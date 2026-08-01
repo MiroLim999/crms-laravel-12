@@ -1,115 +1,131 @@
 # TrOCR service
 
-## What already exists
+The OCR pipeline is the core of CRMS. It runs as a **separate FastAPI process**, not inside
+Laravel.
 
-This repo started as a working TrOCR prototype and that pipeline is the core of CRMS:
+## The pipeline
 
-1. Fine-tune `microsoft/trocr-base-handwritten` on a custom handwriting dataset
-   (`train_trocr.py`, best-by-val-loss checkpoint saved to `Models/<name>/`).
-2. Evaluate base vs. fine-tuned with CER / WER / exact-match and export a timestamped
-   PNG chart (`test_trocr.py`, `test_finetuned.py`, `metrics.py`).
-3. Once a model's metrics look good, it is added to `Models/` and becomes selectable for
-   scanning handwritten documents in the app.
+1. **Fine-tune** — `ml/train_trocr.py` trains `microsoft/trocr-base-handwritten` on a
+   custom handwriting dataset. The best-by-validation-loss checkpoint is saved to
+   `ml/models/<name>/`.
+2. **Evaluate** — `ml/test_trocr.py` (base) and `ml/test_finetuned.py` (fine-tuned) compute
+   CER / WER / exact-match via `ml/metrics.py` and export a timestamped PNG chart to
+   `ml/evaluation-metrics/{base,finetuned}/`.
+3. **Promote** — a Super Admin reviews those charts on the OCR page, records the figures,
+   and sets the model active. Only then does Staff scanning use it.
+4. **Scan** — Staff mark fields on a certificate; the crops go to the service; the readings
+   come back with confidence scores.
 
-Model folders are auto-discovered: any folder under `Models/` containing `config.json`
-plus `model.safetensors` or `pytorch_model.bin` shows up without a restart. The base
-`microsoft/trocr-base-handwritten` model is always offered as the `base` key and can
-never be renamed or deleted.
+Model folders are auto-discovered: any folder under `ml/models/` containing `config.json`
+plus `model.safetensors` or `pytorch_model.bin` appears without a restart. The base
+`microsoft/trocr-base-handwritten` model is always offered as the `base` key and can never
+be renamed or deleted.
 
-Keep the training and evaluation scripts as standalone CLI tools. They are not part of
-the request path.
+The training and evaluation scripts are standalone CLI tools. They are **not** part of the
+request path and must not be invoked from Laravel.
 
-## Flask to FastAPI migration
+## Running it
 
-The prototype API is Flask (`api/app.py`, port 5000). **Rewrite it as FastAPI** — that is
-the target for CRMS. Guidance:
+```
+uvicorn ml.api.main:app --host 127.0.0.1 --port 8001
+```
 
-- Entry point `api/main.py`, run with `uvicorn api.main:app --host 127.0.0.1 --port 8001`.
-- Keep the endpoint paths and JSON shapes below so the migration is behavior-preserving.
-- Port the logic as-is where it already works. Specifically preserve:
-  - Lazy model loading with an in-process cache keyed by model name.
-  - `compute_transition_scores` confidence: geometric mean of per-token probabilities up
-    to the first EOS, returned as a 0-100 percentage.
-  - Model-folder discovery, name sanitizing (`[^A-Za-z0-9._-]` to `-`), the allowed-file
-    whitelist on upload, rollback on failed upload, and the path-safety checks that
-    refuse to delete or rename anything outside `Models/`.
-- Replace Flask idioms with FastAPI ones: Pydantic request/response models, `UploadFile`
-  for weight uploads (stream to disk, never buffer multi-GB files in memory), `HTTPException`
-  instead of `jsonify(...), status`, `async def` only where there's real I/O to await.
-- Model inference is blocking and CPU/GPU-bound: run it in a threadpool (`def` endpoint or
-  `run_in_threadpool`) so health checks and uploads aren't blocked.
-- `api/requirements.txt` becomes `fastapi`, `uvicorn[standard]`, `python-multipart`
-  (drop `flask`, `flask-cors`).
+From the repo root. `python -m uvicorn ...` if `uvicorn` is not on PATH.
+
+## Behaviour that must not be broken
+
+`ml/api/main.py` is a behaviour-preserving port of the original Flask prototype. Preserve:
+
+- Lazy model loading with an in-process cache keyed by model name.
+- The confidence calculation: `compute_transition_scores`, geometric mean of per-token
+  probabilities up to the first EOS, returned as a 0-100 percentage rounded to 1 dp.
+- Model discovery re-scanned on every call, so a manually added folder appears immediately.
+- Name sanitising `[^A-Za-z0-9._-]+` to `-`, the allowed-file whitelist on upload, rollback
+  via `rmtree` on a failed save, and the path-safety checks that refuse to touch anything
+  whose parent is not `ml/models/`.
+- `MAX_NEW_TOKENS = 32` and the HF/transformers warning suppression env vars, which must be
+  set before `torch`/`transformers` are imported.
+- Endpoints are plain `def`, not `async def`, so FastAPI runs the blocking GPU work in a
+  threadpool and `/health` stays responsive during inference.
+- Paths anchor to `ML_ROOT` (the file's own directory), never the working directory.
+- **No CORS middleware.** Laravel is the only client and calls it server-side.
 
 ## Endpoint contract
 
-| Method | Path             | Purpose                                                        |
-|--------|------------------|----------------------------------------------------------------|
-| GET    | `/health`        | status, device, whether any model is loaded, default model key  |
-| GET    | `/models`        | selectable models: `key`, `label`, `available`, `loaded`         |
-| POST   | `/ocr`           | `{ fields: [{ name, image }], model }` -> `{ results: [{ name, text, confidence }], model, modelKey }` |
-| POST   | `/add_model`     | multipart `name` + `files` -> saved to `Models/<name>/`          |
-| POST   | `/delete_model`  | `{ model }` -> removes the folder                               |
-| POST   | `/rename_model`  | `{ model }`, `{ newName }` -> renames the folder                 |
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/health` | status, device, whether any model is loaded, default model key |
+| GET | `/models` | selectable models: `key`, `label`, `available`, `loaded` |
+| POST | `/ocr` | `{ fields: [{ name, image }], model }` → `{ results: [{ name, text, confidence }], model, modelKey }` |
+| POST | `/add_model` | multipart `name` + `files` → saved to `ml/models/<name>/` |
+| POST | `/delete_model` | `{ model }` → removes the folder |
+| POST | `/rename_model` | `{ model }`, `{ newName }` → renames the folder |
 
-`image` is a `data:image/png;base64,...` data URL of a single cropped field.
+`image` is a `data:image/png;base64,...` data URL of one cropped field.
+
+Errors return `{ "ok": false, "error": "..." }` rather than FastAPI's default
+`{ "detail": ... }`, because Laravel's `OcrClient` reads `error`.
 
 ## How Laravel talks to it
 
-- Laravel calls the FastAPI service **server-side** with the HTTP client, never from the
-  browser. Base URL in config (`config/services.php` + `OCR_API_URL` in `.env`), defaulting
-  to `http://127.0.0.1:8001`.
-- The FastAPI service has **no authentication of its own** and must stay bound to
-  `127.0.0.1`. All authorization happens in Laravel:
-  - `/ocr` — Staff and Super Admin.
-  - `/models` (read) — needed wherever a model must be picked.
-  - `/add_model`, `/rename_model`, `/delete_model` — **Super Admin only**. These are OCR
-    model management and must never be reachable by Staff or Admin.
-- Model add / rename / delete and the active-model selection are audit-logged in Laravel.
-- Handle the service being down gracefully: a clear "OCR service unavailable" state, no
-  stack traces to the user, and no half-saved records.
-- CORS no longer needs to be permissive. Since Laravel is the only client, drop the
-  wide-open CORS from the prototype.
+- Server-side only, via `App\Services\Ocr\OcrClient`. The browser never calls the service
+  directly. Base URL is `config('services.ocr.url')`, from `OCR_API_URL`, defaulting to
+  `http://127.0.0.1:8001`.
+- The service has **no authentication of its own** and must stay bound to `127.0.0.1`.
+  Every authorization decision happens in Laravel:
+  - `/ocr` — Staff and Super Admin (`documents.process`).
+  - `/add_model`, `/rename_model`, `/delete_model` — **Super Admin only** (`ocr.manage`).
+- Transport failures surface as `OcrServiceException`, which the UI renders as a clear
+  "OCR service unavailable" state. No stack traces, and no half-saved records.
+- Model add / rename / delete and the active-model change are all audit-logged in Laravel.
 
 ## OCR management page (Super Admin)
 
-All TrOCR management lives on **one page**, the way the legacy prototype did it — a single
-Super Admin screen, not features scattered across separate menus. Route it under something
-like `/super-admin/ocr` and build it with SNEAT cards and modals.
+All TrOCR management lives on **one page** at `/ocr` (`ocr.index`), the way the legacy
+prototype did it — not scattered across separate menus. Built with SNEAT cards and modals.
 
 Everything on that page:
 
-- **Model list / picker** — every folder discovered under `Models/` plus the always-present
-  `base` model, each with its label and whether it is currently loaded in the service. The
-  default model is preselected.
-- **Set active model** — choose which model Staff use for scanning. Persisted in the DB, not
-  just in the browser, and audit-logged on change.
-- **+ Add** — modal with a model name field and a **folder picker**
-  (`<input type="file" webkitdirectory directory multiple>`), a file list showing what was
-  selected, a validation badge confirming `config.json` and the weights are present, and an
-  upload progress bar with status text. Uploads go Laravel → FastAPI, streamed to disk.
+- **Model list** — every folder discovered under `ml/models/` plus the always-present
+  `base` model, reconciled with the `ocr_models` registry table. Rows the service can no
+  longer see are shown flagged rather than hidden, so a mismatch is visible.
+- **Set active model** — which model Staff scanning uses. Persisted in `ocr_models`, not in
+  the browser, and audit-logged on change. If no model is active, the scan page says so and
+  Staff cannot produce readings.
+- **+ Add** — modal with a name field and a folder picker
+  (`<input type="file" webkitdirectory directory multiple>`), a file list, and a validation
+  badge confirming `config.json` and the weights are present. See the upload caveat below.
 - **Rename** — modal prefilled with the current folder name.
-- **Delete** — confirm modal with danger styling. Destructive: it removes the folder from disk.
-- **↻ Rescan** — re-read `Models/` for folders added manually.
-- **Engine status** — a dot plus label driven by `/health`: reachable or not, and the device
-  (`cuda` / `cpu`). Show it clearly; Staff scanning fails without the service.
-- **Evaluation metrics** — surface the saved charts from `Evaluation Metrics/base/` and
-  `Evaluation Metrics/finetuned/` so a model's CER / WER / exact-match can be reviewed before
-  it is promoted to active. This is the "is it good enough for Staff to use?" gate.
+- **Delete** — confirm modal, danger styling. Destructive: removes the folder from disk.
+- **↻ Rescan** — re-read `ml/models/` for folders added by hand.
+- **Engine status** — dot plus label driven by `/health`: reachable or not, and the device
+  (`cuda` / `cpu`).
+- **Evaluation metrics** — the saved charts from `ml/evaluation-metrics/{base,finetuned}/`,
+  streamed through a gated route since they sit outside the web root. Plus a modal to record
+  CER / WER / exact-match against a model, so the promotion decision is traceable.
 
 Rules for the page:
 
-- The `base` model can never be renamed or deleted. Disable those controls when it is selected.
-- Rename and Delete are disabled for whichever model is currently active. Switch active first.
-- Every add / rename / delete / activate writes an audit log entry.
-- Model weights are ~1.3 GB per folder. PHP will reject them at default limits, so raise
-  `upload_max_filesize` and `post_max_size` (or upload in chunks) and set a generous HTTP
-  client timeout. Don't let a 20-minute upload die on a 30-second default.
+- The `base` model can never be renamed or deleted.
+- Rename and Delete are blocked while a model is active. Activate another model first.
+- Every add / rename / delete / activate writes an audit entry.
+- **Upload caveat:** the Add modal posts a plain multipart form, and `php.ini` caps uploads
+  at 40M against ~1.3 GB model folders. Uploading a real model through the browser will
+  fail at the PHP limit. The working path today is dropping the folder into `ml/models/`
+  and clicking Rescan. See `tech.md` for the open decision on raising limits vs chunking.
 
 ## Field templates
 
-The prototype defines per-document-type field boxes as fractional coordinates
-(`x`, `y`, `w`, `h` in 0-1 of page size) for birth, death, and marriage certificates —
-see `web/js/config.js`. In CRMS these move into the database behind the Super Admin
-document template builder, keeping the same fractional-coordinate model so the
-field-marking UI stays resolution-independent.
+Field boxes are stored as fractional coordinates (`x`, `y`, `width`, `height` in 0-1 of
+page size) so a layout holds at any scan resolution or zoom level.
+
+The original per-document-type defaults came from the deleted `web/js/config.js` and now
+live in `App\Enums\DocumentType::defaultFields()`, which `DocumentTemplateSeeder` uses to
+create one active starter template per certificate type. Super Admins adjust them in the
+template builder from there.
+
+## Two path constants that must agree
+
+`ml/metrics.py`'s `DEFAULT_METRICS_DIR` and
+`App\Services\Ocr\EvaluationCharts::DIRECTORY` both point at `ml/evaluation-metrics`.
+Nothing enforces this. If they drift, charts silently stop appearing on the OCR page.
