@@ -1,9 +1,18 @@
 <?php
 
 use App\Http\Controllers\AccountSettingsController;
+use App\Http\Controllers\AnalyticsController;
+use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordChangeController;
+use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DocumentScanController;
+use App\Http\Controllers\DocumentTemplateController;
+use App\Http\Controllers\OcrModelController;
+use App\Http\Controllers\RecordController;
+use App\Http\Controllers\ReportController;
+use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -58,63 +67,137 @@ Route::middleware('auth')->group(function () {
         ->name('settings.password.update');
 
     /*
-    |----------------------------------------------------------------------
-    | Feature stubs - replaced slice by slice
-    |----------------------------------------------------------------------
-    |
-    | Each carries its real `can:` gate already, so authorization is live and
-    | testable before the feature itself exists. Replace the placeholder with a
-    | real controller as each slice lands; do not relax the gate.
-    |
-    */
+     * Digitisation - Staff and Super Admin.
+     *
+     * Admin has no route in here at all. Data entry is not an oversight function,
+     * and the gate is the enforcement, not the missing nav link.
+     */
+    Route::middleware('can:documents.process')->group(function () {
+        Route::get('documents/new', [DocumentScanController::class, 'create'])->name('documents.create');
+        Route::get('documents/workspace', [DocumentScanController::class, 'workspace'])
+            ->name('documents.workspace');
+        // Proxies the FastAPI service; never called from the browser directly.
+        Route::post('documents/recognise', [DocumentScanController::class, 'recognise'])
+            ->name('documents.recognise');
+        Route::post('documents', [DocumentScanController::class, 'store'])->name('documents.store');
+    });
 
-    // Digitization - Staff and Super Admin
-    Route::view('documents/new', 'placeholder', [
-        'title' => 'New Document',
-        'description' => 'Upload a scanned certificate, mark its fields, and run the OCR model.',
-    ])->middleware('can:documents.process')->name('documents.create');
+    /*
+     * Archive - every signed-in role may read it.
+     *
+     * Read-only for everyone, including Super Admin. There is no update or destroy
+     * route: submitted records change only through an approved change request.
+     */
+    Route::middleware('can:records.view')->group(function () {
+        Route::get('records', [RecordController::class, 'index'])->name('records.index');
+        Route::get('records/{record}', [RecordController::class, 'show'])->name('records.show');
+        Route::get('records/{record}/scan', [RecordController::class, 'scan'])->name('records.scan');
+    });
 
-    // Archive - every signed-in role
-    Route::view('records', 'placeholder', [
-        'title' => 'Records Archive',
-        'description' => 'Search and view submitted civil registry records.',
-    ])->middleware('can:records.view')->name('records.index');
+    /*
+     * Change requests - Staff propose, Admin and Super Admin decide.
+     *
+     * Approving is what writes the new values, which is why there is no direct
+     * record-edit route anywhere in this file.
+     */
+    Route::get('change-requests', [ChangeRequestController::class, 'index'])
+        ->name('change-requests.index');
+    Route::get('change-requests/{changeRequest}', [ChangeRequestController::class, 'show'])
+        ->name('change-requests.show');
 
-    // Change requests - Staff raise them, Admin moderates
-    Route::view('change-requests', 'placeholder', [
-        'title' => 'Change Requests',
-        'description' => 'Corrections to locked records: Staff request, Admin approves or rejects.',
-    ])->name('change-requests.index');
+    Route::middleware('can:change-requests.create')->group(function () {
+        Route::get('records/{record}/change-request', [ChangeRequestController::class, 'create'])
+            ->name('records.change-requests.create');
+        Route::post('records/{record}/change-request', [ChangeRequestController::class, 'store'])
+            ->name('records.change-requests.store');
+    });
 
-    // Oversight - Admin and Super Admin
-    Route::view('analytics', 'placeholder', [
-        'title' => 'Analytics',
-        'description' => 'Throughput, accuracy trends, and workload across the registry.',
-    ])->middleware('can:analytics.view')->name('analytics.index');
+    Route::post('change-requests/{changeRequest}/withdraw', [ChangeRequestController::class, 'withdraw'])
+        ->name('change-requests.withdraw');
 
-    Route::view('reports', 'placeholder', [
-        'title' => 'Reports',
-        'description' => 'Generate registry reports for a given period or document type.',
-    ])->middleware('can:reports.generate')->name('reports.index');
+    Route::middleware('can:change-requests.moderate')->group(function () {
+        Route::post('change-requests/{changeRequest}/approve', [ChangeRequestController::class, 'approve'])
+            ->name('change-requests.approve');
+        Route::post('change-requests/{changeRequest}/reject', [ChangeRequestController::class, 'reject'])
+            ->name('change-requests.reject');
+    });
 
-    Route::view('users', 'placeholder', [
-        'title' => 'User Accounts',
-        'description' => 'Provision accounts, issue temporary passwords, and manage roles.',
-    ])->middleware('can:users.manage')->name('users.index');
+    /*
+     * Oversight - Admin and Super Admin.
+     *
+     * All three read-only: they aggregate, list, and export. None of them is a
+     * write path to record values, which is what keeps Admin out of data entry.
+     */
+    Route::get('analytics', [AnalyticsController::class, 'index'])
+        ->middleware('can:analytics.view')
+        ->name('analytics.index');
 
-    Route::view('audit', 'placeholder', [
-        'title' => 'Audit Log',
-        'description' => 'Immutable trail of every state change, with actor and before/after values.',
-    ])->middleware('can:audit.view')->name('audit.index');
+    Route::middleware('can:reports.generate')->group(function () {
+        Route::get('reports', [ReportController::class, 'index'])->name('reports.index');
+        Route::get('reports/export', [ReportController::class, 'export'])->name('reports.export');
+    });
 
-    // System - Super Admin only
-    Route::view('templates', 'placeholder', [
-        'title' => 'Document Templates',
-        'description' => 'Define the field boxes captured for each certificate type.',
-    ])->middleware('can:templates.manage')->name('templates.index');
+    /*
+     * User management - Admin and Super Admin.
+     *
+     * Accounts are deactivated, never deleted, so the audit trail keeps pointing
+     * at a real row. There is deliberately no destroy route.
+     */
+    Route::middleware('can:users.manage')->group(function () {
+        Route::get('users', [UserController::class, 'index'])->name('users.index');
+        Route::get('users/create', [UserController::class, 'create'])->name('users.create');
+        Route::post('users', [UserController::class, 'store'])->name('users.store');
+        Route::get('users/{user}/edit', [UserController::class, 'edit'])->name('users.edit');
+        Route::put('users/{user}', [UserController::class, 'update'])->name('users.update');
+        Route::post('users/{user}/password', [UserController::class, 'resetPassword'])
+            ->name('users.password.reset');
+        Route::post('users/{user}/deactivate', [UserController::class, 'deactivate'])
+            ->name('users.deactivate');
+        Route::post('users/{user}/activate', [UserController::class, 'activate'])
+            ->name('users.activate');
+    });
 
-    Route::view('ocr', 'placeholder', [
-        'title' => 'OCR Models',
-        'description' => 'Manage TrOCR models: add, rename, delete, set active, and review evaluation metrics.',
-    ])->middleware('can:ocr.manage')->name('ocr.index');
+    /*
+     * Audit log - view only. The trail is append-only, so there is no route here
+     * that could edit or remove an entry, and none may be added.
+     */
+    Route::get('audit', [AuditLogController::class, 'index'])
+        ->middleware('can:audit.view')
+        ->name('audit.index');
+
+    /*
+     * Document template builder - Super Admin only. Templates decide which fields
+     * Staff capture, so changing one changes what the registry records.
+     */
+    Route::middleware('can:templates.manage')->group(function () {
+        Route::get('templates', [DocumentTemplateController::class, 'index'])->name('templates.index');
+        Route::get('templates/create', [DocumentTemplateController::class, 'create'])->name('templates.create');
+        Route::post('templates', [DocumentTemplateController::class, 'store'])->name('templates.store');
+        Route::get('templates/{template}/edit', [DocumentTemplateController::class, 'edit'])
+            ->name('templates.edit');
+        Route::put('templates/{template}', [DocumentTemplateController::class, 'update'])
+            ->name('templates.update');
+        Route::post('templates/{template}/activate', [DocumentTemplateController::class, 'activate'])
+            ->name('templates.activate');
+        Route::delete('templates/{template}', [DocumentTemplateController::class, 'destroy'])
+            ->name('templates.destroy');
+    });
+
+    /*
+     * OCR model management - Super Admin only, all on one page.
+     *
+     * These endpoints reach through to the FastAPI service and can delete ~1.3 GB
+     * of weights from disk, which is why they never widen beyond Super Admin.
+     */
+    Route::middleware('can:ocr.manage')->prefix('ocr')->name('ocr.')->group(function () {
+        Route::get('/', [OcrModelController::class, 'index'])->name('index');
+        Route::post('rescan', [OcrModelController::class, 'rescan'])->name('rescan');
+        Route::post('models', [OcrModelController::class, 'store'])->name('store');
+        Route::post('models/{key}/activate', [OcrModelController::class, 'activate'])->name('activate');
+        Route::post('models/{key}/rename', [OcrModelController::class, 'rename'])->name('rename');
+        Route::delete('models/{key}', [OcrModelController::class, 'destroy'])->name('destroy');
+        Route::post('models/{key}/evaluation', [OcrModelController::class, 'recordEvaluation'])
+            ->name('evaluation');
+        Route::get('charts/{variant}/{name}', [OcrModelController::class, 'chart'])->name('chart');
+    });
 });

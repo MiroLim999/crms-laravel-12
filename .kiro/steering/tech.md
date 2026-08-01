@@ -117,28 +117,64 @@ plain form upload as-is. Either raise the limits or upload in chunks.
 Two processes run side by side in development:
 
 ```
-php artisan serve                                    # Laravel app
-uvicorn api.main:app --host 127.0.0.1 --port 8001    # FastAPI OCR service
+php artisan serve                                       # Laravel app
+uvicorn ml.api.main:app --host 127.0.0.1 --port 8001    # FastAPI OCR service
 ```
+
+Both run from the repo root. ML dependencies install with
+`pip install -r ml\requirements.txt -r ml\api\requirements.txt`.
 
 ## Repo layout
 
 The Laravel app lives at the repo root alongside the existing ML tooling:
 
+Everything Python lives under `ml/`. Nothing ML-related belongs at the repo root, and
+nothing Laravel belongs inside `ml/` — that boundary is the point.
+
 ```
+ml/                     ALL Python. One boundary between the two ecosystems.
+├── api/
+│   ├── main.py         FastAPI OCR service
+│   └── requirements.txt
+├── train_trocr.py      fine-tuning
+├── test_trocr.py       evaluate base model
+├── test_finetuned.py   evaluate fine-tuned model
+├── predict.py          batch predict a folder
+├── metrics.py          CER / WER / exact-match helpers + chart export
+├── download_trocr.py   fetch the base model
+├── requirements.txt    ML stack (torch, transformers, Pillow, ...)
+├── models/             fine-tuned model folders (gitignored, ~1.3 GB each)
+├── dataset/            training images + manifest CSV (gitignored)
+└── evaluation-metrics/ saved charts, read by the OCR page (base/ and finetuned/)
+
 sneat/                  downloaded SNEAT template - design reference, never served or routed
-api/                    FastAPI OCR service
-Models/                 fine-tuned model folders (gitignored, ~1.3 GB each)
-dataset/                training images + manifest CSV (gitignored)
-Evaluation Metrics/      saved metric charts (base/ and finetuned/)
-train_trocr.py          fine-tuning
-test_trocr.py           evaluate base model
-test_finetuned.py       evaluate fine-tuned model
-predict.py              batch predict a folder
-metrics.py              CER / WER / exact-match helpers
-download_trocr.py       fetch the base model
-web/                    LEGACY PHP prototype - reference only, being replaced
 ```
 
-`web/` is the original PHP + JS prototype ("Civil Records Digitizer"). Read it for the
-field-marking UX and the API contract, then reimplement in Laravel. Do not extend it.
+Every script anchors its paths to `ML_ROOT` (its own directory), not the working
+directory, so they behave identically however they are launched. Keep it that way — a
+bare `os.path.join("dataset", ...)` silently resolves against the caller's CWD.
+
+Two path constants must agree, and there is no test tying them together:
+`metrics.py`'s `DEFAULT_METRICS_DIR` and `EvaluationCharts::DIRECTORY`. Change one,
+change the other.
+
+### Laravel side of the OCR feature
+
+Organised by domain, never by role. Access is decided by gates in `AuthServiceProvider`,
+so there is no `SuperAdmin/` folder anywhere and there should not be one.
+
+```
+app/Services/Ocr/       OcrClient, OcrModelManager, OcrServiceException, EvaluationCharts
+app/Models/OcrModel.php active-model registry + recorded evaluation figures
+app/Http/Controllers/OcrModelController.php
+resources/views/ocr/    the single Super Admin management page
+```
+
+The legacy `web/` PHP prototype and the Flask `api/app.py` have been **deleted** — both are
+now fully superseded by the Laravel app and `api/main.py`. Their logic lives on in:
+
+- `resources/js/field-marker.js` — the canvas crop, drag/resize boxes, and PDF.js rendering
+- `app/Enums/DocumentType.php` — `defaultFields()`, the field boxes from `web/js/config.js`
+- `ml/api/main.py` — the endpoint contract, confidence maths, and path-safety guards
+
+Recover either from git history if you need to compare behaviour; do not reintroduce them.

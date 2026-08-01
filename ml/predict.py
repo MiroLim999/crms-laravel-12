@@ -35,9 +35,12 @@ from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 # ============================================================
 # CONFIG
 # ============================================================
+# Anchored to ml/ so the script runs the same from any working directory.
+ML_ROOT = os.path.dirname(os.path.abspath(__file__))
+
 # FINETUNED_DIR = "microsoft/trocr-base-handwritten" # Default Model
-FINETUNED_DIR = os.path.join("Models", "trocr-finetuned")  # Path to your fine-tuned model
-DEFAULT_FOLDER = "new_images"             # Default folder for new images
+FINETUNED_DIR = os.path.join(ML_ROOT, "models", "TrOCR-fine-tune-10k-samples")
+DEFAULT_FOLDER = os.path.join(ML_ROOT, "new_images")   # Default folder for new images
 # ============================================================
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif")

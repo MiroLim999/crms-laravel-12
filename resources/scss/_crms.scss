@@ -18,3 +18,74 @@
   cursor: not-allowed;
   opacity: 0.85;
 }
+
+// ---------------------------------------------------------------- field marking
+//
+// Draggable boxes laid over a rendered scan. Positioned by field-marker.js in
+// display pixels; the source of truth is fractional coordinates.
+
+.doc-stage {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+
+  canvas {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--bs-border-radius);
+  }
+}
+
+.field-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.field-box {
+  position: absolute;
+  border: 2px solid var(--bs-primary);
+  background-color: rgba(105, 108, 255, 0.12);
+  border-radius: 2px;
+  cursor: move;
+  touch-action: none;
+
+  &.is-active {
+    border-style: dashed;
+    background-color: rgba(105, 108, 255, 0.22);
+  }
+}
+
+.field-box-label {
+  position: absolute;
+  top: -1.35rem;
+  left: -2px;
+  padding: 0 0.35rem;
+  font-size: 0.6875rem;
+  line-height: 1.25rem;
+  white-space: nowrap;
+  color: #fff;
+  background-color: var(--bs-primary);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.field-box-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  background-color: #fff;
+  border: 2px solid var(--bs-primary);
+  border-radius: 50%;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+// Read-only rendering in the archive: show where a value came from without
+// implying it can be moved.
+.field-overlay--readonly .field-box {
+  cursor: default;
+  border-style: dotted;
+}

@@ -35,4 +35,22 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | TrOCR service
+    |--------------------------------------------------------------------------
+    |
+    | The FastAPI process in api/. It has no authentication of its own, so it must
+    | stay bound to 127.0.0.1 and is only ever called server-side from Laravel.
+    |
+    | Timeout is generous because a cold start loads ~1.3 GB of weights before the
+    | first prediction returns.
+    |
+    */
+
+    'ocr' => [
+        'url' => env('OCR_API_URL', 'http://127.0.0.1:8001'),
+        'timeout' => env('OCR_API_TIMEOUT', 120),
+    ],
+
 ];

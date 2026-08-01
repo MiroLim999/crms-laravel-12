@@ -1,6 +1,9 @@
 <?php
 
+use App\Providers\AppServiceProvider;
+use App\Providers\MenuServiceProvider;
+
 return [
-    App\Providers\AppServiceProvider::class,
-    App\Providers\MenuServiceProvider::class,
+    AppServiceProvider::class,
+    MenuServiceProvider::class,
 ];

@@ -46,10 +46,12 @@ from torch.cuda.amp import GradScaler, autocast
 # ============================================================
 MODEL_NAME = "microsoft/trocr-base-handwritten"
 
-# Paths
-MANIFEST_CSV = os.path.join("dataset", "manifest.csv")
-TRAIN_IMG_DIR = os.path.join("dataset", "train")
-VAL_IMG_DIR = os.path.join("dataset", "val")
+# Paths, anchored to the ml/ directory rather than the working directory, so the
+# script runs the same from anywhere.
+ML_ROOT = os.path.dirname(os.path.abspath(__file__))
+MANIFEST_CSV = os.path.join(ML_ROOT, "dataset", "manifest.csv")
+TRAIN_IMG_DIR = os.path.join(ML_ROOT, "dataset", "train")
+VAL_IMG_DIR = os.path.join(ML_ROOT, "dataset", "val")
 
 # Training hyperparameters
 EPOCHS = 5
@@ -63,8 +65,9 @@ NUM_WORKERS = 2               # DataLoader workers
 TRAIN_SUBSET = None          # Use first N training samples (None = all)
 VAL_SUBSET = None            # Use first N validation samples (None = all)
 
-# Output
-SAVE_DIR = os.path.join("Models", "trocr-finetuned")  # Where to save the fine-tuned model
+# Output. Any folder dropped in ml/models/ is auto-discovered by the OCR service,
+# so a finished run becomes selectable in the app without further steps.
+SAVE_DIR = os.path.join(ML_ROOT, "models", "trocr-finetuned")
 # ============================================================
 
 

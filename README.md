@@ -1,225 +1,188 @@
-# Local TrOCR Handwritten Fine-Tuning
+# Civil Registry Management System (CRMS)
 
-Fine-tune Microsoft's [TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) (`microsoft/trocr-base-handwritten`) on your own handwritten text images, then evaluate and run predictions locally. Training runs on GPU automatically when CUDA is available and falls back to CPU otherwise.
+A Laravel 12 system for digitising and managing civil registry documents (birth, death, and
+marriage certificates). Staff scan handwritten certificates, a fine-tuned
+[TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) model extracts the field
+values, Staff verify and submit them, and the result becomes a searchable, locked archive
+with a legally meaningful audit trail.
 
-## Features
+## Architecture
 
-- Fine-tune `trocr-base-handwritten` on a custom image + label dataset
-- Mixed-precision (AMP) training with per-epoch validation and best-checkpoint saving
-- Dependency-free CER / WER / exact-match metrics, plus saved bar-chart PNGs
-- Batch prediction over a folder of images (no labels required)
-- Baseline evaluation of the original model for before/after comparison
-- Web UI (Civil Records Digitizer) to scan certificates and manage models (add / rename / delete)
+Two processes, one repository:
 
-## Project Structure
+| Part | Stack | Role |
+|---|---|---|
+| Web application | Laravel 12, Blade, Bootstrap 5 (SNEAT design), MySQL | Everything users touch |
+| OCR service | FastAPI, PyTorch, Hugging Face `transformers` | Reads handwriting from cropped field images |
+
+Laravel calls the OCR service **server-side only**. The service has no authentication of
+its own and stays bound to `127.0.0.1`; all authorization happens in Laravel.
+
+## Roles
+
+Three seeded roles. **There is no public sign-up** — every account is created by an admin.
+
+| Capability | Staff | Admin | Super Admin |
+|---|---|---|---|
+| Upload & process documents | Yes | No | Yes |
+| Verify & submit records | Yes | No | Yes |
+| Search / view archive | Yes | Yes | Yes |
+| Request changes to locked records | Yes | No | Yes |
+| Approve / reject change requests | No | Yes | Yes |
+| Analytics dashboard | No | Yes | Yes |
+| Manage user accounts & roles | No | Yes | Yes |
+| View audit log | No | Yes | Yes |
+| Generate reports | No | Yes | Yes |
+| Document template builder | No | No | Yes |
+| OCR model management | No | No | Yes |
+
+**Admin cannot edit record values.** Data entry belongs to Staff; corrections go through the
+change-request flow. This is intentional — it is what keeps the audit trail meaningful.
+
+## Project structure
 
 ```
-.
-├── download_trocr.py     # Download the base TrOCR model + processor from Hugging Face
-├── train_trocr.py        # Fine-tune the model on your dataset
-├── test_trocr.py         # Evaluate the BASE model and save metrics
-├── test_finetuned.py     # Evaluate the FINE-TUNED model and save metrics
-├── predict.py            # Run predictions on a folder of new images
-├── metrics.py            # CER / WER / accuracy helpers + metrics PNG export
-├── requirements.txt
-├── Evaluation Metrics/   # Saved metric charts (base/ and finetuned/)
-├── dataset/              # Your images + label CSVs (not tracked in git)
-├── Models/               # All fine-tuned models, one folder each (not tracked in git)
-│   ├── trocr-finetuned/
-│   └── v2-finetuned-model/
-├── api/                  # Flask OCR API that serves the models to the web app
-│   ├── app.py
-│   └── requirements.txt
-└── web/                  # PHP + JS frontend (Civil Records Digitizer)
-    ├── index.php
-    ├── css/ , js/
-    └── *.php             # save/list/delete saved documents
-```
+app/                    Laravel application code
+├── Enums/              RoleSlug, DocumentType, RecordStatus, ChangeRequestStatus
+├── Models/             User, Role, CivilRecord, RecordField, ChangeRequest, OcrModel, ...
+├── Services/Ocr/       OcrClient, OcrModelManager, EvaluationCharts
+├── Services/           AuditLogger, UserProvisioner, ChangeRequestService
+└── Providers/          AuthServiceProvider - the capability matrix, in code
 
-> Note: `dataset/`, `Models/`, and `venv/` are intentionally excluded from the repo via `.gitignore` because of their size. See [Model & Data](#model--data) below.
+ml/                     ALL Python lives here
+├── api/main.py         FastAPI OCR service
+├── train_trocr.py      fine-tuning
+├── test_trocr.py       evaluate the base model
+├── test_finetuned.py   evaluate a fine-tuned model
+├── predict.py          batch predict a folder of images
+├── metrics.py          CER / WER / exact-match + chart export
+├── download_trocr.py   fetch the base model
+├── models/             fine-tuned model folders (gitignored, ~1.3 GB each)
+├── dataset/            training images + manifest CSV (gitignored)
+└── evaluation-metrics/ charts, surfaced on the OCR management page
+
+sneat/                  SNEAT template - visual design reference only, never routed
+```
 
 ## Setup
 
-Requires Python 3.10+ (developed on 3.13). A CUDA-capable GPU is recommended but optional.
+Requires PHP 8.2+, Composer, Node 20+, MySQL 8+, and Python 3.10+.
 
 ```bash
-# Create and activate a virtual environment
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # macOS / Linux
+composer install
+npm install
+pip install -r ml\requirements.txt -r ml\api\requirements.txt
 
-# Install dependencies
-pip install -r requirements.txt
+copy .env.example .env
+php artisan key:generate
+# set DB_DATABASE / DB_USERNAME / DB_PASSWORD in .env, then:
+php artisan migrate --seed
+npm run build
 ```
 
-For GPU support, install the CUDA build of PyTorch that matches your system from the [official PyTorch install guide](https://pytorch.org/get-started/locally/) instead of the default CPU wheel.
+`php artisan migrate --seed` creates the three roles, the bootstrap Super Admin, and a
+starter template per certificate type.
 
-## Dataset Format
+PHP needs `pdo_mysql`, `mbstring`, `fileinfo`, `openssl`, `curl`, and `zip`. Enable `gd` if
+you want server-side image work; field cropping happens in the browser, so it is optional.
 
-Place images in split folders and describe them with a manifest CSV:
+For GPU inference, install the CUDA build of PyTorch from the
+[official install guide](https://pytorch.org/get-started/locally/) rather than the default
+CPU wheel.
 
-```
-dataset/
-├── split_manifest.csv     # columns: filename,label,split,source
-├── train/syn_000001.png
-└── val/syn_000004.png
-```
+## Running
 
-The manifest CSV needs at least these columns:
-
-| column     | description                                   |
-|------------|-----------------------------------------------|
-| `filename` | image file name (matched within the split dir)|
-| `label`    | ground-truth text for the image               |
-| `split`    | `train` or `val`                              |
-| `source`   | optional origin tag                           |
-
-Rows with empty labels or the label `UNREADABLE` are skipped automatically.
-
-## Usage
-
-### 1. Download the base model
+Two processes, both from the repo root:
 
 ```bash
-python download_trocr.py
+php artisan serve                                       # http://127.0.0.1:8000
+uvicorn ml.api.main:app --host 127.0.0.1 --port 8001    # OCR service
 ```
 
-Downloads `microsoft/trocr-base-handwritten` (~1.2 GB) and the processor, and prints a CUDA availability check.
+Sign in with the seeded account:
 
-### 2. (Optional) Evaluate the base model
+```
+superadmin@admin.com / superadmin@admin.com
+```
+
+Change that password before any real deployment. Override the defaults with
+`CRMS_SUPER_ADMIN_EMAIL` and `CRMS_SUPER_ADMIN_PASSWORD`.
+
+While user management is still being learned, `DemoUsersSeeder` creates one Staff and one
+Admin account for clicking around. It is deliberately not part of `db:seed`:
 
 ```bash
-python test_trocr.py
+php artisan db:seed --class=DemoUsersSeeder    # staff@crms.test / admin@crms.test, password123
 ```
 
-Runs the original model over your evaluation images and saves a chart to `Evaluation Metrics/base/`.
+Delete that seeder before deploying.
 
-### 3. Fine-tune
+## The OCR workflow
+
+1. **Fine-tune** — `python ml\train_trocr.py`. Hyperparameters are in the `CONFIG` block.
+   The best checkpoint by validation loss is saved to `ml/models/`.
+2. **Evaluate** — `python ml\test_trocr.py` and `python ml\test_finetuned.py`. Each writes a
+   timestamped chart to `ml/evaluation-metrics/{base,finetuned}/`.
+3. **Promote** — sign in as Super Admin, open **OCR Models**, review the charts, record the
+   metrics, and set the model active. Only then does Staff scanning use it.
+4. **Scan** — Staff upload a certificate, adjust the field boxes, run the model, correct
+   anything flagged, and submit. Submission locks the record.
+
+Any folder dropped into `ml/models/` is auto-discovered — no restart needed. It needs
+`config.json` plus `model.safetensors` or `pytorch_model.bin`.
+
+### Dataset format
+
+```
+ml/dataset/
+├── manifest.csv        columns: filename,label,split,source
+├── train/
+├── val/
+└── test/
+```
+
+Rows with empty labels or the label `UNREADABLE` are skipped.
+
+## A note on confidence
+
+Every reading carries a confidence score: the geometric mean of per-token probabilities.
+This is **the model's certainty in its own output, not accuracy**. Fields below the
+threshold (`CRMS_CONFIDENCE_THRESHOLD`, default 80%) are flagged for review. Treat it as a
+prompt to look closer, never as a quality guarantee.
+
+The analytics page also shows a correction rate — how often a person changed what the model
+read. Also a signal, not a validated metric: a corrected field may have been right, and an
+uncorrected one may have been wrong and missed.
+
+## Tests
 
 ```bash
-python train_trocr.py
+php artisan test
 ```
 
-Hyperparameters live in the `CONFIG` section near the top of `train_trocr.py` (epochs, batch size, learning rate, max label length, output dir). The best checkpoint by validation loss is saved to `Models/trocr-finetuned/`.
+Requires a `crms_test` MySQL database (`CREATE DATABASE crms_test;`).
 
-### 4. Evaluate the fine-tuned model
+`tests/Feature/CapabilityMatrixTest.php` is the load-bearing one: it asserts the permission
+table above, route by route and ability by ability. If a change makes it fail, the change is
+wrong, not the test.
 
-```bash
-python test_finetuned.py
-```
+## Model & data
 
-Saves a chart to `Evaluation Metrics/finetuned/` so you can compare against the base run.
+`ml/models/` and `ml/dataset/` are gitignored — they exceed GitHub's file-size limits. To
+share them, push to the [Hugging Face Hub](https://huggingface.co/docs/hub/models-uploading),
+use [Git LFS](https://git-lfs.com/), or host the dataset externally.
 
-### 5. Predict on new images
+## Continued fine-tuning
 
-```bash
-python predict.py                          # uses the default new_images/ folder
-python predict.py --folder path/to/images  # custom folder
-```
-
-Predictions are printed and written to a `predictions.csv` inside the image folder.
-
-## Web App — Civil Records Digitizer
-
-A browser UI for digitizing scanned certificates: upload a scan, mark the fields,
-run the fine-tuned model on each field, verify the text, and save the result.
-It has two parts that run at the same time:
-
-- **Flask OCR API** (`api/app.py`) — serves the models on `http://127.0.0.1:5000`
-- **PHP frontend** (`web/`) — the UI, served by Apache (XAMPP) or PHP's built-in server
-
-### 1. Install the API dependencies
-
-```bash
-venv\Scripts\activate
-pip install -r api\requirements.txt   # flask + flask-cors (in addition to torch/transformers)
-```
-
-### 2. Start the OCR API
-
-```bash
-python api\app.py
-```
-
-Leave it running. It loads models lazily from `Models/` on first use and falls
-back to the base `microsoft/trocr-base-handwritten` model if no folder is found.
-
-### 3. Serve the frontend
-
-Option A — XAMPP (Apache). Add an alias so Apache serves the `web/` folder in
-place. Create `C:\xampp\apache\conf\extra\httpd-civilrecords.conf`:
-
-```apache
-Alias /civil-records "C:/path/to/repo/web"
-<Directory "C:/path/to/repo/web">
-    Options Indexes FollowSymLinks
-    AllowOverride All
-    Require all granted
-    DirectoryIndex index.php
-</Directory>
-```
-
-Then add `Include conf/extra/httpd-civilrecords.conf` to
-`C:\xampp\apache\conf\httpd.conf`, restart Apache, and open
-`http://localhost/civil-records`.
-
-Option B — PHP built-in server (no XAMPP):
-
-```bash
-php -S localhost:8000 -t web
-```
-
-Then open `http://localhost:8000`.
-
-### Managing models from the UI
-
-The sidebar has an **OCR Model** dropdown plus controls to manage the folders in
-`Models/` without touching the filesystem:
-
-- **+ Add** — upload a model folder (must contain `config.json`,
-  `model.safetensors`, and the tokenizer files). The upload goes through the
-  Flask API, which streams large weight files to disk, then saves the model to
-  `Models/<name>/`.
-- **Rename** — rename the selected model's folder.
-- **Delete** — permanently remove the selected model's folder from disk.
-- **↻ Rescan** — re-scan `Models/` (useful if you added a folder manually).
-- The base model is always available and cannot be renamed or deleted.
-
-Any folder dropped into `Models/` is auto-discovered — no restart needed. The
-API endpoints backing these actions are `/models`, `/ocr`, `/add_model`,
-`/rename_model`, and `/delete_model`.
-
-> Security note: the API and PHP endpoints have no authentication. Run them on
-> `localhost` only — do not expose this prototype to a network.
-
-## Metrics
-
-`metrics.py` computes corpus-level scores:
-
-- CER (Character Error Rate)
-- WER (Word Error Rate)
-- Exact-match accuracy (whole string)
-
-Each evaluation also exports a timestamped PNG bar chart under `Evaluation Metrics/`.
-
-## Model & Data
-
-The fine-tuned models (`Models/`, ~1.3 GB each) and the `dataset/` folder are not stored in this repo because they exceed GitHub's file-size limits. To share them, consider:
-
-- Pushing the model to the [Hugging Face Hub](https://huggingface.co/docs/hub/models-uploading)
-- Tracking large files with [Git LFS](https://git-lfs.com/)
-- Hosting the dataset externally and linking to it
-
-## Continued Fine-Tuning
-
-To keep training from an existing fine-tuned checkpoint instead of the base model, point the loaders in `train_trocr.py` at your saved directory:
+To keep training from an existing checkpoint, point the loaders in `ml/train_trocr.py` at a
+saved directory:
 
 ```python
-processor = TrOCRProcessor.from_pretrained("Models/trocr-finetuned", local_files_only=True)
-model = VisionEncoderDecoderModel.from_pretrained("Models/trocr-finetuned", local_files_only=True)
+processor = TrOCRProcessor.from_pretrained("models/your-model", local_files_only=True)
+model = VisionEncoderDecoderModel.from_pretrained("models/your-model", local_files_only=True)
 ```
 
-When continuing, a lower learning rate and mixing in earlier data help reduce catastrophic forgetting.
+A lower learning rate and mixing in earlier data help reduce catastrophic forgetting.
 
 ## License
 

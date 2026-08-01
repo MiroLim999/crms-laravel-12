@@ -27,9 +27,12 @@ from metrics import compute_metrics, print_metrics, save_metrics_png
 # ============================================================
 # CONFIG
 # ============================================================
-FINETUNED_DIR = os.path.join("Models", "trocr-finetuned")  # Path to your fine-tuned model
-MANIFEST_CSV = os.path.join("dataset", "manifest.csv")
-TEST_IMG_DIR = os.path.join("dataset", "test")   # Folder of images to evaluate
+# Anchored to ml/ so the script runs the same from any working directory.
+ML_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+FINETUNED_DIR = os.path.join(ML_ROOT, "models", "TrOCR-fine-tune-10k-samples")
+MANIFEST_CSV = os.path.join(ML_ROOT, "dataset", "manifest.csv")
+TEST_IMG_DIR = os.path.join(ML_ROOT, "dataset", "test")   # Folder of images to evaluate
 NUM_SAMPLES = 6000
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif")
 # ============================================================

@@ -6,6 +6,7 @@ use App\Models\AuditLog;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Request;
 
 /**
@@ -51,16 +52,26 @@ class AuditLogger
     }
 
     /**
-     * Log a model change, diffing to only the attributes that actually moved.
+     * Persist a pending change and log the diff.
+     *
+     * Call this with the model still dirty - Eloquent re-syncs originals during
+     * save(), so the before values are unrecoverable afterwards. Saving and
+     * logging happen in one transaction so the trail cannot drift from the data.
+     *
+     * @param  Model  $subject  A model with unsaved changes.
      */
-    public function logChange(string $action, Model $subject, ?string $description = null): AuditLog
+    public function saveAndLog(string $action, Model $subject, ?string $description = null): AuditLog
     {
-        $changes = $subject->getChanges();
-        unset($changes['updated_at']);
+        $new = $subject->getDirty();
+        unset($new['updated_at']);
 
-        $old = array_intersect_key($subject->getOriginal(), $changes);
+        $old = array_intersect_key($subject->getOriginal(), $new);
 
-        return $this->log($action, $subject, $old, $changes, $description);
+        return DB::transaction(function () use ($action, $subject, $old, $new, $description) {
+            $subject->save();
+
+            return $this->log($action, $subject, $old, $new, $description);
+        });
     }
 
     /**

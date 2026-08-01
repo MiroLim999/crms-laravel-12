@@ -11,6 +11,13 @@ export default defineConfig({
                 'resources/scss/app.scss',
                 'resources/css/app.css',
                 'resources/js/app.js',
+                // Loaded only by the analytics page, which is the one screen that
+                // charts anything. Keeping it out of app.js spares every other
+                // page the download.
+                'resources/js/sneat/apexcharts.js',
+                // Own entry for the same reason: it pulls in PDF.js, and only the
+                // scanning workspace and the template builder need it.
+                'resources/js/field-marker.js',
             ],
             refresh: true,
         }),

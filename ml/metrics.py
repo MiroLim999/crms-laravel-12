@@ -95,7 +95,11 @@ def print_metrics(metrics, title="EVALUATION METRICS"):
     print("=" * 60)
 
 
-def save_metrics_png(metrics, subfolder, model_label, base_dir="Evaluation Metrics"):
+ML_ROOT = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_METRICS_DIR = os.path.join(ML_ROOT, "evaluation-metrics")
+
+
+def save_metrics_png(metrics, subfolder, model_label, base_dir=DEFAULT_METRICS_DIR):
     """
     Save a metrics dict as a PNG image under:
         <base_dir>/<subfolder>/metrics_<timestamp>.png
@@ -103,11 +107,16 @@ def save_metrics_png(metrics, subfolder, model_label, base_dir="Evaluation Metri
     The image contains a bar chart of CER / WER / Accuracy plus a small
     summary table (model, samples, exact matches).
 
+    The default output directory is read by the CRMS OCR management page
+    (app/Services/Ocr/EvaluationCharts.php), which is how a Super Admin reviews a
+    model's numbers before promoting it. Changing the location means changing that
+    class too.
+
     Args:
         metrics: dict from compute_metrics()
         subfolder: e.g. "base" or "finetuned"
         model_label: human-readable model name shown on the chart
-        base_dir: top-level folder (default "Evaluation Metrics")
+        base_dir: top-level folder, defaulting to ml/evaluation-metrics/
 
     Returns:
         The path to the written PNG file.

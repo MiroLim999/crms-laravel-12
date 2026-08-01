@@ -30,8 +30,11 @@ IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif")
 
 def main():
     model_name = "microsoft/trocr-base-handwritten"
-    dataset_folder = os.path.join("dataset", "test")
-    manifest_csv = os.path.join("dataset", "manifest.csv")
+
+    # Anchored to ml/ so the script runs the same from any working directory.
+    ml_root = os.path.dirname(os.path.abspath(__file__))
+    dataset_folder = os.path.join(ml_root, "dataset", "test")
+    manifest_csv = os.path.join(ml_root, "dataset", "manifest.csv")
 
     print("=" * 50)
     print("TrOCR HANDWRITTEN TEXT RECOGNITION TEST")

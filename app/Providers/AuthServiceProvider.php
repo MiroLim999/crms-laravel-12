@@ -59,15 +59,28 @@ class AuthServiceProvider extends ServiceProvider
         });
 
         /*
-         * Editing an existing account. Nobody but a Super Admin may modify a
-         * Super Admin, and no one may deactivate themselves out of the system.
+         * Editing an existing account.
+         *
+         * Admin user management covers Staff accounts only - modifying another
+         * Admin, or any Super Admin, requires a Super Admin.
          */
         Gate::define('users.update', function (User $actor, User $target) {
-            if ($target->isSuperAdmin() && ! $actor->isSuperAdmin()) {
+            if ($actor->isSuperAdmin()) {
+                return true;
+            }
+
+            return $actor->isAdmin() && $target->isStaff();
+        });
+
+        /*
+         * Deactivation. Same rules as editing, but nobody may lock themselves out.
+         */
+        Gate::define('users.deactivate', function (User $actor, User $target) {
+            if ($actor->is($target)) {
                 return false;
             }
 
-            return $actor->hasOversight();
+            return Gate::forUser($actor)->allows('users.update', $target);
         });
     }
 }
