@@ -60,9 +60,6 @@ Icon markup: `<i class="icon-base bx bx-menu icon-md"></i>`. Sizes are `icon-sm`
   classes. Never rely on hiding a nav item as the only guard.
 - Eloquent with eager loading. No raw string-interpolated SQL.
 
-Not yet built, worth doing when batch work appears: queueing long OCR or reporting jobs.
-The report export currently streams synchronously and there is no `app/Jobs/`.
-
 ## Environment
 
 Windows, **PowerShell** (not cmd). Separator is `;`, never `&` or `&&`. It is
@@ -74,12 +71,16 @@ write a temp `.php` file and delete it after.
 Field cropping still happens client-side in canvas, deliberately — it keeps
 full-resolution pixels and avoids a server round trip.
 
-**Open decision — model uploads.** `php.ini` caps uploads at **40M** against ~1.3 GB model
-folders. The OCR page posts a plain multipart form, so uploading a real model through the
-browser fails at the PHP limit before Laravel sees it. The working path today is dropping
-the folder into `ml/models/` and clicking Rescan. Resolve by raising the limits or
-implementing chunked upload; chunking is preferred because it survives Laravel and the OCR
-service being on separate hosts.
+**Required — chunked uploads.** `php.ini` caps uploads at **40M**, but models are ~1.3 GB
+and datasets run to thousands of images. Plain multipart posts fail at the PHP limit before
+Laravel sees them. Chunked upload is therefore a requirement, not an option: slice in the
+browser, post the pieces, reassemble server-side. Every upload surface is drag and drop.
+Until chunking exists, the fallback is placing folders under `ml/models/` or `ml/datasets/`
+by hand and clicking Rescan.
+
+Queue infrastructure is needed for GPU work. Training and evaluation run as jobs inside the
+FastAPI service (it owns the GPU); Laravel starts them, polls status, and mirrors history
+into `ml_jobs`. Laravel's own queue is still unused — there is no `app/Jobs/` yet.
 
 Two processes, both from the repo root:
 
@@ -108,7 +109,7 @@ ml/
 ├── download_trocr.py   fetch the base model
 ├── requirements.txt    ML stack
 ├── models/             fine-tuned models (gitignored, ~1.3 GB each)
-├── dataset/            training data (gitignored)
+├── datasets/<name>/    named training datasets (gitignored)
 └── evaluation-metrics/ charts read by the OCR page (base/ and finetuned/)
 
 sneat/                  design reference, never served or routed
@@ -122,8 +123,4 @@ against the caller's CWD.
 `ml/metrics.py`'s `DEFAULT_METRICS_DIR` and `EvaluationCharts::DIRECTORY` must agree.
 Nothing enforces it; if they drift, charts silently stop appearing.
 
-The legacy `web/` PHP prototype and Flask `api/app.py` are **deleted**, superseded by the
-Laravel app and `ml/api/main.py`. Their logic survives in `resources/js/field-marker.js`
-(canvas crop, drag boxes, PDF.js), `DocumentType::defaultFields()` (the field boxes), and
-`ml/api/main.py` (endpoint contract, confidence maths, path guards). Recover from git
-history to compare behaviour; do not reintroduce them.
+

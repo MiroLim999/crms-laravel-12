@@ -44,8 +44,11 @@ ml/models/
 *.pth
 *.ckpt
 
-# Training data and prediction inputs (large - keep out of the repo)
+# Training data and prediction inputs (large - keep out of the repo).
+# Both spellings: ml/dataset/ is the current single folder, ml/datasets/ is the
+# named-dataset layout the OCR workspace moves to.
 ml/dataset/
+ml/datasets/
 ml/new_images/
 
 # ============ OS / editor ============

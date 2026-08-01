@@ -26,9 +26,13 @@ public register route, controller, or view.
 | Document template builder              | No    | No    | Yes         |
 | OCR model management (and related)     | No    | No    | Yes         |
 
-Super Admin OCR model management is a **single page** covering the whole model lifecycle —
-list, add, rename, delete, rescan, set active, engine status, evaluation metrics — mirroring
-the legacy prototype. See `trocr-service.md` for the full spec.
+"OCR model management" means the **whole ML lifecycle from the UI, with no CLI**: upload and
+validate datasets, fine-tune a model, evaluate it, spot-check predictions, and promote it
+for Staff use — plus renaming, deleting, and inspecting models and datasets. It lives on one
+tabbed page. See `trocr-service.md` for the full spec.
+
+Training and evaluation are long-running GPU jobs, never synchronous requests, and only a
+Super Admin can start one.
 
 ## Separation of duties (do not "simplify" this)
 
