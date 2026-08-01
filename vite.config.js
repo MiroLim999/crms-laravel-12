@@ -11,6 +11,9 @@ export default defineConfig({
                 'resources/scss/app.scss',
                 'resources/css/app.css',
                 'resources/js/app.js',
+                // Auth-page decoration (centred card, corner shapes). Only the
+                // guest layout loads it, so it stays out of the main bundle.
+                'resources/scss/pages/page-auth.scss',
                 // Loaded only by the analytics page. Keeping it out of app.js
                 // saves everyone else ~154 KB gzip on every page load.
                 'resources/js/sneat/apexcharts.js',

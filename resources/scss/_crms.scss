@@ -19,6 +19,12 @@
   opacity: 0.85;
 }
 
+// SNEAT's auth markup uses .cursor-pointer on the password-toggle affordance but
+// does not ship the rule itself.
+.cursor-pointer {
+  cursor: pointer;
+}
+
 // ---------------------------------------------------------------- field marking
 //
 // Draggable boxes laid over a rendered scan. Positioned by field-marker.js in

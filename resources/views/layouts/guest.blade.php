@@ -1,10 +1,18 @@
-{{-- Unauthenticated shell: sign-in and the forced password change. --}}
+{{--
+    Unauthenticated shell: sign-in and the forced password change.
+
+    Structure mirrors SNEAT's auth-login-basic page. The
+    authentication-wrapper / authentication-basic / authentication-inner nesting is
+    what page-auth.scss hooks into to centre the card and draw the corner shapes —
+    changing those class names flattens the page back to full width.
+--}}
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}"
-      class="layout-blank"
+      class="layout-wide"
       dir="ltr"
       data-skin="default"
-      data-bs-theme="light">
+      data-bs-theme="light"
+      data-template="vertical-menu-template">
 
 <head>
     <meta charset="utf-8">
@@ -22,6 +30,7 @@
     @vite([
         'resources/fonts/iconify/iconify.css',
         'resources/scss/app.scss',
+        'resources/scss/pages/page-auth.scss',
         'resources/css/app.css',
         'resources/js/app.js',
     ])
@@ -31,21 +40,23 @@
     <div class="container-xxl">
         <div class="authentication-wrapper authentication-basic container-p-y">
             <div class="authentication-inner">
-                <div class="card">
+                <div class="card px-sm-6 px-0">
                     <div class="card-body">
 
-                        <div class="app-brand justify-content-center mb-4">
+                        <div class="app-brand justify-content-center mb-6">
                             <span class="app-brand-link gap-2">
-                                <span class="d-flex align-items-center justify-content-center rounded text-white fw-bold"
-                                      style="width: 2.5rem; height: 2.5rem; background-color: #696cff;">
-                                    CR
+                                <span class="app-brand-logo demo">
+                                    <span class="d-flex align-items-center justify-content-center rounded text-white fw-bold"
+                                          style="width: 2.5rem; height: 2.5rem; background-color: #696cff;">
+                                        CR
+                                    </span>
                                 </span>
-                                <span class="app-brand-text fw-bold ms-2 fs-4 text-heading">CRMS</span>
+                                <span class="app-brand-text demo text-heading fw-bold ms-2 fs-4">CRMS</span>
                             </span>
                         </div>
 
                         <h4 class="mb-1">@yield('heading')</h4>
-                        <p class="mb-4 text-muted">@yield('subheading')</p>
+                        <p class="mb-6">@yield('subheading')</p>
 
                         <x-alerts />
 
