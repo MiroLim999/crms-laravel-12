@@ -14,9 +14,12 @@
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+// Use the CDN-hosted worker instead of bundling the 2.2 MB parser file.
+// The version must stay in sync with pdfjs-dist in package.json (currently 4.10.38).
+// If you upgrade pdfjs-dist, update this URL too.
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
 
 const HANDLE_SIZE = 10;
 const MIN_FRACTION = 0.01;

@@ -3,7 +3,8 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "subset-icons": "node tools/subset-icons.mjs"
     },
     "devDependencies": {
         "@popperjs/core": "^2.11.8",

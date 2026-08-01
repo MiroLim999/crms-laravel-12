@@ -11,31 +11,74 @@ export default defineConfig({
                 'resources/scss/app.scss',
                 'resources/css/app.css',
                 'resources/js/app.js',
-                // Loaded only by the analytics page, which is the one screen that
-                // charts anything. Keeping it out of app.js spares every other
-                // page the download.
+                // Loaded only by the analytics page. Keeping it out of app.js
+                // saves everyone else ~154 KB gzip on every page load.
                 'resources/js/sneat/apexcharts.js',
-                // Own entry for the same reason: it pulls in PDF.js, and only the
-                // scanning workspace and the template builder need it.
+                // Own entry: pulls in the PDF.js module tree. Only the scanning
+                // workspace and the template builder use it.
+                // NOTE: pdf.worker.mjs is now served from the CDN (see field-marker.js).
+                //       Do not add `pdfjs-dist/build/pdf.worker.mjs?url` back here.
                 'resources/js/field-marker.js',
             ],
             refresh: true,
         }),
         tailwindcss(),
     ],
+
     resolve: {
         alias: {
             '@': path.resolve(__dirname, 'resources'),
         },
     },
+
     css: {
         preprocessorOptions: {
             scss: {
-                // SNEAT's SCSS does bare `@import "bootstrap/scss/..."`, which only
-                // resolves if node_modules is on the Sass load path.
+                // SNEAT's SCSS does bare `@import "bootstrap/scss/..."`, which
+                // only resolves if node_modules is on the Sass load path.
                 loadPaths: ['node_modules'],
                 quietDeps: true,
-                silenceDeprecations: ['import', 'global-builtin', 'color-functions'],
+                silenceDeprecations: ['import', 'global-builtin', 'color-functions', 'if-function'],
+            },
+        },
+    },
+
+    build: {
+        // Report chunks larger than this — keeps bundle growth visible.
+        chunkSizeWarningLimit: 600,
+
+        rollupOptions: {
+            output: {
+                // Vendor code changes less often than app code, so split it into
+                // its own chunk to get longer cache hits in production.
+                manualChunks(id) {
+                    // Bootstrap JS and Popper share a chunk because they're both
+                    // loaded on every page and always version-locked together.
+                    if (id.includes('node_modules/bootstrap')
+                        || id.includes('node_modules/@popperjs')) {
+                        return 'vendor-bootstrap';
+                    }
+
+                    // Perfect Scrollbar is small but loaded on every page via app.js.
+                    if (id.includes('node_modules/perfect-scrollbar')) {
+                        return 'vendor-scrollbar';
+                    }
+
+                    // PDF.js is large (~364 KB) and only the scanning workspace needs
+                    // it. Bundling it with app.js would penalise every other page.
+                    // It already has its own entry (field-marker.js), so this keeps
+                    // the internal dependency out of the shared chunk.
+                    if (id.includes('node_modules/pdfjs-dist')) {
+                        return 'vendor-pdfjs';
+                    }
+
+                    // ApexCharts already has its own entry (apexcharts.js) which
+                    // prevents it from appearing in app.js, but mark it explicitly
+                    // to stop Rollup from hoisting it into a shared chunk.
+                    if (id.includes('node_modules/apexcharts')) {
+                        return 'vendor-apexcharts';
+                    }
+                },
             },
         },
     },
