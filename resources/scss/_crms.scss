@@ -25,6 +25,33 @@
   cursor: pointer;
 }
 
+// ---------------------------------------------------------------- audit log diff panel
+
+.audit-diff-toggle {
+  border-radius: 1rem;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+
+  &.active {
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: #fff;
+  }
+}
+
+.audit-expand-row > td {
+  // No border between the data row and the panel row — the panel's own top
+  // border provides the visual separation.
+  border-top: 0 !important;
+  padding: 0 !important;
+}
+
+.audit-diff-inner {
+  background: #fff;
+  border-color: rgba(105, 108, 255, 0.2) !important;
+  box-shadow: 0 2px 8px rgba(105, 108, 255, 0.06);
+  overflow: hidden;
+}
+
 // ---------------------------------------------------------------- field marking
 //
 // Draggable boxes laid over a rendered scan. Positioned by field-marker.js in
