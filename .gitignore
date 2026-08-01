@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Model checkpoints / weights (too large for GitHub - use HF Hub or Git LFS)
+Models/
+trocr-finetuned/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# Training data (large - keep out of the repo)
+dataset/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Web prototype — generated saved documents
+web/saved_docs/
