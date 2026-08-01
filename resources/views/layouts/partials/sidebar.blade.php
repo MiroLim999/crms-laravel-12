@@ -1,0 +1,43 @@
+{{-- Role-driven vertical menu. Items come from App\Support\Navigation. --}}
+<aside id="layout-menu" class="layout-menu menu-vertical menu bg-menu-theme">
+
+    <div class="app-brand demo">
+        <a href="{{ route('dashboard') }}" class="app-brand-link">
+            <span class="app-brand-logo demo">
+                <span class="d-flex align-items-center justify-content-center rounded text-white fw-bold"
+                      style="width: 2.25rem; height: 2.25rem; background-color: #696cff; font-size: .8125rem;">
+                    CR
+                </span>
+            </span>
+            <span class="app-brand-text demo menu-text fw-bold ms-2">CRMS</span>
+        </a>
+
+        <a href="javascript:void(0);"
+           class="layout-menu-toggle menu-link text-large ms-auto d-block d-xl-none"
+           aria-label="Collapse menu">
+            <i class="icon-base bx bx-chevron-left icon-sm d-flex align-items-center justify-content-center"></i>
+        </a>
+    </div>
+
+    <div class="menu-divider mt-0"></div>
+    <div class="menu-inner-shadow"></div>
+
+    <ul class="menu-inner py-1">
+        @foreach (\App\Support\Navigation::sections() as $section)
+            @if ($section['header'])
+                <li class="menu-header small text-uppercase">
+                    <span class="menu-header-text">{{ $section['header'] }}</span>
+                </li>
+            @endif
+
+            @foreach ($section['items'] as $item)
+                <li class="menu-item {{ $item['active'] ? 'active' : '' }}">
+                    <a href="{{ route($item['route']) }}" class="menu-link">
+                        <i class="menu-icon icon-base bx {{ $item['icon'] }}"></i>
+                        <div>{{ $item['label'] }}</div>
+                    </a>
+                </li>
+            @endforeach
+        @endforeach
+    </ul>
+</aside>

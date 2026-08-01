@@ -1,0 +1,11 @@
+// CRMS stylesheet entry point.
+//
+// `core.scss` and everything under _bootstrap-extended/, _components/,
+// _custom-variables/ and pages/ was harvested from the SNEAT template and is
+// treated as vendor code - avoid editing it directly. Put CRMS overrides in
+// _crms.scss so an asset refresh stays painless.
+
+@import 'core';
+@import 'libs/perfect-scrollbar';
+
+@import 'crms';

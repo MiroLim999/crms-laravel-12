@@ -1,0 +1,20 @@
+// CRMS-specific styling that sits on top of the harvested SNEAT theme.
+// Keep this thin. If Bootstrap or a SNEAT component already does the job, use it.
+
+// Confidence badges for OCR field review. Confidence is the model's certainty in
+// its own output, not accuracy, so these read as review flags rather than scores.
+.confidence-badge {
+  font-variant-numeric: tabular-nums;
+}
+
+// Field marked as needing review (low model confidence).
+.field-needs-review {
+  border-color: var(--bs-warning) !important;
+  background-color: rgba(255, 171, 0, 0.06);
+}
+
+// Locked archive records are read-only; make that visually obvious.
+.record-locked {
+  cursor: not-allowed;
+  opacity: 0.85;
+}

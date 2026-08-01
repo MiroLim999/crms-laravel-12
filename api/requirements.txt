@@ -1,3 +1,7 @@
-# OCR API dependencies (in addition to the project's torch/transformers/Pillow)
-flask
-flask-cors
+# TrOCR OCR service dependencies.
+# Installed on top of the project's ML stack (see ../requirements.txt for
+# torch / transformers / Pillow).
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.5
