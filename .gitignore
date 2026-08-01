@@ -58,3 +58,6 @@ Thumbs.db
 # ============ Legacy prototype ============
 # Web prototype - generated saved documents
 web/saved_docs/
+
+#kiro IDE
+/.kiro
