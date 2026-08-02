@@ -1,134 +1,98 @@
-"""
+r"""
 test_trocr.py
-Loads the TrOCR model and predicts text from ALL images in the dataset/ folder.
-Automatically uses GPU if available, otherwise falls back to CPU.
+Evaluates the **base**, un-fine-tuned TrOCR model so its CER / WER / exact-match
+can be compared against a fine-tuned one.
+
+This is a thin wrapper over `test_finetuned.run_evaluation(model="base", ...)`.
+
+It used to carry its own copy of the load / generate / decode / score loop, which
+meant two code paths could disagree about what a number meant - and this copy had
+already drifted: it read the pre-migration `ml/dataset/` folder directly, ignored
+the manifest's `split` column, and generated with `max_new_tokens=64` where
+everything else uses 32. A base-model score produced under different settings is
+not comparable with the fine-tuned score it exists to be compared against.
+
+  CLI         python ml\test_trocr.py --dataset default --split test
+  In-process  from test_finetuned import run_evaluation
+              run_evaluation(model="base", dataset="default", split="test")
 """
 
-import os
-import sys
-import warnings
-import logging
+import argparse
 
-# --- Suppress ALL noisy warnings/logs BEFORE any library imports ---
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
-os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
-os.environ["TRANSFORMERS_VERBOSITY"] = "error"
-warnings.filterwarnings("ignore")
-logging.disable(logging.WARNING)
+# Quiets the HF stack. Must precede torch/transformers.
+import hf_quiet  # noqa: F401
 
-import pandas as pd
-import torch
-from PIL import Image
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+import dataset_registry as ds
+from metrics import print_metrics
+from test_finetuned import (
+    BASE_MODEL_KEY,
+    BATCH_SIZE,
+    DEFAULT_DATASET,
+    DEFAULT_SPLIT,
+    EvaluationError,
+    run_evaluation,
+)
 
-from metrics import compute_metrics, print_metrics, save_metrics_png
-
-# Supported image extensions
-IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif")
+# Re-exported for anything that imported these from here.
+IMAGE_EXTENSIONS = ds.IMAGE_EXTENSIONS
 
 
-def main():
-    model_name = "microsoft/trocr-base-handwritten"
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Evaluate the base (not fine-tuned) TrOCR model on a dataset split."
+    )
+    parser.add_argument("--dataset", default=DEFAULT_DATASET)
+    parser.add_argument("--split", default=DEFAULT_SPLIT, choices=list(ds.SPLITS))
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--no-chart", action="store_true")
+    args = parser.parse_args(argv)
 
-    # Anchored to ml/ so the script runs the same from any working directory.
-    ml_root = os.path.dirname(os.path.abspath(__file__))
-    dataset_folder = os.path.join(ml_root, "dataset", "test")
-    manifest_csv = os.path.join(ml_root, "dataset", "manifest.csv")
+    print("=" * 60)
+    print("TrOCR BASE MODEL - EVALUATION")
+    print("=" * 60)
 
-    print("=" * 50)
-    print("TrOCR HANDWRITTEN TEXT RECOGNITION TEST")
-    print("=" * 50)
+    printed = {"header": False}
 
-    # --- Step 1: Find all images in the dataset folder ---
-    if not os.path.isdir(dataset_folder):
-        print(f"\nERROR: Folder '{dataset_folder}' not found.")
-        return
+    def show(row):
+        if not printed["header"]:
+            print(f"\n{'Filename':<28} {'Ground truth':<22} {'Prediction':<22} Match")
+            print("-" * 82)
+            printed["header"] = True
+        print(f"{row['filename']:<28} {row['reference']:<22} {row['prediction']:<22} "
+              f"{'OK' if row['match'] else 'x'}")
 
-    image_files = sorted([
-        f for f in os.listdir(dataset_folder)
-        if f.lower().endswith(IMAGE_EXTENSIONS)
-    ])
+    try:
+        result = run_evaluation(
+            model=BASE_MODEL_KEY,
+            dataset=args.dataset,
+            split=args.split,
+            limit=args.limit,
+            batch_size=args.batch_size,
+            save_chart=not args.no_chart,
+            log=lambda line: print(f"  {line}"),
+            on_row=show,
+        )
+    except (EvaluationError, ds.DatasetError) as e:
+        print(f"\nERROR: {e}")
+        return 1
 
-    if not image_files:
-        print(f"\nERROR: No images found in '{dataset_folder}/'")
-        print(f"Supported formats: {IMAGE_EXTENSIONS}")
-        return
-
-    print(f"Found {len(image_files)} image(s) in '{dataset_folder}/'")
+    print("-" * 82)
     print()
-
-    # --- Load ground-truth labels (if manifest is available) ---
-    labels = {}
-    if os.path.exists(manifest_csv):
-        gt = pd.read_csv(manifest_csv, keep_default_na=False)
-        labels = dict(zip(gt["filename"], gt["label"].astype(str)))
-        print(f"Loaded {len(labels)} ground-truth labels from '{manifest_csv}'")
-    else:
-        print(f"NOTE: '{manifest_csv}' not found — metrics will be skipped.")
-    print()
-
-    # --- Step 2: Select device (GPU or CPU) ---
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    if device.type == "cuda":
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print()
-
-    # --- Step 3: Load processor and model (once) ---
-    print("Loading processor...")
-    processor = TrOCRProcessor.from_pretrained(model_name)
-
-    print("Loading model...")
-    model = VisionEncoderDecoderModel.from_pretrained(model_name)
-    model.to(device)
-    model.eval()
-    print("Model loaded and ready.\n")
-
-    # --- Step 4: Process each image ---
-    print("=" * 50)
-    print("RESULTS")
-    print("=" * 50)
-    print(f"{'#':<4} {'Filename':<22} {'Ground Truth':<22} {'Prediction'}")
-    print("-" * 80)
-
-    references = []
-    predictions = []
-
-    for i, filename in enumerate(image_files, start=1):
-        image_path = os.path.join(dataset_folder, filename)
-        ground_truth = labels.get(filename)
-        try:
-            image = Image.open(image_path).convert("RGB")
-            pixel_values = processor(images=image, return_tensors="pt").pixel_values
-            pixel_values = pixel_values.to(device)
-
-            with torch.no_grad():
-                generated_ids = model.generate(pixel_values, max_new_tokens=64)
-
-            predicted_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
-            gt_display = ground_truth if ground_truth is not None else "(no label)"
-            print(f"{i:<4} {filename:<22} {gt_display:<22} {predicted_text}")
-
-            if ground_truth is not None:
-                references.append(str(ground_truth).strip())
-                predictions.append(predicted_text)
-
-        except Exception as e:
-            print(f"{i:<4} {filename:<22} {'ERROR':<22} {e}")
-
-    print("-" * 80)
-    print(f"\nDone. Processed {len(image_files)} image(s).")
-
-    # --- Evaluation metrics ---
-    if references:
-        results = compute_metrics(references, predictions)
-        print()
-        print_metrics(results, title="BASE MODEL — EVALUATION METRICS")
-        save_metrics_png(results, subfolder="base", model_label="microsoft/trocr-base-handwritten")
-    else:
-        print("\nNo ground-truth labels matched these images — metrics skipped.")
+    print_metrics(
+        {
+            "cer": result["metrics"]["cer"],
+            "wer": result["metrics"]["wer"],
+            "accuracy": result["metrics"]["exact_match"],
+            "exact": result["metrics"]["exact"],
+            "total": result["metrics"]["total"],
+        },
+        title="BASE MODEL - EVALUATION METRICS",
+    )
+    print("\nCompare against a fine-tuned model with:")
+    print(f"  python ml\\test_finetuned.py --model <name> --split {args.split}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\Ocr\DatasetManager;
 use App\Services\Ocr\ChunkedUpload;
+use App\Services\Ocr\DatasetManager;
 use App\Services\Ocr\EngineProcess;
 use App\Services\Ocr\EvaluationCharts;
 use App\Services\Ocr\JobCoordinator;
@@ -60,18 +60,21 @@ class OcrModelController extends Controller
     }
 
     /**
-     * Re-read the models folder. Useful after dropping a folder in by hand, which
-     * is the documented fallback when an upload is too large to be worth chunking.
+     * Reconcile both durable registries with the service after folders are changed
+     * by hand, which is the documented fallback for very large artifacts.
      */
-    public function rescan(): RedirectResponse
+    public function rescan(Request $request): RedirectResponse
     {
         try {
-            $models = count($this->client->models()['models']);
-            $datasets = count($this->client->datasets());
+            $models = $this->manager->reconcile($request->user());
+            $datasets = $this->datasets->reconcile($request->user());
 
             return $this->back('models')->with(
                 'success',
-                "Rescanned. The service reports {$models} model(s) and {$datasets} dataset(s).",
+                "Rescanned {$models['remote']} model(s) and {$datasets['remote']} dataset(s): "
+                .'registered '.($models['registered'] + $datasets['registered'])
+                .', restored '.($models['restored'] + $datasets['restored'])
+                .', marked missing '.($models['tombstoned'] + $datasets['tombstoned']).'.',
             );
         } catch (OcrServiceException $e) {
             return $this->back('models')->with('error', $e->getMessage());

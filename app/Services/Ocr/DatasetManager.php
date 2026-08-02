@@ -8,14 +8,7 @@ use App\Services\AuditLogger;
 use Illuminate\Support\Collection;
 
 /**
- * Reconciles the OCR service's on-disk datasets with the CRMS registry.
- *
- * Same split of authority as models: the service owns what exists on disk, this
- * table owns what CRMS knows about it - who uploaded it and what validation said.
- *
- * Validation is not optional. A manifest pointing at missing files fails deep into
- * an epoch after hours of GPU time, so a dataset is validated on upload and cannot
- * be trained on until it passes.
+ * Reconciles the OCR service's on-disk datasets with the durable CRMS registry.
  */
 class DatasetManager
 {
@@ -25,14 +18,10 @@ class DatasetManager
     ) {}
 
     /**
-     * Merge the service's dataset list with our stored metadata.
-     *
      * @return array{reachable: bool, error: string|null, datasets: Collection<int, array<string, mixed>>}
      */
     public function overview(): array
     {
-        // Skip a call already known to fail. Without this the page pays a second
-        // connection-refused wait to learn what health just told it.
         if ($this->client->isKnownUnreachable()) {
             return $this->offline($this->client->health()['error']);
         }
@@ -43,15 +32,10 @@ class DatasetManager
             return $this->offline($e->getMessage());
         }
 
-        // Eager loaded: the uploader is rendered on every row of the table.
         $registry = MlDataset::with('uploader')->orderBy('name')->get()->keyBy('name');
-
         $datasets = $remote->map(
             fn (array $row) => $this->describe($registry->get($row['name']), $row)
         );
-
-        // Registered datasets the service can no longer see, e.g. a folder deleted
-        // by hand. Flagged rather than hidden so the mismatch is visible.
         $missing = $registry->keys()->diff($remote->pluck('name'))
             ->map(fn (string $name) => $this->describe($registry->get($name), null));
 
@@ -63,9 +47,6 @@ class DatasetManager
     }
 
     /**
-     * Show what we know about, flagged, so history stays readable while the service
-     * is down.
-     *
      * @return array{reachable: bool, error: string|null, datasets: Collection<int, array<string, mixed>>}
      */
     private function offline(?string $error): array
@@ -74,13 +55,13 @@ class DatasetManager
             'reachable' => false,
             'error' => $error ?? 'The OCR service is not reachable.',
             'datasets' => MlDataset::with('uploader')->orderBy('name')->get()
-                ->map(fn (MlDataset $d) => $this->describe($d, null))
+                ->map(fn (MlDataset $dataset) => $this->describe($dataset, null))
                 ->values(),
         ];
     }
 
     /**
-     * @param  array<string, mixed>|null  $remote  Null when the service cannot see it.
+     * @param  array<string, mixed>|null  $remote
      * @return array<string, mixed>
      */
     private function describe(?MlDataset $local, ?array $remote): array
@@ -105,65 +86,99 @@ class DatasetManager
             'validation' => $local?->validation,
             'trainable' => $remote !== null && (bool) $local?->isTrainable(),
             'uploader' => $local?->uploader?->name,
+            'disk_deleted_at' => $local?->disk_deleted_at,
+            'disk_deleted_by' => $local?->disk_deleted_by,
             'dataset' => $local,
         ];
     }
 
-    /**
-     * Register a dataset the service reports, so it has a row to hang metadata on.
-     */
     public function register(string $name, User $actor): MlDataset
     {
         $dataset = MlDataset::firstOrNew(['name' => $name]);
 
         if (! $dataset->exists) {
             $dataset->fill(['uploaded_by' => $actor->getKey()])->save();
+            $this->audit->log(
+                'ml_dataset.registered',
+                $dataset,
+                new: ['name' => $name],
+                description: "Registered dataset '{$name}'.",
+                actor: $actor,
+            );
+
+            return $dataset;
+        }
+
+        if ($dataset->disk_deleted_at !== null) {
+            $dataset->fill([
+                'disk_deleted_at' => null,
+                'disk_deleted_by' => null,
+            ]);
+            $this->audit->saveAndLog(
+                'ml_dataset.restored',
+                $dataset,
+                "Restored dataset '{$name}' to the registry.",
+            );
         }
 
         return $dataset;
     }
 
     /**
-     * Hand an assembled zip to the service, then validate what came out of it.
+     * @param  list<array{name: string, relative_path: string, path: string, size: int}>  $files
      */
+    public function createFromFiles(string $name, array $files, User $actor): MlDataset
+    {
+        return $this->persistCreated(
+            $this->client->createDatasetFromFiles($name, $files),
+            $name,
+            $actor,
+        );
+    }
+
     public function createFromArchive(string $name, string $zipPath, User $actor): MlDataset
     {
-        $result = $this->client->createDataset($name, $zipPath);
-        $resolved = $result['name'] ?? $name;
+        return $this->persistCreated(
+            $this->client->createDataset($name, $zipPath),
+            $name,
+            $actor,
+        );
+    }
 
-        $dataset = $this->register($resolved, $actor);
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function persistCreated(array $result, string $requestedName, User $actor): MlDataset
+    {
+        $resolved = $result['name'] ?? $requestedName;
+        $dataset = MlDataset::firstOrNew(['name' => $resolved]);
 
+        $dataset->fill([
+            'uploaded_by' => $actor->getKey(),
+            'disk_deleted_at' => null,
+            'disk_deleted_by' => null,
+            'validation' => null,
+            'is_valid' => null,
+            'validated_at' => null,
+        ]);
         $this->applySummary($dataset, $result['summary'] ?? []);
         $this->applyValidation($dataset, $result['validation'] ?? null);
-        $dataset->save();
 
-        $this->audit->log(
+        $this->audit->saveAndLog(
             'ml_dataset.uploaded',
             $dataset,
-            new: [
-                'name' => $resolved,
-                'total_images' => $dataset->total_images,
-                'size_bytes' => $dataset->size_bytes,
-                'is_valid' => $dataset->is_valid,
-            ],
-            description: "Uploaded dataset '{$resolved}' ({$dataset->total_images} images).",
-            actor: $actor,
+            "Uploaded dataset '{$resolved}' ({$dataset->total_images} images).",
         );
 
         return $dataset;
     }
 
-    /**
-     * Re-run the service's sanity report and store it.
-     */
     public function validate(string $name, User $actor): MlDataset
     {
         $report = $this->client->validateDataset($name);
-
         $dataset = $this->register($name, $actor);
         $this->applyValidation($dataset, $report);
 
-        // Refresh the counts at the same time: they come from the same walk of disk.
         $summary = collect($this->client->datasets())->firstWhere('name', $name);
         if ($summary !== null) {
             $this->applySummary($dataset, $summary);
@@ -174,38 +189,88 @@ class DatasetManager
         return $dataset;
     }
 
-    /**
-     * Destructive: removes the folder and every image in it.
-     */
     public function delete(string $name, User $actor): void
     {
         $this->client->deleteDataset($name);
+        $dataset = MlDataset::firstOrNew(['name' => $name]);
+        $dataset->fill([
+            'disk_deleted_at' => now(),
+            'disk_deleted_by' => $actor->getKey(),
+            'is_valid' => false,
+        ]);
 
-        $dataset = MlDataset::where('name', $name)->first();
-
-        $this->audit->log(
+        $this->audit->saveAndLog(
             'ml_dataset.deleted',
             $dataset,
-            old: [
-                'name' => $name,
-                'total_images' => $dataset?->total_images,
-                'size_bytes' => $dataset?->size_bytes,
-            ],
-            description: "Deleted dataset '{$name}' from disk.",
-            actor: $actor,
+            "Deleted dataset '{$name}' from disk.",
         );
-
-        $dataset?->delete();
     }
 
     /**
-     * Datasets that may be trained on right now: on disk and passing validation.
+     * Fetch the service dataset list once and durably reconcile every transition.
      *
+     * @return array{remote: int, registered: int, restored: int, tombstoned: int, updated: int}
+     */
+    public function reconcile(User $actor): array
+    {
+        $remote = collect($this->client->datasets())->keyBy('name');
+        $registry = MlDataset::all()->keyBy('name');
+        $counts = [
+            'remote' => $remote->count(),
+            'registered' => 0,
+            'restored' => 0,
+            'tombstoned' => 0,
+            'updated' => 0,
+        ];
+
+        foreach ($remote as $name => $summary) {
+            $local = $registry->get($name);
+            if ($local === null) {
+                $counts['registered']++;
+            } elseif ($local->disk_deleted_at !== null) {
+                $counts['restored']++;
+            }
+
+            $dataset = $this->register($name, $actor);
+            $this->applySummary($dataset, $summary);
+
+            if ($dataset->isDirty()) {
+                $this->audit->saveAndLog(
+                    'ml_dataset.reconciled',
+                    $dataset,
+                    "Updated the on-disk summary for dataset '{$name}'.",
+                );
+                $counts['updated']++;
+            }
+        }
+
+        foreach ($registry as $name => $dataset) {
+            if ($remote->has($name) || $dataset->disk_deleted_at !== null) {
+                continue;
+            }
+
+            $dataset->fill([
+                'disk_deleted_at' => now(),
+                'disk_deleted_by' => null,
+                'is_valid' => false,
+            ]);
+            $this->audit->saveAndLog(
+                'ml_dataset.marked_missing',
+                $dataset,
+                "Marked dataset '{$name}' deleted because it is absent from disk.",
+            );
+            $counts['tombstoned']++;
+        }
+
+        return $counts;
+    }
+
+    /**
      * @return Collection<int, array<string, mixed>>
      */
     public function trainable(): Collection
     {
-        return $this->overview()['datasets']->filter(fn (array $d) => $d['trainable'])->values();
+        return $this->overview()['datasets']->filter(fn (array $dataset) => $dataset['trainable'])->values();
     }
 
     /**
@@ -214,7 +279,6 @@ class DatasetManager
     private function applySummary(MlDataset $dataset, array $summary): void
     {
         $images = $summary['images'] ?? [];
-
         $dataset->fill([
             'train_count' => $images['train'] ?? 0,
             'val_count' => $images['val'] ?? 0,

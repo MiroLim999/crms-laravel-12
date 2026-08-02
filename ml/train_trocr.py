@@ -21,16 +21,11 @@ it. Nothing in this module calls sys.exit() or input() - it has to stay importab
 
 import argparse
 import os
-import warnings
-import logging
+import sys
 
-# --- Suppress warnings ---
-os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
-os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
-os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
-os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
-warnings.filterwarnings("ignore")
-logging.disable(logging.WARNING)
+# Quiets the HF stack. Must precede torch/transformers - see hf_quiet's docstring
+# for why this is not a `logging.disable()` call.
+import hf_quiet  # noqa: F401
 
 import shutil
 import time
@@ -42,9 +37,28 @@ from PIL import Image
 from tqdm import tqdm
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 from torch.optim import AdamW
-from torch.cuda.amp import GradScaler, autocast
 
 import dataset_registry as ds
+
+# Mixed precision moved to torch.amp in 2.x; torch.cuda.amp still works but emits
+# a FutureWarning on every run under torch 2.4+. Prefer the current API and keep
+# the old one as a fallback so an older install still trains.
+try:
+    from torch.amp import GradScaler as _GradScaler, autocast as _autocast
+
+    def _grad_scaler(enabled):
+        return _GradScaler("cuda", enabled=enabled)
+
+    def _amp_autocast(enabled):
+        return _autocast("cuda", enabled=enabled)
+except ImportError:  # pragma: no cover - torch < 2.0
+    from torch.cuda.amp import GradScaler as _GradScaler, autocast as _autocast
+
+    def _grad_scaler(enabled):
+        return _GradScaler(enabled=enabled)
+
+    def _amp_autocast(enabled):
+        return _autocast(enabled=enabled)
 
 # ============================================================
 # CONFIG - defaults. Every one is overridable via run_training().
@@ -63,7 +77,15 @@ EPOCHS = 5
 BATCH_SIZE = 8                # Adjust based on your GPU VRAM (RTX 4050 = 6GB)
 LEARNING_RATE = 5e-5
 MAX_LABEL_LENGTH = 32         # Max characters in a label
-NUM_WORKERS = 2               # DataLoader workers
+
+# DataLoader workers. Zero on Windows by default, and that is not timidity:
+# Windows has no fork, so each worker is a *spawned* process that re-imports the
+# parent's __main__ and unpickles the dataset (the TrOCR processor with it). When
+# training is driven from the API, that __main__ is uvicorn's entry point, and
+# re-executing it in a child is at best wasteful and at worst starts a second
+# server. _safe_worker_count() enforces this at run time as well, so a config
+# posted from the workspace form cannot reintroduce the hang.
+NUM_WORKERS = 0 if os.name == "nt" else 2
 
 # Dataset subset (None = use ALL data)
 TRAIN_SUBSET = None
@@ -198,6 +220,31 @@ def _configure_for_finetuning(model, processor, max_label_length):
     model.generation_config.max_length = max_label_length
 
 
+def _safe_worker_count(requested, log=_noop):
+    """Force single-process loading when spawned workers would be unsafe.
+
+    See the NUM_WORKERS comment: on Windows a DataLoader worker re-imports
+    whatever `__main__` is. That is fine for `python ml\\train_trocr.py` and wrong
+    for anything that imports this module, the API included."""
+    requested = int(requested or 0)
+    if requested <= 0:
+        return 0
+
+    if os.name == "nt":
+        main = sys.modules.get("__main__")
+        main_file = getattr(main, "__file__", None)
+        driven_by_cli = main_file and os.path.abspath(main_file) == os.path.abspath(__file__)
+
+        if not driven_by_cli:
+            log(
+                f"num_workers={requested} ignored: DataLoader workers are spawned on "
+                "Windows and would re-import the host process. Loading in-process."
+            )
+            return 0
+
+    return requested
+
+
 def check_disk_space(path, minimum=MIN_FREE_BYTES):
     """A checkpoint is ~1.3 GB. Running out mid-save wastes the whole run."""
     target = path
@@ -313,20 +360,30 @@ def run_training(
     if len(train_dataset) == 0:
         raise TrainingError("No usable training samples. Validate the dataset first.")
 
+    workers = _safe_worker_count(num_workers, log)
+    # pin_memory only helps a CUDA copy, and on CPU it just costs pinned pages.
+    pin = device.type == "cuda"
+
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=True,
+        num_workers=workers, pin_memory=pin,
+        persistent_workers=workers > 0,
     )
     val_loader = DataLoader(
         val_dataset, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=True,
+        num_workers=workers, pin_memory=pin,
+        persistent_workers=workers > 0,
     )
 
     optimizer = AdamW(model.parameters(), lr=learning_rate)
     use_amp = device.type == "cuda"
-    scaler = GradScaler(enabled=use_amp)
+    scaler = _grad_scaler(use_amp)
 
-    log(f"Epochs {epochs} | batch {batch_size} | lr {learning_rate} | "
+    has_validation = len(val_dataset) > 0
+    if not has_validation:
+        log("No usable validation samples: selecting the best epoch on training loss instead.")
+
+    log(f"Epochs {epochs} | batch {batch_size} | lr {learning_rate} | workers {workers} | "
         f"train {len(train_dataset)} | val {len(val_dataset)} | amp {use_amp}")
 
     progress(
@@ -337,7 +394,7 @@ def run_training(
         epoch=0,
     )
 
-    best_val_loss = float("inf")
+    best_loss = float("inf")
     history = []
     checkpoint_written = False
     epochs_completed = 0
@@ -367,7 +424,7 @@ def run_training(
                     # inf is not valid JSON, and this is serialised straight into
                     # the job snapshot.
                     best_val_loss=(
-                        round(best_val_loss, 4) if best_val_loss != float("inf") else None
+                        round(best_loss, 4) if best_loss != float("inf") else None
                     ),
                     history=history,
                     elapsed=time.monotonic() - started,
@@ -376,20 +433,18 @@ def run_training(
             pixel_values = batch["pixel_values"].to(device)
             labels = batch["labels"].to(device)
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
-            if use_amp:
-                with autocast():
-                    outputs = model(pixel_values=pixel_values, labels=labels)
-                    loss = outputs.loss
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-            else:
+            # One path for both precisions: a GradScaler constructed with
+            # enabled=False passes the loss and the optimizer step straight
+            # through, so the CPU branch needs no special case.
+            with _amp_autocast(use_amp):
                 outputs = model(pixel_values=pixel_values, labels=labels)
                 loss = outputs.loss
-                loss.backward()
-                optimizer.step()
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             epoch_loss += loss.item()
             num_batches += 1
@@ -409,8 +464,18 @@ def run_training(
         avg_train_loss = epoch_loss / max(num_batches, 1)
 
         # ------------------------------------------------------------ validation
-        progress(stage="validating", epoch=epoch)
-        val_loss = _validate(model, val_loader, device, verbose, epoch, epochs)
+        if has_validation:
+            progress(stage="validating", epoch=epoch)
+            val_loss = _validate(model, val_loader, device, verbose, epoch, epochs)
+            selection_loss = val_loss
+        else:
+            # With no validation rows there is nothing to pick a best epoch with.
+            # Selecting on validation loss anyway means _validate() returns 0.0
+            # every epoch, 0.0 never beats the 0.0 already recorded, and the run
+            # keeps only epoch 1 - throwing away every later epoch of training.
+            # Fall back to training loss so the checkpoint still improves.
+            val_loss = None
+            selection_loss = avg_train_loss
 
         epochs_completed = epoch
         epoch_time = time.monotonic() - epoch_start
@@ -420,25 +485,26 @@ def run_training(
         history.append({
             "epoch": epoch,
             "train_loss": round(avg_train_loss, 4),
-            "val_loss": round(val_loss, 4),
+            "val_loss": round(val_loss, 4) if val_loss is not None else None,
             "seconds": round(epoch_time, 1),
         })
 
         log(f"Epoch {epoch}/{epochs} - train {avg_train_loss:.4f} | "
-            f"val {val_loss:.4f} | {epoch_time:.0f}s | ETA {eta / 60:.1f} min")
+            f"val {f'{val_loss:.4f}' if val_loss is not None else 'n/a'} | "
+            f"{epoch_time:.0f}s | ETA {eta / 60:.1f} min")
 
         progress(
             stage="training",
             epoch=epoch,
             loss=round(avg_train_loss, 4),
-            val_loss=round(val_loss, 4),
+            val_loss=round(val_loss, 4) if val_loss is not None else None,
             eta_seconds=round(eta),
         )
 
         # Save only on improvement, and only between epochs, so a cancel never
         # interrupts a write.
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if selection_loss < best_loss:
+            best_loss = selection_loss
             progress(stage="saving", epoch=epoch)
             model.save_pretrained(save_dir)
             processor.save_pretrained(save_dir)
@@ -449,10 +515,11 @@ def run_training(
 
     if not checkpoint_written:
         raise TrainingError(
-            "Training finished without saving a checkpoint. Validation loss never improved."
+            "Training finished without saving a checkpoint: the loss never improved."
         )
 
-    log(f"Training complete in {total / 60:.1f} min. Best val loss {best_val_loss:.4f}.")
+    metric_name = "val" if has_validation else "train"
+    log(f"Training complete in {total / 60:.1f} min. Best {metric_name} loss {best_loss:.4f}.")
 
     return {
         "cancelled": False,
@@ -462,7 +529,11 @@ def run_training(
         "elapsed": round(total, 1),
         "history": history,
         "metrics": {
-            "best_val_loss": round(best_val_loss, 4),
+            # Kept under the original key so Laravel's ml_jobs mirror is unchanged.
+            # `selected_on` says which loss it actually is, because with no
+            # validation split this is the training loss.
+            "best_val_loss": round(best_loss, 4),
+            "selected_on": metric_name,
             "epochs_completed": epochs_completed,
             "train_samples": len(train_dataset),
             "val_samples": len(val_dataset),

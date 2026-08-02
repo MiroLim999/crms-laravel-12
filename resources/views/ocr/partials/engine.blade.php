@@ -29,9 +29,9 @@
                 </span>
 
                 {{--
-                    Answering but not ours: started from a terminal, or left over from a
-                    crash that lost the pidfile. Stop still works - it adopts whatever
-                    holds the port - so this is information, not a warning.
+                    Answering but not ours: started from a terminal, or left over from
+                    a crash that lost the pidfile. The listener is shown for diagnosis,
+                    but CRMS never adopts or terminates a process it did not start.
                 --}}
                 @if ($engine['reachable'] && ! $engine['owned'])
                     <span class="badge bg-label-warning" id="engine-untracked">
@@ -74,10 +74,10 @@
                             id="engine-stop-btn"
                             @disabled(! $engine['stoppable'])
                             title="{{ $engine['stoppable']
-                                ? ($engine['owned']
-                                    ? 'Stop the service.'
-                                    : 'Stop whatever is serving on port '.parse_url($engine['url'], PHP_URL_PORT).'.')
-                                : 'Nothing is running to stop.' }}">
+                                ? 'Stop the service.'
+                                : ($engine['reachable'] && ! $engine['owned']
+                                    ? 'This service was started outside CRMS; stop it from its terminal or process manager.'
+                                    : 'Nothing is running to stop.') }}">
                         <i class="icon-base bx bx-stop icon-sm me-1"></i> Stop FastAPI
                     </button>
                 @else
@@ -112,9 +112,14 @@
 
             @if ($engine['reachable'] && ! $engine['owned'])
                 <div class="mt-2 text-muted">
-                    This service was not started from here, so there is no clean shutdown to
-                    perform — <em>Stop</em> will end whichever process holds the port. If it
-                    is running in a terminal you are watching, that window will go quiet.
+                    This service was not started from CRMS, so it cannot be stopped here.
+                    Stop it from the terminal or process manager that launched
+                    @if ($engine['listener_pid'])
+                        PID {{ $engine['listener_pid'] }}
+                    @else
+                        it
+                    @endif
+                    .
                 </div>
             @endif
         </div>

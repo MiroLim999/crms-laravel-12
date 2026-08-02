@@ -58,26 +58,18 @@ class EngineProcess
             $pid = null;
         }
 
-        /*
-         * A service answering on our port that we have no PID for was started from a
-         * terminal, or survived a crash that lost the pidfile. Look up whoever holds
-         * the port so Stop still works instead of dead-ending.
-         *
-         * Only looked up in that specific case: it costs a netstat call, and in the
-         * normal path we already know the PID.
-         */
+        // A reachable service with no tracked PID was started outside CRMS. Resolve
+        // its listener only for diagnostics; ownership is never inferred from a port.
         $listener = ($pid === null && $health['reachable']) ? $this->listenerPid() : null;
 
         return [
             'managed' => $this->isManaged(),
             'running' => $pid !== null,
             'pid' => $pid,
-            // True when this app started the process, so Stop is a clean shutdown
-            // rather than adopting a stranger.
             'owned' => $pid !== null,
             'listener_pid' => $listener,
-            // Whether Stop has anything to act on at all.
-            'stoppable' => $pid !== null || $listener !== null,
+            // CRMS may stop only a process whose PID it recorded when starting it.
+            'stoppable' => $pid !== null,
             'reachable' => $health['reachable'],
             'device' => $health['device'],
             'busy' => (bool) ($health['busy'] ?? false),
@@ -310,38 +302,26 @@ PY;
         $this->guardManaged();
 
         $pid = $this->recordedPid();
-        $adopted = false;
 
-        /*
-         * No pidfile, but something may still be serving on our port - started from a
-         * terminal, or left behind by a crash that lost the pidfile. Adopt it so Stop
-         * is never a dead end, but only after confirming it looks like Python. If some
-         * unrelated process holds the port, say so rather than killing it.
-         */
         if ($pid === null) {
             $listener = $this->listenerPid();
 
             if ($listener !== null) {
-                if (! $this->looksLikePython($listener)) {
-                    throw new OcrServiceException(sprintf(
-                        'Port %d is held by PID %d, which does not look like the OCR service. '
-                        .'Refusing to stop it - check what is bound to that port.',
-                        $this->port(),
-                        $listener,
-                    ));
-                }
-
-                $pid = $listener;
-                $adopted = true;
+                throw new OcrServiceException(sprintf(
+                    'The OCR service on port %d was started outside CRMS (PID %d). '
+                    .'Stop it from the terminal or process manager that launched it.',
+                    $this->port(),
+                    $listener,
+                ));
             }
-        }
 
-        if ($pid === null) {
             throw new OcrServiceException(sprintf(
                 'Nothing is running on port %d, so there is nothing to stop.',
                 $this->port(),
             ));
         }
+
+        $adopted = false;
 
         // Killing the GPU out from under a running job loses hours of work, so it
         // takes a second, explicit confirmation.

@@ -323,18 +323,39 @@ def validate(name):
 # --------------------------------------------------------------- create/delete
 
 def _safe_extract(archive, destination):
-    """Extract a zip, refusing any member that escapes the destination."""
+    """Extract a zip, refusing any member that escapes the destination.
+
+    The original two-pass version called infolist() to check every path, then
+    extractall() to write — loading every ZipInfo into memory first. For a
+    100 GB archive with hundreds of thousands of entries that list can itself
+    consume gigabytes of RAM. This version checks and extracts each member in
+    a single pass so only one ZipInfo is live at a time.
+    """
     root = os.path.realpath(destination)
 
     for member in archive.infolist():
         name = member.filename.replace("\\", "/")
+
+        # Path safety: refuse anything that could escape the destination.
         if name.startswith("/") or ".." in name.split("/"):
             raise DatasetError(f"Refusing to extract unsafe path: {member.filename}")
+
         target = os.path.realpath(os.path.join(destination, name))
         if not target.startswith(root + os.sep) and target != root:
             raise DatasetError(f"Refusing to extract outside the dataset: {member.filename}")
 
-    archive.extractall(destination)
+        # Directories are created implicitly by extractall; skip them explicitly
+        # here so we never try to open a directory as a file.
+        if member.is_dir():
+            os.makedirs(target, exist_ok=True)
+            continue
+
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+
+        # Stream the compressed data directly to disk — never read the whole
+        # entry into memory.
+        with archive.open(member) as src, open(target, "wb") as dst:
+            shutil.copyfileobj(src, dst, 256 * 1024)  # 256 KB copy buffer
 
 
 def _find_manifest_root(base):
@@ -353,35 +374,144 @@ def _find_manifest_root(base):
     raise DatasetError(f"The archive does not contain a {MANIFEST_NAME}.")
 
 
-def create_from_zip(name, zip_path):
-    """Unpack an uploaded zip into ml/datasets/<name>/ and validate it."""
+def _remove_install_artifact(path, ignore_errors=False):
+    """Remove one owned installation path without following a symlink."""
+    try:
+        if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
+            os.remove(path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path)
+    except OSError:
+        if not ignore_errors:
+            raise
+
+
+def _installation_paths(name):
+    """Return anchored target/staging paths and reject any existing target."""
     safe = sanitise_name(name)
     target = dataset_path(safe, must_exist=False)
+    staging = target + ".incoming"
 
-    if os.path.isdir(target):
+    datasets_root = os.path.abspath(DATASETS_DIR)
+    if (
+        os.path.dirname(os.path.abspath(target)) != datasets_root
+        or os.path.dirname(os.path.abspath(staging)) != datasets_root
+    ):
+        raise DatasetError("Refusing to install outside the datasets folder.")
+
+    if os.path.lexists(target):
         raise DatasetError(f"A dataset named '{safe}' already exists.")
+
+    return safe, target, staging
+
+
+def _commit_install(safe, source, target):
+    """Move a staged tree into place and roll it back if inspection fails."""
+    if os.path.lexists(target):
+        raise DatasetError(f"A dataset named '{safe}' already exists.")
+
+    installed = False
+    try:
+        shutil.move(source, target)
+        installed = True
+        return {"name": safe, "summary": describe(safe), "validation": validate(safe)}
+    except Exception:
+        if installed:
+            _remove_install_artifact(target, ignore_errors=True)
+        raise
+
+
+def create_from_zip(name, zip_path):
+    """Unpack an uploaded zip into ml/datasets/<name>/ and validate it.
+
+    Disk requirement at peak: the zip itself sits in Laravel's staging area
+    (already on disk by the time this is called), FastAPI writes a second copy
+    to a temp file, and then the extracted tree is written alongside. For a
+    100 GB zip that can reach 300 GB of temporary disk use. The caller's
+    check_disk_space (in the training validator) guards training, but upload
+    itself has no such guard — we just let the OS error if disk runs out,
+    which surfaces as a clear 500 rather than a silent truncation.
+    """
+    safe, target, staging = _installation_paths(name)
 
     if not zipfile.is_zipfile(zip_path):
         raise DatasetError("The upload is not a readable zip archive.")
 
-    staging = target + ".incoming"
-    shutil.rmtree(staging, ignore_errors=True)
-    os.makedirs(staging, exist_ok=True)
+    os.makedirs(DATASETS_DIR, exist_ok=True)
+    _remove_install_artifact(staging)
+    os.makedirs(staging)
 
     try:
         with zipfile.ZipFile(zip_path) as archive:
             _safe_extract(archive, staging)
 
         source = _find_manifest_root(staging)
-        os.makedirs(DATASETS_DIR, exist_ok=True)
-        shutil.move(source, target)
-    except Exception:
-        shutil.rmtree(target, ignore_errors=True)  # roll back a partial move
-        raise
+        return _commit_install(safe, source, target)
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        _remove_install_artifact(staging, ignore_errors=True)
 
-    return {"name": safe, "summary": describe(safe), "validation": validate(safe)}
+
+def _assert_regular_directory_tree(root):
+    """Refuse links and special files before copying an untrusted tree."""
+    resolved_root = os.path.realpath(root)
+
+    for base, directories, files in os.walk(root, followlinks=False):
+        for entry in directories + files:
+            path = os.path.join(base, entry)
+            if os.path.islink(path):
+                raise DatasetError(f"The dataset directory contains a symbolic link: {entry}")
+
+            resolved = os.path.realpath(path)
+            try:
+                inside_root = os.path.commonpath((resolved_root, resolved)) == resolved_root
+            except ValueError:
+                inside_root = False
+            if not inside_root:
+                raise DatasetError("Refusing to copy a file outside the dataset directory.")
+
+        for filename in files:
+            path = os.path.join(base, filename)
+            if not os.path.isfile(path):
+                raise DatasetError(f"The dataset directory contains a non-regular file: {filename}")
+
+
+def create_from_directory(name, source):
+    """Install a staged directory upload under ml/datasets/<name>/ safely.
+
+    The source may contain the dataset directly or inside one wrapping folder,
+    matching create_from_zip's Explorer-friendly manifest-root handling. The
+    source remains caller-owned: this function copies it into the target's
+    incoming path before committing the completed dataset.
+    """
+    safe, target, staging = _installation_paths(name)
+
+    source = os.fspath(source)
+    if not os.path.isdir(source) or os.path.islink(source):
+        raise DatasetError("The uploaded dataset directory is not readable.")
+
+    manifest_root = _find_manifest_root(source)
+    if os.path.islink(manifest_root):
+        raise DatasetError("The uploaded dataset directory cannot be a symbolic link.")
+
+    source_root = os.path.realpath(source)
+    resolved_manifest_root = os.path.realpath(manifest_root)
+    try:
+        inside_source = os.path.commonpath((source_root, resolved_manifest_root)) == source_root
+    except ValueError:
+        inside_source = False
+    if not inside_source:
+        raise DatasetError("Refusing to install a dataset outside the uploaded directory.")
+
+    _assert_regular_directory_tree(manifest_root)
+
+    os.makedirs(DATASETS_DIR, exist_ok=True)
+    _remove_install_artifact(staging)
+
+    try:
+        shutil.copytree(manifest_root, staging)
+        return _commit_install(safe, staging, target)
+    finally:
+        _remove_install_artifact(staging, ignore_errors=True)
 
 
 def delete_dataset(name):

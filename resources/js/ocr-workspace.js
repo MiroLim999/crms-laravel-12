@@ -19,8 +19,9 @@
 
 const config = window.crmsOcr ?? {};
 
-/** 5 MB, comfortably under PHP's upload_max_filesize of 40M. */
-const CHUNK_SIZE = 5 * 1024 * 1024;
+/** 16 MB — well within PHP's 40M post_max_size even with multipart overhead,
+ *  and still only ~6 400 chunks for a 100 GB archive. */
+const CHUNK_SIZE = 16 * 1024 * 1024;
 
 /** How often to ask about a running job. */
 const JOB_POLL_MS = 3000;
@@ -70,6 +71,20 @@ const getJson = async (endpoint) => {
 
 // ------------------------------------------------------------------ chunked upload
 
+/** Paths supplied by folder pickers and directory drag traversal. */
+const relativePaths = new WeakMap();
+
+const relativePathFor = (file) => {
+    const path = relativePaths.get(file) || file.webkitRelativePath;
+    return path ? path.replace(/\\/g, '/') : (file.name || 'file').split(/[\\/]/).pop();
+};
+
+const discardUpload = (uploadId) => {
+    const body = new FormData();
+    body.append('upload_id', uploadId);
+    return post(config.urls.discardUpload, body).catch(() => null);
+};
+
 /**
  * Send one file in slices. Progress is reported in bytes so a multi-file model
  * folder can show a single total.
@@ -77,9 +92,8 @@ const getJson = async (endpoint) => {
 async function uploadFile(uploadId, file, onProgress) {
     const total = Math.max(Math.ceil(file.size / CHUNK_SIZE), 1);
     const fileKey = randomId();
-    // A folder picker yields webkitRelativePath; the server only ever wants the
-    // basename, but strip the path here too so nothing surprising is sent.
     const name = (file.name || 'file').split(/[\\/]/).pop();
+    const relativePath = relativePathFor(file);
 
     for (let index = 0; index < total; index += 1) {
         const start = index * CHUNK_SIZE;
@@ -89,6 +103,7 @@ async function uploadFile(uploadId, file, onProgress) {
         body.append('upload_id', uploadId);
         body.append('file_key', fileKey);
         body.append('filename', name);
+        body.append('relative_path', relativePath);
         body.append('index', String(index));
         body.append('total', String(total));
         body.append('chunk', slice, `${name}.part${index}`);
@@ -97,7 +112,18 @@ async function uploadFile(uploadId, file, onProgress) {
 
         if (!response.ok) {
             const payload = await response.json().catch(() => ({}));
-            throw new Error(payload.message ?? `Upload of ${name} failed (HTTP ${response.status}).`);
+            const validation = payload.errors ? Object.values(payload.errors).flat()[0] : null;
+            throw new Error(validation ?? payload.message ?? `Upload of ${name} failed (HTTP ${response.status}).`);
+        }
+
+        // PHP silently returns 200 with an empty body when post_max_size is exceeded.
+        // Treat any non-JSON or missing `complete` field as a failure.
+        const result = await response.json().catch(() => null);
+        if (!result || result.complete === undefined) {
+            throw new Error(
+                `Chunk ${index + 1}/${total} of ${name} was rejected by the server ` +
+                `(body size limit). Try a smaller file or contact your administrator.`
+            );
         }
 
         onProgress(slice.size);
@@ -121,7 +147,8 @@ async function uploadAll(uploadId, files, onProgress) {
 // ---------------------------------------------------------------------- dropzones
 
 /**
- * Wire a drag-and-drop area with a click-to-browse fallback.
+ * Wire a drag-and-drop area with click-to-browse fallbacks. Dataset zones may
+ * expose separate zip and folder pickers; other zones keep the original picker.
  *
  * @param {object} options
  * @param {HTMLElement} options.zone
@@ -130,11 +157,16 @@ async function uploadAll(uploadId, files, onProgress) {
 function wireDropzone({ zone, onFiles }) {
     if (!zone) return;
 
-    const input = $('[data-role="input"]', zone);
-    const browse = $('[data-role="browse"]', zone);
-
-    browse?.addEventListener('click', () => input?.click());
-    input?.addEventListener('change', () => onFiles(Array.from(input.files ?? [])));
+    [
+        ['browse', 'input'],
+        ['browse-zip', 'input-zip'],
+        ['browse-folder', 'input-folder'],
+    ].forEach(([browseRole, inputRole]) => {
+        const browse = $(`[data-role="${browseRole}"]`, zone);
+        const input = $(`[data-role="${inputRole}"]`, zone);
+        browse?.addEventListener('click', () => input?.click());
+        input?.addEventListener('change', () => onFiles(Array.from(input.files ?? [])));
+    });
 
     // Without preventDefault on dragover the browser navigates to the file instead.
     ['dragenter', 'dragover'].forEach((event) =>
@@ -160,19 +192,24 @@ function wireDropzone({ zone, onFiles }) {
         // A dropped folder arrives as a directory entry, which has to be walked.
         // Falling back to dataTransfer.files covers browsers without the entry API.
         const files = entries.length
-            ? (await Promise.all(entries.map(readEntry))).flat()
+            ? (await Promise.all(entries.map((entry) => readEntry(entry)))).flat()
             : Array.from(e.dataTransfer?.files ?? []);
 
         onFiles(files);
     });
 }
 
-/** Recursively collect files from a dropped directory entry. */
-function readEntry(entry, path = '') {
+/** Recursively collect files and retain each path from the dropped root. */
+function readEntry(entry, parentPath = '') {
     return new Promise((resolve) => {
+        const relativePath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+
         if (entry.isFile) {
             entry.file(
-                (file) => resolve([file]),
+                (file) => {
+                    relativePaths.set(file, relativePath);
+                    resolve([file]);
+                },
                 () => resolve([]),
             );
             return;
@@ -188,7 +225,7 @@ function readEntry(entry, path = '') {
                     return;
                 }
                 collected.push(
-                    ...(await Promise.all(batch.map((child) => readEntry(child, `${path}/${entry.name}`)))),
+                    ...(await Promise.all(batch.map((child) => readEntry(child, relativePath)))),
                 );
                 readBatch(); // readEntries returns at most 100 at a time
             }, () => resolve(collected.flat()));
@@ -212,31 +249,63 @@ function initDatasetUpload() {
     const nameInput = $('#dataset-name');
     const uploadIdInput = $('#dataset-upload-id');
 
-    let selected = null;
+    let selected = [];
 
     const setStatus = (message, tone = 'text-muted') => {
         status.className = `small ms-2 ${tone}`;
         status.textContent = message;
     };
 
+    const rejectSelection = (message) => {
+        selected = [];
+        submit.disabled = true;
+        setStatus(message, 'text-danger');
+    };
+
     wireDropzone({
         zone,
         onFiles: (files) => {
-            const zip = files.find((file) => file.name.toLowerCase().endsWith('.zip'));
-
-            if (!zip) {
-                setStatus('That is not a .zip archive.', 'text-danger');
-                submit.disabled = true;
+            if (!files.length) {
+                rejectSelection('Choose one zip or a folder containing manifest.csv.');
                 return;
             }
 
-            selected = zip;
-            submit.disabled = false;
-            setStatus(`${zip.name} · ${formatBytes(zip.size)} ready to upload.`);
+            const zips = files.filter((file) => file.name.toLowerCase().endsWith('.zip'));
+            const isArchive = files.length === 1 && zips.length === 1;
+            const hasManifest = files.some(
+                (file) => relativePathFor(file).split('/').pop().toLowerCase() === 'manifest.csv',
+            );
 
-            // Save a step: default the dataset name to the archive's own name.
+            if (zips.length && !isArchive) {
+                rejectSelection('Choose exactly one zip, or a directory/file set without a zip. Do not mix them.');
+                return;
+            }
+
+            if (!isArchive && !hasManifest) {
+                rejectSelection('That folder or file set does not contain manifest.csv.');
+                return;
+            }
+
+            selected = files;
+            submit.disabled = false;
+
+            const bytes = files.reduce((sum, file) => sum + file.size, 0);
+            const sizeNote = bytes > 10 * 1024 ** 3
+                ? ' · Large dataset — upload and validation may take 10–30+ minutes.'
+                : '';
+            setStatus(
+                isArchive
+                    ? `${files[0].name} · ${formatBytes(bytes)} ready to upload.${sizeNote}`
+                    : `${files.length} file(s) · ${formatBytes(bytes)} ready to upload.${sizeNote}`,
+            );
+
             if (!nameInput.value) {
-                nameInput.value = zip.name.replace(/\.zip$/i, '').replace(/[^A-Za-z0-9._-]+/g, '-');
+                const paths = files.map(relativePathFor);
+                const root = paths[0].includes('/') ? paths[0].split('/')[0] : '';
+                const sourceName = isArchive
+                    ? files[0].name.replace(/\.zip$/i, '')
+                    : (root && paths.every((path) => path.startsWith(`${root}/`)) ? root : 'dataset');
+                nameInput.value = sourceName.replace(/[^A-Za-z0-9._-]+/g, '-');
             }
         },
     });
@@ -244,8 +313,14 @@ function initDatasetUpload() {
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
 
-        if (!selected) {
-            setStatus('Choose a .zip first.', 'text-danger');
+        if (!selected.length) {
+            setStatus('Choose one zip or a folder containing manifest.csv.', 'text-danger');
+            return;
+        }
+
+        const name = nameInput.value.trim();
+        if (!name) {
+            setStatus('Enter a dataset name before submitting.', 'text-danger');
             return;
         }
 
@@ -255,19 +330,20 @@ function initDatasetUpload() {
         setStatus('Uploading…');
 
         try {
-            await uploadAll(uploadId, [selected], (percent) => {
+            await uploadAll(uploadId, selected, (percent) => {
                 bar.style.width = `${percent}%`;
                 bar.setAttribute('aria-valuenow', String(percent));
                 setStatus(`Uploading… ${percent}%`);
             });
 
-            setStatus('Unpacking and validating on the server…');
+            setStatus('Creating and validating on the server… (large datasets can take 10–30+ minutes — keep this tab open)');
             uploadIdInput.value = uploadId;
 
             // The upload is done; hand off with a normal post so the result arrives
             // as a flash message and the page re-renders with the new dataset.
             form.submit();
         } catch (error) {
+            discardUpload(uploadId);
             submit.disabled = false;
             setStatus(error.message, 'text-danger');
         }
@@ -382,10 +458,20 @@ function initPredict() {
     wireDropzone({
         zone,
         onFiles: (files) => {
-            const images = files.filter((file) => file.type.startsWith('image/'));
+            // Browser MIME values are optional and user-controlled. Filter only for
+            // a helpful picker experience; Laravel verifies the actual image bytes.
+            const images = files.filter((file) => /\.(png|jpe?g|bmp|tiff?)$/i.test(file.name));
 
             if (!images.length) {
-                setStatus('No images in that drop.', 'text-danger');
+                setStatus('No supported PNG, JPG, BMP, or TIFF images in that selection.', 'text-danger');
+                return;
+            }
+
+            const oversized = images.find((file) => file.size > 20 * 1024 * 1024);
+            if (oversized) {
+                selected = [];
+                run.disabled = true;
+                setStatus(`${oversized.name} exceeds the 20 MB image limit.`, 'text-danger');
                 return;
             }
 
@@ -407,24 +493,36 @@ function initPredict() {
     run.addEventListener('click', async () => {
         if (!selected.length) return;
 
-        const body = new FormData();
-        body.append('model', $('#predict-model').value);
-        selected.forEach((file) => body.append('images[]', file, file.name));
-
+        const uploadId = randomId();
+        let uploadComplete = false;
         run.disabled = true;
-        setStatus('Running on the GPU…');
+        setStatus('Uploading… 0%');
 
         try {
+            await uploadAll(uploadId, selected, (percent) => {
+                setStatus(`Uploading… ${percent}%`);
+            });
+            uploadComplete = true;
+
+            const body = new FormData();
+            body.append('model', $('#predict-model').value);
+            body.append('upload_id', uploadId);
+            setStatus('Running on the GPU…');
+
             const response = await post(config.urls.predict, body);
-            const payload = await response.json();
+            const payload = await response.json().catch(() => ({}));
 
             if (!response.ok) {
-                throw new Error(payload.message ?? `Prediction failed (HTTP ${response.status}).`);
+                const validation = payload.errors ? Object.values(payload.errors).flat()[0] : null;
+                throw new Error(validation ?? payload.message ?? `Prediction failed (HTTP ${response.status}).`);
             }
 
             renderPredictions(payload);
             setStatus('');
         } catch (error) {
+            // A failed chunk never reaches the prediction controller, so Laravel
+            // cannot run its finally block. Discard that partial upload best-effort.
+            if (!uploadComplete) discardUpload(uploadId);
             setStatus(error.message, 'text-danger');
         } finally {
             run.disabled = false;

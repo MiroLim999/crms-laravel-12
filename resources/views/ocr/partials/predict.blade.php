@@ -42,7 +42,8 @@
             </p>
             <input type="file" class="d-none" accept="image/*" multiple data-role="input">
             <p class="text-muted small mb-0">
-                PNG, JPG, BMP, or TIFF. Up to 50 at a time.
+                PNG, JPG, BMP, or TIFF. Up to 50 images, 20&nbsp;MB each. Files are
+                uploaded in chunks before prediction starts.
             </p>
         </div>
 

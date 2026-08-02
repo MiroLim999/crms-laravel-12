@@ -257,13 +257,9 @@
                 </p>
 
                 @if ($engine['reachable'] && ! $engine['owned'])
-                    <div class="alert alert-warning small mb-3">
-                        This service was not started from here. Stopping it ends
-                        @if ($engine['listener_pid'])
-                            <strong>PID {{ $engine['listener_pid'] }}</strong>,
-                        @endif
-                        whichever process is serving on the port — including one running in
-                        a terminal window.
+                    <div class="alert alert-info small mb-3">
+                        This service was started outside CRMS and cannot be stopped here.
+                        Stop it from the terminal or process manager that launched it.
                     </div>
                 @endif
 

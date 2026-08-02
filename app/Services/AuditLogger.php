@@ -34,7 +34,10 @@ class AuditLogger
         ?string $description = null,
         ?User $actor = null,
     ): AuditLog {
-        $actor ??= Auth::user();
+        if ($actor === null) {
+            $authenticated = Auth::user();
+            $actor = $authenticated instanceof User ? $authenticated : null;
+        }
 
         return AuditLog::create([
             'user_id' => $actor?->getKey(),
@@ -60,17 +63,21 @@ class AuditLogger
      *
      * @param  Model  $subject  A model with unsaved changes.
      */
-    public function saveAndLog(string $action, Model $subject, ?string $description = null): AuditLog
-    {
+    public function saveAndLog(
+        string $action,
+        Model $subject,
+        ?string $description = null,
+        ?User $actor = null,
+    ): AuditLog {
         $new = $subject->getDirty();
         unset($new['updated_at']);
 
         $old = array_intersect_key($subject->getOriginal(), $new);
 
-        return DB::transaction(function () use ($action, $subject, $old, $new, $description) {
+        return DB::transaction(function () use ($action, $subject, $old, $new, $description, $actor) {
             $subject->save();
 
-            return $this->log($action, $subject, $old, $new, $description);
+            return $this->log($action, $subject, $old, $new, $description, $actor);
         });
     }
 

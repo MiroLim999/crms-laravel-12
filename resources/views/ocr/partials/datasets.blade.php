@@ -6,23 +6,26 @@
     on a manifest that points at files which are not there fails hours into a run.
 --}}
 <x-card title="Upload a dataset"
-        subtitle="A zip containing manifest.csv and the train/ val/ test/ folders.">
+        subtitle="Upload one zip archive, or choose/drop a folder containing manifest.csv.">
     <div class="dropzone-area border rounded p-4 text-center"
          id="dataset-dropzone"
-         data-accept=".zip"
          data-role="dataset">
         <i class="icon-base bx bx-cloud-upload icon-lg text-muted d-block mb-2"></i>
-        <p class="mb-1"><strong>Drag a .zip here</strong></p>
+        <p class="mb-1"><strong>Drag one .zip or a dataset folder here</strong></p>
         <p class="text-muted small mb-3">
-            or <button type="button" class="btn btn-sm btn-outline-primary" data-role="browse">browse</button>
+            or
+            <button type="button" class="btn btn-sm btn-outline-primary" data-role="browse-zip">browse zip</button>
+            <button type="button" class="btn btn-sm btn-outline-primary ms-1" data-role="browse-folder">browse folder</button>
         </p>
-        <input type="file" class="d-none" accept=".zip" data-role="input">
+        <input type="file" class="d-none" accept=".zip" data-role="input-zip">
+        <input type="file" class="d-none" webkitdirectory directory multiple data-role="input-folder">
 
         <p class="text-muted small mb-0">
-            Expected inside: <code>manifest.csv</code> with columns
-            <code>filename,label,split,source</code>, plus <code>train/</code>,
-            <code>val/</code>, and <code>test/</code>. One wrapping folder is fine.
-            Rows with an empty or <code>UNREADABLE</code> label are skipped by training.
+            Choose exactly one zip, or one directory/file set containing
+            <code>manifest.csv</code> with columns <code>filename,label,split,source</code>,
+            plus <code>train/</code>, <code>val/</code>, and <code>test/</code>.
+            Do not mix a zip with loose files. One wrapping folder is fine. Rows with
+            an empty or <code>UNREADABLE</code> label are skipped by training.
         </p>
     </div>
 
@@ -56,9 +59,11 @@
         <i class="icon-base bx bx-info-circle icon-sm me-2"></i>
         <div>
             Uploads are sliced in the browser and reassembled server-side, so the
-            40&nbsp;MB PHP limit does not apply. If an upload is impractical anyway,
-            place the folder under <code>ml/datasets/</code> by hand and click
-            <em>Rescan</em>.
+            40&nbsp;MB PHP limit does not apply. For large datasets (50–100&nbsp;GB)
+            extraction and validation can take 10–30&nbsp;minutes — keep this tab
+            open until you see the success message. If an upload is impractical
+            over the network, place the folder under <code>ml/datasets/</code> by
+            hand and click <em>Rescan</em>.
         </div>
     </div>
 </x-card>
@@ -94,9 +99,11 @@
                                 @if ($dataset['uploader'])
                                     <small class="text-muted">by {{ $dataset['uploader'] }}</small>
                                 @endif
-                                @unless ($dataset['on_disk'])
-                                    <span class="badge bg-label-danger ms-1">Missing on disk</span>
-                                @endunless
+                                @if ($dataset['disk_deleted_at'])
+                                    <span class="badge bg-label-danger ms-1">Deleted</span>
+                                @elseif (! $dataset['on_disk'])
+                                    <span class="badge bg-label-warning ms-1">Missing on disk</span>
+                                @endif
                             </td>
                             <td class="small">
                                 <div>
@@ -149,7 +156,8 @@
                                             data-bs-toggle="modal" data-bs-target="#deleteDatasetModal"
                                             data-dataset="{{ $dataset['name'] }}"
                                             data-images="{{ $dataset['total'] }}"
-                                            aria-label="Delete dataset">
+                                            aria-label="Delete dataset"
+                                            @disabled(! $dataset['on_disk'])>
                                         <i class="icon-base bx bx-trash"></i>
                                     </button>
                                 </div>

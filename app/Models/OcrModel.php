@@ -20,6 +20,7 @@ class OcrModel extends Model
     protected $fillable = [
         'key', 'label', 'notes', 'is_active',
         'cer', 'wer', 'exact_match', 'evaluated_at', 'registered_by',
+        'disk_deleted_at', 'disk_deleted_by',
     ];
 
     protected function casts(): array
@@ -30,6 +31,7 @@ class OcrModel extends Model
             'wer' => 'float',
             'exact_match' => 'float',
             'evaluated_at' => 'datetime',
+            'disk_deleted_at' => 'datetime',
         ];
     }
 
@@ -38,13 +40,20 @@ class OcrModel extends Model
         return $this->belongsTo(User::class, 'registered_by');
     }
 
+    public function diskDeleter(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'disk_deleted_by');
+    }
+
     /**
      * The model Staff scanning uses. Null means no model has been promoted yet,
      * which the scanning flow treats as "not ready".
      */
     public static function active(): ?self
     {
-        return static::where('is_active', true)->first();
+        return static::where('is_active', true)
+            ->whereNull('disk_deleted_at')
+            ->first();
     }
 
     /**

@@ -302,7 +302,12 @@ class OcrWorkspaceTest extends TestCase
             ->delete(route('ocr.datasets.destroy', 'names-2026'))
             ->assertSessionHas('success');
 
-        $this->assertDatabaseMissing('ml_datasets', ['name' => 'names-2026']);
+        $dataset = MlDataset::firstWhere('name', 'names-2026');
+
+        $this->assertNotNull($dataset);
+        $this->assertNotNull($dataset->disk_deleted_at);
+        $this->assertSame($actor->getKey(), $dataset->disk_deleted_by);
+        $this->assertFalse($dataset->is_valid);
         $this->assertDatabaseHas('audit_logs', ['action' => 'ml_dataset.deleted']);
     }
 

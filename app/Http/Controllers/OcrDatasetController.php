@@ -7,6 +7,7 @@ use App\Services\Ocr\DatasetManager;
 use App\Services\Ocr\OcrServiceException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The Datasets tab of the OCR workspace - Super Admin only.
@@ -35,18 +36,59 @@ class OcrDatasetController extends Controller
 
         $actor = $request->user();
 
-        try {
-            $archive = $this->uploads->singleFile($actor, $validated['upload_id']);
+        // Unpacking a 50–100 GB dataset zip and walking every image for validation
+        // can take many minutes. This also applies to directory sets streamed to
+        // the service one file at a time.
+        set_time_limit(0);
 
-            $dataset = $this->datasets->createFromArchive(
-                $validated['name'],
-                $archive['path'],
-                $actor,
-            );
+        $files = $this->uploads->assembledFiles($actor, $validated['upload_id']);
+
+        try {
+            if ($files === []) {
+                throw ValidationException::withMessages([
+                    'upload_id' => 'No completed upload was found. Try uploading the dataset again.',
+                ]);
+            }
+
+            $isSingleZip = count($files) === 1
+                && strtolower(pathinfo($files[0]['name'], PATHINFO_EXTENSION)) === 'zip';
+
+            if ($isSingleZip) {
+                $dataset = $this->datasets->createFromArchive(
+                    $validated['name'],
+                    $files[0]['path'],
+                    $actor,
+                );
+            } else {
+                $containsZip = collect($files)->contains(
+                    fn (array $file) => strtolower(pathinfo($file['name'], PATHINFO_EXTENSION)) === 'zip'
+                );
+                $hasManifest = collect($files)->contains(
+                    fn (array $file) => strtolower(basename($file['relative_path'])) === 'manifest.csv'
+                );
+
+                if ($containsZip) {
+                    throw ValidationException::withMessages([
+                        'upload_id' => 'Upload exactly one zip, or a directory/file set without a zip. Do not mix them.',
+                    ]);
+                }
+
+                if (! $hasManifest) {
+                    throw ValidationException::withMessages([
+                        'upload_id' => 'A directory/file set must contain manifest.csv.',
+                    ]);
+                }
+
+                $dataset = $this->datasets->createFromFiles(
+                    $validated['name'],
+                    $files,
+                    $actor,
+                );
+            }
         } catch (OcrServiceException $e) {
             return $this->back()->with('error', $e->getMessage());
         } finally {
-            // Never leave a multi-gigabyte archive sitting in storage.
+            // Never leave a multi-gigabyte archive or directory set in storage.
             $this->uploads->discard($actor, $validated['upload_id']);
         }
 

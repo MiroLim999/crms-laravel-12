@@ -21,6 +21,7 @@ class MlDataset extends Model
         'name', 'notes',
         'train_count', 'val_count', 'test_count', 'total_images', 'size_bytes',
         'validation', 'is_valid', 'validated_at', 'uploaded_by',
+        'disk_deleted_at', 'disk_deleted_by',
     ];
 
     protected function casts(): array
@@ -29,6 +30,7 @@ class MlDataset extends Model
             'validation' => 'array',
             'is_valid' => 'boolean',
             'validated_at' => 'datetime',
+            'disk_deleted_at' => 'datetime',
             'train_count' => 'integer',
             'val_count' => 'integer',
             'test_count' => 'integer',
@@ -40,6 +42,11 @@ class MlDataset extends Model
     public function uploader(): BelongsTo
     {
         return $this->belongsTo(User::class, 'uploaded_by');
+    }
+
+    public function diskDeleter(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'disk_deleted_by');
     }
 
     /**
@@ -56,7 +63,9 @@ class MlDataset extends Model
      */
     public function isTrainable(): bool
     {
-        return $this->is_valid === true && $this->usableTrainRows() > 0;
+        return $this->disk_deleted_at === null
+            && $this->is_valid === true
+            && $this->usableTrainRows() > 0;
     }
 
     public function usableTrainRows(): int

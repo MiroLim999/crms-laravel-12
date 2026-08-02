@@ -36,7 +36,7 @@ TRAINING_FIELDS = (
     "train_subset", "val_subset",
 )
 
-EVALUATION_FIELDS = ("model", "dataset", "split", "limit")
+EVALUATION_FIELDS = ("model", "dataset", "split", "limit", "batch_size")
 
 
 def training_defaults():
@@ -56,17 +56,35 @@ def training_defaults():
     }
 
 
-def validate_training_config(config):
+def validate_training_config(config, available_models=None):
     """Reject a config that would waste GPU time before the job is queued.
 
-    Returns the cleaned config. Raises ValueError with a message meant for the
-    Super Admin, which the API surfaces as a 400."""
+    `available_models` is the service's model keys, used to catch a base model the
+    service cannot see. Returns the cleaned config. Raises ValueError with a
+    message meant for the Super Admin, which the API surfaces as a 400."""
     import train_trocr
 
     clean = {k: v for k, v in (config or {}).items() if k in TRAINING_FIELDS and v is not None}
 
-    dataset = clean.get("dataset") or ds.DEFAULT_DATASET
+    # Store the sanitised name, so the "is this dataset in use by a job?" check in
+    # delete_dataset compares like with like.
+    dataset = ds.sanitise_name(clean.get("dataset") or ds.DEFAULT_DATASET)
     clean["dataset"] = dataset
+
+    base_model = clean.get("base_model")
+    if base_model and available_models is not None:
+        # Left alone when the caller names a Hugging Face repo: a local CLI run may
+        # legitimately fine-tune from the hub. Anything else has to be a folder the
+        # service can actually see, or the run dies on the first from_pretrained.
+        known = set(available_models) | {train_trocr.MODEL_NAME}
+        looks_like_hub_id = "/" in base_model
+        on_disk = os.path.isdir(os.path.join(train_trocr.MODELS_DIR, base_model))
+
+        if base_model not in known and not on_disk and not looks_like_hub_id:
+            raise ValueError(
+                f"The service cannot see a base model named '{base_model}'. "
+                "Pick one from the model list."
+            )
 
     # A manifest pointing at missing files fails deep into an epoch, hours in.
     report = ds.validate(dataset)
@@ -150,13 +168,18 @@ def validate_evaluation_config(config, available_models):
     if model not in available_models:
         raise ValueError(f"The service cannot see a model named '{model}'.")
 
-    dataset = clean.get("dataset") or ds.DEFAULT_DATASET
+    dataset = ds.sanitise_name(clean.get("dataset") or ds.DEFAULT_DATASET)
     clean["dataset"] = dataset
 
     split = (clean.get("split") or "test").lower()
     if split not in ds.SPLITS:
         raise ValueError(f"Unknown split '{split}'.")
     clean["split"] = split
+
+    if clean.get("batch_size") is not None:
+        clean["batch_size"] = int(clean["batch_size"])
+        if clean["batch_size"] < 1:
+            raise ValueError("Evaluation batch size must be at least 1.")
 
     # Existence only. Unlike training, a partly broken manifest just means fewer
     # samples, and an evaluation costs minutes rather than hours.

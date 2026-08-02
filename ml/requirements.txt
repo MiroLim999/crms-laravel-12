@@ -1,8 +1,38 @@
-torch
-torchvision
-torchaudio
-transformers
-Pillow
-matplotlib
-pandas
-tqdm
+# ML stack for the TrOCR pipeline.
+#
+#   pip install -r ml\requirements.txt -r ml\api\requirements.txt
+#
+# ---------------------------------------------------------------------------
+# GPU note, and it matters: on Windows the default PyPI `torch` wheel is
+# CPU-ONLY. Installing this file on its own gives you a working but very slow
+# service, and `torch.cuda.is_available()` returns False with no error to
+# explain it. Install torch from PyTorch's own index FIRST:
+#
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#
+# then this file for the rest. Confirm with:
+#
+#   python ml\download_trocr.py      -> "CUDA available  : True"
+#
+# torch is intentionally left unpinned below so it does not fight that install.
+# ---------------------------------------------------------------------------
+#
+# torchaudio is deliberately absent. TrOCR is vision + text; nothing here
+# imports it, and it is a large download for no benefit.
+#
+# Lower bounds rather than exact pins: this has to install on whatever Python
+# the machine already has, and cp313 wheels do not exist for older releases of
+# these packages. Upper bounds mark the majors this code has been run against.
+
+torch>=2.6,<3
+
+# Not imported by our code. transformers uses it for its fast, tensor-backed
+# image processors, which is the path the batched evaluation loop benefits from.
+# Install it from the same CUDA index as torch, or the two disagree on ABI.
+torchvision>=0.21,<1
+
+transformers>=4.44,<6
+Pillow>=10,<13
+matplotlib>=3.8,<4
+pandas>=2.2,<4
+tqdm>=4.66,<5

@@ -236,15 +236,46 @@ class OcrClient
      * of thousands of images is far past PHP's memory and upload limits, which is
      * why the browser chunks it and Laravel reassembles before this call.
      *
+     * No explicit timeout cap: extracting a 50–100 GB archive and walking every
+     * image for validation can take many minutes. PHP's set_time_limit(0) in the
+     * controller already removes the PHP-side cap; the Guzzle default (0 = wait
+     * forever) matches that on the HTTP-client side.
+     *
      * @return array<string, mixed>
      */
     public function createDataset(string $name, string $zipPath): array
     {
         return $this->withAttachments(
-            $this->request($this->timeout * 10),
+            $this->request(0),          // 0 = no timeout
             'file',
             [['name' => $name.'.zip', 'path' => $zipPath]],
             fn (PendingRequest $r) => $r->post('/datasets', ['name' => $name]),
+        )->json();
+    }
+
+    /**
+     * Create a dataset from an assembled directory/file set. Files and paths are
+     * deliberately built from the same ordered array: the service pairs each
+     * repeated multipart `files` field with the same-index entry in paths_json.
+     *
+     * @param  list<array{name: string, relative_path: string, path: string}>  $files
+     * @return array<string, mixed>
+     */
+    public function createDatasetFromFiles(string $name, array $files): array
+    {
+        $paths = array_map(
+            fn (array $file) => $file['relative_path'],
+            $files,
+        );
+
+        return $this->withAttachments(
+            $this->request(0),          // 0 = no timeout
+            'files',
+            $files,
+            fn (PendingRequest $r) => $r->post('/datasets', [
+                'name' => $name,
+                'paths_json' => json_encode($paths, JSON_THROW_ON_ERROR),
+            ]),
         )->json();
     }
 
@@ -402,8 +433,11 @@ class OcrClient
 
     private function reason(\Throwable $e): string
     {
+        // The module path is ml.api.main, not api.main: all Python lives under ml/
+        // and the service is launched from the repo root. The old hint could not
+        // work if anyone pasted it.
         return $e instanceof ConnectionException
-            ? 'Start it with: uvicorn api.main:app --host 127.0.0.1 --port 8001'
+            ? 'Start it with: python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001'
             : $e->getMessage();
     }
 }

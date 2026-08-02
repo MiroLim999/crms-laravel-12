@@ -22,12 +22,29 @@ class OcrUploadController extends Controller
 
     public function chunk(Request $request): JsonResponse
     {
+        // When PHP's post_max_size is exceeded it discards the entire body and
+        // sets CONTENT_LENGTH to 0. The request arrives empty — no fields, no
+        // file — and Laravel's validator would report all fields as missing,
+        // which is confusing. Detect it here and return a clear message the JS
+        // can surface to the user.
+        if (
+            $request->server('CONTENT_LENGTH', 0) > 0
+            && $request->server('REQUEST_METHOD') === 'POST'
+            && $request->all() === []
+        ) {
+            return response()->json([
+                'message' => 'The chunk was too large for the server (post_max_size). '
+                    .'The browser chunk size is already within limits — this is a server config issue.',
+            ], 413);
+        }
+
         $validated = $request->validate([
             // Browser-generated, so treated as untrusted: ChunkedUpload applies its
             // own pattern check and namespaces the directory by user id.
             'upload_id' => ['required', 'string', 'max:64'],
             'file_key' => ['required', 'string', 'max:64'],
             'filename' => ['required', 'string', 'max:255'],
+            'relative_path' => ['nullable', 'string', 'max:4096'],
             'index' => ['required', 'integer', 'min:0'],
             'total' => ['required', 'integer', 'min:1'],
             'chunk' => ['required', 'file'],
@@ -41,6 +58,7 @@ class OcrUploadController extends Controller
             (int) $validated['index'],
             (int) $validated['total'],
             $request->file('chunk'),
+            $validated['relative_path'] ?? null,
         );
 
         // Opportunistic sweep of uploads abandoned mid-flight; a half-sent 1.3 GB

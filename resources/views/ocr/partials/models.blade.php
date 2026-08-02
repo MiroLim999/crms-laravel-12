@@ -55,8 +55,10 @@
                                         Used by Staff
                                     </span>
                                 @endif
-                                @if (! $model['on_disk'])
-                                    <span class="badge bg-label-danger">Missing on disk</span>
+                                @if ($model['disk_deleted_at'])
+                                    <span class="badge bg-label-danger">Deleted</span>
+                                @elseif (! $model['on_disk'])
+                                    <span class="badge bg-label-warning">Missing on disk</span>
                                 @elseif ($model['loaded'])
                                     <span class="badge bg-label-info">Loaded in VRAM</span>
                                 @endif
@@ -101,7 +103,8 @@
                                                     data-cer="{{ $model['cer'] }}"
                                                     data-wer="{{ $model['wer'] }}"
                                                     data-exact="{{ $model['exact_match'] }}"
-                                                    data-notes="{{ $model['notes'] }}">
+                                                    data-notes="{{ $model['notes'] }}"
+                                                    @disabled(! $model['on_disk'])>
                                                 <i class="icon-base bx bx-bar-chart-alt-2 icon-sm me-2"></i>
                                                 Enter metrics by hand
                                             </button>
@@ -110,7 +113,7 @@
                                                 <button type="button" class="dropdown-item"
                                                         data-bs-toggle="modal" data-bs-target="#renameModal"
                                                         data-model-key="{{ $model['key'] }}"
-                                                        @disabled($model['is_active'])>
+                                                        @disabled($model['is_active'] || ! $model['on_disk'])>
                                                     <i class="icon-base bx bx-rename icon-sm me-2"></i> Rename
                                                 </button>
 
@@ -119,7 +122,7 @@
                                                 <button type="button" class="dropdown-item text-danger"
                                                         data-bs-toggle="modal" data-bs-target="#deleteModal"
                                                         data-model-key="{{ $model['key'] }}"
-                                                        @disabled($model['is_active'])>
+                                                        @disabled($model['is_active'] || ! $model['on_disk'])>
                                                     <i class="icon-base bx bx-trash icon-sm me-2"></i> Delete
                                                 </button>
                                             @endunless

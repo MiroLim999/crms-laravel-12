@@ -6,7 +6,6 @@ use App\Enums\MlJobStatus;
 use App\Enums\MlJobType;
 use App\Models\MlDataset;
 use App\Models\MlJob;
-use App\Models\OcrModel;
 use App\Models\User;
 use App\Services\AuditLogger;
 use Illuminate\Support\Collection;
@@ -27,6 +26,7 @@ class JobCoordinator
 {
     public function __construct(
         private readonly OcrClient $client,
+        private readonly OcrModelManager $models,
         private readonly AuditLogger $audit,
     ) {}
 
@@ -43,11 +43,18 @@ class JobCoordinator
     {
         $dataset = $config['dataset'] ?? null;
 
-        // Cheap local guard before spending a round trip. The service validates
-        // again and is the real gate.
+        // A dataset must be registered and have passed validation before it can
+        // hold the GPU for a training run. The service validates again, but a
+        // missing local row means this UI has no validation result to trust.
         $registered = MlDataset::where('name', $dataset)->first();
 
-        if ($registered !== null && ! $registered->isTrainable()) {
+        if ($registered === null) {
+            throw new OcrServiceException(
+                "Dataset '{$dataset}' is not registered. Rescan or upload it, then validate it before training."
+            );
+        }
+
+        if (! $registered->isTrainable()) {
             throw new OcrServiceException(
                 "Dataset '{$dataset}' has not passed validation. Validate it first - "
                 .'training on a broken manifest fails hours into the run.'
@@ -76,16 +83,25 @@ class JobCoordinator
     {
         $response = $this->client->startJob($type->value, $config);
 
-        $snapshot = $response['job'] ?? [];
+        $snapshot = $response['job'] ?? null;
+
+        if (! is_array($snapshot)) {
+            throw new OcrServiceException('The OCR service returned an invalid job snapshot.');
+        }
+
         $jobId = $response['job_id'] ?? ($snapshot['id'] ?? null);
 
-        if ($jobId === null) {
-            throw new OcrServiceException('The service did not return a job id.');
+        if (! is_string($jobId) || trim($jobId) === '') {
+            throw new OcrServiceException('The OCR service did not return a valid job id.');
         }
 
         // The service echoes back the config it actually resolved, defaults filled
         // in. Store that, not what was requested, so the run is reproducible.
         $resolved = $snapshot['config'] ?? $config;
+
+        if (! is_array($resolved)) {
+            throw new OcrServiceException('The OCR service returned an invalid job config.');
+        }
 
         $job = MlJob::create([
             'job_id' => $jobId,
@@ -148,7 +164,13 @@ class JobCoordinator
             ]);
         }
 
-        $status = $this->statusFrom($snapshot);
+        try {
+            $status = $this->statusFrom($snapshot);
+        } catch (OcrServiceException $e) {
+            return $this->finalise($job, MlJobStatus::Failed, [
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         $job->fill([
             'status' => $status,
@@ -232,19 +254,26 @@ class JobCoordinator
         }
 
         if ($job->type === MlJobType::Training && $job->output_name) {
-            $model = OcrModel::firstOrNew(['key' => $job->output_name]);
+            $model = $this->models->register(
+                $job->output_name,
+                $actor,
+                artifactReplaced: true,
+            );
 
-            if (! $model->exists) {
-                $model->fill([
-                    'label' => $job->output_name,
-                    'notes' => sprintf(
-                        'Fine-tuned from %s on dataset %s (%s epochs).',
-                        $job->config['base_model'] ?? 'base',
-                        $job->dataset ?? 'n/a',
-                        $job->config['epochs'] ?? '?',
-                    ),
-                    'registered_by' => $actor->getKey(),
-                ])->save();
+            $model->notes = sprintf(
+                'Fine-tuned from %s on dataset %s (%s epochs).',
+                $job->config['base_model'] ?? 'base',
+                $job->dataset ?? 'n/a',
+                $job->config['epochs'] ?? '?',
+            );
+
+            if ($model->isDirty()) {
+                $this->audit->saveAndLog(
+                    'ocr_model.training_output_recorded',
+                    $model,
+                    "Recorded training provenance for model '{$job->output_name}'.",
+                    actor: $actor,
+                );
             }
 
             return;
@@ -258,11 +287,7 @@ class JobCoordinator
                 return;
             }
 
-            $model = OcrModel::firstOrNew(['key' => $key]);
-
-            if (! $model->exists) {
-                $model->fill(['label' => $key, 'registered_by' => $actor->getKey()])->save();
-            }
+            $model = $this->models->register($key, $actor);
 
             $model->fill([
                 'cer' => $metrics['cer'] ?? null,
@@ -281,6 +306,7 @@ class JobCoordinator
                 'ocr_model.evaluated',
                 $model,
                 "Recorded evaluation metrics for '{$key}' from job {$job->job_id}.",
+                actor: $actor,
             );
         }
     }
@@ -347,6 +373,17 @@ class JobCoordinator
      */
     private function statusFrom(array $snapshot): MlJobStatus
     {
-        return MlJobStatus::tryFrom((string) ($snapshot['status'] ?? '')) ?? MlJobStatus::Queued;
+        $value = $snapshot['status'] ?? null;
+        $status = is_string($value) ? MlJobStatus::tryFrom($value) : null;
+
+        if ($status === null) {
+            $reported = is_scalar($value) ? (string) $value : get_debug_type($value);
+
+            throw new OcrServiceException(
+                "The OCR service returned an invalid job status ({$reported})."
+            );
+        }
+
+        return $status;
     }
 }

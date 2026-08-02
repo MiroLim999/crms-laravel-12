@@ -19,16 +19,9 @@ API can call it without leaving files behind.
 
 import argparse
 import os
-import warnings
-import logging
 
-# --- Suppress warnings ---
-os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
-os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
-os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
-os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
-warnings.filterwarnings("ignore")
-logging.disable(logging.WARNING)
+# Quiets the HF stack. Must precede torch/transformers.
+import hf_quiet  # noqa: F401
 
 import csv
 import math

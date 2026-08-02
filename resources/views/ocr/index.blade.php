@@ -103,9 +103,9 @@
             },
             activeJobId: @json($activeJob?->getKey()),
             engineReachable: @json($engine['reachable']),
-            // Process-control state is tracked separately from reachability. Windows
-            // may discover an externally started listener PID on a later poll; when
-            // that happens the page must reload to enable Stop.
+            // Process-control state is tracked separately from reachability. An
+            // external listener may be discovered later, but it never becomes owned
+            // or stoppable merely because it is using the configured port.
             engineOwned: @json($engine['owned']),
             engineStoppable: @json($engine['stoppable']),
             enginePid: @json($engine['pid']),

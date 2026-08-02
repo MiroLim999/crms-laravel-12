@@ -76,6 +76,9 @@ class Job:
         self.started_at = None
         self.finished_at = None
         self._started_monotonic = None
+        # Set properly by mark_finished(); initialised here so `elapsed` can never
+        # raise AttributeError on a job that reaches a terminal state oddly.
+        self._elapsed_at_finish = 0.0
 
         self.progress = {
             "stage": "queued",
@@ -164,7 +167,9 @@ class Job:
                 "id": self.id,
                 "type": self.type,
                 "status": self.status,
-                "config": self.config,
+                # Copied, not handed out by reference: a caller serialising this
+                # must not be able to mutate the config the runner is using.
+                "config": dict(self.config),
                 "progress": dict(self.progress),
                 "metrics": self.metrics,
                 "result": self.result,

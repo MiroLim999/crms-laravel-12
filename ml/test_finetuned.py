@@ -16,16 +16,9 @@ cancel callback between images so the API can stop it cleanly.
 
 import argparse
 import os
-import warnings
-import logging
 
-# --- Suppress warnings ---
-os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
-os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
-os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
-os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
-warnings.filterwarnings("ignore")
-logging.disable(logging.WARNING)
+# Quiets the HF stack. Must precede torch/transformers.
+import hf_quiet  # noqa: F401
 
 import pandas as pd
 import torch
@@ -52,6 +45,12 @@ DEFAULT_SPLIT = "test"
 NUM_SAMPLES = None
 
 MAX_NEW_TOKENS = 32
+
+# Images per generate() call. One-at-a-time inference leaves the GPU mostly idle
+# between kernel launches; a 6000-image test split goes from tens of minutes to a
+# few. Every image is resized to the same encoder input, so batching changes no
+# individual prediction.
+BATCH_SIZE = 8
 
 # Per-sample rows returned to the caller. The full run can be thousands of images;
 # the UI only needs a readable sample next to the aggregate figures.
@@ -92,6 +91,17 @@ def _load(source):
     return processor, model
 
 
+def _predict_batch(processor, net, device, paths, max_new_tokens):
+    """Decoded text for a batch of image paths, in the same order."""
+    images = [Image.open(path).convert("RGB") for path in paths]
+    pixel_values = processor(images=images, return_tensors="pt").pixel_values.to(device)
+
+    with torch.no_grad():
+        generated = net.generate(pixel_values, max_new_tokens=max_new_tokens)
+
+    return [text.strip() for text in processor.batch_decode(generated, skip_special_tokens=True)]
+
+
 def run_evaluation(
     model=DEFAULT_MODEL,
     dataset=DEFAULT_DATASET,
@@ -100,6 +110,7 @@ def run_evaluation(
     manifest_csv=None,
     image_dir=None,
     max_new_tokens=MAX_NEW_TOKENS,
+    batch_size=BATCH_SIZE,
     save_chart=True,
     loader=None,
     progress=None,
@@ -148,13 +159,33 @@ def run_evaluation(
     if "filename" not in df.columns or "label" not in df.columns:
         raise EvaluationError("manifest.csv needs at least 'filename' and 'label' columns.")
 
-    labels = dict(zip(df["filename"], df["label"].astype(str)))
+    def label_map(frame):
+        return dict(zip(frame["filename"], frame["label"].astype(str)))
 
-    image_files = [
-        f for f in sorted(os.listdir(image_dir))
-        if f.lower().endswith(IMAGE_EXTENSIONS) and f in labels
-        and ds.is_usable(labels[f].strip())
-    ]
+    def usable_images(mapping):
+        return [
+            f for f in sorted(os.listdir(image_dir))
+            if f.lower().endswith(IMAGE_EXTENSIONS) and f in mapping
+            and ds.is_usable(mapping[f].strip())
+        ]
+
+    # Scope to the split under evaluation. Without this a file sitting in test/
+    # whose manifest row says split=train is still scored, which quietly mixes
+    # data the model was fitted on into the numbers and flatters CER/WER.
+    scoped = df
+    if "split" in df.columns:
+        scoped = df[df["split"].astype(str).str.strip().str.lower() == split]
+
+    labels = label_map(scoped)
+    image_files = usable_images(labels)
+
+    if not image_files and len(scoped) != len(df):
+        # Folder layout and the split column disagree. Reporting an empty split
+        # would be technically right and useless, so fall back and say so.
+        log(f"No rows marked '{split}' matched the images in {image_dir}; "
+            "falling back to every manifest row.")
+        labels = label_map(df)
+        image_files = usable_images(labels)
 
     if limit:
         image_files = image_files[:limit]
@@ -174,51 +205,64 @@ def run_evaluation(
     net.to(device)
     net.eval()
 
-    log(f"Evaluating {len(image_files)} image(s) from '{split}' on {device}.")
-    progress(stage="evaluating", total_steps=len(image_files), step=0)
+    total = len(image_files)
+    batch_size = max(int(batch_size or 1), 1)
+    log(f"Evaluating {total} image(s) from '{split}' on {device}, batch {batch_size}.")
+    progress(stage="evaluating", total_steps=total, step=0)
 
     references, predictions, rows = [], [], []
     cancelled = False
+    processed = 0
 
-    for index, filename in enumerate(image_files, start=1):
+    for start in range(0, total, batch_size):
+        # Checked per batch rather than per image: a batch is the smallest unit
+        # that can be abandoned without wasting a partial generate() call.
         if should_cancel():
             cancelled = True
-            log(f"Cancelled after {index - 1} image(s).")
+            log(f"Cancelled after {processed} image(s).")
             break
 
-        ground_truth = str(labels[filename]).strip()
-        img_path = os.path.join(image_dir, filename)
+        chunk = image_files[start:start + batch_size]
+        paths = [os.path.join(image_dir, name) for name in chunk]
 
         try:
-            image = Image.open(img_path).convert("RGB")
-            pixel_values = processor(images=image, return_tensors="pt").pixel_values.to(device)
-
-            with torch.no_grad():
-                generated = net.generate(pixel_values, max_new_tokens=max_new_tokens)
-
-            predicted = processor.batch_decode(generated, skip_special_tokens=True)[0].strip()
+            texts = _predict_batch(processor, net, device, paths, max_new_tokens)
         except Exception as e:
-            # One unreadable file must not abort a multi-hour evaluation.
-            log(f"Skipped {filename}: {e}")
-            continue
+            # A single unreadable file must not abort a long evaluation, and it
+            # must not take the rest of its batch down with it. Retry the batch
+            # one image at a time and skip only the ones that really fail.
+            log(f"Batch of {len(chunk)} failed ({e}); retrying individually.")
+            texts = []
+            for path in paths:
+                try:
+                    texts.append(
+                        _predict_batch(processor, net, device, [path], max_new_tokens)[0]
+                    )
+                except Exception as inner:
+                    log(f"Skipped {os.path.basename(path)}: {inner}")
+                    texts.append(None)
 
-        references.append(ground_truth)
-        predictions.append(predicted)
+        for filename, predicted in zip(chunk, texts):
+            processed += 1
+            if predicted is None:
+                continue
 
-        row = {
-            "filename": filename,
-            "reference": ground_truth,
-            "prediction": predicted,
-            "match": predicted == ground_truth,
-        }
-        if len(rows) < MAX_RETURNED_ROWS:
-            rows.append(row)
-        if on_row:
-            on_row(row)
+            ground_truth = str(labels[filename]).strip()
+            references.append(ground_truth)
+            predictions.append(predicted)
 
-        # Reporting every image would be noise on a 6000-image run.
-        if index % 10 == 0 or index == len(image_files):
-            progress(stage="evaluating", step=index, total_steps=len(image_files))
+            row = {
+                "filename": filename,
+                "reference": ground_truth,
+                "prediction": predicted,
+                "match": predicted == ground_truth,
+            }
+            if len(rows) < MAX_RETURNED_ROWS:
+                rows.append(row)
+            if on_row:
+                on_row(row)
+
+        progress(stage="evaluating", step=processed, total_steps=total)
 
     if not references:
         raise EvaluationError("No samples were evaluated.")
@@ -263,6 +307,8 @@ def main(argv=None):
     parser.add_argument("--dataset", default=DEFAULT_DATASET)
     parser.add_argument("--split", default=DEFAULT_SPLIT, choices=list(ds.SPLITS))
     parser.add_argument("--limit", type=int, default=NUM_SAMPLES)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE,
+                        help="Images per generate() call. Lower it if VRAM is tight.")
     parser.add_argument("--no-chart", action="store_true")
     args = parser.parse_args(argv)
 
@@ -286,6 +332,7 @@ def main(argv=None):
             dataset=args.dataset,
             split=args.split,
             limit=args.limit,
+            batch_size=args.batch_size,
             save_chart=not args.no_chart,
             log=lambda line: print(f"  {line}"),
             on_row=show,
