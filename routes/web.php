@@ -9,7 +9,12 @@ use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentScanController;
 use App\Http\Controllers\DocumentTemplateController;
+use App\Http\Controllers\OcrDatasetController;
+use App\Http\Controllers\OcrEngineController;
+use App\Http\Controllers\OcrJobController;
 use App\Http\Controllers\OcrModelController;
+use App\Http\Controllers\OcrPredictionController;
+use App\Http\Controllers\OcrUploadController;
 use App\Http\Controllers\RecordController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\UserController;
@@ -184,20 +189,59 @@ Route::middleware('auth')->group(function () {
     });
 
     /*
-     * OCR model management - Super Admin only, all on one page.
+     * OCR workspace - Super Admin only, all on one tabbed page.
      *
-     * These endpoints reach through to the FastAPI service and can delete ~1.3 GB
-     * of weights from disk, which is why they never widen beyond Super Admin.
+     * The whole ML lifecycle lives here: upload and validate datasets, fine-tune,
+     * evaluate, spot-check, and promote a model for Staff use. No CLI required.
+     *
+     * Every one of these reaches through to the FastAPI service. They can start a
+     * job that pins the GPU for hours, delete ~1.3 GB of weights, delete a dataset
+     * of thousands of images, and start or stop an OS process. That is why the gate
+     * never widens beyond Super Admin: the service itself has no authentication, so
+     * this middleware is the only thing standing in front of it.
      */
     Route::middleware('can:ocr.manage')->prefix('ocr')->name('ocr.')->group(function () {
         Route::get('/', [OcrModelController::class, 'index'])->name('index');
         Route::post('rescan', [OcrModelController::class, 'rescan'])->name('rescan');
+
+        // Engine process control, replacing the uvicorn command line.
+        Route::post('engine/start', [OcrEngineController::class, 'start'])->name('engine.start');
+        Route::post('engine/stop', [OcrEngineController::class, 'stop'])->name('engine.stop');
+        Route::get('engine/status', [OcrEngineController::class, 'status'])->name('engine.status');
+
+        // Chunked upload, because PHP's 40M limit is far below a model or a dataset.
+        Route::post('uploads/chunk', [OcrUploadController::class, 'chunk'])->name('uploads.chunk');
+        Route::post('uploads/discard', [OcrUploadController::class, 'discard'])
+            ->name('uploads.discard');
+
+        // Models. `activate` is the only one that changes what Staff scan with.
         Route::post('models', [OcrModelController::class, 'store'])->name('store');
         Route::post('models/{key}/activate', [OcrModelController::class, 'activate'])->name('activate');
         Route::post('models/{key}/rename', [OcrModelController::class, 'rename'])->name('rename');
         Route::delete('models/{key}', [OcrModelController::class, 'destroy'])->name('destroy');
         Route::post('models/{key}/evaluation', [OcrModelController::class, 'recordEvaluation'])
             ->name('evaluation');
+
+        // Datasets.
+        Route::post('datasets', [OcrDatasetController::class, 'store'])->name('datasets.store');
+        Route::post('datasets/{name}/validate', [OcrDatasetController::class, 'validateDataset'])
+            ->name('datasets.validate');
+        Route::delete('datasets/{name}', [OcrDatasetController::class, 'destroy'])
+            ->name('datasets.destroy');
+
+        /*
+         * GPU jobs. Never synchronous, and never started automatically - training
+         * degrades Staff scanning for as long as it runs.
+         */
+        Route::post('jobs/training', [OcrJobController::class, 'train'])->name('jobs.train');
+        Route::post('jobs/evaluation', [OcrJobController::class, 'evaluate'])->name('jobs.evaluate');
+        Route::get('jobs/{job}/status', [OcrJobController::class, 'status'])->name('jobs.status');
+        Route::post('jobs/{job}/cancel', [OcrJobController::class, 'cancel'])->name('jobs.cancel');
+
+        // Spot-check prediction: synchronous, capped, and not a Staff path.
+        Route::post('predict', [OcrPredictionController::class, 'store'])->name('predict');
+
+        // Charts live outside the web root, so they are streamed through here.
         Route::get('charts/{variant}/{name}', [OcrModelController::class, 'chart'])->name('chart');
     });
 });

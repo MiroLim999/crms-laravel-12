@@ -1,185 +1,112 @@
+{{--
+    The OCR workspace: the whole ML lifecycle on one page, no CLI.
+
+    Tabs are sections of one page rather than separate routes, because the engine
+    status and any running job have to stay visible whichever section you are in.
+    The open tab is carried in ?tab= so a redirect after an action returns you to
+    where you were.
+--}}
 @extends('layouts.app')
 
-@section('title', 'OCR Models')
+@section('title', 'OCR Workspace')
+
+@php
+    $tabs = [
+        'models' => ['label' => 'Models', 'icon' => 'bx-brain'],
+        'datasets' => ['label' => 'Datasets', 'icon' => 'bx-folder'],
+        'training' => ['label' => 'Fine-tuning', 'icon' => 'bx-dumbbell'],
+        'evaluation' => ['label' => 'Evaluation', 'icon' => 'bx-bar-chart-alt-2'],
+        'predict' => ['label' => 'Predict', 'icon' => 'bx-search-alt'],
+    ];
+@endphp
 
 @section('content')
-    <x-page-header title="OCR Models"
-                   subtitle="Manage TrOCR models, promote one for Staff scanning, and review evaluation metrics.">
+    <x-page-header title="OCR Workspace"
+                   subtitle="Upload datasets, fine-tune a model, evaluate it, then promote it for Staff scanning.">
         <form method="POST" action="{{ route('ocr.rescan') }}">
             @csrf
-            <button class="btn btn-outline-secondary" type="submit">
+            <button class="btn btn-outline-secondary" type="submit"
+                    @disabled(! $engine['reachable'])>
                 <i class="icon-base bx bx-refresh icon-sm me-1"></i> Rescan
             </button>
         </form>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModelModal">
-            <i class="icon-base bx bx-plus icon-sm me-1"></i> Add Model
-        </button>
     </x-page-header>
 
-    {{-- Engine status. Staff scanning fails outright when this is down. --}}
-    <div class="card mb-4">
-        <div class="card-body d-flex flex-wrap align-items-center gap-3">
-            @if ($overview['reachable'])
-                <span class="d-inline-flex align-items-center gap-2">
-                    <span class="badge bg-success rounded-circle p-1"></span>
-                    <strong>OCR service online</strong>
-                </span>
-                <span class="text-muted">
-                    Device: <code>{{ $overview['device'] ?: 'not-loaded' }}</code>
-                </span>
-                <span class="text-muted">
-                    Review threshold: <strong>{{ $threshold }}%</strong> confidence
-                </span>
-            @else
-                <span class="d-inline-flex align-items-center gap-2">
-                    <span class="badge bg-danger rounded-circle p-1"></span>
-                    <strong>OCR service offline</strong>
-                </span>
-                <span class="text-muted small">{{ $overview['error'] }}</span>
-            @endif
-        </div>
-    </div>
+    @include('ocr.partials.engine')
 
-    @if (! $overview['models']->contains(fn ($m) => $m['is_active']))
-        <div class="alert alert-warning d-flex align-items-center" role="alert">
-            <i class="icon-base bx bx-error icon-md me-2"></i>
-            <div>
-                No active model. Staff cannot scan documents until one is promoted below.
-            </div>
-        </div>
-    @endif
+    {{-- A running job matters on every tab, so it sits above them. --}}
+    @include('ocr.partials.job-banner')
 
-    <x-card title="Models" subtitle="Discovered from the Models folder, reconciled with the CRMS registry.">
-        @if ($overview['models']->isEmpty())
-            <x-empty-state icon="bx-brain" title="No models found"
-                           message="Add a model folder, or drop one into Models/ and rescan." />
-        @else
-            <div class="table-responsive">
-                <table class="table table-hover align-middle">
-                    <thead>
-                        <tr>
-                            <th>Model</th>
-                            <th>State</th>
-                            <th>Evaluation</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach ($overview['models'] as $model)
-                            <tr>
-                                <td>
-                                    <div class="fw-medium">{{ $model['label'] }}</div>
-                                    <code class="small text-muted">{{ $model['key'] }}</code>
-                                    @if ($model['is_base'])
-                                        <span class="badge bg-label-secondary ms-1">base</span>
-                                    @endif
-                                </td>
-                                <td>
-                                    @if ($model['is_active'])
-                                        <span class="badge bg-label-success">Active</span>
-                                    @endif
-                                    @if (! $model['on_disk'])
-                                        <span class="badge bg-label-danger">Missing on disk</span>
-                                    @elseif ($model['loaded'])
-                                        <span class="badge bg-label-info">Loaded in memory</span>
-                                    @endif
-                                </td>
-                                <td>
-                                    @if ($model['cer'] !== null || $model['wer'] !== null)
-                                        <div class="small">
-                                            CER {{ $model['cer'] !== null ? number_format($model['cer'] * 100, 2).'%' : '—' }}
-                                            · WER {{ $model['wer'] !== null ? number_format($model['wer'] * 100, 2).'%' : '—' }}
-                                            · Exact {{ $model['exact_match'] !== null ? number_format($model['exact_match'] * 100, 2).'%' : '—' }}
-                                        </div>
-                                        <small class="text-muted">{{ $model['evaluated_at']?->diffForHumans() }}</small>
-                                    @else
-                                        <span class="text-muted small">Not recorded</span>
-                                    @endif
-                                </td>
-                                <td class="text-end">
-                                    <div class="dropdown">
-                                        <button class="btn btn-sm btn-icon btn-text-secondary rounded-pill dropdown-toggle hide-arrow"
-                                                data-bs-toggle="dropdown" aria-label="Actions">
-                                            <i class="icon-base bx bx-dots-vertical-rounded"></i>
-                                        </button>
-                                        <div class="dropdown-menu dropdown-menu-end">
-                                            @unless ($model['is_active'])
-                                                <form method="POST" action="{{ route('ocr.activate', $model['key']) }}">
-                                                    @csrf
-                                                    <button type="submit" class="dropdown-item"
-                                                            @disabled(! $model['on_disk'])>
-                                                        <i class="icon-base bx bx-check-circle icon-sm me-2"></i>
-                                                        Set as active
-                                                    </button>
-                                                </form>
-                                            @endunless
+    <ul class="nav nav-pills flex-column flex-md-row mb-4" role="tablist" id="ocrTabs">
+        @foreach ($tabs as $key => $meta)
+            <li class="nav-item">
+                <button type="button"
+                        class="nav-link @if ($tab === $key) active @endif"
+                        data-bs-toggle="tab"
+                        data-bs-target="#tab-{{ $key }}"
+                        data-tab-key="{{ $key }}"
+                        role="tab"
+                        aria-selected="{{ $tab === $key ? 'true' : 'false' }}">
+                    <i class="icon-base bx {{ $meta['icon'] }} icon-sm me-1"></i>
+                    {{ $meta['label'] }}
+                </button>
+            </li>
+        @endforeach
+    </ul>
 
-                                            <button type="button" class="dropdown-item"
-                                                    data-bs-toggle="modal" data-bs-target="#evalModal"
-                                                    data-model-key="{{ $model['key'] }}"
-                                                    data-cer="{{ $model['cer'] }}"
-                                                    data-wer="{{ $model['wer'] }}"
-                                                    data-exact="{{ $model['exact_match'] }}"
-                                                    data-notes="{{ $model['notes'] }}">
-                                                <i class="icon-base bx bx-bar-chart-alt-2 icon-sm me-2"></i>
-                                                Record evaluation
-                                            </button>
-
-                                            @unless ($model['is_base'])
-                                                <button type="button" class="dropdown-item"
-                                                        data-bs-toggle="modal" data-bs-target="#renameModal"
-                                                        data-model-key="{{ $model['key'] }}"
-                                                        @disabled($model['is_active'])>
-                                                    <i class="icon-base bx bx-rename icon-sm me-2"></i> Rename
-                                                </button>
-
-                                                <div class="dropdown-divider"></div>
-
-                                                <button type="button" class="dropdown-item text-danger"
-                                                        data-bs-toggle="modal" data-bs-target="#deleteModal"
-                                                        data-model-key="{{ $model['key'] }}"
-                                                        @disabled($model['is_active'])>
-                                                    <i class="icon-base bx bx-trash icon-sm me-2"></i> Delete
-                                                </button>
-                                            @endunless
-                                        </div>
-                                    </div>
-                                </td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
-            </div>
-
-            <p class="small text-muted mb-0 mt-2">
-                The base model cannot be renamed or deleted. The active model is locked
-                against rename and delete — promote another model first.
-            </p>
-        @endif
-    </x-card>
-
-    {{-- Evaluation charts written by test_trocr.py / test_finetuned.py --}}
-    <div class="row g-4 mt-2">
-        @foreach ($charts as $variant => $files)
-            <div class="col-lg-6">
-                <x-card :title="ucfirst($variant) . ' model metrics'"
-                        :subtitle="'Evaluation Metrics/' . $variant . '/'">
-                    @forelse ($files as $chart)
-                        <figure class="mb-3">
-                            <img src="{{ $chart['url'] }}" alt="{{ $variant }} evaluation chart"
-                                 class="img-fluid rounded border">
-                            <figcaption class="small text-muted mt-1">
-                                {{ $chart['name'] }} · {{ $chart['modified']->diffForHumans() }}
-                            </figcaption>
-                        </figure>
-                    @empty
-                        <x-empty-state icon="bx-bar-chart" title="No charts yet"
-                                       message="Run test_{{ $variant === 'base' ? 'trocr' : 'finetuned' }}.py to generate one." />
-                    @endforelse
-                </x-card>
+    <div class="tab-content p-0 bg-transparent shadow-none">
+        @foreach ($tabs as $key => $meta)
+            <div class="tab-pane fade @if ($tab === $key) show active @endif"
+                 id="tab-{{ $key }}" role="tabpanel">
+                @include('ocr.partials.'.$key)
             </div>
         @endforeach
     </div>
 
+    {{--
+        Run history sits outside the tabs. Every pane is rendered, so including it
+        from both Fine-tuning and Evaluation would emit each row's id twice.
+    --}}
+    @include('ocr.partials.history')
+
     @include('ocr.partials.modals')
 @endsection
+
+@push('scripts')
+    {{--
+        Own Vite entry, listed as an input in vite.config.js. Anything referenced by
+        @vite() and not declared there throws "Unable to locate file in Vite
+        manifest" - a 500, not a silent miss.
+    --}}
+    @vite('resources/js/ocr-workspace.js')
+
+    <script>
+        // Endpoints and state the module needs, rendered here so the JS file itself
+        // contains no hardcoded URLs.
+        window.crmsOcr = {
+            csrf: document.querySelector('meta[name="csrf-token"]').content,
+            urls: {
+                chunk: @json(route('ocr.uploads.chunk')),
+                discardUpload: @json(route('ocr.uploads.discard')),
+                engineStatus: @json(route('ocr.engine.status')),
+                predict: @json(route('ocr.predict')),
+                index: @json(route('ocr.index')),
+                // __KEY__ / __ID__ are replaced client-side, so a model key with
+                // awkward characters is encoded once rather than baked into markup.
+                jobStatus: @json(route('ocr.jobs.status', ['job' => '__ID__'])),
+                jobCancel: @json(route('ocr.jobs.cancel', ['job' => '__ID__'])),
+                modelActivate: @json(route('ocr.activate', '__KEY__')),
+                modelRename: @json(route('ocr.rename', '__KEY__')),
+                modelDestroy: @json(route('ocr.destroy', '__KEY__')),
+                modelEvaluation: @json(route('ocr.evaluation', '__KEY__')),
+                datasetDestroy: @json(route('ocr.datasets.destroy', '__KEY__')),
+            },
+            activeJobId: @json($activeJob?->getKey()),
+            engineReachable: @json($engine['reachable']),
+            // False when the running service was started outside the app. Stop still
+            // works in that case, but the wording and the badge differ.
+            engineOwned: @json($engine['owned']),
+            threshold: @json((float) $threshold),
+        };
+    </script>
+@endpush

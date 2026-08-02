@@ -96,7 +96,7 @@ Two processes, both from the repo root:
 
 ```bash
 php artisan serve                                       # http://127.0.0.1:8000
-uvicorn ml.api.main:app --host 127.0.0.1 --port 8001    # OCR service
+python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001    # OCR service
 ```
 
 Sign in with the seeded account:

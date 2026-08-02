@@ -1,211 +1,304 @@
-"""
+r"""
 predict.py
-Predicts handwritten text from ALL images in a given folder
-using your fine-tuned TrOCR model.
+Spot-checks a TrOCR model on loose, unlabelled images.
 
-No CSV or labels needed — just drop images in a folder and run.
-Each prediction includes a confidence score (the model's certainty in its own
-output, 0-100%). This is not true accuracy — there are no ground-truth labels
-here — but low confidence is a useful flag for predictions worth reviewing.
+No CSV or labels needed - hand it a folder or a list of files. Each prediction
+carries a confidence score (the model's certainty in its own output, 0-100%).
+This is not accuracy: there is no ground truth here. Low confidence is a useful
+flag for predictions worth reviewing, nothing more.
 
-Usage:
-  python predict.py                          (uses default folder: new_images/)
-  python predict.py --folder path/to/images  (uses custom folder)
+Two ways to run it:
+
+  CLI         python ml\predict.py --folder path\to\images --model base
+  In-process  from predict import run_prediction
+              rows = run_prediction(model="base", folder="...")
+
+`run_prediction()` returns rows as data. Writing predictions.csv is opt-in, so the
+API can call it without leaving files behind.
 """
 
+import argparse
 import os
-import sys
 import warnings
 import logging
 
 # --- Suppress warnings ---
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
-os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
-os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 warnings.filterwarnings("ignore")
 logging.disable(logging.WARNING)
 
+import csv
 import math
 
 import torch
 from PIL import Image
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
+import dataset_registry as ds
+
 # ============================================================
-# CONFIG
+# CONFIG - defaults only.
 # ============================================================
-# Anchored to ml/ so the script runs the same from any working directory.
 ML_ROOT = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR = os.path.join(ML_ROOT, "models")
 
-# FINETUNED_DIR = "microsoft/trocr-base-handwritten" # Default Model
-FINETUNED_DIR = os.path.join(ML_ROOT, "models", "TrOCR-fine-tune-10k-samples")
-DEFAULT_FOLDER = os.path.join(ML_ROOT, "new_images")   # Default folder for new images
+BASE_MODEL_KEY = "base"
+BASE_MODEL_NAME = "microsoft/trocr-base-handwritten"
+
+DEFAULT_MODEL = "TrOCR-fine-tune-10k-samples"
+DEFAULT_FOLDER = os.path.join(ML_ROOT, "new_images")
+
+MAX_NEW_TOKENS = 32
+
+# The API's /predict is synchronous, so it is capped. Anything larger belongs in
+# an evaluation job.
+MAX_IMAGES = 50
+
+# Below this, flag the prediction for review. Mirrors CRMS's own threshold.
+REVIEW_THRESHOLD = 80.0
+
+IMAGE_EXTENSIONS = ds.IMAGE_EXTENSIONS
 # ============================================================
 
-IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif")
+
+class PredictionError(Exception):
+    """Missing model or images. Raised instead of exiting."""
 
 
-def main():
-    # Allow custom folder via command line argument
-    if "--folder" in sys.argv:
-        idx = sys.argv.index("--folder")
-        if idx + 1 < len(sys.argv):
-            image_folder = sys.argv[idx + 1]
-        else:
-            print("ERROR: --folder requires a path argument")
-            return
-    else:
-        image_folder = DEFAULT_FOLDER
+def _noop(*_args, **_kwargs):
+    pass
 
-    print("=" * 60)
-    print("TrOCR PREDICTION — NEW IMAGES")
-    print("=" * 60)
 
-    # --- Verify paths ---
-    # FINETUNED_DIR may be a local folder (e.g. "trocr-finetuned") OR a Hugging
-    # Face model name (e.g. "microsoft/trocr-base-handwritten"). Only error out
-    # for a local-looking path that doesn't exist; let HF names pass through to
-    # from_pretrained (which loads from cache / downloads).
-    looks_like_local_path = os.path.sep in FINETUNED_DIR or FINETUNED_DIR.startswith(".")
-    is_hf_name = "/" in FINETUNED_DIR and not looks_like_local_path
-    if not os.path.isdir(FINETUNED_DIR) and not is_hf_name:
-        print(f"\nERROR: Model not found at '{FINETUNED_DIR}/'")
-        print("Set FINETUNED_DIR to your fine-tuned folder (e.g. 'trocr-finetuned')")
-        print("or a Hugging Face name (e.g. 'microsoft/trocr-base-handwritten').")
-        return
+def resolve_model(model):
+    """Turn a model key from the UI into something from_pretrained accepts."""
+    if not model or model == BASE_MODEL_KEY:
+        return BASE_MODEL_NAME, BASE_MODEL_KEY
 
-    if not os.path.isdir(image_folder):
-        print(f"\nERROR: Image folder not found at '{image_folder}/'")
-        print(f"Create the folder and add your images there.")
-        print(f"\nExample:")
-        print(f"  mkdir {image_folder}")
-        print(f"  (copy your images into {image_folder}/)")
-        print(f"  python predict.py")
-        return
+    if os.path.isdir(model):
+        return model, os.path.basename(os.path.normpath(model))
 
-    # --- Find all images ---
-    image_files = sorted([
-        f for f in os.listdir(image_folder)
-        if f.lower().endswith(IMAGE_EXTENSIONS)
-    ])
+    candidate = os.path.join(MODELS_DIR, model)
+    if os.path.isdir(candidate):
+        return candidate, model
 
-    if not image_files:
-        print(f"\nERROR: No images found in '{image_folder}/'")
-        print(f"Supported formats: {IMAGE_EXTENSIONS}")
-        return
+    raise PredictionError(f"Model '{model}' was not found under ml/models/.")
 
-    print(f"Folder: {os.path.abspath(image_folder)}")
-    print(f"Images found: {len(image_files)}")
-    print()
 
-    # --- Device ---
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
-    if device.type == "cuda":
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print()
+def _load(source):
+    return (
+        TrOCRProcessor.from_pretrained(source),
+        VisionEncoderDecoderModel.from_pretrained(source),
+    )
 
-    # --- Load fine-tuned model ---
-    print(f"Loading model: {FINETUNED_DIR}")
-    processor = TrOCRProcessor.from_pretrained(FINETUNED_DIR)
-    model = VisionEncoderDecoderModel.from_pretrained(FINETUNED_DIR)
-    model.to(device)
-    model.eval()
-    print("Model loaded.\n")
 
-    # --- Run predictions ---
-    print("=" * 70)
-    print("PREDICTIONS")
-    print("=" * 70)
-    print("Note: 'Confidence' is the model's certainty in its own output")
-    print("      (not true accuracy, since these images have no ground-truth labels).")
-    print()
-    print(f"{'#':<4} {'Filename':<35} {'Conf %':<8} {'Predicted Text'}")
-    print("-" * 80)
-
-    results = []
-    # eos id can live in different places depending on the model; fall back safely.
-    eos_id = (
-        getattr(model.generation_config, "eos_token_id", None)
-        or getattr(model.config, "eos_token_id", None)
-        or getattr(model.config.decoder, "eos_token_id", None)
+def eos_token_id(net, processor):
+    """The EOS id can live in several places depending on the model."""
+    return (
+        getattr(net.generation_config, "eos_token_id", None)
+        or getattr(net.config, "eos_token_id", None)
+        or getattr(net.config.decoder, "eos_token_id", None)
         or processor.tokenizer.sep_token_id
     )
 
-    def sequence_confidence(gen_output):
-        """Geometric mean of per-token probabilities, up to the first EOS, as a %."""
+
+def sequence_confidence(net, gen_output, eos_id):
+    """Geometric mean of per-token probabilities up to the first EOS, as a %.
+
+    Identical to the calculation in api/main.py - the number a Super Admin sees
+    while spot-checking must be the number Staff see while scanning."""
+    try:
+        scores = net.compute_transition_scores(
+            gen_output.sequences, gen_output.scores, normalize_logits=True
+        )[0]
+        gen_tokens = gen_output.sequences[0][1:1 + len(scores)]
+        log_probs = []
+        for tok, lp in zip(gen_tokens, scores):
+            if not torch.isfinite(lp):
+                continue
+            log_probs.append(lp.item())
+            if tok.item() == eos_id:
+                break
+        if not log_probs:
+            return 0.0
+        return round(math.exp(sum(log_probs) / len(log_probs)) * 100.0, 1)
+    except Exception:
+        return 0.0
+
+
+def collect_images(folder, limit=MAX_IMAGES):
+    if not os.path.isdir(folder):
+        raise PredictionError(f"Image folder not found at '{folder}'.")
+
+    files = sorted(
+        os.path.join(folder, f) for f in os.listdir(folder)
+        if f.lower().endswith(IMAGE_EXTENSIONS)
+    )
+
+    if not files:
+        raise PredictionError(f"No images found in '{folder}'.")
+
+    return files[:limit] if limit else files
+
+
+def run_prediction(
+    model=DEFAULT_MODEL,
+    image_paths=None,
+    folder=None,
+    limit=MAX_IMAGES,
+    max_new_tokens=MAX_NEW_TOKENS,
+    loader=None,
+    log=None,
+    write_csv=False,
+):
+    """Predict text for each image and return the rows.
+
+    Args:
+        image_paths: explicit list of files. Takes precedence over `folder`.
+        loader: optional callable(source) -> (processor, model), so the API can
+            hand over a model it already has in VRAM.
+        write_csv: also write predictions.csv beside the images (CLI behaviour).
+
+    Returns:
+        dict with model_key, rows [{filename, text, confidence, error}],
+        average_confidence, low_confidence count, and csv path if written.
+    """
+    log = log or _noop
+    loader = loader or _load
+
+    source, model_key = resolve_model(model)
+
+    if image_paths:
+        paths = list(image_paths)[:limit] if limit else list(image_paths)
+    else:
+        paths = collect_images(folder or DEFAULT_FOLDER, limit)
+
+    if not paths:
+        raise PredictionError("No images to predict.")
+
+    log(f"Loading model: {source}")
+    processor, net = loader(source)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    net.to(device)
+    net.eval()
+    eos_id = eos_token_id(net, processor)
+
+    log(f"Predicting {len(paths)} image(s) on {device}.")
+
+    rows = []
+    for path in paths:
+        filename = os.path.basename(path)
         try:
-            scores = model.compute_transition_scores(
-                gen_output.sequences, gen_output.scores, normalize_logits=True
-            )[0]  # log-probs for each generated step (batch of 1)
-            # sequences[0] = [start_token, tok1, tok2, ...]; align generated tokens with scores
-            gen_tokens = gen_output.sequences[0][1:1 + len(scores)]
-            log_probs = []
-            for tok, lp in zip(gen_tokens, scores):
-                if not torch.isfinite(lp):
-                    continue
-                log_probs.append(lp.item())
-                if tok.item() == eos_id:
-                    break
-            if not log_probs:
-                return 0.0
-            return math.exp(sum(log_probs) / len(log_probs)) * 100.0
-        except Exception:
-            return float("nan")
-
-    confidences = []
-
-    for i, filename in enumerate(image_files, start=1):
-        img_path = os.path.join(image_folder, filename)
-
-        try:
-            image = Image.open(img_path).convert("RGB")
+            image = Image.open(path).convert("RGB")
             pixel_values = processor(images=image, return_tensors="pt").pixel_values.to(device)
 
             with torch.no_grad():
-                gen_output = model.generate(
+                gen_output = net.generate(
                     pixel_values,
-                    max_new_tokens=32,
+                    max_new_tokens=max_new_tokens,
                     output_scores=True,
                     return_dict_in_generate=True,
                 )
 
-            generated_ids = gen_output.sequences
-            predicted = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
-            conf = sequence_confidence(gen_output)
-            confidences.append(conf)
+            text = processor.batch_decode(
+                gen_output.sequences, skip_special_tokens=True
+            )[0].strip()
 
-            print(f"{i:<4} {filename:<35} {conf:<8.1f} {predicted}")
-            results.append((filename, predicted, conf))
-
+            rows.append({
+                "filename": filename,
+                "text": text,
+                "confidence": sequence_confidence(net, gen_output, eos_id),
+            })
         except Exception as e:
-            print(f"{i:<4} {filename:<35} {'-':<8} ERROR: {e}")
-            results.append((filename, f"ERROR: {e}", float("nan")))
+            # One bad file must not fail the batch.
+            rows.append({
+                "filename": filename, "text": "", "confidence": 0.0, "error": str(e),
+            })
 
+    scored = [r["confidence"] for r in rows if "error" not in r]
+    average = round(sum(scored) / len(scored), 1) if scored else 0.0
+    low = sum(1 for c in scored if c < REVIEW_THRESHOLD)
+
+    csv_path = None
+    if write_csv:
+        target_dir = os.path.dirname(paths[0]) or ML_ROOT
+        csv_path = write_predictions_csv(rows, target_dir)
+        log(f"Results saved to: {csv_path}")
+
+    return {
+        "model_key": model_key,
+        "rows": rows,
+        "count": len(rows),
+        "average_confidence": average,
+        "low_confidence": low,
+        "threshold": REVIEW_THRESHOLD,
+        "csv": csv_path,
+    }
+
+
+def write_predictions_csv(rows, directory):
+    """Write predictions.csv beside the images. CLI convenience only."""
+    path = os.path.join(directory, "predictions.csv")
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["FILENAME", "PREDICTION", "CONFIDENCE"])
+        for row in rows:
+            failed = "error" in row
+            writer.writerow([
+                row["filename"],
+                f"ERROR: {row['error']}" if failed else row["text"],
+                "" if failed else f"{row['confidence']:.1f}",
+            ])
+    return path
+
+
+# ============================================================
+# CLI wrapper - `python ml\predict.py` still works.
+# ============================================================
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Predict text for loose handwritten images.")
+    parser.add_argument("--folder", default=DEFAULT_FOLDER)
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Folder under ml/models/, or 'base'.")
+    parser.add_argument("--limit", type=int, default=None, help="Max images (default: all).")
+    args = parser.parse_args(argv)
+
+    print("=" * 60)
+    print("TrOCR PREDICTION - NEW IMAGES")
+    print("=" * 60)
+    print("Note: 'Conf %' is the model's certainty in its own output,")
+    print("      not accuracy - these images have no ground-truth labels.")
+    print()
+
+    try:
+        result = run_prediction(
+            model=args.model,
+            folder=args.folder,
+            limit=args.limit,
+            log=lambda line: print(f"  {line}"),
+            write_csv=True,
+        )
+    except PredictionError as e:
+        print(f"\nERROR: {e}")
+        return 1
+
+    print()
+    print(f"{'#':<4} {'Filename':<35} {'Conf %':<8} Predicted text")
     print("-" * 80)
-    print(f"\nDone. Predicted {len(results)} image(s).")
+    for i, row in enumerate(result["rows"], start=1):
+        if row.get("error"):
+            print(f"{i:<4} {row['filename']:<35} {'-':<8} ERROR: {row['error']}")
+        else:
+            print(f"{i:<4} {row['filename']:<35} {row['confidence']:<8.1f} {row['text']}")
+    print("-" * 80)
 
-    # --- Average confidence summary ---
-    valid_conf = [c for c in confidences if not math.isnan(c)]
-    if valid_conf:
-        avg_conf = sum(valid_conf) / len(valid_conf)
-        low = sum(1 for c in valid_conf if c < 80.0)
-        print(f"Average confidence: {avg_conf:.1f}%")
-        print(f"Low-confidence (<80%) predictions to review: {low}/{len(valid_conf)}")
-
-    # --- Save results to CSV ---
-    output_csv = os.path.join(image_folder, "predictions.csv")
-    with open(output_csv, "w", encoding="utf-8") as f:
-        f.write("FILENAME,PREDICTION,CONFIDENCE\n")
-        for filename, prediction, conf in results:
-            # Escape quotes in predictions
-            prediction_clean = prediction.replace('"', '""')
-            conf_str = "" if (isinstance(conf, float) and math.isnan(conf)) else f"{conf:.1f}"
-            f.write(f'{filename},"{prediction_clean}",{conf_str}\n')
-
-    print(f"Results saved to: {output_csv}")
+    print(f"\nDone. Predicted {result['count']} image(s).")
+    print(f"Average confidence: {result['average_confidence']:.1f}%")
+    print(f"Low-confidence (<{result['threshold']:.0f}%) predictions to review: "
+          f"{result['low_confidence']}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

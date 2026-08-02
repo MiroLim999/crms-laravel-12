@@ -51,6 +51,24 @@ return [
     'ocr' => [
         'url' => env('OCR_API_URL', 'http://127.0.0.1:8001'),
         'timeout' => env('OCR_API_TIMEOUT', 120),
+
+        /*
+         * Process control for the Run / Stop buttons in the OCR workspace, so a
+         * Super Admin never has to type the uvicorn command into a terminal.
+         *
+         * Every value here ends up on a command line, and none of it may come from
+         * a request. `host` is additionally forced to a loopback address in
+         * EngineProcess: the service has no authentication of its own, so binding
+         * it anywhere routable would publish unauthenticated model and dataset
+         * deletion to the network.
+         *
+         * Set OCR_MANAGED=false where something else supervises the process.
+         */
+        'managed' => env('OCR_MANAGED', true),
+        'python' => env('OCR_PYTHON', 'python'),
+        'module' => env('OCR_MODULE', 'ml.api.main:app'),
+        'host' => env('OCR_HOST', '127.0.0.1'),
+        'port' => env('OCR_PORT', 8001),
     ],
 
 ];

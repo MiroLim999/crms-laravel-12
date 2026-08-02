@@ -14,25 +14,50 @@ Run:
   (or: python api/main.py)
 
 Endpoints:
-  GET  /health     -> status + which models are available/loaded
+  GET  /health     -> status + which models are available/loaded + active job
   GET  /models     -> selectable models for the frontend dropdown
   POST /ocr        -> { "fields": [ { "name": "...", "image": "data:image/png;base64,..." } ],
                        "model": "<key>" }  returns { "results": [ { "name", "text", "confidence" } ] }
-  POST /add_model  -> multipart upload (name + files) saved into Models/<name>/
-  POST /delete_model -> { "model": "<key>" } removes that folder from Models/
+  POST /add_model  -> multipart upload (name + files) saved into ml/models/<name>/
+  POST /delete_model -> { "model": "<key>" } removes that folder from ml/models/
   POST /rename_model -> { "model": "<key>", "newName": "<name>" } renames the folder
+  POST /predict    -> multipart images + model, synchronous, capped. Spot-checking.
+
+  GET    /datasets                 -> named datasets with per-split counts and size
+  POST   /datasets                 -> create one from an uploaded zip
+  GET    /datasets/{name}/validate -> pre-training sanity report
+  DELETE /datasets/{name}          -> remove a dataset
+
+  GET  /jobs             -> recent training/evaluation runs
+  POST /jobs             -> start one (409 if the GPU is already busy)
+  GET  /jobs/{id}        -> status, progress, metrics, log tail
+  POST /jobs/{id}/cancel -> request cancellation
+
+Training and evaluation are jobs, never synchronous requests: training runs for
+hours. One GPU job at a time - see jobs.py.
 """
 
 import os
 import io
 import re
+import sys
 import math
 import shutil
 import base64
+import tempfile
 import warnings
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, Optional
+
+# ml/ and ml/api/ go on sys.path so the sibling modules import by bare name
+# whether this file is loaded as `ml.api.main` (uvicorn, from the repo root) or
+# run directly. The ML scripts import each other the same way.
+_ML_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_API_ROOT = os.path.dirname(os.path.abspath(__file__))
+for _path in (_API_ROOT, _ML_ROOT):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 # --- Quiet down HF / transformers noise ---
 # Set before importing torch/transformers, otherwise they are read too late.
@@ -46,16 +71,23 @@ logging.disable(logging.WARNING)
 import torch
 from PIL import Image
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+
+# Import-cheap siblings: no torch, so /health and /datasets stay responsive while
+# the GPU is busy.
+import dataset_registry as ds
+import jobs
+import runners
 
 # ============================================================
 # CONFIG
 # ============================================================
 # Anchored to this file's location (<repo>/ml/api/main.py) rather than the working
 # directory, so the service behaves the same however it is launched.
-ML_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ML_ROOT = _ML_ROOT
 
 # All fine-tuned models live in ml/models/<name>/. Drop a model folder in there
 # (with config.json + model.safetensors) and it shows up automatically.
@@ -252,6 +284,10 @@ class HealthResponse(BaseModel):
     device: str
     default: str
     models: list[ModelInfo]
+    # Added for the OCR workspace. Optional so an older caller reading only the
+    # original keys is unaffected.
+    job: Optional[dict] = None
+    busy: bool = False
 
 
 class ModelsResponse(BaseModel):
@@ -317,8 +353,10 @@ async def lifespan(app: FastAPI):
     # Nothing heavy here on purpose: models stay lazy so the service answers
     # /health immediately after start, and the device is only probed on the
     # first real inference.
-    print(f"[ocr-api] Models directory: {MODELS_DIR}")
+    print(f"[ocr-api] Models directory:   {MODELS_DIR}")
+    print(f"[ocr-api] Datasets directory: {ds.DATASETS_DIR}")
     print(f"[ocr-api] Discovered models: {sorted(_discover_models()) or '(none)'}")
+    print(f"[ocr-api] Discovered datasets: {[d['name'] for d in ds.list_datasets()] or '(none)'}")
     yield
     _models.clear()
 
@@ -341,14 +379,38 @@ def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse
     return JSONResponse(body, status_code=exc.status_code)
 
 
+@app.exception_handler(RequestValidationError)
+def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Same translation for FastAPI's own 422s.
+
+    Without this, a malformed body returns {"detail": [ ... ]} and OcrClient - which
+    reads `error` - can only report "HTTP 422" with no explanation of what was wrong."""
+    problems = []
+    for error in exc.errors():
+        # Drop the leading "body"/"query" segment: the field name is what matters.
+        location = ".".join(str(part) for part in error.get("loc", ())[1:])
+        problems.append(f"{location}: {error.get('msg')}" if location else str(error.get("msg")))
+
+    return JSONResponse(
+        {"ok": False, "error": "Invalid request. " + "; ".join(problems)},
+        status_code=422,
+    )
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> dict:
+    # Touches no GPU, so it keeps answering while a training job saturates the
+    # card. That is what lets the workspace poll for progress at all.
+    active = jobs.manager.active()
+
     return {
         "status": "ok",
         "model_loaded": bool(_models),
         "device": str(_device) if _device else "not-loaded",
         "default": _default_key(),
         "models": _model_info(),
+        "job": active.summary() if active else None,
+        "busy": active is not None,
     }
 
 
@@ -568,6 +630,281 @@ def rename_model(payload: RenameModelRequest) -> dict:
 
     print(f"[ocr-api] Renamed model '{key}' -> '{new_name}'.")
     return {"ok": True, "name": new_name}
+
+
+# ============================================================
+# Spot-check prediction (synchronous, capped)
+# ============================================================
+# Loose unlabelled images, a handful at a time. Anything larger is an evaluation
+# job: this call blocks a worker thread until it finishes.
+MAX_PREDICT_IMAGES = 50
+
+
+def _cached_loader(source):
+    """Adapter so the ML scripts reuse this service's in-process model cache.
+
+    The scripts resolve a model key to a folder path (or the HF name) and then
+    call `loader(source)`. Mapping that back to a cache key avoids loading a
+    second ~1.3 GB copy of a model that is already in VRAM."""
+    if source == FALLBACK_MODEL:
+        key = BASE_MODEL_KEY
+    else:
+        key = os.path.basename(os.path.normpath(source))
+
+    entry = _load_model(key)
+    return entry["processor"], entry["model"]
+
+
+class PredictResponse(BaseModel):
+    ok: bool
+    model: str
+    modelKey: str
+    count: int
+    average_confidence: float
+    low_confidence: int
+    threshold: float
+    rows: list[dict]
+
+
+# Plain `def`: blocking GPU work belongs on a threadpool so /health keeps answering.
+@app.post("/predict", response_model=PredictResponse)
+def predict(
+    model: str = Form(""),
+    files: Optional[list[UploadFile]] = File(None),
+    files_bracketed: Optional[list[UploadFile]] = File(None, alias="files[]"),
+) -> dict:
+    """Predict text for a few loose images, with a confidence per image."""
+    import predict as predictor
+
+    uploads = list(files or []) or list(files_bracketed or [])
+    if not uploads:
+        raise HTTPException(status_code=400, detail="No images were uploaded.")
+
+    if len(uploads) > MAX_PREDICT_IMAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Up to {MAX_PREDICT_IMAGES} images at a time. "
+                   "For a larger run, start an evaluation job.",
+        )
+
+    key = _resolve_key(model or None)
+
+    # Written to a temp folder and removed straight after, so a spot-check never
+    # leaves images on the server.
+    with tempfile.TemporaryDirectory(prefix="crms-predict-") as staging:
+        paths = []
+        for upload in uploads:
+            base = os.path.basename((upload.filename or "").replace("\\", "/"))
+            if not base or ".." in base:
+                raise HTTPException(status_code=400, detail="Invalid file name in upload.")
+            if not base.lower().endswith(ds.IMAGE_EXTENSIONS):
+                raise HTTPException(status_code=400, detail=f"Not an image: {base}")
+
+            target = os.path.join(staging, base)
+            with open(target, "wb") as out:
+                shutil.copyfileobj(upload.file, out, UPLOAD_CHUNK_BYTES)
+            paths.append(target)
+
+        try:
+            result = predictor.run_prediction(
+                model=key,
+                image_paths=paths,
+                limit=MAX_PREDICT_IMAGES,
+                max_new_tokens=MAX_NEW_TOKENS,
+                loader=_cached_loader,
+                write_csv=False,
+            )
+        except predictor.PredictionError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "ok": True,
+        "model": _label_for(key),
+        "modelKey": key,
+        "count": result["count"],
+        "average_confidence": result["average_confidence"],
+        "low_confidence": result["low_confidence"],
+        "threshold": result["threshold"],
+        "rows": result["rows"],
+    }
+
+
+# ============================================================
+# Datasets
+# ============================================================
+class DatasetsResponse(BaseModel):
+    ok: bool
+    datasets: list[dict]
+
+
+@app.get("/datasets", response_model=DatasetsResponse)
+def list_datasets() -> dict:
+    """Named datasets with per-split image counts and total size."""
+    return {"ok": True, "datasets": ds.list_datasets()}
+
+
+@app.get("/datasets/{name}/validate")
+def validate_dataset(name: str) -> dict:
+    """Sanity report, run before a dataset is offered for training.
+
+    A manifest that points at missing files wastes hours of GPU time and fails
+    deep into an epoch, so this is not optional."""
+    try:
+        return {"ok": True, "report": ds.validate(name)}
+    except ds.DatasetError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/datasets")
+def create_dataset(
+    name: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+) -> dict:
+    """Create a dataset from an uploaded zip.
+
+    Laravel reassembles the browser's chunks and posts one archive here, because
+    a dataset of thousands of images is far past PHP's upload limit."""
+    if not (name or "").strip():
+        raise HTTPException(status_code=400, detail="Please provide a dataset name.")
+    if file is None:
+        raise HTTPException(status_code=400, detail="No archive was uploaded.")
+
+    try:
+        safe = ds.sanitise_name(name)
+    except ds.DatasetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    os.makedirs(ds.DATASETS_DIR, exist_ok=True)
+
+    # Copied in chunks: a dataset archive can be gigabytes.
+    handle, staged_zip = tempfile.mkstemp(suffix=".zip", prefix="crms-dataset-")
+    os.close(handle)
+
+    try:
+        with open(staged_zip, "wb") as out:
+            shutil.copyfileobj(file.file, out, UPLOAD_CHUNK_BYTES)
+
+        result = ds.create_from_zip(safe, staged_zip)
+    except ds.DatasetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to unpack the dataset: {e}")
+    finally:
+        try:
+            os.remove(staged_zip)
+        except OSError:
+            pass
+
+    print(f"[ocr-api] Added dataset '{result['name']}'.")
+    return {"ok": True, **result}
+
+
+@app.delete("/datasets/{name}")
+def delete_dataset(name: str) -> dict:
+    """Destructive: removes the dataset folder and every image in it."""
+    active = jobs.manager.active()
+    if active and (active.config or {}).get("dataset") == name:
+        raise HTTPException(
+            status_code=409,
+            detail=f"'{name}' is in use by the running {active.type} job.",
+        )
+
+    try:
+        deleted = ds.delete_dataset(name)
+    except ds.DatasetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not delete: {e}")
+
+    print(f"[ocr-api] Deleted dataset '{deleted}'.")
+    return {"ok": True, "deleted": deleted}
+
+
+# ============================================================
+# Jobs (training / evaluation)
+# ============================================================
+class JobRequest(BaseModel):
+    type: str
+    config: dict = Field(default_factory=dict)
+
+
+@app.get("/jobs")
+def list_jobs() -> dict:
+    """Recent runs. Laravel mirrors these into ml_jobs for the durable history."""
+    return {"ok": True, "jobs": jobs.manager.list(), "active": _active_summary()}
+
+
+@app.get("/jobs/{job_id}")
+def get_job(job_id: str) -> dict:
+    job = jobs.manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found.")
+    return {"ok": True, "job": job.snapshot()}
+
+
+@app.post("/jobs")
+def start_job(payload: JobRequest) -> dict:
+    """Start a training or evaluation run.
+
+    Returns 409 when a GPU job is already in flight: the message names what is
+    running rather than queueing silently behind it."""
+    job_type = (payload.type or "").strip().lower()
+
+    # Checked before the config is validated: being told "already running" should
+    # not depend on the second request happening to be well-formed.
+    running = jobs.manager.active()
+    if running is not None:
+        raise HTTPException(status_code=409, detail=str(jobs.JobBusy(running.summary())))
+
+    if job_type == jobs.TRAINING:
+        try:
+            config = runners.validate_training_config(payload.config)
+        except (ValueError, ds.DatasetError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        runner = runners.training_runner(config)
+
+    elif job_type == jobs.EVALUATION:
+        available = [m["key"] for m in _model_info()]
+        try:
+            config = runners.validate_evaluation_config(payload.config, available)
+        except (ValueError, ds.DatasetError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        runner = runners.evaluation_runner(config, loader=_cached_loader)
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown job type '{payload.type}'. Expected 'training' or 'evaluation'.",
+        )
+
+    try:
+        job = jobs.manager.start(job_type, config, runner)
+    except jobs.JobBusy as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    print(f"[ocr-api] Started {job_type} job {job.id}: {config}")
+    return {"ok": True, "job_id": job.id, "job": job.snapshot()}
+
+
+@app.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict:
+    """Request cancellation. The runner stops between steps, leaving no
+    half-written checkpoint."""
+    job = jobs.manager.cancel(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found.")
+    return {"ok": True, "job": job.snapshot()}
+
+
+@app.get("/training_defaults")
+def training_defaults() -> dict:
+    """The scripts' own defaults, so the training form is pre-filled from one source."""
+    return {"ok": True, "defaults": runners.training_defaults()}
+
+
+def _active_summary():
+    active = jobs.manager.active()
+    return active.summary() if active else None
 
 
 if __name__ == "__main__":

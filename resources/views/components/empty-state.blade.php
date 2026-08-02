@@ -1,5 +1,7 @@
 @props([
-    'icon' => 'bx-inbox',
+    {{-- The previous default was an inbox name this Boxicons build only ships as a
+         solid variant, so it rendered as a blank box wherever no icon was passed. --}}
+    'icon' => 'bx-folder-open',
     'title' => 'Nothing here yet',
     'message' => null,
 ])

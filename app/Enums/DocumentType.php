@@ -33,7 +33,10 @@ enum DocumentType: string
     public function icon(): string
     {
         return match ($this) {
-            self::Birth => 'bx-baby-carriage',
+            // Outline icons, matching the rest of the UI. Birth previously used a
+            // baby-carriage name that this Boxicons build only ships as a solid
+            // variant, so it rendered as a blank box.
+            self::Birth => 'bx-cake',
             self::Death => 'bx-file',
             self::Marriage => 'bx-heart',
         };

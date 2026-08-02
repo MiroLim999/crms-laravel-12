@@ -52,7 +52,7 @@ class Navigation
                 'header' => 'System',
                 'items' => [
                     self::item('Document Templates', 'templates.index', 'bx-layout', 'templates.manage'),
-                    self::item('OCR Models', 'ocr.index', 'bx-brain', 'ocr.manage'),
+                    self::item('OCR Workspace', 'ocr.index', 'bx-brain', 'ocr.manage'),
                 ],
             ],
         ];
