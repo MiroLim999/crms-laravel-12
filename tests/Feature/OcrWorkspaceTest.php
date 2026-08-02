@@ -139,7 +139,7 @@ class OcrWorkspaceTest extends TestCase
             ->get(route('ocr.index'))
             ->assertOk()
             ->assertSee('OCR service offline')
-            ->assertSee('Run service');
+            ->assertSee('Start FastAPI');
     }
 
     public function test_the_workspace_shows_every_tab_when_the_service_is_up(): void

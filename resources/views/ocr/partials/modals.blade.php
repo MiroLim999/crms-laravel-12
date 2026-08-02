@@ -252,8 +252,8 @@
             <div class="modal-body">
                 <p class="mb-3">
                     Stop the service process? <strong>Staff will not be able to scan
-                    documents</strong> until it is started again. You can restart it with
-                    <em>Run service</em> straight afterwards.
+                    documents</strong> until it is manually started again. You can restart it with
+                    <em>Start FastAPI</em> straight afterwards.
                 </p>
 
                 @if ($engine['reachable'] && ! $engine['owned'])

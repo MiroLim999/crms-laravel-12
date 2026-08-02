@@ -553,6 +553,9 @@ function initEnginePolling() {
 
     let lastReachable = config.engineReachable;
     let lastOwned = config.engineOwned;
+    let lastStoppable = config.engineStoppable;
+    let lastPid = config.enginePid;
+    let lastListenerPid = config.engineListenerPid;
 
     // Poll less aggressively when the service is offline: there's nothing useful
     // to show, and each probe pays a full connection-refused wait (~500ms).
@@ -590,12 +593,19 @@ function initEnginePolling() {
                 return;
             }
 
-            // Ownership decides the button hints and the "started outside the app"
-            // badge, and it can change without reachability changing - a tracked
-            // service dying and being restarted by hand, say. Re-render rather than
-            // patch half the card.
-            if (engine.owned !== lastOwned) {
+            // Ownership and PID discovery decide whether Stop can act safely. On
+            // Windows the listener may be discovered after the page first renders,
+            // so refresh whenever any process-control value changes.
+            if (
+                engine.owned !== lastOwned
+                || engine.stoppable !== lastStoppable
+                || engine.pid !== lastPid
+                || engine.listener_pid !== lastListenerPid
+            ) {
                 lastOwned = engine.owned;
+                lastStoppable = engine.stoppable;
+                lastPid = engine.pid;
+                lastListenerPid = engine.listener_pid;
                 window.location.reload();
                 return;
             }

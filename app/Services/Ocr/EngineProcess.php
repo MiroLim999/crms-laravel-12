@@ -149,19 +149,48 @@ class EngineProcess
                 return $tasklist->getOutput();
             }
 
-            // Same blind spot as isAlive(): tasklist can miss WindowsApps processes.
-            // Use -File rather than -Command to avoid error 8009001d.
-            $ps = $this->runPsScript(
-                "(Get-Process -Id {$pid} -ErrorAction SilentlyContinue).ProcessName"
-            );
-
-            return $ps->getOutput();
+            return $this->windowsProcessPath($pid);
         }
 
         $process = Process::fromShellCommandline("ps -p {$pid} -o comm=", base_path(), timeout: 10);
         $process->run();
 
         return $process->getOutput();
+    }
+
+    /**
+     * Query a Windows process without PowerShell. The managed PowerShell host is
+     * broken on this machine and must not decide whether a valid PID is forgotten.
+     */
+    private function windowsProcessPath(int $pid): string
+    {
+        $probe = <<<'PY'
+import ctypes
+import sys
+
+kernel32 = ctypes.windll.kernel32
+handle = kernel32.OpenProcess(0x1000, False, int(sys.argv[1]))
+if not handle:
+    raise SystemExit(1)
+
+try:
+    size = ctypes.c_ulong(32768)
+    path = ctypes.create_unicode_buffer(size.value)
+    if not kernel32.QueryFullProcessImageNameW(handle, 0, path, ctypes.byref(size)):
+        raise SystemExit(1)
+    print(path.value)
+finally:
+    kernel32.CloseHandle(handle)
+PY;
+
+        $process = new Process(
+            [$this->resolvedPython(), '-c', $probe, (string) $pid],
+            base_path(),
+            timeout: 15,
+        );
+        $process->run();
+
+        return $process->isSuccessful() ? trim($process->getOutput()) : '';
     }
 
     /**
@@ -355,40 +384,57 @@ class EngineProcess
     // -------------------------------------------------------------------- spawning
 
     /**
-     * Windows: spawn the OCR service detached from this PHP process.
+     * Windows: ask the configured Python interpreter to launch uvicorn as a
+     * detached child and print its PID.
      *
-     * PowerShell's Start-Process creates an independent child and gives us its PID.
-     * stdout/stderr are redirected on the child itself, so it inherits none of
-     * Symfony Process's pipes. That detail matters: `cmd /c start /B` left a pipe
-     * attached to the long-lived Python process and Symfony waited until its
-     * 15-second timeout, killing the server during its cold import.
-     *
-     * PowerShell is invoked through a temporary `-File` script because `-Command`
-     * triggers a Windows credential-store error on this machine.
+     * Using Python avoids Windows PowerShell entirely. On this machine the managed
+     * PowerShell host can fail with credential error 8009001d after creating the
+     * child, leaving FastAPI online but untracked. The child writes directly to log
+     * files, so it inherits none of Symfony Process's pipes.
      */
     private function spawnWindows(): ?int
     {
         $python = $this->resolvedPython();
-        $args = $this->arguments();
-        $outLog = $this->logPath();
-        $errLog = $this->errorLogPath();
+        $command = [$python, ...$this->arguments()];
 
-        $argumentList = '@('.implode(', ', array_map(
-            fn (string $argument) => $this->psQuote($argument),
-            $args,
-        )).')';
+        $launcher = <<<'PY'
+import json
+import subprocess
+import sys
 
-        $script = "\$ErrorActionPreference = 'Stop'\r\n"
-            .'$ocrProcess = Start-Process'
-            .' -FilePath '.$this->psQuote($python)
-            .' -ArgumentList '.$argumentList
-            .' -WorkingDirectory '.$this->psQuote(base_path())
-            .' -RedirectStandardOutput '.$this->psQuote($outLog)
-            .' -RedirectStandardError '.$this->psQuote($errLog)
-            ." -WindowStyle Hidden -PassThru\r\n"
-            ."[Console]::Out.WriteLine(\$ocrProcess.Id)\r\n";
+command = json.loads(sys.argv[1])
+working_directory = sys.argv[2]
+stdout_path = sys.argv[3]
+stderr_path = sys.argv[4]
 
-        $process = $this->runPsScript($script);
+with open(stdout_path, "ab", buffering=0) as stdout, open(stderr_path, "ab", buffering=0) as stderr:
+    process = subprocess.Popen(
+        command,
+        cwd=working_directory,
+        stdin=subprocess.DEVNULL,
+        stdout=stdout,
+        stderr=stderr,
+        close_fds=True,
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
+
+print(process.pid)
+PY;
+
+        $process = new Process(
+            [
+                $python,
+                '-c',
+                $launcher,
+                json_encode($command, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+                base_path(),
+                $this->logPath(),
+                $this->errorLogPath(),
+            ],
+            base_path(),
+            timeout: 30,
+        );
+        $process->run();
 
         if (! $process->isSuccessful()) {
             $this->appendToErrorLog(
@@ -461,12 +507,10 @@ class EngineProcess
                 return true;
             }
 
-            // Fallback via -File (not -Command, which fails with 8009001d here).
-            $ps = $this->runPsScript(
-                "if (Get-Process -Id {$pid} -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"
-            );
-
-            return $ps->getExitCode() === 0;
+            // `tasklist` can miss WindowsApps processes in a web-server
+            // context. Verify the PID through Python's Win32 API instead of the
+            // broken managed PowerShell host.
+            return $this->windowsProcessPath($pid) !== '';
         }
 
         // Signal 0 tests for existence without touching the process.
@@ -621,44 +665,6 @@ class EngineProcess
                 .'service with whatever supervises it.'
             );
         }
-    }
-
-    /**
-     * PowerShell single-quoted literal: only the quote itself needs escaping, and
-     * it is escaped by doubling.
-     */
-    private function psQuote(string $value): string
-    {
-        return "'".str_replace("'", "''", $value)."'";
-    }
-
-    /**
-     * Run a short PowerShell snippet using `-File` rather than `-Command`.
-     *
-     * Every `powershell -Command` invocation on this system fails with error
-     * 8009001d (Windows Credential Manager / certificate store). `-File` skips that
-     * code path entirely. We write a disposable `.ps1` file, run it, and clean up.
-     *
-     * @return Process  The completed process - caller reads getOutput()/getExitCode().
-     */
-    private function runPsScript(string $scriptContent, int $timeout = 15): Process
-    {
-        $this->prepareStorage();
-        $file = $this->directory().DIRECTORY_SEPARATOR.'_ps_'.bin2hex(random_bytes(4)).'.ps1';
-        file_put_contents($file, $scriptContent."\r\n");
-
-        try {
-            $process = new Process(
-                ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $file],
-                base_path(),
-                timeout: $timeout,
-            );
-            $process->run();
-        } finally {
-            @unlink($file);
-        }
-
-        return $process;
     }
 
     // -------------------------------------------------------------------- pid + logs

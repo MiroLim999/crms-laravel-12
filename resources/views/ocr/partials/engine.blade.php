@@ -1,7 +1,8 @@
 {{--
     Engine status, always visible regardless of tab.
 
-    The Run and Stop buttons replace typing the uvicorn command into a terminal.
+    The manual Start and Stop buttons replace typing the uvicorn command into a terminal.
+    Opening this workspace only checks service health; it never starts the process.
     The command itself is still shown, so what the button does is never a mystery
     and can be run by hand if the process needs supervising properly.
 --}}
@@ -64,7 +65,7 @@
                                 title="{{ $engine['reachable']
                                     ? 'Already running - stop it first if you want to restart.'
                                     : 'Start the OCR service.' }}">
-                            <i class="icon-base bx bx-play icon-sm me-1"></i> Run service
+                            <i class="icon-base bx bx-play icon-sm me-1"></i> Start FastAPI
                         </button>
                     </form>
 
@@ -77,7 +78,7 @@
                                     ? 'Stop the service.'
                                     : 'Stop whatever is serving on port '.parse_url($engine['url'], PHP_URL_PORT).'.')
                                 : 'Nothing is running to stop.' }}">
-                        <i class="icon-base bx bx-stop icon-sm me-1"></i> Stop
+                        <i class="icon-base bx bx-stop icon-sm me-1"></i> Stop FastAPI
                     </button>
                 @else
                     <span class="badge bg-label-secondary">

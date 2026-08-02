@@ -103,9 +103,13 @@
             },
             activeJobId: @json($activeJob?->getKey()),
             engineReachable: @json($engine['reachable']),
-            // False when the running service was started outside the app. Stop still
-            // works in that case, but the wording and the badge differ.
+            // Process-control state is tracked separately from reachability. Windows
+            // may discover an externally started listener PID on a later poll; when
+            // that happens the page must reload to enable Stop.
             engineOwned: @json($engine['owned']),
+            engineStoppable: @json($engine['stoppable']),
+            enginePid: @json($engine['pid']),
+            engineListenerPid: @json($engine['listener_pid']),
             threshold: @json((float) $threshold),
         };
     </script>
