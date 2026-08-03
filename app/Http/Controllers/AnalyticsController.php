@@ -8,6 +8,7 @@ use App\Enums\RecordStatus;
 use App\Enums\RoleSlug;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
+use App\Models\OcrSetting;
 use App\Models\RecordField;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -33,7 +34,7 @@ class AnalyticsController extends Controller
             'byMonth' => $this->recordsByMonth(),
             'ocrQuality' => $this->ocrQuality(),
             'throughput' => $this->staffThroughput(),
-            'threshold' => (float) config('crms.confidence_review_threshold', 80.0),
+            'threshold' => OcrSetting::threshold(),
         ]);
     }
 
@@ -123,7 +124,7 @@ class AnalyticsController extends Controller
      */
     private function ocrQuality(): array
     {
-        $threshold = (float) config('crms.confidence_review_threshold', 80.0);
+        $threshold = OcrSetting::threshold();
 
         // Only fields the model actually read can be compared against a human.
         $comparable = RecordField::whereNotNull('ocr_text')->count();

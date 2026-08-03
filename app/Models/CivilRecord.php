@@ -109,7 +109,7 @@ class CivilRecord extends Model
      */
     public function lowConfidenceFields(): Collection
     {
-        $threshold = (float) config('crms.confidence_review_threshold', 80.0);
+        $threshold = OcrSetting::threshold();
 
         return $this->fields->filter(
             fn (RecordField $f) => $f->ocr_confidence !== null && $f->ocr_confidence < $threshold,

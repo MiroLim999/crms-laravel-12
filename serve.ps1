@@ -11,9 +11,9 @@
     incidental - nothing here is served by Apache.
 
     The OCR service is meant to stay up for the whole working session: Staff
-    scanning depends on it and it costs almost nothing while idle. A Super Admin
-    can also start and stop it from the OCR workspace (see EngineProcess), which
-    is the better route once the app is running.
+    scanning depends on it and it costs almost nothing while idle. CRMS never starts
+    or stops it - the OCR workspace only reports whether it answers - so this script
+    (or a supervisor in a deployment) is how it gets running.
 #>
 
 [CmdletBinding()]

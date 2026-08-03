@@ -17,25 +17,6 @@
         </div>
     @endunless
 
-    {{--
-        Training, evaluation, and scanning share one GPU. Without this, slow readings
-        during a training run look like a fault rather than contention.
-    --}}
-    @if ($health['reachable'] && ($health['busy'] ?? false))
-        <div class="alert alert-warning d-flex align-items-start" role="alert">
-            <i class="icon-base bx bx-time-five icon-md me-2"></i>
-            <div>
-                <h6 class="alert-heading mb-1">Model work in progress</h6>
-                <p class="mb-0">
-                    A Super Admin is running a
-                    {{ data_get($health, 'job.type', 'model') }} job on the graphics card
-                    ({{ data_get($health, 'job.percent', 0) }}% done). Reading handwriting
-                    will be slower than usual until it finishes. Everything still works.
-                </p>
-            </div>
-        </div>
-    @endif
-
     @if (! $activeModel)
         <div class="alert alert-warning d-flex align-items-center" role="alert">
             <i class="icon-base bx bx-error icon-md me-2"></i>

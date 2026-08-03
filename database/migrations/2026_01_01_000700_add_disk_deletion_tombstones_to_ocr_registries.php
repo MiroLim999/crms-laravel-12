@@ -27,10 +27,15 @@ return new class extends Migration
             $table->dropColumn(['disk_deleted_by', 'disk_deleted_at']);
         });
 
-        Schema::table('ml_datasets', function (Blueprint $table) {
-            $table->dropForeign(['disk_deleted_by']);
-            $table->dropIndex(['disk_deleted_at']);
-            $table->dropColumn(['disk_deleted_by', 'disk_deleted_at']);
-        });
+        // A later migration drops ml_datasets outright, so on any database that has
+        // reached it there is no table left to take these columns off. Guarded rather
+        // than removed: a database rolled back from between the two still needs it.
+        if (Schema::hasTable('ml_datasets')) {
+            Schema::table('ml_datasets', function (Blueprint $table) {
+                $table->dropForeign(['disk_deleted_by']);
+                $table->dropIndex(['disk_deleted_at']);
+                $table->dropColumn(['disk_deleted_by', 'disk_deleted_at']);
+            });
+        }
     }
 };

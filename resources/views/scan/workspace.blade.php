@@ -46,6 +46,30 @@
                     </p>
                 </x-card>
 
+                {{--
+                    Only rendered when a Super Admin has allowed Staff to choose.
+                    Otherwise every reading in the archive comes from the one promoted
+                    model, and there is nothing here to decide.
+                --}}
+                @if ($selectableModels !== [])
+                    <x-card title="OCR model" class="mb-4">
+                        <label for="modelSelect" class="form-label visually-hidden">
+                            Model to read with
+                        </label>
+                        <select class="form-select" id="modelSelect">
+                            @foreach ($selectableModels as $model)
+                                <option value="{{ $model['key'] }}" @selected($model['is_active'])>
+                                    {{ $model['label'] }}@if ($model['is_active']) (default)@endif
+                                </option>
+                            @endforeach
+                        </select>
+                        <p class="small text-muted mb-0 mt-2">
+                            The record stores whichever model produced its readings. Switching
+                            here affects this document only.
+                        </p>
+                    </x-card>
+                @endif
+
                 <div class="d-grid gap-2">
                     <button class="btn btn-primary" type="button" id="scanNowBtn">
                         <i class="icon-base bx bx-scan icon-sm me-1"></i> Read handwriting
@@ -229,6 +253,9 @@
                 },
                 body: JSON.stringify({
                     fields: cropped.map((c) => ({ name: c.name, image: c.image })),
+                    // Absent unless Staff choice is enabled; the server falls back to
+                    // the promoted model and re-checks that the key is one it allows.
+                    model: el('modelSelect')?.value ?? null,
                 }),
             });
 

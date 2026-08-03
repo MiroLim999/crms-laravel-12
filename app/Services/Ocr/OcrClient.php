@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\Http;
  * The browser never talks to the OCR service directly: it has no authentication
  * of its own and is bound to 127.0.0.1, so every call is proxied through Laravel
  * where the capability matrix is enforced.
+ *
+ * The surface is deliberately small - health, the model list, recognition, and the
+ * three model-lifecycle calls. Training, evaluation, datasets, and batch prediction
+ * are command-line work under ml/, not something the web app drives.
  */
 class OcrClient
 {
@@ -39,9 +43,7 @@ class OcrClient
     /**
      * Is the service up, and what is it running on?
      *
-     * @param  bool  $fresh  Skip the per-request cache. Required while waiting for a
-     *                       process that is still starting up.
-     * @return array{reachable: bool, status: string|null, device: string|null, default: string|null, models: list<array<string, mixed>>, busy: bool, job: array<string, mixed>|null, error: string|null}
+     * @return array{reachable: bool, status: string|null, device: string|null, default: string|null, models: list<array<string, mixed>>, error: string|null}
      */
     public function health(bool $fresh = false): array
     {
@@ -66,8 +68,6 @@ class OcrClient
                 'device' => $data['device'] ?? null,
                 'default' => $data['default'] ?? null,
                 'models' => $data['models'] ?? [],
-                'busy' => (bool) ($data['busy'] ?? false),
-                'job' => $data['job'] ?? null,
                 'error' => null,
             ];
         } catch (\Throwable $e) {
@@ -77,8 +77,6 @@ class OcrClient
                 'device' => null,
                 'default' => null,
                 'models' => [],
-                'busy' => false,
-                'job' => null,
                 'error' => $this->reason($e),
             ];
         }
@@ -96,7 +94,7 @@ class OcrClient
     }
 
     /**
-     * Drop the cached health, e.g. after starting or stopping the process.
+     * Drop the cached health.
      */
     public function forgetHealth(): void
     {
@@ -152,8 +150,8 @@ class OcrClient
     // ----------------------------------------------------------- model lifecycle
 
     /**
-     * Upload a model folder. Files are streamed, never buffered - weights run to
-     * roughly 1.3 GB.
+     * Upload a model as loose files - the folder a Super Admin dropped on the page.
+     * Files are streamed, never buffered: weights run to roughly 1.3 GB.
      *
      * @param  list<array{name: string, path: string}>  $files
      * @return array<string, mixed>
@@ -161,9 +159,27 @@ class OcrClient
     public function addModel(string $name, array $files): array
     {
         return $this->withAttachments(
-            $this->request($this->timeout * 10),
+            // No timeout cap: writing 1.3 GB to disk on a slow volume can take
+            // minutes, and there is nothing useful to do with a half-written model.
+            $this->request(0),
             'files',
             $files,
+            fn (PendingRequest $r) => $r->post('/add_model', ['name' => $name]),
+        )->json();
+    }
+
+    /**
+     * Upload a model as one .zip. The service extracts it and locates the model
+     * files inside, so a wrapping folder in the archive is fine.
+     *
+     * @return array<string, mixed>
+     */
+    public function addModelArchive(string $name, string $zipPath, string $filename = 'model.zip'): array
+    {
+        return $this->withAttachments(
+            $this->request(0),
+            'archive',
+            [['name' => $filename, 'path' => $zipPath]],
             fn (PendingRequest $r) => $r->post('/add_model', ['name' => $name]),
         )->json();
     }
@@ -187,171 +203,6 @@ class OcrClient
         return $this->send(fn (PendingRequest $r) => $r->post('/delete_model', [
             'model' => $key,
         ]))->json();
-    }
-
-    // ---------------------------------------------------------------- spot-check
-
-    /**
-     * Predict text for a handful of loose images. Synchronous and capped by the
-     * service - anything larger belongs in an evaluation job.
-     *
-     * @param  list<array{name: string, path: string}>  $files
-     * @return array<string, mixed>
-     */
-    public function predict(array $files, ?string $modelKey = null): array
-    {
-        return $this->withAttachments(
-            $this->request(),
-            'files',
-            $files,
-            fn (PendingRequest $r) => $r->post('/predict', ['model' => $modelKey ?? '']),
-        )->json();
-    }
-
-    // -------------------------------------------------------------------- datasets
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    public function datasets(): array
-    {
-        return $this->send(fn (PendingRequest $r) => $r->get('/datasets'))->json('datasets') ?? [];
-    }
-
-    /**
-     * Pre-training sanity report. Always run this before offering a dataset for
-     * training: a manifest pointing at missing files fails hours into an epoch.
-     *
-     * @return array<string, mixed>
-     */
-    public function validateDataset(string $name): array
-    {
-        return $this->send(
-            fn (PendingRequest $r) => $r->get('/datasets/'.urlencode($name).'/validate')
-        )->json('report') ?? [];
-    }
-
-    /**
-     * Create a dataset from an assembled zip. Streamed, never buffered: a dataset
-     * of thousands of images is far past PHP's memory and upload limits, which is
-     * why the browser chunks it and Laravel reassembles before this call.
-     *
-     * No explicit timeout cap: extracting a 50–100 GB archive and walking every
-     * image for validation can take many minutes. PHP's set_time_limit(0) in the
-     * controller already removes the PHP-side cap; the Guzzle default (0 = wait
-     * forever) matches that on the HTTP-client side.
-     *
-     * @return array<string, mixed>
-     */
-    public function createDataset(string $name, string $zipPath): array
-    {
-        return $this->withAttachments(
-            $this->request(0),          // 0 = no timeout
-            'file',
-            [['name' => $name.'.zip', 'path' => $zipPath]],
-            fn (PendingRequest $r) => $r->post('/datasets', ['name' => $name]),
-        )->json();
-    }
-
-    /**
-     * Create a dataset from an assembled directory/file set. Files and paths are
-     * deliberately built from the same ordered array: the service pairs each
-     * repeated multipart `files` field with the same-index entry in paths_json.
-     *
-     * @param  list<array{name: string, relative_path: string, path: string}>  $files
-     * @return array<string, mixed>
-     */
-    public function createDatasetFromFiles(string $name, array $files): array
-    {
-        $paths = array_map(
-            fn (array $file) => $file['relative_path'],
-            $files,
-        );
-
-        return $this->withAttachments(
-            $this->request(0),          // 0 = no timeout
-            'files',
-            $files,
-            fn (PendingRequest $r) => $r->post('/datasets', [
-                'name' => $name,
-                'paths_json' => json_encode($paths, JSON_THROW_ON_ERROR),
-            ]),
-        )->json();
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function deleteDataset(string $name): array
-    {
-        return $this->send(
-            fn (PendingRequest $r) => $r->delete('/datasets/'.urlencode($name))
-        )->json();
-    }
-
-    // ------------------------------------------------------------------------ jobs
-
-    /**
-     * Start a training or evaluation run.
-     *
-     * Returns immediately with a job id, so the client timeout covers only the
-     * start call and not the hours the run itself may take.
-     *
-     * @param  array<string, mixed>  $config
-     * @return array<string, mixed>
-     *
-     * @throws OcrServiceException When a GPU job is already running (409).
-     */
-    public function startJob(string $type, array $config): array
-    {
-        return $this->send(fn (PendingRequest $r) => $r->post('/jobs', [
-            'type' => $type,
-            'config' => $config,
-        ]))->json();
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function job(string $jobId): array
-    {
-        return $this->send(
-            fn (PendingRequest $r) => $r->timeout(10)->get('/jobs/'.urlencode($jobId))
-        )->json('job') ?? [];
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    public function jobs(): array
-    {
-        return $this->send(fn (PendingRequest $r) => $r->get('/jobs'))->json('jobs') ?? [];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function cancelJob(string $jobId): array
-    {
-        return $this->send(
-            fn (PendingRequest $r) => $r->post('/jobs/'.urlencode($jobId).'/cancel')
-        )->json('job') ?? [];
-    }
-
-    /**
-     * The training script's own defaults, so the form is pre-filled from one
-     * source rather than a second copy of the numbers in Blade.
-     *
-     * @return array<string, mixed>
-     */
-    public function trainingDefaults(): array
-    {
-        try {
-            return $this->request(5)->get('/training_defaults')->throw()->json('defaults') ?? [];
-        } catch (\Throwable) {
-            // The form still has to render when the service is down.
-            return [];
-        }
     }
 
     // ------------------------------------------------------------------ plumbing
@@ -423,8 +274,8 @@ class OcrClient
             // The service returns { ok: false, error: "..." } for its own errors.
             $message = $response->json('error') ?? "HTTP {$response->status()}";
 
-            // Carry the status so a 409 can be presented as "already running"
-            // rather than as a failure.
+            // Carry the status so a 409 can be presented as "already exists"
+            // rather than as an opaque failure.
             throw OcrServiceException::refused($message, $response->status());
         }
 
@@ -434,8 +285,7 @@ class OcrClient
     private function reason(\Throwable $e): string
     {
         // The module path is ml.api.main, not api.main: all Python lives under ml/
-        // and the service is launched from the repo root. The old hint could not
-        // work if anyone pasted it.
+        // and the service is launched from the repo root.
         return $e instanceof ConnectionException
             ? 'Start it with: python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001'
             : $e->getMessage();

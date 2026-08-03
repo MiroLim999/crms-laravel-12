@@ -18,6 +18,10 @@ Two processes, one repository:
 Laravel calls the OCR service **server-side only**. The service has no authentication of
 its own and stays bound to `127.0.0.1`; all authorization happens in Laravel.
 
+Laravel does not start or stop that process. It is a separate program with its own
+lifetime — run it from a terminal in development, or under a supervisor in a
+deployment. The OCR workspace reports whether it answers and shows the command.
+
 ## Roles
 
 Three seeded roles. **There is no public sign-up** — every account is created by an admin.
@@ -44,25 +48,32 @@ change-request flow. This is intentional — it is what keeps the audit trail me
 ```
 app/                    Laravel application code
 ├── Enums/              RoleSlug, DocumentType, RecordStatus, ChangeRequestStatus
-├── Models/             User, Role, CivilRecord, RecordField, ChangeRequest, OcrModel, ...
-├── Services/Ocr/       OcrClient, OcrModelManager, EvaluationCharts
+├── Models/             User, Role, CivilRecord, RecordField, ChangeRequest,
+│                       OcrModel, OcrSetting, ...
+├── Services/Ocr/       OcrClient, OcrModelManager, EngineStatus, ChunkedUpload
 ├── Services/           AuditLogger, UserProvisioner, ChangeRequestService
 └── Providers/          AuthServiceProvider - the capability matrix, in code
 
 ml/                     ALL Python lives here
-├── api/main.py         FastAPI OCR service
+├── api/main.py         FastAPI OCR service - serve, install, rename, delete models
 ├── train_trocr.py      fine-tuning
 ├── test_trocr.py       evaluate the base model
 ├── test_finetuned.py   evaluate a fine-tuned model
 ├── predict.py          batch predict a folder of images
 ├── metrics.py          CER / WER / exact-match + chart export
+├── dataset_registry.py dataset layout, validation, and name sanitising
 ├── download_trocr.py   fetch the base model
 ├── models/             fine-tuned model folders (gitignored, ~1.3 GB each)
 ├── dataset/            training images + manifest CSV (gitignored)
-└── evaluation-metrics/ charts, surfaced on the OCR management page
+└── evaluation-metrics/ charts written by the evaluation scripts
 
 sneat/                  SNEAT template - visual design reference only, never routed
 ```
+
+Training, evaluation, dataset preparation, and batch prediction are **command-line
+work only**. They are deliberately not driven from the web UI: a request handler is
+the wrong place to pin a GPU for hours, and the scripts' output is far more useful in
+a terminal than paraphrased into a progress bar.
 
 ## Setup
 
@@ -123,13 +134,39 @@ Delete that seeder before deploying.
    The best checkpoint by validation loss is saved to `ml/models/`.
 2. **Evaluate** — `python ml\test_trocr.py` and `python ml\test_finetuned.py`. Each writes a
    timestamped chart to `ml/evaluation-metrics/{base,finetuned}/`.
-3. **Promote** — sign in as Super Admin, open **OCR Models**, review the charts, record the
-   metrics, and set the model active. Only then does Staff scanning use it.
-4. **Scan** — Staff upload a certificate, adjust the field boxes, run the model, correct
+3. **Install** — sign in as Super Admin, open **OCR Workspace**, and add the model with
+   *Add*. Either a `.zip` of the model or the folder itself; both are uploaded in slices,
+   so PHP's 40 MB limit does not apply.
+4. **Select** — pick it in *Model used for scanning* and press **Save settings**. Only
+   then does Staff scanning use it. Installing a model changes nothing on its own.
+5. **Scan** — Staff upload a certificate, adjust the field boxes, run the model, correct
    anything flagged, and submit. Submission locks the record.
 
-Any folder dropped into `ml/models/` is auto-discovered — no restart needed. It needs
-`config.json` plus `model.safetensors` or `pytorch_model.bin`.
+Any folder dropped into `ml/models/` is auto-discovered — no restart needed, just press
+*Rescan*. It needs `config.json` plus `model.safetensors` or `pytorch_model.bin`, and the
+tokenizer files.
+
+### The OCR workspace
+
+One page, Super Admin only. It does exactly two things:
+
+- **Manage models** — install (folder or `.zip`), rename, delete. A `.zip` may wrap the
+  model in a folder; the service finds it. The base model and the model currently in use
+  cannot be renamed or deleted.
+- **Save settings** — which model Staff scan with, whether Staff may choose a different
+  one per document, and the review threshold. *Save settings* stays disabled until
+  something actually differs from what is stored.
+
+There is deliberately no fine-tuning, dataset upload, evaluation, batch prediction, or
+Start/Stop button on that page. The first four are long-running command-line work; the
+last is an OS process, and spawning or killing one from a browser tab is a lot of blast
+radius for a convenience.
+
+**Staff model choice is off by default.** Left off, every reading in the archive came from
+the one model a Super Admin approved, which is the easier position to defend. Switched on,
+Staff get a picker on the marking step and the record stores whichever model produced its
+readings. A submitted key is honoured only if the service can actually serve it — a stale
+tab cannot swap the model behind a record.
 
 ### Dataset format
 
@@ -146,9 +183,13 @@ Rows with empty labels or the label `UNREADABLE` are skipped.
 ## A note on confidence
 
 Every reading carries a confidence score: the geometric mean of per-token probabilities.
-This is **the model's certainty in its own output, not accuracy**. Fields below the
-threshold (`CRMS_CONFIDENCE_THRESHOLD`, default 80%) are flagged for review. Treat it as a
-prompt to look closer, never as a quality guarantee.
+This is **the model's certainty in its own output, not accuracy**. Fields below the review
+threshold are flagged for a closer look. Treat it as a prompt to look closer, never as a
+quality guarantee.
+
+The threshold is set in the OCR workspace. `CRMS_CONFIDENCE_THRESHOLD` (default 80%) is the
+fallback used until a Super Admin overrides it, and clearing the field in the UI returns to
+that fallback.
 
 The analytics page also shows a correction rate — how often a person changed what the model
 read. Also a signal, not a validated metric: a corrected field may have been right, and an

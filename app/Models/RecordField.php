@@ -38,7 +38,7 @@ class RecordField extends Model
     public function needsReview(): bool
     {
         return $this->ocr_confidence !== null
-            && $this->ocr_confidence < (float) config('crms.confidence_review_threshold', 80.0);
+            && $this->ocr_confidence < OcrSetting::threshold();
     }
 
     /**

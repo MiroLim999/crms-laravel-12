@@ -6,48 +6,35 @@ Laravel sends one or more cropped field images (as PNG data URLs) and gets back
 the predicted text plus a confidence score (the model's certainty in its own
 output, 0-100%) for each crop.
 
-This is a port of the Flask prototype (api/app.py) with the same endpoints and
-JSON shapes, so the migration is behavior-preserving for callers.
-
 Run from the repo root:
   python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001
   (or: python ml\api\main.py)
 
 Endpoints:
-  GET  /health     -> status + which models are available/loaded + active job
+  GET  /health     -> status + which models are available/loaded
   GET  /models     -> selectable models for the frontend dropdown
   POST /ocr        -> { "fields": [ { "name": "...", "image": "data:image/png;base64,..." } ],
                        "model": "<key>" }  returns { "results": [ { "name", "text", "confidence" } ] }
-  POST /add_model  -> multipart upload (name + files) saved into ml/models/<name>/
+  POST /add_model  -> multipart upload saved into ml/models/<name>/. Either loose
+                      `files` (a model folder) or one `archive` (.zip).
   POST /delete_model -> { "model": "<key>" } removes that folder from ml/models/
   POST /rename_model -> { "model": "<key>", "newName": "<name>" } renames the folder
-  POST /predict    -> multipart images + model, synchronous, capped. Spot-checking.
 
-  GET    /datasets                 -> named datasets with per-split counts and size
-  POST   /datasets                 -> create one from an uploaded zip or directory drop
-  GET    /datasets/{name}/validate -> pre-training sanity report
-  DELETE /datasets/{name}          -> remove a dataset
-
-  GET  /jobs             -> recent training/evaluation runs
-  POST /jobs             -> start one (409 if the GPU is already busy)
-  GET  /jobs/{id}        -> status, progress, metrics, log tail
-  POST /jobs/{id}/cancel -> request cancellation
-
-Training and evaluation are jobs, never synchronous requests: training runs for
-hours. One GPU job at a time - see jobs.py.
+Training, evaluation, dataset preparation, and batch prediction are deliberately
+NOT here. They are long-running command-line work - see ml/train_trocr.py,
+ml/test_finetuned.py, ml/predict.py - and a request handler is the wrong place to
+pin a GPU for hours.
 """
 
 import os
 import io
 import sys
-import json
 import math
-import ntpath
 import shutil
 import base64
 import tempfile
 import threading
-import unicodedata
+import zipfile
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
@@ -62,8 +49,8 @@ for _path in (_API_ROOT, _ML_ROOT):
 
 # Quiets the HF stack. Must precede torch/transformers, whose env vars are read at
 # import time. Deliberately NOT `logging.disable(WARNING)`, which is process-wide
-# and used to silence uvicorn's own log along with everything else - leaving
-# EngineProcess with an empty engine.out.log to explain a failed start.
+# and would silence uvicorn's own log along with everything else - leaving the
+# terminal with nothing to explain a failed start.
 import hf_quiet  # noqa: E402,F401
 
 import torch
@@ -74,11 +61,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
-# Import-cheap siblings: no torch, so /health and /datasets stay responsive while
-# the GPU is busy.
+# Import-cheap sibling: no torch, so /health stays responsive while the GPU is busy.
+# Only `sanitise_name` is used, so model and dataset names fold to a safe path
+# segment by exactly one rule rather than two copies of it.
 import dataset_registry as ds
-import jobs
-import runners
 
 # ============================================================
 # CONFIG
@@ -290,30 +276,6 @@ def _safe_model_name(raw):
     return name
 
 
-def _guard_model_not_in_use(key, verb):
-    """Refuse to rename or delete a model a running job depends on.
-
-    Training writes into its output folder between epochs and evaluation reads the
-    model it was given; moving either out from under a job corrupts it. Laravel
-    blocks the *active* model separately - this is the check only the service can
-    make, because the service owns the jobs."""
-    active = jobs.manager.active()
-    if active is None:
-        return
-
-    config = active.config or {}
-    involved = {config.get("output_name"), config.get("model"), config.get("base_model")}
-
-    if key in involved - {None}:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"'{key}' is in use by the running {active.type} job ({active.id}). "
-                f"Cancel it or wait for it to finish before you {verb} this model."
-            ),
-        )
-
-
 def _sequence_confidence(model, gen_output, eos_id):
     """Geometric mean of per-token probabilities up to the first EOS, as a %."""
     try:
@@ -364,10 +326,6 @@ class HealthResponse(BaseModel):
     device: str
     default: str
     models: list[ModelInfo]
-    # Added for the OCR workspace. Optional so an older caller reading only the
-    # original keys is unaffected.
-    job: Optional[dict] = None
-    busy: bool = False
 
 
 class ModelsResponse(BaseModel):
@@ -434,9 +392,7 @@ async def lifespan(app: FastAPI):
     # /health immediately after start, and the device is only probed on the
     # first real inference.
     print(f"[ocr-api] Models directory:   {MODELS_DIR}")
-    print(f"[ocr-api] Datasets directory: {ds.DATASETS_DIR}")
     print(f"[ocr-api] Discovered models: {sorted(_discover_models()) or '(none)'}")
-    print(f"[ocr-api] Discovered datasets: {[d['name'] for d in ds.list_datasets()] or '(none)'}")
     yield
     _models.clear()
 
@@ -492,18 +448,14 @@ def _device_name() -> str:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> dict:
-    # Touches no GPU, so it keeps answering while a training job saturates the
-    # card. That is what lets the workspace poll for progress at all.
-    active = jobs.manager.active()
-
+    # Touches no GPU, so it keeps answering while a scan is mid-flight. That is
+    # what lets the workspace poll for reachability at all.
     return {
         "status": "ok",
         "model_loaded": bool(_models),
         "device": _device_name(),
         "default": _default_key(),
         "models": _model_info(),
-        "job": active.summary() if active else None,
-        "busy": active is not None,
     }
 
 
@@ -567,32 +519,135 @@ _ALLOWED_MODEL_FILES = {
 }
 _ALLOWED_MODEL_EXTS = {".json", ".safetensors", ".bin", ".txt", ".model"}
 
+_WEIGHT_FILES = {"model.safetensors", "pytorch_model.bin"}
 
-@app.post("/add_model", response_model=AddModelResponse)
-def add_model(
-    name: str = Form(""),
-    files: Optional[list[UploadFile]] = File(None),
-    files_bracketed: Optional[list[UploadFile]] = File(None, alias="files[]"),
-) -> dict:
-    """Save an uploaded model folder into Models/<name>/ so it becomes selectable.
+# A model folder is a dozen small files plus one big weights file. An archive with
+# thousands of members is not a model, and walking it would be the expensive part of
+# a zip bomb.
+_MAX_ARCHIVE_MEMBERS = 500
 
-    Multipart form:
-      name      -> desired model name (folder name)
-      files     -> the model files (config.json, model.safetensors, ...)
+# Refuse an archive that claims to expand to more than this. TrOCR base is ~1.3 GB;
+# 12 GB leaves room for a larger checkpoint without accepting an unbounded write.
+_MAX_ARCHIVE_UNCOMPRESSED_BYTES = 12 * 1024 ** 3
 
-    Starlette spools large uploads to a temp file and we copy them across in
-    chunks, so a ~1.3 GB weights file is never held in memory."""
-    raw_name = (name or "").strip()
-    if not raw_name:
-        raise HTTPException(status_code=400, detail="Please provide a model name.")
 
-    safe_name = _safe_model_name(raw_name)
+def _model_root_in_archive(zf):
+    """The directory inside the archive that holds config.json, or None.
 
-    uploads = list(files or []) or list(files_bracketed or [])
-    if not uploads:
-        raise HTTPException(status_code=400, detail="No files were uploaded.")
+    A zip exported from a file manager usually wraps everything in a folder, and
+    sometimes in two, so the model is found rather than assumed to be at the root.
+    The shallowest directory containing config.json wins; deeper ones would be
+    nested checkpoints, not the model that was uploaded."""
+    candidates = []
 
-    # Validate names/extensions and that it looks like a real model.
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+
+        # Zip entries always use forward slashes, but archives written on Windows
+        # by careless tooling sometimes contain backslashes.
+        path = info.filename.replace("\\", "/")
+
+        # macOS adds a __MACOSX sidecar tree that mirrors every real file.
+        if path.startswith("__MACOSX/") or os.path.basename(path).startswith("._"):
+            continue
+
+        if os.path.basename(path) == "config.json":
+            prefix = path[: -len("config.json")]
+            candidates.append(prefix)
+
+    if not candidates:
+        return None
+
+    return min(candidates, key=lambda prefix: (prefix.count("/"), len(prefix)))
+
+
+def _extract_model_archive(zip_path, target):
+    """Unpack the model files from `zip_path` into `target`, flattened.
+
+    Only the whitelisted files directly inside the archive's model directory are
+    written, and each one is written by name into `target` - member paths are never
+    joined onto a filesystem path, so no crafted entry ('../', 'C:/', a symlink) can
+    escape. That is the whole zip-slip defence: nothing derived from the archive
+    reaches os.path.join except a validated basename."""
+    try:
+        zf = zipfile.ZipFile(zip_path)
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="That file is not a readable .zip archive.")
+
+    with zf:
+        members = zf.infolist()
+
+        if len(members) > _MAX_ARCHIVE_MEMBERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"That archive has {len(members)} entries; a model has a handful. "
+                       "Zip the model folder on its own.",
+            )
+
+        if sum(info.file_size for info in members) > _MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail="That archive expands to more than 12 GB, which is far larger than "
+                       "a TrOCR checkpoint. Refusing to unpack it.",
+            )
+
+        for info in members:
+            if info.flag_bits & 0x1:
+                raise HTTPException(
+                    status_code=400, detail="Encrypted archives are not supported."
+                )
+
+        root = _model_root_in_archive(zf)
+        if root is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No config.json anywhere in that archive, so it is not a model. "
+                       "Zip the folder containing config.json and the weights.",
+            )
+
+        saved = []
+        for info in members:
+            if info.is_dir():
+                continue
+
+            path = info.filename.replace("\\", "/")
+            if path.startswith("__MACOSX/") or not path.startswith(root):
+                continue
+
+            relative = path[len(root):]
+
+            # Only the model directory itself. A nested subfolder is a different
+            # artifact (an optimiser state, another checkpoint) and is not part of
+            # what makes this model loadable.
+            if "/" in relative:
+                continue
+
+            base = os.path.basename(relative)
+            ext = os.path.splitext(base)[1].lower()
+            if base not in _ALLOWED_MODEL_FILES and ext not in _ALLOWED_MODEL_EXTS:
+                continue
+
+            # Streamed member -> file. A 1.3 GB weights file must not be read into
+            # memory to be written out.
+            with zf.open(info, "r") as source, open(os.path.join(target, base), "wb") as out:
+                shutil.copyfileobj(source, out, UPLOAD_CHUNK_BYTES)
+
+            saved.append(base)
+
+    if "config.json" not in saved:
+        raise HTTPException(status_code=400, detail="Missing config.json.")
+    if not (_WEIGHT_FILES & set(saved)):
+        raise HTTPException(
+            status_code=400,
+            detail="Missing weights (model.safetensors or pytorch_model.bin).",
+        )
+
+    return sorted(saved)
+
+
+def _save_model_files(uploads, target):
+    """Write a folder upload - one multipart part per model file - into `target`."""
     incoming = {}
     for f in uploads:
         base = os.path.basename((f.filename or "").replace("\\", "/"))
@@ -605,11 +660,52 @@ def add_model(
 
     if "config.json" not in incoming:
         raise HTTPException(status_code=400, detail="Missing config.json.")
-    if not ({"model.safetensors", "pytorch_model.bin"} & set(incoming)):
+    if not (_WEIGHT_FILES & set(incoming)):
         raise HTTPException(
             status_code=400,
             detail="Missing weights (model.safetensors or pytorch_model.bin).",
         )
+
+    saved = []
+    for base, f in incoming.items():
+        with open(os.path.join(target, base), "wb") as out:
+            shutil.copyfileobj(f.file, out, UPLOAD_CHUNK_BYTES)
+        saved.append(base)
+
+    return sorted(saved)
+
+
+@app.post("/add_model", response_model=AddModelResponse)
+def add_model(
+    name: str = Form(""),
+    files: Optional[list[UploadFile]] = File(None),
+    files_bracketed: Optional[list[UploadFile]] = File(None, alias="files[]"),
+    archive: Optional[UploadFile] = File(None),
+) -> dict:
+    """Save an uploaded model into Models/<name>/ so it becomes selectable.
+
+    Multipart form, one of two shapes:
+      name    + files    -> the model folder, one part per file
+      name    + archive  -> a single .zip; the model is located inside it, so a
+                            wrapping folder in the archive is fine
+
+    Starlette spools large uploads to a temp file and we copy them across in
+    chunks, so a ~1.3 GB weights file is never held in memory."""
+    raw_name = (name or "").strip()
+    if not raw_name:
+        raise HTTPException(status_code=400, detail="Please provide a model name.")
+
+    safe_name = _safe_model_name(raw_name)
+
+    uploads = list(files or []) or list(files_bracketed or [])
+
+    if archive is not None and uploads:
+        raise HTTPException(
+            status_code=400,
+            detail="Send either one archive or the model files, not both.",
+        )
+    if archive is None and not uploads:
+        raise HTTPException(status_code=400, detail="No files were uploaded.")
 
     os.makedirs(MODELS_DIR, exist_ok=True)
     target = os.path.join(MODELS_DIR, safe_name)
@@ -620,13 +716,27 @@ def add_model(
 
     os.makedirs(target)
     try:
-        saved = []
-        for base, f in incoming.items():
-            with open(os.path.join(target, base), "wb") as out:
-                shutil.copyfileobj(f.file, out, UPLOAD_CHUNK_BYTES)
-            saved.append(base)
+        if archive is None:
+            saved = _save_model_files(uploads, target)
+        else:
+            # Spooled to disk first: zipfile needs a seekable file, and an UploadFile
+            # over ~1 MB is a SpooledTemporaryFile that may not be.
+            handle, staged = tempfile.mkstemp(suffix=".zip", prefix="crms-model-")
+            os.close(handle)
+            try:
+                with open(staged, "wb") as out:
+                    shutil.copyfileobj(archive.file, out, UPLOAD_CHUNK_BYTES)
+                saved = _extract_model_archive(staged, target)
+            finally:
+                try:
+                    os.remove(staged)
+                except OSError:
+                    pass
+    except HTTPException:
+        shutil.rmtree(target, ignore_errors=True)  # never leave a half-written model
+        raise
     except Exception as e:
-        shutil.rmtree(target, ignore_errors=True)  # roll back on failure
+        shutil.rmtree(target, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"Failed to save files: {e}")
 
     print(f"[ocr-api] Added model '{safe_name}' with {len(saved)} files.")
@@ -645,12 +755,6 @@ def delete_model(payload: DeleteModelRequest) -> dict:
         raise HTTPException(status_code=400, detail="No model specified.")
     if key == BASE_MODEL_KEY:
         raise HTTPException(status_code=400, detail="The base model cannot be deleted.")
-
-    # Before the existence check, not after. A training run's output folder does not
-    # exist until its first checkpoint lands, so checking existence first reports a
-    # confusing 404 for a name that is very much in use - and leaves a race where
-    # the folder appears between the two checks.
-    _guard_model_not_in_use(key, "delete")
 
     discovered = _discover_models()
     if key not in discovered:
@@ -693,12 +797,6 @@ def rename_model(payload: RenameModelRequest) -> dict:
 
     new_name = _safe_model_name(raw_new)
 
-    # Checked first, for the same reason as in delete_model: a running job's output
-    # folder may not exist yet, and "not found" would be a misleading answer.
-    _guard_model_not_in_use(key, "rename")
-    # Also block taking over a name a job is about to write into.
-    _guard_model_not_in_use(new_name, "rename onto")
-
     discovered = _discover_models()
     if key not in discovered:
         raise HTTPException(status_code=404, detail=f"Model '{key}' was not found.")
@@ -729,427 +827,6 @@ def rename_model(payload: RenameModelRequest) -> dict:
 
     print(f"[ocr-api] Renamed model '{key}' -> '{new_name}'.")
     return {"ok": True, "name": new_name}
-
-
-# ============================================================
-# Spot-check prediction (synchronous, capped)
-# ============================================================
-# Loose unlabelled images, a handful at a time. Anything larger is an evaluation
-# job: this call blocks a worker thread until it finishes.
-MAX_PREDICT_IMAGES = 50
-
-
-def _cached_loader(source):
-    """Adapter so the ML scripts reuse this service's in-process model cache.
-
-    The scripts resolve a model key to a folder path (or the HF name) and then
-    call `loader(source)`. Mapping that back to a cache key avoids loading a
-    second ~1.3 GB copy of a model that is already in VRAM."""
-    if source == FALLBACK_MODEL:
-        key = BASE_MODEL_KEY
-    else:
-        key = os.path.basename(os.path.normpath(source))
-
-    entry = _load_model(key)
-    return entry["processor"], entry["model"]
-
-
-class PredictResponse(BaseModel):
-    ok: bool
-    model: str
-    modelKey: str
-    count: int
-    average_confidence: float
-    low_confidence: int
-    threshold: float
-    rows: list[dict]
-
-
-# Plain `def`: blocking GPU work belongs on a threadpool so /health keeps answering.
-@app.post("/predict", response_model=PredictResponse)
-def predict(
-    model: str = Form(""),
-    files: Optional[list[UploadFile]] = File(None),
-    files_bracketed: Optional[list[UploadFile]] = File(None, alias="files[]"),
-) -> dict:
-    """Predict text for a few loose images, with a confidence per image."""
-    import predict as predictor
-
-    uploads = list(files or []) or list(files_bracketed or [])
-    if not uploads:
-        raise HTTPException(status_code=400, detail="No images were uploaded.")
-
-    if len(uploads) > MAX_PREDICT_IMAGES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Up to {MAX_PREDICT_IMAGES} images at a time. "
-                   "For a larger run, start an evaluation job.",
-        )
-
-    # Not _resolve_key(): that silently substitutes the default when a model is
-    # missing, which is the right call for /ocr (a Staff scan should still produce
-    # something) and the wrong one here. A Super Admin spot-checking model X to
-    # decide whether to promote it must never be shown model Y's output under X's
-    # name. Say the model is gone instead.
-    key = (model or "").strip() or _default_key()
-    if key != BASE_MODEL_KEY and key not in _discover_models():
-        raise HTTPException(
-            status_code=404,
-            detail=f"The service cannot see a model named '{key}'. Rescan the model list.",
-        )
-
-    # Written to a temp folder and removed straight after, so a spot-check never
-    # leaves images on the server.
-    with tempfile.TemporaryDirectory(prefix="crms-predict-") as staging:
-        paths = []
-        for upload in uploads:
-            base = os.path.basename((upload.filename or "").replace("\\", "/"))
-            if not base or ".." in base:
-                raise HTTPException(status_code=400, detail="Invalid file name in upload.")
-            if not base.lower().endswith(ds.IMAGE_EXTENSIONS):
-                raise HTTPException(status_code=400, detail=f"Not an image: {base}")
-
-            target = os.path.join(staging, base)
-            with open(target, "wb") as out:
-                shutil.copyfileobj(upload.file, out, UPLOAD_CHUNK_BYTES)
-            paths.append(target)
-
-        try:
-            result = predictor.run_prediction(
-                model=key,
-                image_paths=paths,
-                limit=MAX_PREDICT_IMAGES,
-                max_new_tokens=MAX_NEW_TOKENS,
-                loader=_cached_loader,
-                write_csv=False,
-            )
-        except predictor.PredictionError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-    return {
-        "ok": True,
-        "model": _label_for(key),
-        "modelKey": key,
-        "count": result["count"],
-        "average_confidence": result["average_confidence"],
-        "low_confidence": result["low_confidence"],
-        "threshold": result["threshold"],
-        "rows": result["rows"],
-    }
-
-
-# ============================================================
-# Datasets
-# ============================================================
-class DatasetsResponse(BaseModel):
-    ok: bool
-    datasets: list[dict]
-
-
-@app.get("/datasets", response_model=DatasetsResponse)
-def list_datasets() -> dict:
-    """Named datasets with per-split image counts and total size."""
-    return {"ok": True, "datasets": ds.list_datasets()}
-
-
-@app.get("/datasets/{name}/validate")
-def validate_dataset(name: str) -> dict:
-    """Sanity report, run before a dataset is offered for training.
-
-    A manifest that points at missing files wastes hours of GPU time and fails
-    deep into an epoch, so this is not optional."""
-    try:
-        return {"ok": True, "report": ds.validate(name)}
-    except ds.DatasetError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-def _normalise_dataset_upload_paths(paths_json: str, uploads: list[UploadFile]) -> list[str]:
-    """Validate and normalise browser-supplied relative paths in upload order."""
-    try:
-        paths = json.loads(paths_json)
-    except (TypeError, json.JSONDecodeError):
-        raise HTTPException(status_code=400, detail="paths_json must be a valid JSON array.")
-
-    if not isinstance(paths, list):
-        raise HTTPException(status_code=400, detail="paths_json must be a JSON array.")
-    if not paths or not uploads:
-        raise HTTPException(status_code=400, detail="No directory files were uploaded.")
-    if len(paths) != len(uploads):
-        raise HTTPException(
-            status_code=400,
-            detail="The number of uploaded files must match the number of paths.",
-        )
-
-    normalised = []
-    file_paths = set()
-    directory_paths = set()
-
-    for index, raw_path in enumerate(paths):
-        if not isinstance(raw_path, str):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Dataset path {index + 1} must be a string.",
-            )
-
-        path = raw_path.replace("\\", "/")
-        drive, _tail = ntpath.splitdrive(path)
-        if drive or path.startswith("/"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Dataset path {index + 1} must be relative.",
-            )
-
-        segments = path.split("/")
-        if any(segment in ("", ".", "..") for segment in segments):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Dataset path {index + 1} contains an unsafe path segment.",
-            )
-        if any(
-            len(segment.encode("utf-8")) > 255
-            or any(character in '<>:"|?*' for character in segment)
-            or segment.rstrip(" .") != segment
-            or any(unicodedata.category(character).startswith("C") for character in segment)
-            for segment in segments
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Dataset path {index + 1} contains an unsafe path segment.",
-            )
-        if any(
-            os.path.splitext(segment)[0].casefold()
-            in {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
-            for segment in segments
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Dataset path {index + 1} contains a reserved file name.",
-            )
-
-        path = "/".join(segments)
-        filename = segments[-1]
-        if filename != ds.MANIFEST_NAME and not filename.lower().endswith(ds.IMAGE_EXTENSIONS):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Dataset path '{path}' is not a manifest CSV or supported image.",
-            )
-
-        # Directory drops must remain portable to Windows, where case-only path
-        # differences and alternate separators address the same destination.
-        key = tuple(segment.casefold() for segment in segments)
-        if key in file_paths:
-            raise HTTPException(status_code=400, detail=f"Duplicate dataset path: {path}")
-        if key in directory_paths or any(key[:length] in file_paths for length in range(1, len(key))):
-            raise HTTPException(status_code=400, detail=f"Conflicting dataset path: {path}")
-
-        file_paths.add(key)
-        for length in range(1, len(key)):
-            directory_paths.add(key[:length])
-        normalised.append(path)
-
-    return normalised
-
-
-@app.post("/datasets")
-def create_dataset(
-    name: str = Form(""),
-    file: Optional[UploadFile] = File(None),
-    files: Optional[list[UploadFile]] = File(None),
-    paths_json: Optional[str] = Form(None),
-) -> dict:
-    """Create a dataset from one zip or a directory drop, never both."""
-    if not (name or "").strip():
-        raise HTTPException(status_code=400, detail="Please provide a dataset name.")
-
-    directory_files = files or []
-    has_directory_payload = bool(directory_files) or paths_json is not None
-    if file is not None and has_directory_payload:
-        raise HTTPException(
-            status_code=400,
-            detail="Upload either one zip archive or directory files, not both.",
-        )
-    if file is None and not has_directory_payload:
-        raise HTTPException(status_code=400, detail="No archive or directory files were uploaded.")
-
-    try:
-        safe = ds.sanitise_name(name)
-    except ds.DatasetError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    os.makedirs(ds.DATASETS_DIR, exist_ok=True)
-
-    if file is not None:
-        # Copied in chunks: a dataset archive can be tens of gigabytes.
-        # 8 MB copy buffer keeps memory flat regardless of archive size.
-        handle, staged_zip = tempfile.mkstemp(suffix=".zip", prefix="crms-dataset-")
-        os.close(handle)
-
-        try:
-            with open(staged_zip, "wb") as out:
-                shutil.copyfileobj(file.file, out, UPLOAD_CHUNK_BYTES)
-
-            result = ds.create_from_zip(safe, staged_zip)
-        except ds.DatasetError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to unpack the dataset: {e}")
-        finally:
-            # Always remove the staged zip — it can be tens of gigabytes.
-            try:
-                os.remove(staged_zip)
-            except OSError:
-                pass
-    else:
-        if paths_json is None:
-            raise HTTPException(status_code=400, detail="paths_json is required for directory files.")
-        normalised_paths = _normalise_dataset_upload_paths(paths_json, directory_files)
-
-        try:
-            with tempfile.TemporaryDirectory(prefix="crms-dataset-directory-") as staged_directory:
-                staging_root = os.path.realpath(staged_directory)
-                for upload, relative_path in zip(directory_files, normalised_paths):
-                    destination = os.path.realpath(
-                        os.path.join(staged_directory, *relative_path.split("/"))
-                    )
-                    try:
-                        inside_staging = os.path.commonpath((staging_root, destination)) == staging_root
-                    except ValueError:
-                        inside_staging = False
-                    if not inside_staging:
-                        raise ds.DatasetError("Refusing to stage a file outside the upload directory.")
-
-                    os.makedirs(os.path.dirname(destination), exist_ok=True)
-                    with open(destination, "wb") as out:
-                        shutil.copyfileobj(upload.file, out, UPLOAD_CHUNK_BYTES)
-
-                result = ds.create_from_directory(safe, staged_directory)
-        except ds.DatasetError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to install the dataset: {e}")
-
-    print(f"[ocr-api] Added dataset '{result['name']}'.")
-    return {"ok": True, **result}
-
-
-@app.delete("/datasets/{name}")
-def delete_dataset(name: str) -> dict:
-    """Destructive: removes the dataset folder and every image in it."""
-    active = jobs.manager.active()
-    if active is not None:
-        # Both sides sanitised, so 'my dataset' and 'my-dataset' cannot slip past
-        # the check and delete the images a running job is reading.
-        try:
-            requested = ds.sanitise_name(name)
-        except ds.DatasetError:
-            requested = name
-
-        if (active.config or {}).get("dataset") == requested:
-            raise HTTPException(
-                status_code=409,
-                detail=f"'{requested}' is in use by the running {active.type} job "
-                       f"({active.id}). Cancel it first.",
-            )
-
-    try:
-        deleted = ds.delete_dataset(name)
-    except ds.DatasetError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Could not delete: {e}")
-
-    print(f"[ocr-api] Deleted dataset '{deleted}'.")
-    return {"ok": True, "deleted": deleted}
-
-
-# ============================================================
-# Jobs (training / evaluation)
-# ============================================================
-class JobRequest(BaseModel):
-    type: str
-    config: dict = Field(default_factory=dict)
-
-
-@app.get("/jobs")
-def list_jobs() -> dict:
-    """Recent runs. Laravel mirrors these into ml_jobs for the durable history."""
-    return {"ok": True, "jobs": jobs.manager.list(), "active": _active_summary()}
-
-
-@app.get("/jobs/{job_id}")
-def get_job(job_id: str) -> dict:
-    job = jobs.manager.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found.")
-    return {"ok": True, "job": job.snapshot()}
-
-
-@app.post("/jobs")
-def start_job(payload: JobRequest) -> dict:
-    """Start a training or evaluation run.
-
-    Returns 409 when a GPU job is already in flight: the message names what is
-    running rather than queueing silently behind it."""
-    job_type = (payload.type or "").strip().lower()
-
-    # Checked before the config is validated: being told "already running" should
-    # not depend on the second request happening to be well-formed.
-    running = jobs.manager.active()
-    if running is not None:
-        raise HTTPException(status_code=409, detail=str(jobs.JobBusy(running.summary())))
-
-    if job_type == jobs.TRAINING:
-        try:
-            config = runners.validate_training_config(
-                payload.config, [m["key"] for m in _model_info()]
-            )
-        except (ValueError, ds.DatasetError) as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        runner = runners.training_runner(config)
-
-    elif job_type == jobs.EVALUATION:
-        available = [m["key"] for m in _model_info()]
-        try:
-            config = runners.validate_evaluation_config(payload.config, available)
-        except (ValueError, ds.DatasetError) as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        runner = runners.evaluation_runner(config, loader=_cached_loader)
-
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown job type '{payload.type}'. Expected 'training' or 'evaluation'.",
-        )
-
-    try:
-        job = jobs.manager.start(job_type, config, runner)
-    except jobs.JobBusy as e:
-        raise HTTPException(status_code=409, detail=str(e))
-
-    print(f"[ocr-api] Started {job_type} job {job.id}: {config}")
-    return {"ok": True, "job_id": job.id, "job": job.snapshot()}
-
-
-@app.post("/jobs/{job_id}/cancel")
-def cancel_job(job_id: str) -> dict:
-    """Request cancellation. The runner stops between steps, leaving no
-    half-written checkpoint."""
-    job = jobs.manager.cancel(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' was not found.")
-    return {"ok": True, "job": job.snapshot()}
-
-
-@app.get("/training_defaults")
-def training_defaults() -> dict:
-    """The scripts' own defaults, so the training form is pre-filled from one source."""
-    return {"ok": True, "defaults": runners.training_defaults()}
-
-
-def _active_summary():
-    active = jobs.manager.active()
-    return active.summary() if active else None
 
 
 if __name__ == "__main__":

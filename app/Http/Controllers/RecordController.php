@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
+use App\Models\OcrSetting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
@@ -59,7 +60,7 @@ class RecordController extends Controller
 
         return view('records.show', [
             'record' => $record,
-            'threshold' => (float) config('crms.confidence_review_threshold'),
+            'threshold' => OcrSetting::threshold(),
         ]);
     }
 

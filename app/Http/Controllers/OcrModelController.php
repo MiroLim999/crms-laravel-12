@@ -2,105 +2,143 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\OcrModel;
+use App\Models\OcrSetting;
+use App\Services\AuditLogger;
 use App\Services\Ocr\ChunkedUpload;
-use App\Services\Ocr\DatasetManager;
-use App\Services\Ocr\EngineProcess;
-use App\Services\Ocr\EvaluationCharts;
-use App\Services\Ocr\JobCoordinator;
-use App\Services\Ocr\OcrClient;
+use App\Services\Ocr\EngineStatus;
 use App\Services\Ocr\OcrModelManager;
 use App\Services\Ocr\OcrServiceException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Response;
 use Illuminate\View\View;
 
 /**
- * The OCR workspace - Super Admin only, one tabbed page.
+ * The OCR workspace - Super Admin only, one page.
  *
- * This controller renders the whole page and owns the Models tab's actions.
- * Datasets, jobs, prediction, uploads, and engine control each have their own
- * controller; they all redirect back here.
+ * Two responsibilities, and nothing else:
  *
- * The one action that changes what Staff see is `activate`: until a model is
- * promoted, a fine-tuned model is just a folder on disk.
+ *   1. Manage the model folders the service can serve - install, rename, delete.
+ *   2. Save which of them Staff scan with, alongside the two settings that
+ *      decision implies.
+ *
+ * Installing a model is housekeeping. Saving the settings is the load-bearing
+ * action: until it runs, a newly installed model is just a folder on disk.
  */
 class OcrModelController extends Controller
 {
     public function __construct(
         private readonly OcrModelManager $manager,
-        private readonly DatasetManager $datasets,
-        private readonly JobCoordinator $jobs,
-        private readonly EngineProcess $engine,
+        private readonly EngineStatus $engine,
         private readonly ChunkedUpload $uploads,
-        private readonly OcrClient $client,
+        private readonly AuditLogger $audit,
     ) {}
 
-    /**
-     * The whole workspace. Every tab is rendered server-side and refreshed by
-     * ordinary redirects; only job progress and prediction are polled.
-     */
-    public function index(Request $request): View
+    public function index(): View
     {
-        $engine = $this->engine->status();
+        $settings = OcrSetting::current();
 
         return view('ocr.index', [
-            'engine' => $engine,
-            'engineLog' => $engine['reachable'] ? [] : $this->engine->logTail(15),
+            'engine' => $this->engine->status(),
             'overview' => $this->manager->overview(),
-            'datasets' => $this->datasets->overview(),
-            'activeJob' => $this->jobs->activeJob(),
-            'history' => $this->jobs->history(),
-            'defaults' => $this->trainingDefaults(),
-            'charts' => EvaluationCharts::all(),
-            'threshold' => config('crms.confidence_review_threshold'),
-            // Which tab to open on load, so a redirect can return you where you were.
-            'tab' => $this->resolveTab($request->query('tab')),
+            'activeModel' => OcrModel::active(),
+            'settings' => $settings,
+            // Rendered into the form, so an empty override shows the value actually
+            // in force rather than a blank box.
+            'threshold' => OcrSetting::threshold(),
+            'configThreshold' => (float) config('crms.confidence_review_threshold', 80.0),
         ]);
     }
 
     /**
-     * Reconcile both durable registries with the service after folders are changed
-     * by hand, which is the documented fallback for very large artifacts.
+     * The Save settings button.
+     *
+     * One submit covers the model choice and the settings around it, because they
+     * are one decision: this model, and whether Staff may deviate from it.
+     */
+    public function saveSettings(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            // Nullable, not required: with no models installed - or the service down -
+            // the picker has nothing to offer, and the other settings must still save.
+            'model' => ['nullable', 'string', 'max:255'],
+            'allow_staff_model_choice' => ['nullable', 'boolean'],
+            // Null clears the override and falls back to CRMS_CONFIDENCE_THRESHOLD.
+            'confidence_review_threshold' => ['nullable', 'numeric', 'min:1', 'max:100'],
+        ]);
+
+        $actor = $request->user();
+        $changes = [];
+        $model = $validated['model'] ?? '';
+
+        try {
+            $previous = OcrModel::active();
+
+            if ($model !== '' && $previous?->key !== $model) {
+                $this->manager->activate($model, $actor);
+                $changes[] = "Staff now scan with '{$model}'";
+            }
+        } catch (OcrServiceException $e) {
+            return $this->back()->with('error', $e->getMessage());
+        }
+
+        $settings = OcrSetting::current();
+        $settings->fill([
+            'allow_staff_model_choice' => $request->boolean('allow_staff_model_choice'),
+            'confidence_review_threshold' => $validated['confidence_review_threshold'] ?? null,
+            'updated_by' => $actor->getKey(),
+        ]);
+
+        // `updated_by` alone is not a change worth reporting, so it is excluded
+        // when deciding whether anything actually moved.
+        $touched = array_diff_key($settings->getDirty(), ['updated_by' => null]);
+
+        if ($touched !== []) {
+            $this->audit->saveAndLog(
+                'ocr_settings.updated',
+                $settings,
+                'Updated OCR scanning settings.',
+                $actor,
+            );
+            $changes[] = 'scanning settings saved';
+        } elseif ($settings->isDirty()) {
+            // Only `updated_by` moved. Worth recording who last confirmed the
+            // settings, but not worth an audit entry describing no change.
+            $settings->save();
+        }
+
+        OcrSetting::forgetCached();
+
+        return $this->back()->with(
+            'success',
+            $changes === []
+                ? 'Nothing to save - those settings were already in force.'
+                : ucfirst(implode(', ', $changes)).'.',
+        );
+    }
+
+    /**
+     * Reconcile the registry with what is on disk, which is the documented fallback
+     * for a model folder copied into ml/models/ by hand.
      */
     public function rescan(Request $request): RedirectResponse
     {
         try {
-            $models = $this->manager->reconcile($request->user());
-            $datasets = $this->datasets->reconcile($request->user());
+            $counts = $this->manager->reconcile($request->user());
 
-            return $this->back('models')->with(
+            return $this->back()->with(
                 'success',
-                "Rescanned {$models['remote']} model(s) and {$datasets['remote']} dataset(s): "
-                .'registered '.($models['registered'] + $datasets['registered'])
-                .', restored '.($models['restored'] + $datasets['restored'])
-                .', marked missing '.($models['tombstoned'] + $datasets['tombstoned']).'.',
+                "Rescanned {$counts['remote']} model(s): registered {$counts['registered']}, "
+                ."restored {$counts['restored']}, marked missing {$counts['tombstoned']}.",
             );
         } catch (OcrServiceException $e) {
-            return $this->back('models')->with('error', $e->getMessage());
+            return $this->back()->with('error', $e->getMessage());
         }
     }
 
     /**
-     * Promote a model. This is the point at which Staff scanning starts using it -
-     * everything before it is a rehearsal.
-     */
-    public function activate(Request $request, string $key): RedirectResponse
-    {
-        try {
-            $this->manager->activate($key, $request->user());
-
-            return $this->back('models')->with(
-                'success',
-                "'{$key}' is now the active model. Staff document scanning will use it.",
-            );
-        } catch (OcrServiceException $e) {
-            return $this->back('models')->with('error', $e->getMessage());
-        }
-    }
-
-    /**
-     * Add a model folder that the browser uploaded in chunks.
+     * Install a model the browser uploaded in chunks - either a folder of files or
+     * a single .zip.
      */
     public function store(Request $request): RedirectResponse
     {
@@ -116,18 +154,34 @@ class OcrModelController extends Controller
         $files = $this->uploads->assembledFiles($actor, $validated['upload_id']);
 
         if ($files === []) {
-            return $this->back('models')->with(
+            return $this->back()->with(
                 'error',
-                'No completed upload was found. Try adding the folder again.',
+                'No completed upload was found. Try adding the model again.',
             );
         }
 
-        try {
-            $model = $this->manager->add($validated['name'], $files, $actor);
+        // Extraction and a 1.3 GB copy both outlast PHP's default execution time.
+        set_time_limit(0);
 
-            return $this->back('models')->with('success', "Added model '{$model->key}'.");
+        try {
+            $archive = $this->soleArchive($files);
+
+            $model = $archive === null
+                ? $this->manager->add($validated['name'], $files, $actor)
+                : $this->manager->addArchive(
+                    $validated['name'],
+                    $archive['path'],
+                    $archive['name'],
+                    $actor,
+                );
+
+            return $this->back()->with(
+                'success',
+                "Installed model '{$model->key}'. Select it below and save settings to "
+                .'start scanning with it.',
+            );
         } catch (OcrServiceException $e) {
-            return $this->back('models')->with('error', $e->getMessage());
+            return $this->back()->with('error', $e->getMessage());
         } finally {
             $this->uploads->discard($actor, $validated['upload_id']);
         }
@@ -142,9 +196,9 @@ class OcrModelController extends Controller
         try {
             $resolved = $this->manager->rename($key, $validated['new_name'], $request->user());
 
-            return $this->back('models')->with('success', "Renamed to '{$resolved}'.");
+            return $this->back()->with('success', "Renamed to '{$resolved}'.");
         } catch (OcrServiceException $e) {
-            return $this->back('models')->with('error', $e->getMessage());
+            return $this->back()->with('error', $e->getMessage());
         }
     }
 
@@ -153,83 +207,45 @@ class OcrModelController extends Controller
         try {
             $this->manager->delete($key, $request->user());
 
-            return $this->back('models')->with('success', "Deleted model '{$key}' from disk.");
+            return $this->back()->with('success', "Deleted model '{$key}' from disk.");
         } catch (OcrServiceException $e) {
-            return $this->back('models')->with('error', $e->getMessage());
+            return $this->back()->with('error', $e->getMessage());
         }
-    }
-
-    /**
-     * Record figures measured elsewhere. An evaluation job fills these in
-     * automatically; this stays for numbers produced by a CLI run.
-     */
-    public function recordEvaluation(Request $request, string $key): RedirectResponse
-    {
-        $validated = $request->validate([
-            'cer' => ['nullable', 'numeric', 'min:0', 'max:1'],
-            'wer' => ['nullable', 'numeric', 'min:0', 'max:1'],
-            'exact_match' => ['nullable', 'numeric', 'min:0', 'max:1'],
-            'notes' => ['nullable', 'string', 'max:2000'],
-        ]);
-
-        try {
-            $this->manager->recordEvaluation($key, $validated, $request->user());
-
-            return $this->back('models')->with('success', "Recorded evaluation for '{$key}'.");
-        } catch (OcrServiceException $e) {
-            return $this->back('models')->with('error', $e->getMessage());
-        }
-    }
-
-    /**
-     * Serve an evaluation chart PNG. These live outside the public directory, so
-     * they are streamed through a gated route rather than exposed by URL.
-     */
-    public function chart(string $variant, string $name)
-    {
-        $path = EvaluationCharts::resolve($variant, $name);
-
-        abort_if($path === null, 404);
-
-        return Response::file($path, ['Content-Type' => 'image/png']);
     }
 
     // ------------------------------------------------------------------ internals
 
     /**
-     * Pre-fill the training form from the script's own defaults, so the numbers
-     * live in exactly one place. Falls back to a local copy when the service is
-     * down, because the form still has to render.
+     * The upload as a single .zip, or null when it is a folder of loose files.
      *
-     * @return array<string, mixed>
+     * A zip mixed with loose files is ambiguous - which one is the model? - so it is
+     * refused rather than guessed at.
+     *
+     * @param  list<array{name: string, relative_path: string, path: string, size: int}>  $files
+     * @return array{name: string, path: string}|null
      */
-    private function trainingDefaults(): array
+    private function soleArchive(array $files): ?array
     {
-        // Skip the round trip when health has already reported the service down.
-        $remote = $this->client->isKnownUnreachable() ? [] : $this->client->trainingDefaults();
+        $zips = array_values(array_filter(
+            $files,
+            fn (array $file) => strtolower(pathinfo($file['name'], PATHINFO_EXTENSION)) === 'zip',
+        ));
 
-        return $remote + [
-            'epochs' => 5,
-            'batch_size' => 8,
-            'learning_rate' => 5e-5,
-            'max_label_length' => 32,
-            'num_workers' => 2,
-            'train_subset' => null,
-            'val_subset' => null,
-            'base_model' => 'base',
-            'output_name' => 'trocr-finetuned',
-        ];
+        if ($zips === []) {
+            return null;
+        }
+
+        if (count($zips) > 1 || count($files) > 1) {
+            throw new OcrServiceException(
+                'Upload either one .zip archive or the model folder, not both.',
+            );
+        }
+
+        return ['name' => $zips[0]['name'], 'path' => $zips[0]['path']];
     }
 
-    private function resolveTab(?string $tab): string
+    private function back(): RedirectResponse
     {
-        $tabs = ['models', 'datasets', 'training', 'evaluation', 'predict'];
-
-        return in_array($tab, $tabs, true) ? $tab : 'models';
-    }
-
-    private function back(string $tab): RedirectResponse
-    {
-        return redirect()->route('ocr.index', ['tab' => $tab]);
+        return redirect()->route('ocr.index');
     }
 }

@@ -9,6 +9,10 @@ use Illuminate\Support\Collection;
 
 /**
  * Reconciles the OCR service's on-disk models with the durable CRMS registry.
+ *
+ * The weights are the service's business; this class owns the Laravel-side facts:
+ * which model Staff scan with, who installed it, and whether a folder CRMS knew
+ * about has since disappeared.
  */
 class OcrModelManager
 {
@@ -29,6 +33,8 @@ class OcrModelManager
                 'reachable' => false,
                 'error' => $health['error'],
                 'device' => null,
+                // Still list what CRMS knows about, so the page says something
+                // useful while the service is down.
                 'models' => OcrModel::orderByDesc('is_active')->orderBy('key')->get()
                     ->map(fn (OcrModel $model) => $this->describe($model, null))
                     ->values(),
@@ -69,29 +75,47 @@ class OcrModelManager
             'loaded' => (bool) ($remote['loaded'] ?? false),
             'is_active' => (bool) $local?->is_active,
             'registered' => $local !== null,
+            'registered_at' => $local?->created_at,
+            'registrar' => $local?->registrar?->name,
             'notes' => $local?->notes,
-            'cer' => $local?->cer,
-            'wer' => $local?->wer,
-            'exact_match' => $local?->exact_match,
-            'evaluated_at' => $local?->evaluated_at,
             'disk_deleted_at' => $local?->disk_deleted_at,
-            'disk_deleted_by' => $local?->disk_deleted_by,
             'model' => $local,
         ];
     }
 
+    /**
+     * Keys the service can actually serve, for validating a submitted choice.
+     *
+     * @return list<string>
+     */
+    public function servableKeys(): array
+    {
+        if ($this->client->isKnownUnreachable()) {
+            return [];
+        }
+
+        try {
+            return collect($this->client->models()['models'])->pluck('key')->all();
+        } catch (OcrServiceException) {
+            return [];
+        }
+    }
+
     public function activate(string $key, User $actor): OcrModel
     {
-        $available = collect($this->client->models()['models'])->pluck('key');
-
-        if (! $available->contains($key)) {
+        if (! in_array($key, $this->servableKeys(), true)) {
             throw new OcrServiceException(
-                "The OCR service cannot serve '{$key}'. Rescan, or check the Models folder.",
+                "The OCR service cannot serve '{$key}'. Rescan, or check ml/models/.",
             );
         }
 
         $model = $this->register($key, $actor);
         $previous = OcrModel::active();
+
+        if ($previous?->key === $key) {
+            return $model;      // nothing changed; do not write a no-op audit entry
+        }
+
         $model->activate();
 
         $this->audit->log(
@@ -99,7 +123,7 @@ class OcrModelManager
             $model,
             old: $previous ? ['active_model' => $previous->key] : null,
             new: ['active_model' => $key],
-            description: "Set '{$key}' as the active OCR model for scanning.",
+            description: "Set '{$key}' as the OCR model used for scanning.",
             actor: $actor,
         );
 
@@ -108,7 +132,6 @@ class OcrModelManager
 
     /**
      * Ensure a registry row exists and revive it if the service reports it again.
-     * Metrics survive ordinary registration, but not an artifact replacement.
      */
     public function register(
         string $key,
@@ -149,13 +172,7 @@ class OcrModelManager
         }
 
         if ($artifactReplaced) {
-            $model->fill([
-                'registered_by' => $actor->getKey(),
-                'cer' => null,
-                'wer' => null,
-                'exact_match' => null,
-                'evaluated_at' => null,
-            ]);
+            $model->registered_by = $actor->getKey();
         }
 
         if ($model->isDirty()) {
@@ -165,7 +182,7 @@ class OcrModelManager
             $description = $wasDeleted
                 ? "Restored OCR model '{$key}' to the registry."
                 : ($artifactReplaced
-                    ? "Replaced OCR model '{$key}' and cleared stale evaluation metrics."
+                    ? "Replaced the files behind OCR model '{$key}'."
                     : "Updated registration metadata for OCR model '{$key}'.");
 
             $this->audit->saveAndLog($action, $model, $description, $actor);
@@ -175,11 +192,33 @@ class OcrModelManager
     }
 
     /**
+     * Install a model from the folder the browser uploaded in slices.
+     *
      * @param  list<array{name: string, path: string}>  $files
      */
     public function add(string $name, array $files, User $actor): OcrModel
     {
-        $result = $this->client->addModel($name, $files);
+        return $this->registerUpload($name, $actor, $this->client->addModel($name, $files));
+    }
+
+    /**
+     * Install a model from a single uploaded .zip. The service unpacks it and finds
+     * the model files inside, so an archive with a wrapping folder works too.
+     */
+    public function addArchive(string $name, string $zipPath, string $filename, User $actor): OcrModel
+    {
+        return $this->registerUpload(
+            $name,
+            $actor,
+            $this->client->addModelArchive($name, $zipPath, $filename),
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function registerUpload(string $name, User $actor, array $result): OcrModel
+    {
         $key = $result['name'] ?? $name;
         $model = $this->register($key, $actor, artifactReplaced: true);
 
@@ -187,7 +226,7 @@ class OcrModelManager
             'ocr_model.added',
             $model,
             new: ['key' => $key, 'files' => $result['saved'] ?? []],
-            description: "Uploaded OCR model '{$key}'.",
+            description: "Installed OCR model '{$key}'.",
             actor: $actor,
         );
 
@@ -209,6 +248,7 @@ class OcrModelManager
                 'ocr_model.renamed',
                 $model,
                 "Renamed OCR model '{$key}' to '{$resolved}'.",
+                $actor,
             );
         }
 
@@ -239,11 +279,13 @@ class OcrModelManager
             'ocr_model.deleted',
             $model,
             "Deleted OCR model '{$key}' from disk.",
+            $actor,
         );
     }
 
     /**
      * Fetch the service model list once and durably reconcile every transition.
+     * This is the documented fallback for a model folder placed on disk by hand.
      *
      * @return array{remote: int, registered: int, restored: int, tombstoned: int}
      */
@@ -275,12 +317,15 @@ class OcrModelManager
             }
 
             if ($key === 'base') {
+                // The base model is pulled from the Hugging Face cache, so it is
+                // never really absent. A tombstone on it is always wrong.
                 if ($model->disk_deleted_at !== null) {
                     $model->fill(['disk_deleted_at' => null, 'disk_deleted_by' => null]);
                     $this->audit->saveAndLog(
                         'ocr_model.restored',
                         $model,
                         'Cleared an invalid tombstone from the protected base OCR model.',
+                        $actor,
                     );
                     $counts['restored']++;
                 }
@@ -298,35 +343,13 @@ class OcrModelManager
                     'ocr_model.marked_missing',
                     $model,
                     "Marked OCR model '{$key}' deleted because it is absent from disk.",
+                    $actor,
                 );
                 $counts['tombstoned']++;
             }
         }
 
         return $counts;
-    }
-
-    /**
-     * @param  array{cer?: float|null, wer?: float|null, exact_match?: float|null, notes?: string|null}  $metrics
-     */
-    public function recordEvaluation(string $key, array $metrics, User $actor): OcrModel
-    {
-        $model = $this->register($key, $actor);
-        $model->fill([
-            'cer' => $metrics['cer'] ?? null,
-            'wer' => $metrics['wer'] ?? null,
-            'exact_match' => $metrics['exact_match'] ?? null,
-            'notes' => $metrics['notes'] ?? $model->notes,
-            'evaluated_at' => now(),
-        ]);
-
-        $this->audit->saveAndLog(
-            'ocr_model.evaluated',
-            $model,
-            "Recorded evaluation metrics for '{$key}'.",
-        );
-
-        return $model;
     }
 
     private function guardNotBase(string $key, string $verb): void
@@ -340,7 +363,8 @@ class OcrModelManager
     {
         if (OcrModel::where('key', $key)->where('is_active', true)->exists()) {
             throw new OcrServiceException(
-                "{$verb} is blocked while '{$key}' is the active model. Activate another model first.",
+                "{$verb} is blocked while '{$key}' is the model Staff scan with. "
+                .'Select another model and save settings first.',
             );
         }
     }

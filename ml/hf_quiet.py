@@ -9,9 +9,9 @@ Why this is a module rather than a block copied into five scripts: each of those
 copies called `logging.disable(logging.WARNING)`, which is a *global, process-wide*
 switch. It suppresses every log record at or below WARNING for every logger in the
 interpreter, not just the ML libraries'. Inside the FastAPI service that also
-silenced uvicorn, so the service started with an empty log and
-`EngineProcess::firstLogLine()` had nothing to show a Super Admin when a start
-failed. Name the noisy loggers instead of turning the lights off.
+silenced uvicorn, so the service started with an empty log and there was nothing in
+the terminal to explain a failed start. Name the noisy loggers instead of turning
+the lights off.
 
 Our own warnings stay visible on purpose - a script that is misconfigured should
 say so.

@@ -107,10 +107,9 @@ def save_metrics_png(metrics, subfolder, model_label, base_dir=DEFAULT_METRICS_D
     The image contains a bar chart of CER / WER / Accuracy plus a small
     summary table (model, samples, exact matches).
 
-    The default output directory is read by the CRMS OCR management page
-    (app/Services/Ocr/EvaluationCharts.php), which is how a Super Admin reviews a
-    model's numbers before promoting it. Changing the location means changing that
-    class too.
+    The default output directory is `ml/evaluation-metrics/<subfolder>/`. These
+    charts are read from disk by whoever ran the evaluation; the web UI does not
+    surface them, because evaluation is command-line work.
 
     Args:
         metrics: dict from compute_metrics()

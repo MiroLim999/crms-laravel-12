@@ -29,8 +29,8 @@ const TARGET = 'resources/fonts/iconify/iconify.css';
 
 /*
  * Icon names live in Blade, in JS that builds class strings, and in PHP - the
- * DocumentType and MlJobType enums and Navigation all carry them, so `app/` has to
- * be scanned as well or those icons get dropped.
+ * DocumentType enum and Navigation both carry them, so `app/` has to be scanned as
+ * well or those icons get dropped.
  */
 const SEARCH_DIRS = ['resources/views', 'resources/js', 'app'];
 const SEARCH_EXTS = new Set(['.php', '.js', '.mjs', '.ts']);

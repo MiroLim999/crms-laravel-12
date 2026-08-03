@@ -7,6 +7,7 @@ use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
 use App\Models\DocumentTemplate;
 use App\Models\OcrModel;
+use App\Models\OcrSetting;
 use App\Services\AuditLogger;
 use App\Services\Ocr\OcrClient;
 use App\Services\Ocr\OcrServiceException;
@@ -82,7 +83,10 @@ class DocumentScanController extends Controller
             'template' => $template,
             'boxes' => $template->fields->map->toBox()->values(),
             'activeModel' => OcrModel::active(),
-            'threshold' => (float) config('crms.confidence_review_threshold'),
+            // Empty unless a Super Admin has allowed it, in which case the reading
+            // step offers a picker instead of silently using the promoted model.
+            'selectableModels' => $this->selectableModels(),
+            'threshold' => OcrSetting::threshold(),
         ]);
     }
 
@@ -98,12 +102,13 @@ class DocumentScanController extends Controller
             'fields' => ['required', 'array', 'min:1'],
             'fields.*.name' => ['required', 'string', 'max:120'],
             'fields.*.image' => ['required', 'string'],
+            'model' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $active = OcrModel::active();
+        $key = $this->resolveModelKey($validated['model'] ?? null);
 
         try {
-            $result = $this->ocr->recognise($validated['fields'], $active?->key);
+            $result = $this->ocr->recognise($validated['fields'], $key);
         } catch (OcrServiceException $e) {
             // A clear failure, not a stack trace, and nothing persisted.
             return response()->json(['message' => $e->getMessage()], 503);
@@ -113,7 +118,7 @@ class DocumentScanController extends Controller
             'results' => $result['results'],
             'model' => $result['model'],
             'modelKey' => $result['modelKey'],
-            'threshold' => (float) config('crms.confidence_review_threshold'),
+            'threshold' => OcrSetting::threshold(),
         ]);
     }
 
@@ -192,5 +197,63 @@ class DocumentScanController extends Controller
         return redirect()
             ->route('records.show', $record)
             ->with('success', 'Record submitted and locked. Further changes need a change request.');
+    }
+
+    // ------------------------------------------------------------------ internals
+
+    /**
+     * Models Staff may pick from, or an empty list when they may not pick at all.
+     *
+     * Empty is the default: a registry where every reading came from the one model
+     * a Super Admin approved is easier to stand behind than one where each Staff
+     * member chose for themselves.
+     *
+     * @return list<array{key: string, label: string, is_active: bool}>
+     */
+    private function selectableModels(): array
+    {
+        if (! OcrSetting::staffMayChooseModel()) {
+            return [];
+        }
+
+        $health = $this->ocr->health();
+
+        if (! $health['reachable']) {
+            return [];
+        }
+
+        $activeKey = OcrModel::active()?->key;
+
+        return collect($health['models'])
+            ->map(fn (array $model) => [
+                'key' => $model['key'],
+                'label' => $model['label'] ?? $model['key'],
+                'is_active' => $model['key'] === $activeKey,
+            ])
+            // The promoted model first, so the default is the obvious choice.
+            ->sortByDesc(fn (array $model) => (int) $model['is_active'])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Which model this reading should run against.
+     *
+     * A submitted key is honoured only when Staff choice is switched on and the
+     * service can actually serve it. Anything else falls back to the promoted model,
+     * so a stale tab or a hand-edited request cannot silently swap the model behind
+     * a record.
+     */
+    private function resolveModelKey(?string $requested): ?string
+    {
+        $active = OcrModel::active()?->key;
+
+        if ($requested === null || $requested === '') {
+            return $active;
+        }
+
+        $allowed = array_column($this->selectableModels(), 'key');
+
+        return in_array($requested, $allowed, true) ? $requested : $active;
     }
 }
