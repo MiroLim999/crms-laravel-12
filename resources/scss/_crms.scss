@@ -25,6 +25,42 @@
   cursor: pointer;
 }
 
+// ---------------------------------------------------------------- sidebar alignment
+
+// The harvested theme omits SNEAT's demo-only brand sizing. Give the sidebar
+// header a real row height and use one horizontal origin for its logo and text.
+#layout-menu {
+  .app-brand {
+    min-block-size: 4rem;
+    padding-block: .75rem;
+    padding-inline: 2rem;
+  }
+
+  .app-brand-link {
+    min-inline-size: 0;
+  }
+
+  .app-brand-logo {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .app-brand-logo img {
+    display: block;
+    inline-size: 2.25rem;
+    block-size: 2.25rem;
+    object-fit: contain;
+  }
+
+  .app-brand-text {
+    margin-inline-start: .75rem !important;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+}
+
 // ---------------------------------------------------------------- audit log diff panel
 
 .audit-diff-toggle {
