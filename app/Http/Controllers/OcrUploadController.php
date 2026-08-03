@@ -14,7 +14,9 @@ use Illuminate\Http\Request;
  * Laravel runs, so the browser slices each file and posts the pieces at this
  * endpoint; ChunkedUpload stitches them back together.
  *
- * The chunk size is the browser's choice but must stay under `upload_max_filesize`.
+ * The chunk size is not the browser's guess: ChunkedUpload::chunkBytes() reads this
+ * server's upload_max_filesize and post_max_size and the page is rendered with the
+ * largest slice that fits under them.
  */
 class OcrUploadController extends Controller
 {

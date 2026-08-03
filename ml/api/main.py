@@ -562,8 +562,24 @@ def _model_root_in_archive(zf):
     return min(candidates, key=lambda prefix: (prefix.count("/"), len(prefix)))
 
 
-def _extract_model_archive(zip_path, target):
-    """Unpack the model files from `zip_path` into `target`, flattened.
+def _rewound(stream) -> bool:
+    """Seek `stream` back to the start, reporting whether it can be read as a zip.
+
+    Python 3.10's SpooledTemporaryFile has no seekable(), so the attribute is
+    probed rather than assumed."""
+    try:
+        if hasattr(stream, "seekable") and not stream.seekable():
+            return False
+        stream.seek(0)
+        return True
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
+def _extract_model_archive(source, target):
+    """Unpack the model files from `source` into `target`, flattened.
+
+    `source` is a path or an already-rewound seekable file object.
 
     Only the whitelisted files directly inside the archive's model directory are
     written, and each one is written by name into `target` - member paths are never
@@ -571,7 +587,7 @@ def _extract_model_archive(zip_path, target):
     escape. That is the whole zip-slip defence: nothing derived from the archive
     reaches os.path.join except a validated basename."""
     try:
-        zf = zipfile.ZipFile(zip_path)
+        zf = zipfile.ZipFile(source)
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="That file is not a readable .zip archive.")
 
@@ -689,8 +705,9 @@ def add_model(
       name    + archive  -> a single .zip; the model is located inside it, so a
                             wrapping folder in the archive is fine
 
-    Starlette spools large uploads to a temp file and we copy them across in
-    chunks, so a ~1.3 GB weights file is never held in memory."""
+    Starlette spools large uploads to a temp file: loose files are copied across in
+    chunks and an archive is read straight from the spool, so a ~1.3 GB weights file
+    is never held in memory nor written twice."""
     raw_name = (name or "").strip()
     if not raw_name:
         raise HTTPException(status_code=400, detail="Please provide a model name.")
@@ -718,9 +735,15 @@ def add_model(
     try:
         if archive is None:
             saved = _save_model_files(uploads, target)
+        elif _rewound(archive.file):
+            # Starlette spools any part over ~1 MB to a real temp file, so a 1.3 GB
+            # archive is already on disk and seekable: zipfile reads it in place.
+            # Copying it to a second temp file first would cost a full read and a
+            # full write of the whole archive to gain nothing.
+            saved = _extract_model_archive(archive.file, target)
         else:
-            # Spooled to disk first: zipfile needs a seekable file, and an UploadFile
-            # over ~1 MB is a SpooledTemporaryFile that may not be.
+            # Fallback for a stream that cannot be seeked: zipfile needs a seekable
+            # file, so spool it to disk before reading.
             handle, staged = tempfile.mkstemp(suffix=".zip", prefix="crms-model-")
             os.close(handle)
             try:

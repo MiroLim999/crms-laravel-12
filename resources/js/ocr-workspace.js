@@ -18,8 +18,13 @@
 
 const config = window.crmsOcr ?? {};
 
-/** 16 MB — well within PHP's 40M post_max_size even with multipart overhead. */
-const CHUNK_SIZE = 16 * 1024 * 1024;
+/**
+ * Slice size, from the server: it reads upload_max_filesize and post_max_size and
+ * sends the largest slice it will accept. Hardcoding a value guessed wrong in both
+ * directions - wasted requests where the limit is higher, a 413 on every slice where
+ * it is lower. The 16 MB is only a fallback for a stale cached page.
+ */
+const CHUNK_SIZE = Number(config.chunkBytes) > 0 ? Number(config.chunkBytes) : 16 * 1024 * 1024;
 
 // ---------------------------------------------------------------------- helpers
 
@@ -463,61 +468,34 @@ function initEnginePolling() {
 // ------------------------------------------------------------------------- modals
 
 /**
- * Rename and Delete act on the dropdown's current selection, so both modals read it
- * on show. Neither is offered for the base model or for the model in use - the
- * server refuses both anyway, and a disabled button explains it earlier.
+ * Inline rename / delete buttons in the installed-models table.
+ *
+ * Each row carries a .model-rename-trigger and .model-delete-trigger button whose
+ * data-key attribute holds the model's folder name. Disabled state and tooltip are
+ * server-rendered (@disabled + title), so JS only has to wire the modal content on
+ * show: drop the right key into the form action and the display elements.
  */
 function initModelActions() {
-    const select = $('#model-select');
-    const renameBtn = $('#model-rename-btn');
-    const deleteBtn = $('#model-delete-btn');
-
-    if (!select) return;
-
-    const selectedOption = () => select.options[select.selectedIndex] ?? null;
-
-    const refresh = () => {
-        const option = selectedOption();
-        const key = option?.value ?? '';
-        const isBase = option?.dataset.base === '1';
-        // The saved active model, not the pending selection: what blocks a rename is
-        // what Staff are scanning with right now.
-        const inUse = key !== '' && key === config.activeModelKey;
-        const blocked = !config.engineReachable || key === '' || isBase || inUse;
-
-        [renameBtn, deleteBtn].forEach((button) => {
-            if (!button) return;
-            button.disabled = blocked;
-            button.title = !config.engineReachable
-                ? 'The OCR service has to be running.'
-                : key === ''
-                    ? 'No model selected.'
-                    : isBase
-                        ? 'The base model cannot be renamed or deleted.'
-                        : inUse
-                            ? 'This is the model Staff scan with. Select another and save settings first.'
-                            : '';
-        });
-    };
-
-    select.addEventListener('change', refresh);
-    refresh();
-
-    const wire = (modalId, setup) => {
-        const modal = document.getElementById(modalId);
-        modal?.addEventListener('show.bs.modal', () => setup(select.value));
-    };
-
-    wire('renameModal', (key) => {
+    // Rename: read key from the trigger button, not a dropdown.
+    const renameModal = document.getElementById('renameModal');
+    renameModal?.addEventListener('show.bs.modal', (event) => {
+        const trigger = event.relatedTarget;
+        const key = trigger?.dataset.key ?? '';
         const form = $('#renameForm');
         form.action = url(config.urls.modelRename, key);
         $('#renameOldKey').textContent = key;
         form.querySelector('[name="new_name"]').value = key;
     });
 
-    wire('deleteModal', (key) => {
+    // Delete: read key + human label from the trigger button.
+    const deleteModal = document.getElementById('deleteModal');
+    deleteModal?.addEventListener('show.bs.modal', (event) => {
+        const trigger = event.relatedTarget;
+        const key   = trigger?.dataset.key   ?? '';
+        const label = trigger?.dataset.label ?? key;
         $('#deleteForm').action = url(config.urls.modelDestroy, key);
-        $('#deleteKey').textContent = key;
+        $('#deleteKey').textContent   = key;
+        $('#deleteLabel').textContent = label;
     });
 }
 

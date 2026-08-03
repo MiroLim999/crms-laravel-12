@@ -6,6 +6,7 @@ use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\User;
 use Database\Seeders\DocumentTemplateSeeder;
+use Illuminate\Filesystem\Filesystem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -21,6 +22,25 @@ use Tests\TestCase;
 class OcrWorkspaceTest extends TestCase
 {
     use RefreshDatabase;
+
+    /**
+     * Start from an empty upload area.
+     *
+     * RefreshDatabase rolls back the database but nothing rolls back the disk, and
+     * user ids repeat between tests, so an abandoned upload from an earlier run sits
+     * at exactly the path the next one uses. That leftover carries a progress record,
+     * which is enough to change how the next test's first slice is interpreted.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $root = storage_path('app/ocr-uploads');
+
+        if (is_dir($root)) {
+            (new Filesystem)->deleteDirectory($root);
+        }
+    }
 
     private function superAdmin(): User
     {
@@ -159,7 +179,7 @@ class OcrWorkspaceTest extends TestCase
             ->assertOk()
             ->assertDontSee('none selected')
             ->assertDontSee('No model is in use.')
-            ->assertSee('Used by Staff');
+            ->assertSee('Active');
     }
 
     // -------------------------------------------------------------------- chunked upload
@@ -197,6 +217,100 @@ class OcrWorkspaceTest extends TestCase
 
         $this->assertFileExists($assembled);
         $this->assertSame('{"hidden_size": 768}', file_get_contents($assembled));
+    }
+
+    /**
+     * Slices are appended as they arrive, so one that overtakes another has to be
+     * parked and folded in once the gap ahead of it is filled. Without that, a
+     * reordered slice would land at the wrong offset in the file.
+     */
+    public function test_chunked_upload_absorbs_slices_that_arrive_out_of_order(): void
+    {
+        $actor = $this->superAdmin();
+        $uploadId = str_repeat('c', 32);
+        $fileKey = str_repeat('d', 32);
+
+        $pieces = ['{"hidden_', 'size": ', '768}'];
+        $send = fn (int $index) => $this->actingAs($actor)->post(route('ocr.uploads.chunk'), [
+            'upload_id' => $uploadId,
+            'file_key' => $fileKey,
+            'filename' => 'config.json',
+            'index' => $index,
+            'total' => count($pieces),
+            'chunk' => UploadedFile::fake()->createWithContent("part{$index}", $pieces[$index]),
+        ]);
+
+        // The last two arrive first, so neither can be appended yet.
+        $send(2)->assertOk()->assertJson(['complete' => false, 'received' => 1]);
+        $send(1)->assertOk()->assertJson(['complete' => false, 'received' => 2]);
+
+        // Slice 0 closes the gap, and the parked pair follows it in immediately.
+        $send(0)->assertOk()->assertJson(['complete' => true, 'received' => 3]);
+
+        $assembled = storage_path(
+            "app/ocr-uploads/{$actor->getKey()}/{$uploadId}/files/config.json"
+        );
+
+        $this->assertFileExists($assembled);
+        $this->assertSame('{"hidden_size": 768}', file_get_contents($assembled));
+    }
+
+    /**
+     * A slice already in the file must be dropped rather than appended a second time:
+     * the point of appending in order is that those bytes are already committed.
+     */
+    public function test_a_resent_slice_is_not_appended_twice(): void
+    {
+        $actor = $this->superAdmin();
+        $uploadId = str_repeat('e', 32);
+        $fileKey = str_repeat('f', 32);
+
+        $pieces = ['{"hidden_', 'size": ', '768}'];
+        $send = fn (int $index) => $this->actingAs($actor)->post(route('ocr.uploads.chunk'), [
+            'upload_id' => $uploadId,
+            'file_key' => $fileKey,
+            'filename' => 'config.json',
+            'index' => $index,
+            'total' => count($pieces),
+            'chunk' => UploadedFile::fake()->createWithContent("part{$index}", $pieces[$index]),
+        ]);
+
+        $send(0)->assertOk()->assertJson(['complete' => false, 'received' => 1]);
+        $send(1)->assertOk()->assertJson(['complete' => false, 'received' => 2]);
+        // A flaky connection makes the browser resend one it already acknowledged.
+        $send(1)->assertOk()->assertJson(['complete' => false, 'received' => 2]);
+        $send(2)->assertOk()->assertJson(['complete' => true]);
+
+        $assembled = storage_path(
+            "app/ocr-uploads/{$actor->getKey()}/{$uploadId}/files/config.json"
+        );
+
+        $this->assertSame('{"hidden_size": 768}', file_get_contents($assembled));
+    }
+
+    /**
+     * The page tells the browser how large a slice may be. Hardcoding it is a guess:
+     * too large and every slice 413s, too small and the upload wastes requests.
+     */
+    public function test_the_slice_size_handed_to_the_browser_fits_this_server(): void
+    {
+        $this->fakeHealthyService();
+
+        $chunkBytes = $this->actingAs($this->superAdmin())
+            ->get(route('ocr.index'))
+            ->assertOk()
+            ->viewData('chunkBytes');
+
+        $megabyte = 1024 * 1024;
+        $limit = min(
+            (int) filter_var(ini_get('upload_max_filesize'), FILTER_SANITIZE_NUMBER_INT) * $megabyte,
+            (int) filter_var(ini_get('post_max_size'), FILTER_SANITIZE_NUMBER_INT) * $megabyte,
+        );
+
+        $this->assertGreaterThanOrEqual($megabyte, $chunkBytes);
+        $this->assertSame(0, $chunkBytes % $megabyte, 'A slice should be a whole number of MB.');
+        $this->assertLessThan($limit, $chunkBytes, 'A slice must leave room for the form fields.');
+        $this->assertLessThanOrEqual(32 * $megabyte, $chunkBytes);
     }
 
     public function test_chunked_upload_refuses_a_path_traversal_filename(): void
@@ -329,6 +443,50 @@ class OcrWorkspaceTest extends TestCase
 
             return $fields->filter(fn ($name) => $name === 'files')->count() === 2
                 && ! $fields->contains('archive');
+        });
+    }
+
+    /**
+     * The upload has to go out labelled multipart.
+     *
+     * OcrClient builds every request with asJson(), which pins Content-Type to
+     * application/json. attach() switches the body to multipart but leaves that
+     * header alone, and Guzzle will not overwrite a Content-Type that is already
+     * set - so the model arrived as a multipart body labelled JSON. FastAPI then
+     * parsed no form at all, saw an empty `name`, and answered "Please provide a
+     * model name" no matter what the Super Admin had typed.
+     */
+    public function test_a_model_upload_is_labelled_multipart_not_json(): void
+    {
+        $this->fakeHealthyService([
+            '*/add_model' => Http::response(['ok' => true, 'name' => 'trocr-v4', 'saved' => []]),
+        ]);
+
+        $actor = $this->superAdmin();
+        $uploadId = str_repeat('9', 32);
+
+        $this->actingAs($actor)->post(route('ocr.uploads.chunk'), [
+            'upload_id' => $uploadId,
+            'file_key' => str_repeat('8', 32),
+            'filename' => 'model.zip',
+            'index' => 0,
+            'total' => 1,
+            'chunk' => UploadedFile::fake()->createWithContent('model.zip', 'PK'),
+        ])->assertOk();
+
+        $this->actingAs($actor)
+            ->post(route('ocr.store'), ['name' => 'trocr-v4', 'upload_id' => $uploadId])
+            ->assertSessionHas('success');
+
+        Http::assertSent(function ($request) {
+            if (! str_ends_with($request->url(), '/add_model')) {
+                return false;
+            }
+
+            $contentType = $request->header('Content-Type')[0] ?? '';
+
+            return str_starts_with($contentType, 'multipart/form-data')
+                && collect($request->data())->pluck('name')->contains('name');
         });
     }
 

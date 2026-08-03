@@ -161,7 +161,7 @@ class OcrClient
         return $this->withAttachments(
             // No timeout cap: writing 1.3 GB to disk on a slow volume can take
             // minutes, and there is nothing useful to do with a half-written model.
-            $this->request(0),
+            $this->multipartRequest(0),
             'files',
             $files,
             fn (PendingRequest $r) => $r->post('/add_model', ['name' => $name]),
@@ -177,7 +177,7 @@ class OcrClient
     public function addModelArchive(string $name, string $zipPath, string $filename = 'model.zip'): array
     {
         return $this->withAttachments(
-            $this->request(0),
+            $this->multipartRequest(0),
             'archive',
             [['name' => $filename, 'path' => $zipPath]],
             fn (PendingRequest $r) => $r->post('/add_model', ['name' => $name]),
@@ -213,6 +213,24 @@ class OcrClient
             ->timeout($timeout ?? $this->timeout)
             ->acceptJson()
             ->asJson();
+    }
+
+    /**
+     * A request whose body will be multipart, and deliberately not asJson().
+     *
+     * asJson() pins Content-Type to application/json. attach() switches the body
+     * format to multipart but leaves that header in place, and Guzzle only supplies
+     * its own multipart Content-Type - the one carrying the boundary - when none is
+     * set. The upload therefore went out as a multipart body labelled JSON: Starlette
+     * parsed no form at all, `name` arrived empty, and the service answered "Please
+     * provide a model name" however carefully the Super Admin had filled the field in.
+     */
+    private function multipartRequest(?int $timeout = null): PendingRequest
+    {
+        return Http::baseUrl(rtrim($this->baseUrl, '/'))
+            ->timeout($timeout ?? $this->timeout)
+            ->acceptJson()
+            ->asMultipart();
     }
 
     /**

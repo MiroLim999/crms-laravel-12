@@ -56,6 +56,9 @@
                 modelDestroy: @json(route('ocr.destroy', '__KEY__')),
             },
             engineReachable: @json($engine['reachable']),
+            // Largest slice this server accepts, read from php.ini rather than
+            // assumed by the JS.
+            chunkBytes: @json($chunkBytes),
             // The saved active key, so the form can tell a pending choice from the
             // one currently in force.
             activeModelKey: @json($activeModel?->key),

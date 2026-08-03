@@ -47,6 +47,8 @@ class OcrModelController extends Controller
             // in force rather than a blank box.
             'threshold' => OcrSetting::threshold(),
             'configThreshold' => (float) config('crms.confidence_review_threshold', 80.0),
+            // The browser sizes its slices from this rather than assuming a php.ini.
+            'chunkBytes' => $this->uploads->chunkBytes(),
         ]);
     }
 
