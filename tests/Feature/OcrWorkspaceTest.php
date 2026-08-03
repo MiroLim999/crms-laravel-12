@@ -161,8 +161,9 @@ class OcrWorkspaceTest extends TestCase
             // never become dirty by selecting it.
             ->assertSee('Select a model')
             ->assertSee('Action needed')
-            // Healthy-state launch instructions would duplicate the status strip.
-            ->assertDontSee('python -m uvicorn ml.api.main:app', escape: false)
+            ->assertSee('Launch command')
+            ->assertSee('Copy command')
+            ->assertSee('python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001', escape: false)
             // The stripped tabs must not come back.
             ->assertDontSee('Fine-tuning')
             ->assertDontSee('Datasets')

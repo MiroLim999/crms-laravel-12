@@ -1,7 +1,7 @@
 {{--
     Read-only service state. CRMS deliberately does not start or stop this OS
-    process. Healthy-state instructions stay hidden; the launch command appears only
-    when it is actionable (offline).
+    process. The launch command remains visible in every state so a Super Admin can
+    copy it before opening Command Prompt or PowerShell.
 --}}
 <section class="card ocr-engine-card {{ $engine['reachable'] ? 'is-online' : 'is-offline' }} mb-4"
          id="engine-card"
@@ -38,25 +38,25 @@
             </div>
         </div>
 
-        @unless ($engine['reachable'])
-            <div class="ocr-engine-recovery mt-3 pt-3 border-top">
-                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-                    <div>
-                        <div class="fw-medium small">Start the service from the project root</div>
-                        <div class="text-muted small">This page reconnects automatically.</div>
-                    </div>
-                    <button class="btn btn-sm btn-label-secondary" type="button" id="copy-engine-command">
-                        <i class="icon-base bx bx-copy icon-sm me-1"></i>
-                        <span>Copy command</span>
-                    </button>
+        <div class="ocr-engine-recovery mt-3 pt-3 border-top">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <div>
+                    <div class="fw-medium small">Launch command</div>
+                    <div class="text-muted small">Run from the project root in Command Prompt or PowerShell.</div>
                 </div>
-                <div class="ocr-command-line" id="engine-command">{{ $engine['command'] }}</div>
+                <button class="btn btn-sm btn-label-secondary" type="button" id="copy-engine-command">
+                    <i class="icon-base bx bx-copy icon-sm me-1"></i>
+                    <span>Copy command</span>
+                </button>
+            </div>
+            <div class="ocr-command-line" id="engine-command">{{ $engine['command'] }}</div>
+            @unless ($engine['reachable'])
                 @if ($engine['error'])
                     <div class="text-danger small mt-2">
                         <i class="icon-base bx bx-error icon-sm me-1"></i>{{ $engine['error'] }}
                     </div>
                 @endif
-            </div>
-        @endunless
+            @endunless
+        </div>
     </div>
 </section>

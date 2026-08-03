@@ -25,14 +25,6 @@
 
   .ocr-engine-card {
     border: 1px solid var(--ocr-soft-border);
-
-    &.is-online {
-      border-left: 3px solid var(--bs-success);
-    }
-
-    &.is-offline {
-      border-left: 3px solid var(--bs-danger);
-    }
   }
 
   .ocr-engine-icon {
@@ -154,15 +146,6 @@
 
     &.is-active {
       background: rgba(var(--bs-success-rgb), 0.035);
-
-      &::before {
-        position: absolute;
-        inset-block: 0;
-        left: 0;
-        width: 3px;
-        content: '';
-        background: var(--bs-success);
-      }
     }
   }
 
