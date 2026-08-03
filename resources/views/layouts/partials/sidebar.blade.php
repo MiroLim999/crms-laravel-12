@@ -4,10 +4,8 @@
     <div class="app-brand demo">
         <a href="{{ route('dashboard') }}" class="app-brand-link">
             <span class="app-brand-logo demo">
-                <span class="d-flex align-items-center justify-content-center rounded text-white fw-bold"
-                      style="width: 2.25rem; height: 2.25rem; background-color: #696cff; font-size: .8125rem;">
-                    CR
-                </span>
+                <img src="{{ asset('assets/img/logo.png') }}" alt="{{ config('app.name') }} logo"
+                     width="36" height="36" class="d-block rounded">
             </span>
             <span class="app-brand-text demo menu-text fw-bold ms-2">CRMS</span>
         </a>
