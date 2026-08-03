@@ -1,53 +1,62 @@
 {{--
-    Service status - read only.
-
-    There are no Start and Stop buttons. Spawning and killing an OS process from a
-    web request is a lot of blast radius for a convenience, and a service killed
-    from a browser tab mid-scan fails in ways nobody can see. The command is shown
-    instead, so it can be copied and run where its output is visible.
+    Read-only service state. CRMS deliberately does not start or stop this OS
+    process. Healthy-state instructions stay hidden; the launch command appears only
+    when it is actionable (offline).
 --}}
-<div class="card mb-4" id="engine-card">
+<section class="card ocr-engine-card {{ $engine['reachable'] ? 'is-online' : 'is-offline' }} mb-4"
+         id="engine-card"
+         aria-labelledby="engine-state">
     <div class="card-body">
-        <div class="d-flex flex-wrap align-items-center gap-4">
-            <span class="d-inline-flex align-items-center gap-2">
-                <span class="badge rounded-circle p-1 {{ $engine['reachable'] ? 'bg-success' : 'bg-danger' }}"
-                      id="engine-dot"></span>
-                <strong id="engine-state">
-                    {{ $engine['reachable'] ? 'OCR service online' : 'OCR service offline' }}
-                </strong>
-            </span>
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+            <div class="d-flex align-items-center gap-3">
+                <div class="ocr-engine-icon" aria-hidden="true">
+                    <i class="icon-base bx bx-plug"></i>
+                    <span class="ocr-status-dot {{ $engine['reachable'] ? 'is-online' : 'is-offline' }}"
+                          id="engine-dot"></span>
+                </div>
+                <div>
+                    <h2 class="h6 mb-0" id="engine-state" aria-live="polite">
+                        {{ $engine['reachable'] ? 'OCR service online' : 'OCR service offline' }}
+                    </h2>
+                    <p class="text-muted small mb-0 mt-1">
+                        {{ $engine['reachable']
+                            ? 'Scanning and model management are available.'
+                            : 'Scanning and model changes are temporarily unavailable.' }}
+                    </p>
+                </div>
+            </div>
 
-            <span class="text-muted small">
-                <i class="icon-base bx bx-chip icon-sm me-1"></i>
-                Device: <code id="engine-device">{{ $engine['device'] ?: 'not-loaded' }}</code>
-            </span>
-
-            <span class="text-muted small">
-                Review threshold: <strong>{{ rtrim(rtrim(number_format($threshold, 2), '0'), '.') }}%</strong>
-                confidence
-            </span>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <span class="ocr-meta-pill" title="Inference device">
+                    <i class="icon-base bx bx-chip icon-sm"></i>
+                    <span id="engine-device">{{ $engine['device'] ?: 'not loaded' }}</span>
+                </span>
+                <span class="ocr-meta-pill" title="Local OCR endpoint">
+                    <i class="icon-base bx bx-terminal icon-sm"></i>
+                    <span class="font-monospace">{{ parse_url($engine['url'], PHP_URL_HOST) }}:{{ parse_url($engine['url'], PHP_URL_PORT) }}</span>
+                </span>
+            </div>
         </div>
 
-        <div class="mt-3 pt-3 border-top small">
-            <span class="text-muted">Run the service with:</span>
-            <code>{{ $engine['command'] }}</code>
-            <span class="text-muted ms-2">&rarr; {{ $engine['url'] }}</span>
-
-            @unless ($engine['reachable'])
-                <div class="mt-2 text-danger">{{ $engine['error'] }}</div>
-            @endunless
-        </div>
+        @unless ($engine['reachable'])
+            <div class="ocr-engine-recovery mt-3 pt-3 border-top">
+                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                    <div>
+                        <div class="fw-medium small">Start the service from the project root</div>
+                        <div class="text-muted small">This page reconnects automatically.</div>
+                    </div>
+                    <button class="btn btn-sm btn-label-secondary" type="button" id="copy-engine-command">
+                        <i class="icon-base bx bx-copy icon-sm me-1"></i>
+                        <span>Copy command</span>
+                    </button>
+                </div>
+                <div class="ocr-command-line" id="engine-command">{{ $engine['command'] }}</div>
+                @if ($engine['error'])
+                    <div class="text-danger small mt-2">
+                        <i class="icon-base bx bx-error icon-sm me-1"></i>{{ $engine['error'] }}
+                    </div>
+                @endif
+            </div>
+        @endunless
     </div>
-</div>
-
-@unless ($engine['reachable'])
-    <div class="alert alert-warning d-flex align-items-start" role="alert">
-        <i class="icon-base bx bx-error icon-md me-2"></i>
-        <div>
-            <strong>The OCR service is not running.</strong>
-            Staff cannot read handwriting, and models cannot be installed, renamed, or
-            deleted until it answers. Run the command above from the repo root; this
-            page notices on its own once it is up.
-        </div>
-    </div>
-@endunless
+</section>

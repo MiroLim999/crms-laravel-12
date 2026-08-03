@@ -153,14 +153,16 @@ class OcrWorkspaceTest extends TestCase
             ->get(route('ocr.index'))
             ->assertOk()
             ->assertSee('OCR service online')
-            ->assertSee('Model used for scanning')
-            ->assertSee('Save settings')
+            ->assertSee('Approved model')
+            ->assertSee('Save policy')
             ->assertSee('TrOCR v1')
-            // Nothing promoted yet, so the picker has to offer an explicit "not
-            // chosen" state - otherwise the first model is pre-selected, the form is
-            // never dirty, and Save settings can never be pressed.
-            ->assertSee('none selected')
-            ->assertSee('No model is in use.')
+            // Nothing promoted yet, so the picker has to offer an explicit empty
+            // state; otherwise the first model is silently chosen and the form can
+            // never become dirty by selecting it.
+            ->assertSee('Select a model')
+            ->assertSee('Action needed')
+            // Healthy-state launch instructions would duplicate the status strip.
+            ->assertDontSee('python -m uvicorn ml.api.main:app', escape: false)
             // The stripped tabs must not come back.
             ->assertDontSee('Fine-tuning')
             ->assertDontSee('Datasets')
@@ -177,8 +179,8 @@ class OcrWorkspaceTest extends TestCase
         $this->actingAs($actor)
             ->get(route('ocr.index'))
             ->assertOk()
-            ->assertDontSee('none selected')
-            ->assertDontSee('No model is in use.')
+            ->assertDontSee('Select a model')
+            ->assertDontSee('Action needed')
             ->assertSee('Active');
     }
 

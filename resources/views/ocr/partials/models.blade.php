@@ -1,303 +1,324 @@
-{{--
-    OCR model management + scanning settings in two cards.
-
-    Card 1 – Installed models
-        A table of every discovered model with inline Rename / Delete icon buttons on
-        each row. No separate dropdown picker needed: the row button carries the key
-        as a data attribute. The + Add button stays in the header.
-
-    Card 2 – Scanning settings
-        The "Model used for scanning" select, the staff-choice toggle, and the
-        review threshold. Save settings is the only thing that commits a change here;
-        the button stays disabled until something actually differs.
---}}
 @php
-    $models  = $overview['models'];
-    $selectable = $models->filter(fn ($m) => $m['on_disk']);
-    $selected   = old('model', $activeModel?->key);
+    $models = $overview['models'];
+    $selectable = $models->filter(
+        fn (array $model) => $model['on_disk'] && $model['disk_deleted_at'] === null
+    );
+    $selected = old('model', $activeModel?->key);
+    $availableCount = $selectable->count();
 @endphp
 
-{{-- No-model-in-use warning --}}
-@if ($selectable->isNotEmpty() && ! $models->contains(fn ($m) => $m['is_active']))
-    <div class="alert alert-warning d-flex align-items-start mb-4" role="alert">
-        <i class="icon-base bx bx-error icon-md me-2 mt-1 flex-shrink-0"></i>
-        <div>
-            <strong>No model is in use.</strong>
-            Staff cannot read handwriting until one is selected in <em>Scanning settings</em>
-            below and saved.
-        </div>
-    </div>
-@endif
+<div class="ocr-workspace-grid">
+    {{-- ------------------------------------------------------- model inventory --}}
+    <section class="card ocr-models-card" aria-labelledby="installed-models-title">
+        <div class="card-header border-bottom">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                <div class="d-flex align-items-center gap-3">
+                    <span class="ocr-section-icon bg-label-primary" aria-hidden="true">
+                        <i class="icon-base bx bx-brain"></i>
+                    </span>
+                    <div>
+                        <div class="d-flex align-items-center gap-2">
+                            <h2 class="h5 card-title mb-0" id="installed-models-title">Models</h2>
+                            <span class="badge bg-label-secondary">
+                                {{ $availableCount }} available
+                            </span>
+                        </div>
+                        <p class="text-muted small mb-0 mt-1">Models available to the OCR service.</p>
+                    </div>
+                </div>
 
-{{-- ---------------------------------------------------------------- installed models --}}
-<div class="card mb-4">
-    <div class="card-header d-flex align-items-center justify-content-between gap-2">
-        <div>
-            <h5 class="card-title mb-0">Installed models</h5>
-            <small class="text-muted">
-                Discovered from <code>ml/models/</code>, reconciled with the CRMS registry.
-            </small>
-        </div>
-        <button type="button"
-                class="btn btn-sm btn-primary"
-                data-bs-toggle="modal"
-                data-bs-target="#addModelModal">
-            <i class="icon-base bx bx-plus icon-sm me-1"></i> Add model
-        </button>
-    </div>
-
-    @if ($models->isEmpty())
-        <div class="card-body">
-            <div class="text-center py-4 text-muted">
-                <i class="icon-base bx bx-brain icon-lg d-block mb-2"></i>
-                <p class="mb-1 fw-medium">No models found</p>
-                <p class="small mb-0">
-                    Upload one with <em>Add model</em>, or copy a folder into
-                    <code>ml/models/</code> and click <em>Rescan</em>.
-                </p>
+                <button type="button"
+                        class="btn btn-sm btn-primary"
+                        data-bs-toggle="modal"
+                        data-bs-target="#addModelModal"
+                        @disabled(! $engine['reachable'])
+                        title="{{ $engine['reachable'] ? 'Install a model' : 'The OCR service must be online.' }}">
+                    <i class="icon-base bx bx-plus icon-sm me-1"></i>Add model
+                </button>
             </div>
         </div>
-    @else
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th class="ps-4">Model</th>
-                        <th>Status</th>
-                        <th>Installed</th>
-                        <th class="text-end pe-4" style="width:110px">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach ($models as $model)
-                        @php
-                            $canEdit = $model['on_disk']
-                                    && ! $model['is_base']
-                                    && ! $model['is_active']
-                                    && ! $model['disk_deleted_at']
-                                    && $engine['reachable'];
 
-                            $blockReason = ! $engine['reachable']
-                                ? 'OCR service must be running.'
-                                : ($model['is_base']
-                                    ? 'The base model cannot be renamed or deleted.'
-                                    : ($model['is_active']
-                                        ? 'In use by Staff — select another model and save settings first.'
-                                        : (! $model['on_disk']
-                                            ? 'Model folder is missing from disk.'
-                                            : '')));
-                        @endphp
-                        <tr>
-                            <td class="ps-4">
-                                <div class="d-flex align-items-center gap-2">
-                                    <div class="avatar avatar-sm flex-shrink-0">
-                                        <span class="avatar-initial rounded bg-label-{{ $model['is_active'] ? 'success' : ($model['is_base'] ? 'secondary' : 'primary') }}">
-                                            <i class="icon-base bx bx-brain icon-sm"></i>
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <div class="fw-medium lh-sm">{{ $model['label'] }}</div>
-                                        <code class="small text-muted">{{ $model['key'] }}</code>
-                                        @if ($model['is_base'])
-                                            <span class="badge bg-label-secondary ms-1 align-middle small">base</span>
+        @if ($models->isEmpty())
+            <div class="card-body">
+                <div class="ocr-empty-state">
+                    <span class="ocr-empty-icon" aria-hidden="true">
+                        <i class="icon-base bx bx-brain"></i>
+                    </span>
+                    <h3 class="h6 mb-1">No models available</h3>
+                    <p class="text-muted small mb-3">
+                        Upload a model, or copy its folder into <span class="font-monospace">ml/models/</span>
+                        and rescan.
+                    </p>
+                    <button type="button" class="btn btn-sm btn-primary"
+                            data-bs-toggle="modal" data-bs-target="#addModelModal"
+                            @disabled(! $engine['reachable'])>
+                        Add model
+                    </button>
+                </div>
+            </div>
+        @else
+            <div class="ocr-model-list" role="list">
+                @foreach ($models as $model)
+                    @php
+                        $showKey = strcasecmp((string) $model['label'], (string) $model['key']) !== 0;
+                        $canManage = $engine['reachable']
+                            && $model['on_disk']
+                            && ! $model['is_base']
+                            && ! $model['is_active']
+                            && $model['disk_deleted_at'] === null;
+
+                        if (! $engine['reachable']) {
+                            $blockedReason = 'The OCR service is offline.';
+                        } elseif ($model['is_base']) {
+                            $blockedReason = 'The built-in base model is protected.';
+                        } elseif ($model['is_active']) {
+                            $blockedReason = 'Select another scanning model and save before managing this one.';
+                        } elseif ($model['disk_deleted_at']) {
+                            $blockedReason = 'This model was deleted from disk.';
+                        } elseif (! $model['on_disk']) {
+                            $blockedReason = 'The model folder is missing from disk.';
+                        } else {
+                            $blockedReason = '';
+                        }
+
+                        if ($model['disk_deleted_at']) {
+                            $stateLabel = 'Deleted';
+                            $stateColor = 'danger';
+                            $stateIcon = 'bx-trash';
+                        } elseif (! $model['on_disk']) {
+                            $stateLabel = $engine['reachable'] ? 'Missing' : 'Unknown';
+                            $stateColor = 'warning';
+                            $stateIcon = 'bx-error';
+                        } elseif ($model['is_active']) {
+                            $stateLabel = 'Active';
+                            $stateColor = 'success';
+                            $stateIcon = 'bx-check-circle';
+                        } elseif ($model['loaded']) {
+                            $stateLabel = 'Loaded';
+                            $stateColor = 'info';
+                            $stateIcon = 'bx-chip';
+                        } else {
+                            $stateLabel = 'Available';
+                            $stateColor = 'secondary';
+                            $stateIcon = 'bx-check';
+                        }
+                    @endphp
+
+                    <article class="ocr-model-row {{ $model['is_active'] ? 'is-active' : '' }}"
+                             role="listitem"
+                             data-model-key="{{ $model['key'] }}">
+                        <div class="ocr-model-main">
+                            <span class="ocr-model-icon bg-label-{{ $model['is_active'] ? 'success' : ($model['is_base'] ? 'secondary' : 'primary') }}"
+                                  aria-hidden="true">
+                                <i class="icon-base bx bx-brain"></i>
+                            </span>
+
+                            <div class="min-w-0">
+                                <div class="d-flex flex-wrap align-items-center gap-2">
+                                    <h3 class="ocr-model-name mb-0">{{ $model['label'] }}</h3>
+                                    @if ($model['is_base'])
+                                        <span class="badge bg-label-secondary">Base</span>
+                                    @endif
+                                </div>
+
+                                @if ($showKey)
+                                    <div class="ocr-model-key">{{ $model['key'] }}</div>
+                                @endif
+
+                                <div class="ocr-model-meta">
+                                    @if ($model['is_base'])
+                                        <span>Built-in model</span>
+                                    @elseif ($model['registered_at'])
+                                        <span>Added {{ $model['registered_at']->diffForHumans() }}</span>
+                                        @if ($model['registrar'])
+                                            <span aria-hidden="true">·</span>
+                                            <span>{{ $model['registrar'] }}</span>
+                                        @endif
+                                    @else
+                                        <span>Discovered on disk</span>
+                                    @endif
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="ocr-model-controls">
+                            <span class="badge bg-label-{{ $stateColor }} ocr-model-state">
+                                <i class="icon-base bx {{ $stateIcon }} icon-xs me-1"></i>{{ $stateLabel }}
+                            </span>
+
+                            <div class="dropdown">
+                                <button type="button"
+                                        class="btn btn-sm btn-icon btn-text-secondary rounded-pill dropdown-toggle hide-arrow"
+                                        data-bs-toggle="dropdown"
+                                        aria-expanded="false"
+                                        aria-label="Manage {{ $model['label'] }}">
+                                    <i class="icon-base bx bx-dots-vertical-rounded"></i>
+                                </button>
+                                <div class="dropdown-menu dropdown-menu-end ocr-model-menu">
+                                    <div class="px-3 py-2 border-bottom">
+                                        <div class="fw-medium text-truncate">{{ $model['label'] }}</div>
+                                        @if ($showKey)
+                                            <div class="text-muted small font-monospace text-truncate">{{ $model['key'] }}</div>
                                         @endif
                                     </div>
-                                </div>
-                            </td>
 
-                            <td>
-                                @if ($model['is_active'])
-                                    <span class="badge bg-label-success">
-                                        <i class="icon-base bx bx-check-circle icon-xs me-1"></i>
-                                        Active
-                                    </span>
-                                @endif
-                                @if ($model['disk_deleted_at'])
-                                    <span class="badge bg-label-danger">Deleted</span>
-                                @elseif (! $model['on_disk'])
-                                    <span class="badge bg-label-warning">
-                                        {{ $engine['reachable'] ? 'Missing' : 'Unknown' }}
-                                    </span>
-                                @elseif ($model['loaded'])
-                                    <span class="badge bg-label-info">In VRAM</span>
-                                @else
-                                    <span class="badge bg-label-secondary">Ready</span>
-                                @endif
-                            </td>
-
-                            <td class="small text-muted">
-                                @if ($model['registered_at'])
-                                    {{ $model['registered_at']->toFormattedDayDateString() }}
-                                    @if ($model['registrar'])
-                                        <div class="text-muted">{{ $model['registrar'] }}</div>
+                                    @if ($canManage)
+                                        <button type="button"
+                                                class="dropdown-item model-rename-trigger"
+                                                data-key="{{ $model['key'] }}"
+                                                data-label="{{ $model['label'] }}"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#renameModal">
+                                            <i class="icon-base bx bx-rename icon-sm me-2"></i>Rename
+                                        </button>
+                                        <div class="dropdown-divider"></div>
+                                        <button type="button"
+                                                class="dropdown-item text-danger model-delete-trigger"
+                                                data-key="{{ $model['key'] }}"
+                                                data-label="{{ $model['label'] }}"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#deleteModal">
+                                            <i class="icon-base bx bx-trash icon-sm me-2"></i>Delete
+                                        </button>
+                                    @else
+                                        <div class="dropdown-item-text d-flex gap-2 py-3 text-muted small">
+                                            <i class="icon-base bx bx-lock-alt icon-sm flex-shrink-0 mt-1"></i>
+                                            <span>{{ $blockedReason }}</span>
+                                        </div>
                                     @endif
-                                @else
-                                    —
-                                @endif
-                            </td>
+                                </div>
+                            </div>
+                        </div>
+                    </article>
+                @endforeach
+            </div>
+        @endif
+    </section>
 
-                            <td class="text-end pe-4">
-                                @if (! $model['disk_deleted_at'])
-                                    <button type="button"
-                                            class="btn btn-icon btn-sm btn-text-secondary model-rename-trigger"
-                                            data-key="{{ $model['key'] }}"
-                                            data-bs-toggle="modal"
-                                            data-bs-target="#renameModal"
-                                            @disabled(! $canEdit)
-                                            title="{{ $canEdit ? 'Rename' : $blockReason }}">
-                                        <i class="icon-base bx bx-edit icon-sm"></i>
-                                    </button>
+    {{-- -------------------------------------------------------- scanning policy --}}
+    <form method="POST" action="{{ route('ocr.settings') }}"
+          class="card ocr-policy-card" id="ocrSettingsForm">
+        @csrf
 
-                                    <button type="button"
-                                            class="btn btn-icon btn-sm btn-text-danger model-delete-trigger"
-                                            data-key="{{ $model['key'] }}"
-                                            data-label="{{ $model['label'] }}"
-                                            data-bs-toggle="modal"
-                                            data-bs-target="#deleteModal"
-                                            @disabled(! $canEdit)
-                                            title="{{ $canEdit ? 'Delete' : $blockReason }}">
-                                        <i class="icon-base bx bx-trash icon-sm"></i>
-                                    </button>
-                                @endif
-                            </td>
-                        </tr>
-                    @endforeach
-                </tbody>
-            </table>
-        </div>
-
-        <div class="card-footer text-muted small">
-            The base model and the model currently in use cannot be renamed or deleted.
-            To free one up, select a different model in <em>Scanning settings</em> and save.
-        </div>
-    @endif
-</div>
-
-{{-- ---------------------------------------------------------- scanning settings --}}
-<form method="POST" action="{{ route('ocr.settings') }}" id="ocrSettingsForm">
-    @csrf
-
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="card-title mb-0">Scanning settings</h5>
-            <small class="text-muted">Controls what model Staff scan with and how readings are reviewed.</small>
+        <div class="card-header border-bottom">
+            <div class="d-flex align-items-center gap-3">
+                <span class="ocr-section-icon bg-label-info" aria-hidden="true">
+                    <i class="icon-base bx bx-cog"></i>
+                </span>
+                <div class="min-w-0">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <h2 class="h5 card-title mb-0">Scanning policy</h2>
+                        @if ($activeModel === null && $selectable->isNotEmpty())
+                            <span class="badge bg-label-warning">Action needed</span>
+                        @endif
+                    </div>
+                    <p class="text-muted small mb-0 mt-1">Applies to new scans.</p>
+                </div>
+            </div>
         </div>
 
         <div class="card-body">
-            {{-- Model used for scanning --}}
+            @if ($activeModel === null && $selectable->isNotEmpty())
+                <div class="alert alert-warning py-2 px-3 small mb-4">
+                    Choose a model and save to enable handwriting recognition.
+                </div>
+            @endif
+
             <div class="mb-4">
-                <label for="model-select" class="form-label fw-medium">Model used for scanning</label>
+                <label for="model-select" class="form-label fw-medium">Approved model</label>
                 <select class="form-select" id="model-select" name="model"
                         @disabled($selectable->isEmpty())>
                     @if ($selectable->isEmpty())
                         <option value="">
-                            {{ $engine['reachable'] ? 'No models installed' : 'OCR engine offline' }}
+                            {{ $engine['reachable'] ? 'No models available' : 'OCR service offline' }}
                         </option>
                     @else
                         @if ($activeModel === null)
                             <option value="" @selected($selected === null || $selected === '')>
-                                — none selected —
+                                Select a model
                             </option>
                         @endif
                         @foreach ($selectable as $model)
                             <option value="{{ $model['key'] }}"
-                                    data-base="{{ $model['is_base'] ? '1' : '' }}"
-                                    data-active="{{ $model['is_active'] ? '1' : '' }}"
-                                    data-loaded="{{ $model['loaded'] ? '1' : '' }}"
-                                    data-registrar="{{ $model['registrar'] }}"
                                     @selected($selected === $model['key'])>
-                                {{ $model['label'] }}@if ($model['is_base']) (not fine-tuned)@endif
+                                {{ $model['label'] }}{{ $model['is_base'] ? ' (base)' : '' }}
                             </option>
                         @endforeach
                     @endif
                 </select>
-                <div class="mt-2 small" id="model-note">
-                    @if (! $engine['reachable'])
-                        <span class="text-danger">
-                            <i class="icon-base bx bx-circle icon-xs me-1"></i>
-                            OCR engine offline — start the Python API
-                        </span>
-                    @elseif ($selectable->isEmpty())
-                        <span class="text-muted">
-                            Nothing to select. Add a model above, or copy one into
-                            <code>ml/models/</code> and click <em>Rescan</em>.
-                        </span>
-                    @else
-                        <span class="text-muted">
-                            Takes effect on the next scan. Records already submitted keep their
-                            values and their reference to the model that produced them.
-                        </span>
-                    @endif
+                <div class="form-text" id="model-note">
+                    New scans use this model after you save.
                 </div>
             </div>
 
-            <hr class="my-3">
-
-            {{-- Staff model choice --}}
-            <div class="mb-4">
+            <div class="ocr-setting-block mb-3">
                 <div class="form-check form-switch mb-1">
                     <input class="form-check-input" type="checkbox" role="switch" value="1"
                            id="allow-staff-choice" name="allow_staff_model_choice"
                            @checked(old('allow_staff_model_choice', $settings->allow_staff_model_choice))>
                     <label class="form-check-label fw-medium" for="allow-staff-choice">
-                        Let Staff choose a different model while scanning
+                        Allow Staff model choice
                     </label>
                 </div>
-                <p class="text-muted small ms-4 ps-2 mb-0">
-                    Off means every reading in the archive came from the model selected above.
-                    On lets Staff pick any installed model per document, and the record stores
-                    whichever one they used.
+                <p class="text-muted small mb-0 ps-4">
+                    Let Staff override the approved model for an individual document.
                 </p>
             </div>
 
-            {{-- Review threshold --}}
-            <div class="row g-3">
-                <div class="col-md-4">
-                    <label for="threshold-input" class="form-label fw-medium">Review threshold</label>
-                    <div class="input-group">
+            <div class="ocr-setting-block">
+                <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                    <div class="flex-grow-1">
+                        <label for="threshold-input" class="form-label fw-medium mb-1">Review threshold</label>
+                        <p class="text-muted small mb-0">
+                            Flag fields below this confidence for review. Confidence is not accuracy.
+                        </p>
+                    </div>
+                    <div class="input-group ocr-threshold-control">
                         <input type="number" class="form-control" id="threshold-input"
                                name="confidence_review_threshold" min="1" max="100" step="0.5"
                                placeholder="{{ rtrim(rtrim(number_format($configThreshold, 2), '0'), '.') }}"
-                               value="{{ old('confidence_review_threshold', $settings->confidence_review_threshold) }}">
+                               value="{{ old('confidence_review_threshold', $settings->confidence_review_threshold) }}"
+                               aria-describedby="threshold-fallback">
                         <span class="input-group-text">%</span>
                     </div>
-                    @error('confidence_review_threshold')
-                        <div class="text-danger small mt-1">{{ $message }}</div>
-                    @enderror
                 </div>
-                <div class="col-md-8 d-flex align-items-end">
-                    <p class="text-muted small mb-0">
-                        Fields the model was less certain about than this are flagged for a closer
-                        look. Confidence is the model's certainty in its own output, never a
-                        measure of accuracy. Leave empty to use the configured default of
-                        {{ rtrim(rtrim(number_format($configThreshold, 2), '0'), '.') }}%.
-                    </p>
+                <div class="form-text mt-2" id="threshold-fallback">
+                    Empty uses the configured {{ rtrim(rtrim(number_format($configThreshold, 2), '0'), '.') }}% default.
                 </div>
+                @error('confidence_review_threshold')
+                    <div class="text-danger small mt-1">{{ $message }}</div>
+                @enderror
             </div>
         </div>
 
-        <div class="card-footer d-flex flex-wrap align-items-center justify-content-between gap-2">
-            <div>
-                <span class="small text-warning d-none" id="settings-dirty">
-                    <i class="icon-base bx bx-edit icon-sm me-1"></i> Unsaved changes
-                </span>
-                <span class="small text-muted" id="settings-clean">
-                    @if ($settings->updated_by)
-                        Last saved {{ $settings->updated_at->diffForHumans() }}
-                        @if ($settings->editor) by {{ $settings->editor->name }} @endif
-                    @else
-                        No settings saved yet.
-                    @endif
-                </span>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-                <button type="button" class="btn btn-outline-secondary" id="settings-discard" disabled>
-                    Discard
-                </button>
-                <button type="submit" class="btn btn-primary" id="settings-save" disabled>
-                    <i class="icon-base bx bx-save icon-sm me-1"></i> Save settings
-                </button>
+        <div class="card-footer">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                <div class="small">
+                    <span class="text-warning d-none" id="settings-dirty">
+                        <i class="icon-base bx bx-edit icon-sm me-1"></i>Unsaved changes
+                    </span>
+                    <span class="text-muted" id="settings-clean">
+                        @if ($settings->updated_by)
+                            Saved {{ $settings->updated_at->diffForHumans() }}
+                            @if ($settings->editor) by {{ $settings->editor->name }}@endif
+                        @else
+                            Not saved yet
+                        @endif
+                    </span>
+                </div>
+                <div class="d-flex align-items-center gap-2 ms-auto">
+                    <button type="button" class="btn btn-sm btn-label-secondary"
+                            id="settings-discard" disabled>
+                        Discard
+                    </button>
+                    <button type="submit" class="btn btn-sm btn-primary"
+                            id="settings-save" disabled>
+                        <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                        <i class="icon-base bx bx-check icon-sm me-1"></i>
+                        <span>Save policy</span>
+                    </button>
+                </div>
             </div>
         </div>
-    </div>
-</form>
+    </form>
+</div>
