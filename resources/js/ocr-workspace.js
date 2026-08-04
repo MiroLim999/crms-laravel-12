@@ -374,7 +374,7 @@ function initModelUpload() {
             const source = isZip(files[0])
                 ? files[0].name.replace(/\.zip$/i, '')
                 : relativePathFor(files[0]).split('/')[0] || '';
-            nameInput.value = source.replace(/[^A-Za-z0-9._-]+/g, '-');
+            nameInput.value = source.replace(/[^\w\s._-]/g, '').replace(/\s+/g, ' ').trim();
         }
 
         refreshSubmit();

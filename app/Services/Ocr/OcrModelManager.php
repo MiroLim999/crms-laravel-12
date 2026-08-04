@@ -244,6 +244,7 @@ class OcrModelManager
 
         if ($model) {
             $model->key = $resolved;
+            $model->label = $resolved;
             $this->audit->saveAndLog(
                 'ocr_model.renamed',
                 $model,

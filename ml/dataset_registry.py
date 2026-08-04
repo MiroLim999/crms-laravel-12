@@ -53,7 +53,8 @@ class DatasetError(Exception):
 
 def sanitise_name(raw):
     """Fold a user-supplied name into a safe single path segment."""
-    name = re.sub(r"[^A-Za-z0-9._-]+", "-", (raw or "").strip()).strip("-._")
+    name = re.sub(r"[^\w\s._-]", "", (raw or "").strip()).strip(". ")
+    name = re.sub(r"\s+", " ", name)
     if not name:
         raise DatasetError("That dataset name is not allowed.")
     return name
