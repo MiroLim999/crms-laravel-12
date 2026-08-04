@@ -17,8 +17,15 @@ Two processes, one repository:
 
 Laravel normally calls the OCR service server-side. Model installation is the deliberate
 exception: Laravel issues a short-lived signed ticket, then the browser sends the large
-multipart body directly to FastAPI and posts the small result back to Laravel for registry
-and audit synchronization. The service stays bound to `127.0.0.1` in local development.
+multipart body directly to FastAPI. After FastAPI saves the files, the browser posts only
+the installed model name to Laravel; Laravel verifies it against FastAPI's own inventory,
+then writes the registry and audit records transactionally. The model bytes never pass
+through PHP. If that final lightweight request fails, the page can retry registration
+without uploading the model again, and *Rescan models* remains the recovery path.
+
+The service stays bound to `127.0.0.1` in local development. In production, expose only
+the signed upload endpoint through an HTTPS reverse proxy; keep Laravel's other calls to
+FastAPI on a private or loopback address.
 
 Laravel does not start or stop that process. It is a separate program with its own
 lifetime — run it from a terminal in development, or under a supervisor in a
@@ -59,8 +66,8 @@ app/                    Laravel application code
 ml/                     ALL Python lives here
 ├── api/main.py         FastAPI OCR service - serve, install, rename, delete models
 ├── train_trocr.py      fine-tuning
-├── test_trocr.py       evaluate the base model
-├── test_finetuned.py   evaluate a fine-tuned model
+├── test_trocr.py       manual CLI evaluation of the base model (not an automated test)
+├── test_finetuned.py   manual CLI evaluation of any model (not an automated test)
 ├── predict.py          batch predict a folder of images
 ├── metrics.py          CER / WER / exact-match + chart export
 ├── dataset_registry.py dataset layout, validation, and name sanitising
@@ -68,8 +75,6 @@ ml/                     ALL Python lives here
 ├── models/             fine-tuned model folders (gitignored, ~1.3 GB each)
 ├── dataset/            training images + manifest CSV (gitignored)
 └── evaluation-metrics/ charts written by the evaluation scripts
-
-sneat/                  SNEAT template - visual design reference only, never routed
 ```
 
 Training, evaluation, dataset preparation, and batch prediction are **command-line
@@ -129,6 +134,84 @@ php artisan db:seed --class=DemoUsersSeeder    # staff@crms.test / admin@crms.te
 ```
 
 Delete that seeder before deploying.
+
+## Production deployment
+
+The direct-upload design is retained in production. Only the browser-facing address
+changes:
+
+```text
+Local:       browser -> http://127.0.0.1:8001/add_model -> FastAPI
+Production:  browser -> https://crms.example.com/ocr-api/add_model
+                     -> reverse proxy -> 127.0.0.1:8001/add_model
+```
+
+The reverse proxy is part of the web-server path, but Laravel/PHP never receives or
+writes the multi-gigabyte request body.
+
+For a same-server deployment, use separate private and browser-facing URLs:
+
+```dotenv
+OCR_API_URL=http://127.0.0.1:8001
+OCR_API_TIMEOUT=120
+
+OCR_BROWSER_API_URL=https://crms.example.com/ocr-api
+OCR_BROWSER_ORIGIN_REGEX=^https://crms\.example\.com$
+
+# Use the same dedicated value in the Laravel and FastAPI environments.
+OCR_UPLOAD_SECRET=replace-with-a-long-random-production-secret
+
+# The ticket is checked after multipart parsing, so allow for internet upload speed.
+# The current application clamps this value to a maximum of 3600 seconds.
+OCR_UPLOAD_TICKET_TTL=3600
+```
+
+An Nginx location for the public upload path can look like this:
+
+```nginx
+location = /ocr-api/add_model {
+    client_max_body_size 3g;
+    client_body_timeout 3600s;
+
+    proxy_http_version 1.1;
+    proxy_request_buffering off;
+    proxy_send_timeout 3600s;
+    proxy_read_timeout 3600s;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+    proxy_pass http://127.0.0.1:8001/add_model;
+}
+```
+
+Important production requirements:
+
+- Serve both Laravel and the browser-facing OCR upload URL over HTTPS. Browsers block an
+  HTTPS page from sending `fetch`/XHR uploads to an HTTP endpoint.
+- Publicly expose only `/add_model`. The rename, delete, model-list, health, and OCR
+  endpoints are designed for Laravel-to-FastAPI communication and rely on private-network
+  or loopback isolation.
+- Run FastAPI under a process supervisor or container restart policy; do not use development
+  auto-reload in production.
+- Keep `ml/models/` on persistent, writable storage. Container-local ephemeral storage will
+  lose installed models during replacement or redeployment.
+- Allow enough request size, proxy time, temporary disk, and model disk for a model upload.
+  Multipart spooling and archive extraction can temporarily require more than the final
+  model size.
+- After changing OCR environment values, rebuild Laravel's configuration cache and restart
+  FastAPI so both processes read the same secret and URLs.
+
+```bash
+php artisan config:cache
+```
+
+A VPS, dedicated server, or persistent container host can support this layout. Typical
+PHP-only shared hosting cannot, because the application also requires a continuously running
+Python service and control over the large-upload reverse proxy. If FastAPI runs on a separate
+host, set `OCR_BROWSER_API_URL` to its public HTTPS URL, set the CORS regex to the Laravel
+origin, and keep `OCR_API_URL` on a private server-to-server address where possible.
 
 ## The OCR workflow
 
@@ -199,21 +282,55 @@ uncorrected one may have been wrong and missed.
 
 ## Tests
 
+The automated suite is PHPUnit under `tests/`. It currently contains nine feature-test
+classes: 95 test methods expand to 113 executed cases through data providers. The suite
+covers authentication, the role capability matrix, user management, audit integrity and
+viewing, change requests, analytics, reports, and OCR model management.
+
+Create the isolated database once, then run the suite:
+
 ```bash
+mysql -e "CREATE DATABASE crms_test"
 php artisan test
 ```
 
-Requires a `crms_test` MySQL database (`CREATE DATABASE crms_test;`).
+`phpunit.xml` forces the test connection to `crms_test`. `tests/TestCase.php` refuses to run
+when the selected database name does not end in `_test`, and `tests/bootstrap.php` preserves
+that protection when local environment variables would otherwise override PHPUnit. These
+two support files are required even though they do not contain test methods.
 
 `tests/Feature/CapabilityMatrixTest.php` is the load-bearing one: it asserts the permission
 table above, route by route and ability by ability. If a change makes it fail, the change is
 wrong, not the test.
+
+The files `ml/test_trocr.py` and `ml/test_finetuned.py` are manual GPU/CPU evaluation
+commands. Despite their historical names, they are not part of PHPUnit and there is no
+automated Python or browser test runner configured yet.
+
+Before handing a change to another collaborator, run checks appropriate to the files changed:
+
+```bash
+php artisan test                         # Laravel behavior and authorization
+npm run build                            # frontend compilation
+python -m py_compile ml/api/main.py      # FastAPI syntax
+git diff --check                         # whitespace and conflict-marker mistakes
+```
+
+Do not delete tests merely to reduce the repository size. They are small, execute in seconds,
+and document security and workflow rules that are otherwise easy for collaborators to break.
+Current areas that would benefit from additional coverage are document scanning/submission,
+template lifecycle operations, record browsing, FastAPI archive security, and browser-level
+direct-upload recovery.
 
 ## Model & data
 
 `ml/models/` and `ml/dataset/` are gitignored — they exceed GitHub's file-size limits. To
 share them, push to the [Hugging Face Hub](https://huggingface.co/docs/hub/models-uploading),
 use [Git LFS](https://git-lfs.com/), or host the dataset externally.
+
+Evaluation charts under `ml/evaluation-metrics/` are generated artifacts. Avoid adding every
+timestamped run to a collaboration branch unless the chart is an intentional comparison or
+documented baseline.
 
 ## Continued fine-tuning
 
