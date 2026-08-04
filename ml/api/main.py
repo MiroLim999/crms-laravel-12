@@ -149,7 +149,7 @@ def _discover_models():
 
 
 def _prettify(name):
-    return name.replace("-", " ").replace("_", " ").strip().title()
+    return name.replace("-", " ").replace("_", " ").strip()
 
 
 def _label_for(key):
