@@ -35,11 +35,12 @@ const randomId = () =>
         .map((byte) => byte.toString(16).padStart(2, '0'))
         .join('');
 
-const post = (endpoint, body, headers = {}) =>
+const post = (endpoint, body, headers = {}, options = {}) =>
     fetch(endpoint, {
         method: 'POST',
         headers: { 'X-CSRF-TOKEN': config.csrf, Accept: 'application/json', ...headers },
         body,
+        ...options,
     });
 
 const getJson = async (endpoint) => {
@@ -95,13 +96,19 @@ const discardUpload = (uploadId) => {
 };
 
 /** Send one file sequentially in slices. */
-async function uploadFile(uploadId, file, onProgress) {
+async function uploadFile(uploadId, file, onProgress, options = {}) {
     const total = Math.max(Math.ceil(file.size / CHUNK_SIZE), 1);
     const fileKey = randomId();
     const name = (file.name || 'file').split(/[\\/]/).pop();
     const relativePath = relativePathFor(file);
 
     for (let index = 0; index < total; index += 1) {
+        if (options.signal?.aborted) {
+            const err = new Error('Upload cancelled.');
+            err.name = 'AbortError';
+            throw err;
+        }
+
         const start = index * CHUNK_SIZE;
         const slice = file.slice(start, start + CHUNK_SIZE);
         const body = new FormData();
@@ -114,7 +121,7 @@ async function uploadFile(uploadId, file, onProgress) {
         body.append('total', String(total));
         body.append('chunk', slice, `${name}.part${index}`);
 
-        const response = await post(config.urls.chunk, body);
+        const response = await post(config.urls.chunk, body, {}, { signal: options.signal });
 
         if (!response.ok) {
             const payload = await response.json().catch(() => ({}));
@@ -137,17 +144,15 @@ async function uploadFile(uploadId, file, onProgress) {
     }
 }
 
-async function uploadAll(uploadId, files, onProgress) {
+async function uploadAll(uploadId, files, onProgress, options = {}) {
     const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
     let sent = 0;
 
     for (const file of files) {
-        // Sequential by design: it avoids competing writes and makes retry/progress
-        // semantics deterministic for very large model weights.
         await uploadFile(uploadId, file, (bytes) => {
             sent += bytes;
             onProgress(totalBytes === 0 ? 100 : Math.round((sent / totalBytes) * 100));
-        });
+        }, options);
     }
 }
 
@@ -302,6 +307,7 @@ function initModelUpload() {
 
     let selected = [];
     let uploading = false;
+    let abortController = null;
 
     const refreshSubmit = () => {
         submit.disabled = uploading || selected.length === 0 || nameInput.value.trim() === '';
@@ -335,13 +341,19 @@ function initModelUpload() {
         refreshSubmit();
     };
 
+    const cancelUpload = () => {
+        if (uploading && abortController) {
+            abortController.abort();
+        }
+    };
+
     const setUploading = (busy) => {
         uploading = busy;
         form.setAttribute('aria-busy', busy ? 'true' : 'false');
-        nameInput.disabled = busy;
+        nameInput.readOnly = busy;
         clearSelection.disabled = busy;
-        cancel.disabled = busy;
-        close.disabled = busy;
+        cancel.disabled = false;
+        close.disabled = false;
         fileInputs.forEach((input) => { input.disabled = busy; });
         setButtonBusy(submit, busy, 'Uploading…');
         refreshSubmit();
@@ -372,8 +384,24 @@ function initModelUpload() {
     nameInput.addEventListener('input', refreshSubmit);
     clearSelection.addEventListener('click', resetSelection);
 
+    cancel.addEventListener('click', (e) => {
+        if (uploading) {
+            e.preventDefault();
+            e.stopPropagation();
+            cancelUpload();
+        }
+    });
+
+    close.addEventListener('click', () => {
+        if (uploading) {
+            cancelUpload();
+        }
+    });
+
     modal.addEventListener('hide.bs.modal', (event) => {
-        if (uploading) event.preventDefault();
+        if (uploading) {
+            cancelUpload();
+        }
     });
 
     modal.addEventListener('hidden.bs.modal', () => {
@@ -398,6 +426,7 @@ function initModelUpload() {
         }
 
         const uploadId = randomId();
+        abortController = new AbortController();
         setUploading(true);
         progressWrap.classList.remove('d-none');
         progressStatus.textContent = 'Uploading model';
@@ -408,7 +437,7 @@ function initModelUpload() {
                 progress.style.width = `${percent}%`;
                 progress.setAttribute('aria-valuenow', String(percent));
                 progressPercent.textContent = `${percent}%`;
-            });
+            }, { signal: abortController.signal });
 
             uploadIdInput.value = uploadId;
             progress.style.width = '100%';
@@ -421,18 +450,23 @@ function initModelUpload() {
             // Native post returns the install result as a flash message. Clear the
             // beforeunload guard immediately before navigation begins.
             uploading = false;
+            nameInput.disabled = false;
+            nameInput.readOnly = false;
             form.submit();
         } catch (error) {
+            const wasAborted = error.name === 'AbortError' || abortController?.signal?.aborted;
             await discardUpload(uploadId);
             setUploading(false);
             progressWrap.classList.add('d-none');
             renderSummary({
                 ok: false,
-                title: 'Upload failed',
-                detail: error.message,
+                title: wasAborted ? 'Upload cancelled' : 'Upload failed',
+                detail: wasAborted ? 'File upload was cancelled by the user.' : error.message,
             });
             zone.classList.add('d-none');
             refreshSubmit();
+        } finally {
+            abortController = null;
         }
     });
 
