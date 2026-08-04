@@ -2,87 +2,66 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\Ocr\ChunkedUpload;
+use App\Services\Ocr\OcrModelManager;
+use App\Services\Ocr\OcrServiceException;
+use App\Services\Ocr\OcrUploadAuthorizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Receives one slice of a chunked upload - Super Admin only.
- *
- * PHP caps uploads at 40M here while a model folder is around 1.3 GB and a dataset
- * runs to thousands of images. A plain multipart post is rejected by PHP before
- * Laravel runs, so the browser slices each file and posts the pieces at this
- * endpoint; ChunkedUpload stitches them back together.
- *
- * The chunk size is not the browser's guess: ChunkedUpload::chunkBytes() reads this
- * server's upload_max_filesize and post_max_size and the page is rendered with the
- * largest slice that fits under them.
+ * Small control-plane endpoints for a direct browser-to-FastAPI model upload.
+ * The model bytes never enter PHP; Laravel authorizes the upload first and records
+ * the completed installation afterwards.
  */
 class OcrUploadController extends Controller
 {
-    public function __construct(private readonly ChunkedUpload $uploads) {}
+    public function __construct(
+        private readonly OcrUploadAuthorizer $authorizer,
+        private readonly OcrModelManager $manager,
+    ) {}
 
-    public function chunk(Request $request): JsonResponse
+    public function authorizeUpload(Request $request): JsonResponse
     {
-        // When PHP's post_max_size is exceeded it discards the entire body and
-        // sets CONTENT_LENGTH to 0. The request arrives empty — no fields, no
-        // file — and Laravel's validator would report all fields as missing,
-        // which is confusing. Detect it here and return a clear message the JS
-        // can surface to the user.
-        if (
-            $request->server('CONTENT_LENGTH', 0) > 0
-            && $request->server('REQUEST_METHOD') === 'POST'
-            && $request->all() === []
-        ) {
-            return response()->json([
-                'message' => 'The chunk was too large for the server (post_max_size). '
-                    .'The browser chunk size is already within limits — this is a server config issue.',
-            ], 413);
-        }
-
         $validated = $request->validate([
-            // Browser-generated, so treated as untrusted: ChunkedUpload applies its
-            // own pattern check and namespaces the directory by user id.
-            'upload_id' => ['required', 'string', 'max:64'],
-            'file_key' => ['required', 'string', 'max:64'],
-            'filename' => ['required', 'string', 'max:255'],
-            'relative_path' => ['nullable', 'string', 'max:4096'],
-            'index' => ['required', 'integer', 'min:0'],
-            'total' => ['required', 'integer', 'min:1'],
-            'chunk' => ['required', 'file'],
+            'name' => ['required', 'string', 'max:64'],
         ]);
 
-        $result = $this->uploads->receive(
-            $request->user(),
-            $validated['upload_id'],
-            $validated['file_key'],
-            $validated['filename'],
-            (int) $validated['index'],
-            (int) $validated['total'],
-            $request->file('chunk'),
-            $validated['relative_path'] ?? null,
-        );
-
-        // Opportunistic sweep of uploads abandoned mid-flight; a half-sent 1.3 GB
-        // model would otherwise sit in storage forever.
-        if ((int) $validated['index'] === 0) {
-            $this->uploads->prune();
-        }
-
-        return response()->json($result);
+        return response()->json([
+            'upload_url' => rtrim((string) config('services.ocr.browser_url'), '/').'/add_model',
+            'authorization' => $this->authorizer->issue($validated['name'], $request->user()),
+        ]);
     }
 
     /**
-     * Abandon an upload and free the disk it was using.
+     * Persist the model FastAPI has installed and write its audit record. The OCR
+     * service is queried again so a forged browser response cannot register a model
+     * that is not actually present on disk.
      */
-    public function discard(Request $request): JsonResponse
+    public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'upload_id' => ['required', 'string', 'max:64'],
+            'name' => ['required', 'string', 'max:255'],
+            'saved' => ['nullable', 'array', 'max:100'],
+            'saved.*' => ['string', 'max:255'],
         ]);
 
-        $this->uploads->discard($request->user(), $validated['upload_id']);
+        try {
+            $model = $this->manager->registerInstalled(
+                $validated['name'],
+                $validated['saved'] ?? [],
+                $request->user(),
+            );
+        } catch (OcrServiceException $e) {
+            return response()->json(['message' => $e->getMessage()], $e->status ?? 503);
+        }
 
-        return response()->json(['discarded' => true]);
+        $message = "Installed model '{$model->key}'. Select it below and save settings to start scanning with it.";
+        $request->session()->flash('success', $message);
+
+        return response()->json([
+            'registered' => true,
+            'name' => $model->key,
+            'message' => $message,
+        ]);
     }
 }

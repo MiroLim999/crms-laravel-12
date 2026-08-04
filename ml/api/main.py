@@ -15,8 +15,8 @@ Endpoints:
   GET  /models     -> selectable models for the frontend dropdown
   POST /ocr        -> { "fields": [ { "name": "...", "image": "data:image/png;base64,..." } ],
                        "model": "<key>" }  returns { "results": [ { "name", "text", "confidence" } ] }
-  POST /add_model  -> multipart upload saved into ml/models/<name>/. Either loose
-                      `files` (a model folder) or one `archive` (.zip).
+  POST /add_model  -> signed direct-browser multipart upload saved into
+                      ml/models/<name>/. Either loose `files` or one `archive`.
   POST /delete_model -> { "model": "<key>" } removes that folder from ml/models/
   POST /rename_model -> { "model": "<key>", "newName": "<name>" } renames the folder
 
@@ -30,6 +30,10 @@ import os
 import io
 import sys
 import math
+import json
+import time
+import hmac
+import hashlib
 import shutil
 import base64
 import tempfile
@@ -55,9 +59,10 @@ import hf_quiet  # noqa: E402,F401
 
 import torch
 from PIL import Image
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
@@ -72,6 +77,7 @@ import dataset_registry as ds
 # Anchored to this file's location (<repo>/ml/api/main.py) rather than the working
 # directory, so the service behaves the same however it is launched.
 ML_ROOT = _ML_ROOT
+REPO_ROOT = os.path.dirname(ML_ROOT)
 
 # All fine-tuned models live in ml/models/<name>/. Drop a model folder in there
 # (with config.json + model.safetensors) and it shows up automatically.
@@ -98,6 +104,10 @@ MODEL_LABELS = {
 # Laravel sends the model marked active in the ocr_models table, which is the
 # real source of truth for what Staff scan against.
 PREFERRED_DEFAULT = "TrOCR-fine-tune-10k-samples"
+
+# The upload is the only browser-to-service request. Restrict response access to
+# the local CRMS origins by default; a reverse-proxied deployment can override it.
+DEFAULT_BROWSER_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$"
 # ============================================================
 
 # Models are loaded lazily and cached by key so the server starts instantly
@@ -276,6 +286,79 @@ def _safe_model_name(raw):
     return name
 
 
+def _env_value(name):
+    """Read one service setting from the process or Laravel's root .env file."""
+    value = os.environ.get(name)
+    if value:
+        return value
+
+    env_path = os.path.join(REPO_ROOT, ".env")
+    try:
+        with open(env_path, "r", encoding="utf-8-sig") as env_file:
+            for raw_line in env_file:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, candidate = line.split("=", 1)
+                if key.strip() != name:
+                    continue
+                candidate = candidate.strip()
+                if len(candidate) >= 2 and candidate[0] == candidate[-1] and candidate[0] in "\"'":
+                    candidate = candidate[1:-1]
+                return candidate or None
+    except OSError:
+        pass
+
+    return None
+
+
+def _upload_secret():
+    secret = _env_value("OCR_UPLOAD_SECRET") or _env_value("APP_KEY")
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="OCR upload signing is not configured. Set OCR_UPLOAD_SECRET or APP_KEY.",
+        )
+    return secret.encode("utf-8")
+
+
+def _base64_url_decode(value):
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _authorize_model_upload(token, requested_name):
+    """Verify the short-lived Laravel ticket before accepting a large body."""
+    try:
+        encoded, supplied_signature = token.split(".", 1)
+        expected_signature = hmac.new(
+            _upload_secret(), encoded.encode("ascii"), hashlib.sha256
+        ).digest()
+        decoded_signature = _base64_url_decode(supplied_signature)
+        payload = json.loads(_base64_url_decode(encoded).decode("utf-8"))
+    except (AttributeError, UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=401, detail="Invalid model-upload authorization.")
+
+    if not hmac.compare_digest(expected_signature, decoded_signature):
+        raise HTTPException(status_code=401, detail="Invalid model-upload authorization.")
+
+    if (
+        payload.get("purpose") != "ocr-model-upload"
+        or payload.get("name") != requested_name
+        or not isinstance(payload.get("user_id"), int)
+        or not isinstance(payload.get("nonce"), str)
+    ):
+        raise HTTPException(status_code=401, detail="Model-upload authorization does not match this request.")
+
+    try:
+        expires_at = int(payload.get("expires_at", 0))
+    except (TypeError, ValueError):
+        expires_at = 0
+
+    if expires_at < int(time.time()):
+        raise HTTPException(status_code=401, detail="Model-upload authorization has expired.")
+
+
 def _sequence_confidence(model, gen_output, eos_id):
     """Geometric mean of per-token probabilities up to the first EOS, as a %."""
     try:
@@ -399,10 +482,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CRMS TrOCR service", lifespan=lifespan)
 
-# No CORS middleware on purpose. Laravel is the only client and it calls this
-# service server-side over 127.0.0.1, so no browser origin ever talks to it
-# directly. Adding permissive CORS would only widen the attack surface of a
-# service that has no authentication of its own.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=_env_value("OCR_BROWSER_ORIGIN_REGEX") or DEFAULT_BROWSER_ORIGIN_REGEX,
+    allow_credentials=False,
+    allow_methods=["POST"],
+    allow_headers=["X-OCR-Upload-Authorization"],
+)
 
 
 @app.exception_handler(HTTPException)
@@ -694,6 +780,7 @@ def _save_model_files(uploads, target):
 @app.post("/add_model", response_model=AddModelResponse)
 def add_model(
     name: str = Form(""),
+    authorization: str = Header("", alias="X-OCR-Upload-Authorization"),
     files: Optional[list[UploadFile]] = File(None),
     files_bracketed: Optional[list[UploadFile]] = File(None, alias="files[]"),
     archive: Optional[UploadFile] = File(None),
@@ -711,6 +798,8 @@ def add_model(
     raw_name = (name or "").strip()
     if not raw_name:
         raise HTTPException(status_code=400, detail="Please provide a model name.")
+
+    _authorize_model_upload(authorization, raw_name)
 
     safe_name = _safe_model_name(raw_name)
 
@@ -855,5 +944,5 @@ def rename_model(payload: RenameModelRequest) -> dict:
 if __name__ == "__main__":
     import uvicorn
 
-    # 127.0.0.1 only: the service has no auth of its own, Laravel proxies it.
+    # Other model-management calls still rely on Laravel and loopback isolation.
     uvicorn.run(app, host="127.0.0.1", port=8001)

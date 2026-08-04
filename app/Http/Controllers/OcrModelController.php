@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Services\AuditLogger;
-use App\Services\Ocr\ChunkedUpload;
 use App\Services\Ocr\EngineStatus;
 use App\Services\Ocr\OcrModelManager;
 use App\Services\Ocr\OcrServiceException;
@@ -30,7 +29,6 @@ class OcrModelController extends Controller
     public function __construct(
         private readonly OcrModelManager $manager,
         private readonly EngineStatus $engine,
-        private readonly ChunkedUpload $uploads,
         private readonly AuditLogger $audit,
     ) {}
 
@@ -47,8 +45,6 @@ class OcrModelController extends Controller
             // in force rather than a blank box.
             'threshold' => OcrSetting::threshold(),
             'configThreshold' => (float) config('crms.confidence_review_threshold', 80.0),
-            // The browser sizes its slices from this rather than assuming a php.ini.
-            'chunkBytes' => $this->uploads->chunkBytes(),
         ]);
     }
 
@@ -138,57 +134,6 @@ class OcrModelController extends Controller
         }
     }
 
-    /**
-     * Install a model the browser uploaded in chunks - either a folder of files or
-     * a single .zip.
-     */
-    public function store(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:64'],
-            'upload_id' => ['required', 'string', 'max:64'],
-        ]);
-
-        $actor = $request->user();
-
-        // Weights run to roughly 1.3 GB, so the service is handed file paths and
-        // streams them itself. Nothing is read into memory here.
-        $files = $this->uploads->assembledFiles($actor, $validated['upload_id']);
-
-        if ($files === []) {
-            return $this->back()->with(
-                'error',
-                'No completed upload was found. Try adding the model again.',
-            );
-        }
-
-        // Extraction and a 1.3 GB copy both outlast PHP's default execution time.
-        set_time_limit(0);
-
-        try {
-            $archive = $this->soleArchive($files);
-
-            $model = $archive === null
-                ? $this->manager->add($validated['name'], $files, $actor)
-                : $this->manager->addArchive(
-                    $validated['name'],
-                    $archive['path'],
-                    $archive['name'],
-                    $actor,
-                );
-
-            return $this->back()->with(
-                'success',
-                "Installed model '{$model->key}'. Select it below and save settings to "
-                .'start scanning with it.',
-            );
-        } catch (OcrServiceException $e) {
-            return $this->back()->with('error', $e->getMessage());
-        } finally {
-            $this->uploads->discard($actor, $validated['upload_id']);
-        }
-    }
-
     public function rename(Request $request, string $key): RedirectResponse
     {
         $validated = $request->validate([
@@ -213,37 +158,6 @@ class OcrModelController extends Controller
         } catch (OcrServiceException $e) {
             return $this->back()->with('error', $e->getMessage());
         }
-    }
-
-    // ------------------------------------------------------------------ internals
-
-    /**
-     * The upload as a single .zip, or null when it is a folder of loose files.
-     *
-     * A zip mixed with loose files is ambiguous - which one is the model? - so it is
-     * refused rather than guessed at.
-     *
-     * @param  list<array{name: string, relative_path: string, path: string, size: int}>  $files
-     * @return array{name: string, path: string}|null
-     */
-    private function soleArchive(array $files): ?array
-    {
-        $zips = array_values(array_filter(
-            $files,
-            fn (array $file) => strtolower(pathinfo($file['name'], PATHINFO_EXTENSION)) === 'zip',
-        ));
-
-        if ($zips === []) {
-            return null;
-        }
-
-        if (count($zips) > 1 || count($files) > 1) {
-            throw new OcrServiceException(
-                'Upload either one .zip archive or the model folder, not both.',
-            );
-        }
-
-        return ['name' => $zips[0]['name'], 'path' => $zips[0]['path']];
     }
 
     private function back(): RedirectResponse

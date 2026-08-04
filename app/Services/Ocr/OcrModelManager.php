@@ -194,41 +194,25 @@ class OcrModelManager
     }
 
     /**
-     * Install a model from the folder the browser uploaded in slices.
+     * Register a model after FastAPI has accepted the direct browser upload.
      *
-     * @param  list<array{name: string, path: string}>  $files
+     * @param  list<string>  $saved
      */
-    public function add(string $name, array $files, User $actor): OcrModel
+    public function registerInstalled(string $name, array $saved, User $actor): OcrModel
     {
-        return $this->registerUpload($name, $actor, $this->client->addModel($name, $files));
-    }
+        if (! in_array($name, $this->servableKeys(), true)) {
+            throw new OcrServiceException(
+                "The OCR service does not report '{$name}' as installed. Rescan, or check ml/models/.",
+            );
+        }
 
-    /**
-     * Install a model from a single uploaded .zip. The service unpacks it and finds
-     * the model files inside, so an archive with a wrapping folder works too.
-     */
-    public function addArchive(string $name, string $zipPath, string $filename, User $actor): OcrModel
-    {
-        return $this->registerUpload(
-            $name,
-            $actor,
-            $this->client->addModelArchive($name, $zipPath, $filename),
-        );
-    }
-
-    /**
-     * @param  array<string, mixed>  $result
-     */
-    private function registerUpload(string $name, User $actor, array $result): OcrModel
-    {
-        $key = $result['name'] ?? $name;
-        $model = $this->register($key, $actor, artifactReplaced: true);
+        $model = $this->register($name, $actor, artifactReplaced: true);
 
         $this->audit->log(
             'ocr_model.added',
             $model,
-            new: ['key' => $key, 'files' => $result['saved'] ?? []],
-            description: "Installed OCR model '{$key}'.",
+            new: ['key' => $name, 'files' => $saved],
+            description: "Installed OCR model '{$name}'.",
             actor: $actor,
         );
 

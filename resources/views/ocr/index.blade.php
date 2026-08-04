@@ -40,14 +40,13 @@
         window.crmsOcr = {
             csrf: document.querySelector('meta[name="csrf-token"]').content,
             urls: {
-                chunk: @json(route('ocr.uploads.chunk')),
-                discardUpload: @json(route('ocr.uploads.discard')),
+                authorizeUpload: @json(route('ocr.uploads.authorize')),
+                registerModel: @json(route('ocr.register')),
                 engineStatus: @json(route('ocr.engine.status')),
                 modelRename: @json(route('ocr.rename', '__KEY__')),
                 modelDestroy: @json(route('ocr.destroy', '__KEY__')),
             },
             engineReachable: @json($engine['reachable']),
-            chunkBytes: @json($chunkBytes),
         };
     </script>
 

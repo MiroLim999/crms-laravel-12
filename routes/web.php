@@ -209,13 +209,14 @@ Route::middleware('auth')->group(function () {
         // up or going away without a manual refresh.
         Route::get('engine/status', [OcrEngineController::class, 'status'])->name('engine.status');
 
-        // Chunked upload, because PHP's 40M limit is far below a 1.3 GB model.
-        Route::post('uploads/chunk', [OcrUploadController::class, 'chunk'])->name('uploads.chunk');
-        Route::post('uploads/discard', [OcrUploadController::class, 'discard'])
-            ->name('uploads.discard');
+        // Direct upload control plane. Laravel authorizes and records the action;
+        // the multi-gigabyte body travels from the browser straight to FastAPI.
+        Route::post('uploads/authorize', [OcrUploadController::class, 'authorizeUpload'])
+            ->name('uploads.authorize');
+        Route::post('models/register', [OcrUploadController::class, 'register'])
+            ->name('register');
 
-        // Models on disk. Installing accepts a folder or a single .zip.
-        Route::post('models', [OcrModelController::class, 'store'])->name('store');
+        // Models on disk.
         Route::post('models/{key}/rename', [OcrModelController::class, 'rename'])->name('rename');
         Route::delete('models/{key}', [OcrModelController::class, 'destroy'])->name('destroy');
     });

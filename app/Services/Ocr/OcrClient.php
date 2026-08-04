@@ -10,12 +10,12 @@ use Illuminate\Support\Facades\Http;
 /**
  * Server-side bridge to the FastAPI TrOCR service.
  *
- * The browser never talks to the OCR service directly: it has no authentication
- * of its own and is bound to 127.0.0.1, so every call is proxied through Laravel
- * where the capability matrix is enforced.
+ * Ordinary calls stay server-side. Model bytes are the one exception: the browser
+ * sends them directly with a short-lived Laravel-signed authorization ticket, then
+ * Laravel verifies and registers the installed model.
  *
  * The surface is deliberately small - health, the model list, recognition, and the
- * three model-lifecycle calls. Training, evaluation, datasets, and batch prediction
+ * model-list and model-lifecycle calls. Training, evaluation, datasets, and batch prediction
  * are command-line work under ml/, not something the web app drives.
  */
 class OcrClient
@@ -150,41 +150,6 @@ class OcrClient
     // ----------------------------------------------------------- model lifecycle
 
     /**
-     * Upload a model as loose files - the folder a Super Admin dropped on the page.
-     * Files are streamed, never buffered: weights run to roughly 1.3 GB.
-     *
-     * @param  list<array{name: string, path: string}>  $files
-     * @return array<string, mixed>
-     */
-    public function addModel(string $name, array $files): array
-    {
-        return $this->withAttachments(
-            // No timeout cap: writing 1.3 GB to disk on a slow volume can take
-            // minutes, and there is nothing useful to do with a half-written model.
-            $this->multipartRequest(0),
-            'files',
-            $files,
-            fn (PendingRequest $r) => $r->post('/add_model', ['name' => $name]),
-        )->json();
-    }
-
-    /**
-     * Upload a model as one .zip. The service extracts it and locates the model
-     * files inside, so a wrapping folder in the archive is fine.
-     *
-     * @return array<string, mixed>
-     */
-    public function addModelArchive(string $name, string $zipPath, string $filename = 'model.zip'): array
-    {
-        return $this->withAttachments(
-            $this->multipartRequest(0),
-            'archive',
-            [['name' => $filename, 'path' => $zipPath]],
-            fn (PendingRequest $r) => $r->post('/add_model', ['name' => $name]),
-        )->json();
-    }
-
-    /**
      * @return array<string, mixed>
      */
     public function renameModel(string $key, string $newName): array
@@ -213,65 +178,6 @@ class OcrClient
             ->timeout($timeout ?? $this->timeout)
             ->acceptJson()
             ->asJson();
-    }
-
-    /**
-     * A request whose body will be multipart, and deliberately not asJson().
-     *
-     * asJson() pins Content-Type to application/json. attach() switches the body
-     * format to multipart but leaves that header in place, and Guzzle only supplies
-     * its own multipart Content-Type - the one carrying the boundary - when none is
-     * set. The upload therefore went out as a multipart body labelled JSON: Starlette
-     * parsed no form at all, `name` arrived empty, and the service answered "Please
-     * provide a model name" however carefully the Super Admin had filled the field in.
-     */
-    private function multipartRequest(?int $timeout = null): PendingRequest
-    {
-        return Http::baseUrl(rtrim($this->baseUrl, '/'))
-            ->timeout($timeout ?? $this->timeout)
-            ->acceptJson()
-            ->asMultipart();
-    }
-
-    /**
-     * Attach files as streams, and always close the handles afterwards.
-     *
-     * Streaming rather than reading is required: model weights run to roughly 1.3 GB
-     * and would blow PHP's memory limit. Closing is required for a subtler reason -
-     * an open handle pins the file on Windows, so the reassembled upload could not
-     * be deleted and every upload left gigabytes behind in storage.
-     *
-     * @param  list<array{name: string, path: string}>  $files
-     * @param  callable(PendingRequest): Response  $call
-     */
-    private function withAttachments(
-        PendingRequest $request,
-        string $field,
-        array $files,
-        callable $call,
-    ): Response {
-        $handles = [];
-
-        try {
-            foreach ($files as $file) {
-                $handle = @fopen($file['path'], 'rb');
-
-                if ($handle === false) {
-                    throw new OcrServiceException("Could not read '{$file['name']}' for upload.");
-                }
-
-                $handles[] = $handle;
-                $request = $request->attach($field, $handle, $file['name']);
-            }
-
-            return $this->send(fn () => $call($request));
-        } finally {
-            foreach ($handles as $handle) {
-                if (is_resource($handle)) {
-                    fclose($handle);
-                }
-            }
-        }
     }
 
     /**

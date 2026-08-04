@@ -15,8 +15,10 @@ Two processes, one repository:
 | Web application | Laravel 12, Blade, Bootstrap 5 (SNEAT design), MySQL | Everything users touch |
 | OCR service | FastAPI, PyTorch, Hugging Face `transformers` | Reads handwriting from cropped field images |
 
-Laravel calls the OCR service **server-side only**. The service has no authentication of
-its own and stays bound to `127.0.0.1`; all authorization happens in Laravel.
+Laravel normally calls the OCR service server-side. Model installation is the deliberate
+exception: Laravel issues a short-lived signed ticket, then the browser sends the large
+multipart body directly to FastAPI and posts the small result back to Laravel for registry
+and audit synchronization. The service stays bound to `127.0.0.1` in local development.
 
 Laravel does not start or stop that process. It is a separate program with its own
 lifetime — run it from a terminal in development, or under a supervisor in a
@@ -50,7 +52,7 @@ app/                    Laravel application code
 ├── Enums/              RoleSlug, DocumentType, RecordStatus, ChangeRequestStatus
 ├── Models/             User, Role, CivilRecord, RecordField, ChangeRequest,
 │                       OcrModel, OcrSetting, ...
-├── Services/Ocr/       OcrClient, OcrModelManager, EngineStatus, ChunkedUpload
+├── Services/Ocr/       OcrClient, OcrModelManager, EngineStatus, OcrUploadAuthorizer
 ├── Services/           AuditLogger, UserProvisioner, ChangeRequestService
 └── Providers/          AuthServiceProvider - the capability matrix, in code
 
@@ -135,8 +137,8 @@ Delete that seeder before deploying.
 2. **Evaluate** — `python ml\test_trocr.py` and `python ml\test_finetuned.py`. Each writes a
    timestamped chart to `ml/evaluation-metrics/{base,finetuned}/`.
 3. **Install** — sign in as Super Admin, open **OCR Workspace**, and add the model with
-   *Add*. Either a `.zip` of the model or the folder itself; both are uploaded in slices,
-   so PHP's 40 MB limit does not apply.
+   *Add*. Either a `.zip` or the model folder is sent in one browser-to-FastAPI request,
+   so PHP's upload limit and the former Laravel-to-FastAPI second copy do not apply.
 4. **Select** — pick it in *Model used for scanning* and press **Save settings**. Only
    then does Staff scanning use it. Installing a model changes nothing on its own.
 5. **Scan** — Staff upload a certificate, adjust the field boxes, run the model, correct

@@ -6,9 +6,7 @@ use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\User;
 use Database\Seeders\DocumentTemplateSeeder;
-use Illuminate\Filesystem\Filesystem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -16,31 +14,12 @@ use Tests\TestCase;
  * The OCR workspace: choose the model Staff scan with, and manage what is installed.
  *
  * The OCR service is faked throughout. These tests are about Laravel's half of the
- * contract - authorization, the durable registry, chunked upload reassembly, the
- * settings form, and the audit trail - not about whether TrOCR reads handwriting.
+ * contract - authorization, direct-upload registration, the durable registry,
+ * settings, and the audit trail - not about whether TrOCR reads handwriting.
  */
 class OcrWorkspaceTest extends TestCase
 {
     use RefreshDatabase;
-
-    /**
-     * Start from an empty upload area.
-     *
-     * RefreshDatabase rolls back the database but nothing rolls back the disk, and
-     * user ids repeat between tests, so an abandoned upload from an earlier run sits
-     * at exactly the path the next one uses. That leftover carries a progress record,
-     * which is enough to change how the next test's first slice is interpreted.
-     */
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        $root = storage_path('app/ocr-uploads');
-
-        if (is_dir($root)) {
-            (new Filesystem)->deleteDirectory($root);
-        }
-    }
 
     private function superAdmin(): User
     {
@@ -77,9 +56,8 @@ class OcrWorkspaceTest extends TestCase
     /**
      * Every route in the workspace is Super Admin only.
      *
-     * The service has no authentication of its own, so this gate is the only thing
-     * standing between a Staff account and deleting 1.3 GB of weights or silently
-     * changing what the whole registry is read with.
+     * Direct uploads also require signed tickets, while the remaining lifecycle
+     * calls rely on this gate and the service's loopback binding.
      */
     public function test_every_workspace_route_is_super_admin_only(): void
     {
@@ -90,9 +68,8 @@ class OcrWorkspaceTest extends TestCase
             ['post', route('ocr.rescan')],
             ['post', route('ocr.settings')],
             ['get', route('ocr.engine.status')],
-            ['post', route('ocr.uploads.chunk')],
-            ['post', route('ocr.uploads.discard')],
-            ['post', route('ocr.store')],
+            ['post', route('ocr.uploads.authorize')],
+            ['post', route('ocr.register')],
             ['post', route('ocr.rename', 'trocr-v1')],
             ['delete', route('ocr.destroy', 'trocr-v1')],
         ];
@@ -117,6 +94,7 @@ class OcrWorkspaceTest extends TestCase
             'ocr.datasets.store', 'ocr.datasets.validate', 'ocr.datasets.destroy',
             'ocr.predict', 'ocr.chart', 'ocr.evaluation', 'ocr.activate',
             'ocr.engine.start', 'ocr.engine.stop',
+            'ocr.uploads.chunk', 'ocr.uploads.discard', 'ocr.store',
         ] as $name) {
             $this->assertFalse(
                 app('router')->has($name),
@@ -185,341 +163,78 @@ class OcrWorkspaceTest extends TestCase
             ->assertSee('Active');
     }
 
-    // -------------------------------------------------------------------- chunked upload
+    // -------------------------------------------------------------- direct upload
 
-    /**
-     * PHP caps uploads at 40M and a model is ~1.3 GB, so reassembly is the feature.
-     */
-    public function test_chunked_upload_reassembles_a_file_across_requests(): void
+    public function test_super_admin_can_issue_a_short_lived_direct_upload_ticket(): void
     {
-        $actor = $this->superAdmin();
-        $uploadId = str_repeat('a', 32);
-        $fileKey = str_repeat('b', 32);
-
-        $pieces = ['{"hidden_', 'size": 768}'];
-
-        foreach ($pieces as $index => $piece) {
-            $response = $this->actingAs($actor)->post(route('ocr.uploads.chunk'), [
-                'upload_id' => $uploadId,
-                'file_key' => $fileKey,
-                'filename' => 'config.json',
-                'index' => $index,
-                'total' => count($pieces),
-                'chunk' => UploadedFile::fake()->createWithContent("part{$index}", $piece),
-            ]);
-
-            $response->assertOk()->assertJson([
-                'complete' => $index === count($pieces) - 1,
-                'name' => 'config.json',
-            ]);
-        }
-
-        $assembled = storage_path(
-            "app/ocr-uploads/{$actor->getKey()}/{$uploadId}/files/config.json"
-        );
-
-        $this->assertFileExists($assembled);
-        $this->assertSame('{"hidden_size": 768}', file_get_contents($assembled));
-    }
-
-    /**
-     * Slices are appended as they arrive, so one that overtakes another has to be
-     * parked and folded in once the gap ahead of it is filled. Without that, a
-     * reordered slice would land at the wrong offset in the file.
-     */
-    public function test_chunked_upload_absorbs_slices_that_arrive_out_of_order(): void
-    {
-        $actor = $this->superAdmin();
-        $uploadId = str_repeat('c', 32);
-        $fileKey = str_repeat('d', 32);
-
-        $pieces = ['{"hidden_', 'size": ', '768}'];
-        $send = fn (int $index) => $this->actingAs($actor)->post(route('ocr.uploads.chunk'), [
-            'upload_id' => $uploadId,
-            'file_key' => $fileKey,
-            'filename' => 'config.json',
-            'index' => $index,
-            'total' => count($pieces),
-            'chunk' => UploadedFile::fake()->createWithContent("part{$index}", $pieces[$index]),
+        config([
+            'services.ocr.browser_url' => 'http://127.0.0.1:8001',
+            'services.ocr.upload_secret' => 'test-upload-secret',
+            'services.ocr.upload_ticket_ttl' => 900,
         ]);
 
-        // The last two arrive first, so neither can be appended yet.
-        $send(2)->assertOk()->assertJson(['complete' => false, 'received' => 1]);
-        $send(1)->assertOk()->assertJson(['complete' => false, 'received' => 2]);
-
-        // Slice 0 closes the gap, and the parked pair follows it in immediately.
-        $send(0)->assertOk()->assertJson(['complete' => true, 'received' => 3]);
-
-        $assembled = storage_path(
-            "app/ocr-uploads/{$actor->getKey()}/{$uploadId}/files/config.json"
-        );
-
-        $this->assertFileExists($assembled);
-        $this->assertSame('{"hidden_size": 768}', file_get_contents($assembled));
-    }
-
-    /**
-     * A slice already in the file must be dropped rather than appended a second time:
-     * the point of appending in order is that those bytes are already committed.
-     */
-    public function test_a_resent_slice_is_not_appended_twice(): void
-    {
         $actor = $this->superAdmin();
-        $uploadId = str_repeat('e', 32);
-        $fileKey = str_repeat('f', 32);
+        $response = $this->actingAs($actor)
+            ->postJson(route('ocr.uploads.authorize'), ['name' => 'trocr direct v2'])
+            ->assertOk()
+            ->assertJsonPath('upload_url', 'http://127.0.0.1:8001/add_model');
 
-        $pieces = ['{"hidden_', 'size": ', '768}'];
-        $send = fn (int $index) => $this->actingAs($actor)->post(route('ocr.uploads.chunk'), [
-            'upload_id' => $uploadId,
-            'file_key' => $fileKey,
-            'filename' => 'config.json',
-            'index' => $index,
-            'total' => count($pieces),
-            'chunk' => UploadedFile::fake()->createWithContent("part{$index}", $pieces[$index]),
-        ]);
-
-        $send(0)->assertOk()->assertJson(['complete' => false, 'received' => 1]);
-        $send(1)->assertOk()->assertJson(['complete' => false, 'received' => 2]);
-        // A flaky connection makes the browser resend one it already acknowledged.
-        $send(1)->assertOk()->assertJson(['complete' => false, 'received' => 2]);
-        $send(2)->assertOk()->assertJson(['complete' => true]);
-
-        $assembled = storage_path(
-            "app/ocr-uploads/{$actor->getKey()}/{$uploadId}/files/config.json"
+        [$encoded, $signature] = explode('.', $response->json('authorization'), 2);
+        $decode = fn (string $value) => base64_decode(
+            strtr($value, '-_', '+/').str_repeat('=', (4 - strlen($value) % 4) % 4),
+            true,
         );
+        $payload = json_decode($decode($encoded), true, flags: JSON_THROW_ON_ERROR);
+        $expected = hash_hmac('sha256', $encoded, 'test-upload-secret', true);
 
-        $this->assertSame('{"hidden_size": 768}', file_get_contents($assembled));
+        $this->assertTrue(hash_equals($expected, $decode($signature)));
+        $this->assertSame('ocr-model-upload', $payload['purpose']);
+        $this->assertSame('trocr direct v2', $payload['name']);
+        $this->assertSame($actor->getKey(), $payload['user_id']);
+        $this->assertGreaterThan(now()->getTimestamp(), $payload['expires_at']);
     }
 
-    /**
-     * The page tells the browser how large a slice may be. Hardcoding it is a guess:
-     * too large and every slice 413s, too small and the upload wastes requests.
-     */
-    public function test_the_slice_size_handed_to_the_browser_fits_this_server(): void
+    public function test_completed_direct_upload_is_registered_and_audited(): void
     {
         $this->fakeHealthyService();
-
-        $chunkBytes = $this->actingAs($this->superAdmin())
-            ->get(route('ocr.index'))
-            ->assertOk()
-            ->viewData('chunkBytes');
-
-        $megabyte = 1024 * 1024;
-        $limit = min(
-            (int) filter_var(ini_get('upload_max_filesize'), FILTER_SANITIZE_NUMBER_INT) * $megabyte,
-            (int) filter_var(ini_get('post_max_size'), FILTER_SANITIZE_NUMBER_INT) * $megabyte,
-        );
-
-        $this->assertGreaterThanOrEqual($megabyte, $chunkBytes);
-        $this->assertSame(0, $chunkBytes % $megabyte, 'A slice should be a whole number of MB.');
-        $this->assertLessThan($limit, $chunkBytes, 'A slice must leave room for the form fields.');
-        $this->assertLessThanOrEqual(32 * $megabyte, $chunkBytes);
-    }
-
-    public function test_chunked_upload_refuses_a_path_traversal_filename(): void
-    {
         $actor = $this->superAdmin();
 
-        // '..' and separators are stripped, leaving a name with no accepted
-        // extension, which is rejected rather than written somewhere unexpected.
         $this->actingAs($actor)
-            ->post(route('ocr.uploads.chunk'), [
-                'upload_id' => str_repeat('a', 32),
-                'file_key' => str_repeat('b', 32),
-                'filename' => '../../../../.env',
-                'index' => 0,
-                'total' => 1,
-                'chunk' => UploadedFile::fake()->createWithContent('x', 'x'),
-            ])
-            ->assertSessionHasErrors('filename');
-
-        $this->assertDirectoryDoesNotExist(
-            storage_path("app/ocr-uploads/{$actor->getKey()}/".str_repeat('a', 32).'/files')
-        );
-    }
-
-    public function test_chunked_upload_refuses_a_malformed_upload_id(): void
-    {
-        $this->actingAs($this->superAdmin())
-            ->post(route('ocr.uploads.chunk'), [
-                'upload_id' => '../escape',
-                'file_key' => str_repeat('b', 32),
-                'filename' => 'config.json',
-                'index' => 0,
-                'total' => 1,
-                'chunk' => UploadedFile::fake()->createWithContent('x', 'x'),
-            ])
-            ->assertSessionHasErrors('upload_id');
-    }
-
-    // ------------------------------------------------------------------ installing a model
-
-    /**
-     * A single .zip is forwarded as `archive`, so the service extracts it and finds
-     * the model inside rather than Laravel unpacking a 1.3 GB file itself.
-     */
-    public function test_installing_a_model_from_a_zip_sends_it_as_an_archive(): void
-    {
-        $this->fakeHealthyService([
-            '*/add_model' => Http::response([
-                'ok' => true,
-                'name' => 'trocr-v2',
+            ->postJson(route('ocr.register'), [
+                'name' => 'trocr-v1',
                 'saved' => ['config.json', 'model.safetensors'],
-            ]),
-        ]);
-
-        $actor = $this->superAdmin();
-        $uploadId = str_repeat('c', 32);
-
-        // Stand in for the browser's slices having already been reassembled.
-        $this->actingAs($actor)->post(route('ocr.uploads.chunk'), [
-            'upload_id' => $uploadId,
-            'file_key' => str_repeat('d', 32),
-            'filename' => 'trocr-v2.zip',
-            'index' => 0,
-            'total' => 1,
-            'chunk' => UploadedFile::fake()->createWithContent('trocr-v2.zip', 'PK-not-a-real-zip'),
-        ])->assertOk();
-
-        $this->actingAs($actor)
-            ->post(route('ocr.store'), ['name' => 'trocr-v2', 'upload_id' => $uploadId])
-            ->assertRedirect(route('ocr.index'))
+            ])
+            ->assertOk()
+            ->assertJson([
+                'registered' => true,
+                'name' => 'trocr-v1',
+            ])
             ->assertSessionHas('success');
 
-        Http::assertSent(function ($request) {
-            if (! str_ends_with($request->url(), '/add_model')) {
-                return false;
-            }
-
-            $fields = collect($request->data())->pluck('name');
-
-            // The zip goes in the `archive` part; `files` is the folder-upload shape.
-            return $fields->contains('archive') && ! $fields->contains('files');
-        });
-
-        $model = OcrModel::firstWhere('key', 'trocr-v2');
+        $model = OcrModel::firstWhere('key', 'trocr-v1');
 
         $this->assertNotNull($model);
         $this->assertFalse($model->is_active, 'Installing must not silently change what Staff use.');
-
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'ocr_model.added',
             'user_id' => $actor->getKey(),
         ]);
-
-        // The reassembled archive must not be left behind.
-        $this->assertDirectoryDoesNotExist(
-            storage_path("app/ocr-uploads/{$actor->getKey()}/{$uploadId}")
-        );
     }
 
-    public function test_a_model_folder_is_sent_as_loose_files(): void
-    {
-        $this->fakeHealthyService([
-            '*/add_model' => Http::response(['ok' => true, 'name' => 'trocr-v3', 'saved' => []]),
-        ]);
-
-        $actor = $this->superAdmin();
-        $uploadId = str_repeat('e', 32);
-
-        foreach (['config.json', 'model.safetensors'] as $index => $filename) {
-            $this->actingAs($actor)->post(route('ocr.uploads.chunk'), [
-                'upload_id' => $uploadId,
-                'file_key' => str_repeat((string) ($index + 1), 32),
-                'filename' => $filename,
-                'index' => 0,
-                'total' => 1,
-                'chunk' => UploadedFile::fake()->createWithContent($filename, 'x'),
-            ])->assertOk();
-        }
-
-        $this->actingAs($actor)
-            ->post(route('ocr.store'), ['name' => 'trocr-v3', 'upload_id' => $uploadId])
-            ->assertSessionHas('success');
-
-        Http::assertSent(function ($request) {
-            if (! str_ends_with($request->url(), '/add_model')) {
-                return false;
-            }
-
-            $fields = collect($request->data())->pluck('name');
-
-            return $fields->filter(fn ($name) => $name === 'files')->count() === 2
-                && ! $fields->contains('archive');
-        });
-    }
-
-    /**
-     * The upload has to go out labelled multipart.
-     *
-     * OcrClient builds every request with asJson(), which pins Content-Type to
-     * application/json. attach() switches the body to multipart but leaves that
-     * header alone, and Guzzle will not overwrite a Content-Type that is already
-     * set - so the model arrived as a multipart body labelled JSON. FastAPI then
-     * parsed no form at all, saw an empty `name`, and answered "Please provide a
-     * model name" no matter what the Super Admin had typed.
-     */
-    public function test_a_model_upload_is_labelled_multipart_not_json(): void
-    {
-        $this->fakeHealthyService([
-            '*/add_model' => Http::response(['ok' => true, 'name' => 'trocr-v4', 'saved' => []]),
-        ]);
-
-        $actor = $this->superAdmin();
-        $uploadId = str_repeat('9', 32);
-
-        $this->actingAs($actor)->post(route('ocr.uploads.chunk'), [
-            'upload_id' => $uploadId,
-            'file_key' => str_repeat('8', 32),
-            'filename' => 'model.zip',
-            'index' => 0,
-            'total' => 1,
-            'chunk' => UploadedFile::fake()->createWithContent('model.zip', 'PK'),
-        ])->assertOk();
-
-        $this->actingAs($actor)
-            ->post(route('ocr.store'), ['name' => 'trocr-v4', 'upload_id' => $uploadId])
-            ->assertSessionHas('success');
-
-        Http::assertSent(function ($request) {
-            if (! str_ends_with($request->url(), '/add_model')) {
-                return false;
-            }
-
-            $contentType = $request->header('Content-Type')[0] ?? '';
-
-            return str_starts_with($contentType, 'multipart/form-data')
-                && collect($request->data())->pluck('name')->contains('name');
-        });
-    }
-
-    /**
-     * A zip beside loose files is ambiguous - which one is the model? - so it is
-     * refused rather than guessed at.
-     */
-    public function test_a_zip_mixed_with_loose_files_is_refused(): void
+    public function test_direct_upload_registration_refuses_a_model_not_on_disk(): void
     {
         $this->fakeHealthyService();
 
-        $actor = $this->superAdmin();
-        $uploadId = str_repeat('f', 32);
+        $this->actingAs($this->superAdmin())
+            ->postJson(route('ocr.register'), ['name' => 'ghost-model', 'saved' => []])
+            ->assertStatus(503)
+            ->assertJsonPath(
+                'message',
+                "The OCR service does not report 'ghost-model' as installed. Rescan, or check ml/models/.",
+            );
 
-        foreach (['config.json', 'extra.zip'] as $index => $filename) {
-            $this->actingAs($actor)->post(route('ocr.uploads.chunk'), [
-                'upload_id' => $uploadId,
-                'file_key' => str_repeat((string) ($index + 6), 32),
-                'filename' => $filename,
-                'index' => 0,
-                'total' => 1,
-                'chunk' => UploadedFile::fake()->createWithContent($filename, 'x'),
-            ])->assertOk();
-        }
-
-        $this->actingAs($actor)
-            ->post(route('ocr.store'), ['name' => 'mixed', 'upload_id' => $uploadId])
-            ->assertSessionHas('error');
-
-        Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/add_model'));
+        $this->assertDatabaseMissing('ocr_models', ['key' => 'ghost-model']);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'ocr_model.added']);
     }
 
     // --------------------------------------------------------------------- save settings

@@ -2,9 +2,7 @@
 <div class="modal fade" id="addModelModal" tabindex="-1"
      aria-labelledby="addModelTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg">
-        <form class="modal-content" method="POST" action="{{ route('ocr.store') }}" id="addModelForm">
-            @csrf
-            <input type="hidden" name="upload_id" id="model-upload-id">
+        <form class="modal-content" id="addModelForm">
 
             <div class="modal-header">
                 <div class="d-flex align-items-center gap-3">
@@ -80,7 +78,7 @@
                     <span>
                         Requires <span class="font-monospace">config.json</span>, tokenizer files,
                         and <span class="font-monospace">model.safetensors</span> or
-                        <span class="font-monospace">pytorch_model.bin</span>. Large files are uploaded in chunks.
+                        <span class="font-monospace">pytorch_model.bin</span>. The model uploads directly to the OCR service.
                     </span>
                 </div>
             </div>

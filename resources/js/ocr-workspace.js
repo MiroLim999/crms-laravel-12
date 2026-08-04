@@ -1,15 +1,12 @@
 /**
  * OCR Workspace front end (Super Admin only).
  *
- * This page owns chunked model uploads, model-action modals, dirty settings state,
+ * This page owns direct model uploads, model-action modals, dirty settings state,
  * and service-status polling. Application URLs and server limits come from
  * window.crmsOcr, rendered by the Blade view.
  */
 
 const config = window.crmsOcr ?? {};
-const CHUNK_SIZE = Number(config.chunkBytes) > 0
-    ? Number(config.chunkBytes)
-    : 16 * 1024 * 1024;
 
 // ---------------------------------------------------------------------- helpers
 
@@ -29,11 +26,6 @@ const formatBytes = (bytes) => {
 
     return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 };
-
-const randomId = () =>
-    Array.from(crypto.getRandomValues(new Uint8Array(16)))
-        .map((byte) => byte.toString(16).padStart(2, '0'))
-        .join('');
 
 const post = (endpoint, body, headers = {}, options = {}) =>
     fetch(endpoint, {
@@ -79,7 +71,7 @@ const setButtonBusy = (button, busy, busyLabel) => {
     button.setAttribute('aria-busy', busy ? 'true' : 'false');
 };
 
-// ------------------------------------------------------------------ chunked upload
+// -------------------------------------------------------------- direct upload
 
 /** Paths supplied by folder pickers and directory drag traversal. */
 const relativePaths = new WeakMap();
@@ -89,71 +81,78 @@ const relativePathFor = (file) => {
     return path ? path.replace(/\\/g, '/') : (file.name || 'file').split(/[\\/]/).pop();
 };
 
-const discardUpload = (uploadId) => {
-    const body = new FormData();
-    body.append('upload_id', uploadId);
-    return post(config.urls.discardUpload, body).catch(() => null);
+const responseError = (payload, fallback) => {
+    const validation = payload?.errors ? Object.values(payload.errors).flat()[0] : null;
+    return validation ?? payload?.message ?? payload?.error ?? fallback;
 };
 
-/** Send one file sequentially in slices. */
-async function uploadFile(uploadId, file, onProgress, options = {}) {
-    const total = Math.max(Math.ceil(file.size / CHUNK_SIZE), 1);
-    const fileKey = randomId();
-    const name = (file.name || 'file').split(/[\\/]/).pop();
-    const relativePath = relativePathFor(file);
+async function postForm(endpoint, body) {
+    const response = await post(endpoint, body);
+    const payload = await response.json().catch(() => ({}));
 
-    for (let index = 0; index < total; index += 1) {
-        if (options.signal?.aborted) {
-            const err = new Error('Upload cancelled.');
-            err.name = 'AbortError';
-            throw err;
-        }
-
-        const start = index * CHUNK_SIZE;
-        const slice = file.slice(start, start + CHUNK_SIZE);
-        const body = new FormData();
-
-        body.append('upload_id', uploadId);
-        body.append('file_key', fileKey);
-        body.append('filename', name);
-        body.append('relative_path', relativePath);
-        body.append('index', String(index));
-        body.append('total', String(total));
-        body.append('chunk', slice, `${name}.part${index}`);
-
-        const response = await post(config.urls.chunk, body, {}, { signal: options.signal });
-
-        if (!response.ok) {
-            const payload = await response.json().catch(() => ({}));
-            const validation = payload.errors ? Object.values(payload.errors).flat()[0] : null;
-            throw new Error(
-                validation ?? payload.message ?? `Upload of ${name} failed (HTTP ${response.status}).`,
-            );
-        }
-
-        // PHP can return an empty 200 after discarding a body over post_max_size.
-        const result = await response.json().catch(() => null);
-        if (!result || result.complete === undefined) {
-            throw new Error(
-                `Part ${index + 1} of ${total} for ${name} was rejected by the server. ` +
-                'Check the PHP request-size limits.',
-            );
-        }
-
-        onProgress(slice.size);
+    if (!response.ok) {
+        throw new Error(responseError(payload, `Request failed (HTTP ${response.status}).`));
     }
+
+    return payload;
 }
 
-async function uploadAll(uploadId, files, onProgress, options = {}) {
-    const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-    let sent = 0;
+/** Send the model once, directly to FastAPI, while retaining upload progress. */
+function uploadDirect(endpoint, authorization, name, files, onProgress, signal) {
+    return new Promise((resolve, reject) => {
+        const body = new FormData();
+        body.append('name', name);
 
-    for (const file of files) {
-        await uploadFile(uploadId, file, (bytes) => {
-            sent += bytes;
-            onProgress(totalBytes === 0 ? 100 : Math.round((sent / totalBytes) * 100));
-        }, options);
-    }
+        if (files.length === 1 && isZip(files[0])) {
+            body.append('archive', files[0], files[0].name);
+        } else {
+            files.forEach((file) => body.append('files', file, file.name));
+        }
+
+        const xhr = new XMLHttpRequest();
+        const abort = () => xhr.abort();
+        const finish = () => signal?.removeEventListener('abort', abort);
+
+        xhr.open('POST', endpoint);
+        xhr.responseType = 'json';
+        xhr.setRequestHeader('X-OCR-Upload-Authorization', authorization);
+
+        xhr.upload.addEventListener('progress', (event) => {
+            if (event.lengthComputable) {
+                onProgress(Math.round((event.loaded / event.total) * 100));
+            }
+        });
+
+        xhr.addEventListener('load', () => {
+            finish();
+            const payload = xhr.response && typeof xhr.response === 'object' ? xhr.response : {};
+
+            if (xhr.status >= 200 && xhr.status < 300 && payload.ok) {
+                resolve(payload);
+                return;
+            }
+
+            reject(new Error(responseError(payload, `Upload failed (HTTP ${xhr.status}).`)));
+        });
+        xhr.addEventListener('error', () => {
+            finish();
+            reject(new Error('Could not reach the OCR upload service. Check its URL and CORS configuration.'));
+        });
+        xhr.addEventListener('abort', () => {
+            finish();
+            const error = new Error('Upload cancelled.');
+            error.name = 'AbortError';
+            reject(error);
+        });
+
+        if (signal?.aborted) {
+            abort();
+            return;
+        }
+
+        signal?.addEventListener('abort', abort, { once: true });
+        xhr.send(body);
+    });
 }
 
 // ---------------------------------------------------------------------- dropzone
@@ -290,7 +289,6 @@ function initModelUpload() {
 
     const submit = $('#addModelSubmit');
     const nameInput = $('#model-name');
-    const uploadIdInput = $('#model-upload-id');
     const summary = $('#model-file-summary');
     const summaryIcon = $('#model-file-summary-icon');
     const summaryTitle = $('#model-file-summary-title');
@@ -407,7 +405,6 @@ function initModelUpload() {
     modal.addEventListener('hidden.bs.modal', () => {
         if (uploading) return;
         form.reset();
-        uploadIdInput.value = '';
         resetSelection();
     });
 
@@ -425,37 +422,49 @@ function initModelUpload() {
             return;
         }
 
-        const uploadId = randomId();
         abortController = new AbortController();
         setUploading(true);
         progressWrap.classList.remove('d-none');
-        progressStatus.textContent = 'Uploading model';
-        progressDetail.textContent = `Sending ${selected.length === 1 ? 'the selected file' : `${selected.length} files`} in ${formatBytes(CHUNK_SIZE)} parts.`;
+        progressStatus.textContent = 'Authorizing upload';
+        progressDetail.textContent = 'Preparing a short-lived direct upload ticket…';
 
         try {
-            await uploadAll(uploadId, selected, (percent) => {
-                progress.style.width = `${percent}%`;
-                progress.setAttribute('aria-valuenow', String(percent));
-                progressPercent.textContent = `${percent}%`;
-            }, { signal: abortController.signal });
+            const ticketBody = new FormData();
+            ticketBody.append('name', nameInput.value.trim());
+            const ticket = await postForm(config.urls.authorizeUpload, ticketBody);
 
-            uploadIdInput.value = uploadId;
+            progressStatus.textContent = 'Uploading model';
+            progressDetail.textContent = `Sending ${formatBytes(selected.reduce((sum, file) => sum + file.size, 0))} directly to the OCR service.`;
+
+            const installed = await uploadDirect(
+                ticket.upload_url,
+                ticket.authorization,
+                nameInput.value.trim(),
+                selected,
+                (percent) => {
+                    progress.style.width = `${percent}%`;
+                    progress.setAttribute('aria-valuenow', String(percent));
+                    progressPercent.textContent = `${percent}%`;
+                },
+                abortController.signal,
+            );
+
             progress.style.width = '100%';
             progress.setAttribute('aria-valuenow', '100');
             progressPercent.textContent = '100%';
-            progressStatus.textContent = 'Installing model';
-            progressDetail.textContent = 'Validating and extracting files on the OCR service…';
-            setButtonBusy(submit, true, 'Installing…');
+            progressStatus.textContent = 'Registering model';
+            progressDetail.textContent = 'Writing the CRMS registry and audit entry…';
+            setButtonBusy(submit, true, 'Registering…');
 
-            // Native post returns the install result as a flash message. Clear the
-            // beforeunload guard immediately before navigation begins.
+            const registration = new FormData();
+            registration.append('name', installed.name);
+            (installed.saved ?? []).forEach((file) => registration.append('saved[]', file));
+            await postForm(config.urls.registerModel, registration);
+
             uploading = false;
-            nameInput.disabled = false;
-            nameInput.readOnly = false;
-            form.submit();
+            window.location.reload();
         } catch (error) {
             const wasAborted = error.name === 'AbortError' || abortController?.signal?.aborted;
-            await discardUpload(uploadId);
             setUploading(false);
             progressWrap.classList.add('d-none');
             renderSummary({

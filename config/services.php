@@ -54,7 +54,15 @@ return [
 
     'ocr' => [
         'url' => env('OCR_API_URL', 'http://127.0.0.1:8001'),
+        // Browser-facing URL for the one large model-upload request. In local CRMS
+        // this is the same loopback service; deployments may reverse-proxy it.
+        'browser_url' => env('OCR_BROWSER_API_URL', env('OCR_API_URL', 'http://127.0.0.1:8001')),
         'timeout' => env('OCR_API_TIMEOUT', 120),
+        // FastAPI reads the same value. APP_KEY is a safe zero-configuration
+        // fallback for this two-process repository; a dedicated secret can rotate
+        // upload tickets independently in deployment.
+        'upload_secret' => env('OCR_UPLOAD_SECRET') ?: env('APP_KEY'),
+        'upload_ticket_ttl' => env('OCR_UPLOAD_TICKET_TTL', 900),
     ],
 
 ];
