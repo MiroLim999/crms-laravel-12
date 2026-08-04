@@ -41,14 +41,11 @@ class OcrUploadController extends Controller
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'saved' => ['nullable', 'array', 'max:100'],
-            'saved.*' => ['string', 'max:255'],
         ]);
 
         try {
             $model = $this->manager->registerInstalled(
                 $validated['name'],
-                $validated['saved'] ?? [],
                 $request->user(),
             );
         } catch (OcrServiceException $e) {

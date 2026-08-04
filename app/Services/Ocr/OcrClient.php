@@ -104,7 +104,7 @@ class OcrClient
     /**
      * Models the service can serve right now, discovered from disk.
      *
-     * @return array{default: string|null, models: list<array{key: string, label: string, available: bool, loaded: bool}>}
+     * @return array{default: string|null, models: list<array{key: string, label: string, available: bool, loaded: bool, files?: list<string>}>}
      */
     public function models(): array
     {
@@ -196,7 +196,9 @@ class OcrClient
 
         if ($response->failed()) {
             // The service returns { ok: false, error: "..." } for its own errors.
-            $message = $response->json('error') ?? "HTTP {$response->status()}";
+            $message = $response->json('error')
+                ?? $response->json('detail')
+                ?? "HTTP {$response->status()}";
 
             // Carry the status so a 409 can be presented as "already exists"
             // rather than as an opaque failure.

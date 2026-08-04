@@ -88,10 +88,21 @@ const responseError = (payload, fallback) => {
 
 async function postForm(endpoint, body) {
     const response = await post(endpoint, body);
-    const payload = await response.json().catch(() => ({}));
+    const contentType = response.headers.get('content-type') ?? '';
+    const payload = contentType.includes('application/json')
+        ? await response.json().catch(() => null)
+        : null;
+
+    if (response.redirected) {
+        throw new Error('Your CRMS session has expired. Sign in again, reopen OCR Workspace, then use Rescan models.');
+    }
 
     if (!response.ok) {
         throw new Error(responseError(payload, `Request failed (HTTP ${response.status}).`));
+    }
+
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error('CRMS returned an unexpected response. Retry registration or use Rescan models.');
     }
 
     return payload;
@@ -306,9 +317,22 @@ function initModelUpload() {
     let selected = [];
     let uploading = false;
     let abortController = null;
+    let pendingRegistration = null;
+
+    const submitLabel = Array.from(submit.children).find(
+        (child) => child.tagName === 'SPAN' && !child.classList.contains('spinner-border'),
+    );
+
+    const setSubmitLabel = (label) => {
+        submit.dataset.idleLabel = label;
+        if (!uploading && submitLabel) submitLabel.textContent = label;
+    };
 
     const refreshSubmit = () => {
-        submit.disabled = uploading || selected.length === 0 || nameInput.value.trim() === '';
+        submit.disabled = uploading || (
+            pendingRegistration === null
+            && (selected.length === 0 || nameInput.value.trim() === '')
+        );
     };
 
     const renderSummary = ({ ok, title, detail }) => {
@@ -330,8 +354,13 @@ function initModelUpload() {
     };
 
     const resetSelection = () => {
+        pendingRegistration = null;
         selected = [];
         fileInputs.forEach((input) => { input.value = ''; });
+        nameInput.readOnly = false;
+        clearSelection.disabled = false;
+        fileInputs.forEach((input) => { input.disabled = false; });
+        setSubmitLabel('Upload and install');
         summary.classList.add('d-none');
         summary.classList.remove('is-valid', 'is-invalid');
         zone.classList.remove('d-none', 'is-dragging');
@@ -409,7 +438,7 @@ function initModelUpload() {
     });
 
     window.addEventListener('beforeunload', (event) => {
-        if (!uploading) return;
+        if (!uploading && pendingRegistration === null) return;
         event.preventDefault();
         event.returnValue = '';
     });
@@ -417,7 +446,7 @@ function initModelUpload() {
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
 
-        if (!selected.length || !form.checkValidity()) {
+        if ((pendingRegistration === null && !selected.length) || !form.checkValidity()) {
             form.reportValidity();
             return;
         }
@@ -425,29 +454,44 @@ function initModelUpload() {
         abortController = new AbortController();
         setUploading(true);
         progressWrap.classList.remove('d-none');
-        progressStatus.textContent = 'Authorizing upload';
-        progressDetail.textContent = 'Preparing a short-lived direct upload ticket…';
+        let installedName = pendingRegistration;
 
         try {
-            const ticketBody = new FormData();
-            ticketBody.append('name', nameInput.value.trim());
-            const ticket = await postForm(config.urls.authorizeUpload, ticketBody);
+            if (installedName === null) {
+                progressStatus.textContent = 'Authorizing upload';
+                progressDetail.textContent = 'Preparing a short-lived direct upload ticket…';
 
-            progressStatus.textContent = 'Uploading model';
-            progressDetail.textContent = `Sending ${formatBytes(selected.reduce((sum, file) => sum + file.size, 0))} directly to the OCR service.`;
+                const ticketBody = new FormData();
+                ticketBody.append('name', nameInput.value.trim());
+                const ticket = await postForm(config.urls.authorizeUpload, ticketBody);
 
-            const installed = await uploadDirect(
-                ticket.upload_url,
-                ticket.authorization,
-                nameInput.value.trim(),
-                selected,
-                (percent) => {
-                    progress.style.width = `${percent}%`;
-                    progress.setAttribute('aria-valuenow', String(percent));
-                    progressPercent.textContent = `${percent}%`;
-                },
-                abortController.signal,
-            );
+                if (!ticket.upload_url || typeof ticket.upload_url !== 'string'
+                    || !ticket.authorization || typeof ticket.authorization !== 'string') {
+                    throw new Error('CRMS returned an invalid upload ticket. Please try again.');
+                }
+
+                progressStatus.textContent = 'Uploading model';
+                progressDetail.textContent = `Sending ${formatBytes(selected.reduce((sum, file) => sum + file.size, 0))} directly to the OCR service.`;
+
+                const installed = await uploadDirect(
+                    ticket.upload_url,
+                    ticket.authorization,
+                    nameInput.value.trim(),
+                    selected,
+                    (percent) => {
+                        progress.style.width = `${percent}%`;
+                        progress.setAttribute('aria-valuenow', String(percent));
+                        progressPercent.textContent = `${percent}%`;
+                    },
+                    abortController.signal,
+                );
+
+                if (typeof installed.name !== 'string' || installed.name === '') {
+                    throw new Error('The OCR service returned an invalid installation result.');
+                }
+
+                installedName = installed.name;
+            }
 
             progress.style.width = '100%';
             progress.setAttribute('aria-valuenow', '100');
@@ -457,14 +501,39 @@ function initModelUpload() {
             setButtonBusy(submit, true, 'Registering…');
 
             const registration = new FormData();
-            registration.append('name', installed.name);
-            (installed.saved ?? []).forEach((file) => registration.append('saved[]', file));
-            await postForm(config.urls.registerModel, registration);
+            registration.append('name', installedName);
+            const registered = await postForm(config.urls.registerModel, registration);
 
+            if (registered.registered !== true || registered.name !== installedName) {
+                throw new Error('CRMS did not confirm model registration. Retry registration or use Rescan models.');
+            }
+
+            pendingRegistration = null;
             uploading = false;
             window.location.reload();
         } catch (error) {
             const wasAborted = error.name === 'AbortError' || abortController?.signal?.aborted;
+
+            if (installedName !== null) {
+                pendingRegistration = installedName;
+                setUploading(false);
+                nameInput.readOnly = true;
+                clearSelection.disabled = true;
+                fileInputs.forEach((input) => { input.disabled = true; });
+                setSubmitLabel('Retry registration');
+                progressWrap.classList.remove('d-none');
+                progressStatus.textContent = 'Registration pending';
+                progressDetail.textContent = 'The files are already installed. Retry after a temporary error. If your session expired, sign in again, reopen this workspace, and use Rescan models.';
+                renderSummary({
+                    ok: false,
+                    title: 'Model installed; CRMS registration pending',
+                    detail: error.message,
+                });
+                zone.classList.add('d-none');
+                refreshSubmit();
+                return;
+            }
+
             setUploading(false);
             progressWrap.classList.add('d-none');
             renderSummary({

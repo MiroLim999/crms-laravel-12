@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AuditLog;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\User;
@@ -32,8 +33,14 @@ class OcrWorkspaceTest extends TestCase
     private function fakeHealthyService(array $overrides = []): void
     {
         $models = [
-            ['key' => 'trocr-v1', 'label' => 'TrOCR v1', 'available' => true, 'loaded' => false],
-            ['key' => 'base', 'label' => 'TrOCR base', 'available' => true, 'loaded' => false],
+            [
+                'key' => 'trocr-v1',
+                'label' => 'TrOCR v1',
+                'available' => true,
+                'loaded' => false,
+                'files' => ['config.json', 'model.safetensors', 'tokenizer.json'],
+            ],
+            ['key' => 'base', 'label' => 'TrOCR base', 'available' => true, 'loaded' => false, 'files' => []],
         ];
 
         Http::fake(array_merge([
@@ -202,7 +209,8 @@ class OcrWorkspaceTest extends TestCase
         $this->actingAs($actor)
             ->postJson(route('ocr.register'), [
                 'name' => 'trocr-v1',
-                'saved' => ['config.json', 'model.safetensors'],
+                // This browser-controlled value must never reach the audit log.
+                'saved' => ['forged-browser-value.txt'],
             ])
             ->assertOk()
             ->assertJson([
@@ -219,6 +227,21 @@ class OcrWorkspaceTest extends TestCase
             'action' => 'ocr_model.added',
             'user_id' => $actor->getKey(),
         ]);
+
+        $audit = AuditLog::where('action', 'ocr_model.added')->sole();
+        $this->assertSame(
+            ['key' => 'trocr-v1', 'files' => ['config.json', 'model.safetensors', 'tokenizer.json']],
+            $audit->new_values,
+        );
+
+        // A retry after Laravel committed but the browser lost the response must
+        // succeed without duplicating the installation audit.
+        $this->actingAs($actor)
+            ->postJson(route('ocr.register'), ['name' => 'trocr-v1'])
+            ->assertOk()
+            ->assertJsonPath('registered', true);
+
+        $this->assertSame(1, AuditLog::where('action', 'ocr_model.added')->count());
     }
 
     public function test_direct_upload_registration_refuses_a_model_not_on_disk(): void
@@ -226,7 +249,7 @@ class OcrWorkspaceTest extends TestCase
         $this->fakeHealthyService();
 
         $this->actingAs($this->superAdmin())
-            ->postJson(route('ocr.register'), ['name' => 'ghost-model', 'saved' => []])
+            ->postJson(route('ocr.register'), ['name' => 'ghost-model'])
             ->assertStatus(503)
             ->assertJsonPath(
                 'message',

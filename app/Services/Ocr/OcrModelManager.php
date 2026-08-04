@@ -6,6 +6,7 @@ use App\Models\OcrModel;
 use App\Models\User;
 use App\Services\AuditLogger;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Reconciles the OCR service's on-disk models with the durable CRMS registry.
@@ -196,27 +197,45 @@ class OcrModelManager
     /**
      * Register a model after FastAPI has accepted the direct browser upload.
      *
-     * @param  list<string>  $saved
+     * FastAPI's inventory is the source of truth for both existence and file names;
+     * browser-supplied metadata never enters the audit trail. Repeating this call
+     * after a lost response is intentionally a no-op.
      */
-    public function registerInstalled(string $name, array $saved, User $actor): OcrModel
+    public function registerInstalled(string $name, User $actor): OcrModel
     {
-        if (! in_array($name, $this->servableKeys(), true)) {
+        $remote = collect($this->client->models()['models'])
+            ->first(fn (array $model) => ($model['key'] ?? null) === $name);
+
+        if ($remote === null) {
             throw new OcrServiceException(
                 "The OCR service does not report '{$name}' as installed. Rescan, or check ml/models/.",
             );
         }
 
-        $model = $this->register($name, $actor, artifactReplaced: true);
+        $files = collect($remote['files'] ?? [])
+            ->filter(fn (mixed $file) => is_string($file))
+            ->values()
+            ->all();
 
-        $this->audit->log(
-            'ocr_model.added',
-            $model,
-            new: ['key' => $name, 'files' => $saved],
-            description: "Installed OCR model '{$name}'.",
-            actor: $actor,
-        );
+        return DB::transaction(function () use ($name, $files, $actor) {
+            $existing = OcrModel::query()->where('key', $name)->lockForUpdate()->first();
 
-        return $model;
+            if ($existing !== null && $existing->disk_deleted_at === null) {
+                return $existing;
+            }
+
+            $model = $this->register($name, $actor, artifactReplaced: true);
+
+            $this->audit->log(
+                'ocr_model.added',
+                $model,
+                new: ['key' => $name, 'files' => $files],
+                description: "Installed OCR model '{$name}'.",
+                actor: $actor,
+            );
+
+            return $model;
+        });
     }
 
     public function rename(string $key, string $newName, User $actor): string

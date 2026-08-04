@@ -188,14 +188,22 @@ def _resolve_key(requested):
 
 def _model_info():
     """Descriptor list of every selectable model for /models and /health."""
+    discovered = _discover_models()
     infos = [
         {
             "key": key,
             "label": _label_for(key),
             "available": True,
             "loaded": key in _models,
+            # Laravel uses this server-derived list for its audit record. The
+            # browser's upload response is deliberately not trusted as evidence.
+            "files": sorted(
+                name
+                for name in os.listdir(path)
+                if os.path.isfile(os.path.join(path, name))
+            ),
         }
-        for key in _discover_models()
+        for key, path in discovered.items()
     ]
     # The base model is always available (pulled from the HF cache / hub).
     infos.append({
@@ -203,6 +211,7 @@ def _model_info():
         "label": BASE_MODEL_LABEL,
         "available": True,
         "loaded": BASE_MODEL_KEY in _models,
+        "files": [],
     })
     return infos
 
@@ -396,6 +405,7 @@ class ModelInfo(BaseModel):
     label: str
     available: bool
     loaded: bool
+    files: list[str] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):
