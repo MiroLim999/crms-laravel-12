@@ -674,9 +674,7 @@ class OcrWorkspaceTest extends TestCase
 
         $model = OcrModel::firstWhere('key', 'trocr-v1');
 
-        $this->assertNotNull($model);
-        $this->assertNotNull($model->disk_deleted_at);
-        $this->assertSame($actor->getKey(), $model->disk_deleted_by);
+        $this->assertNull($model);
         $this->assertDatabaseHas('audit_logs', ['action' => 'ocr_model.deleted']);
     }
 

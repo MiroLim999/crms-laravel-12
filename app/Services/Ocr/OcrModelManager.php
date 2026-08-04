@@ -35,7 +35,8 @@ class OcrModelManager
                 'device' => null,
                 // Still list what CRMS knows about, so the page says something
                 // useful while the service is down.
-                'models' => OcrModel::orderByDesc('is_active')->orderBy('key')->get()
+                'models' => OcrModel::whereNull('disk_deleted_at')
+                    ->orderByDesc('is_active')->orderBy('key')->get()
                     ->map(fn (OcrModel $model) => $this->describe($model, null))
                     ->values(),
             ];
@@ -54,6 +55,7 @@ class OcrModelManager
             'error' => null,
             'device' => $health['device'],
             'models' => $models->concat($missing)
+                ->filter(fn (array $model) => $model['disk_deleted_at'] === null)
                 ->sortByDesc(fn (array $model) => (int) $model['is_active'])
                 ->values(),
         ];
@@ -267,21 +269,17 @@ class OcrModelManager
             $model->fill([
                 'label' => $key,
                 'registered_by' => $actor->getKey(),
-            ]);
+            ])->save();
         }
-
-        $model->fill([
-            'disk_deleted_at' => now(),
-            'disk_deleted_by' => $actor->getKey(),
-            'is_active' => false,
-        ]);
 
         $this->audit->saveAndLog(
             'ocr_model.deleted',
             $model,
-            "Deleted OCR model '{$key}' from disk.",
+            "Deleted OCR model '{$key}' permanently from disk.",
             $actor,
         );
+
+        $model->delete();
     }
 
     /**
