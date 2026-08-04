@@ -10,10 +10,10 @@ with a legally meaningful audit trail.
 
 Two processes, one repository:
 
-| Part | Stack | Role |
-|---|---|---|
-| Web application | Laravel 12, Blade, Bootstrap 5 (SNEAT design), MySQL | Everything users touch |
-| OCR service | FastAPI, PyTorch, Hugging Face `transformers` | Reads handwriting from cropped field images |
+| Part            | Stack                                                | Role                                        |
+| --------------- | ---------------------------------------------------- | ------------------------------------------- |
+| Web application | Laravel 12, Blade, Bootstrap 5 (SNEAT design), MySQL | Everything users touch                      |
+| OCR service     | FastAPI, PyTorch, Hugging Face `transformers`        | Reads handwriting from cropped field images |
 
 Laravel normally calls the OCR service server-side. Model installation is the deliberate
 exception: Laravel issues a short-lived signed ticket, then the browser sends the large
@@ -21,7 +21,7 @@ multipart body directly to FastAPI. After FastAPI saves the files, the browser p
 the installed model name to Laravel; Laravel verifies it against FastAPI's own inventory,
 then writes the registry and audit records transactionally. The model bytes never pass
 through PHP. If that final lightweight request fails, the page can retry registration
-without uploading the model again, and *Rescan models* remains the recovery path.
+without uploading the model again, and _Rescan models_ remains the recovery path.
 
 The service stays bound to `127.0.0.1` in local development. In production, expose only
 the signed upload endpoint through an HTTPS reverse proxy; keep Laravel's other calls to
@@ -35,19 +35,19 @@ deployment. The OCR workspace reports whether it answers and shows the command.
 
 Three seeded roles. **There is no public sign-up** — every account is created by an admin.
 
-| Capability | Staff | Admin | Super Admin |
-|---|---|---|---|
-| Upload & process documents | Yes | No | Yes |
-| Verify & submit records | Yes | No | Yes |
-| Search / view archive | Yes | Yes | Yes |
-| Request changes to locked records | Yes | No | Yes |
-| Approve / reject change requests | No | Yes | Yes |
-| Analytics dashboard | No | Yes | Yes |
-| Manage user accounts & roles | No | Yes | Yes |
-| View audit log | No | Yes | Yes |
-| Generate reports | No | Yes | Yes |
-| Document template builder | No | No | Yes |
-| OCR model management | No | No | Yes |
+| Capability                        | Staff | Admin | Super Admin |
+| --------------------------------- | ----- | ----- | ----------- |
+| Upload & process documents        | Yes   | No    | Yes         |
+| Verify & submit records           | Yes   | No    | Yes         |
+| Search / view archive             | Yes   | Yes   | Yes         |
+| Request changes to locked records | Yes   | No    | Yes         |
+| Approve / reject change requests  | No    | Yes   | Yes         |
+| Analytics dashboard               | No    | Yes   | Yes         |
+| Manage user accounts & roles      | No    | Yes   | Yes         |
+| View audit log                    | No    | Yes   | Yes         |
+| Generate reports                  | No    | Yes   | Yes         |
+| Document template builder         | No    | No    | Yes         |
+| OCR model management              | No    | No    | Yes         |
 
 **Admin cannot edit record values.** Data entry belongs to Staff; corrections go through the
 change-request flow. This is intentional — it is what keeps the audit trail meaningful.
@@ -91,7 +91,7 @@ composer install
 npm install
 pip install -r ml\requirements.txt -r ml\api\requirements.txt
 
-copy .env.example .env
+cp .env.example .env
 php artisan key:generate
 # set DB_DATABASE / DB_USERNAME / DB_PASSWORD in .env, then:
 php artisan migrate --seed
@@ -220,15 +220,15 @@ origin, and keep `OCR_API_URL` on a private server-to-server address where possi
 2. **Evaluate** — `python ml\test_trocr.py` and `python ml\test_finetuned.py`. Each writes a
    timestamped chart to `ml/evaluation-metrics/{base,finetuned}/`.
 3. **Install** — sign in as Super Admin, open **OCR Workspace**, and add the model with
-   *Add*. Either a `.zip` or the model folder is sent in one browser-to-FastAPI request,
+   _Add_. Either a `.zip` or the model folder is sent in one browser-to-FastAPI request,
    so PHP's upload limit and the former Laravel-to-FastAPI second copy do not apply.
-4. **Select** — pick it in *Model used for scanning* and press **Save settings**. Only
+4. **Select** — pick it in _Model used for scanning_ and press **Save settings**. Only
    then does Staff scanning use it. Installing a model changes nothing on its own.
 5. **Scan** — Staff upload a certificate, adjust the field boxes, run the model, correct
    anything flagged, and submit. Submission locks the record.
 
 Any folder dropped into `ml/models/` is auto-discovered — no restart needed, just press
-*Rescan*. It needs `config.json` plus `model.safetensors` or `pytorch_model.bin`, and the
+_Rescan_. It needs `config.json` plus `model.safetensors` or `pytorch_model.bin`, and the
 tokenizer files.
 
 ### The OCR workspace
@@ -239,7 +239,7 @@ One page, Super Admin only. It does exactly two things:
   model in a folder; the service finds it. The base model and the model currently in use
   cannot be renamed or deleted.
 - **Save settings** — which model Staff scan with, whether Staff may choose a different
-  one per document, and the review threshold. *Save settings* stays disabled until
+  one per document, and the review threshold. _Save settings_ stays disabled until
   something actually differs from what is stored.
 
 There is deliberately no fine-tuning, dataset upload, evaluation, batch prediction, or
