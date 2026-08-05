@@ -234,6 +234,12 @@ export class FieldMarker {
         this._emitSelection();
     }
 
+    selectAll() {
+        if (this.boxes.length === 0) return;
+        this.selected = new Set(this.boxes);
+        this._emitSelection();
+    }
+
     removeSelected() {
         if (this.selected.size === 0) return;
 

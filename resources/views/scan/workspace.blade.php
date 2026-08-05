@@ -90,6 +90,8 @@
                                     <div><span><kbd>Ctrl</kbd> + scroll</span><small>Zoom document</small></div>
                                     <div><span><kbd>Shift</kbd> + click</span><small>Select multiple</small></div>
                                     <div><span>Drag selection</span><small>Move selected fields</small></div>
+                                    <div><span><kbd>Ctrl</kbd> + <kbd>C</kbd></span><small>Copy selected</small></div>
+                                    <div><span><kbd>Ctrl</kbd> + <kbd>V</kbd></span><small>Paste fields</small></div>
                                     <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Delete selected</small></div>
                                     <div><span><kbd>Ctrl</kbd> + <kbd>Z</kbd></span><small>Undo last change</small></div>
                                 </div>
@@ -122,6 +124,17 @@
                     <x-slot:actions>
                         <span class="badge bg-label-primary" id="fieldCount">0 fields</span>
                     </x-slot:actions>
+
+                    <div class="marker-field-bulk-actions">
+                        <div class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" id="selectAllFields">
+                            <label class="form-check-label" for="selectAllFields">Select all</label>
+                        </div>
+                        <button type="button" class="marker-field-delete" id="deleteFieldsBtn" disabled>
+                            <i class="icon-base bx bx-trash" aria-hidden="true"></i>
+                            <span>Delete</span>
+                        </button>
+                    </div>
 
                     <ul class="list-unstyled marker-field-list mb-3" id="fieldList"></ul>
 
@@ -163,6 +176,11 @@
                         </p>
                     </x-card>
                 @endif
+
+                <div class="ocr-action-status d-none" id="ocrActionStatus" role="alert" aria-live="assertive">
+                    <i class="icon-base bx bx-error" aria-hidden="true"></i>
+                    <span id="ocrActionMessage"></span>
+                </div>
 
                 <div class="d-grid gap-2">
                     <button class="btn btn-primary btn-lg" type="button" id="scanNowBtn">
@@ -278,6 +296,8 @@
     let fieldHistory = [];
     let currentFieldSnapshot = null;
     let restoringFieldHistory = false;
+    let markerClipboard = [];
+    let pasteSequence = 0;
 
     const marker = new FieldMarker({
         canvas: el('pageCanvas'),
@@ -306,6 +326,8 @@
     function resetFieldHistory() {
         fieldHistory = [];
         currentFieldSnapshot = null;
+        markerClipboard = [];
+        pasteSequence = 0;
     }
 
     function undoFieldChange() {
@@ -315,6 +337,57 @@
         restoringFieldHistory = true;
         marker.setBoxes(cloneBoxes(previous));
         restoringFieldHistory = false;
+    }
+
+    function copySelectedFields() {
+        const boxes = marker.toJSON();
+        markerClipboard = marker.selectedIndexes().map((index) => ({ ...boxes[index] }));
+        pasteSequence = 0;
+
+        const count = markerClipboard.length;
+        if (count > 0) {
+            el('selectionSummary').querySelector('span').textContent = `${count} copied`;
+        }
+    }
+
+    function nextCopyName(name, takenNames) {
+        let candidate = `${name} copy`;
+        let suffix = 2;
+
+        while (takenNames.has(candidate.toLocaleLowerCase())) {
+            candidate = `${name} copy ${suffix}`;
+            suffix += 1;
+        }
+
+        takenNames.add(candidate.toLocaleLowerCase());
+        return candidate;
+    }
+
+    function pasteCopiedFields() {
+        if (markerClipboard.length === 0) return;
+
+        const existing = marker.toJSON();
+        const minX = Math.min(...markerClipboard.map((box) => box.x));
+        const minY = Math.min(...markerClipboard.map((box) => box.y));
+        const maxX = Math.max(...markerClipboard.map((box) => box.x + box.w));
+        const maxY = Math.max(...markerClipboard.map((box) => box.y + box.h));
+        const distance = Math.min(0.1, 0.018 * (pasteSequence + 1));
+        const dx = maxX + distance <= 1 ? distance : (minX - distance >= 0 ? -distance : 0);
+        const dy = maxY + distance <= 1 ? distance : (minY - distance >= 0 ? -distance : 0);
+        const takenNames = new Set(existing.map((box) => box.name.toLocaleLowerCase()));
+        const copies = markerClipboard.map((box) => ({
+            ...box,
+            name: nextCopyName(box.name, takenNames),
+            x: box.x + dx,
+            y: box.y + dy,
+        }));
+        const firstCopyIndex = existing.length;
+
+        pasteSequence += 1;
+        marker.setBoxes([...existing, ...copies]);
+        copies.forEach((box, index) => marker.selectBox(firstCopyIndex + index, {
+            additive: index > 0,
+        }));
     }
 
     function showStep(name) {
@@ -441,6 +514,7 @@
         });
 
         el('fieldCount').textContent = `${boxes.length} field${boxes.length === 1 ? '' : 's'}`;
+        el('selectAllFields').disabled = boxes.length === 0;
         el('scanNowBtn').disabled = boxes.length === 0;
         updateSelectionUI(marker.selectedIndexes());
     }
@@ -452,10 +526,14 @@
         });
 
         const count = indexes.length;
+        const total = marker.toJSON().length;
         const summary = el('selectionSummary');
         summary.querySelector('span').textContent = `${count} selected`;
         summary.classList.toggle('is-active', count > 0);
+        el('selectAllFields').checked = total > 0 && count === total;
+        el('selectAllFields').indeterminate = count > 0 && count < total;
         el('deleteSelectedBtn').disabled = count === 0;
+        el('deleteFieldsBtn').disabled = count === 0;
     }
 
     function updateZoomUI(zoom) {
@@ -466,6 +544,14 @@
     el('zoomInBtn').addEventListener('click', () => marker.zoomBy(0.1));
     el('zoomResetBtn').addEventListener('click', () => marker.resetZoom());
     el('deleteSelectedBtn').addEventListener('click', () => marker.removeSelected());
+    el('deleteFieldsBtn').addEventListener('click', () => marker.removeSelected());
+    el('selectAllFields').addEventListener('change', (event) => {
+        if (event.target.checked) {
+            marker.selectAll();
+        } else {
+            marker.clearSelection();
+        }
+    });
 
     document.addEventListener('keydown', (event) => {
         if (steps.mark.classList.contains('d-none')) {
@@ -481,9 +567,24 @@
             return;
         }
 
-        const undoPressed = (event.ctrlKey || event.metaKey)
+        const commandPressed = event.ctrlKey || event.metaKey;
+        const key = event.key.toLowerCase();
+
+        if (commandPressed && !event.shiftKey && key === 'c' && marker.selectedIndexes().length > 0) {
+            event.preventDefault();
+            copySelectedFields();
+            return;
+        }
+
+        if (commandPressed && !event.shiftKey && key === 'v' && markerClipboard.length > 0) {
+            event.preventDefault();
+            pasteCopiedFields();
+            return;
+        }
+
+        const undoPressed = commandPressed
             && !event.shiftKey
-            && event.key.toLowerCase() === 'z';
+            && key === 'z';
 
         if (undoPressed && fieldHistory.length > 0) {
             event.preventDefault();
@@ -518,25 +619,78 @@
     });
     el('backToMark').addEventListener('click', () => showStep('mark'));
 
-    el('scanNowBtn').addEventListener('click', async () => {
-        cropped = marker.crop();
+    let scanInProgress = false;
 
-        if (!cropped.length) {
-            alert('Add at least one field before reading.');
-            return;
+    function showOcrError(message) {
+        el('ocrActionMessage').textContent = message;
+        el('ocrActionStatus').classList.remove('d-none');
+    }
+
+    function clearOcrError() {
+        el('ocrActionMessage').textContent = '';
+        el('ocrActionStatus').classList.add('d-none');
+    }
+
+    function responseErrorMessage(response, payload) {
+        if (response.status === 419) {
+            return 'Your session expired. Refresh the page, reopen the document, and try again.';
+        }
+        if (response.status === 413) {
+            return 'The marked image crops are too large to send. Use tighter field boxes and try again.';
+        }
+        if (response.status === 422) {
+            const validationMessage = payload?.errors
+                ? Object.values(payload.errors).flat()[0]
+                : null;
+            return validationMessage || payload?.message || 'One or more marked fields are invalid.';
         }
 
-        const modal = new bootstrap.Modal(el('scanningModal'));
-        modal.show();
+        return payload?.message || payload?.error || `OCR failed with HTTP ${response.status}.`;
+    }
+
+    el('scanNowBtn').addEventListener('click', async () => {
+        if (scanInProgress) return;
+
+        const button = el('scanNowBtn');
+        const originalButtonContent = button.innerHTML;
+        const controller = new AbortController();
+        let modal = null;
+        let timeoutId = null;
+
+        scanInProgress = true;
+        clearOcrError();
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Preparing fields...';
 
         try {
+            // Cropping and modal creation used to happen outside the try block. A
+            // browser-side failure there made the button appear to do nothing.
+            await new Promise((resolve) => window.requestAnimationFrame(resolve));
+            cropped = marker.crop();
+
+            if (!cropped.length) {
+                throw new Error('Add at least one field before reading.');
+            }
+
+            const Modal = window.bootstrap?.Modal;
+            if (Modal) {
+                modal = Modal.getOrCreateInstance(el('scanningModal'));
+                modal.show();
+            }
+
+            button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Reading handwriting...';
+            timeoutId = window.setTimeout(() => controller.abort(), 125000);
+
             const response = await fetch(config.recogniseUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
                     Accept: 'application/json',
                 },
+                credentials: 'same-origin',
+                signal: controller.signal,
                 body: JSON.stringify({
                     fields: cropped.map((c) => ({ name: c.name, image: c.image })),
                     // Absent unless Staff choice is enabled; the server falls back to
@@ -545,22 +699,37 @@
                 }),
             });
 
-            const payload = await response.json();
+            const contentType = response.headers.get('content-type') || '';
+            const payload = contentType.includes('application/json')
+                ? await response.json()
+                : null;
 
             if (!response.ok) {
-                throw new Error(payload.message || 'The OCR service could not be reached.');
+                throw new Error(responseErrorMessage(response, payload));
             }
 
-            readings = payload.results ?? [];
+            if (!Array.isArray(payload?.results) || payload.results.length === 0) {
+                throw new Error('The OCR service returned no field readings. Please try again.');
+            }
+
+            readings = payload.results;
             el('ocrModelKey').value = payload.modelKey ?? '';
             el('summaryModel').textContent = payload.model || '—';
 
             renderVerifyRows();
             showStep('verify');
         } catch (error) {
-            alert(error.message);
+            const message = error.name === 'AbortError'
+                ? 'OCR timed out after two minutes. Check the OCR service and try again.'
+                : (error.message || 'The document could not be scanned.');
+            console.error('Document OCR failed:', error);
+            showOcrError(message);
         } finally {
-            modal.hide();
+            if (timeoutId !== null) window.clearTimeout(timeoutId);
+            modal?.hide();
+            scanInProgress = false;
+            button.innerHTML = originalButtonContent;
+            button.disabled = marker.toJSON().length === 0;
         }
     });
 
