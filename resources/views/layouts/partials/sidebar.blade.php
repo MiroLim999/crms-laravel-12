@@ -11,11 +11,10 @@
         </a>
 
         <button type="button"
-           class="layout-menu-toggle menu-link text-large ms-auto d-block d-xl-none border-0 bg-transparent"
-           data-sidebar-toggle
+           class="sidebar-toggle-control menu-link text-large ms-auto d-block d-xl-none border-0 bg-transparent"
            aria-controls="layout-menu"
-           aria-expanded="true"
-           aria-label="Hide sidebar">
+           aria-label="Hide sidebar"
+           onclick="document.documentElement.classList.remove('layout-menu-expanded')">
             <i class="icon-base bx bx-chevron-left icon-sm d-flex align-items-center justify-content-center"></i>
         </button>
     </div>

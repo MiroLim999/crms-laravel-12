@@ -5,14 +5,14 @@
 <nav class="layout-navbar container-xxl navbar-detached navbar navbar-expand-xl align-items-center bg-navbar-theme"
      id="layout-navbar">
 
-    {{-- Menu toggle --}}
+    {{-- Uses the responsive off-canvas state on small screens and the desktop
+         collapsed-menu state at xl and above. --}}
     <div class="navbar-nav align-items-xl-center me-4 me-xl-0">
         <button type="button"
-                class="layout-menu-toggle nav-item nav-link px-0 me-xl-6 border-0 bg-transparent"
-                data-sidebar-toggle
+                class="sidebar-toggle-control nav-item nav-link px-0 me-xl-6 border-0 bg-transparent"
                 aria-controls="layout-menu"
-                aria-expanded="true"
-                aria-label="Hide sidebar">
+                aria-label="Toggle sidebar"
+                onclick="document.documentElement.classList.toggle(window.matchMedia('(min-width: 1200px)').matches ? 'layout-menu-collapsed' : 'layout-menu-expanded')">
             <i class="icon-base bx bx-menu icon-md"></i>
         </button>
     </div>
