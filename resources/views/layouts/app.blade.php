@@ -22,6 +22,18 @@
 
     <title>@yield('title', 'Dashboard') · {{ config('app.name') }}</title>
 
+    <script>
+        // Restore the saved desktop sidebar state before CSS paints, avoiding a
+        // one-frame flash of the menu when navigating between pages or tabs.
+        try {
+            if (localStorage.getItem('crms.sidebarCollapsed') === 'true') {
+                document.documentElement.classList.add('layout-menu-collapsed');
+            }
+        } catch (_) {
+            // Storage can be disabled by the browser; use the normal default.
+        }
+    </script>
+
     <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('assets/img/favicon-32.png') }}">
     <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('assets/img/apple-touch-icon.png') }}">
 
