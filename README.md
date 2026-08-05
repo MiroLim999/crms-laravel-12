@@ -91,7 +91,7 @@ composer install
 npm install
 pip install -r ml\requirements.txt -r ml\api\requirements.txt
 
-cp .env.example .env
+copy .env.example .env
 php artisan key:generate
 # set DB_DATABASE / DB_USERNAME / DB_PASSWORD in .env, then:
 php artisan migrate --seed

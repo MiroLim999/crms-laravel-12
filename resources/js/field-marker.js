@@ -29,26 +29,58 @@ export class FieldMarker {
      * @param {object} options
      * @param {HTMLCanvasElement} options.canvas   Page render target.
      * @param {HTMLElement} options.overlay        Positioned container for the boxes.
+     * @param {HTMLElement|null} [options.viewport] Scroll container used for zooming.
      * @param {boolean} [options.readOnly]         Render boxes without interaction.
      * @param {(boxes: Array) => void} [options.onChange]
+     * @param {(indexes: number[]) => void} [options.onSelectionChange]
+     * @param {(zoom: number) => void} [options.onZoomChange]
      */
-    constructor({ canvas, overlay, readOnly = false, onChange = null }) {
+    constructor({
+        canvas,
+        overlay,
+        viewport = null,
+        readOnly = false,
+        onChange = null,
+        onSelectionChange = null,
+        onZoomChange = null,
+    }) {
         this.canvas = canvas;
         this.overlay = overlay;
+        this.viewport = viewport;
         this.readOnly = readOnly;
         this.onChange = onChange;
+        this.onSelectionChange = onSelectionChange;
+        this.onZoomChange = onZoomChange;
 
         /** @type {Array<{name: string, x: number, y: number, w: number, h: number, el: HTMLElement|null}>} */
         this.boxes = [];
+        this.selected = new Set();
         this.pdfDoc = null;
+        this.zoom = 1;
+        this.minZoom = 0.5;
+        this.maxZoom = 3;
 
         // Boxes are positioned in display pixels, so a resize has to reposition them.
-        this._onResize = () => this.layout();
+        this._onResize = () => this.viewport ? this._applyZoom() : this.layout();
+        this._onWheel = (event) => {
+            if (!event.ctrlKey || !this.viewport) return;
+
+            event.preventDefault();
+            this.zoomBy(event.deltaY < 0 ? 0.1 : -0.1, event);
+        };
+        this._onOverlayPointerDown = (event) => {
+            if (event.target === this.overlay) this.clearSelection();
+        };
+
         window.addEventListener('resize', this._onResize);
+        this.viewport?.addEventListener('wheel', this._onWheel, { passive: false });
+        this.overlay.addEventListener('pointerdown', this._onOverlayPointerDown);
     }
 
     destroy() {
         window.removeEventListener('resize', this._onResize);
+        this.viewport?.removeEventListener('wheel', this._onWheel);
+        this.overlay.removeEventListener('pointerdown', this._onOverlayPointerDown);
     }
 
     // ------------------------------------------------------------------ loading
@@ -137,21 +169,28 @@ export class FieldMarker {
     setBoxes(boxes) {
         this.overlay.innerHTML = '';
         this.boxes = boxes.map((box) => ({ ...box, el: null }));
+        this.selected.clear();
         this.layout();
         this._emit();
+        this._emitSelection();
     }
 
     addBox(name, fraction = { x: 0.3, y: 0.1, w: 0.35, h: 0.05 }) {
-        this.boxes.push({ name, ...fraction, el: null });
+        const box = { name, ...fraction, el: null };
+        this.boxes.push(box);
+        this.selected = new Set([box]);
         this.layout();
         this._emit();
+        this._emitSelection();
     }
 
     removeBox(index) {
         const [removed] = this.boxes.splice(index, 1);
+        this.selected.delete(removed);
         removed?.el?.remove();
         this.layout();
         this._emit();
+        this._emitSelection();
     }
 
     renameBox(index, name) {
@@ -167,6 +206,100 @@ export class FieldMarker {
      */
     toJSON() {
         return this.boxes.map(({ name, x, y, w, h }) => ({ name, x, y, w, h }));
+    }
+
+    selectedIndexes() {
+        return this.boxes
+            .map((box, index) => this.selected.has(box) ? index : null)
+            .filter((index) => index !== null);
+    }
+
+    selectBox(index, { additive = false, toggle = false } = {}) {
+        const box = this.boxes[index];
+        if (!box) return;
+
+        if (toggle && this.selected.has(box)) {
+            this.selected.delete(box);
+        } else {
+            if (!additive) this.selected.clear();
+            this.selected.add(box);
+        }
+
+        this._emitSelection();
+    }
+
+    clearSelection() {
+        if (this.selected.size === 0) return;
+        this.selected.clear();
+        this._emitSelection();
+    }
+
+    selectAll() {
+        if (this.boxes.length === 0) return;
+        this.selected = new Set(this.boxes);
+        this._emitSelection();
+    }
+
+    removeSelected() {
+        if (this.selected.size === 0) return;
+
+        this.boxes = this.boxes.filter((box) => {
+            if (!this.selected.has(box)) return true;
+            box.el?.remove();
+            return false;
+        });
+
+        this.selected.clear();
+        this.layout();
+        this._emit();
+        this._emitSelection();
+    }
+
+    // --------------------------------------------------------------------- zoom
+
+    resetZoom() {
+        this.setZoom(1);
+    }
+
+    zoomBy(amount, focalEvent = null) {
+        this.setZoom(this.zoom + amount, focalEvent);
+    }
+
+    setZoom(value, focalEvent = null) {
+        if (!this.viewport) return;
+
+        const next = clamp(value, this.minZoom, this.maxZoom);
+        const viewportRect = this.viewport.getBoundingClientRect();
+        const localX = focalEvent ? focalEvent.clientX - viewportRect.left : this.viewport.clientWidth / 2;
+        const localY = focalEvent ? focalEvent.clientY - viewportRect.top : this.viewport.clientHeight / 2;
+        const oldWidth = this.canvas.clientWidth || 1;
+        const oldHeight = this.canvas.clientHeight || 1;
+        const documentX = (this.viewport.scrollLeft + localX) / oldWidth;
+        const documentY = (this.viewport.scrollTop + localY) / oldHeight;
+
+        this.zoom = next;
+        this._applyZoom();
+
+        this.viewport.scrollLeft = documentX * this.canvas.clientWidth - localX;
+        this.viewport.scrollTop = documentY * this.canvas.clientHeight - localY;
+        this.onZoomChange?.(this.zoom);
+    }
+
+    _applyZoom() {
+        if (!this.viewport || !this.canvas.width || !this.canvas.height) return;
+
+        const available = Math.max(1, this.viewport.clientWidth - 2);
+        const fitWidth = Math.min(this.canvas.width, available);
+        const width = fitWidth * this.zoom;
+        const height = width * (this.canvas.height / this.canvas.width);
+        const stage = this.canvas.parentElement;
+
+        this.canvas.style.maxWidth = 'none';
+        this.canvas.style.width = `${width}px`;
+        this.canvas.style.height = `${height}px`;
+        stage.style.width = `${width}px`;
+        stage.style.height = `${height}px`;
+        this.layout();
     }
 
     /**
@@ -191,6 +324,7 @@ export class FieldMarker {
             box.el.style.width = `${box.w * width}px`;
             box.el.style.height = `${box.h * height}px`;
             box.el.dataset.index = String(index);
+            box.el.classList.toggle('is-selected', this.selected.has(box));
         });
     }
 
@@ -209,7 +343,7 @@ export class FieldMarker {
             handle.className = 'field-box-handle';
             el.appendChild(handle);
 
-            this._makeInteractive(el, handle);
+            this._makeInteractive(el, handle, box);
         }
 
         return el;
@@ -219,20 +353,40 @@ export class FieldMarker {
      * Drag to move, corner handle to resize. Pointer events so it works with
      * touch and pen as well as mouse.
      */
-    _makeInteractive(el, handle) {
+    _makeInteractive(el, handle, box) {
         let mode = null;
         let startX = 0;
         let startY = 0;
-        let origin = null;
+        let origins = [];
 
         const begin = (event, nextMode) => {
             event.preventDefault();
             event.stopPropagation();
+
+            const index = Number(el.dataset.index);
+
+            if (nextMode === 'move') {
+                if (event.shiftKey && this.selected.has(box)) {
+                    this.selectBox(index, { additive: true, toggle: true });
+                    return;
+                }
+
+                if (event.shiftKey) {
+                    this.selectBox(index, { additive: true });
+                } else if (!this.selected.has(box)) {
+                    this.selectBox(index);
+                }
+            } else if (!this.selected.has(box)) {
+                this.selectBox(index);
+            }
+
             mode = nextMode;
             startX = event.clientX;
             startY = event.clientY;
-            const index = Number(el.dataset.index);
-            origin = { ...this.boxes[index] };
+            // Moving and resizing operate on the full selection. Each marker
+            // keeps its own origin and size, while receiving the same delta.
+            origins = [...this.selected]
+                .map((selected) => ({ box: selected, ...selected }));
             el.setPointerCapture(event.pointerId);
             el.classList.add('is-active');
         };
@@ -245,15 +399,30 @@ export class FieldMarker {
             const dx = (event.clientX - startX) / width;
             const dy = (event.clientY - startY) / height;
 
-            const index = Number(el.dataset.index);
-            const box = this.boxes[index];
-
             if (mode === 'move') {
-                box.x = clamp(origin.x + dx, 0, 1 - origin.w);
-                box.y = clamp(origin.y + dy, 0, 1 - origin.h);
+                const minDx = Math.max(...origins.map((origin) => -origin.x));
+                const maxDx = Math.min(...origins.map((origin) => 1 - origin.x - origin.w));
+                const minDy = Math.max(...origins.map((origin) => -origin.y));
+                const maxDy = Math.min(...origins.map((origin) => 1 - origin.y - origin.h));
+                const boundedX = clamp(dx, minDx, maxDx);
+                const boundedY = clamp(dy, minDy, maxDy);
+
+                origins.forEach((origin) => {
+                    origin.box.x = origin.x + boundedX;
+                    origin.box.y = origin.y + boundedY;
+                });
             } else {
-                box.w = clamp(origin.w + dx, MIN_FRACTION, 1 - origin.x);
-                box.h = clamp(origin.h + dy, MIN_FRACTION, 1 - origin.y);
+                const minDw = Math.max(...origins.map((origin) => MIN_FRACTION - origin.w));
+                const maxDw = Math.min(...origins.map((origin) => 1 - origin.x - origin.w));
+                const minDh = Math.max(...origins.map((origin) => MIN_FRACTION - origin.h));
+                const maxDh = Math.min(...origins.map((origin) => 1 - origin.y - origin.h));
+                const boundedW = clamp(dx, minDw, maxDw);
+                const boundedH = clamp(dy, minDh, maxDh);
+
+                origins.forEach((origin) => {
+                    origin.box.w = origin.w + boundedW;
+                    origin.box.h = origin.h + boundedH;
+                });
             }
 
             this.layout();
@@ -318,6 +487,11 @@ export class FieldMarker {
 
     _emit() {
         this.onChange?.(this.toJSON());
+    }
+
+    _emitSelection() {
+        this.boxes.forEach((box) => box.el?.classList.toggle('is-selected', this.selected.has(box)));
+        this.onSelectionChange?.(this.selectedIndexes());
     }
 }
 
