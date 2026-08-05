@@ -10,11 +10,14 @@
             <span class="app-brand-text demo menu-text fw-bold ms-2">CRMS</span>
         </a>
 
-        <a href="javascript:void(0);"
-           class="layout-menu-toggle menu-link text-large ms-auto d-block d-xl-none"
-           aria-label="Collapse menu">
+        <button type="button"
+           class="layout-menu-toggle menu-link text-large ms-auto d-block d-xl-none border-0 bg-transparent"
+           data-sidebar-toggle
+           aria-controls="layout-menu"
+           aria-expanded="true"
+           aria-label="Hide sidebar">
             <i class="icon-base bx bx-chevron-left icon-sm d-flex align-items-center justify-content-center"></i>
-        </a>
+        </button>
     </div>
 
     <div class="menu-divider mt-0"></div>

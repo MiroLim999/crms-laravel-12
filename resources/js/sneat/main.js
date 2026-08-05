@@ -28,14 +28,32 @@ document.addEventListener('DOMContentLoaded', function () {
     window.Helpers.mainMenu = menu;
   });
 
-  // Initialize menu togglers and bind click on each
-  let menuToggler = document.querySelectorAll('.layout-menu-toggle');
-  menuToggler.forEach(item => {
+  // The sidebar is an off-canvas menu below the xl breakpoint and a collapsible
+  // menu above it. Bind only the actual controls, so a click cannot bubble
+  // through two togglers and immediately undo itself.
+  const menuTogglers = document.querySelectorAll('[data-sidebar-toggle]');
+  const syncSidebarToggleState = () => {
+    const expanded = !window.Helpers.isCollapsed();
+
+    menuTogglers.forEach(item => {
+      item.setAttribute('aria-expanded', String(expanded));
+      item.setAttribute('aria-label', expanded ? 'Hide sidebar' : 'Show sidebar');
+    });
+  };
+
+  menuTogglers.forEach(item => {
     item.addEventListener('click', event => {
       event.preventDefault();
       window.Helpers.toggleCollapsed();
+      // Helpers applies the small-screen class after a possible redraw.
+      window.setTimeout(syncSidebarToggleState, 10);
     });
   });
+
+  // CSS moves the sidebar off canvas automatically below this same breakpoint.
+  // Keep the controls' state accurate when a viewport crosses the breakpoint.
+  window.addEventListener('resize', syncSidebarToggleState);
+  syncSidebarToggleState();
 
   // Display menu toggle (layout-menu-toggle) on hover with delay
   let delay = function (elem, callback) {
@@ -121,7 +139,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // If current layout is vertical and current window screen is > small
 
   // Auto update menu collapsed/expanded based on the themeConfig
-      window.Helpers.setCollapsed(true, false);
+      window.Helpers.setCollapsed(false, false);
 })();
 // Utils
 function isMacOS() {
