@@ -23,6 +23,8 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('id="documentFlowSteps"', escape: false)
                 ->assertSee('id="documentDropzone"', escape: false)
                 ->assertSee('id="docViewport"', escape: false)
+                ->assertSee('class="layout-menu-toggle marker-sidebar-toggle"', escape: false)
+                ->assertSee('aria-controls="layout-menu"', escape: false)
                 ->assertSee('id="zoomResetBtn"', escape: false)
                 ->assertSee('id="resetFieldsBtn"', escape: false)
                 ->assertSee('id="resetFieldsModal"', escape: false)

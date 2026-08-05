@@ -10,11 +10,6 @@
             <span class="app-brand-text demo menu-text fw-bold ms-2">CRMS</span>
         </a>
 
-        <a href="javascript:void(0);"
-           class="layout-menu-toggle menu-link text-large ms-auto d-block d-xl-none"
-           aria-label="Collapse menu">
-            <i class="icon-base bx bx-chevron-left icon-sm d-flex align-items-center justify-content-center"></i>
-        </a>
     </div>
 
     <div class="menu-divider mt-0"></div>

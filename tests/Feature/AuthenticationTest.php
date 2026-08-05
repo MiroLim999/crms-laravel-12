@@ -44,6 +44,20 @@ class AuthenticationTest extends TestCase
         $this->assertNotNull($user->fresh()->last_login_at);
     }
 
+    public function test_authenticated_layout_has_responsive_navigation_controls(): void
+    {
+        $user = User::factory()->staff()->create();
+
+        $this->actingAs($user)
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertSee('layout-menu-fixed-offcanvas', escape: false)
+            ->assertSee('class="layout-menu-toggle navbar-menu-toggle', escape: false)
+            ->assertSee('data-menu-toggle-control', escape: false)
+            ->assertSee('aria-controls="layout-menu"', escape: false)
+            ->assertDontSee('sidebar-menu-toggle', escape: false);
+    }
+
     public function test_sign_in_is_audit_logged(): void
     {
         $user = User::factory()->staff()->create(['password' => 'password']);

@@ -8,7 +8,7 @@
 --}}
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}"
-      class="layout-menu-fixed layout-compact"
+      class="layout-menu-fixed-offcanvas layout-compact"
       dir="ltr"
       data-skin="default"
       data-bs-theme="light"
