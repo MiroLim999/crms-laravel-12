@@ -137,6 +137,17 @@
   cursor: move;
   touch-action: none;
 
+  &:hover,
+  &.is-active {
+    z-index: 3;
+
+    .field-box-label {
+      visibility: visible;
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
   &.is-active {
     border-style: dashed;
     background-color: rgba(105, 108, 255, 0.22);
@@ -156,11 +167,18 @@
   padding: 0 0.35rem;
   font-size: 0.6875rem;
   line-height: 1.25rem;
+  max-inline-size: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   color: #fff;
   background-color: var(--bs-primary);
   border-radius: 2px;
+  visibility: hidden;
+  opacity: 0;
   pointer-events: none;
+  transform: translateY(.2rem);
+  transition: opacity .12s ease, transform .12s ease, visibility .12s ease;
 }
 
 .field-box-handle {
@@ -181,6 +199,12 @@
 .field-overlay--readonly .field-box {
   cursor: default;
   border-style: dotted;
+
+  .field-box-label {
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .field-list-item {
