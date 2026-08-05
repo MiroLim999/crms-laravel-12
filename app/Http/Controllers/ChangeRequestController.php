@@ -111,15 +111,44 @@ class ChangeRequestController extends Controller
 
         $validated = $request->validate([
             'decision_note' => ['nullable', 'string', 'max:2000'],
+            'item_ids'      => ['nullable', 'array'],
+            'item_ids.*'    => ['integer'],
         ]);
 
+        // Resolve which items are in scope.
+        // If the form sent item_ids, intersect with the actual items on this
+        // request so a hand-crafted POST cannot reference a foreign item.
+        $selectedItemIds = null;
+        if (array_key_exists('item_ids', $validated) && is_array($validated['item_ids'])) {
+            $validIds = $changeRequest->items->pluck('id')->all();
+            $selectedItemIds = array_values(
+                array_intersect(
+                    array_map('intval', $validated['item_ids']),
+                    $validIds,
+                )
+            );
+
+            if (empty($selectedItemIds)) {
+                return back()
+                    ->withInput()
+                    ->with('error', 'Select at least one field to approve.');
+            }
+        }
+
         try {
-            $this->service->approve($changeRequest, $request->user(), $validated['decision_note'] ?? null);
+            $this->service->approve(
+                $changeRequest,
+                $request->user(),
+                $validated['decision_note'] ?? null,
+                $selectedItemIds,
+            );
         } catch (RuntimeException $e) {
             return back()->with('error', $e->getMessage());
         }
 
-        return back()->with('success', 'Approved. The record has been updated.');
+        $count = $selectedItemIds !== null ? count($selectedItemIds) : $changeRequest->items->count();
+
+        return back()->with('success', "Approved. {$count} field(s) applied to the record.");
     }
 
     public function reject(Request $request, ChangeRequest $changeRequest): RedirectResponse

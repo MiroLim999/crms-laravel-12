@@ -81,14 +81,19 @@ class ChangeRequestService
 
     /**
      * Approve and apply. This is the only place a locked record's values move.
+     *
+     * @param  array<int>|null  $selectedItemIds  When provided, only items whose primary
+     *                                            key is in this list have their field values
+     *                                            updated. Null means apply all items.
      */
-    public function approve(ChangeRequest $request, User $reviewer, ?string $note = null): ChangeRequest
+    public function approve(ChangeRequest $request, User $reviewer, ?string $note = null, ?array $selectedItemIds = null): ChangeRequest
     {
         $this->guardOpen($request);
 
-        return DB::transaction(function () use ($request, $reviewer, $note) {
+        return DB::transaction(function () use ($request, $reviewer, $note, $selectedItemIds) {
             $applied = [];
             $previous = [];
+            $skipped = [];
 
             foreach ($request->items as $item) {
                 $field = $item->field;
@@ -97,16 +102,22 @@ class ChangeRequestService
                     continue;
                 }
 
+                // When the moderator selected specific items, skip anything not chosen.
+                if ($selectedItemIds !== null && ! in_array($item->getKey(), $selectedItemIds, true)) {
+                    $skipped[$field->name] = $item->proposed_value;
+                    continue;
+                }
+
                 $previous[$field->name] = $field->verified_value;
-                $applied[$field->name] = $item->proposed_value;
+                $applied[$field->name]  = $item->proposed_value;
 
                 $field->forceFill(['verified_value' => $item->proposed_value])->save();
             }
 
             $request->forceFill([
-                'status' => ChangeRequestStatus::Approved,
-                'reviewed_by' => $reviewer->getKey(),
-                'reviewed_at' => now(),
+                'status'        => ChangeRequestStatus::Approved,
+                'reviewed_by'   => $reviewer->getKey(),
+                'reviewed_at'   => now(),
                 'decision_note' => $note,
             ])->save();
 
@@ -116,7 +127,8 @@ class ChangeRequestService
                 old: $previous,
                 new: $applied,
                 description: "Approved change request #{$request->getKey()} and applied "
-                    .count($applied).' value(s).',
+                    . count($applied) . ' value(s)'
+                    . (count($skipped) ? '; skipped: ' . implode(', ', array_keys($skipped)) : '') . '.',
                 actor: $reviewer,
             );
 
