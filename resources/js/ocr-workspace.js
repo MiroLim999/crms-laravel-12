@@ -620,19 +620,23 @@ async function copyToClipboard(text) {
 function initEngineStatus() {
     if (!$('#engine-card')) return;
 
-    const copy = $('#copy-engine-command');
-    copy?.addEventListener('click', async () => {
-        const label = $('span', copy);
-        const idle = label.textContent;
+    document.querySelectorAll('.js-copy-command').forEach((copy) => {
+        copy.addEventListener('click', async () => {
+            const label = $('span', copy);
+            const target = document.getElementById(copy.dataset.copyTarget);
+            if (!label || !target) return;
 
-        try {
-            await copyToClipboard($('#engine-command').textContent.trim());
-            label.textContent = 'Copied';
-        } catch {
-            label.textContent = 'Copy failed';
-        }
+            const idle = label.textContent;
 
-        window.setTimeout(() => { label.textContent = idle; }, 1600);
+            try {
+                await copyToClipboard(target.textContent.trim());
+                label.textContent = 'Copied';
+            } catch {
+                label.textContent = 'Copy failed';
+            }
+
+            window.setTimeout(() => { label.textContent = idle; }, 1600);
+        });
     });
 
     let lastReachable = config.engineReachable;
