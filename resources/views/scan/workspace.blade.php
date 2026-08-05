@@ -267,35 +267,33 @@
 
     {{-- Confirm restoring the original template layout --}}
     <div class="modal fade" id="resetFieldsModal" tabindex="-1"
-         aria-labelledby="resetFieldsModalTitle" aria-describedby="resetFieldsModalDescription"
+        aria-labelledby="resetFieldsModalTitle" aria-describedby="resetFieldsModalDescription"
          aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered reset-confirm-dialog">
             <div class="modal-content reset-confirm-modal">
-                <div class="modal-body p-4">
-                    <div class="reset-confirm-modal__icon" aria-hidden="true">
-                        <i class="icon-base bx bx-refresh"></i>
-                    </div>
+                <div class="modal-header">
+                    <h5 class="modal-title" id="resetFieldsModalTitle">Reset field layout?</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                            aria-label="Close"></button>
+                </div>
 
-                    <h5 class="mb-2" id="resetFieldsModalTitle">Restore template fields?</h5>
-                    <p class="text-muted mb-0" id="resetFieldsModalDescription">
-                        Added or copied fields will be removed, deleted fields will return, and every
-                        marker will move back to its original position and size.
+                <div class="modal-body">
+                    <p class="mb-2" id="resetFieldsModalDescription">
+                        Restore all field markers to the positions and sizes configured in the original template?
                     </p>
-{{-- 
-                    <div class="reset-confirm-modal__notice">
-                        <i class="icon-base bx bx-history" aria-hidden="true"></i>
-                        <span>You can press <kbd>Ctrl</kbd> + <kbd>Z</kbd> afterward to undo this reset.</span>
-                    </div> --}}
+                    <p class="small text-muted mb-0">
+                        Added or copied fields will be removed, and deleted fields will be restored.
+                    </p>
+                </div>
 
-                    <div class="reset-confirm-modal__actions">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
-                            Keep changes
-                        </button>
-                        <button type="button" class="btn btn-primary" id="confirmResetFieldsBtn">
-                            <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
-                            Reset fields
-                        </button>
-                    </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                        Cancel
+                    </button>
+                    <button type="button" class="btn btn-primary" id="confirmResetFieldsBtn">
+                        <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
+                        Reset fields
+                    </button>
                 </div>
             </div>
         </div>
