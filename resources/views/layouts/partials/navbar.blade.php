@@ -12,7 +12,7 @@
                 class="sidebar-toggle-control nav-item nav-link px-0 me-xl-6 border-0 bg-transparent"
                 aria-controls="layout-menu"
                 aria-label="Toggle sidebar"
-                onclick="const desktop = window.matchMedia('(min-width: 1200px)').matches; const sidebarClass = desktop ? 'layout-menu-collapsed' : 'layout-menu-expanded'; document.documentElement.classList.toggle(sidebarClass); if (desktop) localStorage.setItem('crms.sidebarCollapsed', String(document.documentElement.classList.contains(sidebarClass)));">
+                onclick="const root = document.documentElement; const desktop = window.matchMedia('(min-width: 1200px)').matches; const sidebarClass = desktop ? 'layout-menu-collapsed' : 'layout-menu-expanded'; root.classList.add('layout-transitioning'); root.classList.toggle(sidebarClass); window.setTimeout(() => root.classList.remove('layout-transitioning'), 350); if (desktop) localStorage.setItem('crms.sidebarCollapsed', String(root.classList.contains(sidebarClass)));">
             <i class="icon-base bx bx-menu icon-md"></i>
         </button>
     </div>
