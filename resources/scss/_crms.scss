@@ -519,7 +519,7 @@
 }
 
 .document-canvas-card .doc-viewport {
-  block-size: calc(100vh - 14rem);
+  block-size: calc(100vh - 8.5rem);
   min-block-size: 28rem;
   max-block-size: none;
   background-color: #e9ebf0;
@@ -541,7 +541,7 @@
 }
 
 #step-mark .document-side-panel {
-  max-block-size: calc(100vh - 8rem);
+  max-block-size: calc(100vh - 3rem);
   padding-inline-end: .2rem;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -556,6 +556,7 @@
   max-block-size: 20rem;
   padding-inline-end: .2rem;
   overflow-y: auto;
+  user-select: none;
 }
 
 .marker-field-empty {
@@ -698,7 +699,7 @@
   }
 
   .document-canvas-card .doc-viewport {
-    block-size: calc(100vh - 15rem);
+    block-size: calc(100vh - 10rem);
     min-block-size: 22rem;
   }
 

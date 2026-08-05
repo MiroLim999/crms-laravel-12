@@ -91,6 +91,8 @@
                         <span><kbd>Ctrl</kbd> + scroll to zoom</span>
                         <span><kbd>Shift</kbd> + click to select multiple</span>
                         <span>Drag a selected box to move the group</span>
+                        <span><kbd>Del</kbd> or <kbd>Backspace</kbd> to delete</span>
+                        <span><kbd>Ctrl</kbd> + <kbd>Z</kbd> to undo</span>
                     </div>
 
                     <div class="doc-viewport" id="docViewport">
@@ -261,15 +263,47 @@
     let scanFile = null;
     let cropped = [];
     let readings = [];
+    let fieldHistory = [];
+    let currentFieldSnapshot = null;
+    let restoringFieldHistory = false;
 
     const marker = new FieldMarker({
         canvas: el('pageCanvas'),
         overlay: el('fieldOverlay'),
         viewport: el('docViewport'),
-        onChange: renderFieldList,
+        onChange: handleMarkerChange,
         onSelectionChange: updateSelectionUI,
         onZoomChange: updateZoomUI,
     });
+
+    const cloneBoxes = (boxes) => boxes.map(({ name, x, y, w, h }) => ({ name, x, y, w, h }));
+
+    function handleMarkerChange(boxes) {
+        const next = cloneBoxes(boxes);
+
+        if (!restoringFieldHistory && currentFieldSnapshot !== null
+            && JSON.stringify(next) !== JSON.stringify(currentFieldSnapshot)) {
+            fieldHistory.push(currentFieldSnapshot);
+            if (fieldHistory.length > 100) fieldHistory.shift();
+        }
+
+        currentFieldSnapshot = next;
+        renderFieldList(boxes);
+    }
+
+    function resetFieldHistory() {
+        fieldHistory = [];
+        currentFieldSnapshot = null;
+    }
+
+    function undoFieldChange() {
+        const previous = fieldHistory.pop();
+        if (!previous) return;
+
+        restoringFieldHistory = true;
+        marker.setBoxes(cloneBoxes(previous));
+        restoringFieldHistory = false;
+    }
 
     function showStep(name) {
         Object.entries(steps).forEach(([key, node]) => node.classList.toggle('d-none', key !== name));
@@ -277,6 +311,7 @@
         const marking = name === 'mark';
         el('documentPageHeader').classList.toggle('d-none', marking);
         el('documentFlowSteps').classList.toggle('d-none', marking);
+        el('layout-navbar')?.classList.toggle('d-none', marking);
 
         const order = ['upload', 'mark', 'verify'];
         const activeIndex = order.indexOf(name);
@@ -312,6 +347,7 @@
             await marker.load(file);
             el('selectedFileName').textContent = file.name;
             showStep('mark');
+            resetFieldHistory();
             marker.setBoxes(config.boxes.map((b) => ({
                 name: b.name,
                 x: +b.x,
@@ -418,6 +454,36 @@
     el('zoomInBtn').addEventListener('click', () => marker.zoomBy(0.1));
     el('zoomResetBtn').addEventListener('click', () => marker.resetZoom());
     el('deleteSelectedBtn').addEventListener('click', () => marker.removeSelected());
+
+    document.addEventListener('keydown', (event) => {
+        if (steps.mark.classList.contains('d-none')) {
+            return;
+        }
+
+        const target = event.target;
+        const isEditing = target instanceof HTMLElement && (
+            target.matches('input, textarea, select') || target.isContentEditable
+        );
+
+        if (isEditing) {
+            return;
+        }
+
+        const undoPressed = (event.ctrlKey || event.metaKey)
+            && !event.shiftKey
+            && event.key.toLowerCase() === 'z';
+
+        if (undoPressed && fieldHistory.length > 0) {
+            event.preventDefault();
+            undoFieldChange();
+            return;
+        }
+
+        if (['Backspace', 'Delete'].includes(event.key) && marker.selectedIndexes().length > 0) {
+            event.preventDefault();
+            marker.removeSelected();
+        }
+    });
 
     el('addFieldBtn').addEventListener('click', () => {
         const input = el('newFieldName');
