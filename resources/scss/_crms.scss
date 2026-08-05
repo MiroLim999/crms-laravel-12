@@ -817,6 +817,81 @@
   }
 }
 
+@property --ocr-progress {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+.ocr-progress-modal {
+  overflow: hidden;
+  border: 0;
+  border-radius: 1rem;
+  box-shadow: 0 1.25rem 3.5rem rgba(34, 48, 62, .2);
+}
+
+.ocr-progress-ring {
+  --ocr-progress: 0;
+
+  position: relative;
+  display: grid;
+  inline-size: 7.5rem;
+  block-size: 7.5rem;
+  place-items: center;
+  background: conic-gradient(
+    from -90deg,
+    var(--bs-primary) calc(var(--ocr-progress) * 1%),
+    rgba(105, 108, 255, .12) 0
+  );
+  border-radius: 50%;
+  box-shadow: 0 0 0 .45rem rgba(105, 108, 255, .05);
+  transition: --ocr-progress .3s ease;
+
+  &::before {
+    position: absolute;
+    inset: .55rem;
+    background: #fff;
+    border-radius: inherit;
+    content: '';
+  }
+}
+
+.ocr-progress-ring__center {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+
+  strong {
+    color: var(--bs-primary);
+    font-size: 1.65rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  small {
+    margin-block-start: .3rem;
+    color: var(--bs-secondary-color);
+    font-size: .625rem;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+}
+
+.ocr-progress-fields {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .45rem .7rem;
+  color: var(--bs-primary);
+  background: rgba(105, 108, 255, .08);
+  border-radius: 2rem;
+  font-size: .75rem;
+  font-weight: 500;
+}
+
 .document-tip {
   color: #8a6500;
   background: rgba(255, 171, 0, .1);

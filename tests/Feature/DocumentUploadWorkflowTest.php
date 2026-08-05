@@ -29,6 +29,8 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('id="selectAllFields"', escape: false)
                 ->assertSee('id="deleteFieldsBtn"', escape: false)
                 ->assertSee('id="ocrActionStatus"', escape: false)
+                ->assertSee('id="ocrProgressRing"', escape: false)
+                ->assertSee('id="ocrProgressValue"', escape: false)
                 ->assertSee('<kbd>Shift</kbd> + click', escape: false)
                 ->assertSee('Resize selected fields')
                 ->assertSee('<kbd>Ctrl</kbd> + <kbd>C</kbd>', escape: false)

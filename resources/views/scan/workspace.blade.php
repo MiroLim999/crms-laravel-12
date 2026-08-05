@@ -265,18 +265,30 @@
         </form>
     </section>
 
-    {{-- Busy overlay while the model runs --}}
-    <div class="modal fade" id="scanningModal" tabindex="-1" data-bs-backdrop="static" aria-hidden="true">
+    {{-- OCR progress while the model runs --}}
+    <div class="modal fade" id="scanningModal" tabindex="-1" data-bs-backdrop="static"
+         data-bs-keyboard="false" aria-hidden="true">
         <div class="modal-dialog modal-sm modal-dialog-centered">
-            <div class="modal-content text-center">
-                <div class="modal-body py-4">
-                    <div class="spinner-border text-primary mb-3" role="status">
-                        <span class="visually-hidden">Reading</span>
+            <div class="modal-content ocr-progress-modal text-center">
+                <div class="modal-body p-4 p-sm-5">
+                    <div class="ocr-progress-ring mx-auto mb-4" id="ocrProgressRing"
+                         role="progressbar" aria-label="OCR progress" aria-valuemin="0"
+                         aria-valuemax="100" aria-valuenow="0">
+                        <div class="ocr-progress-ring__center">
+                            <strong id="ocrProgressValue">0%</strong>
+                            <small>estimated</small>
+                        </div>
                     </div>
-                    <p class="mb-1 fw-medium">Reading handwriting</p>
-                    <p class="small text-muted mb-0" id="scanningNote">
-                        A cold model takes a moment to load.
+
+                    <h5 class="mb-2" id="ocrProgressTitle">Preparing document</h5>
+                    <p class="small text-muted mb-3" id="scanningNote" aria-live="polite">
+                        Creating clear image crops for each marked field.
                     </p>
+
+                    <div class="ocr-progress-fields">
+                        <i class="icon-base bx bx-scan" aria-hidden="true"></i>
+                        <span id="ocrProgressFields">Preparing marked fields</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -654,6 +666,8 @@
     el('backToMark').addEventListener('click', () => showStep('mark'));
 
     let scanInProgress = false;
+    let ocrProgressTimer = null;
+    let ocrProgress = 0;
 
     function showOcrError(message) {
         el('ocrActionMessage').textContent = message;
@@ -663,6 +677,56 @@
     function clearOcrError() {
         el('ocrActionMessage').textContent = '';
         el('ocrActionStatus').classList.add('d-none');
+    }
+
+    function setOcrProgress(value, title = null, note = null) {
+        ocrProgress = Math.max(0, Math.min(100, value));
+        const rounded = Math.round(ocrProgress);
+        const ring = el('ocrProgressRing');
+
+        ring.style.setProperty('--ocr-progress', ocrProgress);
+        ring.setAttribute('aria-valuenow', String(rounded));
+        el('ocrProgressValue').textContent = `${rounded}%`;
+
+        if (title) el('ocrProgressTitle').textContent = title;
+        if (note) el('scanningNote').textContent = note;
+    }
+
+    function beginOcrProgress(fieldCount) {
+        if (ocrProgressTimer !== null) window.clearInterval(ocrProgressTimer);
+
+        el('ocrProgressFields').textContent = `${fieldCount} marked field${fieldCount === 1 ? '' : 's'}`;
+        setOcrProgress(4, 'Preparing document', 'Creating clear image crops for each marked field.');
+
+        ocrProgressTimer = window.setInterval(() => {
+            if (ocrProgress >= 92) return;
+
+            const increment = ocrProgress < 30 ? 4 : (ocrProgress < 70 ? 2 : 1);
+            const next = Math.min(92, ocrProgress + increment);
+
+            if (next < 18) {
+                setOcrProgress(next, 'Preparing document', 'Creating clear image crops for each marked field.');
+            } else if (next < 30) {
+                setOcrProgress(next, 'Sending marked fields', 'Uploading the field crops securely to the OCR service.');
+            } else if (next < 78) {
+                setOcrProgress(next, 'Reading handwriting', 'The selected TrOCR model is reading the marked areas.');
+            } else {
+                setOcrProgress(next, 'Finalizing results', 'Checking the OCR response before validation.');
+            }
+        }, 350);
+    }
+
+    function stopOcrProgress() {
+        if (ocrProgressTimer === null) return;
+        window.clearInterval(ocrProgressTimer);
+        ocrProgressTimer = null;
+    }
+
+    async function completeOcrProgress() {
+        stopOcrProgress();
+        await new Promise((resolve) => window.setTimeout(resolve, 180));
+        setOcrProgress(100, 'Scan complete', 'Opening the validation results.');
+        await new Promise((resolve) => window.setTimeout(resolve, 420));
     }
 
     function responseErrorMessage(response, payload) {
@@ -694,11 +758,20 @@
         scanInProgress = true;
         clearOcrError();
         button.disabled = true;
-        button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Preparing fields...';
+        button.innerHTML = '<i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i> OCR in progress...';
 
         try {
             // Cropping and modal creation used to happen outside the try block. A
             // browser-side failure there made the button appear to do nothing.
+            const Modal = window.bootstrap?.Modal;
+            if (!Modal) {
+                throw new Error('The OCR loading interface did not finish loading. Refresh the page and try again.');
+            }
+
+            modal = Modal.getOrCreateInstance(el('scanningModal'));
+            beginOcrProgress(marker.toJSON().length);
+            modal.show();
+
             await new Promise((resolve) => window.requestAnimationFrame(resolve));
             cropped = marker.crop();
 
@@ -706,13 +779,7 @@
                 throw new Error('Add at least one field before reading.');
             }
 
-            const Modal = window.bootstrap?.Modal;
-            if (Modal) {
-                modal = Modal.getOrCreateInstance(el('scanningModal'));
-                modal.show();
-            }
-
-            button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Reading handwriting...';
+            setOcrProgress(Math.max(ocrProgress, 18), 'Sending marked fields', 'Uploading the field crops securely to the OCR service.');
             timeoutId = window.setTimeout(() => controller.abort(), 125000);
 
             const response = await fetch(config.recogniseUrl, {
@@ -750,7 +817,9 @@
             el('ocrModelKey').value = payload.modelKey ?? '';
             el('summaryModel').textContent = payload.model || '—';
 
+            setOcrProgress(96, 'Preparing validation', 'The handwriting results are ready for your review.');
             renderVerifyRows();
+            await completeOcrProgress();
             showStep('verify');
         } catch (error) {
             const message = error.name === 'AbortError'
@@ -760,6 +829,7 @@
             showOcrError(message);
         } finally {
             if (timeoutId !== null) window.clearTimeout(timeoutId);
+            stopOcrProgress();
             modal?.hide();
             scanInProgress = false;
             button.innerHTML = originalButtonContent;
