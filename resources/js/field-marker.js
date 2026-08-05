@@ -383,7 +383,9 @@ export class FieldMarker {
             mode = nextMode;
             startX = event.clientX;
             startY = event.clientY;
-            origins = (nextMode === 'move' ? [...this.selected] : [box])
+            // Moving and resizing operate on the full selection. Each marker
+            // keeps its own origin and size, while receiving the same delta.
+            origins = [...this.selected]
                 .map((selected) => ({ box: selected, ...selected }));
             el.setPointerCapture(event.pointerId);
             el.classList.add('is-active');
@@ -410,9 +412,17 @@ export class FieldMarker {
                     origin.box.y = origin.y + boundedY;
                 });
             } else {
-                const [origin] = origins;
-                box.w = clamp(origin.w + dx, MIN_FRACTION, 1 - origin.x);
-                box.h = clamp(origin.h + dy, MIN_FRACTION, 1 - origin.y);
+                const minDw = Math.max(...origins.map((origin) => MIN_FRACTION - origin.w));
+                const maxDw = Math.min(...origins.map((origin) => 1 - origin.x - origin.w));
+                const minDh = Math.max(...origins.map((origin) => MIN_FRACTION - origin.h));
+                const maxDh = Math.min(...origins.map((origin) => 1 - origin.y - origin.h));
+                const boundedW = clamp(dx, minDw, maxDw);
+                const boundedH = clamp(dy, minDh, maxDh);
+
+                origins.forEach((origin) => {
+                    origin.box.w = origin.w + boundedW;
+                    origin.box.h = origin.h + boundedH;
+                });
             }
 
             this.layout();

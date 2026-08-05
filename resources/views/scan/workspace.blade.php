@@ -90,6 +90,7 @@
                                     <div><span><kbd>Ctrl</kbd> + scroll</span><small>Zoom document</small></div>
                                     <div><span><kbd>Shift</kbd> + click</span><small>Select multiple</small></div>
                                     <div><span>Drag selection</span><small>Move selected fields</small></div>
+                                    <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
                                     <div><span><kbd>Ctrl</kbd> + <kbd>C</kbd></span><small>Copy selected</small></div>
                                     <div><span><kbd>Ctrl</kbd> + <kbd>V</kbd></span><small>Paste fields</small></div>
                                     <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Delete selected</small></div>
