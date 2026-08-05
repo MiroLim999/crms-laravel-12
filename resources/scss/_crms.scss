@@ -193,7 +193,7 @@
 }
 
 .marker-zoom-value {
-  min-inline-size: 4rem;
+  min-inline-size: 3.5rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -432,7 +432,7 @@
 }
 
 .document-canvas-card {
-  overflow: hidden;
+  overflow: visible;
 
   > .card-body {
     padding: 0;
@@ -464,9 +464,10 @@
   justify-content: space-between;
   gap: .75rem;
   margin: 0;
-  padding: .7rem 1rem;
-  background: var(--bs-gray-100);
-  border-block: 1px solid var(--bs-border-color);
+  padding: .65rem .75rem;
+  background: #fff;
+  border-block-end: 1px solid var(--bs-border-color);
+  border-radius: .65rem .65rem 0 0;
 }
 
 .marker-toolbar__divider {
@@ -475,51 +476,166 @@
   background: var(--bs-border-color);
 }
 
-.marker-toolbar__group,
-.marker-toolbar__selection {
+.marker-toolbar__primary,
+.marker-toolbar__actions {
   display: flex;
   align-items: center;
-  gap: .65rem;
+  gap: .55rem;
+  min-inline-size: 0;
 }
 
-.marker-toolbar__label {
-  color: var(--bs-secondary-color);
-  font-size: .75rem;
+.marker-zoom-controls {
+  display: inline-flex;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: .55rem;
+}
+
+.marker-tool-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 2rem;
+  block-size: 2.25rem;
+  padding: 0 .45rem;
+  color: var(--bs-primary);
+  background: #fff;
+  border: 0;
+  border-radius: 0;
+  font-size: .875rem;
+  transition: color .12s ease, background-color .12s ease;
+
+  + .marker-tool-button {
+    border-inline-start: 1px solid var(--bs-border-color);
+  }
+
+  &:hover,
+  &:focus-visible {
+    color: var(--bs-primary);
+    background: rgba(105, 108, 255, .08);
+    outline: 0;
+  }
+}
+
+.marker-tool-button.marker-zoom-value {
+  color: var(--bs-primary);
+  background: #fff;
   font-weight: 600;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+}
+
+.marker-help-button,
+.marker-delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .35rem;
+  block-size: 2.3rem;
+  padding: 0 .65rem;
+  color: var(--bs-secondary-color);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: .5rem;
+  font-size: .8125rem;
+  font-weight: 500;
+  transition: color .12s ease, background-color .12s ease, border-color .12s ease;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--bs-body-color);
+    background: var(--bs-gray-100);
+    border-color: var(--bs-border-color);
+    outline: 0;
+  }
+}
+
+.marker-help-button .bx-terminal {
+  color: var(--bs-primary);
+}
+
+.marker-delete-button {
+  color: var(--bs-danger);
+  background: rgba(255, 62, 29, .06);
+
+  &:hover,
+  &:focus-visible {
+    color: var(--bs-danger);
+    background: rgba(255, 62, 29, .12);
+    border-color: rgba(255, 62, 29, .2);
+  }
+
+  &:disabled {
+    color: var(--bs-secondary-color);
+    background: transparent;
+    border-color: transparent;
+    opacity: .45;
+  }
 }
 
 .marker-selection-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .4rem .6rem;
   color: var(--bs-secondary-color);
-  font-size: .8125rem;
+  background: var(--bs-gray-100);
+  border-radius: 2rem;
+  font-size: .75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+
+  &.is-active {
+    color: var(--bs-primary);
+    background: rgba(105, 108, 255, .1);
+  }
 }
 
-.marker-shortcuts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .45rem .7rem;
-  padding: .55rem 1rem;
-  color: var(--bs-secondary-color);
-  font-size: .75rem;
+.marker-shortcuts-menu {
+  z-index: 1080;
+  min-inline-size: 19rem;
+  margin-block-start: .45rem !important;
+  padding: .65rem;
+  border-color: rgba(67, 89, 113, .12);
+  border-radius: .65rem;
+  box-shadow: 0 .6rem 1.6rem rgba(67, 89, 113, .16);
 
-  span:not(:last-child)::after {
-    margin-inline-start: .7rem;
-    color: var(--bs-border-color);
-    content: '|';
+  > div:not(.marker-shortcuts-menu__title) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .5rem .4rem;
+    color: var(--bs-body-color);
+    font-size: .75rem;
+
+    + div {
+      border-block-start: 1px solid var(--bs-border-color);
+    }
+  }
+
+  small {
+    color: var(--bs-secondary-color);
+    text-align: right;
   }
 
   kbd {
     padding: .12rem .35rem;
     color: var(--bs-body-color);
-    background: #fff;
+    background: var(--bs-gray-100);
     border: 1px solid var(--bs-border-color);
     box-shadow: 0 1px 0 var(--bs-border-color);
   }
 }
 
+.marker-shortcuts-menu__title {
+  padding: .2rem .4rem .55rem;
+  color: var(--bs-heading-color);
+  font-size: .75rem;
+  font-weight: 600;
+}
+
 .document-canvas-card .doc-viewport {
-  block-size: calc(100vh - 8.5rem);
+  block-size: calc(100vh - 6rem);
   min-block-size: 28rem;
   max-block-size: none;
   background-color: #e9ebf0;
@@ -690,12 +806,8 @@
     margin-inline: 0;
   }
 
-  .marker-shortcuts span {
-    inline-size: 100%;
-
-    &::after {
-      display: none;
-    }
+  .marker-help-button > span {
+    display: none;
   }
 
   .document-canvas-card .doc-viewport {
@@ -722,8 +834,17 @@
     flex-direction: column;
   }
 
-  .marker-toolbar__selection {
+  .marker-toolbar__primary,
+  .marker-toolbar__actions {
     inline-size: 100%;
     justify-content: space-between;
+  }
+
+  .marker-toolbar__divider {
+    display: none;
+  }
+
+  .document-file-chip {
+    max-inline-size: 10rem;
   }
 }

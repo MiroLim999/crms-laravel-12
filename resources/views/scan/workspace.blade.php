@@ -61,38 +61,50 @@
             <div class="col-lg-8">
                 <x-card class="document-canvas-card" bodyClass="p-0">
                     <div class="marker-toolbar">
-                        <div class="marker-toolbar__group">
+                        <div class="marker-toolbar__primary">
                             <span class="document-file-chip" title="Current document">
                                 <i class="icon-base bx bx-file"></i>
                                 <span id="selectedFileName">Document</span>
                             </span>
                             <span class="marker-toolbar__divider" aria-hidden="true"></span>
-                            <span class="marker-toolbar__label">View</span>
-                            <div class="btn-group btn-group-sm" role="group" aria-label="Document zoom controls">
-                            <button type="button" class="btn btn-outline-secondary" id="zoomOutBtn"
-                                    aria-label="Zoom out">−</button>
-                            <button type="button" class="btn btn-outline-secondary marker-zoom-value"
-                                    id="zoomResetBtn" title="Fit document to the workspace">100%</button>
-                            <button type="button" class="btn btn-outline-secondary" id="zoomInBtn"
-                                    aria-label="Zoom in">+</button>
+                            <div class="marker-zoom-controls" role="group" aria-label="Document zoom controls">
+                                <button type="button" class="marker-tool-button" id="zoomOutBtn"
+                                        aria-label="Zoom out">&minus;</button>
+                                <button type="button" class="marker-tool-button marker-zoom-value"
+                                        id="zoomResetBtn" title="Fit document to the workspace">100%</button>
+                                <button type="button" class="marker-tool-button" id="zoomInBtn"
+                                        aria-label="Zoom in">+</button>
                             </div>
                         </div>
 
-                        <div class="marker-toolbar__selection">
-                            <span class="marker-selection-summary" id="selectionSummary">No fields selected</span>
-                            <button type="button" class="btn btn-sm btn-outline-danger"
+                        <div class="marker-toolbar__actions">
+                            <div class="dropdown">
+                                <button type="button" class="marker-help-button" data-bs-toggle="dropdown"
+                                        aria-expanded="false" aria-label="Show editor shortcuts">
+                                    <i class="icon-base bx bx-terminal icon-sm"></i>
+                                    <span>Shortcuts</span>
+                                    <i class="icon-base bx bx-chevron-down"></i>
+                                </button>
+                                <div class="dropdown-menu dropdown-menu-end marker-shortcuts-menu">
+                                    <div class="marker-shortcuts-menu__title">Editor shortcuts</div>
+                                    <div><span><kbd>Ctrl</kbd> + scroll</span><small>Zoom document</small></div>
+                                    <div><span><kbd>Shift</kbd> + click</span><small>Select multiple</small></div>
+                                    <div><span>Drag selection</span><small>Move selected fields</small></div>
+                                    <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Delete selected</small></div>
+                                    <div><span><kbd>Ctrl</kbd> + <kbd>Z</kbd></span><small>Undo last change</small></div>
+                                </div>
+                            </div>
+
+                            <span class="marker-selection-summary" id="selectionSummary">
+                                <i class="icon-base bx bx-check-circle"></i>
+                                <span>0 selected</span>
+                            </span>
+                            <button type="button" class="marker-delete-button"
                                     id="deleteSelectedBtn" disabled>
-                                <i class="icon-base bx bx-trash icon-sm me-1"></i> Delete
+                                <i class="icon-base bx bx-trash icon-sm"></i>
+                                <span>Delete</span>
                             </button>
                         </div>
-                    </div>
-
-                    <div class="marker-shortcuts">
-                        <span><kbd>Ctrl</kbd> + scroll to zoom</span>
-                        <span><kbd>Shift</kbd> + click to select multiple</span>
-                        <span>Drag a selected box to move the group</span>
-                        <span><kbd>Del</kbd> or <kbd>Backspace</kbd> to delete</span>
-                        <span><kbd>Ctrl</kbd> + <kbd>Z</kbd> to undo</span>
                     </div>
 
                     <div class="doc-viewport" id="docViewport">
@@ -122,7 +134,7 @@
                     </div>
 
                     <p class="document-tip mt-3 mb-0">
-                        <i class="icon-base bx bx-bulb"></i>
+                        <i class="icon-base bx bx-info-circle"></i>
                         <span>Position each box tightly around the handwriting. Loose boxes pick up
                         neighbouring text and read badly.</span>
                     </p>
@@ -157,7 +169,7 @@
                         <i class="icon-base bx bx-scan icon-sm me-1"></i> Scan with OCR
                     </button>
                     <button class="btn btn-outline-secondary" type="button" id="backToUpload">
-                        <i class="icon-base bx bx-arrow-back icon-sm me-1"></i> Choose another file
+                        <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Choose another file
                     </button>
                 </div>
                 </div>
@@ -219,7 +231,7 @@
                             <i class="icon-base bx bx-check-shield icon-sm me-1"></i> Submit &amp; lock record
                         </button>
                         <button class="btn btn-outline-secondary" type="button" id="backToMark">
-                            <i class="icon-base bx bx-arrow-back icon-sm me-1"></i> Back to marking
+                            <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Back to marking
                         </button>
                     </div>
                     </div>
@@ -402,7 +414,7 @@
         if (!boxes.length) {
             const empty = document.createElement('li');
             empty.className = 'marker-field-empty';
-            empty.innerHTML = '<i class="icon-base bx bx-selection"></i><span>No fields yet. Add one below.</span>';
+            empty.innerHTML = '<i class="icon-base bx bx-list-check"></i><span>No fields yet. Add one below.</span>';
             list.appendChild(empty);
         }
 
@@ -440,9 +452,9 @@
         });
 
         const count = indexes.length;
-        el('selectionSummary').textContent = count === 0
-            ? 'No fields selected'
-            : `${count} field${count === 1 ? '' : 's'} selected`;
+        const summary = el('selectionSummary');
+        summary.querySelector('span').textContent = `${count} selected`;
+        summary.classList.toggle('is-active', count > 0);
         el('deleteSelectedBtn').disabled = count === 0;
     }
 
