@@ -100,7 +100,10 @@
 <script type="module">
     import { FieldMarker } from '{{ Vite::asset('resources/js/field-marker.js') }}';
 
-    const initial = @json($fields);
+    // A validation redirect should put the exact working layout back on screen.
+    // Without this, an unrelated validation error silently resets the boxes to
+    // the template/default layout and discards the user's positioning work.
+    const initial = @json(old('fields', $fields));
 
     const canvas = document.getElementById('pageCanvas');
     const overlay = document.getElementById('fieldOverlay');
@@ -146,12 +149,28 @@
         });
     }
 
-    document.getElementById('addFieldBtn').addEventListener('click', () => {
-        const input = document.getElementById('newFieldName');
+    const newFieldInput = document.getElementById('newFieldName');
+
+    function addPendingField() {
+        const input = newFieldInput;
         const name = input.value.trim();
-        if (!name) return;
+        if (!name) return false;
+
         marker.addBox(name);
         input.value = '';
+        return true;
+    }
+
+    document.getElementById('addFieldBtn').addEventListener('click', addPendingField);
+
+    // Pressing Enter in the new-field box should add the field, not submit an
+    // incomplete template. If the user clicks Create/Save while text is still in
+    // the box, the submit handler below adds it automatically as well.
+    newFieldInput.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+
+        event.preventDefault();
+        addPendingField();
     });
 
     document.getElementById('sampleScan').addEventListener('change', async (event) => {
@@ -161,6 +180,8 @@
 
     // Serialise the boxes into hidden inputs at submit time.
     document.getElementById('templateForm').addEventListener('submit', () => {
+        addPendingField();
+
         const container = document.getElementById('fieldInputs');
         container.innerHTML = '';
 

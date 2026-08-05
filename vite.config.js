@@ -57,6 +57,12 @@ export default defineConfig({
         chunkSizeWarningLimit: 600,
 
         rollupOptions: {
+            // field-marker.js is both a Vite entry and a module imported by the
+            // inline template/scanning workspaces. Rollup normally removes exports
+            // from application entries because it assumes nobody imports the built
+            // file. Preserve its public exports so `import { FieldMarker } from
+            // Vite::asset(...)` continues to work in production builds.
+            preserveEntrySignatures: 'exports-only',
             output: {
                 // Vendor code changes less often than app code, so split it into
                 // its own chunk to get longer cache hits in production.
