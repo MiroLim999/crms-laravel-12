@@ -1,0 +1,31 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Enums\DocumentType;
+use App\Models\User;
+use Database\Seeders\DocumentTemplateSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class DocumentUploadWorkflowTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_staff_and_super_admin_receive_the_interactive_marker_workspace(): void
+    {
+        $this->seed(DocumentTemplateSeeder::class);
+
+        foreach ([User::factory()->staff()->create(), User::factory()->superAdmin()->create()] as $user) {
+            $this->actingAs($user)
+                ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
+                ->assertOk()
+                ->assertSee('id="docViewport"', escape: false)
+                ->assertSee('id="zoomResetBtn"', escape: false)
+                ->assertSee('id="deleteSelectedBtn"', escape: false)
+                ->assertSee('Hold Shift while clicking')
+                ->assertSee('Scan with OCR')
+                ->assertSee('Validate extracted fields');
+        }
+    }
+}

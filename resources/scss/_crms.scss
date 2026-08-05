@@ -111,6 +111,24 @@
   inset: 0;
 }
 
+.doc-viewport {
+  max-block-size: 70vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--bs-gray-100);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+
+  .doc-stage {
+    display: block;
+    max-inline-size: none;
+  }
+
+  canvas {
+    max-inline-size: none;
+  }
+}
+
 .field-box {
   position: absolute;
   border: 2px solid var(--bs-primary);
@@ -122,6 +140,12 @@
   &.is-active {
     border-style: dashed;
     background-color: rgba(105, 108, 255, 0.22);
+  }
+
+  &.is-selected {
+    border-color: var(--bs-info);
+    background-color: rgba(3, 195, 236, 0.18);
+    box-shadow: 0 0 0 2px rgba(3, 195, 236, 0.3);
   }
 }
 
@@ -157,4 +181,18 @@
 .field-overlay--readonly .field-box {
   cursor: default;
   border-style: dotted;
+}
+
+.field-list-item {
+  cursor: pointer;
+
+  &.is-selected {
+    background-color: rgba(3, 195, 236, 0.1);
+    box-shadow: inset 0 0 0 1px rgba(3, 195, 236, 0.3);
+  }
+}
+
+.marker-zoom-value {
+  min-inline-size: 4rem;
+  font-variant-numeric: tabular-nums;
 }

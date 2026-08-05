@@ -23,10 +23,35 @@
         <div class="row g-4">
             <div class="col-lg-8">
                 <x-card title="Mark the fields"
-                        subtitle="Drag each box onto the matching handwriting. Drag the corner to resize.">
-                    <div class="doc-stage" id="docStage">
-                        <canvas id="pageCanvas"></canvas>
-                        <div class="field-overlay" id="fieldOverlay"></div>
+                        subtitle="Drag boxes to align them. Hold Shift while clicking to select several boxes and move them together.">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3 marker-toolbar">
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Document zoom controls">
+                            <button type="button" class="btn btn-outline-secondary" id="zoomOutBtn"
+                                    aria-label="Zoom out">−</button>
+                            <button type="button" class="btn btn-outline-secondary marker-zoom-value"
+                                    id="zoomResetBtn" title="Fit document to the workspace">100%</button>
+                            <button type="button" class="btn btn-outline-secondary" id="zoomInBtn"
+                                    aria-label="Zoom in">+</button>
+                        </div>
+
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="small text-muted" id="selectionSummary">No fields selected</span>
+                            <button type="button" class="btn btn-sm btn-outline-danger"
+                                    id="deleteSelectedBtn" disabled>
+                                Delete selected
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="small text-muted mb-2">
+                        Hold <kbd>Ctrl</kbd> and scroll over the document to zoom. Drag any selected box to move the whole selection.
+                    </div>
+
+                    <div class="doc-viewport" id="docViewport">
+                        <div class="doc-stage" id="docStage">
+                            <canvas id="pageCanvas"></canvas>
+                            <div class="field-overlay" id="fieldOverlay"></div>
+                        </div>
                     </div>
                 </x-card>
             </div>
@@ -72,7 +97,7 @@
 
                 <div class="d-grid gap-2">
                     <button class="btn btn-primary" type="button" id="scanNowBtn">
-                        <i class="icon-base bx bx-scan icon-sm me-1"></i> Read handwriting
+                        <i class="icon-base bx bx-scan icon-sm me-1"></i> Scan with OCR
                     </button>
                     <button class="btn btn-outline-secondary" type="button" id="backToUpload">
                         Choose another file
@@ -93,7 +118,7 @@
 
             <div class="row g-4">
                 <div class="col-lg-8">
-                    <x-card title="Review &amp; verify"
+                    <x-card title="Validate extracted fields"
                             subtitle="Compare each crop with the reading and correct it. The corrected value is what gets stored.">
                         <div id="verifyRows"></div>
                     </x-card>
@@ -182,7 +207,10 @@
     const marker = new FieldMarker({
         canvas: el('pageCanvas'),
         overlay: el('fieldOverlay'),
+        viewport: el('docViewport'),
         onChange: renderFieldList,
+        onSelectionChange: updateSelectionUI,
+        onZoomChange: updateZoomUI,
     });
 
     function showStep(name) {
@@ -195,10 +223,26 @@
         const file = event.target.files?.[0];
         if (!file) return;
 
-        scanFile = file;
-        await marker.load(file);
-        marker.setBoxes(config.boxes.map((b) => ({ name: b.name, x: +b.x, y: +b.y, w: +b.w, h: +b.h })));
-        showStep('mark');
+        try {
+            scanFile = file;
+            await marker.load(file);
+            showStep('mark');
+            marker.setBoxes(config.boxes.map((b) => ({
+                name: b.name,
+                x: +b.x,
+                y: +b.y,
+                w: +b.w,
+                h: +b.h,
+            })));
+
+            // The marking section was hidden while the file loaded, so fit only
+            // after it becomes measurable in the layout.
+            window.requestAnimationFrame(() => marker.resetZoom());
+        } catch (error) {
+            scanFile = null;
+            event.target.value = '';
+            alert(error.message || 'That document could not be opened.');
+        }
     });
 
     // ---------------------------------------------------------------- step 2
@@ -208,7 +252,8 @@
 
         boxes.forEach((box, index) => {
             const li = document.createElement('li');
-            li.className = 'd-flex align-items-center gap-2 py-1';
+            li.className = 'field-list-item d-flex align-items-center gap-2 py-1 px-2 rounded';
+            li.dataset.fieldIndex = String(index);
             li.innerHTML = `
                 <span class="badge bg-label-primary">${index + 1}</span>
                 <span class="flex-grow-1 small"></span>
@@ -216,10 +261,41 @@
                     <i class="icon-base bx bx-x icon-sm"></i>
                 </button>`;
             li.querySelector('span.flex-grow-1').textContent = box.name;
-            li.querySelector('button').addEventListener('click', () => marker.removeBox(index));
+            li.addEventListener('click', (event) => marker.selectBox(index, {
+                additive: event.shiftKey,
+                toggle: event.shiftKey,
+            }));
+            li.querySelector('button').addEventListener('click', (event) => {
+                event.stopPropagation();
+                marker.removeBox(index);
+            });
             list.appendChild(li);
         });
+
+        updateSelectionUI(marker.selectedIndexes());
     }
+
+    function updateSelectionUI(indexes) {
+        const selected = new Set(indexes);
+        document.querySelectorAll('#fieldList .field-list-item').forEach((item) => {
+            item.classList.toggle('is-selected', selected.has(Number(item.dataset.fieldIndex)));
+        });
+
+        const count = indexes.length;
+        el('selectionSummary').textContent = count === 0
+            ? 'No fields selected'
+            : `${count} field${count === 1 ? '' : 's'} selected`;
+        el('deleteSelectedBtn').disabled = count === 0;
+    }
+
+    function updateZoomUI(zoom) {
+        el('zoomResetBtn').textContent = `${Math.round(zoom * 100)}%`;
+    }
+
+    el('zoomOutBtn').addEventListener('click', () => marker.zoomBy(-0.1));
+    el('zoomInBtn').addEventListener('click', () => marker.zoomBy(0.1));
+    el('zoomResetBtn').addEventListener('click', () => marker.resetZoom());
+    el('deleteSelectedBtn').addEventListener('click', () => marker.removeSelected());
 
     el('addFieldBtn').addEventListener('click', () => {
         const input = el('newFieldName');
