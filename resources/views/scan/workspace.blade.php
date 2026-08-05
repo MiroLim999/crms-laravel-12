@@ -281,11 +281,11 @@
                         Added or copied fields will be removed, deleted fields will return, and every
                         marker will move back to its original position and size.
                     </p>
-
+{{-- 
                     <div class="reset-confirm-modal__notice">
                         <i class="icon-base bx bx-history" aria-hidden="true"></i>
                         <span>You can press <kbd>Ctrl</kbd> + <kbd>Z</kbd> afterward to undo this reset.</span>
-                    </div>
+                    </div> --}}
 
                     <div class="reset-confirm-modal__actions">
                         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
