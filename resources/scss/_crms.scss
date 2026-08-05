@@ -525,6 +525,7 @@
 }
 
 .marker-help-button,
+.marker-reset-button,
 .marker-delete-button {
   display: inline-flex;
   align-items: center;
@@ -549,8 +550,21 @@
   }
 }
 
-.marker-help-button .bx-terminal {
+.marker-help-button .bx-terminal,
+.marker-reset-button .bx-refresh {
   color: var(--bs-primary);
+}
+
+.marker-reset-button:disabled {
+  color: var(--bs-secondary-color);
+  background: transparent;
+  border-color: transparent;
+  cursor: not-allowed;
+  opacity: .45;
+
+  .bx-refresh {
+    color: currentColor;
+  }
 }
 
 .marker-delete-button {

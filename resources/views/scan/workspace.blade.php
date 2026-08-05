@@ -98,6 +98,12 @@
                                 </div>
                             </div>
 
+                            <button type="button" class="marker-reset-button" id="resetFieldsBtn"
+                                    title="Restore the original template fields and document view" disabled>
+                                <i class="icon-base bx bx-refresh icon-sm" aria-hidden="true"></i>
+                                <span>Reset</span>
+                            </button>
+
                             <span class="marker-selection-summary" id="selectionSummary">
                                 <i class="icon-base bx bx-check-circle"></i>
                                 <span>0 selected</span>
@@ -310,6 +316,23 @@
     });
 
     const cloneBoxes = (boxes) => boxes.map(({ name, x, y, w, h }) => ({ name, x, y, w, h }));
+    const templateBoxes = config.boxes.map((box) => ({
+        name: box.name,
+        x: +box.x,
+        y: +box.y,
+        w: +box.w,
+        h: +box.h,
+    }));
+
+    function fieldsMatchTemplate() {
+        return JSON.stringify(marker.toJSON()) === JSON.stringify(templateBoxes);
+    }
+
+    function updateResetUI() {
+        const layoutChanged = !fieldsMatchTemplate();
+        const zoomChanged = Math.abs(marker.zoom - 1) > 0.001;
+        el('resetFieldsBtn').disabled = !layoutChanged && !zoomChanged;
+    }
 
     function handleMarkerChange(boxes) {
         const next = cloneBoxes(boxes);
@@ -322,6 +345,7 @@
 
         currentFieldSnapshot = next;
         renderFieldList(boxes);
+        updateResetUI();
     }
 
     function resetFieldHistory() {
@@ -434,13 +458,7 @@
             el('selectedFileName').textContent = file.name;
             showStep('mark');
             resetFieldHistory();
-            marker.setBoxes(config.boxes.map((b) => ({
-                name: b.name,
-                x: +b.x,
-                y: +b.y,
-                w: +b.w,
-                h: +b.h,
-            })));
+            marker.setBoxes(cloneBoxes(templateBoxes));
 
             // The marking section was hidden while the file loaded, so fit only
             // after it becomes measurable in the layout.
@@ -539,11 +557,26 @@
 
     function updateZoomUI(zoom) {
         el('zoomResetBtn').textContent = `${Math.round(zoom * 100)}%`;
+        updateResetUI();
     }
 
     el('zoomOutBtn').addEventListener('click', () => marker.zoomBy(-0.1));
     el('zoomInBtn').addEventListener('click', () => marker.zoomBy(0.1));
     el('zoomResetBtn').addEventListener('click', () => marker.resetZoom());
+    el('resetFieldsBtn').addEventListener('click', () => {
+        const layoutChanged = !fieldsMatchTemplate();
+        const zoomChanged = Math.abs(marker.zoom - 1) > 0.001;
+        if (!layoutChanged && !zoomChanged) return;
+
+        if (layoutChanged && !window.confirm(
+            'Reset all field changes? Added and copied fields will be removed, deleted fields will return, and positions will be restored.',
+        )) return;
+
+        marker.setBoxes(cloneBoxes(templateBoxes));
+        marker.resetZoom();
+        el('docViewport').scrollTo({ top: 0, left: 0 });
+        clearOcrError();
+    });
     el('deleteSelectedBtn').addEventListener('click', () => marker.removeSelected());
     el('deleteFieldsBtn').addEventListener('click', () => marker.removeSelected());
     el('selectAllFields').addEventListener('change', (event) => {
