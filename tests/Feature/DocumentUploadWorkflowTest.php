@@ -25,6 +25,8 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('id="docViewport"', escape: false)
                 ->assertSee('id="zoomResetBtn"', escape: false)
                 ->assertSee('id="resetFieldsBtn"', escape: false)
+                ->assertSee('id="resetFieldsModal"', escape: false)
+                ->assertSee('id="confirmResetFieldsBtn"', escape: false)
                 ->assertSee('id="deleteSelectedBtn"', escape: false)
                 ->assertSee('id="selectAllFields"', escape: false)
                 ->assertSee('id="deleteFieldsBtn"', escape: false)

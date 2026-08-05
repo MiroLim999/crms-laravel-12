@@ -265,6 +265,42 @@
         </form>
     </section>
 
+    {{-- Confirm restoring the original template layout --}}
+    <div class="modal fade" id="resetFieldsModal" tabindex="-1"
+         aria-labelledby="resetFieldsModalTitle" aria-describedby="resetFieldsModalDescription"
+         aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered reset-confirm-dialog">
+            <div class="modal-content reset-confirm-modal">
+                <div class="modal-body p-4">
+                    <div class="reset-confirm-modal__icon" aria-hidden="true">
+                        <i class="icon-base bx bx-refresh"></i>
+                    </div>
+
+                    <h5 class="mb-2" id="resetFieldsModalTitle">Restore template fields?</h5>
+                    <p class="text-muted mb-0" id="resetFieldsModalDescription">
+                        Added or copied fields will be removed, deleted fields will return, and every
+                        marker will move back to its original position and size.
+                    </p>
+
+                    <div class="reset-confirm-modal__notice">
+                        <i class="icon-base bx bx-history" aria-hidden="true"></i>
+                        <span>You can press <kbd>Ctrl</kbd> + <kbd>Z</kbd> afterward to undo this reset.</span>
+                    </div>
+
+                    <div class="reset-confirm-modal__actions">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                            Keep changes
+                        </button>
+                        <button type="button" class="btn btn-primary" id="confirmResetFieldsBtn">
+                            <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
+                            Reset fields
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- OCR progress while the model runs --}}
     <div class="modal fade" id="scanningModal" tabindex="-1" data-bs-backdrop="static"
          data-bs-keyboard="false" aria-hidden="true">
@@ -575,19 +611,29 @@
     el('zoomOutBtn').addEventListener('click', () => marker.zoomBy(-0.1));
     el('zoomInBtn').addEventListener('click', () => marker.zoomBy(0.1));
     el('zoomResetBtn').addEventListener('click', () => marker.resetZoom());
+
+    function restoreTemplateFields() {
+        marker.setBoxes(cloneBoxes(templateBoxes));
+        marker.resetZoom();
+        el('docViewport').scrollTo({ top: 0, left: 0 });
+        clearOcrError();
+    }
+
     el('resetFieldsBtn').addEventListener('click', () => {
         const layoutChanged = !fieldsMatchTemplate();
         const zoomChanged = Math.abs(marker.zoom - 1) > 0.001;
         if (!layoutChanged && !zoomChanged) return;
 
-        if (layoutChanged && !window.confirm(
-            'Reset all field changes? Added and copied fields will be removed, deleted fields will return, and positions will be restored.',
-        )) return;
+        if (!layoutChanged) {
+            restoreTemplateFields();
+            return;
+        }
 
-        marker.setBoxes(cloneBoxes(templateBoxes));
-        marker.resetZoom();
-        el('docViewport').scrollTo({ top: 0, left: 0 });
-        clearOcrError();
+        window.bootstrap.Modal.getOrCreateInstance(el('resetFieldsModal')).show();
+    });
+    el('confirmResetFieldsBtn').addEventListener('click', () => {
+        window.bootstrap.Modal.getInstance(el('resetFieldsModal'))?.hide();
+        restoreTemplateFields();
     });
     el('deleteSelectedBtn').addEventListener('click', () => marker.removeSelected());
     el('deleteFieldsBtn').addEventListener('click', () => marker.removeSelected());
