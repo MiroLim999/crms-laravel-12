@@ -111,8 +111,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // If current layout is vertical and current window screen is > small
 
-  // Auto update menu collapsed/expanded based on the themeConfig
-      window.Helpers.setCollapsed(false, false);
+  // Restore the user's desktop sidebar choice instead of expanding it again on
+  // every page load or tab revisit. Small screens stay off canvas by default.
+  const sidebarCollapsed = window.localStorage.getItem('crms.sidebarCollapsed') === 'true';
+  window.Helpers.setCollapsed(sidebarCollapsed, false);
 })();
 // Utils
 function isMacOS() {
