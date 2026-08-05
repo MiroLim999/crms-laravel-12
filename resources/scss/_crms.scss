@@ -435,7 +435,7 @@
   overflow: hidden;
 
   > .card-body {
-    padding-block-start: 0;
+    padding: 0;
   }
 }
 
@@ -463,10 +463,16 @@
   align-items: center;
   justify-content: space-between;
   gap: .75rem;
-  margin: 0 -1.5rem;
-  padding: .85rem 1.5rem;
+  margin: 0;
+  padding: .7rem 1rem;
   background: var(--bs-gray-100);
   border-block: 1px solid var(--bs-border-color);
+}
+
+.marker-toolbar__divider {
+  inline-size: 1px;
+  block-size: 1.75rem;
+  background: var(--bs-border-color);
 }
 
 .marker-toolbar__group,
@@ -493,7 +499,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: .45rem .7rem;
-  padding-block: .8rem;
+  padding: .55rem 1rem;
   color: var(--bs-secondary-color);
   font-size: .75rem;
 
@@ -513,7 +519,9 @@
 }
 
 .document-canvas-card .doc-viewport {
-  min-block-size: 32rem;
+  block-size: calc(100vh - 14rem);
+  min-block-size: 28rem;
+  max-block-size: none;
   background-color: #e9ebf0;
   background-image:
     linear-gradient(45deg, rgba(67, 89, 113, .035) 25%, transparent 25%),
@@ -522,13 +530,22 @@
     linear-gradient(-45deg, transparent 75%, rgba(67, 89, 113, .035) 75%);
   background-position: 0 0, 0 .5rem, .5rem -.5rem, -.5rem 0;
   background-size: 1rem 1rem;
-  border-radius: .65rem;
+  border-width: 1px 0 0;
+  border-radius: 0 0 .65rem .65rem;
   box-shadow: inset 0 1px .25rem rgba(67, 89, 113, .08);
 }
 
 .document-side-panel {
   position: sticky;
   top: 1.25rem;
+}
+
+#step-mark .document-side-panel {
+  max-block-size: calc(100vh - 8rem);
+  padding-inline-end: .2rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .document-fields-card .card-body {
@@ -669,7 +686,7 @@
   }
 
   .marker-toolbar {
-    margin-inline: -1.5rem;
+    margin-inline: 0;
   }
 
   .marker-shortcuts span {
@@ -681,6 +698,7 @@
   }
 
   .document-canvas-card .doc-viewport {
+    block-size: calc(100vh - 15rem);
     min-block-size: 22rem;
   }
 

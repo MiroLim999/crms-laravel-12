@@ -3,10 +3,12 @@
 @section('title', 'Scan ' . $docType->shortLabel())
 
 @section('content')
-    <x-page-header :title="'Scan: ' . $docType->label()"
-                   :subtitle="'Template: ' . $template->name">
-        <a href="{{ route('documents.create') }}" class="btn btn-outline-secondary">Cancel</a>
-    </x-page-header>
+    <div id="documentPageHeader">
+        <x-page-header :title="'Scan: ' . $docType->label()"
+                       :subtitle="'Template: ' . $template->name">
+            <a href="{{ route('documents.create') }}" class="btn btn-outline-secondary">Cancel</a>
+        </x-page-header>
+    </div>
 
     <nav class="document-flow-steps" id="documentFlowSteps" aria-label="Document processing progress">
         <div class="document-flow-step is-active" data-flow-step="upload" aria-current="step">
@@ -57,17 +59,14 @@
     <section id="step-mark" class="document-step-panel d-none">
         <div class="row g-4">
             <div class="col-lg-8">
-                <x-card class="document-canvas-card" title="Align extraction fields"
-                        subtitle="Drag boxes to align them. Hold Shift while clicking to select several boxes and move them together.">
-                    <x-slot:actions>
-                        <span class="document-file-chip" title="Current document">
-                            <i class="icon-base bx bx-file"></i>
-                            <span id="selectedFileName">Document</span>
-                        </span>
-                    </x-slot:actions>
-
+                <x-card class="document-canvas-card" bodyClass="p-0">
                     <div class="marker-toolbar">
                         <div class="marker-toolbar__group">
+                            <span class="document-file-chip" title="Current document">
+                                <i class="icon-base bx bx-file"></i>
+                                <span id="selectedFileName">Document</span>
+                            </span>
+                            <span class="marker-toolbar__divider" aria-hidden="true"></span>
                             <span class="marker-toolbar__label">View</span>
                             <div class="btn-group btn-group-sm" role="group" aria-label="Document zoom controls">
                             <button type="button" class="btn btn-outline-secondary" id="zoomOutBtn"
@@ -274,6 +273,10 @@
 
     function showStep(name) {
         Object.entries(steps).forEach(([key, node]) => node.classList.toggle('d-none', key !== name));
+
+        const marking = name === 'mark';
+        el('documentPageHeader').classList.toggle('d-none', marking);
+        el('documentFlowSteps').classList.toggle('d-none', marking);
 
         const order = ['upload', 'mark', 'verify'];
         const activeIndex = order.indexOf(name);

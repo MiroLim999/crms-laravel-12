@@ -25,7 +25,7 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('id="docViewport"', escape: false)
                 ->assertSee('id="zoomResetBtn"', escape: false)
                 ->assertSee('id="deleteSelectedBtn"', escape: false)
-                ->assertSee('Hold Shift while clicking')
+                ->assertSee('<kbd>Shift</kbd> + click', escape: false)
                 ->assertSee('Scan with OCR')
                 ->assertSee('Validate extracted fields');
         }
