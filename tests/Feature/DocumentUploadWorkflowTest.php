@@ -20,6 +20,8 @@ class DocumentUploadWorkflowTest extends TestCase
             $this->actingAs($user)
                 ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
                 ->assertOk()
+                ->assertSee('id="documentFlowSteps"', escape: false)
+                ->assertSee('id="documentDropzone"', escape: false)
                 ->assertSee('id="docViewport"', escape: false)
                 ->assertSee('id="zoomResetBtn"', escape: false)
                 ->assertSee('id="deleteSelectedBtn"', escape: false)

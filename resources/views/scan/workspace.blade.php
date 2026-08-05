@@ -8,43 +8,90 @@
         <a href="{{ route('documents.create') }}" class="btn btn-outline-secondary">Cancel</a>
     </x-page-header>
 
+    <nav class="document-flow-steps" id="documentFlowSteps" aria-label="Document processing progress">
+        <div class="document-flow-step is-active" data-flow-step="upload" aria-current="step">
+            <span class="document-flow-step__number">1</span>
+            <span class="document-flow-step__copy"><strong>Upload</strong><small>Choose a scan</small></span>
+        </div>
+        <div class="document-flow-step" data-flow-step="mark">
+            <span class="document-flow-step__number">2</span>
+            <span class="document-flow-step__copy"><strong>Align fields</strong><small>Check the markers</small></span>
+        </div>
+        <div class="document-flow-step" data-flow-step="verify">
+            <span class="document-flow-step__number">3</span>
+            <span class="document-flow-step__copy"><strong>Validate</strong><small>Review OCR results</small></span>
+        </div>
+    </nav>
+
     {{-- Step 1: upload --}}
-    <section id="step-upload">
-        <x-card>
-            <label for="scanFile" class="form-label">Scanned certificate</label>
-            <input type="file" id="scanFile" class="form-control"
-                   accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp,image/tiff">
-            <div class="form-text">PDF or image, up to 20 MB. Nothing is uploaded until you submit.</div>
-        </x-card>
+    <section id="step-upload" class="document-step-panel">
+        <div class="document-upload-wrap">
+            <x-card class="document-upload-card" bodyClass="p-0">
+                <label for="scanFile" class="document-dropzone" id="documentDropzone" tabindex="0">
+                    <span class="document-dropzone__icon" aria-hidden="true">
+                        <i class="icon-base bx bx-cloud-upload"></i>
+                    </span>
+                    <span class="document-dropzone__title">Drop a scanned document here</span>
+                    <span class="document-dropzone__text">or choose a file from your computer</span>
+                    <span class="btn btn-primary document-dropzone__button">Choose document</span>
+                    <span class="document-dropzone__formats">
+                        <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>TIFF</span>
+                    </span>
+                </label>
+                <input type="file" id="scanFile" class="visually-hidden"
+                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp,image/tiff">
+
+                <div class="document-upload-note">
+                    <span><i class="icon-base bx bx-file me-1"></i> Maximum file size: 20 MB</span>
+                    <span><i class="icon-base bx bx-lock-alt me-1"></i> Stored only after validation</span>
+                </div>
+            </x-card>
+
+            <p class="document-upload-help">
+                For the best handwriting results, use a straight, well-lit scan with the full certificate visible.
+            </p>
+        </div>
     </section>
 
     {{-- Step 2: mark the fields --}}
-    <section id="step-mark" class="d-none">
+    <section id="step-mark" class="document-step-panel d-none">
         <div class="row g-4">
             <div class="col-lg-8">
-                <x-card title="Mark the fields"
+                <x-card class="document-canvas-card" title="Align extraction fields"
                         subtitle="Drag boxes to align them. Hold Shift while clicking to select several boxes and move them together.">
-                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3 marker-toolbar">
-                        <div class="btn-group btn-group-sm" role="group" aria-label="Document zoom controls">
+                    <x-slot:actions>
+                        <span class="document-file-chip" title="Current document">
+                            <i class="icon-base bx bx-file"></i>
+                            <span id="selectedFileName">Document</span>
+                        </span>
+                    </x-slot:actions>
+
+                    <div class="marker-toolbar">
+                        <div class="marker-toolbar__group">
+                            <span class="marker-toolbar__label">View</span>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="Document zoom controls">
                             <button type="button" class="btn btn-outline-secondary" id="zoomOutBtn"
                                     aria-label="Zoom out">−</button>
                             <button type="button" class="btn btn-outline-secondary marker-zoom-value"
                                     id="zoomResetBtn" title="Fit document to the workspace">100%</button>
                             <button type="button" class="btn btn-outline-secondary" id="zoomInBtn"
                                     aria-label="Zoom in">+</button>
+                            </div>
                         </div>
 
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="small text-muted" id="selectionSummary">No fields selected</span>
+                        <div class="marker-toolbar__selection">
+                            <span class="marker-selection-summary" id="selectionSummary">No fields selected</span>
                             <button type="button" class="btn btn-sm btn-outline-danger"
                                     id="deleteSelectedBtn" disabled>
-                                Delete selected
+                                <i class="icon-base bx bx-trash icon-sm me-1"></i> Delete
                             </button>
                         </div>
                     </div>
 
-                    <div class="small text-muted mb-2">
-                        Hold <kbd>Ctrl</kbd> and scroll over the document to zoom. Drag any selected box to move the whole selection.
+                    <div class="marker-shortcuts">
+                        <span><kbd>Ctrl</kbd> + scroll to zoom</span>
+                        <span><kbd>Shift</kbd> + click to select multiple</span>
+                        <span>Drag a selected box to move the group</span>
                     </div>
 
                     <div class="doc-viewport" id="docViewport">
@@ -57,17 +104,26 @@
             </div>
 
             <div class="col-lg-4">
-                <x-card title="Fields" class="mb-4">
-                    <ul class="list-unstyled mb-3" id="fieldList"></ul>
+                <div class="document-side-panel">
+                <x-card title="Fields" class="mb-4 document-fields-card">
+                    <x-slot:actions>
+                        <span class="badge bg-label-primary" id="fieldCount">0 fields</span>
+                    </x-slot:actions>
 
-                    <div class="input-group input-group-sm">
-                        <input type="text" id="newFieldName" class="form-control" placeholder="Extra field">
-                        <button class="btn btn-outline-secondary" type="button" id="addFieldBtn">Add</button>
+                    <ul class="list-unstyled marker-field-list mb-3" id="fieldList"></ul>
+
+                    <label class="form-label small fw-medium" for="newFieldName">Add another field</label>
+                    <div class="input-group">
+                        <input type="text" id="newFieldName" class="form-control" placeholder="Field name">
+                        <button class="btn btn-outline-primary" type="button" id="addFieldBtn">
+                            <i class="icon-base bx bx-plus me-1"></i>Add
+                        </button>
                     </div>
 
-                    <p class="small text-muted mt-3 mb-0">
-                        Position each box tightly around the handwriting. Loose boxes pick up
-                        neighbouring text and read badly.
+                    <p class="document-tip mt-3 mb-0">
+                        <i class="icon-base bx bx-bulb"></i>
+                        <span>Position each box tightly around the handwriting. Loose boxes pick up
+                        neighbouring text and read badly.</span>
                     </p>
                 </x-card>
 
@@ -96,19 +152,20 @@
                 @endif
 
                 <div class="d-grid gap-2">
-                    <button class="btn btn-primary" type="button" id="scanNowBtn">
+                    <button class="btn btn-primary btn-lg" type="button" id="scanNowBtn">
                         <i class="icon-base bx bx-scan icon-sm me-1"></i> Scan with OCR
                     </button>
                     <button class="btn btn-outline-secondary" type="button" id="backToUpload">
-                        Choose another file
+                        <i class="icon-base bx bx-arrow-back icon-sm me-1"></i> Choose another file
                     </button>
+                </div>
                 </div>
             </div>
         </div>
     </section>
 
     {{-- Step 3: verify and submit --}}
-    <section id="step-verify" class="d-none">
+    <section id="step-verify" class="document-step-panel d-none">
         <form method="POST" action="{{ route('documents.store') }}" id="submitForm"
               enctype="multipart/form-data">
             @csrf
@@ -118,14 +175,15 @@
 
             <div class="row g-4">
                 <div class="col-lg-8">
-                    <x-card title="Validate extracted fields"
+                    <x-card class="document-validation-card" title="Validate extracted fields"
                             subtitle="Compare each crop with the reading and correct it. The corrected value is what gets stored.">
                         <div id="verifyRows"></div>
                     </x-card>
                 </div>
 
                 <div class="col-lg-4">
-                    <x-card title="Summary" class="mb-4">
+                    <div class="document-side-panel">
+                    <x-card title="Scan summary" class="mb-4 document-summary-card">
                         <dl class="row mb-0">
                             <dt class="col-7 fw-normal text-muted">Model</dt>
                             <dd class="col-5"><code id="summaryModel">—</code></dd>
@@ -150,18 +208,19 @@
                                class="form-control" placeholder="As written on the certificate">
                     </x-card>
 
-                    <div class="alert alert-warning small">
-                        Submitting locks this record. Later corrections need a change request
-                        approved by an Admin.
+                    <div class="document-lock-notice">
+                        <i class="icon-base bx bx-lock-alt"></i>
+                        <span>Submitting locks this record. Later corrections need a change request approved by an Admin.</span>
                     </div>
 
-                    <div class="d-grid gap-2">
-                        <button class="btn btn-primary" type="submit" id="submitBtn">
-                            Submit &amp; lock record
+                    <div class="d-grid gap-2 mt-4">
+                        <button class="btn btn-primary btn-lg" type="submit" id="submitBtn">
+                            <i class="icon-base bx bx-check-shield icon-sm me-1"></i> Submit &amp; lock record
                         </button>
                         <button class="btn btn-outline-secondary" type="button" id="backToMark">
-                            Back to marking
+                            <i class="icon-base bx bx-arrow-back icon-sm me-1"></i> Back to marking
                         </button>
+                    </div>
                     </div>
                 </div>
             </div>
@@ -215,17 +274,40 @@
 
     function showStep(name) {
         Object.entries(steps).forEach(([key, node]) => node.classList.toggle('d-none', key !== name));
+
+        const order = ['upload', 'mark', 'verify'];
+        const activeIndex = order.indexOf(name);
+        document.querySelectorAll('[data-flow-step]').forEach((node) => {
+            const stepIndex = order.indexOf(node.dataset.flowStep);
+            node.classList.toggle('is-active', stepIndex === activeIndex);
+            node.classList.toggle('is-complete', stepIndex < activeIndex);
+            if (stepIndex === activeIndex) {
+                node.setAttribute('aria-current', 'step');
+            } else {
+                node.removeAttribute('aria-current');
+            }
+        });
+
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     // ---------------------------------------------------------------- step 1
-    el('scanFile').addEventListener('change', async (event) => {
-        const file = event.target.files?.[0];
+    async function openDocument(file) {
         if (!file) return;
+
+        if (file.size > 20 * 1024 * 1024) {
+            alert('Choose a document smaller than 20 MB.');
+            el('scanFile').value = '';
+            return;
+        }
+
+        dropzone.classList.add('is-loading');
+        dropzone.setAttribute('aria-busy', 'true');
 
         try {
             scanFile = file;
             await marker.load(file);
+            el('selectedFileName').textContent = file.name;
             showStep('mark');
             marker.setBoxes(config.boxes.map((b) => ({
                 name: b.name,
@@ -240,8 +322,36 @@
             window.requestAnimationFrame(() => marker.resetZoom());
         } catch (error) {
             scanFile = null;
-            event.target.value = '';
+            el('scanFile').value = '';
             alert(error.message || 'That document could not be opened.');
+        } finally {
+            dropzone.classList.remove('is-loading');
+            dropzone.removeAttribute('aria-busy');
+        }
+    }
+
+    el('scanFile').addEventListener('change', (event) => {
+        openDocument(event.target.files?.[0]);
+    });
+
+    const dropzone = el('documentDropzone');
+    ['dragenter', 'dragover'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            dropzone.classList.add('is-dragging');
+        });
+    });
+    ['dragleave', 'drop'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            dropzone.classList.remove('is-dragging');
+        });
+    });
+    dropzone.addEventListener('drop', (event) => openDocument(event.dataTransfer?.files?.[0]));
+    dropzone.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            el('scanFile').click();
         }
     });
 
@@ -249,6 +359,13 @@
     function renderFieldList(boxes) {
         const list = el('fieldList');
         list.innerHTML = '';
+
+        if (!boxes.length) {
+            const empty = document.createElement('li');
+            empty.className = 'marker-field-empty';
+            empty.innerHTML = '<i class="icon-base bx bx-selection"></i><span>No fields yet. Add one below.</span>';
+            list.appendChild(empty);
+        }
 
         boxes.forEach((box, index) => {
             const li = document.createElement('li');
@@ -272,6 +389,8 @@
             list.appendChild(li);
         });
 
+        el('fieldCount').textContent = `${boxes.length} field${boxes.length === 1 ? '' : 's'}`;
+        el('scanNowBtn').disabled = boxes.length === 0;
         updateSelectionUI(marker.selectedIndexes());
     }
 
@@ -303,9 +422,19 @@
         if (!name) return;
         marker.addBox(name);
         input.value = '';
+        input.focus();
+    });
+    el('newFieldName').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            el('addFieldBtn').click();
+        }
     });
 
-    el('backToUpload').addEventListener('click', () => showStep('upload'));
+    el('backToUpload').addEventListener('click', () => {
+        el('scanFile').value = '';
+        showStep('upload');
+    });
     el('backToMark').addEventListener('click', () => showStep('mark'));
 
     el('scanNowBtn').addEventListener('click', async () => {
@@ -365,19 +494,23 @@
             const flagged = confidence < config.threshold;
 
             const row = document.createElement('div');
-            row.className = 'row g-3 align-items-start py-3' + (index ? ' border-top' : '');
+            row.className = 'validation-field row g-3 align-items-center';
             row.innerHTML = `
                 <div class="col-md-5">
-                    <label class="form-label mb-1 small fw-medium"></label>
-                    <img alt="Scanned crop" class="img-fluid border rounded bg-white mb-2">
+                    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                        <label class="form-label mb-0 fw-semibold"></label>
+                        <span class="badge confidence-badge"></span>
+                    </div>
+                    <div class="validation-crop">
+                        <img alt="Scanned crop" class="img-fluid">
+                    </div>
                     <div class="small text-muted">
                         Model read: <span class="fst-italic reading"></span>
                     </div>
-                    <span class="badge confidence-badge mt-1"></span>
                 </div>
                 <div class="col-md-7">
                     <label class="form-label mb-1 small fw-medium">Verified value</label>
-                    <input type="text" class="form-control verified">
+                    <input type="text" class="form-control form-control-lg verified">
                     ${reading.error ? '<div class="text-danger small mt-1">This crop failed to read.</div>' : ''}
                 </div>`;
 
