@@ -2214,6 +2214,22 @@
   font-weight: 500;
 }
 
+.template-sample-delete-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.template-builder-sample-error {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .55rem .75rem;
+  color: var(--bs-danger);
+  background: rgba(255, 62, 29, .07);
+  border-block-end: 1px solid rgba(255, 62, 29, .18);
+  font-size: .75rem;
+}
+
 .template-builder-field-list {
   max-block-size: min(27vh, 17rem);
 }

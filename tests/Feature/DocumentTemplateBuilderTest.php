@@ -9,7 +9,10 @@ use App\Models\CivilRecord;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTypeDefinition;
 use App\Models\User;
+use App\Services\TemplateSampleStorage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class DocumentTemplateBuilderTest extends TestCase
@@ -73,6 +76,127 @@ class DocumentTemplateBuilderTest extends TestCase
             'document_template_id' => $template->getKey(),
             'name' => 'Child Full Name',
         ]);
+    }
+
+    public function test_layout_sample_is_privately_stored_previewed_and_deleted(): void
+    {
+        Storage::fake('local');
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'Birth Registry 2026',
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'sample_document' => UploadedFile::fake()->image('Municipal Birth Form.jpg', 900, 1200),
+            'fields' => [$this->field('Child Full Name')],
+        ])->assertRedirect();
+
+        $template = DocumentTemplate::where('name', 'Birth Registry 2026')->firstOrFail();
+        $samplePath = $template->sample_path;
+
+        $this->assertNotNull($samplePath);
+        $this->assertStringContainsString('template-samples/001-birth-certificate/', $samplePath);
+        $this->assertStringContainsString(
+            sprintf('/%05d-birth-registry-2026/', $template->getKey()),
+            $samplePath,
+        );
+        $this->assertStringEndsWith(
+            '/birth-certificate--birth-registry-2026--sample.jpg',
+            $samplePath,
+        );
+        $this->assertSame('Municipal Birth Form.jpg', $template->sample_original_name);
+        $this->assertSame('image/jpeg', $template->sample_mime);
+        Storage::disk('local')->assertExists($samplePath);
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->get(route('templates.sample', $template))
+            ->assertForbidden();
+
+        $this->actingAs($superAdmin)->get(route('templates.edit', $template))
+            ->assertOk()
+            ->assertSee('enctype="multipart/form-data"', escape: false)
+            ->assertSeeText('Municipal Birth Form.jpg')
+            ->assertSee(route('templates.sample', $template), escape: false);
+
+        $this->get(route('templates.sample', $template))
+            ->assertOk()
+            ->assertHeader('content-type', 'image/jpeg');
+
+        $this->delete(route('templates.sample.destroy', $template))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        Storage::disk('local')->assertMissing($samplePath);
+        $this->assertNull($template->refresh()->sample_path);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'template.sample-deleted']);
+    }
+
+    public function test_sample_path_follows_layout_and_custom_document_type_names(): void
+    {
+        Storage::fake('local');
+        $superAdmin = User::factory()->superAdmin()->create();
+        $type = DocumentTypeDefinition::create([
+            'key' => 'custom-residency-sample-test',
+            'name' => 'Residency Certificate',
+            'short_name' => 'Residency Certificate',
+            'icon' => 'bx-file',
+            'is_system' => false,
+        ]);
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'Old Residency Layout',
+            'doc_type' => $type->key,
+            ...$this->paperSpec(),
+            'sample_document' => UploadedFile::fake()->image('residency.png', 900, 1200),
+            'fields' => [$this->field('Resident Full Name')],
+        ])->assertRedirect();
+
+        $template = DocumentTemplate::where('name', 'Old Residency Layout')->firstOrFail();
+        $initialPath = $template->sample_path;
+
+        $this->actingAs($superAdmin)->put(route('templates.update', $template), [
+            'name' => 'Current Residency Layout',
+            'document_type_id' => $type->getKey(),
+            'doc_type' => DocumentType::Custom->value,
+            ...$this->paperSpec(),
+            'fields' => [$this->field('Resident Full Name')],
+        ])->assertRedirect();
+
+        $layoutPath = $template->refresh()->sample_path;
+        Storage::disk('local')->assertMissing($initialPath);
+        Storage::disk('local')->assertExists($layoutPath);
+        $this->assertStringContainsString('current-residency-layout', $layoutPath);
+
+        $this->actingAs($superAdmin)->put(route('templates.document-types.update', $type), [
+            'document_type_name' => 'Barangay Residency Record',
+        ])->assertRedirect();
+
+        $renamedTypePath = $template->refresh()->sample_path;
+        Storage::disk('local')->assertMissing($layoutPath);
+        Storage::disk('local')->assertExists($renamedTypePath);
+        $this->assertStringContainsString('barangay-residency-record', $renamedTypePath);
+        $this->assertStringContainsString('current-residency-layout', $renamedTypePath);
+    }
+
+    public function test_unsupported_template_sample_is_rejected(): void
+    {
+        Storage::fake('local');
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'Unsafe sample',
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'sample_document' => UploadedFile::fake()->create(
+                'payload.exe',
+                10,
+                'application/x-msdownload',
+            ),
+            'fields' => [$this->field('Child Full Name')],
+        ])->assertSessionHasErrors('sample_document');
+
+        $this->assertDatabaseMissing('document_templates', ['name' => 'Unsafe sample']);
+        $this->assertSame([], Storage::disk('local')->allFiles(TemplateSampleStorage::ROOT));
     }
 
     public function test_validation_redirect_restores_the_working_field_layout(): void
@@ -218,17 +342,50 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertSame('Birth layout', $template->name);
     }
 
-    public function test_published_template_cannot_be_deleted(): void
+    public function test_super_admin_can_delete_a_published_template(): void
     {
+        Storage::fake('local');
         $superAdmin = User::factory()->superAdmin()->create();
         $template = $this->template($superAdmin, DocumentType::Birth, 'Published layout', active: true);
+        $samplePath = 'template-samples/001-birth-certificate/published-layout/sample.jpg';
+        Storage::disk('local')->put($samplePath, 'sample');
+        $template->forceFill([
+            'sample_path' => $samplePath,
+            'sample_original_name' => 'sample.jpg',
+            'sample_mime' => 'image/jpeg',
+            'sample_size' => 6,
+        ])->save();
 
         $this->actingAs($superAdmin)
             ->delete(route('templates.destroy', $template))
-            ->assertRedirect()
-            ->assertSessionHas('error');
+            ->assertRedirect(route('templates.index'))
+            ->assertSessionHas('success');
 
-        $this->assertDatabaseHas('document_templates', ['id' => $template->getKey()]);
+        $this->assertDatabaseMissing('document_templates', ['id' => $template->getKey()]);
+        Storage::disk('local')->assertMissing($samplePath);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'template.deleted']);
+    }
+
+    public function test_deleting_a_used_template_keeps_its_existing_records(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $staff = User::factory()->staff()->create();
+        $template = $this->template($superAdmin, DocumentType::Birth, 'Used layout');
+        $record = CivilRecord::factory()->create([
+            'doc_type' => DocumentType::Birth->value,
+            'document_type_id' => $template->document_type_id,
+            'document_template_id' => $template->getKey(),
+            'created_by' => $staff->getKey(),
+        ]);
+
+        $this->actingAs($superAdmin)
+            ->delete(route('templates.destroy', $template))
+            ->assertRedirect(route('templates.index'))
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseMissing('document_templates', ['id' => $template->getKey()]);
+        $this->assertDatabaseHas('records', ['id' => $record->getKey()]);
+        $this->assertNull($record->refresh()->document_template_id);
     }
 
     public function test_unknown_paper_settings_are_rejected(): void
@@ -317,6 +474,7 @@ class DocumentTemplateBuilderTest extends TestCase
 
     public function test_super_admin_can_delete_an_unused_custom_document_type_and_its_layouts(): void
     {
+        Storage::fake('local');
         $superAdmin = User::factory()->superAdmin()->create();
         $type = DocumentTypeDefinition::create([
             'key' => 'custom-residency-delete-test',
@@ -325,6 +483,8 @@ class DocumentTemplateBuilderTest extends TestCase
             'icon' => 'bx-file',
             'is_system' => false,
         ]);
+        $samplePath = 'template-samples/004-temporary-residency-record/00001-temporary-layout/sample.jpg';
+        Storage::disk('local')->put($samplePath, 'sample');
         $template = DocumentTemplate::create([
             'name' => 'Temporary layout',
             'doc_type' => DocumentType::Custom->value,
@@ -332,6 +492,10 @@ class DocumentTemplateBuilderTest extends TestCase
             ...$this->paperSpec(),
             'is_active' => false,
             'created_by' => $superAdmin->getKey(),
+            'sample_path' => $samplePath,
+            'sample_original_name' => 'sample.jpg',
+            'sample_mime' => 'image/jpeg',
+            'sample_size' => 6,
         ]);
         $field = $template->fields()->create([
             ...$this->field('Resident name'),
@@ -347,6 +511,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertDatabaseMissing('document_types', ['id' => $type->getKey()]);
         $this->assertDatabaseMissing('document_templates', ['id' => $template->getKey()]);
         $this->assertDatabaseMissing('document_template_fields', ['id' => $field->getKey()]);
+        Storage::disk('local')->assertMissing($samplePath);
         $this->assertDatabaseHas('audit_logs', ['action' => 'document-type.deleted']);
     }
 

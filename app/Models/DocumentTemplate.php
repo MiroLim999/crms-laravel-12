@@ -18,6 +18,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property float|null $custom_height_mm
  * @property bool $is_active
  * @property int|null $document_type_id
+ * @property string|null $sample_path
+ * @property string|null $sample_original_name
+ * @property string|null $sample_mime
+ * @property int|null $sample_size
  */
 class DocumentTemplate extends Model
 {
@@ -25,6 +29,7 @@ class DocumentTemplate extends Model
 
     protected $fillable = [
         'name', 'doc_type', 'document_type_id', 'paper_size', 'orientation', 'custom_width_mm', 'custom_height_mm', 'description',
+        'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
         'is_active', 'created_by',
     ];
 
@@ -37,6 +42,7 @@ class DocumentTemplate extends Model
             'custom_width_mm' => 'float',
             'custom_height_mm' => 'float',
             'is_active' => 'boolean',
+            'sample_size' => 'integer',
         ];
     }
 

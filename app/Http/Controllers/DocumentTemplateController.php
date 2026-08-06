@@ -8,12 +8,17 @@ use App\Enums\PaperSize;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTypeDefinition;
 use App\Services\AuditLogger;
+use App\Services\TemplateSampleStorage;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\File;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Document template builder - Super Admin only.
@@ -24,7 +29,10 @@ use Illuminate\View\View;
  */
 class DocumentTemplateController extends Controller
 {
-    public function __construct(private readonly AuditLogger $audit) {}
+    public function __construct(
+        private readonly AuditLogger $audit,
+        private readonly TemplateSampleStorage $samples,
+    ) {}
 
     public function index(): View
     {
@@ -75,6 +83,12 @@ class DocumentTemplateController extends Controller
 
             $this->syncFields($template, $validated['fields']);
 
+            if (($validated['sample_document'] ?? null) instanceof UploadedFile) {
+                $template->forceFill(
+                    $this->samples->store($template, $validated['sample_document']),
+                )->save();
+            }
+
             $this->audit->log(
                 'template.created',
                 $template,
@@ -82,7 +96,8 @@ class DocumentTemplateController extends Controller
                     'paper_size' => $validated['paper_size'], 'orientation' => $validated['orientation'],
                     'custom_width_mm' => $validated['custom_width_mm'],
                     'custom_height_mm' => $validated['custom_height_mm'],
-                    'field_count' => count($validated['fields'])],
+                    'field_count' => count($validated['fields']),
+                    'sample_document' => $template->sample_original_name],
                 description: "Created template '{$template->name}'.",
             );
 
@@ -128,6 +143,9 @@ class DocumentTemplateController extends Controller
         $documentType = DocumentTypeDefinition::findOrFail($validated['document_type_id']);
 
         DB::transaction(function () use ($template, $validated, $documentType) {
+            $oldSample = $template->only([
+                'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
+            ]);
             $template->fill([
                 'name' => $validated['name'],
                 'doc_type' => $documentType->legacyType()->value,
@@ -147,6 +165,27 @@ class DocumentTemplateController extends Controller
                 $template,
                 "Updated template '{$template->name}' ({$before} -> ".count($validated['fields']).' fields).',
             );
+
+            if (($validated['sample_document'] ?? null) instanceof UploadedFile) {
+                $template->forceFill(
+                    $this->samples->store($template, $validated['sample_document']),
+                )->save();
+
+                $this->audit->log(
+                    $oldSample['sample_path'] ? 'template.sample-replaced' : 'template.sample-uploaded',
+                    $template,
+                    old: $oldSample['sample_path'] ? $oldSample : null,
+                    new: $template->only([
+                        'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
+                    ]),
+                    description: "Stored sample document '{$template->sample_original_name}' for template '{$template->name}'.",
+                );
+            } elseif ($template->sample_path) {
+                $relocated = $this->samples->relocate($template);
+                if ($relocated !== $template->sample_path) {
+                    $template->forceFill(['sample_path' => $relocated])->saveQuietly();
+                }
+            }
 
             if ($validated['publish'] ?? false) {
                 $this->publishTemplate($template);
@@ -176,41 +215,91 @@ class DocumentTemplateController extends Controller
         return back()->with('success', "'{$template->name}' is now published for {$template->typeLabel()}.");
     }
 
-    /**
-     * Templates already used by records are kept: deleting one would orphan the
-     * layout that produced those crops.
-     */
-    public function destroy(DocumentTemplate $template): RedirectResponse
+    public function sample(DocumentTemplate $template): StreamedResponse
     {
-        if ($template->is_active) {
-            return back()->with(
-                'error',
-                'A published template cannot be deleted. Publish another layout for this document type first.',
-            );
-        }
-
-        if ($template->records()->exists()) {
-            return back()->with(
-                'error',
-                'This template has been used by existing records and cannot be deleted.',
-            );
-        }
-
-        $this->audit->log(
-            'template.deleted',
-            $template,
-            old: [
-                'name' => $template->name,
-                'document_type' => $template->documentTypeDefinition?->key ?? $template->doc_type->value,
-                'paper_size' => $template->paper_size->value,
-                'orientation' => $template->orientation->value,
-            ],
-            description: "Deleted template '{$template->name}'.",
+        abort_unless(
+            $template->sample_path && Storage::disk('local')->exists($template->sample_path),
+            404,
         );
 
-        $template->delete();
+        return Storage::disk('local')->response(
+            $template->sample_path,
+            $template->sample_original_name ?? basename($template->sample_path),
+            [
+                'Content-Type' => $template->sample_mime ?? 'application/octet-stream',
+                'Content-Disposition' => 'inline',
+                'Cache-Control' => 'private, no-store',
+            ],
+        );
+    }
 
-        return redirect()->route('templates.index')->with('success', 'Template deleted.');
+    public function destroySample(DocumentTemplate $template): RedirectResponse
+    {
+        if (! $template->sample_path) {
+            return back()->with('error', 'This layout does not have a stored sample document.');
+        }
+
+        $sample = $template->only([
+            'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
+        ]);
+
+        DB::transaction(function () use ($template, $sample) {
+            $template->forceFill([
+                'sample_path' => null,
+                'sample_original_name' => null,
+                'sample_mime' => null,
+                'sample_size' => null,
+            ])->save();
+
+            $this->audit->log(
+                'template.sample-deleted',
+                $template,
+                old: $sample,
+                description: "Deleted the stored sample from template '{$template->name}'.",
+            );
+        });
+
+        $this->samples->deletePath($sample['sample_path']);
+
+        return back()->with('success', 'The stored sample document was deleted.');
+    }
+
+    public function destroy(DocumentTemplate $template): RedirectResponse
+    {
+        $template->loadMissing('documentTypeDefinition');
+        $samplePath = $template->sample_path;
+        $wasPublished = $template->is_active;
+        $recordCount = $template->records()->count();
+
+        DB::transaction(function () use ($template, $wasPublished, $recordCount) {
+            $this->audit->log(
+                'template.deleted',
+                $template,
+                old: [
+                    'name' => $template->name,
+                    'document_type' => $template->documentTypeDefinition?->key ?? $template->doc_type->value,
+                    'paper_size' => $template->paper_size->value,
+                    'orientation' => $template->orientation->value,
+                    'was_published' => $wasPublished,
+                    'linked_record_count' => $recordCount,
+                    'sample_document' => $template->sample_original_name,
+                ],
+                description: "Deleted template '{$template->name}'. Existing records retained their captured data.",
+            );
+
+            // records.document_template_id uses nullOnDelete. Existing records,
+            // scans, and copied field values remain intact after the layout goes.
+            $template->delete();
+        });
+
+        $this->samples->deletePath($samplePath);
+
+        $message = "Layout '{$template->name}' was deleted.";
+        if ($wasPublished) {
+            $message .= ' Publish another layout before Staff scan this document type again.';
+        }
+
+        return redirect()->route('templates.index')->with('success', $message);
     }
 
     /**
@@ -243,6 +332,11 @@ class DocumentTemplateController extends Controller
                 ...($template ? [Rule::in([$template->doc_type->value])] : []),
             ],
             'description' => ['nullable', 'string', 'max:1000'],
+            'sample_document' => [
+                'nullable',
+                File::types(['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tif', 'tiff'])
+                    ->max(20 * 1024),
+            ],
             'paper_size' => ['required', Rule::enum(PaperSize::class)],
             'orientation' => ['required', Rule::enum(PageOrientation::class)],
             'custom_width_mm' => ['nullable', 'required_if:paper_size,custom', 'numeric', 'min:50', 'max:2000'],

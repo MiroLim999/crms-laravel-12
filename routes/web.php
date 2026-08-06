@@ -184,6 +184,10 @@ Route::middleware('auth')->group(function () {
         Route::post('templates', [DocumentTemplateController::class, 'store'])->name('templates.store');
         Route::get('templates/{template}/edit', [DocumentTemplateController::class, 'edit'])
             ->name('templates.edit');
+        Route::get('templates/{template}/sample', [DocumentTemplateController::class, 'sample'])
+            ->name('templates.sample');
+        Route::delete('templates/{template}/sample', [DocumentTemplateController::class, 'destroySample'])
+            ->name('templates.sample.destroy');
         Route::put('templates/{template}', [DocumentTemplateController::class, 'update'])
             ->name('templates.update');
         Route::post('templates/{template}/activate', [DocumentTemplateController::class, 'activate'])

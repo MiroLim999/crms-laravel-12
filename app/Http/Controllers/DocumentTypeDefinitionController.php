@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\DocumentTypeDefinition;
 use App\Services\AuditLogger;
+use App\Services\TemplateSampleStorage;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -12,7 +13,10 @@ use Illuminate\Validation\ValidationException;
 
 class DocumentTypeDefinitionController extends Controller
 {
-    public function __construct(private readonly AuditLogger $audit) {}
+    public function __construct(
+        private readonly AuditLogger $audit,
+        private readonly TemplateSampleStorage $samples,
+    ) {}
 
     public function store(Request $request): RedirectResponse
     {
@@ -53,6 +57,13 @@ class DocumentTypeDefinitionController extends Controller
             "Renamed document type '{$old}' to '{$name}'.",
         );
 
+        $documentType->templates()->with('documentTypeDefinition')->get()->each(function ($template) {
+            $relocated = $this->samples->relocate($template);
+            if ($relocated !== $template->sample_path) {
+                $template->forceFill(['sample_path' => $relocated])->saveQuietly();
+            }
+        });
+
         return redirect()
             ->route('templates.index', ['open' => $documentType->key])
             ->with('success', "Document type renamed to '{$name}'.");
@@ -69,7 +80,8 @@ class DocumentTypeDefinitionController extends Controller
             );
         }
 
-        $layoutCount = $documentType->templates()->count();
+        $templates = $documentType->templates()->get();
+        $layoutCount = $templates->count();
         DB::transaction(function () use ($documentType, $layoutCount) {
             $this->audit->log(
                 'document-type.deleted',
@@ -85,6 +97,8 @@ class DocumentTypeDefinitionController extends Controller
             $documentType->templates()->delete();
             $documentType->delete();
         });
+
+        $templates->each(fn ($template) => $this->samples->delete($template));
 
         return redirect()->route('templates.index')->with(
             'success',

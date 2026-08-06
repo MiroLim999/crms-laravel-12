@@ -638,6 +638,42 @@ async function openSample(file) {
     }
 }
 
+async function openStoredSample() {
+    const storedSample = config.sample;
+    if (!storedSample?.url) return;
+
+    try {
+        const response = await window.fetch(storedSample.url, {
+            headers: { Accept: storedSample.mime || 'application/octet-stream' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+        });
+
+        if (!response.ok) throw new Error('The stored sample document could not be loaded.');
+
+        const blob = await response.blob();
+        const file = new File(
+            [blob],
+            storedSample.originalName || 'stored-sample',
+            { type: storedSample.mime || blob.type },
+        );
+        await openSample(file);
+    } catch (error) {
+        showBuilderError(error instanceof Error
+            ? error.message
+            : 'The stored sample document could not be loaded.');
+    }
+}
+
+function selectDroppedSample(file) {
+    if (!file) return;
+
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    fileInput.files = transfer.files;
+    openSample(file);
+}
+
 element('zoomOutBtn', HTMLButtonElement).addEventListener('click', () => marker.zoomBy(-0.1));
 element('zoomInBtn', HTMLButtonElement).addEventListener('click', () => marker.zoomBy(0.1));
 element('zoomResetBtn', HTMLButtonElement).addEventListener('click', () => marker.resetZoom());
@@ -681,7 +717,7 @@ fileLabel.addEventListener('keydown', (event) => {
     });
 });
 
-viewport.addEventListener('drop', (event) => openSample(event.dataTransfer?.files?.[0]));
+viewport.addEventListener('drop', (event) => selectDroppedSample(event.dataTransfer?.files?.[0]));
 
 paperSizeSelect.addEventListener('change', handlePaperSettingChange);
 useSampleSizeButton.addEventListener('click', useSampleAsCustomSize);
@@ -794,3 +830,4 @@ form.addEventListener('submit', (event) => {
 marker.setBoxes(cloneBoxes(initialBoxes));
 updatePaperPreview();
 window.requestAnimationFrame(() => marker.resetZoom());
+openStoredSample();

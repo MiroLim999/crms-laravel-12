@@ -25,6 +25,12 @@
             'baselineOrientation' => $template?->orientation?->value ?? App\Enums\PageOrientation::Portrait->value,
             'baselineCustomWidth' => $template?->custom_width_mm ?? 210,
             'baselineCustomHeight' => $template?->custom_height_mm ?? 297,
+            'sample' => $template?->sample_path ? [
+                'url' => route('templates.sample', $template),
+                'originalName' => $template->sample_original_name,
+                'mime' => $template->sample_mime,
+                'size' => $template->sample_size,
+            ] : null,
         ];
     @endphp
 
@@ -55,7 +61,7 @@
 
         <form method="POST"
               action="{{ $template ? route('templates.update', $template) : route('templates.store') }}"
-              id="templateBuilderForm" novalidate>
+              id="templateBuilderForm" enctype="multipart/form-data" novalidate>
             @csrf
             @if ($template)
                 @method('PUT')
@@ -84,12 +90,21 @@
 
                                 <label for="sampleScan" class="document-file-chip template-sample-control"
                                        id="sampleScanLabel" tabindex="0" role="button"
-                                       title="Choose a sample document">
+                                       title="{{ $template?->sample_path ? 'Replace the stored sample document' : 'Choose a sample document' }}">
                                     <i class="icon-base bx bx-file" aria-hidden="true"></i>
-                                    <span id="sampleFileName">Choose sample</span>
+                                    <span id="sampleFileName">{{ $template?->sample_original_name ?? 'Choose sample' }}</span>
                                 </label>
-                                <input type="file" id="sampleScan" class="visually-hidden"
+                                <input type="file" id="sampleScan" name="sample_document" class="visually-hidden"
                                        accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp,image/tiff">
+
+                                @if ($template?->sample_path)
+                                    <button type="button" class="btn btn-sm btn-outline-danger template-sample-delete-button"
+                                            data-bs-toggle="modal" data-bs-target="#deleteTemplateSampleModal"
+                                            title="Delete stored sample document">
+                                        <i class="icon-base bx bx-trash icon-sm" aria-hidden="true"></i>
+                                        <span>Delete sample</span>
+                                    </button>
+                                @endif
 
                                 <span class="marker-toolbar__divider" aria-hidden="true"></span>
                                 <div class="marker-zoom-controls" role="group" aria-label="Document zoom controls">
@@ -140,6 +155,13 @@
                                 </button>
                             </div>
                         </div>
+
+                        @error('sample_document')
+                            <div class="template-builder-sample-error" role="alert">
+                                <i class="icon-base bx bx-error" aria-hidden="true"></i>
+                                <span>{{ $message }}</span>
+                            </div>
+                        @enderror
 
                         <div class="doc-viewport" id="docViewport">
                             <div class="template-builder-canvas-note" id="sampleHint" role="status">
@@ -319,7 +341,7 @@
 
                                 <p class="document-tip mt-3 mb-0">
                                     <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
-                                    <span>Keep each marker tight around one handwritten value. The sample stays in your browser and is not stored.</span>
+                                    <span>Keep each marker tight around one handwritten value. The sample is stored privately with this layout after you save.</span>
                                 </p>
                             </div>
                         </section>
@@ -354,6 +376,35 @@
             </div>
         </form>
     </div>
+
+    @if ($template?->sample_path)
+        <div class="modal fade" id="deleteTemplateSampleModal" tabindex="-1"
+             aria-labelledby="deleteTemplateSampleModalTitle" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-sm">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 class="modal-title h5" id="deleteTemplateSampleModalTitle">Delete stored sample?</h2>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="mb-2">Remove <strong>{{ $template->sample_original_name }}</strong> from this layout?</p>
+                        <p class="mb-0 text-muted small">The field markers and layout settings will not be changed.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <form method="POST" action="{{ route('templates.sample.destroy', $template) }}">
+                            @csrf
+                            @method('DELETE')
+                            <button type="submit" class="btn btn-danger">
+                                <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
+                                Delete sample
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
 
     <div class="modal fade" id="resetFieldsModal" tabindex="-1"
          aria-labelledby="resetFieldsModalTitle" aria-describedby="resetFieldsModalDescription"

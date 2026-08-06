@@ -147,6 +147,16 @@
                                                     ({{ $layout->paperDimensionsLabel() }})
                                                     &middot; {{ $layout->orientation->label() }}
                                                 </small>
+                                                @if ($layout->sample_path)
+                                                    <a class="d-inline-flex align-items-center gap-1 small mt-1"
+                                                       href="{{ route('templates.sample', $layout) }}" target="_blank"
+                                                       rel="noopener" title="Open stored sample">
+                                                        <i class="icon-base bx bx-file icon-sm" aria-hidden="true"></i>
+                                                        {{ $layout->sample_original_name }}
+                                                    </a>
+                                                @else
+                                                    <small class="d-block text-muted mt-1">No sample stored</small>
+                                                @endif
                                             </td>
                                             <td>{{ $layout->fields_count }}</td>
                                             <td>{{ $layout->records_count }}</td>
@@ -175,6 +185,13 @@
                                                         </button>
                                                     </form>
                                                 @endunless
+
+                                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                                        data-bs-toggle="modal"
+                                                        data-bs-target="#deleteLayout{{ $layout->getKey() }}">
+                                                    <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
+                                                    Delete
+                                                </button>
                                             </td>
                                         </tr>
                                     @endforeach
@@ -184,6 +201,56 @@
                         @endif
                     </div>
                 </section>
+
+                @foreach ($group as $layout)
+                    <div class="modal fade" id="deleteLayout{{ $layout->getKey() }}" tabindex="-1"
+                         aria-labelledby="deleteLayoutLabel{{ $layout->getKey() }}" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered modal-sm">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <div>
+                                        <div class="text-uppercase text-danger small fw-semibold mb-1">Template Builder</div>
+                                        <h2 class="modal-title h5" id="deleteLayoutLabel{{ $layout->getKey() }}">
+                                            Delete {{ $layout->name }}?
+                                        </h2>
+                                    </div>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body">
+                                    @if ($layout->is_active)
+                                        <div class="alert alert-warning py-2 px-3 small mb-3">
+                                            This is the published Staff layout. Staff cannot start new scans for this document type until another layout is published.
+                                        </div>
+                                    @endif
+
+                                    @if ($layout->records_count > 0)
+                                        <p class="mb-2">
+                                            {{ $layout->records_count }} existing {{ Str::plural('record', $layout->records_count) }} will remain saved, but will no longer link back to this layout.
+                                        </p>
+                                    @else
+                                        <p class="mb-2">This layout has not been used by any saved records.</p>
+                                    @endif
+
+                                    @if ($layout->sample_path)
+                                        <p class="mb-2">Its stored sample document will also be deleted.</p>
+                                    @endif
+                                    <p class="mb-0 text-muted small">This action cannot be undone.</p>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                                    <form method="POST" action="{{ route('templates.destroy', $layout) }}">
+                                        @csrf
+                                        @method('DELETE')
+                                        <button type="submit" class="btn btn-danger">
+                                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
+                                            Delete layout
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                @endforeach
 
                 @unless ($type->is_system)
                     <div class="modal fade" id="renameDocumentType{{ $type->getKey() }}" tabindex="-1"
