@@ -97,6 +97,11 @@
                                                     {{ $layout->creator?->name ?? 'System' }}
                                                     &middot; Updated {{ $layout->updated_at->diffForHumans() }}
                                                 </small>
+                                                <small class="d-block text-muted mt-1">
+                                                    {{ $layout->paper_size->label() }}
+                                                    ({{ $layout->paperDimensionsLabel() }})
+                                                    &middot; {{ $layout->orientation->label() }}
+                                                </small>
                                             </td>
                                             <td>{{ $layout->fields_count }}</td>
                                             <td>{{ $layout->records_count }}</td>

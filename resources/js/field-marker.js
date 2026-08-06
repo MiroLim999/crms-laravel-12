@@ -56,6 +56,7 @@ export class FieldMarker {
         this.boxes = [];
         this.selected = new Set();
         this.pdfDoc = null;
+        this.pageMeasurement = null;
         this.zoom = 1;
         this.minZoom = 0.5;
         this.maxZoom = 3;
@@ -98,9 +99,12 @@ export class FieldMarker {
             await this.renderPdfPage(1);
         } else {
             await this.renderImage(file);
+            this.pageMeasurement = await this._measureImage(file);
         }
 
         this.layout();
+
+        return this.pageMeasurement;
     }
 
     /**
@@ -119,6 +123,19 @@ export class FieldMarker {
 
     async renderPdfPage(pageNumber) {
         const page = await this.pdfDoc.getPage(pageNumber);
+
+        // PDF viewport units at scale 1 are points (1/72 inch), so this is a
+        // real physical page measurement rather than an estimate from pixels.
+        const physicalViewport = page.getViewport({ scale: 1 });
+        this.pageMeasurement = {
+            kind: 'pdf',
+            widthPx: Math.round(physicalViewport.width * 2),
+            heightPx: Math.round(physicalViewport.height * 2),
+            widthMm: physicalViewport.width * 25.4 / 72,
+            heightMm: physicalViewport.height * 25.4 / 72,
+            pageCount: this.pdfDoc.numPages,
+            physicalSource: 'PDF page box',
+        };
 
         // Render at 2x so the crops handed to the model keep their detail.
         const viewport = page.getViewport({ scale: 2 });
@@ -139,6 +156,97 @@ export class FieldMarker {
         } finally {
             URL.revokeObjectURL(url);
         }
+    }
+
+    async _measureImage(file) {
+        const measurement = {
+            kind: 'image',
+            widthPx: this.canvas.width,
+            heightPx: this.canvas.height,
+            widthMm: null,
+            heightMm: null,
+            pageCount: 1,
+            physicalSource: null,
+        };
+
+        try {
+            const density = this._readImageDensity(await file.arrayBuffer(), file);
+            if (!density) return measurement;
+
+            measurement.widthMm = this.canvas.width / density.xPixelsPerInch * 25.4;
+            measurement.heightMm = this.canvas.height / density.yPixelsPerInch * 25.4;
+            measurement.physicalSource = density.source;
+        } catch {
+            // Pixel dimensions remain exact even when optional metadata cannot
+            // be read. Physical size must not be guessed from screen DPI.
+        }
+
+        return measurement;
+    }
+
+    _readImageDensity(buffer, file) {
+        const view = new DataView(buffer);
+        const name = file.name.toLowerCase();
+
+        if ((file.type === 'image/png' || name.endsWith('.png')) && view.byteLength >= 33) {
+            let offset = 8;
+            while (offset + 12 <= view.byteLength) {
+                const length = view.getUint32(offset);
+                const type = String.fromCharCode(
+                    view.getUint8(offset + 4), view.getUint8(offset + 5),
+                    view.getUint8(offset + 6), view.getUint8(offset + 7),
+                );
+                if (type === 'pHYs' && length >= 9 && offset + 17 <= view.byteLength) {
+                    const xPerMetre = view.getUint32(offset + 8);
+                    const yPerMetre = view.getUint32(offset + 12);
+                    const unitIsMetre = view.getUint8(offset + 16) === 1;
+                    if (unitIsMetre && xPerMetre > 0 && yPerMetre > 0) {
+                        return {
+                            xPixelsPerInch: xPerMetre * 0.0254,
+                            yPixelsPerInch: yPerMetre * 0.0254,
+                            source: 'PNG density metadata',
+                        };
+                    }
+                }
+                offset += length + 12;
+            }
+        }
+
+        if ((file.type === 'image/jpeg' || /\.jpe?g$/.test(name))
+            && view.byteLength >= 18 && view.getUint16(0) === 0xffd8) {
+            let offset = 2;
+            while (offset + 4 <= view.byteLength) {
+                if (view.getUint8(offset) !== 0xff) {
+                    offset += 1;
+                    continue;
+                }
+
+                const marker = view.getUint8(offset + 1);
+                if (marker === 0xda || marker === 0xd9) break;
+                const length = view.getUint16(offset + 2);
+                const dataOffset = offset + 4;
+                if (marker === 0xe0 && length >= 16 && dataOffset + 12 <= view.byteLength) {
+                    const identifier = String.fromCharCode(...new Uint8Array(buffer, dataOffset, 5));
+                    if (identifier === 'JFIF\0') {
+                        const unit = view.getUint8(dataOffset + 7);
+                        const xDensity = view.getUint16(dataOffset + 8);
+                        const yDensity = view.getUint16(dataOffset + 10);
+                        if (unit > 0 && xDensity > 0 && yDensity > 0) {
+                            const multiplier = unit === 2 ? 2.54 : 1;
+                            return {
+                                xPixelsPerInch: xDensity * multiplier,
+                                yPixelsPerInch: yDensity * multiplier,
+                                source: 'JPEG density metadata',
+                            };
+                        }
+                    }
+                }
+                if (length < 2) break;
+                offset += length + 2;
+            }
+        }
+
+        return null;
     }
 
     _drawImage(url) {

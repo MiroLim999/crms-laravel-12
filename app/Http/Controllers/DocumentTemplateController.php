@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Enums\DocumentType;
+use App\Enums\PageOrientation;
+use App\Enums\PaperSize;
 use App\Models\DocumentTemplate;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
@@ -45,6 +47,8 @@ class DocumentTemplateController extends Controller
             'docType' => $type,
             // Start from the prototype's field boxes rather than a blank page.
             'fields' => $type->defaultFields(),
+            'paperSizes' => PaperSize::cases(),
+            'orientations' => PageOrientation::cases(),
         ]);
     }
 
@@ -56,6 +60,10 @@ class DocumentTemplateController extends Controller
             $template = DocumentTemplate::create([
                 'name' => $validated['name'],
                 'doc_type' => $validated['doc_type'],
+                'paper_size' => $validated['paper_size'],
+                'orientation' => $validated['orientation'],
+                'custom_width_mm' => $validated['custom_width_mm'],
+                'custom_height_mm' => $validated['custom_height_mm'],
                 'description' => $validated['description'] ?? null,
                 'is_active' => false,
                 'created_by' => $request->user()->getKey(),
@@ -67,6 +75,9 @@ class DocumentTemplateController extends Controller
                 'template.created',
                 $template,
                 new: ['name' => $template->name, 'doc_type' => $validated['doc_type'],
+                    'paper_size' => $validated['paper_size'], 'orientation' => $validated['orientation'],
+                    'custom_width_mm' => $validated['custom_width_mm'],
+                    'custom_height_mm' => $validated['custom_height_mm'],
                     'field_count' => count($validated['fields'])],
                 description: "Created template '{$template->name}'.",
             );
@@ -102,6 +113,8 @@ class DocumentTemplateController extends Controller
                 'width' => $f->width,
                 'height' => $f->height,
             ])->all(),
+            'paperSizes' => PaperSize::cases(),
+            'orientations' => PageOrientation::cases(),
         ]);
     }
 
@@ -113,6 +126,10 @@ class DocumentTemplateController extends Controller
             $template->fill([
                 'name' => $validated['name'],
                 'doc_type' => $validated['doc_type'],
+                'paper_size' => $validated['paper_size'],
+                'orientation' => $validated['orientation'],
+                'custom_width_mm' => $validated['custom_width_mm'],
+                'custom_height_mm' => $validated['custom_height_mm'],
                 'description' => $validated['description'] ?? null,
             ]);
 
@@ -176,7 +193,12 @@ class DocumentTemplateController extends Controller
         $this->audit->log(
             'template.deleted',
             $template,
-            old: ['name' => $template->name, 'doc_type' => $template->doc_type->value],
+            old: [
+                'name' => $template->name,
+                'doc_type' => $template->doc_type->value,
+                'paper_size' => $template->paper_size->value,
+                'orientation' => $template->orientation->value,
+            ],
             description: "Deleted template '{$template->name}'.",
         );
 
@@ -198,6 +220,10 @@ class DocumentTemplateController extends Controller
                 ...($template ? [Rule::in([$template->doc_type->value])] : []),
             ],
             'description' => ['nullable', 'string', 'max:1000'],
+            'paper_size' => ['required', Rule::enum(PaperSize::class)],
+            'orientation' => ['required', Rule::enum(PageOrientation::class)],
+            'custom_width_mm' => ['nullable', 'required_if:paper_size,custom', 'numeric', 'min:50', 'max:2000'],
+            'custom_height_mm' => ['nullable', 'required_if:paper_size,custom', 'numeric', 'min:50', 'max:2000'],
             'publish' => ['sometimes', 'boolean'],
             'fields' => ['required', 'array', 'min:1', 'max:100'],
             'fields.*.name' => ['required', 'string', 'max:120', 'distinct:ignore_case'],
@@ -207,6 +233,14 @@ class DocumentTemplateController extends Controller
             'fields.*.width' => ['required', 'numeric', 'min:0.01', 'max:1'],
             'fields.*.height' => ['required', 'numeric', 'min:0.01', 'max:1'],
         ]);
+
+        $validated['custom_width_mm'] ??= null;
+        $validated['custom_height_mm'] ??= null;
+
+        if ($validated['paper_size'] !== PaperSize::Custom->value) {
+            $validated['custom_width_mm'] = null;
+            $validated['custom_height_mm'] = null;
+        }
 
         $coordinateErrors = [];
         foreach ($validated['fields'] as $index => $field) {
@@ -255,7 +289,11 @@ class DocumentTemplateController extends Controller
             'template.activated',
             $template,
             old: ['previous_active' => $previous->pluck('name')->values()->all()],
-            new: ['active' => $template->name],
+            new: [
+                'active' => $template->name,
+                'paper_size' => $template->paper_size->value,
+                'orientation' => $template->orientation->value,
+            ],
             description: "Published template '{$template->name}' for {$template->doc_type->label()}.",
         );
     }

@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Enums\DocumentType;
+use App\Enums\PageOrientation;
+use App\Enums\PaperSize;
 use App\Models\DocumentTemplate;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,6 +31,16 @@ class DocumentTemplateBuilderTest extends TestCase
             ->assertSee('id="fieldOverlay"', escape: false)
             ->assertSee('id="selectAllFields"', escape: false)
             ->assertSee('id="publishIntent"', escape: false)
+            ->assertSee('id="paper_size"', escape: false)
+            ->assertSee('value="custom"', escape: false)
+            ->assertSee('id="custom_width_mm"', escape: false)
+            ->assertSee('id="custom_height_mm"', escape: false)
+            ->assertSee('id="orientation_portrait"', escape: false)
+            ->assertSee('id="orientation_landscape"', escape: false)
+            ->assertSee('id="paperPreviewStatus"', escape: false)
+            ->assertSee('id="samplePageSize"', escape: false)
+            ->assertSee('id="samplePhysicalSize"', escape: false)
+            ->assertSee('id="useSampleSizeBtn"', escape: false)
             ->assertSeeText('Save & publish for Staff');
     }
 
@@ -39,6 +51,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->actingAs($superAdmin)->post(route('templates.store'), [
             'name' => 'Birth Certificate 2026',
             'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(PaperSize::LongBond, PageOrientation::Landscape),
             'description' => 'Current form revision.',
             'fields' => [$this->field('Child Full Name')],
         ])->assertRedirect();
@@ -46,6 +59,8 @@ class DocumentTemplateBuilderTest extends TestCase
         $template = DocumentTemplate::where('name', 'Birth Certificate 2026')->firstOrFail();
 
         $this->assertFalse($template->is_active);
+        $this->assertSame(PaperSize::LongBond, $template->paper_size);
+        $this->assertSame(PageOrientation::Landscape, $template->orientation);
         $this->assertDatabaseHas('document_template_fields', [
             'document_template_id' => $template->getKey(),
             'name' => 'Child Full Name',
@@ -62,6 +77,7 @@ class DocumentTemplateBuilderTest extends TestCase
             ->post(route('templates.store'), [
                 'name' => '',
                 'doc_type' => DocumentType::Birth->value,
+                ...$this->paperSpec(),
                 'fields' => [$this->field('Custom Registry Field')],
             ]);
 
@@ -80,6 +96,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->actingAs($superAdmin)->post(route('templates.store'), [
             'name' => 'Current layout',
             'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
             'publish' => '1',
             'fields' => [$this->field('Registry Name')],
         ])->assertRedirect();
@@ -103,12 +120,15 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->actingAs($superAdmin)->put(route('templates.update', $draft), [
             'name' => 'Published death layout',
             'doc_type' => DocumentType::Death->value,
+            ...$this->paperSpec(PaperSize::A4, PageOrientation::Landscape),
             'publish' => '1',
             'fields' => [$this->field('Deceased Full Name')],
         ])->assertRedirect();
 
         $this->assertTrue($draft->refresh()->is_active);
         $this->assertSame('Published death layout', $draft->name);
+        $this->assertSame(PaperSize::A4, $draft->paper_size);
+        $this->assertSame(PageOrientation::Landscape, $draft->orientation);
         $this->assertFalse($previous->refresh()->is_active);
     }
 
@@ -134,6 +154,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->actingAs($superAdmin)->post(route('templates.store'), [
             'name' => 'Duplicate fields',
             'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
             'fields' => [
                 $this->field('Child Full Name'),
                 $this->field('child full name'),
@@ -153,6 +174,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->actingAs($superAdmin)->post(route('templates.store'), [
             'name' => 'Invalid bounds',
             'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
             'fields' => [$field],
         ])->assertSessionHasErrors('fields.0.width');
     }
@@ -167,6 +189,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->actingAs($superAdmin)->post(route('templates.store'), [
             'name' => 'Too many fields',
             'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
             'fields' => $fields,
         ])->assertSessionHasErrors('fields');
     }
@@ -179,6 +202,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->actingAs($superAdmin)->put(route('templates.update', $template), [
             'name' => 'Tampered layout',
             'doc_type' => DocumentType::Death->value,
+            ...$this->paperSpec(),
             'fields' => [$this->field('Full Name')],
         ])->assertSessionHasErrors('doc_type');
 
@@ -199,6 +223,56 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertDatabaseHas('document_templates', ['id' => $template->getKey()]);
     }
 
+    public function test_unknown_paper_settings_are_rejected(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'Invalid paper',
+            'doc_type' => DocumentType::Birth->value,
+            'paper_size' => 'tabloid',
+            'orientation' => 'upside_down',
+            'fields' => [$this->field('Full Name')],
+        ])->assertSessionHasErrors(['paper_size', 'orientation']);
+    }
+
+    public function test_super_admin_can_save_a_custom_page_size(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'Custom registry sheet',
+            'doc_type' => DocumentType::Birth->value,
+            'paper_size' => PaperSize::Custom->value,
+            'orientation' => PageOrientation::Landscape->value,
+            'custom_width_mm' => 240.5,
+            'custom_height_mm' => 355.6,
+            'fields' => [$this->field('Full Name')],
+        ])->assertRedirect();
+
+        $template = DocumentTemplate::where('name', 'Custom registry sheet')->firstOrFail();
+
+        $this->assertSame(PaperSize::Custom, $template->paper_size);
+        $this->assertSame(240.5, $template->custom_width_mm);
+        $this->assertSame(355.6, $template->custom_height_mm);
+        $this->assertSame('240.5 × 355.6 mm', $template->paperDimensionsLabel());
+        $this->assertEqualsWithDelta(355.6 / 240.5, $template->paperAspectRatio(), 0.00001);
+    }
+
+    public function test_custom_page_size_requires_valid_dimensions(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'Invalid custom sheet',
+            'doc_type' => DocumentType::Birth->value,
+            'paper_size' => PaperSize::Custom->value,
+            'orientation' => PageOrientation::Portrait->value,
+            'custom_width_mm' => 20,
+            'fields' => [$this->field('Full Name')],
+        ])->assertSessionHasErrors(['custom_width_mm', 'custom_height_mm']);
+    }
+
     private function template(
         User $creator,
         DocumentType $type,
@@ -208,6 +282,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $template = DocumentTemplate::create([
             'name' => $name,
             'doc_type' => $type->value,
+            ...$this->paperSpec(),
             'is_active' => $active,
             'created_by' => $creator->getKey(),
         ]);
@@ -219,6 +294,19 @@ class DocumentTemplateBuilderTest extends TestCase
         ]);
 
         return $template;
+    }
+
+    /**
+     * @return array{paper_size: string, orientation: string}
+     */
+    private function paperSpec(
+        PaperSize $paperSize = PaperSize::Letter,
+        PageOrientation $orientation = PageOrientation::Portrait,
+    ): array {
+        return [
+            'paper_size' => $paperSize->value,
+            'orientation' => $orientation->value,
+        ];
     }
 
     /**

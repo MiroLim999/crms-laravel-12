@@ -28,6 +28,17 @@ const fileLabel = element('sampleScanLabel');
 const selectAllInput = element('selectAllFields', HTMLInputElement);
 const newFieldInput = element('newFieldName', HTMLInputElement);
 const publishIntent = element('publishIntent', HTMLInputElement);
+const paperSizeSelect = element('paper_size', HTMLSelectElement);
+const customPaperFields = element('customPaperSizeFields');
+const customWidthInput = element('custom_width_mm', HTMLInputElement);
+const customHeightInput = element('custom_height_mm', HTMLInputElement);
+const sampleSizePanel = element('samplePageSize');
+const useSampleSizeButton = element('useSampleSizeBtn', HTMLButtonElement);
+const paperSizes = new Map((config.paperSizes ?? []).map((size) => [size.value, size]));
+const baselinePaperSize = String(config.baselinePaperSize ?? 'letter');
+const baselineOrientation = String(config.baselineOrientation ?? 'portrait');
+const baselineCustomWidth = finiteNumber(config.baselineCustomWidth, 210);
+const baselineCustomHeight = finiteNumber(config.baselineCustomHeight, 297);
 
 const cloneBoxes = (boxes) => boxes.map(({ name, x, y, w, h }) => ({ name, x, y, w, h }));
 const snapshot = (boxes) => JSON.stringify(cloneBoxes(boxes));
@@ -65,6 +76,116 @@ let restoringHistory = false;
 let clipboard = [];
 let pasteSequence = 0;
 let invalidFieldIndexes = new Set();
+let sampleLoaded = false;
+let sampleMeasurement = null;
+
+function selectedOrientation() {
+    const input = form.querySelector('input[name="orientation"]:checked');
+    return input instanceof HTMLInputElement ? input.value : 'portrait';
+}
+
+function selectedPaper() {
+    const selected = paperSizes.get(paperSizeSelect.value) ?? paperSizes.values().next().value;
+
+    if (paperSizeSelect.value !== 'custom') return selected;
+
+    const width = Math.min(2000, Math.max(50, finiteNumber(customWidthInput.value, 210)));
+    const height = Math.min(2000, Math.max(50, finiteNumber(customHeightInput.value, 297)));
+
+    return {
+        ...selected,
+        width,
+        height,
+        dimensionsLabel: `${formatDimension(width)} × ${formatDimension(height)} mm`,
+    };
+}
+
+function formatDimension(value) {
+    return Number(value.toFixed(2)).toString();
+}
+
+function renderSampleMeasurement(measurement) {
+    sampleMeasurement = measurement;
+    sampleSizePanel.classList.remove('d-none');
+
+    const physicalSize = element('samplePhysicalSize');
+    const pixelSize = element('samplePixelSize');
+    const note = element('sampleSizeNote');
+    const hasPhysicalSize = Number.isFinite(measurement?.widthMm)
+        && Number.isFinite(measurement?.heightMm);
+
+    pixelSize.textContent = measurement?.kind === 'pdf'
+        ? `${measurement.widthPx.toLocaleString()} × ${measurement.heightPx.toLocaleString()} px rendered preview`
+        : `${measurement.widthPx.toLocaleString()} × ${measurement.heightPx.toLocaleString()} px image`;
+
+    if (!hasPhysicalSize) {
+        physicalSize.textContent = 'Physical size unavailable';
+        note.textContent = 'The pixel size is exact. This image has no usable DPI metadata, so millimetres would only be a guess.';
+        useSampleSizeButton.disabled = true;
+        return;
+    }
+
+    const width = Number(measurement.widthMm);
+    const height = Number(measurement.heightMm);
+    const withinRange = width >= 50 && width <= 2000 && height >= 50 && height <= 2000;
+    physicalSize.textContent = `${formatDimension(width)} × ${formatDimension(height)} mm`;
+    note.textContent = measurement.kind === 'pdf'
+        ? `Exact PDF page size${measurement.pageCount > 1 ? ` · page 1 of ${measurement.pageCount}` : ''}.`
+        : `Calculated from ${measurement.physicalSource}.`;
+    useSampleSizeButton.disabled = !withinRange;
+}
+
+function useSampleAsCustomSize() {
+    if (!sampleMeasurement || !Number.isFinite(sampleMeasurement.widthMm)
+        || !Number.isFinite(sampleMeasurement.heightMm)) return;
+
+    const sampleWidth = Number(sampleMeasurement.widthMm);
+    const sampleHeight = Number(sampleMeasurement.heightMm);
+    const landscape = sampleWidth > sampleHeight;
+
+    paperSizeSelect.value = 'custom';
+    customWidthInput.value = formatDimension(landscape ? sampleHeight : sampleWidth);
+    customHeightInput.value = formatDimension(landscape ? sampleWidth : sampleHeight);
+
+    const orientation = form.querySelector(
+        `input[name="orientation"][value="${landscape ? 'landscape' : 'portrait'}"]`,
+    );
+    if (orientation instanceof HTMLInputElement) orientation.checked = true;
+
+    handlePaperSettingChange();
+    customWidthInput.focus();
+}
+
+function expectedPaper() {
+    const paper = selectedPaper();
+    const orientation = selectedOrientation();
+    const portraitWidth = finiteNumber(paper?.width, 215.9);
+    const portraitHeight = finiteNumber(paper?.height, 279.4);
+    const landscape = orientation === 'landscape';
+    const width = landscape ? portraitHeight : portraitWidth;
+    const height = landscape ? portraitWidth : portraitHeight;
+
+    return {
+        paper,
+        orientation,
+        width,
+        height,
+        ratio: width / height,
+    };
+}
+
+function resizeBlankCanvas() {
+    const { ratio } = expectedPaper();
+    const longEdge = 1600;
+
+    if (ratio >= 1) {
+        canvas.width = longEdge;
+        canvas.height = Math.round(longEdge / ratio);
+    } else {
+        canvas.height = longEdge;
+        canvas.width = Math.round(longEdge * ratio);
+    }
+}
 
 function drawBlankPage() {
     const context = canvas.getContext('2d');
@@ -77,6 +198,7 @@ function drawBlankPage() {
     context.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
 }
 
+resizeBlankCanvas();
 drawBlankPage();
 
 const marker = new FieldMarker({
@@ -89,7 +211,14 @@ const marker = new FieldMarker({
 });
 
 function layoutMatchesBaseline() {
-    return snapshot(marker.toJSON()) === snapshot(baselineBoxes);
+    const customDimensionsMatch = paperSizeSelect.value !== 'custom'
+        || (finiteNumber(customWidthInput.value, 210) === baselineCustomWidth
+            && finiteNumber(customHeightInput.value, 297) === baselineCustomHeight);
+
+    return snapshot(marker.toJSON()) === snapshot(baselineBoxes)
+        && paperSizeSelect.value === baselinePaperSize
+        && selectedOrientation() === baselineOrientation
+        && customDimensionsMatch;
 }
 
 function updateResetUI() {
@@ -257,6 +386,55 @@ function showBuilderError(message) {
 function clearBuilderError() {
     element('builderError').classList.add('d-none');
     element('builderErrorMessage').textContent = '';
+}
+
+function updatePaperPreview() {
+    const status = element('paperPreviewStatus');
+    const title = element('paperPreviewTitle');
+    const message = element('paperPreviewMessage');
+    const { paper, orientation, ratio } = expectedPaper();
+    const orientationLabel = orientation === 'landscape' ? 'Landscape' : 'Portrait';
+
+    title.textContent = `${paper?.label ?? 'Paper'} · ${orientationLabel}`;
+    status.classList.remove('is-warning', 'is-match');
+
+    if (!sampleLoaded) {
+        message.textContent = `${paper?.dimensionsLabel ?? ''} blank preview. Upload a sample to check its page shape.`;
+        return;
+    }
+
+    const actualRatio = canvas.width / canvas.height;
+    const actualOrientation = actualRatio >= 1 ? 'landscape' : 'portrait';
+    const orientationMismatch = actualOrientation !== orientation;
+    const ratioDifference = Math.abs(actualRatio - ratio) / ratio;
+
+    if (orientationMismatch || ratioDifference > 0.1) {
+        status.classList.add('is-warning');
+        message.textContent = orientationMismatch
+            ? `The sample looks ${actualOrientation}, but this template is ${orientation}. It will not be stretched.`
+            : 'The sample proportions differ from this paper preset. Check the selected paper size before publishing.';
+        return;
+    }
+
+    status.classList.add('is-match');
+    message.textContent = 'The sample proportions are consistent with this template setting.';
+}
+
+function handlePaperSettingChange() {
+    const customSelected = paperSizeSelect.value === 'custom';
+    customPaperFields.classList.toggle('d-none', !customSelected);
+    customWidthInput.required = customSelected;
+    customHeightInput.required = customSelected;
+
+    if (!sampleLoaded) {
+        resizeBlankCanvas();
+        drawBlankPage();
+        marker.layout();
+        window.requestAnimationFrame(() => marker.resetZoom());
+    }
+
+    updatePaperPreview();
+    updateResetUI();
 }
 
 function undoFieldChange() {
@@ -444,9 +622,12 @@ async function openSample(file) {
     clearBuilderError();
 
     try {
-        await marker.load(file);
+        const measurement = await marker.load(file);
+        sampleLoaded = true;
         element('sampleFileName').textContent = file.name;
         element('sampleHint').classList.add('d-none');
+        renderSampleMeasurement(measurement);
+        updatePaperPreview();
         window.requestAnimationFrame(() => marker.resetZoom());
     } catch (error) {
         fileInput.value = '';
@@ -502,13 +683,36 @@ fileLabel.addEventListener('keydown', (event) => {
 
 viewport.addEventListener('drop', (event) => openSample(event.dataTransfer?.files?.[0]));
 
+paperSizeSelect.addEventListener('change', handlePaperSettingChange);
+useSampleSizeButton.addEventListener('click', useSampleAsCustomSize);
+[customWidthInput, customHeightInput].forEach((input) => {
+    input.addEventListener('input', handlePaperSettingChange);
+});
+form.querySelectorAll('input[name="orientation"]').forEach((input) => {
+    input.addEventListener('change', handlePaperSettingChange);
+});
+
 function restoreBaseline() {
     invalidFieldIndexes.clear();
+    paperSizeSelect.value = baselinePaperSize;
+    customWidthInput.value = String(baselineCustomWidth);
+    customHeightInput.value = String(baselineCustomHeight);
+    const orientation = form.querySelector(`input[name="orientation"][value="${baselineOrientation}"]`);
+    if (orientation instanceof HTMLInputElement) orientation.checked = true;
+
+    if (!sampleLoaded) {
+        resizeBlankCanvas();
+        drawBlankPage();
+    }
+
     marker.setBoxes(cloneBoxes(baselineBoxes));
     marker.resetZoom();
     viewport.scrollTo({ top: 0, left: 0 });
+    updatePaperPreview();
     clearBuilderError();
 }
+
+handlePaperSettingChange();
 
 element('resetFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
     const layoutChanged = !layoutMatchesBaseline();
@@ -588,4 +792,5 @@ form.addEventListener('submit', (event) => {
 });
 
 marker.setBoxes(cloneBoxes(initialBoxes));
+updatePaperPreview();
 window.requestAnimationFrame(() => marker.resetZoom());

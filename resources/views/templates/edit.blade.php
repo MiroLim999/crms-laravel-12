@@ -7,10 +7,24 @@
     @php
         $workingFields = old('fields', $fields);
         $published = (bool) $template?->is_active;
+        $currentPaperSize = old('paper_size', $template?->paper_size?->value ?? App\Enums\PaperSize::Letter->value);
+        $currentOrientation = old('orientation', $template?->orientation?->value ?? App\Enums\PageOrientation::Portrait->value);
+        $currentCustomWidth = old('custom_width_mm', $template?->custom_width_mm ?? 210);
+        $currentCustomHeight = old('custom_height_mm', $template?->custom_height_mm ?? 297);
         $builderConfig = [
             'initialFields' => $workingFields,
             'baselineFields' => $fields,
             'maxFields' => 100,
+            'paperSizes' => collect($paperSizes)->map(fn ($size) => [
+                'value' => $size->value,
+                'label' => $size->label(),
+                'dimensionsLabel' => $size->dimensionsLabel(),
+                ...$size->portraitDimensions(),
+            ])->values(),
+            'baselinePaperSize' => $template?->paper_size?->value ?? App\Enums\PaperSize::Letter->value,
+            'baselineOrientation' => $template?->orientation?->value ?? App\Enums\PageOrientation::Portrait->value,
+            'baselineCustomWidth' => $template?->custom_width_mm ?? 210,
+            'baselineCustomHeight' => $template?->custom_height_mm ?? 297,
         ];
     @endphp
 
@@ -166,6 +180,98 @@
                                     <div class="form-text">The certificate type is fixed for this layout.</div>
                                 </div>
 
+                                <div class="mb-3">
+                                    <label for="paper_size" class="form-label">Paper size</label>
+                                    <select id="paper_size" name="paper_size"
+                                            class="form-select @error('paper_size') is-invalid @enderror" required>
+                                        @foreach ($paperSizes as $paperSize)
+                                            <option value="{{ $paperSize->value }}"
+                                                    @selected($currentPaperSize === $paperSize->value)>
+                                                {{ $paperSize->label() }} &mdash; {{ $paperSize->dimensionsLabel() }}
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                    @error('paper_size')
+                                        <div class="invalid-feedback">{{ $message }}</div>
+                                    @enderror
+                                </div>
+
+                                <div class="template-custom-size mb-3 {{ $currentPaperSize === App\Enums\PaperSize::Custom->value ? '' : 'd-none' }}"
+                                     id="customPaperSizeFields">
+                                    <div class="row g-2">
+                                        <div class="col-6">
+                                            <label for="custom_width_mm" class="form-label">Width</label>
+                                            <div class="input-group">
+                                                <input type="number" id="custom_width_mm" name="custom_width_mm"
+                                                       value="{{ $currentCustomWidth }}" min="50" max="2000" step="0.1"
+                                                       class="form-control @error('custom_width_mm') is-invalid @enderror"
+                                                       aria-describedby="customPaperUnit">
+                                                <span class="input-group-text" id="customPaperUnit">mm</span>
+                                                @error('custom_width_mm')
+                                                    <div class="invalid-feedback">{{ $message }}</div>
+                                                @enderror
+                                            </div>
+                                        </div>
+                                        <div class="col-6">
+                                            <label for="custom_height_mm" class="form-label">Height</label>
+                                            <div class="input-group">
+                                                <input type="number" id="custom_height_mm" name="custom_height_mm"
+                                                       value="{{ $currentCustomHeight }}" min="50" max="2000" step="0.1"
+                                                       class="form-control @error('custom_height_mm') is-invalid @enderror">
+                                                <span class="input-group-text">mm</span>
+                                                @error('custom_height_mm')
+                                                    <div class="invalid-feedback">{{ $message }}</div>
+                                                @enderror
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="form-text">Enter the portrait dimensions. Landscape swaps the displayed width and height.</div>
+                                </div>
+
+                                <fieldset class="mb-3">
+                                    <legend class="form-label">Orientation</legend>
+                                    <div class="template-orientation-options">
+                                        @foreach ($orientations as $orientation)
+                                            <input type="radio" class="btn-check" name="orientation"
+                                                   id="orientation_{{ $orientation->value }}"
+                                                   value="{{ $orientation->value }}"
+                                                   @checked($currentOrientation === $orientation->value) required>
+                                            <label class="template-orientation-option"
+                                                   for="orientation_{{ $orientation->value }}">
+                                                <span class="template-orientation-sheet is-{{ $orientation->value }}"
+                                                      aria-hidden="true"></span>
+                                                <span>{{ $orientation->label() }}</span>
+                                            </label>
+                                        @endforeach
+                                    </div>
+                                    @error('orientation')
+                                        <div class="text-danger small mt-1">{{ $message }}</div>
+                                    @enderror
+                                </fieldset>
+
+                                <div class="template-paper-preview" id="paperPreviewStatus" role="status" aria-live="polite">
+                                    <i class="icon-base bx bx-file" aria-hidden="true"></i>
+                                    <div>
+                                        <strong id="paperPreviewTitle"></strong>
+                                        <span id="paperPreviewMessage"></span>
+                                    </div>
+                                </div>
+
+                                <div class="template-sample-size d-none" id="samplePageSize" aria-live="polite">
+                                    <div class="template-sample-size__heading">
+                                        <div>
+                                            <span class="template-sample-size__label">Uploaded sample</span>
+                                            <strong id="samplePhysicalSize">Page size unavailable</strong>
+                                        </div>
+                                        <button type="button" class="btn btn-sm btn-outline-primary"
+                                                id="useSampleSizeBtn" disabled>
+                                            Use as custom
+                                        </button>
+                                    </div>
+                                    <span id="samplePixelSize" class="template-sample-size__meta"></span>
+                                    <span id="sampleSizeNote" class="template-sample-size__meta"></span>
+                                </div>
+
                                 <div>
                                     <label for="description" class="form-label">Notes</label>
                                     <textarea id="description" name="description" rows="2" maxlength="1000"
@@ -259,7 +365,7 @@
                 </div>
                 <div class="modal-body">
                     <p class="mb-0 text-muted" id="resetFieldsModalDescription">
-                        Restore the markers to the layout that was loaded when this editor opened. Added and copied fields will be removed.
+                        Restore the markers, paper size, and orientation that were loaded when this editor opened. Added and copied fields will be removed.
                     </p>
                 </div>
                 <div class="modal-footer">

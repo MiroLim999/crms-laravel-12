@@ -5,7 +5,7 @@
 @section('content')
     <div id="documentPageHeader">
         <x-page-header :title="'Scan: ' . $docType->label()"
-                       :subtitle="'Template: ' . $template->name">
+                       :subtitle="'Template: ' . $template->name . ' · ' . $template->paper_size->label() . ' (' . $template->paperDimensionsLabel() . ') · ' . $template->orientation->label()">
             <a href="{{ route('documents.create') }}" class="btn btn-outline-secondary">Cancel</a>
         </x-page-header>
     </div>
@@ -140,6 +140,20 @@
                     <x-slot:actions>
                         <span class="badge bg-label-primary" id="fieldCount">0 fields</span>
                     </x-slot:actions>
+
+                    <div class="document-paper-spec">
+                        <i class="icon-base bx bx-file" aria-hidden="true"></i>
+                        <div>
+                            <strong>{{ $template->paper_size->label() }} &middot; {{ $template->orientation->label() }}</strong>
+                            <span>{{ $template->paperDimensionsLabel() }} expected</span>
+                        </div>
+                    </div>
+
+                    <div class="document-paper-warning d-none" id="paperMismatchWarning"
+                         role="alert" aria-live="polite">
+                        <i class="icon-base bx bx-error" aria-hidden="true"></i>
+                        <span id="paperMismatchMessage"></span>
+                    </div>
 
                     <div class="marker-field-bulk-actions">
                         <div class="form-check mb-0">
@@ -414,6 +428,13 @@
         threshold: @json($threshold),
         recogniseUrl: @json(route('documents.recognise')),
         csrf: @json(csrf_token()),
+        paper: {!! Illuminate\Support\Js::encode([
+            'sizeLabel' => $template->paper_size->label(),
+            'dimensionsLabel' => $template->paperDimensionsLabel(),
+            'orientation' => $template->orientation->value,
+            'orientationLabel' => $template->orientation->label(),
+            'aspectRatio' => $template->paperAspectRatio(),
+        ]) !!},
     };
 
     const el = (id) => {
@@ -599,6 +620,26 @@
     }
 
     // ---------------------------------------------------------------- step 1
+    function updatePaperMatchWarning() {
+        const warning = el('paperMismatchWarning');
+        const message = el('paperMismatchMessage');
+        const actualRatio = marker.canvas.width / marker.canvas.height;
+        const actualOrientation = actualRatio >= 1 ? 'landscape' : 'portrait';
+        const orientationMismatch = actualOrientation !== config.paper.orientation;
+        const ratioDifference = Math.abs(actualRatio - config.paper.aspectRatio) / config.paper.aspectRatio;
+
+        if (!orientationMismatch && ratioDifference <= 0.1) {
+            warning.classList.add('d-none');
+            message.textContent = '';
+            return;
+        }
+
+        message.textContent = orientationMismatch
+            ? `This scan looks ${actualOrientation}, but the published template expects ${config.paper.orientation}. The image is not stretched; align the markers carefully or choose an upright scan.`
+            : `This scan's proportions differ from ${config.paper.sizeLabel} (${config.paper.dimensionsLabel}). Check that the correct template and paper size were selected.`;
+        warning.classList.remove('d-none');
+    }
+
     async function openDocument(file) {
         if (!file) return;
 
@@ -614,6 +655,7 @@
         try {
             scanFile = file;
             await marker.load(file);
+            updatePaperMatchWarning();
             el('selectedFileName').textContent = file.name;
             showStep('mark');
             resetFieldHistory();

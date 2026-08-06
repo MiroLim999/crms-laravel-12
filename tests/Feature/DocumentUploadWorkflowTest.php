@@ -37,6 +37,10 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('id="deleteSelectedBtn"', escape: false)
                 ->assertSee('id="selectAllFields"', escape: false)
                 ->assertSee('id="deleteFieldsBtn"', escape: false)
+                ->assertSee('id="paperMismatchWarning"', escape: false)
+                ->assertSee('id="paperMismatchMessage"', escape: false)
+                ->assertSeeText('Short / Letter (8.5 × 11 in) · Portrait')
+                ->assertSee('"orientation":"portrait"', escape: false)
                 ->assertSee('id="ocrActionStatus"', escape: false)
                 ->assertSee('id="ocrProgressRing"', escape: false)
                 ->assertSee('id="ocrProgressValue"', escape: false)
@@ -56,6 +60,25 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('id="validationSubmitError"', escape: false)
                 ->assertSee('Only checked fields are submitted.');
         }
+    }
+
+    public function test_staff_workspace_uses_the_published_custom_page_dimensions(): void
+    {
+        $this->seed(DocumentTemplateSeeder::class);
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+        $template->update([
+            'paper_size' => 'custom',
+            'orientation' => 'landscape',
+            'custom_width_mm' => 240.5,
+            'custom_height_mm' => 355.6,
+        ]);
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
+            ->assertOk()
+            ->assertSeeText('Custom size')
+            ->assertSeeText('240.5 × 355.6 mm expected')
+            ->assertSee('"aspectRatio":1.478', escape: false);
     }
 
     public function test_only_explicitly_verified_fields_are_saved(): void

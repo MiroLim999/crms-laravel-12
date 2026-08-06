@@ -3,6 +3,8 @@
 namespace Database\Seeders;
 
 use App\Enums\DocumentType;
+use App\Enums\PageOrientation;
+use App\Enums\PaperSize;
 use App\Models\DocumentTemplate;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -26,6 +28,8 @@ class DocumentTemplateSeeder extends Seeder
                 ['doc_type' => $type->value, 'name' => $type->label()],
                 [
                     'description' => 'Starter layout ported from the TrOCR prototype.',
+                    'paper_size' => PaperSize::Letter->value,
+                    'orientation' => PageOrientation::Portrait->value,
                     'is_active' => true,
                     'created_by' => $superAdmin?->getKey(),
                 ],
