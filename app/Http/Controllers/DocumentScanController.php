@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
 use App\Models\DocumentTemplate;
+use App\Models\DocumentTypeDefinition;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Services\AuditLogger;
@@ -46,13 +46,14 @@ class DocumentScanController extends Controller
     {
         $health = $this->ocr->health();
 
-        $templates = collect(DocumentType::cases())
-            ->mapWithKeys(fn (DocumentType $type) => [
-                $type->value => DocumentTemplate::activeFor($type),
+        $documentTypes = DocumentTypeDefinition::ordered();
+        $templates = $documentTypes
+            ->mapWithKeys(fn (DocumentTypeDefinition $type) => [
+                $type->key => DocumentTemplate::activeFor($type),
             ]);
 
         return view('scan.create', [
-            'documentTypes' => DocumentType::cases(),
+            'documentTypes' => $documentTypes,
             'templates' => $templates,
             'health' => $health,
             'activeModel' => OcrModel::active(),
@@ -67,7 +68,7 @@ class DocumentScanController extends Controller
      */
     public function workspace(Request $request): View|RedirectResponse
     {
-        $type = DocumentType::tryFrom((string) $request->query('type'));
+        $type = DocumentTypeDefinition::where('key', (string) $request->query('type'))->first();
 
         if ($type === null) {
             return redirect()->route('documents.create');
@@ -132,7 +133,7 @@ class DocumentScanController extends Controller
     public function store(Request $request): RedirectResponse|JsonResponse
     {
         $validated = $request->validate([
-            'doc_type' => ['required', Rule::enum(DocumentType::class)],
+            'doc_type' => ['required', 'string', 'exists:document_types,key'],
             'document_template_id' => ['required', 'exists:document_templates,id'],
             'registry_number' => ['nullable', 'string', 'max:64'],
             'ocr_model_key' => [
@@ -155,10 +156,10 @@ class DocumentScanController extends Controller
         ]);
 
         $templateId = (int) $validated['document_template_id'];
-        $documentType = DocumentType::from((string) $validated['doc_type']);
-        $template = DocumentTemplate::find($templateId);
+        $documentType = DocumentTypeDefinition::where('key', (string) $validated['doc_type'])->firstOrFail();
+        $template = DocumentTemplate::with('documentTypeDefinition')->find($templateId);
 
-        if ($template?->doc_type !== $documentType) {
+        if ($template?->document_type_id !== $documentType->getKey()) {
             throw ValidationException::withMessages([
                 'document_template_id' => 'The selected template does not belong to this document type.',
             ]);
@@ -187,10 +188,11 @@ class DocumentScanController extends Controller
         $path = $scan->store('scans', 'local');
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $validated, $path) {
+            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType) {
 
                 $record = CivilRecord::create([
-                    'doc_type' => $validated['doc_type'],
+                    'doc_type' => $documentType->legacyType()->value,
+                    'document_type_id' => $documentType->getKey(),
                     'document_template_id' => $validated['document_template_id'],
                     'registry_number' => $validated['registry_number'] ?? null,
                     'status' => RecordStatus::Submitted,
@@ -224,13 +226,13 @@ class DocumentScanController extends Controller
                     'record.submitted',
                     $record,
                     new: [
-                        'doc_type' => $validated['doc_type'],
+                        'document_type' => $documentType->key,
                         'registry_number' => $validated['registry_number'] ?? null,
                         'field_count' => $record->fields->count(),
                         'corrected_fields' => $corrected,
                         'ocr_model' => $validated['ocr_model_key'],
                     ],
-                    description: "Submitted and locked a {$record->doc_type->shortLabel()} record.",
+                    description: "Submitted and locked a {$record->typeShortLabel()} record.",
                 );
 
                 return $record;

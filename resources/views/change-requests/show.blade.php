@@ -11,7 +11,7 @@
     <div class="row g-4">
         <div class="col-lg-8">
             <x-card title="Proposed changes"
-                    :subtitle="'Record #' . $changeRequest->record->getKey() . ' · ' . $changeRequest->record->doc_type->label()">
+                    :subtitle="'Record #' . $changeRequest->record->getKey() . ' · ' . $changeRequest->record->typeLabel()">
                 <div class="table-responsive">
                     <table class="table align-middle mb-0">
                         <thead>

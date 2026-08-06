@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
+use App\Models\DocumentTypeDefinition;
 use App\Models\OcrSetting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
@@ -23,7 +23,7 @@ class RecordController extends Controller
     public function index(Request $request): View
     {
         $records = CivilRecord::query()
-            ->with(['fields', 'submitter'])
+            ->with(['fields', 'submitter', 'documentTypeDefinition'])
             ->when($request->filled('q'), function ($query) use ($request) {
                 $term = '%'.$request->string('q').'%';
                 $query->where(function ($q) use ($term) {
@@ -31,7 +31,10 @@ class RecordController extends Controller
                         ->orWhereHas('fields', fn ($f) => $f->where('verified_value', 'like', $term));
                 });
             })
-            ->when($request->filled('type'), fn ($q) => $q->where('doc_type', $request->string('type')))
+            ->when($request->filled('type'), fn ($q) => $q->whereHas(
+                'documentTypeDefinition',
+                fn ($typeQuery) => $typeQuery->where('key', $request->string('type')),
+            ))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('from'), fn ($q) => $q->whereDate('submitted_at', '>=', $request->date('from')))
             ->when($request->filled('to'), fn ($q) => $q->whereDate('submitted_at', '<=', $request->date('to')))
@@ -42,7 +45,7 @@ class RecordController extends Controller
 
         return view('records.index', [
             'records' => $records,
-            'documentTypes' => DocumentType::cases(),
+            'documentTypes' => DocumentTypeDefinition::ordered(),
             'statuses' => RecordStatus::cases(),
         ]);
     }
@@ -53,6 +56,7 @@ class RecordController extends Controller
             'fields',
             'submitter',
             'template',
+            'documentTypeDefinition',
             'changeRequests.requester',
             'changeRequests.reviewer',
             'changeRequests.items.field',

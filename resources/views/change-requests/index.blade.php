@@ -53,7 +53,7 @@
                                 <td>
                                     @if ($request->record)
                                         <a href="{{ route('records.show', $request->record) }}">
-                                            {{ $request->record->doc_type->shortLabel() }} #{{ $request->record->getKey() }}
+                                            {{ $request->record->typeShortLabel() }} #{{ $request->record->getKey() }}
                                         </a>
                                     @else
                                         <span class="text-muted">—</span>

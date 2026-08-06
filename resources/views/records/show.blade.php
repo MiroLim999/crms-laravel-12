@@ -4,7 +4,7 @@
 
 @section('content')
     <x-page-header :title="$record->title()"
-                   :subtitle="$record->doc_type->label() . ' · ' . ($record->registry_number ?? 'No registry number')">
+                   :subtitle="$record->typeLabel() . ' · ' . ($record->registry_number ?? 'No registry number')">
         @if ($record->isLocked() && auth()->user()->can('change-requests.create'))
             @if ($record->hasPendingChangeRequest())
                 <span class="badge bg-label-warning align-self-center">Change request pending</span>

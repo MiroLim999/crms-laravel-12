@@ -62,6 +62,7 @@
             @endif
 
             <input type="hidden" name="doc_type" value="{{ $docType->value }}">
+            <input type="hidden" name="document_type_id" value="{{ $docType->getKey() }}">
             <input type="hidden" name="publish" value="{{ $published ? 1 : 0 }}" id="publishIntent">
             <div id="fieldInputs"></div>
 
@@ -171,13 +172,13 @@
                                 </div>
 
                                 <div class="mb-3">
-                                    <label class="form-label">Certificate type</label>
+                                    <label class="form-label">Document type</label>
                                     <div class="template-builder-locked-value">
                                         <i class="icon-base bx {{ $docType->icon() }}" aria-hidden="true"></i>
                                         <span>{{ $docType->label() }}</span>
                                         <i class="icon-base bx bx-lock-alt ms-auto" aria-hidden="true"></i>
                                     </div>
-                                    <div class="form-text">The certificate type is fixed for this layout.</div>
+                                    <div class="form-text">The document type is fixed for this layout.</div>
                                 </div>
 
                                 <div class="mb-3">

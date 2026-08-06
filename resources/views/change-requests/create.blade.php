@@ -4,7 +4,7 @@
 
 @section('content')
     <x-page-header title="Request a Change"
-                   :subtitle="'Record #' . $record->getKey() . ' · ' . $record->doc_type->label()" />
+                   :subtitle="'Record #' . $record->getKey() . ' · ' . $record->typeLabel()" />
 
     <div class="alert alert-info d-flex align-items-start" role="alert">
         <i class="icon-base bx bx-info-circle icon-md me-2"></i>

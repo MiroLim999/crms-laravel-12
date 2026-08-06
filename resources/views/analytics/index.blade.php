@@ -208,7 +208,7 @@
             if (byType.some((t) => t.total > 0)) {
                 new ApexCharts(document.getElementById('records-by-type-chart'), {
                     chart: { type: 'donut', height: 240 },
-                    colors: [purple, '#03c3ec', '#71dd37'],
+                    colors: [purple, '#03c3ec', '#71dd37', '#ffab00', '#ff3e1d', '#8592a3', '#20c997', '#8e44ad'],
                     labels: byType.map((t) => t.label),
                     series: byType.map((t) => t.total),
                     legend: { position: 'bottom' },

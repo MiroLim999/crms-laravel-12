@@ -1816,6 +1816,34 @@
   }
 }
 
+.template-library-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  min-block-size: 2rem;
+  padding: .35rem .55rem;
+  color: var(--bs-secondary-color);
+  background: transparent;
+  border: 0;
+  border-radius: .35rem;
+  font: inherit;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--bs-primary);
+    background: rgba(105, 108, 255, .07);
+  }
+
+  i {
+    font-size: 1rem;
+    transition: transform .18s ease;
+  }
+
+  &[aria-expanded='true'] i {
+    transform: rotate(180deg);
+  }
+}
+
 .template-library-empty {
   display: flex;
   align-items: center;

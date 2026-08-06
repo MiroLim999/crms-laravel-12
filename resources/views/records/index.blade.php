@@ -89,8 +89,8 @@
                                 </td>
                                 <td>
                                     <span class="d-inline-flex align-items-center gap-1">
-                                        <i class="icon-base bx {{ $record->doc_type->icon() }} icon-sm text-muted"></i>
-                                        {{ $record->doc_type->shortLabel() }}
+                                        <i class="icon-base bx {{ $record->typeIcon() }} icon-sm text-muted"></i>
+                                        {{ $record->typeShortLabel() }}
                                     </span>
                                 </td>
                                 <td>

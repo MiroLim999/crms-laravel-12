@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\DocumentType;
 use App\Models\CivilRecord;
 use App\Models\DocumentTemplate;
+use App\Models\DocumentTypeDefinition;
 use App\Models\OcrModel;
 use App\Models\User;
 use Database\Seeders\DocumentTemplateSeeder;
@@ -182,6 +183,56 @@ class DocumentUploadWorkflowTest extends TestCase
             ->assertJsonValidationErrors('ocr_model_key');
 
         $this->assertDatabaseCount('records', 0);
+    }
+
+    public function test_custom_document_type_can_complete_the_staff_submission_flow(): void
+    {
+        Storage::fake('local');
+        $this->registerTestModel();
+        $staff = User::factory()->staff()->create();
+        $type = DocumentTypeDefinition::create([
+            'key' => 'custom-local-registry',
+            'name' => 'Local Registry Form',
+            'short_name' => 'Local Registry Form',
+            'icon' => 'bx-file-blank',
+            'is_system' => false,
+        ]);
+        $template = DocumentTemplate::create([
+            'name' => 'Local registry layout',
+            'doc_type' => DocumentType::Custom->value,
+            'document_type_id' => $type->getKey(),
+            'paper_size' => 'a4',
+            'orientation' => 'portrait',
+            'is_active' => true,
+            'created_by' => User::factory()->superAdmin()->create()->getKey(),
+        ]);
+        $template->fields()->create([
+            'name' => 'Resident Full Name',
+            'x' => 0.1,
+            'y' => 0.1,
+            'width' => 0.5,
+            'height' => 0.08,
+            'sort_order' => 0,
+            'is_required' => true,
+        ]);
+
+        $this->actingAs($staff)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, [
+                    $this->verifiedField('Resident Full Name', 'Ana Reyes'),
+                ]),
+                'doc_type' => $type->key,
+            ])
+            ->assertCreated();
+
+        $record = CivilRecord::with('documentTypeDefinition')->firstOrFail();
+        $this->assertSame(DocumentType::Custom, $record->doc_type);
+        $this->assertSame($type->getKey(), $record->document_type_id);
+        $this->assertSame('Local Registry Form', $record->typeLabel());
+
+        $type->update(['name' => 'Renamed Local Form', 'short_name' => 'Renamed Local Form']);
+        $this->assertSame('Renamed Local Form', $record->refresh()->typeLabel());
     }
 
     /** @param array<int, array<string, mixed>> $fields */

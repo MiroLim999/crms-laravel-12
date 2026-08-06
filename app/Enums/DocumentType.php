@@ -11,6 +11,7 @@ enum DocumentType: string
     case Birth = 'birth';
     case Death = 'death';
     case Marriage = 'marriage';
+    case Custom = 'custom';
 
     public function label(): string
     {
@@ -18,6 +19,7 @@ enum DocumentType: string
             self::Birth => 'Birth Certificate',
             self::Death => 'Death Certificate',
             self::Marriage => 'Marriage Certificate',
+            self::Custom => 'Custom Document',
         };
     }
 
@@ -27,6 +29,7 @@ enum DocumentType: string
             self::Birth => 'Birth',
             self::Death => 'Death',
             self::Marriage => 'Marriage',
+            self::Custom => 'Custom',
         };
     }
 
@@ -39,6 +42,7 @@ enum DocumentType: string
             self::Birth => 'bx-cake',
             self::Death => 'bx-file',
             self::Marriage => 'bx-heart',
+            self::Custom => 'bx-file-blank',
         };
     }
 
@@ -76,6 +80,9 @@ enum DocumentType: string
                 $f('Wife Full Name', 0.30, 0.37, 0.45, 0.05),
                 $f('Date of Marriage', 0.30, 0.46, 0.30, 0.05),
                 $f('Place of Marriage', 0.30, 0.55, 0.40, 0.05),
+            ],
+            self::Custom => [
+                $f('Primary value', 0.15, 0.15, 0.70, 0.08),
             ],
         };
     }

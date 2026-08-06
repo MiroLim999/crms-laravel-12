@@ -17,13 +17,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property float|null $custom_width_mm
  * @property float|null $custom_height_mm
  * @property bool $is_active
+ * @property int|null $document_type_id
  */
 class DocumentTemplate extends Model
 {
     use HasFactory;
 
     protected $fillable = [
-        'name', 'doc_type', 'paper_size', 'orientation', 'custom_width_mm', 'custom_height_mm', 'description',
+        'name', 'doc_type', 'document_type_id', 'paper_size', 'orientation', 'custom_width_mm', 'custom_height_mm', 'description',
         'is_active', 'created_by',
     ];
 
@@ -42,6 +43,11 @@ class DocumentTemplate extends Model
     public function fields(): HasMany
     {
         return $this->hasMany(DocumentTemplateField::class)->orderBy('sort_order');
+    }
+
+    public function documentTypeDefinition(): BelongsTo
+    {
+        return $this->belongsTo(DocumentTypeDefinition::class, 'document_type_id');
     }
 
     public function records(): HasMany
@@ -91,14 +97,52 @@ class DocumentTemplate extends Model
         return rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.');
     }
 
+    public function typeLabel(): string
+    {
+        return $this->documentTypeDefinition?->label() ?? $this->doc_type->label();
+    }
+
+    public function typeShortLabel(): string
+    {
+        return $this->documentTypeDefinition?->shortLabel() ?? $this->doc_type->shortLabel();
+    }
+
+    public function typeIcon(): string
+    {
+        return $this->documentTypeDefinition?->icon() ?? $this->doc_type->icon();
+    }
+
     /**
      * The template Staff get when starting a new document of this type.
      */
-    public static function activeFor(DocumentType $type): ?self
+    public static function activeFor(DocumentType|DocumentTypeDefinition|string $type): ?self
     {
-        return static::with('fields')
-            ->where('doc_type', $type->value)
+        $definition = $type instanceof DocumentTypeDefinition
+            ? $type
+            : DocumentTypeDefinition::where('key', $type instanceof DocumentType ? $type->value : $type)->first();
+
+        $query = static::with(['fields', 'documentTypeDefinition'])
             ->where('is_active', true)
-            ->first();
+            ->when(
+                $definition,
+                fn ($builder) => $builder->where('document_type_id', $definition->getKey()),
+                fn ($builder) => $builder->where('doc_type', $type instanceof DocumentType ? $type->value : $type),
+            );
+
+        return $query->first();
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $template) {
+            if ($template->document_type_id !== null) {
+                return;
+            }
+
+            $key = $template->doc_type instanceof DocumentType
+                ? $template->doc_type->value
+                : (string) $template->doc_type;
+            $template->document_type_id = DocumentTypeDefinition::where('key', $key)->value('id');
+        });
     }
 }

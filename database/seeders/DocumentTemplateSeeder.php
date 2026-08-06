@@ -6,6 +6,7 @@ use App\Enums\DocumentType;
 use App\Enums\PageOrientation;
 use App\Enums\PaperSize;
 use App\Models\DocumentTemplate;
+use App\Models\DocumentTypeDefinition;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 
@@ -23,10 +24,12 @@ class DocumentTemplateSeeder extends Seeder
     {
         $superAdmin = User::where('email', config('crms.super_admin.email'))->first();
 
-        foreach (DocumentType::cases() as $type) {
+        foreach (array_filter(DocumentType::cases(), fn (DocumentType $type) => $type !== DocumentType::Custom) as $type) {
+            $definition = DocumentTypeDefinition::where('key', $type->value)->firstOrFail();
             $template = DocumentTemplate::firstOrCreate(
                 ['doc_type' => $type->value, 'name' => $type->label()],
                 [
+                    'document_type_id' => $definition->getKey(),
                     'description' => 'Starter layout ported from the TrOCR prototype.',
                     'paper_size' => PaperSize::Letter->value,
                     'orientation' => PageOrientation::Portrait->value,

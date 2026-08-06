@@ -3,11 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ChangeRequestStatus;
-use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
 use App\Enums\RoleSlug;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
+use App\Models\DocumentTypeDefinition;
 use App\Models\OcrSetting;
 use App\Models\RecordField;
 use Illuminate\Support\Carbon;
@@ -58,23 +58,23 @@ class AnalyticsController extends Controller
      * Every document type appears, including ones with no records yet, so the
      * breakdown reads the same from one month to the next.
      *
-     * @return Collection<int, array{type: DocumentType, total: int, share: float}>
+     * @return Collection<int, array{type: DocumentTypeDefinition, total: int, share: float}>
      */
     private function recordsByDocumentType(): Collection
     {
         $counts = CivilRecord::query()
-            ->select('doc_type')
+            ->select('document_type_id')
             ->selectRaw('COUNT(*) as total')
-            ->groupBy('doc_type')
-            ->pluck('total', 'doc_type');
+            ->groupBy('document_type_id')
+            ->pluck('total', 'document_type_id');
 
         $total = max(1, (int) $counts->sum());
 
-        return collect(DocumentType::cases())
-            ->map(fn (DocumentType $type) => [
+        return DocumentTypeDefinition::ordered()
+            ->map(fn (DocumentTypeDefinition $type) => [
                 'type' => $type,
-                'total' => (int) ($counts[$type->value] ?? 0),
-                'share' => round(((int) ($counts[$type->value] ?? 0)) / $total * 100, 1),
+                'total' => (int) ($counts[$type->getKey()] ?? 0),
+                'share' => round(((int) ($counts[$type->getKey()] ?? 0)) / $total * 100, 1),
             ])
             ->sortByDesc('total')
             ->values();

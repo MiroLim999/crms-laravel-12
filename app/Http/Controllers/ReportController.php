@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
 use App\Enums\RoleSlug;
 use App\Models\CivilRecord;
+use App\Models\DocumentTypeDefinition;
 use App\Models\RecordField;
 use App\Models\User;
 use App\Services\AuditLogger;
@@ -32,7 +32,7 @@ class ReportController extends Controller
         $filters = $this->filters($request);
 
         $records = $this->query($filters)
-            ->with(['fields', 'submitter', 'creator'])
+            ->with(['fields', 'submitter', 'creator', 'documentTypeDefinition'])
             ->orderByDesc('created_at')
             ->paginate(25)
             ->withQueryString();
@@ -41,7 +41,7 @@ class ReportController extends Controller
             'filters' => $filters,
             'records' => $records,
             'summary' => $this->summary($filters),
-            'documentTypes' => DocumentType::cases(),
+            'documentTypes' => DocumentTypeDefinition::ordered(),
             'dataEntryUsers' => $this->dataEntryUsers(),
         ]);
     }
@@ -82,7 +82,7 @@ class ReportController extends Controller
             ]);
 
             $this->query($filters)
-                ->with(['fields', 'submitter', 'creator'])
+                ->with(['fields', 'submitter', 'creator', 'documentTypeDefinition'])
                 ->chunkById(200, function (Collection $chunk) use ($handle) {
                     foreach ($chunk as $record) {
                         fputcsv($handle, $this->row($record));
@@ -110,7 +110,7 @@ class ReportController extends Controller
         return [
             $record->getKey(),
             $record->registry_number,
-            $record->doc_type->label(),
+            $record->typeLabel(),
             $record->status->label(),
             $record->title(),
             $record->created_at?->toDateTimeString(),
@@ -134,7 +134,7 @@ class ReportController extends Controller
         $validated = $request->validate([
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
-            'doc_type' => ['nullable', 'string', 'in:'.implode(',', array_column(DocumentType::cases(), 'value'))],
+            'doc_type' => ['nullable', 'string', 'exists:document_types,key'],
             'status' => ['nullable', 'string', 'in:'.implode(',', array_column(RecordStatus::cases(), 'value'))],
             'submitted_by' => ['nullable', 'integer', 'exists:users,id'],
         ]);
@@ -164,7 +164,10 @@ class ReportController extends Controller
                 '<=',
                 Carbon::parse($to)->endOfDay(),
             ))
-            ->when($filters['doc_type'], fn (Builder $q, $type) => $q->where('doc_type', $type))
+            ->when($filters['doc_type'], fn (Builder $q, $type) => $q->whereHas(
+                'documentTypeDefinition',
+                fn (Builder $typeQuery) => $typeQuery->where('key', $type),
+            ))
             ->when($filters['status'], fn (Builder $q, $status) => $q->where('status', $status))
             ->when($filters['submitted_by'], fn (Builder $q, $id) => $q->where('submitted_by', $id));
     }

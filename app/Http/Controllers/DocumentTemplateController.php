@@ -6,6 +6,7 @@ use App\Enums\DocumentType;
 use App\Enums\PageOrientation;
 use App\Enums\PaperSize;
 use App\Models\DocumentTemplate;
+use App\Models\DocumentTypeDefinition;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -29,18 +30,19 @@ class DocumentTemplateController extends Controller
     {
         return view('templates.index', [
             'templates' => DocumentTemplate::withCount(['fields', 'records'])
-                ->with('creator')
-                ->orderBy('doc_type')
+                ->with(['creator', 'documentTypeDefinition'])
+                ->orderBy('document_type_id')
                 ->orderByDesc('is_active')
                 ->get()
-                ->groupBy(fn (DocumentTemplate $t) => $t->doc_type->value),
-            'documentTypes' => DocumentType::cases(),
+                ->groupBy('document_type_id'),
+            'documentTypes' => DocumentTypeDefinition::ordered(),
         ]);
     }
 
     public function create(Request $request): View
     {
-        $type = DocumentType::tryFrom((string) $request->query('type')) ?? DocumentType::Birth;
+        $requestedKey = (string) $request->query('type', DocumentType::Birth->value);
+        $type = DocumentTypeDefinition::where('key', $requestedKey)->firstOrFail();
 
         return view('templates.edit', [
             'template' => null,
@@ -55,11 +57,13 @@ class DocumentTemplateController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $validated = $this->validatePayload($request);
+        $documentType = DocumentTypeDefinition::findOrFail($validated['document_type_id']);
 
-        $template = DB::transaction(function () use ($validated, $request) {
+        $template = DB::transaction(function () use ($validated, $request, $documentType) {
             $template = DocumentTemplate::create([
                 'name' => $validated['name'],
-                'doc_type' => $validated['doc_type'],
+                'doc_type' => $documentType->legacyType()->value,
+                'document_type_id' => $documentType->getKey(),
                 'paper_size' => $validated['paper_size'],
                 'orientation' => $validated['orientation'],
                 'custom_width_mm' => $validated['custom_width_mm'],
@@ -74,7 +78,7 @@ class DocumentTemplateController extends Controller
             $this->audit->log(
                 'template.created',
                 $template,
-                new: ['name' => $template->name, 'doc_type' => $validated['doc_type'],
+                new: ['name' => $template->name, 'document_type' => $documentType->key,
                     'paper_size' => $validated['paper_size'], 'orientation' => $validated['orientation'],
                     'custom_width_mm' => $validated['custom_width_mm'],
                     'custom_height_mm' => $validated['custom_height_mm'],
@@ -101,11 +105,11 @@ class DocumentTemplateController extends Controller
 
     public function edit(DocumentTemplate $template): View
     {
-        $template->load('fields');
+        $template->load(['fields', 'documentTypeDefinition']);
 
         return view('templates.edit', [
             'template' => $template,
-            'docType' => $template->doc_type,
+            'docType' => $template->documentTypeDefinition,
             'fields' => $template->fields->map(fn ($f) => [
                 'name' => $f->name,
                 'x' => $f->x,
@@ -121,11 +125,13 @@ class DocumentTemplateController extends Controller
     public function update(Request $request, DocumentTemplate $template): RedirectResponse
     {
         $validated = $this->validatePayload($request, $template);
+        $documentType = DocumentTypeDefinition::findOrFail($validated['document_type_id']);
 
-        DB::transaction(function () use ($template, $validated) {
+        DB::transaction(function () use ($template, $validated, $documentType) {
             $template->fill([
                 'name' => $validated['name'],
-                'doc_type' => $validated['doc_type'],
+                'doc_type' => $documentType->legacyType()->value,
+                'document_type_id' => $documentType->getKey(),
                 'paper_size' => $validated['paper_size'],
                 'orientation' => $validated['orientation'],
                 'custom_width_mm' => $validated['custom_width_mm'],
@@ -167,7 +173,7 @@ class DocumentTemplateController extends Controller
 
         DB::transaction(fn () => $this->publishTemplate($template));
 
-        return back()->with('success', "'{$template->name}' is now published for {$template->doc_type->label()}.");
+        return back()->with('success', "'{$template->name}' is now published for {$template->typeLabel()}.");
     }
 
     /**
@@ -179,7 +185,7 @@ class DocumentTemplateController extends Controller
         if ($template->is_active) {
             return back()->with(
                 'error',
-                'A published template cannot be deleted. Publish another layout for this certificate type first.',
+                'A published template cannot be deleted. Publish another layout for this document type first.',
             );
         }
 
@@ -195,7 +201,7 @@ class DocumentTemplateController extends Controller
             $template,
             old: [
                 'name' => $template->name,
-                'doc_type' => $template->doc_type->value,
+                'document_type' => $template->documentTypeDefinition?->key ?? $template->doc_type->value,
                 'paper_size' => $template->paper_size->value,
                 'orientation' => $template->orientation->value,
             ],
@@ -212,8 +218,25 @@ class DocumentTemplateController extends Controller
      */
     private function validatePayload(Request $request, ?DocumentTemplate $template = null): array
     {
+        $definition = $request->filled('document_type_id')
+            ? DocumentTypeDefinition::find($request->integer('document_type_id'))
+            : DocumentTypeDefinition::where('key', (string) $request->input('doc_type'))->first();
+
+        if ($definition) {
+            $request->merge([
+                'document_type_id' => $definition->getKey(),
+                'doc_type' => $definition->legacyType()->value,
+            ]);
+        }
+
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:120'],
+            'document_type_id' => [
+                'required',
+                'integer',
+                'exists:document_types,id',
+                ...($template ? [Rule::in([$template->document_type_id])] : []),
+            ],
             'doc_type' => [
                 'required',
                 Rule::enum(DocumentType::class),
@@ -268,7 +291,7 @@ class DocumentTemplateController extends Controller
     private function publishTemplate(DocumentTemplate $template): void
     {
         $sameType = DocumentTemplate::query()
-            ->where('doc_type', $template->doc_type->value)
+            ->where('document_type_id', $template->document_type_id)
             ->lockForUpdate()
             ->get();
 
@@ -294,7 +317,7 @@ class DocumentTemplateController extends Controller
                 'paper_size' => $template->paper_size->value,
                 'orientation' => $template->orientation->value,
             ],
-            description: "Published template '{$template->name}' for {$template->doc_type->label()}.",
+            description: "Published template '{$template->name}' for {$template->typeLabel()}.",
         );
     }
 

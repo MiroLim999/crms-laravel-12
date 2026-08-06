@@ -9,6 +9,7 @@ use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentScanController;
 use App\Http\Controllers\DocumentTemplateController;
+use App\Http\Controllers\DocumentTypeDefinitionController;
 use App\Http\Controllers\OcrEngineController;
 use App\Http\Controllers\OcrModelController;
 use App\Http\Controllers\OcrUploadController;
@@ -172,6 +173,10 @@ Route::middleware('auth')->group(function () {
      * Staff capture, so changing one changes what the registry records.
      */
     Route::middleware('can:templates.manage')->group(function () {
+        Route::post('templates/document-types', [DocumentTypeDefinitionController::class, 'store'])
+            ->name('templates.document-types.store');
+        Route::put('templates/document-types/{documentType}', [DocumentTypeDefinitionController::class, 'update'])
+            ->name('templates.document-types.update');
         Route::get('templates', [DocumentTemplateController::class, 'index'])->name('templates.index');
         Route::get('templates/create', [DocumentTemplateController::class, 'create'])->name('templates.create');
         Route::post('templates', [DocumentTemplateController::class, 'store'])->name('templates.store');

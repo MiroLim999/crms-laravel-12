@@ -27,7 +27,7 @@ class ChangeRequestController extends Controller
         $user = $request->user();
 
         $requests = ChangeRequest::query()
-            ->with(['record', 'requester', 'reviewer', 'items'])
+            ->with(['record.documentTypeDefinition', 'requester', 'reviewer', 'items'])
             // Staff see their own requests; reviewers see everything.
             ->when(! $user->can('change-requests.moderate'),
                 fn ($q) => $q->where('requested_by', $user->getKey()))
@@ -57,7 +57,7 @@ class ChangeRequestController extends Controller
                 ->with('error', 'This record is not locked, so it needs no change request.');
         }
 
-        return view('change-requests.create', ['record' => $record->load('fields')]);
+        return view('change-requests.create', ['record' => $record->load(['fields', 'documentTypeDefinition'])]);
     }
 
     public function store(Request $request, CivilRecord $record): RedirectResponse
@@ -99,7 +99,7 @@ class ChangeRequestController extends Controller
 
         return view('change-requests.show', [
             'changeRequest' => $changeRequest->load([
-                'record.fields', 'requester', 'reviewer', 'items.field',
+                'record.fields', 'record.documentTypeDefinition', 'requester', 'reviewer', 'items.field',
             ]),
             'canModerate' => $request->user()->can('change-requests.moderate'),
         ]);

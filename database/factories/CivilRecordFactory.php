@@ -20,7 +20,10 @@ class CivilRecordFactory extends Factory
      */
     public function definition(): array
     {
-        $type = fake()->randomElement(DocumentType::cases());
+        $type = fake()->randomElement(array_filter(
+            DocumentType::cases(),
+            fn (DocumentType $type) => $type !== DocumentType::Custom,
+        ));
 
         return [
             'doc_type' => $type->value,

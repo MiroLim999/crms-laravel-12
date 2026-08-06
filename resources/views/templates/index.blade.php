@@ -18,6 +18,12 @@
                         {{ $type->label() }}
                     </a>
                 @endforeach
+                <div class="dropdown-divider"></div>
+                <button class="dropdown-item" type="button" data-bs-toggle="modal"
+                        data-bs-target="#newDocumentTypeModal">
+                    <i class="icon-base bx bx-folder-plus icon-sm me-2" aria-hidden="true"></i>
+                    New document type&hellip;
+                </button>
             </div>
         </div>
     </x-page-header>
@@ -26,27 +32,29 @@
         <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
         <div>
             <strong>Published layouts are the Staff defaults.</strong>
-            <span>Drafts remain private until you publish them. Publishing a layout replaces the current one for that certificate type.</span>
+            <span>Drafts remain private until you publish them. Publishing a layout replaces the current one for that document type.</span>
         </div>
     </div>
 
     <div class="row g-4">
         @foreach ($documentTypes as $type)
             @php
-                $group = $templates[$type->value] ?? collect();
+                $group = $templates[$type->getKey()] ?? collect();
                 $published = $group->firstWhere('is_active', true);
                 $draftCount = $group->where('is_active', false)->count();
+                $expanded = request('open') === $type->key || (! request()->filled('open') && $loop->first);
+                $collapseId = 'template-layouts-' . $type->getKey();
             @endphp
 
             <div class="col-12">
-                <section class="card template-library-card" aria-labelledby="template-type-{{ $type->value }}">
+                <section class="card template-library-card" aria-labelledby="template-type-{{ $type->getKey() }}">
                     <header class="template-library-card__header">
                         <div class="template-library-card__identity">
                             <span class="template-library-card__icon" aria-hidden="true">
                                 <i class="icon-base bx {{ $type->icon() }}"></i>
                             </span>
                             <div>
-                                <h2 class="h5 mb-1" id="template-type-{{ $type->value }}">{{ $type->label() }}</h2>
+                                <h2 class="h5 mb-1" id="template-type-{{ $type->getKey() }}">{{ $type->label() }}</h2>
                                 @if ($published)
                                     <p class="mb-0 text-muted small">
                                         Staff currently use <strong class="text-body">{{ $published->name }}</strong>.
@@ -65,19 +73,36 @@
                                 <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>
                                 New layout
                             </a>
+                            @unless ($type->is_system)
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#renameDocumentType{{ $type->getKey() }}"
+                                        aria-label="Rename {{ $type->label() }}">
+                                    <i class="icon-base bx bx-edit-alt icon-sm" aria-hidden="true"></i>
+                                    Rename
+                                </button>
+                            @endunless
+                            <button type="button" class="template-library-toggle"
+                                    data-bs-toggle="collapse" data-bs-target="#{{ $collapseId }}"
+                                    aria-expanded="{{ $expanded ? 'true' : 'false' }}"
+                                    aria-controls="{{ $collapseId }}">
+                                <span>{{ $expanded ? 'Hide' : 'Show' }} layouts</span>
+                                <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
+                            </button>
                         </div>
                     </header>
 
-                    @if ($group->isEmpty())
-                        <div class="template-library-empty">
-                            <span>No layouts have been created for this certificate type.</span>
-                            <a href="{{ route('templates.create', ['type' => $type->value]) }}">
-                                Create the first layout
-                                <i class="icon-base bx bx-chevron-right" aria-hidden="true"></i>
-                            </a>
-                        </div>
-                    @else
-                        <div class="table-responsive">
+                    <div class="collapse {{ $expanded ? 'show' : '' }}" id="{{ $collapseId }}">
+                        @if ($group->isEmpty())
+                            <div class="template-library-empty">
+                                <span>No layouts have been created for this document type.</span>
+                                <a href="{{ route('templates.create', ['type' => $type->value]) }}">
+                                    Create the first layout
+                                    <i class="icon-base bx bx-chevron-right" aria-hidden="true"></i>
+                                </a>
+                            </div>
+                        @else
+                            <div class="table-responsive">
                             <table class="table table-hover align-middle mb-0">
                                 <thead>
                                     <tr>
@@ -135,10 +160,109 @@
                                     @endforeach
                                 </tbody>
                             </table>
-                        </div>
-                    @endif
+                            </div>
+                        @endif
+                    </div>
                 </section>
+
+                @unless ($type->is_system)
+                    <div class="modal fade" id="renameDocumentType{{ $type->getKey() }}" tabindex="-1"
+                         aria-labelledby="renameDocumentTypeLabel{{ $type->getKey() }}" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered modal-sm">
+                            <div class="modal-content">
+                                <form method="POST" action="{{ route('templates.document-types.update', $type) }}">
+                                    @csrf
+                                    @method('PUT')
+                                    <input type="hidden" name="document_type_form" value="rename-{{ $type->getKey() }}">
+                                    <div class="modal-header">
+                                        <div>
+                                            <div class="text-uppercase text-primary small fw-semibold mb-1">Document type</div>
+                                            <h2 class="modal-title h5" id="renameDocumentTypeLabel{{ $type->getKey() }}">Rename type</h2>
+                                        </div>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <label for="renameDocumentTypeName{{ $type->getKey() }}" class="form-label">Name</label>
+                                        <input type="text" maxlength="120" required
+                                               class="form-control {{ old('document_type_form') === 'rename-'.$type->getKey() && $errors->has('document_type_name') ? 'is-invalid' : '' }}"
+                                               id="renameDocumentTypeName{{ $type->getKey() }}"
+                                               name="document_type_name"
+                                               value="{{ old('document_type_form') === 'rename-'.$type->getKey() ? old('document_type_name') : $type->name }}">
+                                        @if (old('document_type_form') === 'rename-'.$type->getKey())
+                                            @error('document_type_name')
+                                                <div class="invalid-feedback">{{ $message }}</div>
+                                            @enderror
+                                        @endif
+                                        <div class="form-text">Layouts and saved records stay connected after renaming.</div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                                        <button type="submit" class="btn btn-primary">Save name</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                @endunless
             </div>
         @endforeach
     </div>
+
+    <div class="modal fade" id="newDocumentTypeModal" tabindex="-1"
+         aria-labelledby="newDocumentTypeModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content">
+                <form method="POST" action="{{ route('templates.document-types.store') }}">
+                    @csrf
+                    <input type="hidden" name="document_type_form" value="create">
+                    <div class="modal-header">
+                        <div>
+                            <div class="text-uppercase text-primary small fw-semibold mb-1">Template Builder</div>
+                            <h2 class="modal-title h5" id="newDocumentTypeModalLabel">New document type</h2>
+                        </div>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <label for="newDocumentTypeName" class="form-label">Document type name</label>
+                        <input type="text" id="newDocumentTypeName" name="document_type_name"
+                               value="{{ old('document_type_name') }}" maxlength="120" required
+                               class="form-control {{ old('document_type_form', 'create') === 'create' && $errors->has('document_type_name') ? 'is-invalid' : '' }}"
+                               placeholder="Example: Residency Certificate">
+                        @if (old('document_type_form', 'create') === 'create')
+                            @error('document_type_name')
+                                <div class="invalid-feedback">{{ $message }}</div>
+                            @enderror
+                        @endif
+                        <div class="form-text">You can rename custom document types later.</div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Create and build layout</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
 @endsection
+
+@push('scripts')
+    <script>
+        document.querySelectorAll('.template-library-toggle').forEach((toggle) => {
+            const label = toggle.querySelector('span');
+            const target = document.querySelector(toggle.dataset.bsTarget);
+            target?.addEventListener('shown.bs.collapse', () => { label.textContent = 'Hide layouts'; });
+            target?.addEventListener('hidden.bs.collapse', () => { label.textContent = 'Show layouts'; });
+        });
+
+        @if ($errors->has('document_type_name'))
+            window.addEventListener('load', () => {
+                const intent = @json(old('document_type_form', 'create'));
+                const modalId = intent.startsWith('rename-')
+                    ? `renameDocumentType${intent.replace('rename-', '')}`
+                    : 'newDocumentTypeModal';
+                const modal = document.getElementById(modalId);
+                if (modal) window.bootstrap?.Modal.getOrCreateInstance(modal).show();
+            });
+        @endif
+    </script>
+@endpush

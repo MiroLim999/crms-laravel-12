@@ -6,6 +6,7 @@ use App\Enums\DocumentType;
 use App\Enums\PageOrientation;
 use App\Enums\PaperSize;
 use App\Models\DocumentTemplate;
+use App\Models\DocumentTypeDefinition;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -24,6 +25,12 @@ class DocumentTemplateBuilderTest extends TestCase
             ->assertSeeText('Template Builder')
             ->assertDontSeeText('Document Templates')
             ->assertSeeText('Published layouts are the Staff defaults.');
+
+        $this->get(route('templates.index'))
+            ->assertSee('class="collapse show"', escape: false)
+            ->assertSee('data-bs-toggle="collapse"', escape: false)
+            ->assertSeeText('Show layouts')
+            ->assertSeeText('New document type');
 
         $this->get(route('templates.create', ['type' => DocumentType::Birth->value]))
             ->assertOk()
@@ -271,6 +278,88 @@ class DocumentTemplateBuilderTest extends TestCase
             'custom_width_mm' => 20,
             'fields' => [$this->field('Full Name')],
         ])->assertSessionHasErrors(['custom_width_mm', 'custom_height_mm']);
+    }
+
+    public function test_super_admin_can_create_and_rename_a_custom_document_type(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $response = $this->actingAs($superAdmin)->post(route('templates.document-types.store'), [
+            'document_type_name' => 'Residency Certificate',
+        ]);
+
+        $type = DocumentTypeDefinition::where('name', 'Residency Certificate')->firstOrFail();
+        $this->assertFalse($type->is_system);
+        $this->assertStringStartsWith('custom-residency-certificate-', $type->key);
+        $response->assertRedirect(route('templates.create', ['type' => $type->key]));
+
+        $this->actingAs($superAdmin)->put(route('templates.document-types.update', $type), [
+            'document_type_name' => 'Barangay Residency Record',
+        ])->assertRedirect(route('templates.index', ['open' => $type->key]));
+
+        $this->assertSame('Barangay Residency Record', $type->refresh()->name);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'document-type.created']);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'document-type.renamed']);
+    }
+
+    public function test_builtin_document_types_cannot_be_renamed(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $birth = DocumentTypeDefinition::where('key', DocumentType::Birth->value)->firstOrFail();
+
+        $this->actingAs($superAdmin)->put(route('templates.document-types.update', $birth), [
+            'document_type_name' => 'Changed birth name',
+        ])->assertForbidden();
+
+        $this->assertSame('Birth Certificate', $birth->refresh()->name);
+    }
+
+    public function test_only_super_admin_can_manage_custom_document_types(): void
+    {
+        foreach ([User::factory()->staff()->create(), User::factory()->admin()->create()] as $user) {
+            $this->actingAs($user)->post(route('templates.document-types.store'), [
+                'document_type_name' => 'Unauthorized custom type',
+            ])->assertForbidden();
+        }
+
+        $this->assertDatabaseMissing('document_types', ['name' => 'Unauthorized custom type']);
+    }
+
+    public function test_custom_document_type_layout_can_be_published_for_staff(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $type = DocumentTypeDefinition::create([
+            'key' => 'custom-residency-test',
+            'name' => 'Residency Certificate',
+            'short_name' => 'Residency Certificate',
+            'icon' => 'bx-file-blank',
+            'is_system' => false,
+        ]);
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'Residency layout',
+            'document_type_id' => $type->getKey(),
+            'doc_type' => $type->key,
+            ...$this->paperSpec(),
+            'publish' => '1',
+            'fields' => [$this->field('Resident Full Name')],
+        ])->assertRedirect();
+
+        $template = DocumentTemplate::where('name', 'Residency layout')->firstOrFail();
+        $this->assertSame(DocumentType::Custom, $template->doc_type);
+        $this->assertSame($type->getKey(), $template->document_type_id);
+        $this->assertTrue($template->is_active);
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->get(route('documents.create'))
+            ->assertOk()
+            ->assertSeeText('Residency Certificate')
+            ->assertSee(route('documents.workspace', ['type' => $type->key]), escape: false);
+
+        $this->get(route('documents.workspace', ['type' => $type->key]))
+            ->assertOk()
+            ->assertSeeText('Scan: Residency Certificate')
+            ->assertSee('name="doc_type" value="'.$type->key.'"', escape: false);
     }
 
     private function template(
