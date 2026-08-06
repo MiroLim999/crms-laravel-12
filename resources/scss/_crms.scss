@@ -2049,16 +2049,46 @@
 }
 
 .template-orientation-sheet {
+  position: relative;
   display: inline-block;
-  inline-size: .7rem;
-  block-size: .9rem;
-  background: currentColor;
-  border-radius: 1px;
-  opacity: .72;
+  inline-size: .78rem;
+  block-size: 1rem;
+  background: transparent;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  opacity: .82;
+
+  // Two small content lines make this read as a page rather than a colour swatch.
+  &::before,
+  &::after {
+    position: absolute;
+    left: 20%;
+    inline-size: 60%;
+    block-size: 1px;
+    background: currentColor;
+    border-radius: 1px;
+    content: '';
+  }
+
+  &::before {
+    top: 36%;
+  }
+
+  &::after {
+    top: 61%;
+  }
 
   &.is-landscape {
-    inline-size: .9rem;
-    block-size: .7rem;
+    inline-size: 1rem;
+    block-size: .78rem;
+
+    &::before {
+      top: 32%;
+    }
+
+    &::after {
+      top: 62%;
+    }
   }
 }
 
