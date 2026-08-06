@@ -120,7 +120,9 @@ class DocumentTemplateBuilderTest extends TestCase
 
         $this->get(route('templates.sample', $template))
             ->assertOk()
-            ->assertHeader('content-type', 'image/jpeg');
+            ->assertHeader('content-type', 'application/vnd.crms.template-sample')
+            ->assertHeader('x-crms-sample-type', 'image/jpeg')
+            ->assertHeaderMissing('content-disposition');
 
         $this->delete(route('templates.sample.destroy', $template))
             ->assertRedirect()
@@ -129,6 +131,41 @@ class DocumentTemplateBuilderTest extends TestCase
         Storage::disk('local')->assertMissing($samplePath);
         $this->assertNull($template->refresh()->sample_path);
         $this->assertDatabaseHas('audit_logs', ['action' => 'template.sample-deleted']);
+    }
+
+    public function test_sample_survives_create_publish_and_reopening_the_layout(): void
+    {
+        Storage::fake('local');
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'Published Sample Layout',
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'publish' => '1',
+            'sample_document' => UploadedFile::fake()->createWithContent(
+                'archival-birth-scan.pdf',
+                '%PDF-1.4 sample document',
+            ),
+            'fields' => [$this->field('Child Full Name')],
+        ])->assertRedirect();
+
+        $template = DocumentTemplate::where('name', 'Published Sample Layout')->firstOrFail();
+
+        $this->assertTrue($template->is_active);
+        $this->assertNotNull($template->sample_path);
+        Storage::disk('local')->assertExists($template->sample_path);
+
+        $this->get(route('templates.edit', $template))
+            ->assertOk()
+            ->assertSeeText('archival-birth-scan.pdf')
+            ->assertSee(route('templates.sample', $template), escape: false);
+
+        $this->get(route('templates.sample', $template))
+            ->assertOk()
+            ->assertHeader('content-type', 'application/vnd.crms.template-sample')
+            ->assertHeader('x-crms-sample-type', 'application/pdf')
+            ->assertHeaderMissing('content-disposition');
     }
 
     public function test_sample_path_follows_layout_and_custom_document_type_names(): void

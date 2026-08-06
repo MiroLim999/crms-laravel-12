@@ -78,6 +78,10 @@ let pasteSequence = 0;
 let invalidFieldIndexes = new Set();
 let sampleLoaded = false;
 let sampleMeasurement = null;
+// Keep the exact file represented by the preview. Some browsers can display a
+// dropped/selected File even when their file input is later reconstructed or
+// loses its FileList, which used to produce a saved layout with no sample.
+let pendingSampleFile = null;
 
 function selectedOrientation() {
     const input = form.querySelector('input[name="orientation"]:checked');
@@ -649,7 +653,8 @@ function serialiseFields() {
     });
 }
 
-async function openSample(file) {
+async function openSample(file, { pendingUpload = true } = {}) {
+    if (pendingUpload) pendingSampleFile = null;
     if (!file) return;
 
     if (file.size > 20 * 1024 * 1024) {
@@ -665,6 +670,7 @@ async function openSample(file) {
     try {
         const measurement = await marker.load(file);
         sampleLoaded = true;
+        if (pendingUpload) pendingSampleFile = file;
         element('sampleFileName').textContent = file.name;
         element('sampleHint').classList.add('d-none');
         renderSampleMeasurement(measurement);
@@ -685,7 +691,9 @@ async function openStoredSample() {
 
     try {
         const response = await window.fetch(storedSample.url, {
-            headers: { Accept: storedSample.mime || 'application/octet-stream' },
+            // Ask for the private canvas transport instead of application/pdf;
+            // download-manager extensions otherwise steal this background fetch.
+            headers: { Accept: 'application/vnd.crms.template-sample' },
             credentials: 'same-origin',
             cache: 'no-store',
         });
@@ -698,7 +706,7 @@ async function openStoredSample() {
             storedSample.originalName || 'stored-sample',
             { type: storedSample.mime || blob.type },
         );
-        await openSample(file);
+        await openSample(file, { pendingUpload: false });
     } catch (error) {
         showBuilderError(error instanceof Error
             ? error.message
@@ -866,6 +874,15 @@ form.addEventListener('submit', (event) => {
     form.querySelectorAll('button[type="submit"]').forEach((button) => {
         button.disabled = true;
     });
+});
+
+// Explicitly attach the file that produced the current preview. Native file
+// inputs already contribute it in the common case; set() also covers dropped
+// files and browsers that lose the input's FileList before submission.
+form.addEventListener('formdata', (event) => {
+    if (pendingSampleFile instanceof File) {
+        event.formData.set('sample_document', pendingSampleFile, pendingSampleFile.name);
+    }
 });
 
 marker.setBoxes(cloneBoxes(initialBoxes));

@@ -217,20 +217,37 @@ class DocumentTemplateController extends Controller
 
     public function sample(DocumentTemplate $template): StreamedResponse
     {
+        $disk = Storage::disk('local');
+
         abort_unless(
-            $template->sample_path && Storage::disk('local')->exists($template->sample_path),
+            $template->sample_path && $disk->exists($template->sample_path),
             404,
         );
 
-        return Storage::disk('local')->response(
-            $template->sample_path,
-            $template->sample_original_name ?? basename($template->sample_path),
-            [
-                'Content-Type' => $template->sample_mime ?? 'application/octet-stream',
-                'Content-Disposition' => 'inline',
-                'Cache-Control' => 'private, no-store',
-            ],
-        );
+        // This endpoint is an authenticated canvas-data transport, not a file
+        // download. Returning application/pdf with a filename causes browser
+        // download managers to intercept the fetch before PDF.js can render it.
+        // Keep the original MIME in metadata while serving neutral binary bytes
+        // without Content-Disposition.
+        return response()->stream(function () use ($disk, $template) {
+            $stream = $disk->readStream($template->sample_path);
+
+            if (! is_resource($stream)) {
+                return;
+            }
+
+            try {
+                fpassthru($stream);
+            } finally {
+                fclose($stream);
+            }
+        }, 200, [
+            'Content-Type' => 'application/vnd.crms.template-sample',
+            'Content-Length' => (string) $disk->size($template->sample_path),
+            'X-CRMS-Sample-Type' => $template->sample_mime ?? 'application/octet-stream',
+            'Cache-Control' => 'private, no-store, max-age=0',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     public function destroySample(DocumentTemplate $template): RedirectResponse

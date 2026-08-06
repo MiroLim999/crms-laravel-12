@@ -94,7 +94,8 @@
                                     <i class="icon-base bx bx-file" aria-hidden="true"></i>
                                     <span id="sampleFileName">{{ $template?->sample_original_name ?? 'Choose sample' }}</span>
                                 </label>
-                                <input type="file" id="sampleScan" name="sample_document" class="visually-hidden"
+                                <input type="file" id="sampleScan" name="sample_document" form="templateBuilderForm"
+                                       class="visually-hidden"
                                        accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp,image/tiff">
 
                                 @if ($template?->sample_path)
