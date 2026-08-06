@@ -32,7 +32,7 @@ export class FieldMarker {
      * @param {HTMLElement|null} [options.viewport] Scroll container used for zooming.
      * @param {boolean} [options.readOnly]         Render boxes without interaction.
      * @param {(boxes: Array) => void} [options.onChange]
-     * @param {(indexes: number[]) => void} [options.onSelectionChange]
+     * @param {(indexes: number[], context: {source: string, activeIndex: number|null}) => void} [options.onSelectionChange]
      * @param {(zoom: number) => void} [options.onZoomChange]
      */
     constructor({
@@ -322,7 +322,7 @@ export class FieldMarker {
             .filter((index) => index !== null);
     }
 
-    selectBox(index, { additive = false, toggle = false } = {}) {
+    selectBox(index, { additive = false, toggle = false, source = 'api' } = {}) {
         const box = this.boxes[index];
         if (!box) return;
 
@@ -333,7 +333,7 @@ export class FieldMarker {
             this.selected.add(box);
         }
 
-        this._emitSelection();
+        this._emitSelection({ source, activeIndex: index });
     }
 
     clearSelection() {
@@ -475,17 +475,21 @@ export class FieldMarker {
 
             if (nextMode === 'move') {
                 if (event.shiftKey && this.selected.has(box)) {
-                    this.selectBox(index, { additive: true, toggle: true });
+                    this.selectBox(index, { additive: true, toggle: true, source: 'marker' });
                     return;
                 }
 
                 if (event.shiftKey) {
-                    this.selectBox(index, { additive: true });
+                    this.selectBox(index, { additive: true, source: 'marker' });
                 } else if (!this.selected.has(box)) {
-                    this.selectBox(index);
+                    this.selectBox(index, { source: 'marker' });
+                } else {
+                    this._emitSelection({ source: 'marker', activeIndex: index });
                 }
             } else if (!this.selected.has(box)) {
-                this.selectBox(index);
+                this.selectBox(index, { source: 'marker' });
+            } else {
+                this._emitSelection({ source: 'marker', activeIndex: index });
             }
 
             mode = nextMode;
@@ -597,9 +601,9 @@ export class FieldMarker {
         this.onChange?.(this.toJSON());
     }
 
-    _emitSelection() {
+    _emitSelection({ source = 'api', activeIndex = null } = {}) {
         this.boxes.forEach((box) => box.el?.classList.toggle('is-selected', this.selected.has(box)));
-        this.onSelectionChange?.(this.selectedIndexes());
+        this.onSelectionChange?.(this.selectedIndexes(), { source, activeIndex });
     }
 }
 

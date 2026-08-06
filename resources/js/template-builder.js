@@ -353,7 +353,44 @@ function renderFieldList(boxes) {
     updateSelectionUI(marker.selectedIndexes());
 }
 
-function updateSelectionUI(indexes) {
+function centerFieldListRow(index) {
+    const list = element('fieldList');
+    const row = list.querySelector(`[data-field-index="${index}"]`);
+    if (!(row instanceof HTMLElement)) return;
+
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const behavior = smooth ? 'smooth' : 'auto';
+    const listRect = list.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const listTarget = list.scrollTop
+        + rowRect.top - listRect.top
+        - (list.clientHeight - rowRect.height) / 2;
+    const clampedListTarget = Math.min(
+        Math.max(0, list.scrollHeight - list.clientHeight),
+        Math.max(0, listTarget),
+    );
+    const listDelta = clampedListTarget - list.scrollTop;
+
+    list.scrollTo({ top: clampedListTarget, behavior });
+
+    const panel = list.closest('.template-builder-side-panel');
+    if (!(panel instanceof HTMLElement) || panel.scrollHeight <= panel.clientHeight) return;
+
+    const panelRect = panel.getBoundingClientRect();
+    const eventualRowTop = rowRect.top - listDelta;
+    const panelTarget = panel.scrollTop
+        + eventualRowTop - panelRect.top
+        - (panel.clientHeight - rowRect.height) / 2;
+    panel.scrollTo({
+        top: Math.min(
+            Math.max(0, panel.scrollHeight - panel.clientHeight),
+            Math.max(0, panelTarget),
+        ),
+        behavior,
+    });
+}
+
+function updateSelectionUI(indexes, context = {}) {
     const selected = new Set(indexes);
 
     document.querySelectorAll('#fieldList .template-builder-field-item').forEach((item) => {
@@ -371,6 +408,10 @@ function updateSelectionUI(indexes) {
     selectAllInput.indeterminate = count > 0 && count < total;
     element('deleteSelectedBtn', HTMLButtonElement).disabled = count === 0;
     element('deleteFieldsBtn', HTMLButtonElement).disabled = count === 0;
+
+    if (context.source === 'marker' && Number.isInteger(context.activeIndex)) {
+        centerFieldListRow(context.activeIndex);
+    }
 }
 
 function updateZoomUI(zoom) {
