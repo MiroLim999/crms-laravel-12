@@ -154,8 +154,11 @@ class DocumentScanController extends Controller
             'fields.*.height' => ['required', 'numeric', 'min:0.00001', 'max:1'],
         ]);
 
-        $template = DocumentTemplate::find($validated['document_template_id']);
-        if ($template?->doc_type->value !== $validated['doc_type']) {
+        $templateId = (int) $validated['document_template_id'];
+        $documentType = DocumentType::from((string) $validated['doc_type']);
+        $template = DocumentTemplate::find($templateId);
+
+        if ($template?->doc_type !== $documentType) {
             throw ValidationException::withMessages([
                 'document_template_id' => 'The selected template does not belong to this document type.',
             ]);
