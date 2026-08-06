@@ -691,20 +691,30 @@ async function openStoredSample() {
 
     try {
         const response = await window.fetch(storedSample.url, {
-            // Ask for the private canvas transport instead of application/pdf;
-            // download-manager extensions otherwise steal this background fetch.
-            headers: { Accept: 'application/vnd.crms.template-sample' },
+            headers: { Accept: 'application/json' },
             credentials: 'same-origin',
             cache: 'no-store',
         });
 
         if (!response.ok) throw new Error('The stored sample document could not be loaded.');
 
-        const blob = await response.blob();
+        const preview = await response.json();
+        if (!preview?.data || typeof preview.data !== 'string') {
+            throw new Error('The stored sample document response is invalid.');
+        }
+
+        const binary = window.atob(preview.data);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+        }
+
+        const mime = preview.mime || storedSample.mime || 'application/octet-stream';
+        const blob = new Blob([bytes], { type: mime });
         const file = new File(
             [blob],
-            storedSample.originalName || 'stored-sample',
-            { type: storedSample.mime || blob.type },
+            preview.name || storedSample.originalName || 'stored-sample',
+            { type: mime },
         );
         await openSample(file, { pendingUpload: false });
     } catch (error) {

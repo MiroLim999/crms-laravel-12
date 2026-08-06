@@ -120,8 +120,9 @@ class DocumentTemplateBuilderTest extends TestCase
 
         $this->get(route('templates.sample', $template))
             ->assertOk()
-            ->assertHeader('content-type', 'application/vnd.crms.template-sample')
-            ->assertHeader('x-crms-sample-type', 'image/jpeg')
+            ->assertJsonPath('name', 'Municipal Birth Form.jpg')
+            ->assertJsonPath('mime', 'image/jpeg')
+            ->assertJsonStructure(['data'])
             ->assertHeaderMissing('content-disposition');
 
         $this->delete(route('templates.sample.destroy', $template))
@@ -163,8 +164,9 @@ class DocumentTemplateBuilderTest extends TestCase
 
         $this->get(route('templates.sample', $template))
             ->assertOk()
-            ->assertHeader('content-type', 'application/vnd.crms.template-sample')
-            ->assertHeader('x-crms-sample-type', 'application/pdf')
+            ->assertJsonPath('name', 'archival-birth-scan.pdf')
+            ->assertJsonPath('mime', 'application/pdf')
+            ->assertJsonStructure(['data'])
             ->assertHeaderMissing('content-disposition');
     }
 

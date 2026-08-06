@@ -10,6 +10,7 @@ use App\Models\DocumentTypeDefinition;
 use App\Services\AuditLogger;
 use App\Services\TemplateSampleStorage;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -18,7 +19,6 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\File;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Document template builder - Super Admin only.
@@ -215,7 +215,7 @@ class DocumentTemplateController extends Controller
         return back()->with('success', "'{$template->name}' is now published for {$template->typeLabel()}.");
     }
 
-    public function sample(DocumentTemplate $template): StreamedResponse
+    public function sample(DocumentTemplate $template): JsonResponse
     {
         $disk = Storage::disk('local');
 
@@ -224,30 +224,17 @@ class DocumentTemplateController extends Controller
             404,
         );
 
-        // This endpoint is an authenticated canvas-data transport, not a file
-        // download. Returning application/pdf with a filename causes browser
-        // download managers to intercept the fetch before PDF.js can render it.
-        // Keep the original MIME in metadata while serving neutral binary bytes
-        // without Content-Disposition.
-        return response()->stream(function () use ($disk, $template) {
-            $stream = $disk->readStream($template->sample_path);
-
-            if (! is_resource($stream)) {
-                return;
-            }
-
-            try {
-                fpassthru($stream);
-            } finally {
-                fclose($stream);
-            }
-        }, 200, [
-            'Content-Type' => 'application/vnd.crms.template-sample',
-            'Content-Length' => (string) $disk->size($template->sample_path),
-            'X-CRMS-Sample-Type' => $template->sample_mime ?? 'application/octet-stream',
+        // Return preview data as JSON instead of exposing a PDF/image response.
+        // This prevents browsers and download-manager extensions from treating
+        // an editor preview as a file download.
+        return response()->json([
+            'name' => $template->sample_original_name ?? basename($template->sample_path),
+            'mime' => $template->sample_mime ?? 'application/octet-stream',
+            'data' => base64_encode($disk->get($template->sample_path)),
+        ], 200, [
             'Cache-Control' => 'private, no-store, max-age=0',
             'X-Content-Type-Options' => 'nosniff',
-        ]);
+        ], JSON_UNESCAPED_SLASHES);
     }
 
     public function destroySample(DocumentTemplate $template): RedirectResponse
