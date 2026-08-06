@@ -1767,7 +1767,8 @@
 }
 
 .template-library-card {
-  overflow: hidden;
+  // Dropdown menus in the card header must be able to extend beyond the card.
+  overflow: visible;
 }
 
 .template-library-card__header {
@@ -1817,39 +1818,7 @@
 }
 
 .template-library-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: .3rem;
-  min-block-size: 2rem;
-  padding: .35rem .65rem;
-  color: var(--bs-secondary-color);
-  background: var(--bs-body-bg);
-  border: 1px solid var(--bs-border-color);
-  border-radius: .45rem;
-  font: inherit;
-  transition: color .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .18s ease;
-
-  &:hover,
-  &:focus-visible {
-    color: var(--bs-primary);
-    background: rgba(105, 108, 255, .07);
-    border-color: rgba(105, 108, 255, .35);
-  }
-
-  &__chevron {
-    font-size: 1rem;
-    transition: transform .18s ease;
-  }
-
-  &[aria-expanded='true'] {
-    color: var(--bs-primary);
-    background: rgba(105, 108, 255, .08);
-    border-color: rgba(105, 108, 255, .28);
-  }
-
-  &[aria-expanded='true'] &__chevron {
-    transform: rotate(180deg);
-  }
+  white-space: nowrap;
 }
 
 .template-library-layouts {
@@ -1858,8 +1827,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .template-library-layouts,
-  .template-library-toggle,
-  .template-library-toggle__chevron {
+  .template-library-toggle {
     transition: none !important;
   }
 }

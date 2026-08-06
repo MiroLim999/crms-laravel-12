@@ -97,16 +97,15 @@
                                     </div>
                                 </div>
                             @endunless
-                            <button type="button" class="template-library-toggle"
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary audit-diff-toggle template-library-toggle {{ $expanded ? 'active' : '' }}"
                                     data-template-layout-toggle data-target="{{ $collapseId }}"
                                     data-storage-key="template-layouts:{{ $type->key }}"
                                     aria-expanded="{{ $expanded ? 'true' : 'false' }}"
-                                    aria-controls="{{ $collapseId }}">
-                                <i class="icon-base bx {{ $expanded ? 'bx-hide' : 'bx-show' }} icon-sm"
-                                   data-layout-visibility-icon aria-hidden="true"></i>
+                                    aria-controls="{{ $collapseId }}"
+                                    title="{{ $expanded ? 'Hide' : 'Show' }} {{ $group->count() }} {{ Str::plural('layout', $group->count()) }}">
+                                <i class="icon-base bx bx-layout icon-sm me-1" aria-hidden="true"></i>
                                 <span>{{ $expanded ? 'Hide' : 'Show' }} layouts</span>
-                                <i class="icon-base bx bx-chevron-down template-library-toggle__chevron"
-                                   aria-hidden="true"></i>
                             </button>
                         </div>
                     </header>
@@ -312,15 +311,14 @@
         document.querySelectorAll('[data-template-layout-toggle]').forEach((toggle) => {
             const label = toggle.querySelector('span');
             const target = document.getElementById(toggle.dataset.target);
-            const visibilityIcon = toggle.querySelector('[data-layout-visibility-icon]');
             if (!label || !target) return;
 
             const updateState = (expanded, remember = true) => {
                 toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
                 target.setAttribute('aria-hidden', expanded ? 'false' : 'true');
                 label.textContent = expanded ? 'Hide layouts' : 'Show layouts';
-                visibilityIcon?.classList.toggle('bx-hide', expanded);
-                visibilityIcon?.classList.toggle('bx-show', !expanded);
+                toggle.classList.toggle('active', expanded);
+                toggle.title = `${expanded ? 'Hide' : 'Show'} layouts`;
 
                 if (remember) {
                     try {
