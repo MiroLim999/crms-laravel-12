@@ -1173,6 +1173,23 @@
     background: rgba(105, 108, 255, .09);
     transition: border-color .12s ease, background-color .12s ease, box-shadow .12s ease;
 
+    // Keep the source document uncluttered. Selection is communicated by the
+    // green marker itself; the field name is only revealed on direct intent.
+    .field-box-label {
+      visibility: hidden;
+      opacity: 0;
+      transform: translateY(.2rem);
+    }
+
+    &:hover,
+    &:focus-visible {
+      .field-box-label {
+        visibility: visible;
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
     &:focus-visible {
       z-index: 4;
       outline: 3px solid rgba(40, 199, 111, .28);
@@ -1196,10 +1213,7 @@
       box-shadow: 0 0 0 3px rgba(40, 199, 111, .25);
 
       .field-box-label {
-        visibility: visible;
         background: var(--bs-success);
-        opacity: 1;
-        transform: translateY(0);
       }
     }
   }
