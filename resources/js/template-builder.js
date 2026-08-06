@@ -1,0 +1,591 @@
+import { FieldMarker } from './field-marker';
+
+const configNode = document.getElementById('templateBuilderConfig');
+
+if (!(configNode instanceof HTMLScriptElement)) {
+    throw new Error('Template Builder configuration is missing.');
+}
+
+const config = JSON.parse(configNode.textContent || '{}');
+const maxFields = Number(config.maxFields) || 100;
+
+function element(id, Type = HTMLElement) {
+    const node = document.getElementById(id);
+
+    if (!(node instanceof Type)) {
+        throw new Error(`Template Builder element #${id} is missing.`);
+    }
+
+    return node;
+}
+
+const form = element('templateBuilderForm', HTMLFormElement);
+const canvas = element('pageCanvas', HTMLCanvasElement);
+const overlay = element('fieldOverlay');
+const viewport = element('docViewport');
+const fileInput = element('sampleScan', HTMLInputElement);
+const fileLabel = element('sampleScanLabel');
+const selectAllInput = element('selectAllFields', HTMLInputElement);
+const newFieldInput = element('newFieldName', HTMLInputElement);
+const publishIntent = element('publishIntent', HTMLInputElement);
+
+const cloneBoxes = (boxes) => boxes.map(({ name, x, y, w, h }) => ({ name, x, y, w, h }));
+const snapshot = (boxes) => JSON.stringify(cloneBoxes(boxes));
+
+function finiteNumber(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+}
+
+function normaliseBoxes(fields) {
+    if (!Array.isArray(fields)) return [];
+
+    return fields.map((field, index) => {
+        const x = Math.min(0.99, Math.max(0, finiteNumber(field.x, 0.08)));
+        const y = Math.min(0.99, Math.max(0, finiteNumber(field.y, 0.08)));
+        const width = Math.min(1 - x, Math.max(0.01, finiteNumber(field.width ?? field.w, 0.35)));
+        const height = Math.min(1 - y, Math.max(0.01, finiteNumber(field.height ?? field.h, 0.06)));
+
+        return {
+            name: String(field.name ?? `Field ${index + 1}`),
+            x,
+            y,
+            w: width,
+            h: height,
+        };
+    });
+}
+
+const baselineBoxes = normaliseBoxes(config.baselineFields);
+const initialBoxes = normaliseBoxes(config.initialFields);
+
+let fieldHistory = [];
+let currentSnapshot = null;
+let restoringHistory = false;
+let clipboard = [];
+let pasteSequence = 0;
+let invalidFieldIndexes = new Set();
+
+function drawBlankPage() {
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('The document preview could not be created.');
+
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = '#d9dee3';
+    context.lineWidth = 2;
+    context.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+}
+
+drawBlankPage();
+
+const marker = new FieldMarker({
+    canvas,
+    overlay,
+    viewport,
+    onChange: handleMarkerChange,
+    onSelectionChange: updateSelectionUI,
+    onZoomChange: updateZoomUI,
+});
+
+function layoutMatchesBaseline() {
+    return snapshot(marker.toJSON()) === snapshot(baselineBoxes);
+}
+
+function updateResetUI() {
+    const changed = !layoutMatchesBaseline() || Math.abs(marker.zoom - 1) > 0.001;
+    element('resetFieldsBtn', HTMLButtonElement).disabled = !changed;
+}
+
+function handleMarkerChange(boxes) {
+    const next = cloneBoxes(boxes);
+    const nextSnapshot = snapshot(next);
+
+    if (!restoringHistory && currentSnapshot !== null && nextSnapshot !== snapshot(currentSnapshot)) {
+        fieldHistory.push(cloneBoxes(currentSnapshot));
+        if (fieldHistory.length > 100) fieldHistory.shift();
+    }
+
+    currentSnapshot = next;
+    renderFieldList(boxes);
+    updateResetUI();
+}
+
+function createFieldRow(index) {
+    const item = document.createElement('li');
+    item.className = 'field-list-item template-builder-field-item';
+    item.dataset.fieldIndex = String(index);
+
+    const number = document.createElement('span');
+    number.className = 'badge bg-label-primary template-builder-field-number';
+    item.appendChild(number);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 120;
+    input.className = 'form-control form-control-sm template-builder-field-name';
+    input.setAttribute('aria-label', `Field ${index + 1} name`);
+    item.appendChild(input);
+
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.className = 'btn btn-sm btn-icon btn-text-danger';
+    removeButton.setAttribute('aria-label', `Remove field ${index + 1}`);
+
+    const removeIcon = document.createElement('i');
+    removeIcon.className = 'icon-base bx bx-x icon-sm';
+    removeIcon.setAttribute('aria-hidden', 'true');
+    removeButton.appendChild(removeIcon);
+    item.appendChild(removeButton);
+
+    item.addEventListener('pointerdown', (event) => {
+        if (event.shiftKey && !(event.target instanceof Element && event.target.closest('button'))) {
+            // Shift-click is a marker selection gesture, not native text selection.
+            event.preventDefault();
+        }
+    });
+
+    item.addEventListener('click', (event) => {
+        if (event.target instanceof Element && event.target.closest('button')) return;
+        if (event.target === input && !event.shiftKey) return;
+
+        const currentIndex = Number(item.dataset.fieldIndex);
+        marker.selectBox(currentIndex, {
+            additive: event.shiftKey,
+            toggle: event.shiftKey,
+        });
+    });
+
+    input.addEventListener('focus', () => {
+        marker.selectBox(Number(item.dataset.fieldIndex));
+    });
+
+    input.addEventListener('input', () => {
+        const currentIndex = Number(item.dataset.fieldIndex);
+        invalidFieldIndexes.delete(currentIndex);
+        input.classList.remove('is-invalid');
+        clearBuilderError();
+        marker.renameBox(currentIndex, input.value);
+    });
+
+    removeButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        marker.removeBox(Number(item.dataset.fieldIndex));
+    });
+
+    return item;
+}
+
+function renderFieldList(boxes) {
+    const list = element('fieldList');
+    let items = [...list.querySelectorAll('.template-builder-field-item')];
+
+    if (items.length !== boxes.length) {
+        list.replaceChildren();
+
+        if (boxes.length === 0) {
+            const empty = document.createElement('li');
+            empty.className = 'marker-field-empty';
+
+            const icon = document.createElement('i');
+            icon.className = 'icon-base bx bx-list-check';
+            icon.setAttribute('aria-hidden', 'true');
+
+            const text = document.createElement('span');
+            text.textContent = 'No fields yet. Add one below.';
+            empty.append(icon, text);
+            list.appendChild(empty);
+        } else {
+            boxes.forEach((_, index) => list.appendChild(createFieldRow(index)));
+        }
+
+        items = [...list.querySelectorAll('.template-builder-field-item')];
+    }
+
+    items.forEach((item, index) => {
+        const box = boxes[index];
+        item.dataset.fieldIndex = String(index);
+
+        const number = item.querySelector('.template-builder-field-number');
+        const input = item.querySelector('.template-builder-field-name');
+        const removeButton = item.querySelector('button');
+
+        if (number) number.textContent = String(index + 1);
+        if (input instanceof HTMLInputElement) {
+            if (document.activeElement !== input) input.value = box.name;
+            input.classList.toggle('is-invalid', invalidFieldIndexes.has(index));
+            input.setAttribute('aria-label', `Field ${index + 1} name`);
+        }
+        removeButton?.setAttribute('aria-label', `Remove field ${index + 1}`);
+    });
+
+    element('fieldCount').textContent = `${boxes.length} field${boxes.length === 1 ? '' : 's'}`;
+    selectAllInput.disabled = boxes.length === 0;
+    updateSelectionUI(marker.selectedIndexes());
+}
+
+function updateSelectionUI(indexes) {
+    const selected = new Set(indexes);
+
+    document.querySelectorAll('#fieldList .template-builder-field-item').forEach((item) => {
+        item.classList.toggle('is-selected', selected.has(Number(item.dataset.fieldIndex)));
+    });
+
+    const count = indexes.length;
+    const total = marker.toJSON().length;
+    const summary = element('selectionSummary');
+    const summaryText = summary.querySelector('span');
+    if (summaryText) summaryText.textContent = `${count} selected`;
+    summary.classList.toggle('is-active', count > 0);
+
+    selectAllInput.checked = total > 0 && count === total;
+    selectAllInput.indeterminate = count > 0 && count < total;
+    element('deleteSelectedBtn', HTMLButtonElement).disabled = count === 0;
+    element('deleteFieldsBtn', HTMLButtonElement).disabled = count === 0;
+}
+
+function updateZoomUI(zoom) {
+    element('zoomResetBtn', HTMLButtonElement).textContent = `${Math.round(zoom * 100)}%`;
+    updateResetUI();
+}
+
+function showBuilderError(message) {
+    element('builderErrorMessage').textContent = message;
+    element('builderError').classList.remove('d-none');
+}
+
+function clearBuilderError() {
+    element('builderError').classList.add('d-none');
+    element('builderErrorMessage').textContent = '';
+}
+
+function undoFieldChange() {
+    const previous = fieldHistory.pop();
+    if (!previous) return;
+
+    restoringHistory = true;
+    marker.setBoxes(cloneBoxes(previous));
+    restoringHistory = false;
+    clearBuilderError();
+}
+
+function copySelectedFields() {
+    const boxes = marker.toJSON();
+    clipboard = marker.selectedIndexes().map((index) => ({ ...boxes[index] }));
+    pasteSequence = 0;
+
+    const summaryText = element('selectionSummary').querySelector('span');
+    if (summaryText && clipboard.length > 0) {
+        summaryText.textContent = `${clipboard.length} copied`;
+    }
+}
+
+function nextCopyName(name, takenNames) {
+    const base = name.trim() || 'Field';
+    let suffix = 1;
+    let tail = ' copy';
+    let candidate = `${base.slice(0, 120 - tail.length)}${tail}`;
+
+    while (takenNames.has(candidate.toLocaleLowerCase())) {
+        suffix += 1;
+        tail = ` copy ${suffix}`;
+        candidate = `${base.slice(0, 120 - tail.length)}${tail}`;
+    }
+
+    takenNames.add(candidate.toLocaleLowerCase());
+    return candidate;
+}
+
+function pasteCopiedFields() {
+    if (clipboard.length === 0) return;
+
+    const existing = marker.toJSON();
+    if (existing.length + clipboard.length > maxFields) {
+        showBuilderError(`A layout can contain at most ${maxFields} fields.`);
+        return;
+    }
+
+    const minX = Math.min(...clipboard.map((box) => box.x));
+    const minY = Math.min(...clipboard.map((box) => box.y));
+    const maxX = Math.max(...clipboard.map((box) => box.x + box.w));
+    const maxY = Math.max(...clipboard.map((box) => box.y + box.h));
+    const distance = Math.min(0.1, 0.018 * (pasteSequence + 1));
+    const dx = maxX + distance <= 1 ? distance : (minX - distance >= 0 ? -distance : 0);
+    const dy = maxY + distance <= 1 ? distance : (minY - distance >= 0 ? -distance : 0);
+    const takenNames = new Set(existing.map((box) => box.name.trim().toLocaleLowerCase()));
+    const copies = clipboard.map((box) => ({
+        ...box,
+        name: nextCopyName(box.name, takenNames),
+        x: box.x + dx,
+        y: box.y + dy,
+    }));
+    const firstCopyIndex = existing.length;
+
+    pasteSequence += 1;
+    invalidFieldIndexes.clear();
+    marker.setBoxes([...existing, ...copies]);
+    copies.forEach((_, index) => marker.selectBox(firstCopyIndex + index, {
+        additive: index > 0,
+    }));
+    clearBuilderError();
+}
+
+function addPendingField() {
+    const name = newFieldInput.value.trim();
+    if (!name) return true;
+
+    const boxes = marker.toJSON();
+    if (boxes.length >= maxFields) {
+        showBuilderError(`A layout can contain at most ${maxFields} fields.`);
+        return false;
+    }
+
+    if (boxes.some((box) => box.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+        showBuilderError(`A field named “${name}” already exists.`);
+        newFieldInput.focus();
+        return false;
+    }
+
+    const offset = (boxes.length % 10) * 0.018;
+    const width = 0.34;
+    const height = 0.06;
+    marker.addBox(name, {
+        x: Math.min(1 - width, 0.08 + offset),
+        y: Math.min(1 - height, 0.08 + offset),
+        w: width,
+        h: height,
+    });
+    newFieldInput.value = '';
+    clearBuilderError();
+    return true;
+}
+
+function validateFields() {
+    const boxes = marker.toJSON();
+    invalidFieldIndexes = new Set();
+
+    if (boxes.length === 0) {
+        showBuilderError('Add at least one field before saving this layout.');
+        renderFieldList(boxes);
+        return false;
+    }
+
+    if (boxes.length > maxFields) {
+        showBuilderError(`A layout can contain at most ${maxFields} fields.`);
+        return false;
+    }
+
+    const seen = new Map();
+    boxes.forEach((box, index) => {
+        const name = box.name.trim();
+        const key = name.toLocaleLowerCase();
+
+        if (!name || name.length > 120) invalidFieldIndexes.add(index);
+        if (seen.has(key)) {
+            invalidFieldIndexes.add(index);
+            invalidFieldIndexes.add(seen.get(key));
+        } else if (name) {
+            seen.set(key, index);
+        }
+
+        if (box.x < 0 || box.y < 0 || box.w < 0.01 || box.h < 0.01
+            || box.x + box.w > 1.00001 || box.y + box.h > 1.00001) {
+            invalidFieldIndexes.add(index);
+        }
+    });
+
+    renderFieldList(boxes);
+
+    if (invalidFieldIndexes.size > 0) {
+        showBuilderError('Every field needs a unique name and a marker fully inside the document.');
+        const firstInvalid = element('fieldList').querySelector('.template-builder-field-name.is-invalid');
+        firstInvalid?.focus();
+        return false;
+    }
+
+    clearBuilderError();
+    return true;
+}
+
+function serialiseFields() {
+    const container = element('fieldInputs');
+    container.replaceChildren();
+
+    marker.toJSON().forEach((box, index) => {
+        const values = {
+            name: box.name.trim(),
+            x: box.x.toFixed(5),
+            y: box.y.toFixed(5),
+            width: box.w.toFixed(5),
+            height: box.h.toFixed(5),
+        };
+
+        Object.entries(values).forEach(([key, value]) => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = `fields[${index}][${key}]`;
+            input.value = value;
+            container.appendChild(input);
+        });
+    });
+}
+
+async function openSample(file) {
+    if (!file) return;
+
+    if (file.size > 20 * 1024 * 1024) {
+        showBuilderError('Choose a sample smaller than 20 MB.');
+        fileInput.value = '';
+        return;
+    }
+
+    fileLabel.classList.add('is-loading');
+    fileLabel.setAttribute('aria-busy', 'true');
+    clearBuilderError();
+
+    try {
+        await marker.load(file);
+        element('sampleFileName').textContent = file.name;
+        element('sampleHint').classList.add('d-none');
+        window.requestAnimationFrame(() => marker.resetZoom());
+    } catch (error) {
+        fileInput.value = '';
+        showBuilderError(error instanceof Error ? error.message : 'That sample could not be opened.');
+    } finally {
+        fileLabel.classList.remove('is-loading');
+        fileLabel.removeAttribute('aria-busy');
+    }
+}
+
+element('zoomOutBtn', HTMLButtonElement).addEventListener('click', () => marker.zoomBy(-0.1));
+element('zoomInBtn', HTMLButtonElement).addEventListener('click', () => marker.zoomBy(0.1));
+element('zoomResetBtn', HTMLButtonElement).addEventListener('click', () => marker.resetZoom());
+
+element('deleteSelectedBtn', HTMLButtonElement).addEventListener('click', () => marker.removeSelected());
+element('deleteFieldsBtn', HTMLButtonElement).addEventListener('click', () => marker.removeSelected());
+
+selectAllInput.addEventListener('change', () => {
+    if (selectAllInput.checked) marker.selectAll();
+    else marker.clearSelection();
+});
+
+element('addFieldBtn', HTMLButtonElement).addEventListener('click', () => {
+    if (addPendingField()) newFieldInput.focus();
+});
+
+newFieldInput.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    if (addPendingField()) newFieldInput.focus();
+});
+
+fileInput.addEventListener('change', () => openSample(fileInput.files?.[0]));
+fileLabel.addEventListener('keydown', (event) => {
+    if (!['Enter', ' '].includes(event.key)) return;
+    event.preventDefault();
+    fileInput.click();
+});
+
+['dragenter', 'dragover'].forEach((eventName) => {
+    viewport.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        viewport.classList.add('is-dragging');
+    });
+});
+
+['dragleave', 'drop'].forEach((eventName) => {
+    viewport.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        viewport.classList.remove('is-dragging');
+    });
+});
+
+viewport.addEventListener('drop', (event) => openSample(event.dataTransfer?.files?.[0]));
+
+function restoreBaseline() {
+    invalidFieldIndexes.clear();
+    marker.setBoxes(cloneBoxes(baselineBoxes));
+    marker.resetZoom();
+    viewport.scrollTo({ top: 0, left: 0 });
+    clearBuilderError();
+}
+
+element('resetFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
+    const layoutChanged = !layoutMatchesBaseline();
+    const zoomChanged = Math.abs(marker.zoom - 1) > 0.001;
+    if (!layoutChanged && !zoomChanged) return;
+
+    if (!layoutChanged) {
+        restoreBaseline();
+        return;
+    }
+
+    window.bootstrap.Modal.getOrCreateInstance(element('resetFieldsModal')).show();
+});
+
+element('confirmResetFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
+    window.bootstrap.Modal.getInstance(element('resetFieldsModal'))?.hide();
+    restoreBaseline();
+});
+
+document.addEventListener('keydown', (event) => {
+    const target = event.target;
+    const editing = target instanceof HTMLElement
+        && (target.matches('input, textarea, select') || target.isContentEditable);
+    if (editing) return;
+
+    const commandPressed = event.ctrlKey || event.metaKey;
+    const key = event.key.toLocaleLowerCase();
+
+    if (commandPressed && !event.shiftKey && key === 'c' && marker.selectedIndexes().length > 0) {
+        event.preventDefault();
+        copySelectedFields();
+        return;
+    }
+
+    if (commandPressed && !event.shiftKey && key === 'v' && clipboard.length > 0) {
+        event.preventDefault();
+        pasteCopiedFields();
+        return;
+    }
+
+    if (commandPressed && !event.shiftKey && key === 'z' && fieldHistory.length > 0) {
+        event.preventDefault();
+        undoFieldChange();
+        return;
+    }
+
+    if (['Backspace', 'Delete'].includes(event.key) && marker.selectedIndexes().length > 0) {
+        event.preventDefault();
+        marker.removeSelected();
+    }
+});
+
+form.querySelectorAll('button[type="submit"][data-publish]').forEach((button) => {
+    button.addEventListener('click', () => {
+        publishIntent.value = button.dataset.publish === '1' ? '1' : '0';
+    });
+});
+
+form.addEventListener('submit', (event) => {
+    if (!addPendingField() || !validateFields()) {
+        event.preventDefault();
+        return;
+    }
+
+    if (!form.checkValidity()) {
+        event.preventDefault();
+        form.classList.add('was-validated');
+        form.reportValidity();
+        return;
+    }
+
+    serialiseFields();
+    form.setAttribute('aria-busy', 'true');
+    form.querySelectorAll('button[type="submit"]').forEach((button) => {
+        button.disabled = true;
+    });
+});
+
+marker.setBoxes(cloneBoxes(initialBoxes));
+window.requestAnimationFrame(() => marker.resetZoom());

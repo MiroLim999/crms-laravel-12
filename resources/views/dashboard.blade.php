@@ -71,7 +71,7 @@
                         'Manage user accounts' => 'users.manage',
                         'View audit log' => 'audit.view',
                         'Generate reports' => 'reports.generate',
-                        'Document templates' => 'templates.manage',
+                        'Template builder' => 'templates.manage',
                         'OCR model management' => 'ocr.manage',
                     ] as $label => $ability)
                         <li class="d-flex align-items-center gap-2 py-1">

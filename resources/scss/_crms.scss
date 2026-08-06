@@ -1665,3 +1665,430 @@
     }
   }
 }
+
+// ------------------------------------------------------------- template builder
+
+.template-library-note {
+  display: flex;
+  align-items: flex-start;
+  gap: .7rem;
+  margin-block-end: 1rem;
+  padding: .85rem 1rem;
+  color: var(--bs-body-color);
+  background: rgba(105, 108, 255, .06);
+  border: 1px solid rgba(105, 108, 255, .16);
+  border-radius: var(--bs-border-radius);
+  font-size: .8125rem;
+
+  > i {
+    flex: 0 0 auto;
+    margin-block-start: .1rem;
+    color: var(--bs-primary);
+  }
+
+  div {
+    display: flex;
+    flex-direction: column;
+    gap: .15rem;
+  }
+
+  span {
+    color: var(--bs-secondary-color);
+  }
+}
+
+.template-library-card {
+  overflow: hidden;
+}
+
+.template-library-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1.15rem 1.25rem;
+  border-block-end: 1px solid var(--bs-border-color);
+}
+
+.template-library-card__identity {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  min-inline-size: 0;
+}
+
+.template-library-card__icon {
+  display: inline-flex;
+  flex: 0 0 2.75rem;
+  align-items: center;
+  justify-content: center;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  color: var(--bs-primary);
+  background: rgba(105, 108, 255, .1);
+  border-radius: .6rem;
+
+  i {
+    font-size: 1.35rem;
+  }
+}
+
+.template-library-card__summary {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  white-space: nowrap;
+
+  strong {
+    color: var(--bs-heading-color);
+    font-size: .875rem;
+  }
+}
+
+.template-library-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem;
+  color: var(--bs-secondary-color);
+  font-size: .875rem;
+
+  a {
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+    font-weight: 500;
+  }
+}
+
+.template-builder-focused {
+  #layout-navbar,
+  .content-footer {
+    display: none !important;
+  }
+
+  .container-xxl.container-p-y {
+    max-inline-size: none;
+    padding: .75rem !important;
+  }
+
+  .content-wrapper {
+    min-block-size: 100vh;
+  }
+}
+
+.template-builder-page {
+  min-inline-size: 0;
+}
+
+.template-builder-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-block-end: .75rem;
+}
+
+.template-builder-page__heading {
+  min-inline-size: 0;
+
+  p {
+    margin-block-start: .3rem;
+    font-size: .8125rem;
+  }
+}
+
+.template-builder-page__eyebrow {
+  display: block;
+  margin-block-end: .2rem;
+  color: var(--bs-primary);
+  font-size: .6875rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.template-builder-grid {
+  min-inline-size: 0;
+
+  > [class*='col-'] {
+    min-inline-size: 0;
+  }
+}
+
+.template-builder-canvas-card {
+  overflow: hidden;
+
+  .doc-viewport {
+    position: relative;
+    block-size: calc(100vh - 9.75rem);
+    min-block-size: 30rem;
+  }
+
+  .doc-stage {
+    margin-inline: auto;
+  }
+
+  .doc-viewport.is-dragging {
+    box-shadow: inset 0 0 0 3px rgba(105, 108, 255, .28);
+  }
+}
+
+.template-sample-control {
+  cursor: pointer;
+  outline: 0;
+
+  &:hover,
+  &:focus-visible {
+    background: rgba(105, 108, 255, .15);
+    box-shadow: 0 0 0 .2rem rgba(105, 108, 255, .12);
+  }
+
+  &.is-loading {
+    cursor: wait;
+    opacity: .65;
+    pointer-events: none;
+  }
+}
+
+.template-builder-canvas-note {
+  position: absolute;
+  z-index: 4;
+  right: .75rem;
+  bottom: .75rem;
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  max-inline-size: min(28rem, calc(100% - 1.5rem));
+  padding: .55rem .7rem;
+  color: var(--bs-secondary-color);
+  background: rgba(255, 255, 255, .94);
+  border: 1px solid var(--bs-border-color);
+  border-radius: .45rem;
+  box-shadow: 0 .2rem .65rem rgba(67, 89, 113, .1);
+  font-size: .75rem;
+  pointer-events: none;
+
+  i,
+  strong {
+    color: var(--bs-primary);
+  }
+}
+
+.template-builder-side-panel {
+  position: sticky;
+  top: .75rem;
+  max-block-size: calc(100vh - 7.75rem);
+  padding-inline-end: .15rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(67, 89, 113, .28) transparent;
+  scrollbar-width: thin;
+
+  &::-webkit-scrollbar {
+    inline-size: .4rem;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(67, 89, 113, .26);
+    border-radius: 50rem;
+  }
+
+  &::-webkit-scrollbar-button {
+    display: none;
+    inline-size: 0;
+    block-size: 0;
+  }
+}
+
+.template-builder-settings-card,
+.template-builder-fields-card {
+  box-shadow: 0 .15rem .65rem rgba(67, 89, 113, .07);
+
+  .card-header {
+    padding: 1rem 1rem .6rem;
+  }
+
+  .card-body {
+    padding: .75rem 1rem 1rem;
+  }
+}
+
+.template-builder-locked-value {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  min-block-size: 2.4rem;
+  padding: .45rem .7rem;
+  color: var(--bs-body-color);
+  background: var(--bs-gray-100);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+
+  > i:first-child {
+    color: var(--bs-primary);
+  }
+
+  > i:last-child {
+    color: var(--bs-secondary-color);
+  }
+}
+
+.template-builder-field-list {
+  max-block-size: min(27vh, 17rem);
+}
+
+.template-builder-field-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .45rem;
+  min-block-size: 2.8rem;
+  margin-block-end: .35rem;
+  padding: .25rem .3rem;
+  border: 1px solid transparent;
+  border-radius: .45rem;
+  user-select: none;
+
+  &:hover {
+    background: var(--bs-gray-100);
+    border-color: var(--bs-border-color);
+  }
+
+  &.is-selected {
+    background: rgba(3, 195, 236, .1);
+    border-color: rgba(3, 195, 236, .38);
+    box-shadow: inset 0 0 0 1px rgba(3, 195, 236, .1);
+  }
+}
+
+.template-builder-field-number {
+  min-inline-size: 1.85rem;
+  padding-inline: .35rem;
+  text-align: center;
+}
+
+.template-builder-field-name {
+  min-inline-size: 0;
+  background: transparent;
+  border-color: transparent;
+  user-select: text;
+
+  &:hover,
+  &:focus {
+    background: #fff;
+    border-color: var(--bs-border-color);
+  }
+
+  &:focus {
+    border-color: var(--bs-primary);
+  }
+}
+
+.template-builder-error {
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  margin-block-end: .75rem;
+  padding: .7rem .8rem;
+  color: var(--bs-danger);
+  background: rgba(255, 62, 29, .07);
+  border: 1px solid rgba(255, 62, 29, .18);
+  border-radius: .5rem;
+  font-size: .75rem;
+
+  i {
+    flex: 0 0 auto;
+    margin-block-start: .05rem;
+  }
+}
+
+.template-builder-save-panel {
+  display: grid;
+  gap: .55rem;
+  padding: .75rem;
+  background: #fff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  box-shadow: 0 .15rem .65rem rgba(67, 89, 113, .07);
+}
+
+.template-builder-live-note {
+  display: flex;
+  align-items: flex-start;
+  gap: .4rem;
+  margin: 0;
+  color: var(--bs-secondary-color);
+  font-size: .6875rem;
+  line-height: 1.4;
+
+  i {
+    flex: 0 0 auto;
+    margin-block-start: .05rem;
+    color: var(--bs-primary);
+  }
+}
+
+@media (max-width: 991.98px) {
+  .template-builder-focused .container-xxl.container-p-y {
+    padding: .65rem !important;
+  }
+
+  .template-builder-canvas-card .doc-viewport {
+    block-size: 65vh;
+    min-block-size: 25rem;
+  }
+
+  .template-builder-side-panel {
+    position: static;
+    max-block-size: none;
+    padding-inline-end: 0;
+    overflow: visible;
+  }
+
+  .template-builder-field-list {
+    max-block-size: 20rem;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .template-library-card__header,
+  .template-library-empty,
+  .template-builder-page__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .template-library-card__summary {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+
+  .template-builder-page__header > .btn {
+    align-self: flex-start;
+  }
+
+  .template-builder-canvas-card .doc-viewport {
+    block-size: 60vh;
+    min-block-size: 22rem;
+  }
+}
+
+@media (max-width: 479.98px) {
+  .template-builder-canvas-note {
+    right: .5rem;
+    bottom: .5rem;
+    max-inline-size: calc(100% - 1rem);
+  }
+
+  .template-builder-page__header > .btn {
+    inline-size: 100%;
+  }
+}

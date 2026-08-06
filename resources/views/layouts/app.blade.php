@@ -40,7 +40,7 @@
     @stack('styles')
 </head>
 
-<body>
+<body class="@yield('body-class')">
     <div class="layout-wrapper layout-content-navbar">
         <div class="layout-container">
 

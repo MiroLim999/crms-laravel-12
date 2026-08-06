@@ -28,7 +28,7 @@ enum RoleSlug: string
         return match ($this) {
             self::Staff => 'Digitizes documents, verifies extracted records, and requests corrections.',
             self::Admin => 'Oversees people and approvals. Cannot edit record values.',
-            self::SuperAdmin => 'Full access, including document templates and OCR model management.',
+            self::SuperAdmin => 'Full access, including template building and OCR model management.',
         };
     }
 
