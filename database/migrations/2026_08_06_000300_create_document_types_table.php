@@ -14,7 +14,7 @@ return new class extends Migration
             $table->string('key', 80)->unique();
             $table->string('name', 120)->unique();
             $table->string('short_name', 80);
-            $table->string('icon', 50)->default('bx-file-blank');
+            $table->string('icon', 50)->default('bx-file');
             $table->boolean('is_system')->default(false);
             $table->timestamps();
         });

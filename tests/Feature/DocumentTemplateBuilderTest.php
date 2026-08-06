@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\DocumentType;
 use App\Enums\PageOrientation;
 use App\Enums\PaperSize;
+use App\Models\CivilRecord;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTypeDefinition;
 use App\Models\User;
@@ -312,6 +313,79 @@ class DocumentTemplateBuilderTest extends TestCase
         ])->assertForbidden();
 
         $this->assertSame('Birth Certificate', $birth->refresh()->name);
+    }
+
+    public function test_super_admin_can_delete_an_unused_custom_document_type_and_its_layouts(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $type = DocumentTypeDefinition::create([
+            'key' => 'custom-residency-delete-test',
+            'name' => 'Temporary Residency Record',
+            'short_name' => 'Temporary Residency Record',
+            'icon' => 'bx-file',
+            'is_system' => false,
+        ]);
+        $template = DocumentTemplate::create([
+            'name' => 'Temporary layout',
+            'doc_type' => DocumentType::Custom->value,
+            'document_type_id' => $type->getKey(),
+            ...$this->paperSpec(),
+            'is_active' => false,
+            'created_by' => $superAdmin->getKey(),
+        ]);
+        $field = $template->fields()->create([
+            ...$this->field('Resident name'),
+            'sort_order' => 0,
+            'is_required' => true,
+        ]);
+
+        $this->actingAs($superAdmin)
+            ->delete(route('templates.document-types.destroy', $type))
+            ->assertRedirect(route('templates.index'))
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseMissing('document_types', ['id' => $type->getKey()]);
+        $this->assertDatabaseMissing('document_templates', ['id' => $template->getKey()]);
+        $this->assertDatabaseMissing('document_template_fields', ['id' => $field->getKey()]);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'document-type.deleted']);
+    }
+
+    public function test_custom_document_type_with_records_cannot_be_deleted(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $staff = User::factory()->staff()->create();
+        $type = DocumentTypeDefinition::create([
+            'key' => 'custom-residency-record-test',
+            'name' => 'Residency Record With History',
+            'short_name' => 'Residency Record With History',
+            'icon' => 'bx-file',
+            'is_system' => false,
+        ]);
+        CivilRecord::factory()->create([
+            'doc_type' => DocumentType::Custom->value,
+            'document_type_id' => $type->getKey(),
+            'created_by' => $staff->getKey(),
+        ]);
+
+        $this->actingAs($superAdmin)
+            ->delete(route('templates.document-types.destroy', $type))
+            ->assertRedirect()
+            ->assertSessionHas('error');
+
+        $this->assertDatabaseHas('document_types', ['id' => $type->getKey()]);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'document-type.deleted']);
+    }
+
+    public function test_builtin_document_types_cannot_be_deleted(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $birth = DocumentTypeDefinition::where('key', DocumentType::Birth->value)->firstOrFail();
+
+        $this->actingAs($superAdmin)
+            ->delete(route('templates.document-types.destroy', $birth))
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('document_types', ['id' => $birth->getKey()]);
     }
 
     public function test_only_super_admin_can_manage_custom_document_types(): void

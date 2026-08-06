@@ -21,7 +21,7 @@
                 <div class="dropdown-divider"></div>
                 <button class="dropdown-item" type="button" data-bs-toggle="modal"
                         data-bs-target="#newDocumentTypeModal">
-                    <i class="icon-base bx bx-folder-plus icon-sm me-2" aria-hidden="true"></i>
+                    <i class="icon-base bx bx-folder icon-sm me-2" aria-hidden="true"></i>
                     New document type&hellip;
                 </button>
             </div>
@@ -74,26 +74,46 @@
                                 New layout
                             </a>
                             @unless ($type->is_system)
-                                <button type="button" class="btn btn-sm btn-outline-secondary"
-                                        data-bs-toggle="modal"
-                                        data-bs-target="#renameDocumentType{{ $type->getKey() }}"
-                                        aria-label="Rename {{ $type->label() }}">
-                                    <i class="icon-base bx bx-edit-alt icon-sm" aria-hidden="true"></i>
-                                    Rename
-                                </button>
+                                <div class="dropdown">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                                            data-bs-toggle="dropdown" aria-expanded="false"
+                                            aria-label="Manage {{ $type->label() }}">
+                                        <i class="icon-base bx bx-dots-vertical-rounded icon-sm" aria-hidden="true"></i>
+                                        Manage
+                                    </button>
+                                    <div class="dropdown-menu dropdown-menu-end">
+                                        <button type="button" class="dropdown-item"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#renameDocumentType{{ $type->getKey() }}">
+                                            <i class="icon-base bx bx-edit-alt icon-sm me-2" aria-hidden="true"></i>
+                                            Rename
+                                        </button>
+                                        <button type="button" class="dropdown-item text-danger"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#deleteDocumentType{{ $type->getKey() }}">
+                                            <i class="icon-base bx bx-trash icon-sm me-2" aria-hidden="true"></i>
+                                            Delete document type
+                                        </button>
+                                    </div>
+                                </div>
                             @endunless
                             <button type="button" class="template-library-toggle"
                                     data-template-layout-toggle data-target="{{ $collapseId }}"
                                     data-storage-key="template-layouts:{{ $type->key }}"
                                     aria-expanded="{{ $expanded ? 'true' : 'false' }}"
                                     aria-controls="{{ $collapseId }}">
+                                <i class="icon-base bx {{ $expanded ? 'bx-hide' : 'bx-show' }} icon-sm"
+                                   data-layout-visibility-icon aria-hidden="true"></i>
                                 <span>{{ $expanded ? 'Hide' : 'Show' }} layouts</span>
-                                <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
+                                <i class="icon-base bx bx-chevron-down template-library-toggle__chevron"
+                                   aria-hidden="true"></i>
                             </button>
                         </div>
                     </header>
 
-                    <div class="template-library-layouts" id="{{ $collapseId }}" @if (! $expanded) hidden @endif>
+                    <div class="template-library-layouts" id="{{ $collapseId }}"
+                         style="max-height: {{ $expanded ? 'none' : '0px' }}; overflow: hidden;"
+                         aria-hidden="{{ $expanded ? 'false' : 'true' }}">
                         @if ($group->isEmpty())
                             <div class="template-library-empty">
                                 <span>No layouts have been created for this document type.</span>
@@ -204,6 +224,47 @@
                             </div>
                         </div>
                     </div>
+
+                    <div class="modal fade" id="deleteDocumentType{{ $type->getKey() }}" tabindex="-1"
+                         aria-labelledby="deleteDocumentTypeLabel{{ $type->getKey() }}" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered modal-sm">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <div>
+                                        <div class="text-uppercase text-danger small fw-semibold mb-1">Document type</div>
+                                        <h2 class="modal-title h5" id="deleteDocumentTypeLabel{{ $type->getKey() }}">
+                                            Delete {{ $type->label() }}?
+                                        </h2>
+                                    </div>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body">
+                                    @if ($type->records_count > 0)
+                                        <p class="mb-2">This document type is used by {{ $type->records_count }} saved {{ Str::plural('record', $type->records_count) }}.</p>
+                                        <p class="mb-0 text-muted small">It cannot be deleted because its identity is needed for record history.</p>
+                                    @else
+                                        <p class="mb-2">This removes the document type and its {{ $type->templates_count }} {{ Str::plural('layout', $type->templates_count) }}.</p>
+                                        <p class="mb-0 text-muted small">This action cannot be undone.</p>
+                                    @endif
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                                        {{ $type->records_count > 0 ? 'Close' : 'Cancel' }}
+                                    </button>
+                                    @if ($type->records_count === 0)
+                                        <form method="POST" action="{{ route('templates.document-types.destroy', $type) }}">
+                                            @csrf
+                                            @method('DELETE')
+                                            <button type="submit" class="btn btn-danger">
+                                                <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
+                                                Delete document type
+                                            </button>
+                                        </form>
+                                    @endif
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 @endunless
             </div>
         @endforeach
@@ -251,12 +312,15 @@
         document.querySelectorAll('[data-template-layout-toggle]').forEach((toggle) => {
             const label = toggle.querySelector('span');
             const target = document.getElementById(toggle.dataset.target);
+            const visibilityIcon = toggle.querySelector('[data-layout-visibility-icon]');
             if (!label || !target) return;
 
-            const applyState = (expanded, remember = true) => {
-                target.hidden = !expanded;
+            const updateState = (expanded, remember = true) => {
                 toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                target.setAttribute('aria-hidden', expanded ? 'false' : 'true');
                 label.textContent = expanded ? 'Hide layouts' : 'Show layouts';
+                visibilityIcon?.classList.toggle('bx-hide', expanded);
+                visibilityIcon?.classList.toggle('bx-show', !expanded);
 
                 if (remember) {
                     try {
@@ -267,15 +331,42 @@
                 }
             };
 
+            let expanded = toggle.getAttribute('aria-expanded') === 'true';
+
             try {
                 const saved = window.localStorage.getItem(toggle.dataset.storageKey);
-                if (saved !== null) applyState(saved === 'open', false);
+                if (saved !== null) expanded = saved === 'open';
             } catch (_) {
-                applyState(toggle.getAttribute('aria-expanded') === 'true', false);
+                // Use the server-rendered state when storage is unavailable.
             }
 
+            target.style.maxHeight = expanded ? 'none' : '0px';
+            updateState(expanded, false);
+
+            window.requestAnimationFrame(() => {
+                target.style.transition = 'max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1)';
+            });
+
             toggle.addEventListener('click', () => {
-                applyState(toggle.getAttribute('aria-expanded') !== 'true');
+                const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+
+                if (isExpanded) {
+                    target.style.maxHeight = `${target.scrollHeight}px`;
+                    target.getBoundingClientRect();
+                    target.style.maxHeight = '0px';
+                    updateState(false);
+                    return;
+                }
+
+                target.style.maxHeight = `${target.scrollHeight}px`;
+                updateState(true);
+                target.addEventListener('transitionend', function onTransitionEnd(event) {
+                    if (event.propertyName !== 'max-height') return;
+                    target.removeEventListener('transitionend', onTransitionEnd);
+                    if (toggle.getAttribute('aria-expanded') === 'true') {
+                        target.style.maxHeight = 'none';
+                    }
+                });
             });
         });
 

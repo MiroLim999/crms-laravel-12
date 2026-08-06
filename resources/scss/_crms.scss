@@ -1821,26 +1821,46 @@
   align-items: center;
   gap: .3rem;
   min-block-size: 2rem;
-  padding: .35rem .55rem;
+  padding: .35rem .65rem;
   color: var(--bs-secondary-color);
-  background: transparent;
-  border: 0;
-  border-radius: .35rem;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: .45rem;
   font: inherit;
+  transition: color .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .18s ease;
 
   &:hover,
   &:focus-visible {
     color: var(--bs-primary);
     background: rgba(105, 108, 255, .07);
+    border-color: rgba(105, 108, 255, .35);
   }
 
-  i {
+  &__chevron {
     font-size: 1rem;
     transition: transform .18s ease;
   }
 
-  &[aria-expanded='true'] i {
+  &[aria-expanded='true'] {
+    color: var(--bs-primary);
+    background: rgba(105, 108, 255, .08);
+    border-color: rgba(105, 108, 255, .28);
+  }
+
+  &[aria-expanded='true'] &__chevron {
     transform: rotate(180deg);
+  }
+}
+
+.template-library-layouts {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .template-library-layouts,
+  .template-library-toggle,
+  .template-library-toggle__chevron {
+    transition: none !important;
   }
 }
 

@@ -6,6 +6,7 @@ use App\Models\DocumentTypeDefinition;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -23,7 +24,7 @@ class DocumentTypeDefinitionController extends Controller
             'key' => $key,
             'name' => $name,
             'short_name' => $name,
-            'icon' => 'bx-file-blank',
+            'icon' => 'bx-file',
             'is_system' => false,
         ]);
 
@@ -55,6 +56,40 @@ class DocumentTypeDefinitionController extends Controller
         return redirect()
             ->route('templates.index', ['open' => $documentType->key])
             ->with('success', "Document type renamed to '{$name}'.");
+    }
+
+    public function destroy(DocumentTypeDefinition $documentType): RedirectResponse
+    {
+        abort_if($documentType->is_system, 403, 'Built-in document types cannot be deleted.');
+
+        if ($documentType->records()->exists()) {
+            return back()->with(
+                'error',
+                "'{$documentType->name}' cannot be deleted because saved records use it.",
+            );
+        }
+
+        $layoutCount = $documentType->templates()->count();
+        DB::transaction(function () use ($documentType, $layoutCount) {
+            $this->audit->log(
+                'document-type.deleted',
+                $documentType,
+                old: [
+                    'key' => $documentType->key,
+                    'name' => $documentType->name,
+                    'layout_count' => $layoutCount,
+                ],
+                description: "Deleted custom document type '{$documentType->name}' and {$layoutCount} unused layout(s).",
+            );
+
+            $documentType->templates()->delete();
+            $documentType->delete();
+        });
+
+        return redirect()->route('templates.index')->with(
+            'success',
+            "Document type '{$documentType->name}' and its unused layouts were deleted.",
+        );
     }
 
     private function validatedName(Request $request, ?DocumentTypeDefinition $current = null): string

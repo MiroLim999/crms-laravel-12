@@ -46,7 +46,10 @@ class DocumentTypeDefinition extends Model
 
     public function icon(): string
     {
-        return $this->icon ?: 'bx-file-blank';
+        return match ($this->icon) {
+            null, '', 'bx-file-blank' => 'bx-file',
+            default => $this->icon,
+        };
     }
 
     /** @return list<array{name: string, x: float, y: float, width: float, height: float}> */
@@ -69,6 +72,7 @@ class DocumentTypeDefinition extends Model
     public static function ordered(): Collection
     {
         return static::query()
+            ->withCount(['templates', 'records'])
             ->orderByDesc('is_system')
             ->orderBy('id')
             ->get();

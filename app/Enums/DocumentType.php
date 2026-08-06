@@ -42,7 +42,7 @@ enum DocumentType: string
             self::Birth => 'bx-cake',
             self::Death => 'bx-file',
             self::Marriage => 'bx-heart',
-            self::Custom => 'bx-file-blank',
+            self::Custom => 'bx-file',
         };
     }
 

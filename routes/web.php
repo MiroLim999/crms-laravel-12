@@ -177,6 +177,8 @@ Route::middleware('auth')->group(function () {
             ->name('templates.document-types.store');
         Route::put('templates/document-types/{documentType}', [DocumentTypeDefinitionController::class, 'update'])
             ->name('templates.document-types.update');
+        Route::delete('templates/document-types/{documentType}', [DocumentTypeDefinitionController::class, 'destroy'])
+            ->name('templates.document-types.destroy');
         Route::get('templates', [DocumentTemplateController::class, 'index'])->name('templates.index');
         Route::get('templates/create', [DocumentTemplateController::class, 'create'])->name('templates.create');
         Route::post('templates', [DocumentTemplateController::class, 'store'])->name('templates.store');
