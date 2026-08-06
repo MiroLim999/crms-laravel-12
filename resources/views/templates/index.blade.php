@@ -83,7 +83,8 @@
                                 </button>
                             @endunless
                             <button type="button" class="template-library-toggle"
-                                    data-bs-toggle="collapse" data-bs-target="#{{ $collapseId }}"
+                                    data-template-layout-toggle data-target="{{ $collapseId }}"
+                                    data-storage-key="template-layouts:{{ $type->key }}"
                                     aria-expanded="{{ $expanded ? 'true' : 'false' }}"
                                     aria-controls="{{ $collapseId }}">
                                 <span>{{ $expanded ? 'Hide' : 'Show' }} layouts</span>
@@ -92,7 +93,7 @@
                         </div>
                     </header>
 
-                    <div class="collapse {{ $expanded ? 'show' : '' }}" id="{{ $collapseId }}">
+                    <div class="template-library-layouts" id="{{ $collapseId }}" @if (! $expanded) hidden @endif>
                         @if ($group->isEmpty())
                             <div class="template-library-empty">
                                 <span>No layouts have been created for this document type.</span>
@@ -247,11 +248,35 @@
 
 @push('scripts')
     <script>
-        document.querySelectorAll('.template-library-toggle').forEach((toggle) => {
+        document.querySelectorAll('[data-template-layout-toggle]').forEach((toggle) => {
             const label = toggle.querySelector('span');
-            const target = document.querySelector(toggle.dataset.bsTarget);
-            target?.addEventListener('shown.bs.collapse', () => { label.textContent = 'Hide layouts'; });
-            target?.addEventListener('hidden.bs.collapse', () => { label.textContent = 'Show layouts'; });
+            const target = document.getElementById(toggle.dataset.target);
+            if (!label || !target) return;
+
+            const applyState = (expanded, remember = true) => {
+                target.hidden = !expanded;
+                toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                label.textContent = expanded ? 'Hide layouts' : 'Show layouts';
+
+                if (remember) {
+                    try {
+                        window.localStorage.setItem(toggle.dataset.storageKey, expanded ? 'open' : 'closed');
+                    } catch (_) {
+                        // Storage can be unavailable in strict privacy modes; toggling still works.
+                    }
+                }
+            };
+
+            try {
+                const saved = window.localStorage.getItem(toggle.dataset.storageKey);
+                if (saved !== null) applyState(saved === 'open', false);
+            } catch (_) {
+                applyState(toggle.getAttribute('aria-expanded') === 'true', false);
+            }
+
+            toggle.addEventListener('click', () => {
+                applyState(toggle.getAttribute('aria-expanded') !== 'true');
+            });
         });
 
         @if ($errors->has('document_type_name'))

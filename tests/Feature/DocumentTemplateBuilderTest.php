@@ -27,8 +27,8 @@ class DocumentTemplateBuilderTest extends TestCase
             ->assertSeeText('Published layouts are the Staff defaults.');
 
         $this->get(route('templates.index'))
-            ->assertSee('class="collapse show"', escape: false)
-            ->assertSee('data-bs-toggle="collapse"', escape: false)
+            ->assertSee('class="template-library-layouts"', escape: false)
+            ->assertSee('data-template-layout-toggle', escape: false)
             ->assertSeeText('Show layouts')
             ->assertSeeText('New document type');
 
