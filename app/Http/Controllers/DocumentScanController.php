@@ -14,9 +14,13 @@ use App\Services\Ocr\OcrServiceException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use Throwable;
 
 /**
  * The digitisation flow: upload a scan, mark the fields, run OCR, verify, submit.
@@ -125,78 +129,127 @@ class DocumentScanController extends Controller
     /**
      * Step 3: persist the verified record and lock it.
      */
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request): RedirectResponse|JsonResponse
     {
         $validated = $request->validate([
             'doc_type' => ['required', Rule::enum(DocumentType::class)],
             'document_template_id' => ['required', 'exists:document_templates,id'],
             'registry_number' => ['nullable', 'string', 'max:64'],
-            'ocr_model_key' => ['nullable', 'string', 'max:255'],
+            'ocr_model_key' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::exists(OcrModel::class, 'key')->whereNull('disk_deleted_at'),
+            ],
             'scan' => ['required', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp,tiff', 'max:20480'],
-            'fields' => ['required', 'array', 'min:1'],
-            'fields.*.name' => ['required', 'string', 'max:120'],
+            'fields' => ['required', 'array', 'min:1', 'max:100'],
+            'fields.*.verified' => ['required', 'accepted'],
+            'fields.*.name' => ['required', 'string', 'max:120', 'distinct:ignore_case'],
             'fields.*.ocr_text' => ['nullable', 'string', 'max:2000'],
             'fields.*.ocr_confidence' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'fields.*.verified_value' => ['nullable', 'string', 'max:2000'],
+            'fields.*.verified_value' => ['required', 'string', 'max:2000'],
             'fields.*.x' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.y' => ['required', 'numeric', 'min:0', 'max:1'],
-            'fields.*.width' => ['required', 'numeric', 'min:0', 'max:1'],
-            'fields.*.height' => ['required', 'numeric', 'min:0', 'max:1'],
+            'fields.*.width' => ['required', 'numeric', 'min:0.00001', 'max:1'],
+            'fields.*.height' => ['required', 'numeric', 'min:0.00001', 'max:1'],
         ]);
 
-        $record = DB::transaction(function () use ($request, $validated) {
-            $path = $request->file('scan')->store('scans', 'local');
-
-            $record = CivilRecord::create([
-                'doc_type' => $validated['doc_type'],
-                'document_template_id' => $validated['document_template_id'],
-                'registry_number' => $validated['registry_number'] ?? null,
-                'status' => RecordStatus::Submitted,
-                'scan_path' => $path,
-                'scan_mime' => $request->file('scan')->getMimeType(),
-                'ocr_model_key' => $validated['ocr_model_key'] ?? null,
-                'created_by' => $request->user()->getKey(),
-                'submitted_by' => $request->user()->getKey(),
-                'submitted_at' => now(),
+        $template = DocumentTemplate::find($validated['document_template_id']);
+        if ($template?->doc_type->value !== $validated['doc_type']) {
+            throw ValidationException::withMessages([
+                'document_template_id' => 'The selected template does not belong to this document type.',
             ]);
+        }
 
-            foreach (array_values($validated['fields']) as $index => $field) {
-                $record->fields()->create([
-                    'name' => $field['name'],
-                    'ocr_text' => $field['ocr_text'] ?? null,
-                    'ocr_confidence' => $field['ocr_confidence'] ?? null,
-                    'verified_value' => $field['verified_value'] ?? null,
-                    'x' => $field['x'],
-                    'y' => $field['y'],
-                    'width' => $field['width'],
-                    'height' => $field['height'],
-                    'sort_order' => $index,
-                ]);
+        $coordinateErrors = [];
+        foreach ($validated['fields'] as $index => $field) {
+            if ((float) $field['x'] + (float) $field['width'] > 1.00001) {
+                $coordinateErrors["fields.{$index}.width"] = 'This field marker extends beyond the document width.';
             }
+            if ((float) $field['y'] + (float) $field['height'] > 1.00001) {
+                $coordinateErrors["fields.{$index}.height"] = 'This field marker extends beyond the document height.';
+            }
+        }
+        if ($coordinateErrors !== []) {
+            throw ValidationException::withMessages($coordinateErrors);
+        }
 
-            $record->load('fields');
+        $scan = $request->file('scan');
+        if (! $scan instanceof UploadedFile) {
+            throw ValidationException::withMessages([
+                'scan' => 'Choose a valid scanned document to submit.',
+            ]);
+        }
 
-            $corrected = $record->fields->filter->wasCorrected()->count();
+        $path = $scan->store('scans', 'local');
 
-            $this->audit->log(
-                'record.submitted',
-                $record,
-                new: [
+        try {
+            $record = DB::transaction(function () use ($request, $scan, $validated, $path) {
+
+                $record = CivilRecord::create([
                     'doc_type' => $validated['doc_type'],
+                    'document_template_id' => $validated['document_template_id'],
                     'registry_number' => $validated['registry_number'] ?? null,
-                    'field_count' => $record->fields->count(),
-                    'corrected_fields' => $corrected,
-                    'ocr_model' => $validated['ocr_model_key'] ?? null,
-                ],
-                description: "Submitted and locked a {$record->doc_type->shortLabel()} record.",
-            );
+                    'status' => RecordStatus::Submitted,
+                    'scan_path' => $path,
+                    'scan_mime' => $scan->getMimeType(),
+                    'ocr_model_key' => $validated['ocr_model_key'],
+                    'created_by' => $request->user()->getKey(),
+                    'submitted_by' => $request->user()->getKey(),
+                    'submitted_at' => now(),
+                ]);
 
-            return $record;
-        });
+                foreach (array_values($validated['fields']) as $index => $field) {
+                    $record->fields()->create([
+                        'name' => $field['name'],
+                        'ocr_text' => $field['ocr_text'] ?? null,
+                        'ocr_confidence' => $field['ocr_confidence'] ?? null,
+                        'verified_value' => $field['verified_value'],
+                        'x' => $field['x'],
+                        'y' => $field['y'],
+                        'width' => $field['width'],
+                        'height' => $field['height'],
+                        'sort_order' => $index,
+                    ]);
+                }
+
+                $record->load('fields');
+
+                $corrected = $record->fields->filter->wasCorrected()->count();
+
+                $this->audit->log(
+                    'record.submitted',
+                    $record,
+                    new: [
+                        'doc_type' => $validated['doc_type'],
+                        'registry_number' => $validated['registry_number'] ?? null,
+                        'field_count' => $record->fields->count(),
+                        'corrected_fields' => $corrected,
+                        'ocr_model' => $validated['ocr_model_key'],
+                    ],
+                    description: "Submitted and locked a {$record->doc_type->shortLabel()} record.",
+                );
+
+                return $record;
+            });
+        } catch (Throwable $exception) {
+            Storage::disk('local')->delete($path);
+            throw $exception;
+        }
+
+        $redirect = route('records.show', $record);
+        $message = 'Record submitted and locked. Further changes need a change request.';
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => $message,
+                'redirect' => $redirect,
+            ], 201);
+        }
 
         return redirect()
-            ->route('records.show', $record)
-            ->with('success', 'Record submitted and locked. Further changes need a change request.');
+            ->to($redirect)
+            ->with('success', $message);
     }
 
     // ------------------------------------------------------------------ internals

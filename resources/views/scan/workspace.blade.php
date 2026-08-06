@@ -214,61 +214,128 @@
     {{-- Step 3: verify and submit --}}
     <section id="step-verify" class="document-step-panel d-none">
         <form method="POST" action="{{ route('documents.store') }}" id="submitForm"
-              enctype="multipart/form-data">
+              enctype="multipart/form-data" novalidate>
             @csrf
             <input type="hidden" name="doc_type" value="{{ $docType->value }}">
             <input type="hidden" name="document_template_id" value="{{ $template->getKey() }}">
             <input type="hidden" name="ocr_model_key" id="ocrModelKey">
 
-            <div class="row g-4">
-                <div class="col-lg-8">
-                    <x-card class="document-validation-card" title="Validate extracted fields"
-                            subtitle="Compare each crop with the reading and correct it. The corrected value is what gets stored.">
-                        <div id="verifyRows"></div>
-                    </x-card>
+            <div class="validation-workspace">
+                <header class="validation-workspace__header">
+                    <div>
+                        <span class="validation-eyebrow">Final review</span>
+                        <h2 class="h4 mb-1">Compare and verify</h2>
+                        <p class="text-muted mb-0">
+                            Select a marker or extracted field to compare them. Only checked fields are submitted.
+                        </p>
+                    </div>
+
+                    <div class="validation-progress-summary" aria-live="polite">
+                        <div>
+                            <strong id="verifiedCount">0 of 0</strong>
+                            <span>fields verified</span>
+                        </div>
+                        <div class="progress" role="progressbar" aria-label="Field verification progress"
+                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+                             id="verifiedProgress">
+                            <div class="progress-bar" id="verifiedProgressBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </header>
+
+                <div class="validation-submit-error d-none" id="validationSubmitError"
+                     role="alert" aria-live="assertive">
+                    <i class="icon-base bx bx-error-circle" aria-hidden="true"></i>
+                    <div>
+                        <strong>Unable to submit this record</strong>
+                        <div id="validationSubmitMessage"></div>
+                    </div>
                 </div>
 
-                <div class="col-lg-4">
-                    <div class="document-side-panel">
-                    <x-card title="Scan summary" class="mb-4 document-summary-card">
-                        <dl class="row mb-0">
-                            <dt class="col-7 fw-normal text-muted">Model</dt>
-                            <dd class="col-5"><code id="summaryModel">—</code></dd>
+                <div class="validation-comparison-grid">
+                    <section class="card validation-pane validation-document-pane"
+                             aria-labelledby="originalDocumentTitle">
+                        <header class="validation-pane__header">
+                            <div class="min-w-0">
+                                <span class="validation-pane__eyebrow">Source</span>
+                                <h3 class="h5 mb-1" id="originalDocumentTitle">Original document</h3>
+                                <span class="validation-file-name" id="validationFileName">Document</span>
+                            </div>
 
-                            <dt class="col-7 fw-normal text-muted">Average confidence</dt>
-                            <dd class="col-5" id="summaryConfidence">—</dd>
+                            <div class="marker-zoom-controls" role="group"
+                                 aria-label="Original document zoom controls">
+                                <button type="button" class="marker-tool-button" id="validationZoomOutBtn"
+                                        aria-label="Zoom out">&minus;</button>
+                                <button type="button" class="marker-tool-button marker-zoom-value"
+                                        id="validationZoomResetBtn" title="Fit document to panel">100%</button>
+                                <button type="button" class="marker-tool-button" id="validationZoomInBtn"
+                                        aria-label="Zoom in">+</button>
+                            </div>
+                        </header>
 
-                            <dt class="col-7 fw-normal text-muted">Needs review</dt>
-                            <dd class="col-5 mb-0" id="summaryReview">—</dd>
-                        </dl>
+                        <div class="doc-viewport validation-doc-viewport" id="validationDocViewport">
+                            <div class="doc-stage" id="validationDocStage">
+                                <canvas id="validationPageCanvas"></canvas>
+                                <div class="field-overlay validation-field-overlay"
+                                     id="validationFieldOverlay"></div>
+                            </div>
+                        </div>
 
-                        <hr>
-                        <p class="small text-muted mb-0">
-                            Confidence is the model's certainty in its own output, not accuracy.
-                            Fields under {{ $threshold }}% are flagged for a closer look.
-                        </p>
-                    </x-card>
+                        <footer class="validation-pane__hint">
+                            <i class="icon-base bx bx-mouse" aria-hidden="true"></i>
+                            Click a marker to locate its TrOCR output. Hold <kbd>Ctrl</kbd> and scroll to zoom.
+                        </footer>
+                    </section>
 
-                    <x-card title="Registry details" class="mb-4">
-                        <label for="registry_number" class="form-label">Registry number</label>
-                        <input type="text" id="registry_number" name="registry_number"
-                               class="form-control" placeholder="As written on the certificate">
-                    </x-card>
+                    <section class="card validation-pane validation-output-pane"
+                             aria-labelledby="digitalDocumentTitle">
+                        <header class="validation-pane__header validation-output-header">
+                            <div>
+                                <span class="validation-pane__eyebrow">Transcription</span>
+                                <h3 class="h5 mb-1" id="digitalDocumentTitle">Digital text output</h3>
+                                <p class="small text-muted mb-0">Correct the text, then check Verified.</p>
+                            </div>
 
-                    <div class="document-lock-notice">
-                        <i class="icon-base bx bx-lock-alt"></i>
-                        <span>Submitting locks this record. Later corrections need a change request approved by an Admin.</span>
-                    </div>
+                            <div class="validation-model-summary" aria-label="OCR summary">
+                                <span><small>Model</small><code id="summaryModel">&mdash;</code></span>
+                                <span><small>Confidence</small><strong id="summaryConfidence">&mdash;</strong></span>
+                                <span><small>Review</small><strong id="summaryReview">&mdash;</strong></span>
+                            </div>
+                        </header>
 
-                    <div class="d-grid gap-2 mt-4">
-                        <button class="btn btn-primary btn-lg" type="submit" id="submitBtn">
-                            <i class="icon-base bx bx-check-shield icon-sm me-1"></i> Submit &amp; lock record
-                        </button>
-                        <button class="btn btn-outline-secondary" type="button" id="backToMark">
-                            <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Back to marking
-                        </button>
-                    </div>
-                    </div>
+                        <div class="validation-registry-row">
+                            <label for="registry_number">
+                                Registry number <span>optional</span>
+                            </label>
+                            <input type="text" id="registry_number" name="registry_number"
+                                   class="form-control" maxlength="64"
+                                   placeholder="As written on the certificate">
+                        </div>
+
+                        <div class="validation-list-heading" aria-hidden="true">
+                            <span>Field</span>
+                            <span>TrOCR output</span>
+                            <span>Verified</span>
+                        </div>
+                        <div class="validation-result-list" id="verifyRows"></div>
+
+                        <footer class="validation-submit-bar">
+                            <div class="validation-lock-copy">
+                                <i class="icon-base bx bx-lock-alt" aria-hidden="true"></i>
+                                <span>Submitted fields are locked. Corrections require an approved change request.</span>
+                            </div>
+
+                            <div class="validation-submit-actions">
+                                <button class="btn btn-outline-secondary" type="button" id="backToMark">
+                                    <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Back to marking
+                                </button>
+                                <button class="btn btn-primary" type="submit" id="submitBtn" disabled>
+                                    <i class="icon-base bx bx-check-shield icon-sm me-1"></i>
+                                    Submit <span id="submitVerifiedCount">0</span> verified
+                                </button>
+                            </div>
+                        </footer>
+                    </section>
                 </div>
             </div>
         </form>
@@ -349,8 +416,31 @@
         csrf: @json(csrf_token()),
     };
 
-    const el = (id) => document.getElementById(id);
+    const el = (id) => {
+        const node = document.getElementById(id);
+        if (!node) throw new Error(`Required interface element #${id} was not found.`);
+        return node;
+    };
+
+    const requiredPart = (root, selector) => {
+        const node = root.querySelector(selector);
+        if (!(node instanceof HTMLElement)) {
+            throw new Error(`Required interface element ${selector} was not found.`);
+        }
+        return node;
+    };
+
+    const requiredInput = (root, selector) => {
+        const node = root.querySelector(selector);
+        if (!(node instanceof HTMLInputElement)) {
+            throw new Error(`Required input ${selector} was not found.`);
+        }
+        return node;
+    };
     const steps = { upload: el('step-upload'), mark: el('step-mark'), verify: el('step-verify') };
+    const modelSelect = document.getElementById('modelSelect');
+    const scanFileInput = requiredInput(document, '#scanFile');
+    const selectAllFieldsInput = requiredInput(document, '#selectAllFields');
 
     let scanFile = null;
     let cropped = [];
@@ -360,6 +450,9 @@
     let restoringFieldHistory = false;
     let markerClipboard = [];
     let pasteSequence = 0;
+    let activeValidationIndex = null;
+    let syncingValidationSelection = false;
+    let recordSubmitting = false;
 
     const marker = new FieldMarker({
         canvas: el('pageCanvas'),
@@ -368,6 +461,15 @@
         onChange: handleMarkerChange,
         onSelectionChange: updateSelectionUI,
         onZoomChange: updateZoomUI,
+    });
+
+    const validationMarker = new FieldMarker({
+        canvas: el('validationPageCanvas'),
+        overlay: el('validationFieldOverlay'),
+        viewport: el('validationDocViewport'),
+        readOnly: true,
+        onSelectionChange: handleValidationMarkerSelection,
+        onZoomChange: updateValidationZoomUI,
     });
 
     const cloneBoxes = (boxes) => boxes.map(({ name, x, y, w, h }) => ({ name, x, y, w, h }));
@@ -474,9 +576,11 @@
         Object.entries(steps).forEach(([key, node]) => node.classList.toggle('d-none', key !== name));
 
         const marking = name === 'mark';
-        el('documentPageHeader').classList.toggle('d-none', marking);
-        el('documentFlowSteps').classList.toggle('d-none', marking);
+        const focusedWorkspace = marking || name === 'verify';
+        el('documentPageHeader').classList.toggle('d-none', focusedWorkspace);
+        el('documentFlowSteps').classList.toggle('d-none', focusedWorkspace);
         el('layout-navbar')?.classList.toggle('d-none', marking);
+        document.querySelector('.content-footer')?.classList.toggle('d-none', focusedWorkspace);
 
         const order = ['upload', 'mark', 'verify'];
         const activeIndex = order.indexOf(name);
@@ -491,7 +595,7 @@
             }
         });
 
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        window.scrollTo({ top: 0, behavior: 'auto' });
     }
 
     // ---------------------------------------------------------------- step 1
@@ -500,7 +604,7 @@
 
         if (file.size > 20 * 1024 * 1024) {
             alert('Choose a document smaller than 20 MB.');
-            el('scanFile').value = '';
+            scanFileInput.value = '';
             return;
         }
 
@@ -520,7 +624,7 @@
             window.requestAnimationFrame(() => marker.resetZoom());
         } catch (error) {
             scanFile = null;
-            el('scanFile').value = '';
+            scanFileInput.value = '';
             alert(error.message || 'That document could not be opened.');
         } finally {
             dropzone.classList.remove('is-loading');
@@ -528,8 +632,9 @@
         }
     }
 
-    el('scanFile').addEventListener('change', (event) => {
-        openDocument(event.target.files?.[0]);
+    scanFileInput.addEventListener('change', (event) => {
+        if (!(event.currentTarget instanceof HTMLInputElement)) return;
+        openDocument(event.currentTarget.files?.[0]);
     });
 
     const dropzone = el('documentDropzone');
@@ -549,7 +654,7 @@
     dropzone.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            el('scanFile').click();
+            scanFileInput.click();
         }
     });
 
@@ -588,7 +693,7 @@
         });
 
         el('fieldCount').textContent = `${boxes.length} field${boxes.length === 1 ? '' : 's'}`;
-        el('selectAllFields').disabled = boxes.length === 0;
+        selectAllFieldsInput.disabled = boxes.length === 0;
         el('scanNowBtn').disabled = boxes.length === 0;
         updateSelectionUI(marker.selectedIndexes());
     }
@@ -604,8 +709,8 @@
         const summary = el('selectionSummary');
         summary.querySelector('span').textContent = `${count} selected`;
         summary.classList.toggle('is-active', count > 0);
-        el('selectAllFields').checked = total > 0 && count === total;
-        el('selectAllFields').indeterminate = count > 0 && count < total;
+        selectAllFieldsInput.checked = total > 0 && count === total;
+        selectAllFieldsInput.indeterminate = count > 0 && count < total;
         el('deleteSelectedBtn').disabled = count === 0;
         el('deleteFieldsBtn').disabled = count === 0;
     }
@@ -615,9 +720,16 @@
         updateResetUI();
     }
 
+    function updateValidationZoomUI(zoom) {
+        el('validationZoomResetBtn').textContent = `${Math.round(zoom * 100)}%`;
+    }
+
     el('zoomOutBtn').addEventListener('click', () => marker.zoomBy(-0.1));
     el('zoomInBtn').addEventListener('click', () => marker.zoomBy(0.1));
     el('zoomResetBtn').addEventListener('click', () => marker.resetZoom());
+    el('validationZoomOutBtn').addEventListener('click', () => validationMarker.zoomBy(-0.1));
+    el('validationZoomInBtn').addEventListener('click', () => validationMarker.zoomBy(0.1));
+    el('validationZoomResetBtn').addEventListener('click', () => validationMarker.resetZoom());
 
     function restoreTemplateFields() {
         marker.setBoxes(cloneBoxes(templateBoxes));
@@ -644,7 +756,7 @@
     });
     el('deleteSelectedBtn').addEventListener('click', () => marker.removeSelected());
     el('deleteFieldsBtn').addEventListener('click', () => marker.removeSelected());
-    el('selectAllFields').addEventListener('change', (event) => {
+    selectAllFieldsInput.addEventListener('change', (event) => {
         if (event.target.checked) {
             marker.selectAll();
         } else {
@@ -713,10 +825,13 @@
     });
 
     el('backToUpload').addEventListener('click', () => {
-        el('scanFile').value = '';
+        scanFileInput.value = '';
         showStep('upload');
     });
-    el('backToMark').addEventListener('click', () => showStep('mark'));
+    el('backToMark').addEventListener('click', () => {
+        clearValidationSubmitError();
+        showStep('mark');
+    });
 
     let scanInProgress = false;
     let ocrProgressTimer = null;
@@ -849,7 +964,7 @@
                     fields: cropped.map((c) => ({ name: c.name, image: c.image })),
                     // Absent unless Staff choice is enabled; the server falls back to
                     // the promoted model and re-checks that the key is one it allows.
-                    model: el('modelSelect')?.value ?? null,
+                    model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null,
                 }),
             });
 
@@ -866,14 +981,37 @@
                 throw new Error('The OCR service returned no field readings. Please try again.');
             }
 
+            if (typeof payload.modelKey !== 'string' || payload.modelKey.trim() === '') {
+                throw new Error('The OCR service did not identify the model used. No data was saved; please scan again.');
+            }
+
+            if (payload.results.length !== cropped.length) {
+                throw new Error('The OCR service returned an incomplete result. No data was saved; please scan again.');
+            }
+
+            const hasMismatchedResult = payload.results.some((result, index) => (
+                !result
+                || typeof result !== 'object'
+                || String(result?.name ?? '') !== String(cropped[index]?.name ?? '')
+            ));
+            if (hasMismatchedResult) {
+                throw new Error('The OCR fields no longer match their markers. No data was saved; please scan again.');
+            }
+
             readings = payload.results;
-            el('ocrModelKey').value = payload.modelKey ?? '';
+            requiredInput(document, '#ocrModelKey').value = payload.modelKey.trim();
             el('summaryModel').textContent = payload.model || '—';
 
             setOcrProgress(96, 'Preparing validation', 'The handwriting results are ready for your review.');
             renderVerifyRows();
             await completeOcrProgress();
             showStep('verify');
+            try {
+                prepareValidationComparison();
+            } catch (error) {
+                showStep('mark');
+                throw error;
+            }
         } catch (error) {
             const message = error.name === 'AbortError'
                 ? 'OCR timed out after two minutes. Check the OCR service and try again.'
@@ -891,106 +1029,425 @@
     });
 
     // ---------------------------------------------------------------- step 3
+    function normaliseConfidence(reading) {
+        const confidence = Number(reading?.confidence ?? 0);
+        return Number.isFinite(confidence) ? Math.max(0, Math.min(100, confidence)) : 0;
+    }
+
+    function prepareValidationComparison() {
+        const source = el('pageCanvas');
+        const target = el('validationPageCanvas');
+        const context = target.getContext('2d');
+
+        if (!context || source.width === 0 || source.height === 0) {
+            throw new Error('The original document could not be prepared for comparison. Please scan again.');
+        }
+
+        activeValidationIndex = null;
+        target.width = source.width;
+        target.height = source.height;
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, target.width, target.height);
+        context.drawImage(source, 0, 0);
+
+        validationMarker.setBoxes(cropped.map(({ name, x, y, w, h }) => ({ name, x, y, w, h })));
+        validationMarker.resetZoom();
+        el('validationDocViewport').scrollTo({ top: 0, left: 0 });
+        el('validationFileName').textContent = scanFile?.name || 'Document';
+
+        window.requestAnimationFrame(() => {
+            validationMarker.layout();
+            makeValidationMarkersAccessible();
+            updateValidationMarkerStates();
+            if (readings.length > 0) activateValidationField(0, 'initial');
+        });
+    }
+
+    function makeValidationMarkersAccessible() {
+        const boxes = validationMarker.toJSON();
+        el('validationFieldOverlay').querySelectorAll('.field-box').forEach((box, index) => {
+            box.tabIndex = 0;
+            box.setAttribute('role', 'button');
+            box.setAttribute('aria-label', `Compare ${boxes[index]?.name ?? `field ${index + 1}`}`);
+            box.title = `Compare ${boxes[index]?.name ?? `field ${index + 1}`}`;
+        });
+    }
+
+    function handleValidationMarkerSelection(indexes) {
+        if (syncingValidationSelection) return;
+        if (indexes.length === 0) {
+            activeValidationIndex = null;
+            el('verifyRows').querySelectorAll('.validation-field').forEach((row) => {
+                row.classList.remove('is-active');
+                row.removeAttribute('aria-current');
+            });
+            return;
+        }
+        activateValidationField(indexes[0], 'marker');
+    }
+
+    function revealValidationRow(index) {
+        const list = el('verifyRows');
+        const row = list.querySelector(`[data-field-index="${index}"]`);
+        if (!row) return;
+
+        const rowTop = row.offsetTop;
+        const rowBottom = rowTop + row.offsetHeight;
+        if (rowTop < list.scrollTop) {
+            list.scrollTo({ top: rowTop - 8, behavior: 'smooth' });
+        } else if (rowBottom > list.scrollTop + list.clientHeight) {
+            list.scrollTo({ top: rowBottom - list.clientHeight + 8, behavior: 'smooth' });
+        }
+    }
+
+    function revealValidationMarker(index) {
+        const viewport = el('validationDocViewport');
+        const box = el('validationFieldOverlay').querySelector(`[data-index="${index}"]`);
+        if (!box) return;
+
+        viewport.scrollTo({
+            left: Math.max(0, box.offsetLeft + (box.offsetWidth / 2) - (viewport.clientWidth / 2)),
+            top: Math.max(0, box.offsetTop + (box.offsetHeight / 2) - (viewport.clientHeight / 2)),
+            behavior: 'smooth',
+        });
+    }
+
+    function activateValidationField(index, source = 'row') {
+        if (!Number.isInteger(index) || index < 0 || index >= readings.length) return;
+        activeValidationIndex = index;
+
+        if (source !== 'marker') {
+            syncingValidationSelection = true;
+            validationMarker.selectBox(index);
+            syncingValidationSelection = false;
+        }
+
+        el('verifyRows').querySelectorAll('.validation-field').forEach((row) => {
+            const active = Number(row.dataset.fieldIndex) === index;
+            row.classList.toggle('is-active', active);
+            row.setAttribute('aria-current', active ? 'true' : 'false');
+        });
+
+        if (source === 'marker') revealValidationRow(index);
+        if (source === 'row') revealValidationMarker(index);
+    }
+
+    function updateValidationMarkerStates() {
+        el('validationFieldOverlay').querySelectorAll('.field-box').forEach((box, index) => {
+            const checkbox = el('verifyRows')
+                .querySelector(`[data-field-index="${index}"] .validation-verified`);
+            const checked = checkbox instanceof HTMLInputElement && checkbox.checked;
+            box.classList.toggle('is-verified', checked);
+        });
+    }
+
+    function clearValidationFieldError(index) {
+        const row = el('verifyRows').querySelector(`[data-field-index="${index}"]`);
+        if (!row) return;
+        row.classList.remove('is-invalid');
+        requiredInput(row, '.verified').classList.remove('is-invalid');
+        const message = requiredPart(row, '.validation-field__error');
+        message.textContent = '';
+        message.classList.add('d-none');
+    }
+
+    function setValidationFieldError(index, message) {
+        const row = el('verifyRows').querySelector(`[data-field-index="${index}"]`);
+        if (!row) return;
+        row.classList.add('is-invalid');
+        requiredInput(row, '.verified').classList.add('is-invalid');
+        const error = requiredPart(row, '.validation-field__error');
+        error.textContent = message;
+        error.classList.remove('d-none');
+    }
+
+    function clearValidationSubmitError() {
+        el('validationSubmitMessage').textContent = '';
+        el('validationSubmitError').classList.add('d-none');
+    }
+
+    function showValidationSubmitError(message) {
+        el('validationSubmitMessage').textContent = message;
+        el('validationSubmitError').classList.remove('d-none');
+        el('validationSubmitError').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    function updateVerificationSummary() {
+        const checkboxes = [...el('verifyRows').querySelectorAll('.validation-verified')];
+        const verified = checkboxes.filter((checkbox) => checkbox.checked).length;
+        const total = checkboxes.length;
+        const percentage = total > 0 ? Math.round((verified / total) * 100) : 0;
+
+        el('verifiedCount').textContent = `${verified} of ${total}`;
+        el('verifiedProgress').setAttribute('aria-valuenow', String(percentage));
+        el('verifiedProgressBar').style.width = `${percentage}%`;
+        el('submitVerifiedCount').textContent = String(verified);
+        el('submitBtn').disabled = verified === 0 || recordSubmitting;
+        updateValidationMarkerStates();
+    }
+
     function renderVerifyRows() {
         const container = el('verifyRows');
         container.innerHTML = '';
+        activeValidationIndex = null;
+        clearValidationSubmitError();
 
         readings.forEach((reading, index) => {
-            const crop = cropped[index] ?? {};
-            const confidence = Number(reading.confidence ?? 0);
+            const confidence = normaliseConfidence(reading);
             const flagged = confidence < config.threshold;
+            const inputId = `verifiedField${index}`;
+            const checkboxId = `verifyField${index}`;
+            const row = document.createElement('article');
 
-            const row = document.createElement('div');
-            row.className = 'validation-field row g-3 align-items-center';
+            row.className = 'validation-field';
+            row.dataset.fieldIndex = String(index);
+            row.tabIndex = 0;
             row.innerHTML = `
-                <div class="col-md-5">
-                    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
-                        <label class="form-label mb-0 fw-semibold"></label>
-                        <span class="badge confidence-badge"></span>
-                    </div>
-                    <div class="validation-crop">
-                        <img alt="Scanned crop" class="img-fluid">
-                    </div>
-                    <div class="small text-muted">
-                        Model read: <span class="fst-italic reading"></span>
+                <div class="validation-field__identity">
+                    <span class="validation-field__number"></span>
+                    <div class="min-w-0">
+                        <strong class="validation-field__name"></strong>
+                        <span class="confidence-badge validation-field__confidence"></span>
                     </div>
                 </div>
-                <div class="col-md-7">
-                    <label class="form-label mb-1 small fw-medium">Verified value</label>
-                    <input type="text" class="form-control form-control-lg verified">
-                    ${reading.error ? '<div class="text-danger small mt-1">This crop failed to read.</div>' : ''}
+                <div class="validation-field__value">
+                    <label class="visually-hidden" for="${inputId}"></label>
+                    <input type="text" id="${inputId}" class="form-control verified"
+                           maxlength="2000" autocomplete="off">
+                    <div class="validation-field__reading">
+                        TrOCR read: <span></span>
+                    </div>
+                    <div class="validation-field__ocr-error d-none">
+                        TrOCR could not read this marker. Enter the value manually.
+                    </div>
+                    <div class="validation-field__error d-none" role="alert"></div>
+                </div>
+                <div class="validation-field__check">
+                    <label class="validation-verified-control" for="${checkboxId}">
+                        <input class="form-check-input validation-verified" type="checkbox"
+                               id="${checkboxId}">
+                        <span>Verified</span>
+                    </label>
                 </div>`;
 
-            row.querySelector('label').textContent = reading.name;
-            row.querySelector('img').src = crop.image ?? '';
-            row.querySelector('.reading').textContent = reading.text || '(nothing read)';
+            requiredPart(row, '.validation-field__number').textContent = String(index + 1).padStart(2, '0');
+            requiredPart(row, '.validation-field__name').textContent = reading.name;
+            requiredPart(row, `label[for="${inputId}"]`).textContent = `Verified value for ${reading.name}`;
 
-            const badge = row.querySelector('.confidence-badge');
-            badge.textContent = `${confidence.toFixed(1)}% confidence`;
-            badge.classList.add(flagged ? 'bg-label-warning' : 'bg-label-success');
+            const badge = requiredPart(row, '.validation-field__confidence');
+            badge.textContent = `${confidence.toFixed(1)}%`;
+            badge.classList.add(flagged ? 'is-low' : 'is-ready');
 
-            const input = row.querySelector('.verified');
-            input.value = reading.text || '';
-            input.name = `fields[${index}][verified_value]`;
-            if (flagged) input.classList.add('field-needs-review');
+            const readingText = String(reading.text ?? '');
+            requiredPart(row, '.validation-field__reading span').textContent = readingText || '(nothing read)';
 
-            // Hidden values submitted alongside the correction.
-            const hidden = {
-                name: reading.name,
-                ocr_text: reading.text || '',
-                ocr_confidence: confidence,
-                x: (crop.x ?? 0).toFixed(5),
-                y: (crop.y ?? 0).toFixed(5),
-                width: (crop.w ?? 0).toFixed(5),
-                height: (crop.h ?? 0).toFixed(5),
-            };
+            const input = requiredInput(row, '.verified');
+            const checkbox = requiredInput(row, '.validation-verified');
+            input.value = readingText;
+            if (flagged) row.classList.add('needs-review');
+            if (reading.error) {
+                row.classList.add('has-ocr-error');
+                requiredPart(row, '.validation-field__ocr-error').classList.remove('d-none');
+            }
 
-            Object.entries(hidden).forEach(([key, value]) => {
-                const node = document.createElement('input');
-                node.type = 'hidden';
-                node.name = `fields[${index}][${key}]`;
-                node.value = value;
-                row.appendChild(node);
+            row.addEventListener('click', () => activateValidationField(index, 'row'));
+            row.addEventListener('focusin', () => activateValidationField(index, 'row'));
+            row.addEventListener('keydown', (event) => {
+                if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
+                event.preventDefault();
+                activateValidationField(index, 'row');
+                input.focus();
+            });
+
+            input.addEventListener('input', () => {
+                clearValidationFieldError(index);
+                clearValidationSubmitError();
+                if (checkbox.checked) {
+                    checkbox.checked = false;
+                    row.classList.remove('is-verified');
+                    updateVerificationSummary();
+                }
+            });
+
+            checkbox.addEventListener('change', () => {
+                activateValidationField(index, 'row');
+                clearValidationFieldError(index);
+                clearValidationSubmitError();
+
+                if (checkbox.checked && input.value.trim() === '') {
+                    checkbox.checked = false;
+                    setValidationFieldError(index, 'Enter or confirm a value before marking this field as verified.');
+                    input.focus();
+                }
+
+                row.classList.toggle('is-verified', checkbox.checked);
+                updateVerificationSummary();
             });
 
             container.appendChild(row);
         });
 
-        const confidences = readings.map((r) => Number(r.confidence ?? 0));
+        const confidences = readings.map(normaliseConfidence);
         const average = confidences.length
             ? confidences.reduce((a, b) => a + b, 0) / confidences.length
             : 0;
-        const flaggedCount = confidences.filter((c) => c < config.threshold).length;
+        const flaggedCount = confidences.filter((confidence) => confidence < config.threshold).length;
 
         el('summaryConfidence').textContent = `${average.toFixed(1)}%`;
-        el('summaryReview').textContent = `${flaggedCount} of ${confidences.length}`;
+        el('summaryReview').textContent = `${flaggedCount}/${confidences.length}`;
+        updateVerificationSummary();
     }
 
-    // The scan file lives in an input the form does not own, so attach it via
-    // FormData on submit.
-    el('submitForm').addEventListener('submit', (event) => {
-        if (!scanFile) {
-            event.preventDefault();
-            alert('The scanned file is missing. Start again from the upload step.');
+    el('validationFieldOverlay').addEventListener('click', (event) => {
+        if (!(event.target instanceof Element)) return;
+        const box = event.target.closest('.field-box');
+        if (!box) return;
+        validationMarker.selectBox(Number(box.dataset.index));
+    });
+
+    el('validationFieldOverlay').addEventListener('keydown', (event) => {
+        if (!(event.target instanceof Element)) return;
+        const box = event.target.closest('.field-box');
+        if (!box || !['Enter', ' '].includes(event.key)) return;
+        event.preventDefault();
+        validationMarker.selectBox(Number(box.dataset.index));
+    });
+
+    function submissionErrorMessage(response, payload) {
+        if (response.status === 419) return 'Your session expired. Refresh the page and scan the document again.';
+        if (response.status === 413) return 'The uploaded document is too large. The maximum size is 20 MB.';
+        if (response.status === 422) {
+            const messages = payload?.errors ? Object.values(payload.errors).flat() : [];
+            return messages[0] || payload?.message || 'Review the highlighted fields and try again.';
+        }
+        return payload?.message || 'The record could not be submitted. Nothing was saved.';
+    }
+
+    function applyServerFieldErrors(errors, submittedIndexes) {
+        Object.entries(errors ?? {}).forEach(([key, messages]) => {
+            const match = key.match(/^fields\.(\d+)\./);
+            if (!match) return;
+            const originalIndex = submittedIndexes[Number(match[1])];
+            if (originalIndex === undefined) return;
+            setValidationFieldError(originalIndex, Array.isArray(messages) ? messages[0] : String(messages));
+        });
+    }
+
+    el('submitForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (recordSubmitting) return;
+
+        clearValidationSubmitError();
+        const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
+        rows.forEach((row) => clearValidationFieldError(Number(row.dataset.fieldIndex)));
+
+        const verifiedIndexes = rows
+            .filter((row) => requiredInput(row, '.validation-verified').checked)
+            .map((row) => Number(row.dataset.fieldIndex));
+
+        if (verifiedIndexes.length === 0) {
+            showValidationSubmitError('Check Verified on at least one field before submitting.');
+            if (rows[0]) requiredInput(rows[0], '.validation-verified').focus();
             return;
         }
 
-        const transfer = new DataTransfer();
-        transfer.items.add(scanFile);
-
-        let input = el('scanInput');
-        if (!input) {
-            input = document.createElement('input');
-            input.type = 'file';
-            input.name = 'scan';
-            input.id = 'scanInput';
-            input.className = 'd-none';
-            el('submitForm').appendChild(input);
+        const invalidIndexes = verifiedIndexes.filter((index) => {
+            const row = rows[index];
+            if (!row) return true;
+            const input = requiredInput(row, '.verified');
+            if (input.value.trim()) return false;
+            setValidationFieldError(index, 'A verified field must contain a value.');
+            return true;
+        });
+        if (invalidIndexes.length > 0) {
+            showValidationSubmitError('Some checked fields still need a value.');
+            activateValidationField(invalidIndexes[0], 'marker');
+            const invalidRow = rows[invalidIndexes[0]];
+            if (invalidRow) requiredInput(invalidRow, '.verified').focus();
+            return;
         }
-        input.files = transfer.files;
 
-        el('submitBtn').disabled = true;
-        el('submitBtn').textContent = 'Submitting...';
+        if (!scanFile) {
+            showValidationSubmitError('The original scan is no longer available. Return to marking and choose the file again.');
+            return;
+        }
+
+        const form = el('submitForm');
+        const data = new FormData(form);
+        data.set('scan', scanFile, scanFile.name);
+
+        verifiedIndexes.forEach((sourceIndex, submitIndex) => {
+            const reading = readings[sourceIndex];
+            const crop = cropped[sourceIndex];
+            const value = requiredInput(rows[sourceIndex], '.verified').value.trim();
+            const fields = {
+                verified: '1',
+                name: String(reading.name ?? ''),
+                ocr_text: String(reading.text ?? ''),
+                ocr_confidence: normaliseConfidence(reading).toFixed(1),
+                verified_value: value,
+                x: Number(crop.x ?? 0).toFixed(5),
+                y: Number(crop.y ?? 0).toFixed(5),
+                width: Number(crop.w ?? 0).toFixed(5),
+                height: Number(crop.h ?? 0).toFixed(5),
+            };
+
+            Object.entries(fields).forEach(([key, fieldValue]) => {
+                data.append(`fields[${submitIndex}][${key}]`, fieldValue);
+            });
+        });
+
+        const button = el('submitBtn');
+        const idleButton = button.innerHTML;
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 120000);
+        let submissionSucceeded = false;
+        recordSubmitting = true;
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Submitting verified fields...';
+
+        try {
+            const response = await fetch(form.action, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+                signal: controller.signal,
+                body: data,
+            });
+            const contentType = response.headers.get('content-type') || '';
+            const payload = contentType.includes('application/json') ? await response.json() : null;
+
+            if (!response.ok) {
+                applyServerFieldErrors(payload?.errors, verifiedIndexes);
+                throw new Error(submissionErrorMessage(response, payload));
+            }
+
+            if (!payload?.redirect) {
+                throw new Error('The record was saved, but the archive location was not returned. Open Records Archive to confirm it.');
+            }
+
+            button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved. Opening record...';
+            window.location.assign(payload.redirect);
+            submissionSucceeded = true;
+        } catch (error) {
+            console.error('Record submission failed:', error);
+            const message = error.name === 'AbortError'
+                ? 'Submission timed out. Check your connection, then confirm the record in Records Archive before trying again.'
+                : (error instanceof TypeError
+                    ? 'The server could not be reached. Check your connection and try again.'
+                    : (error.message || 'The record could not be submitted. Nothing was saved.'));
+            showValidationSubmitError(message);
+        } finally {
+            window.clearTimeout(timeoutId);
+            if (!submissionSucceeded) {
+                recordSubmitting = false;
+                button.innerHTML = idleButton;
+                updateVerificationSummary();
+            }
+        }
     });
 </script>
 @endpush

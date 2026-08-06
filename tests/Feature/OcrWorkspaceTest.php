@@ -448,7 +448,7 @@ class OcrWorkspaceTest extends TestCase
         $this->actingAs($staff)
             ->get(route('documents.workspace', ['type' => 'birth']))
             ->assertOk()
-            ->assertDontSee('OCR model');
+            ->assertDontSee('id="modelSelect"', escape: false);
 
         // A key posted anyway is ignored, and the promoted model is used instead.
         Http::fake([
@@ -496,7 +496,7 @@ class OcrWorkspaceTest extends TestCase
         $this->actingAs($staff)
             ->get(route('documents.workspace', ['type' => 'birth']))
             ->assertOk()
-            ->assertSee('OCR model');
+            ->assertSee('id="modelSelect"', escape: false);
 
         $this->actingAs($staff)
             ->postJson(route('documents.recognise'), [
