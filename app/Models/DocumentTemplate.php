@@ -125,7 +125,9 @@ class DocumentTemplate extends Model
     {
         $definition = $type instanceof DocumentTypeDefinition
             ? $type
-            : DocumentTypeDefinition::where('key', $type instanceof DocumentType ? $type->value : $type)->first();
+            : DocumentTypeDefinition::query()
+                ->where('key', $type instanceof DocumentType ? $type->value : $type)
+                ->first();
 
         $query = static::with(['fields', 'documentTypeDefinition'])
             ->where('is_active', true)
@@ -148,7 +150,9 @@ class DocumentTemplate extends Model
             $key = $template->doc_type instanceof DocumentType
                 ? $template->doc_type->value
                 : (string) $template->doc_type;
-            $template->document_type_id = DocumentTypeDefinition::where('key', $key)->value('id');
+            $template->document_type_id = DocumentTypeDefinition::query()
+                ->where('key', $key)
+                ->value('id');
         });
     }
 }
