@@ -1,29 +1,33 @@
 @extends('layouts.app')
 
 @section('title', 'Scan ' . $docType->shortLabel())
+@section('body-class', 'document-workspace-focused')
 
 @section('content')
-    <div id="documentPageHeader">
-        <x-page-header :title="'Scan: ' . $docType->label()"
-                       :subtitle="'Template: ' . $template->name . ' · ' . $template->paper_size->label() . ' (' . $template->paperDimensionsLabel() . ') · ' . $template->orientation->label()">
-            <a href="{{ route('documents.create') }}" class="btn btn-outline-secondary">Cancel</a>
-        </x-page-header>
-    </div>
+    <header class="document-workspace-topbar" id="documentPageHeader">
+        <div class="document-workspace-topbar__context">
+            <strong>Scan: {{ $docType->label() }}</strong>
+            <small>{{ $template->name }} · {{ $template->paper_size->label() }} ({{ $template->paperDimensionsLabel() }}) · {{ $template->orientation->label() }}</small>
+        </div>
 
-    <nav class="document-flow-steps" id="documentFlowSteps" aria-label="Document processing progress">
-        <div class="document-flow-step is-active" data-flow-step="upload" aria-current="step">
-            <span class="document-flow-step__number">1</span>
-            <span class="document-flow-step__copy"><strong>Upload</strong><small>Choose a scan</small></span>
-        </div>
-        <div class="document-flow-step" data-flow-step="mark">
-            <span class="document-flow-step__number">2</span>
-            <span class="document-flow-step__copy"><strong>Align fields</strong><small>Check the markers</small></span>
-        </div>
-        <div class="document-flow-step" data-flow-step="verify">
-            <span class="document-flow-step__number">3</span>
-            <span class="document-flow-step__copy"><strong>Validate</strong><small>Review OCR results</small></span>
-        </div>
-    </nav>
+        <nav class="document-flow-steps" id="documentFlowSteps" aria-label="Document processing progress">
+            <div class="document-flow-step is-active" data-flow-step="upload" aria-current="step">
+                <span class="document-flow-step__number">1</span>
+                <span class="document-flow-step__copy"><strong>Upload</strong><small>Choose a scan</small></span>
+            </div>
+            <div class="document-flow-step" data-flow-step="mark">
+                <span class="document-flow-step__number">2</span>
+                <span class="document-flow-step__copy"><strong>Align</strong><small>Check the markers</small></span>
+            </div>
+            <div class="document-flow-step" data-flow-step="verify">
+                <span class="document-flow-step__number">3</span>
+                <span class="document-flow-step__copy"><strong>Verify</strong><small>Review and submit</small></span>
+            </div>
+        </nav>
+
+        <a href="{{ route('documents.create') }}"
+           class="btn btn-sm btn-outline-secondary document-workspace-topbar__cancel">Cancel</a>
+    </header>
 
     {{-- Step 1: upload --}}
     <section id="step-upload" class="document-step-panel">
@@ -591,9 +595,8 @@
 
         const marking = name === 'mark';
         const focusedWorkspace = marking || name === 'verify';
-        el('documentPageHeader').classList.toggle('d-none', focusedWorkspace);
-        el('documentFlowSteps').classList.toggle('d-none', focusedWorkspace);
-        el('layout-navbar')?.classList.toggle('d-none', focusedWorkspace);
+        el('documentPageHeader').classList.remove('d-none');
+        el('documentFlowSteps').classList.remove('d-none');
         document.querySelector('.content-footer')?.classList.toggle('d-none', focusedWorkspace);
 
         const order = ['upload', 'mark', 'verify'];
