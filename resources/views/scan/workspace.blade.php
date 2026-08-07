@@ -236,12 +236,19 @@
 
             <div class="validation-workspace">
                 <header class="validation-workspace__header">
-                    <div>
-                        <span class="validation-eyebrow">Final review</span>
-                        <h2 class="h4 mb-1">Compare and verify</h2>
-                        <p class="text-muted mb-0">
-                            Select a marker or extracted field to compare them. Only checked fields are submitted.
-                        </p>
+                    <div class="validation-workspace__heading">
+                        <button type="button" class="layout-menu-toggle marker-sidebar-toggle"
+                                data-menu-toggle-control aria-controls="layout-menu" aria-expanded="true"
+                                aria-label="Collapse navigation" title="Collapse navigation">
+                            <i class="icon-base bx bx-menu icon-sm" aria-hidden="true"></i>
+                        </button>
+                        <div>
+                            <span class="validation-eyebrow">Final review</span>
+                            <h2 class="h4 mb-1">Compare and verify</h2>
+                            <p class="text-muted mb-0">
+                                Select a marker or extracted field to compare them. Only checked fields are submitted.
+                            </p>
+                        </div>
                     </div>
 
                     <div class="validation-progress-summary" aria-live="polite">

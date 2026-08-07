@@ -1128,6 +1128,18 @@
   margin-block-end: 1rem;
 }
 
+.validation-workspace__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  min-inline-size: 0;
+
+  .marker-sidebar-toggle {
+    flex: 0 0 auto;
+    margin-block-start: .05rem;
+  }
+}
+
 .validation-eyebrow,
 .validation-pane__eyebrow {
   display: block;

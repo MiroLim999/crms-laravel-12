@@ -6,6 +6,11 @@
 @section('content')
     <x-page-header :title="$record->title()"
                    :subtitle="$record->typeLabel() . ' · ' . ($record->registry_number ?? 'No registry number')">
+        <button type="button" class="layout-menu-toggle marker-sidebar-toggle"
+                data-menu-toggle-control aria-controls="layout-menu" aria-expanded="true"
+                aria-label="Collapse navigation" title="Collapse navigation">
+            <i class="icon-base bx bx-menu icon-sm" aria-hidden="true"></i>
+        </button>
         @if ($record->isLocked() && auth()->user()->can('change-requests.create'))
             @if ($record->hasPendingChangeRequest())
                 <span class="badge bg-label-warning align-self-center">Change request pending</span>
