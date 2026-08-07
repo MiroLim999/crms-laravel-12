@@ -77,6 +77,93 @@
   }
 }
 
+// Desktop navigation collapses to a stable icon rail. The theme's original
+// fixed-offcanvas mode translated the entire sidebar off-screen; CRMS keeps the
+// primary destinations visible and gives the document workspace back the rest.
+@media (min-width: 1200px) {
+  html.layout-menu-fixed-offcanvas.layout-menu-collapsed {
+    #layout-menu {
+      inline-size: var(--bs-menu-collapsed-width);
+      transform: none !important;
+      transition: inline-size .2s ease;
+    }
+
+    .layout-page {
+      padding-inline-start: var(--bs-menu-collapsed-width);
+    }
+
+    #layout-menu .app-brand {
+      justify-content: center;
+      min-block-size: 4.5rem;
+      padding-inline: 0;
+    }
+
+    #layout-menu .app-brand-link {
+      justify-content: center;
+      inline-size: 100%;
+    }
+
+    #layout-menu .app-brand-logo img {
+      inline-size: 2.1rem;
+      block-size: 2.1rem;
+    }
+
+    #layout-menu .app-brand-text,
+    #layout-menu .menu-header-text,
+    #layout-menu .menu-link > div,
+    #layout-menu .menu-divider,
+    #layout-menu .menu-inner-shadow {
+      display: none !important;
+    }
+
+    #layout-menu .menu-inner {
+      align-items: center;
+      inline-size: 100%;
+      padding: .35rem .65rem 1rem !important;
+      overflow-x: hidden;
+    }
+
+    #layout-menu .menu-header {
+      inline-size: 100%;
+      block-size: .65rem;
+      min-block-size: .65rem;
+      padding: 0;
+      margin: .15rem 0;
+    }
+
+    #layout-menu .menu-header::before {
+      display: none;
+    }
+
+    #layout-menu .menu-item {
+      inline-size: 100%;
+    }
+
+    #layout-menu .menu-link {
+      justify-content: center;
+      inline-size: 3rem;
+      block-size: 3rem;
+      min-block-size: 3rem;
+      padding: 0 !important;
+      margin: .15rem auto;
+      border-radius: .5rem;
+    }
+
+    #layout-menu .menu-icon {
+      inline-size: 1.35rem;
+      block-size: 1.35rem;
+      margin: 0;
+      font-size: 1.35rem;
+      line-height: 1.35rem;
+      text-align: center;
+    }
+
+    #layout-menu .menu-item.active > .menu-link::before {
+      display: none;
+    }
+  }
+}
+
 // ---------------------------------------------------------------- audit log diff panel
 
 .audit-diff-toggle {

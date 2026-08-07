@@ -47,11 +47,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
   const syncMenuControls = collapsed => {
     const expanded = !collapsed;
+    const smallScreen = window.Helpers.isSmallScreen();
 
     menuControls.forEach(control => {
       control.setAttribute('aria-expanded', String(expanded));
-      control.setAttribute('aria-label', expanded ? 'Hide navigation' : 'Show navigation');
-      control.title = expanded ? 'Hide navigation' : 'Show navigation';
+      const label = smallScreen
+        ? (expanded ? 'Close navigation' : 'Open navigation')
+        : (expanded ? 'Collapse navigation' : 'Expand navigation');
+      control.setAttribute('aria-label', label);
+      control.title = label;
     });
   };
 

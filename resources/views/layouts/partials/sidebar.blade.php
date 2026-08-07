@@ -25,8 +25,9 @@
 
             @foreach ($section['items'] as $item)
                 <li class="menu-item {{ $item['active'] ? 'active' : '' }}">
-                    <a href="{{ route($item['route']) }}" class="menu-link">
-                        <i class="menu-icon icon-base bx {{ $item['icon'] }}"></i>
+                    <a href="{{ route($item['route']) }}" class="menu-link"
+                       aria-label="{{ $item['label'] }}" title="{{ $item['label'] }}">
+                        <i class="menu-icon icon-base bx {{ $item['icon'] }}" aria-hidden="true"></i>
                         <div>{{ $item['label'] }}</div>
                     </a>
                 </li>
