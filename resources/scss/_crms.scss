@@ -647,11 +647,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   &.is-complete {
-    color: var(--bs-primary);
+    color: var(--bs-success);
   }
 
   &.is-complete::after {
-    background: var(--bs-primary);
+    background: var(--bs-success);
   }
 }
 
@@ -682,8 +682,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .is-complete & {
     font-size: 0;
     color: #fff;
-    background: var(--bs-primary);
-    border-color: var(--bs-primary);
+    background: var(--bs-success);
+    border-color: var(--bs-success);
   }
 
   .is-complete &::before {
