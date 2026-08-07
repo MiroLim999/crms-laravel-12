@@ -4,19 +4,41 @@
 @section('body-class', 'record-detail-focused')
 
 @section('content')
-    <x-page-header :title="$record->title()"
-                   :subtitle="$record->typeLabel() . ' · ' . ($record->registry_number ?? 'No registry number')">
-        @if ($record->isLocked() && auth()->user()->can('change-requests.create'))
-            @if ($record->hasPendingChangeRequest())
-                <span class="badge bg-label-warning align-self-center">Change request pending</span>
-            @else
-                <a href="{{ route('records.change-requests.create', $record) }}" class="btn btn-outline-primary">
-                    <i class="icon-base bx bx-edit icon-sm me-1"></i> Request a change
-                </a>
+    <header class="document-workspace-topbar record-detail-topbar">
+        <div class="document-workspace-topbar__context">
+            <strong>{{ $record->title() }}</strong>
+            <small>{{ $record->typeLabel() }} · {{ $record->registry_number ?? 'No registry number' }}</small>
+        </div>
+
+        <nav class="document-flow-steps" aria-label="Document processing complete">
+            <div class="document-flow-step is-complete">
+                <span class="document-flow-step__number">1</span>
+                <span class="document-flow-step__copy"><strong>Upload</strong></span>
+            </div>
+            <div class="document-flow-step is-complete">
+                <span class="document-flow-step__number">2</span>
+                <span class="document-flow-step__copy"><strong>Align</strong></span>
+            </div>
+            <div class="document-flow-step is-complete">
+                <span class="document-flow-step__number">3</span>
+                <span class="document-flow-step__copy"><strong>Verified</strong></span>
+            </div>
+        </nav>
+
+        <div class="record-detail-topbar__actions">
+            @if ($record->isLocked() && auth()->user()->can('change-requests.create'))
+                @if ($record->hasPendingChangeRequest())
+                    <span class="badge bg-label-warning align-self-center">Change request pending</span>
+                @else
+                    <a href="{{ route('records.change-requests.create', $record) }}"
+                       class="btn btn-sm btn-outline-primary">
+                        <i class="icon-base bx bx-edit icon-sm me-1"></i> Request a change
+                    </a>
+                @endif
             @endif
-        @endif
-        <a href="{{ route('records.index') }}" class="btn btn-outline-secondary">Back to archive</a>
-    </x-page-header>
+            <a href="{{ route('records.index') }}" class="btn btn-sm btn-outline-secondary">Back to archive</a>
+        </div>
+    </header>
 
     @if ($record->isLocked())
         <div class="alert alert-info d-flex align-items-center" role="alert">

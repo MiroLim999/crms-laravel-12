@@ -593,6 +593,18 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   justify-self: end;
 }
 
+.record-detail-topbar__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .5rem;
+  min-inline-size: 0;
+
+  .btn {
+    white-space: nowrap;
+  }
+}
+
 .document-workspace-topbar .document-flow-steps {
   position: static;
   inline-size: 100%;
@@ -1962,6 +1974,17 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 @media (max-width: 767.98px) {
+  .record-detail-topbar__actions {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: 3;
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+
+    .btn {
+      inline-size: 100%;
+    }
+  }
+
   .validation-workspace__header {
     align-items: stretch;
     flex-direction: column;
