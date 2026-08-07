@@ -27,7 +27,9 @@
   .app-brand {
     min-block-size: 4rem;
     padding-block: .75rem;
-    padding-inline: 2rem;
+    // 1.5rem + half the 2.25rem logo = the compact rail's 2.625rem
+    // centerline, so the logo never shifts when the rail changes width.
+    padding-inline: 1.5rem;
   }
 
   .app-brand-link {
@@ -81,11 +83,30 @@
 // fixed-offcanvas mode translated the entire sidebar off-screen; CRMS keeps the
 // primary destinations visible and gives the document workspace back the rest.
 @media (min-width: 1200px) {
+  html.layout-menu-fixed-offcanvas {
+    #layout-menu {
+      transition: inline-size .3s cubic-bezier(.4, 0, .2, 1) !important;
+    }
+
+    .layout-page {
+      transition: padding-inline-start .3s cubic-bezier(.4, 0, .2, 1) !important;
+    }
+  }
+
+  html.layout-menu-fixed-offcanvas.layout-transitioning {
+    #layout-menu {
+      will-change: inline-size;
+    }
+
+    .layout-page {
+      will-change: padding-inline-start;
+    }
+  }
+
   html.layout-menu-fixed-offcanvas.layout-menu-collapsed {
     #layout-menu {
       inline-size: var(--bs-menu-collapsed-width);
       transform: none !important;
-      transition: inline-size .2s ease;
     }
 
     .layout-page {
@@ -93,19 +114,14 @@
     }
 
     #layout-menu .app-brand {
-      justify-content: center;
+      justify-content: flex-start;
       min-block-size: 4.5rem;
-      padding-inline: 0;
+      padding-inline: 1.5rem;
     }
 
     #layout-menu .app-brand-link {
-      justify-content: center;
-      inline-size: 100%;
-    }
-
-    #layout-menu .app-brand-logo img {
-      inline-size: 2.1rem;
-      block-size: 2.1rem;
+      justify-content: flex-start;
+      inline-size: auto;
     }
 
     #layout-menu .app-brand-text,
@@ -117,9 +133,9 @@
     }
 
     #layout-menu .menu-inner {
-      align-items: center;
+      align-items: flex-start;
       inline-size: 100%;
-      padding: .35rem .65rem 1rem !important;
+      padding: .35rem 0 1rem !important;
       overflow-x: hidden;
     }
 
@@ -145,7 +161,10 @@
       block-size: 3rem;
       min-block-size: 3rem;
       padding: 0 !important;
-      margin: .15rem auto;
+      // Pin the 3rem button to the 5.25rem rail center instead of centering it
+      // inside the sidebar while that sidebar is actively changing width.
+      margin-block: .15rem;
+      margin-inline: 1.125rem 0;
       border-radius: .5rem;
     }
 
