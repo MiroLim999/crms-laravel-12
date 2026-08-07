@@ -3,8 +3,9 @@
 @section('title', 'Record #' . $record->getKey())
 @section('body-class', 'record-detail-focused')
 
-@section('content')
-    <header class="document-workspace-topbar record-detail-topbar">
+@section('workspace-navbar')
+    <nav class="layout-navbar container-xxl navbar-detached navbar document-workspace-topbar record-detail-topbar"
+         id="layout-navbar" aria-label="Completed document workflow">
         <div class="document-workspace-topbar__context">
             <strong>{{ $record->title() }}</strong>
             <small>{{ $record->typeLabel() }} · {{ $record->registry_number ?? 'No registry number' }}</small>
@@ -38,8 +39,10 @@
             @endif
             <a href="{{ route('records.index') }}" class="btn btn-sm btn-outline-secondary">Back to archive</a>
         </div>
-    </header>
+    </nav>
+@endsection
 
+@section('content')
     @if ($record->isLocked())
         <div class="alert alert-info d-flex align-items-center" role="alert">
             <i class="icon-base bx bx-lock-alt icon-md me-2"></i>

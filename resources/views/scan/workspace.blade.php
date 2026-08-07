@@ -3,8 +3,9 @@
 @section('title', 'Scan ' . $docType->shortLabel())
 @section('body-class', 'document-workspace-focused')
 
-@section('content')
-    <header class="document-workspace-topbar" id="documentPageHeader">
+@section('workspace-navbar')
+    <nav class="layout-navbar container-xxl navbar-detached navbar document-workspace-topbar"
+         id="layout-navbar" aria-label="Document workspace">
         <div class="document-workspace-topbar__context">
             <strong>Scan: {{ $docType->label() }}</strong>
             <small>{{ $template->name }} · {{ $template->paper_size->label() }} ({{ $template->paperDimensionsLabel() }}) · {{ $template->orientation->label() }}</small>
@@ -27,8 +28,10 @@
 
         <a href="{{ route('documents.create') }}"
            class="btn btn-sm btn-outline-secondary document-workspace-topbar__cancel">Cancel</a>
-    </header>
+    </nav>
+@endsection
 
+@section('content')
     {{-- Step 1: upload --}}
     <section id="step-upload" class="document-step-panel">
         <div class="document-upload-wrap">
@@ -595,7 +598,7 @@
 
         const marking = name === 'mark';
         const focusedWorkspace = marking || name === 'verify';
-        el('documentPageHeader').classList.remove('d-none');
+        el('layout-navbar').classList.remove('d-none');
         el('documentFlowSteps').classList.remove('d-none');
         document.querySelector('.content-footer')?.classList.toggle('d-none', focusedWorkspace);
 
