@@ -5,18 +5,6 @@
 <nav class="layout-navbar container-xxl navbar-detached navbar navbar-expand-xl align-items-center bg-navbar-theme"
      id="layout-navbar">
 
-    {{-- Menu toggle remains available at every viewport size. --}}
-    <div class="navbar-nav align-items-center me-3">
-        <button type="button"
-                class="layout-menu-toggle navbar-menu-toggle nav-item nav-link border-0"
-                data-menu-toggle-control
-                aria-controls="layout-menu"
-                aria-expanded="true"
-                aria-label="Hide navigation">
-            <i class="icon-base bx bx-menu icon-md"></i>
-        </button>
-    </div>
-
     <div class="navbar-nav-right d-flex align-items-center" id="navbar-collapse">
 
         {{-- Archive search. Every signed-in role may search records. --}}

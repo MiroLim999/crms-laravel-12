@@ -20,6 +20,18 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="robots" content="noindex, nofollow">
 
+    {{-- Restore the desktop sidebar preference before the first paint. --}}
+    <script>
+        try {
+            if (window.matchMedia('(min-width: 1200px)').matches
+                && window.localStorage.getItem('crms.sidebar.hidden') === 'true') {
+                document.documentElement.classList.add('layout-menu-collapsed');
+            }
+        } catch (error) {
+            // Storage can be unavailable in private or locked-down browsers.
+        }
+    </script>
+
     <title>@yield('title', 'Dashboard') · {{ config('app.name') }}</title>
 
     <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('assets/img/favicon-32.png') }}">
@@ -45,6 +57,15 @@
         <div class="layout-container">
 
             @include('layouts.partials.sidebar')
+
+            <button type="button"
+                    class="layout-menu-toggle global-sidebar-toggle"
+                    data-menu-toggle-control
+                    aria-controls="layout-menu"
+                    aria-expanded="true"
+                    aria-label="Collapse navigation">
+                <i class="icon-base bx bx-chevron-left" aria-hidden="true"></i>
+            </button>
 
             <div class="layout-page">
                 @include('layouts.partials.navbar')

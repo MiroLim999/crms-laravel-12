@@ -144,25 +144,43 @@
   }
 }
 
-#layout-navbar .navbar-menu-toggle {
-  display: inline-flex !important;
+.global-sidebar-toggle {
+  position: fixed;
+  z-index: 1090;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  inline-size: 2.5rem;
-  block-size: 2.5rem;
-  padding: 0 !important;
-  color: var(--bs-secondary-color);
-  background: transparent;
-  border-radius: .5rem;
+  inline-size: 2rem;
+  block-size: 2rem;
+  padding: 0;
+  color: var(--bs-body-color);
+  background: #fff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 50%;
   cursor: pointer;
-  transition: color .15s ease, background-color .15s ease;
+  inset-block-start: 1.375rem;
+  inset-inline-start: calc(var(--bs-menu-width) - 1rem);
+  transition: inset-inline-start .3s cubic-bezier(.4, 0, .2, 1),
+              color .15s ease, background-color .15s ease, border-color .15s ease;
+
+  .icon-base {
+    font-size: 1.25rem;
+  }
 
   &:hover,
   &:focus-visible {
     color: var(--bs-primary);
-    background: rgba(105, 108, 255, .08);
-    outline: 0;
+    background: #fff;
+    border-color: rgba(105, 108, 255, .55);
+    outline: 3px solid rgba(105, 108, 255, .12);
+    outline-offset: 1px;
   }
+}
+
+// The compact preference is restored before the application bundle changes the
+// icon class, so keep the initial chevron pointing toward the hidden labels.
+html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
+  transform: rotate(180deg);
 }
 
 // Desktop navigation collapses to a stable rail. Expanded and compact modes use
@@ -193,6 +211,10 @@
   }
 
   html.layout-menu-fixed-offcanvas.layout-menu-collapsed {
+    .global-sidebar-toggle {
+      inset-inline-start: calc(var(--bs-menu-collapsed-width) - 1rem);
+    }
+
     #layout-menu {
       inline-size: var(--bs-menu-collapsed-width);
       transform: none !important;
@@ -258,6 +280,21 @@
       line-height: 1.25rem;
       text-align: center;
     }
+  }
+}
+
+@media (max-width: 1199.98px) {
+  .global-sidebar-toggle {
+    inset-block-start: 1.375rem;
+    inset-inline-start: 1.25rem;
+  }
+
+  #layout-navbar {
+    padding-inline-start: 4rem !important;
+  }
+
+  html.layout-menu-expanded .global-sidebar-toggle {
+    inset-inline-start: calc(var(--bs-menu-width) - 1rem);
   }
 }
 
@@ -706,30 +743,6 @@
   align-items: center;
   gap: .55rem;
   min-inline-size: 0;
-}
-
-.marker-sidebar-toggle {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  inline-size: 2.3rem;
-  block-size: 2.3rem;
-  padding: 0;
-  color: var(--bs-secondary-color);
-  background: transparent;
-  border: 1px solid var(--bs-border-color);
-  border-radius: .5rem;
-  cursor: pointer;
-  transition: color .12s ease, background-color .12s ease, border-color .12s ease;
-
-  &:hover,
-  &:focus-visible {
-    color: var(--bs-primary);
-    background: rgba(105, 108, 255, .08);
-    border-color: rgba(105, 108, 255, .3);
-    outline: 0;
-  }
 }
 
 .marker-zoom-controls {
@@ -1230,11 +1243,6 @@
   align-items: flex-start;
   gap: .75rem;
   min-inline-size: 0;
-
-  .marker-sidebar-toggle {
-    flex: 0 0 auto;
-    margin-block-start: .05rem;
-  }
 }
 
 .validation-eyebrow,

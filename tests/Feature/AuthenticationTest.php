@@ -52,7 +52,7 @@ class AuthenticationTest extends TestCase
             ->get(route('dashboard'))
             ->assertOk()
             ->assertSee('layout-menu-fixed-offcanvas', escape: false)
-            ->assertSee('class="layout-menu-toggle navbar-menu-toggle', escape: false)
+            ->assertSee('class="layout-menu-toggle global-sidebar-toggle', escape: false)
             ->assertSee('data-menu-toggle-control', escape: false)
             ->assertSee('aria-controls="layout-menu"', escape: false)
             ->assertDontSee('sidebar-menu-toggle', escape: false);

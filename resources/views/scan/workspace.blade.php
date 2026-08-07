@@ -62,15 +62,6 @@
                 <x-card class="document-canvas-card" bodyClass="p-0">
                     <div class="marker-toolbar">
                         <div class="marker-toolbar__primary">
-                            <button type="button"
-                                    class="layout-menu-toggle marker-sidebar-toggle"
-                                    data-menu-toggle-control
-                                    aria-controls="layout-menu"
-                                    aria-expanded="true"
-                                    aria-label="Hide navigation"
-                                    title="Show or hide navigation">
-                                <i class="icon-base bx bx-menu icon-sm" aria-hidden="true"></i>
-                            </button>
                             <span class="document-file-chip" title="Current document">
                                 <i class="icon-base bx bx-file"></i>
                                 <span id="selectedFileName">Document</span>
@@ -237,11 +228,6 @@
             <div class="validation-workspace">
                 <header class="validation-workspace__header">
                     <div class="validation-workspace__heading">
-                        <button type="button" class="layout-menu-toggle marker-sidebar-toggle"
-                                data-menu-toggle-control aria-controls="layout-menu" aria-expanded="true"
-                                aria-label="Collapse navigation" title="Collapse navigation">
-                            <i class="icon-base bx bx-menu icon-sm" aria-hidden="true"></i>
-                        </button>
                         <div>
                             <span class="validation-eyebrow">Final review</span>
                             <h2 class="h4 mb-1">Compare and verify</h2>

@@ -56,6 +56,12 @@ document.addEventListener('DOMContentLoaded', function () {
         : (expanded ? 'Collapse navigation' : 'Expand navigation');
       control.setAttribute('aria-label', label);
       control.title = label;
+
+      const icon = control.querySelector('.icon-base');
+      if (icon) {
+        icon.classList.toggle('bx-chevron-left', !collapsed);
+        icon.classList.toggle('bx-chevron-right', collapsed);
+      }
     });
   };
 
@@ -81,8 +87,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     if (collapsed && (smallScreen || trigger?.closest('#layout-menu'))) {
-      const fallback = document.querySelector('.marker-sidebar-toggle')
-        ?? document.querySelector('.navbar-menu-toggle');
+      const fallback = document.querySelector('.global-sidebar-toggle');
       window.setTimeout(() => (lastMenuOpener ?? fallback)?.focus(), 320);
     }
   };

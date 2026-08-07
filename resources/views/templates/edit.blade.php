@@ -78,16 +78,6 @@
                              aria-label="Template document editor">
                         <div class="marker-toolbar">
                             <div class="marker-toolbar__primary">
-                                <button type="button"
-                                        class="layout-menu-toggle marker-sidebar-toggle"
-                                        data-menu-toggle-control
-                                        aria-controls="layout-menu"
-                                        aria-expanded="true"
-                                        aria-label="Show or hide navigation"
-                                        title="Show or hide navigation">
-                                    <i class="icon-base bx bx-menu icon-sm" aria-hidden="true"></i>
-                                </button>
-
                                 <label for="sampleScan" class="document-file-chip template-sample-control"
                                        id="sampleScanLabel" tabindex="0" role="button"
                                        title="{{ $template?->sample_path ? 'Replace the stored sample document' : 'Choose a sample document' }}">
