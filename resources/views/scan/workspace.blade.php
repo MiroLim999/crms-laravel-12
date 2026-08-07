@@ -600,7 +600,7 @@
         const focusedWorkspace = marking || name === 'verify';
         el('documentPageHeader').classList.toggle('d-none', focusedWorkspace);
         el('documentFlowSteps').classList.toggle('d-none', focusedWorkspace);
-        el('layout-navbar')?.classList.toggle('d-none', marking);
+        el('layout-navbar')?.classList.toggle('d-none', focusedWorkspace);
         document.querySelector('.content-footer')?.classList.toggle('d-none', focusedWorkspace);
 
         const order = ['upload', 'mark', 'verify'];

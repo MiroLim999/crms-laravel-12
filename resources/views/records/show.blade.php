@@ -1,6 +1,7 @@
 @extends('layouts.app')
 
 @section('title', 'Record #' . $record->getKey())
+@section('body-class', 'record-detail-focused')
 
 @section('content')
     <x-page-header :title="$record->title()"

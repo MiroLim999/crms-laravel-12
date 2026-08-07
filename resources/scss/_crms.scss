@@ -1113,8 +1113,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1.04fr) minmax(31rem, .96fr);
   gap: 1rem;
-  block-size: calc(100vh - 14rem);
-  block-size: calc(100dvh - 14rem);
+  block-size: calc(100vh - 8rem);
+  block-size: calc(100dvh - 8rem);
   min-block-size: 34rem;
 }
 
@@ -1862,6 +1862,16 @@
 
   .content-wrapper {
     min-block-size: 100vh;
+  }
+}
+
+.record-detail-focused {
+  #layout-navbar {
+    display: none !important;
+  }
+
+  .container-xxl.container-p-y {
+    padding-block-start: .75rem !important;
   }
 }
 
