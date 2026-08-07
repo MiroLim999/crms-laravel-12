@@ -631,6 +631,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   animation: document-panel-in .2s ease-out;
 }
 
+.document-workspace-focused #step-upload {
+  display: flex;
+  align-items: center;
+  min-block-size: calc(100dvh - 10rem);
+}
+
 @keyframes document-panel-in {
   from {
     opacity: 0;
@@ -644,6 +650,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .document-upload-wrap {
+  inline-size: 100%;
   max-inline-size: 48rem;
   margin-inline: auto;
 }
