@@ -87,6 +87,7 @@ MODELS_DIR = os.path.join(ML_ROOT, "models")
 FALLBACK_MODEL = "microsoft/trocr-base-handwritten"
 BASE_MODEL_KEY = "base"
 BASE_MODEL_LABEL = "TrOCR base (not fine-tuned)"
+BASE_MODEL_DIR = os.path.join(MODELS_DIR, BASE_MODEL_KEY)
 
 MAX_NEW_TOKENS = 32
 
@@ -152,6 +153,10 @@ def _discover_models():
     found = {}
     if os.path.isdir(MODELS_DIR):
         for name in sorted(os.listdir(MODELS_DIR)):
+            # The built-in base checkpoint has its own stable key and descriptor
+            # below. Do not expose its local folder as a duplicate custom model.
+            if name == BASE_MODEL_KEY:
+                continue
             path = os.path.join(MODELS_DIR, name)
             if _looks_like_model(path):
                 found[name] = path
@@ -205,13 +210,19 @@ def _model_info():
         }
         for key, path in discovered.items()
     ]
-    # The base model is always available (pulled from the HF cache / hub).
+    base_is_local = _looks_like_model(BASE_MODEL_DIR)
     infos.append({
         "key": BASE_MODEL_KEY,
         "label": BASE_MODEL_LABEL,
+        # Keep the legacy online fallback, but report the actual local files so
+        # the workspace can distinguish a reproducible install from a hub load.
         "available": True,
         "loaded": BASE_MODEL_KEY in _models,
-        "files": [],
+        "files": sorted(
+            name
+            for name in os.listdir(BASE_MODEL_DIR)
+            if base_is_local and os.path.isfile(os.path.join(BASE_MODEL_DIR, name))
+        ) if base_is_local else [],
     })
     return infos
 
@@ -221,7 +232,8 @@ def _load_model(key):
     device = _get_device()
 
     if key == BASE_MODEL_KEY:
-        model_src, label, cache_key = FALLBACK_MODEL, BASE_MODEL_LABEL, BASE_MODEL_KEY
+        model_src = BASE_MODEL_DIR if _looks_like_model(BASE_MODEL_DIR) else FALLBACK_MODEL
+        label, cache_key = BASE_MODEL_LABEL, BASE_MODEL_KEY
     else:
         model_src = _discover_models().get(key)
         if model_src is None:
