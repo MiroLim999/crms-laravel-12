@@ -233,30 +233,6 @@
             <input type="hidden" name="ocr_model_key" id="ocrModelKey">
 
             <div class="validation-workspace">
-                <header class="validation-workspace__header">
-                    <div class="validation-workspace__heading">
-                        <div>
-                            <span class="validation-eyebrow">Final review</span>
-                            <h2 class="h4 mb-1">Compare and verify</h2>
-                            <p class="text-muted mb-0">
-                                Select a marker or extracted field to compare them. Only checked fields are submitted.
-                            </p>
-                        </div>
-                    </div>
-
-                    <div class="validation-progress-summary" aria-live="polite">
-                        <div>
-                            <strong id="verifiedCount">0 of 0</strong>
-                            <span>fields verified</span>
-                        </div>
-                        <div class="progress" role="progressbar" aria-label="Field verification progress"
-                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
-                             id="verifiedProgress">
-                            <div class="progress-bar" id="verifiedProgressBar" style="width: 0%"></div>
-                        </div>
-                    </div>
-                </header>
-
                 <div class="validation-submit-error d-none" id="validationSubmitError"
                      role="alert" aria-live="assertive">
                     <i class="icon-base bx bx-error-circle" aria-hidden="true"></i>
@@ -310,10 +286,24 @@
                                 <p class="small text-muted mb-0">Correct the text, then check Verified.</p>
                             </div>
 
-                            <div class="validation-model-summary" aria-label="OCR summary">
-                                <span><small>Model</small><code id="summaryModel">&mdash;</code></span>
-                                <span><small>Confidence</small><strong id="summaryConfidence">&mdash;</strong></span>
-                                <span><small>Review</small><strong id="summaryReview">&mdash;</strong></span>
+                            <div class="validation-output-summary">
+                                <div class="validation-model-summary" aria-label="OCR summary">
+                                    <span><small>Model</small><code id="summaryModel">&mdash;</code></span>
+                                    <span><small>Confidence</small><strong id="summaryConfidence">&mdash;</strong></span>
+                                    <span><small>Review</small><strong id="summaryReview">&mdash;</strong></span>
+                                </div>
+
+                                <div class="validation-progress-summary" aria-live="polite">
+                                    <div>
+                                        <strong id="verifiedCount">0 of 0</strong>
+                                        <span>fields verified</span>
+                                    </div>
+                                    <div class="progress" role="progressbar" aria-label="Field verification progress"
+                                         aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+                                         id="verifiedProgress">
+                                        <div class="progress-bar" id="verifiedProgressBar" style="width: 0%"></div>
+                                    </div>
+                                </div>
                             </div>
                         </header>
 

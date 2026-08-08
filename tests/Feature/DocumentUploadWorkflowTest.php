@@ -52,14 +52,14 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('<kbd>Del</kbd> or <kbd>Backspace</kbd>', escape: false)
                 ->assertSee('<kbd>Ctrl</kbd> + <kbd>Z</kbd>', escape: false)
                 ->assertSee('Scan with OCR')
-                ->assertSee('Compare and verify')
+                ->assertDontSee('Compare and verify')
                 ->assertSee('Original document')
                 ->assertSee('Digital text output')
                 ->assertSee('id="validationPageCanvas"', escape: false)
                 ->assertSee('id="validationFieldOverlay"', escape: false)
                 ->assertSee('id="verifiedProgress"', escape: false)
                 ->assertSee('id="validationSubmitError"', escape: false)
-                ->assertSee('Only checked fields are submitted.');
+                ->assertDontSee('Only checked fields are submitted.');
         }
     }
 
