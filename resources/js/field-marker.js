@@ -275,7 +275,9 @@ export class FieldMarker {
      * @param {Array<{name: string, x: number, y: number, w: number, h: number}>} boxes
      */
     setBoxes(boxes) {
-        this.overlay.innerHTML = '';
+        // Remove marker elements without destroying overlay-owned tools such as
+        // Template Builder's Windows-style marquee selection rectangle.
+        this.overlay.querySelectorAll(':scope > .field-box').forEach((element) => element.remove());
         this.boxes = boxes.map((box) => ({ ...box, el: null }));
         this.selected.clear();
         this.layout();
@@ -334,6 +336,22 @@ export class FieldMarker {
         }
 
         this._emitSelection({ source, activeIndex: index });
+    }
+
+    /** Select several boxes in one render/update, used by area-selection tools. */
+    selectIndexes(indexes, { additive = false, source = 'api' } = {}) {
+        const next = additive ? new Set(this.selected) : new Set();
+        let activeIndex = null;
+
+        indexes.forEach((index) => {
+            const box = this.boxes[index];
+            if (!box) return;
+            next.add(box);
+            activeIndex = index;
+        });
+
+        this.selected = next;
+        this._emitSelection({ source, activeIndex });
     }
 
     clearSelection() {

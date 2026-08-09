@@ -40,6 +40,8 @@ class DocumentTemplateBuilderTest extends TestCase
             ->assertOk()
             ->assertSee('id="docViewport"', escape: false)
             ->assertSee('id="fieldOverlay"', escape: false)
+            ->assertSee('id="marqueeSelectBtn"', escape: false)
+            ->assertSee('id="fieldSelectionMarquee"', escape: false)
             ->assertSee('id="selectAllFields"', escape: false)
             ->assertSee('id="publishIntent"', escape: false)
             ->assertSee('id="paper_size"', escape: false)

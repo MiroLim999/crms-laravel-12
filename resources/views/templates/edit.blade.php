@@ -98,6 +98,11 @@
                                 @endif
 
                                 <span class="marker-toolbar__divider" aria-hidden="true"></span>
+                                <button type="button" class="marker-selection-tool" id="marqueeSelectBtn"
+                                        aria-pressed="true" title="Drag across the document to select fields">
+                                    <i class="icon-base bx bx-scan icon-sm" aria-hidden="true"></i>
+                                    <span>Area select</span>
+                                </button>
                                 <div class="marker-zoom-controls" role="group" aria-label="Document zoom controls">
                                     <button type="button" class="marker-tool-button" id="zoomOutBtn"
                                             aria-label="Zoom out">&minus;</button>
@@ -119,6 +124,8 @@
                                     <div class="dropdown-menu dropdown-menu-end marker-shortcuts-menu">
                                         <div class="marker-shortcuts-menu__title">Editor shortcuts</div>
                                         <div><span><kbd>Ctrl</kbd> + scroll</span><small>Zoom document</small></div>
+                                        <div><span>Drag empty document area</span><small>Select fields in a rectangle</small></div>
+                                        <div><span><kbd>Shift</kbd> + drag</span><small>Add to selection</small></div>
                                         <div><span><kbd>Shift</kbd> + click</span><small>Select multiple</small></div>
                                         <div><span>Drag selection</span><small>Move selected fields</small></div>
                                         <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
@@ -161,7 +168,10 @@
                             </div>
                             <div class="doc-stage" id="docStage">
                                 <canvas id="pageCanvas" width="900" height="1200"></canvas>
-                                <div class="field-overlay" id="fieldOverlay"></div>
+                                <div class="field-overlay" id="fieldOverlay">
+                                    <div class="field-selection-marquee" id="fieldSelectionMarquee"
+                                         aria-hidden="true"></div>
+                                </div>
                             </div>
                         </div>
                     </section>
