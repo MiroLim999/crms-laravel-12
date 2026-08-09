@@ -279,7 +279,7 @@
 
                         <footer class="validation-pane__hint">
                             <i class="icon-base bx bx-scan" aria-hidden="true"></i>
-                            Green shows the complete person row; the primary outline identifies the exact field.
+                            Orange shows the complete person row; green identifies the exact field.
                             Hold <kbd>Ctrl</kbd> and scroll to zoom.
                         </footer>
                     </section>

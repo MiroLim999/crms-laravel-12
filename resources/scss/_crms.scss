@@ -1612,28 +1612,30 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
     &.is-selected {
       z-index: 5;
-      border-color: var(--bs-success);
+      border-color: var(--bs-warning);
       border-style: solid;
-      background: rgba(40, 199, 111, .2);
-      box-shadow: 0 0 0 3px rgba(40, 199, 111, .25);
+      background: rgba(255, 171, 0, .18);
+      box-shadow: 0 0 0 3px rgba(255, 171, 0, .24);
 
       .field-box-label {
-        background: var(--bs-success);
+        color: var(--bs-heading-color);
+        background: var(--bs-warning);
       }
     }
 
-    // Green identifies the selected person. The exact field receives the
-    // product's primary color so it remains obvious within that green row.
+    // Orange identifies the selected person. Green identifies the exact field
+    // clicked within that row.
     &.is-selected.is-current {
       z-index: 7;
-      border-color: var(--bs-primary);
-      background: rgba(105, 108, 255, .2);
+      border-color: var(--bs-success);
+      background: rgba(40, 199, 111, .24);
       box-shadow:
         0 0 0 2px #fff,
-        0 0 0 5px rgba(105, 108, 255, .72);
+        0 0 0 5px rgba(40, 199, 111, .72);
 
       .field-box-label {
-        background: var(--bs-primary);
+        color: #fff;
+        background: var(--bs-success);
       }
     }
   }
@@ -1832,11 +1834,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   &.is-active::before {
-    background: var(--bs-success);
+    background: var(--bs-warning);
   }
 
   &.is-active > .validation-record-group__toggle {
-    background: rgba(40, 199, 111, .055);
+    background: rgba(255, 171, 0, .075);
   }
 
   &.is-complete .validation-record-group__number {
@@ -1968,8 +1970,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   &.is-active {
-    background: rgba(105, 108, 255, .065);
-    box-shadow: inset .22rem 0 0 var(--bs-primary);
+    background: rgba(40, 199, 111, .07);
+    box-shadow: inset .22rem 0 0 var(--bs-success);
   }
 
   &.is-verified {
@@ -1977,7 +1979,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   &.is-active.is-verified {
-    background: rgba(105, 108, 255, .085);
+    background: rgba(40, 199, 111, .1);
   }
 
   &.is-invalid {
@@ -2012,7 +2014,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   .is-active & {
     color: #fff;
-    background: var(--bs-primary);
+    background: var(--bs-success);
   }
 }
 
