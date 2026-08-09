@@ -10,8 +10,8 @@ use Illuminate\Support\Collection;
 /**
  * A document category available to Template Builder and Staff scanning.
  *
- * The key is permanent so renaming a custom category never disconnects its
- * templates or historical records.
+ * The key is permanent so renaming a category never disconnects its templates
+ * or historical records.
  */
 class DocumentTypeDefinition extends Model
 {

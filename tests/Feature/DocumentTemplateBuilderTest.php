@@ -13,6 +13,7 @@ use App\Services\TemplateSampleStorage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class DocumentTemplateBuilderTest extends TestCase
@@ -750,16 +751,100 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'document-type.renamed']);
     }
 
-    public function test_builtin_document_types_cannot_be_renamed(): void
+    public function test_builtin_document_type_cards_offer_rename_but_not_delete(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
+        $response = $this->actingAs($superAdmin)->get(route('templates.index'));
+
+        $response->assertOk();
+
+        DocumentTypeDefinition::where('is_system', true)->get()->each(function (DocumentTypeDefinition $type) use ($response) {
+            $response
+                ->assertSee('data-bs-target="#renameDocumentType'.$type->getKey().'"', escape: false)
+                ->assertDontSee('data-bs-target="#deleteDocumentType'.$type->getKey().'"', escape: false);
+        });
+    }
+
+    public function test_renamed_builtin_type_is_shown_on_its_layout_and_staff_scan_picker(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $staff = User::factory()->staff()->create();
         $birth = DocumentTypeDefinition::where('key', DocumentType::Birth->value)->firstOrFail();
+        $template = $this->template($superAdmin, DocumentType::Birth, 'Registry Book 2026', active: true);
 
         $this->actingAs($superAdmin)->put(route('templates.document-types.update', $birth), [
-            'document_type_name' => 'Changed birth name',
-        ])->assertForbidden();
+            'document_type_name' => 'Book of Birth Records',
+        ])->assertRedirect(route('templates.index', ['open' => DocumentType::Birth->value]));
 
-        $this->assertSame('Birth Certificate', $birth->refresh()->name);
+        $this->get(route('templates.index'))
+            ->assertOk()
+            ->assertSeeText('Book of Birth Records')
+            ->assertSeeText('Registry Book 2026');
+
+        $this->get(route('templates.edit', $template))
+            ->assertOk()
+            ->assertSeeText('Book of Birth Records')
+            ->assertSee('value="Registry Book 2026"', escape: false);
+
+        $this->actingAs($staff)->get(route('documents.create'))
+            ->assertOk()
+            ->assertSeeText('Book of Birth Records')
+            ->assertSeeText('Registry Book 2026');
+    }
+
+    public function test_builtin_document_types_can_be_renamed_without_changing_keys_or_associations(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $staff = User::factory()->staff()->create();
+
+        foreach ([
+            [DocumentType::Birth, 'Certificate of Live Birth'],
+            [DocumentType::Death, 'Certificate of Death Registration'],
+            [DocumentType::Marriage, trim(str_repeat('Marriage registry designation ', 4))],
+        ] as [$legacyType, $newName]) {
+            $definition = DocumentTypeDefinition::where('key', $legacyType->value)->firstOrFail();
+            $definitionId = $definition->getKey();
+            $permanentKey = $definition->key;
+            $template = $this->template(
+                $superAdmin,
+                $legacyType,
+                "{$legacyType->label()} retained layout",
+                active: true,
+            );
+            $record = CivilRecord::factory()->create([
+                'doc_type' => $legacyType->value,
+                'document_type_id' => $definitionId,
+                'document_template_id' => $template->getKey(),
+                'created_by' => $staff->getKey(),
+            ]);
+
+            $this->actingAs($superAdmin)
+                ->put(route('templates.document-types.update', $definition), [
+                    'document_type_name' => $newName,
+                ])
+                ->assertRedirect(route('templates.index', ['open' => $permanentKey]))
+                ->assertSessionHas('success');
+
+            $definition->refresh();
+            $template->refresh();
+            $record->refresh();
+
+            $this->assertTrue($definition->is_system);
+            $this->assertSame($definitionId, $definition->getKey());
+            $this->assertSame($permanentKey, $definition->key);
+            $this->assertSame($newName, $definition->name);
+            $this->assertSame(Str::limit($newName, 80, ''), $definition->short_name);
+            $this->assertSame($definitionId, $template->document_type_id);
+            $this->assertSame($legacyType, $template->doc_type);
+            $this->assertTrue($template->is(DocumentTemplate::activeFor($legacyType)));
+            $this->assertSame($definitionId, $record->document_type_id);
+            $this->assertSame($legacyType, $record->doc_type);
+            $this->assertSame($newName, $record->typeLabel());
+            $this->assertDatabaseHas('audit_logs', [
+                'action' => 'document-type.renamed',
+                'auditable_id' => $definitionId,
+            ]);
+        }
     }
 
     public function test_super_admin_can_delete_an_unused_custom_document_type_and_its_layouts(): void

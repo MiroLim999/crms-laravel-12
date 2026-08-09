@@ -2561,6 +2561,29 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+.template-library-manage {
+  flex: 0 0 auto;
+}
+
+.template-document-type-rename-note {
+  display: flex;
+  align-items: flex-start;
+  gap: .45rem;
+  margin-block-start: .75rem;
+  padding: .65rem .7rem;
+  color: var(--bs-secondary-color);
+  background: var(--bs-gray-100);
+  border-radius: var(--bs-border-radius-sm);
+  font-size: .75rem;
+  line-height: 1.45;
+
+  i {
+    flex: 0 0 auto;
+    margin-block-start: .1rem;
+    color: var(--bs-primary);
+  }
+}
+
 .template-library-toggle {
   white-space: nowrap;
 }

@@ -73,30 +73,31 @@
                                 <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>
                                 New layout
                             </a>
-                            @unless ($type->is_system)
-                                <div class="dropdown">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary"
-                                            data-bs-toggle="dropdown" aria-expanded="false"
-                                            aria-label="Manage {{ $type->label() }}">
-                                        <i class="icon-base bx bx-dots-vertical-rounded icon-sm" aria-hidden="true"></i>
-                                        Manage
+                            <div class="dropdown template-library-manage">
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        data-bs-toggle="dropdown" aria-expanded="false"
+                                        aria-label="Manage {{ $type->label() }}">
+                                    <i class="icon-base bx bx-dots-vertical-rounded icon-sm" aria-hidden="true"></i>
+                                    Manage
+                                </button>
+                                <div class="dropdown-menu dropdown-menu-end">
+                                    <button type="button" class="dropdown-item"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#renameDocumentType{{ $type->getKey() }}">
+                                        <i class="icon-base bx bx-edit-alt icon-sm me-2" aria-hidden="true"></i>
+                                        Rename
                                     </button>
-                                    <div class="dropdown-menu dropdown-menu-end">
-                                        <button type="button" class="dropdown-item"
-                                                data-bs-toggle="modal"
-                                                data-bs-target="#renameDocumentType{{ $type->getKey() }}">
-                                            <i class="icon-base bx bx-edit-alt icon-sm me-2" aria-hidden="true"></i>
-                                            Rename
-                                        </button>
+                                    @unless ($type->is_system)
+                                        <div class="dropdown-divider"></div>
                                         <button type="button" class="dropdown-item text-danger"
                                                 data-bs-toggle="modal"
                                                 data-bs-target="#deleteDocumentType{{ $type->getKey() }}">
                                             <i class="icon-base bx bx-trash icon-sm me-2" aria-hidden="true"></i>
                                             Delete document type
                                         </button>
-                                    </div>
+                                    @endunless
                                 </div>
-                            @endunless
+                            </div>
                             <button type="button"
                                     class="btn btn-sm btn-outline-secondary audit-diff-toggle template-library-toggle {{ $expanded ? 'active' : '' }}"
                                     data-template-layout-toggle data-target="{{ $collapseId }}"
@@ -252,45 +253,54 @@
                     </div>
                 @endforeach
 
-                @unless ($type->is_system)
-                    <div class="modal fade" id="renameDocumentType{{ $type->getKey() }}" tabindex="-1"
-                         aria-labelledby="renameDocumentTypeLabel{{ $type->getKey() }}" aria-hidden="true">
-                        <div class="modal-dialog modal-dialog-centered modal-sm">
-                            <div class="modal-content">
-                                <form method="POST" action="{{ route('templates.document-types.update', $type) }}">
-                                    @csrf
-                                    @method('PUT')
-                                    <input type="hidden" name="document_type_form" value="rename-{{ $type->getKey() }}">
-                                    <div class="modal-header">
-                                        <div>
-                                            <div class="text-uppercase text-primary small fw-semibold mb-1">Document type</div>
-                                            <h2 class="modal-title h5" id="renameDocumentTypeLabel{{ $type->getKey() }}">Rename type</h2>
-                                        </div>
-                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <div class="modal fade" id="renameDocumentType{{ $type->getKey() }}" tabindex="-1"
+                     aria-labelledby="renameDocumentTypeLabel{{ $type->getKey() }}" aria-hidden="true"
+                     data-document-type-rename-modal>
+                    <div class="modal-dialog modal-dialog-centered modal-sm">
+                        <div class="modal-content">
+                            <form method="POST" action="{{ route('templates.document-types.update', $type) }}"
+                                  data-document-type-rename-form>
+                                @csrf
+                                @method('PUT')
+                                <input type="hidden" name="document_type_form" value="rename-{{ $type->getKey() }}">
+                                <div class="modal-header">
+                                    <div>
+                                        <div class="text-uppercase text-primary small fw-semibold mb-1">Document type</div>
+                                        <h2 class="modal-title h5" id="renameDocumentTypeLabel{{ $type->getKey() }}">
+                                            Rename {{ $type->label() }}
+                                        </h2>
                                     </div>
-                                    <div class="modal-body">
-                                        <label for="renameDocumentTypeName{{ $type->getKey() }}" class="form-label">Name</label>
-                                        <input type="text" maxlength="120" required
-                                               class="form-control {{ old('document_type_form') === 'rename-'.$type->getKey() && $errors->has('document_type_name') ? 'is-invalid' : '' }}"
-                                               id="renameDocumentTypeName{{ $type->getKey() }}"
-                                               name="document_type_name"
-                                               value="{{ old('document_type_form') === 'rename-'.$type->getKey() ? old('document_type_name') : $type->name }}">
-                                        @if (old('document_type_form') === 'rename-'.$type->getKey())
-                                            @error('document_type_name')
-                                                <div class="invalid-feedback">{{ $message }}</div>
-                                            @enderror
-                                        @endif
-                                        <div class="form-text">Layouts and saved records stay connected after renaming.</div>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <label for="renameDocumentTypeName{{ $type->getKey() }}" class="form-label">Display name</label>
+                                    <input type="text" maxlength="120" required
+                                           class="form-control {{ old('document_type_form') === 'rename-'.$type->getKey() && $errors->has('document_type_name') ? 'is-invalid' : '' }}"
+                                           id="renameDocumentTypeName{{ $type->getKey() }}"
+                                           name="document_type_name"
+                                           value="{{ old('document_type_form') === 'rename-'.$type->getKey() ? old('document_type_name') : $type->name }}"
+                                           data-original-name="{{ $type->name }}"
+                                           data-document-type-rename-input>
+                                    @if (old('document_type_form') === 'rename-'.$type->getKey())
+                                        @error('document_type_name')
+                                            <div class="invalid-feedback">{{ $message }}</div>
+                                        @enderror
+                                    @endif
+                                    <div class="template-document-type-rename-note">
+                                        <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
+                                        <span>This changes the label shown on this card, its layouts, and the editor. Existing records and layouts stay connected.</span>
                                     </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                                        <button type="submit" class="btn btn-primary">Save name</button>
-                                    </div>
-                                </form>
-                            </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="submit" class="btn btn-primary" data-document-type-rename-submit>Save name</button>
+                                </div>
+                            </form>
                         </div>
                     </div>
+                </div>
 
+                @unless ($type->is_system)
                     <div class="modal fade" id="deleteDocumentType{{ $type->getKey() }}" tabindex="-1"
                          aria-labelledby="deleteDocumentTypeLabel{{ $type->getKey() }}" aria-hidden="true">
                         <div class="modal-dialog modal-dialog-centered modal-sm">
@@ -361,7 +371,7 @@
                                 <div class="invalid-feedback">{{ $message }}</div>
                             @enderror
                         @endif
-                        <div class="form-text">You can rename custom document types later.</div>
+                        <div class="form-text">Document type display names can be changed later.</div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -433,6 +443,44 @@
                     }
                 });
             });
+        });
+
+        document.querySelectorAll('[data-document-type-rename-modal]').forEach((modal) => {
+            const form = modal.querySelector('[data-document-type-rename-form]');
+            const input = modal.querySelector('[data-document-type-rename-input]');
+            const submit = modal.querySelector('[data-document-type-rename-submit]');
+            if (!(form instanceof HTMLFormElement)
+                || !(input instanceof HTMLInputElement)
+                || !(submit instanceof HTMLButtonElement)) return;
+
+            const originalName = input.dataset.originalName?.trim() ?? '';
+            const refreshSubmit = () => {
+                const name = input.value.trim();
+                submit.disabled = name === '' || name === originalName;
+            };
+
+            input.addEventListener('input', () => {
+                input.classList.remove('is-invalid');
+                refreshSubmit();
+            });
+            modal.addEventListener('shown.bs.modal', () => {
+                refreshSubmit();
+                input.focus();
+                input.select();
+            });
+            form.addEventListener('submit', (event) => {
+                input.value = input.value.trim();
+                if (input.value === '' || input.value === originalName) {
+                    event.preventDefault();
+                    refreshSubmit();
+                    input.focus();
+                    return;
+                }
+                submit.disabled = true;
+                submit.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Saving&hellip;';
+            });
+
+            refreshSubmit();
         });
 
         @if ($errors->has('document_type_name'))

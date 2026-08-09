@@ -27,7 +27,7 @@ class DocumentTypeDefinitionController extends Controller
         $type = DocumentTypeDefinition::create([
             'key' => $key,
             'name' => $name,
-            'short_name' => $name,
+            'short_name' => Str::limit($name, 80, ''),
             'icon' => 'bx-file',
             'is_system' => false,
         ]);
@@ -46,11 +46,12 @@ class DocumentTypeDefinitionController extends Controller
 
     public function update(Request $request, DocumentTypeDefinition $documentType): RedirectResponse
     {
-        abort_if($documentType->is_system, 403, 'Built-in document types cannot be renamed.');
-
         $name = $this->validatedName($request, $documentType);
         $old = $documentType->name;
-        $documentType->fill(['name' => $name, 'short_name' => $name]);
+        $documentType->fill([
+            'name' => $name,
+            'short_name' => Str::limit($name, 80, ''),
+        ]);
         $this->audit->saveAndLog(
             'document-type.renamed',
             $documentType,
