@@ -1129,7 +1129,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .field-marker-comparison-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.04fr) minmax(31rem, .96fr);
+  // Match the Template Builder: 8/4 at large widths, then 9/3 on desktop.
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 1rem;
   block-size: calc(100vh - 8rem);
   block-size: calc(100dvh - 8rem);
@@ -1138,6 +1139,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   > * {
     min-inline-size: 0;
     min-block-size: 0;
+  }
+}
+
+@media (min-width: 1200px) {
+  .field-marker-comparison-grid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
   }
 }
 
