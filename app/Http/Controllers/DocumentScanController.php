@@ -104,8 +104,8 @@ class DocumentScanController extends Controller
     public function recognise(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'fields' => ['required', 'array', 'min:1'],
-            'fields.*.name' => ['required', 'string', 'max:120'],
+            'fields' => ['required', 'array', 'min:1', 'max:450'],
+            'fields.*.name' => ['required', 'string', 'max:500'],
             'fields.*.image' => ['required', 'string'],
             'model' => ['nullable', 'string', 'max:255'],
         ]);
@@ -143,9 +143,9 @@ class DocumentScanController extends Controller
                 Rule::exists(OcrModel::class, 'key')->whereNull('disk_deleted_at'),
             ],
             'scan' => ['required', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp,tiff', 'max:20480'],
-            'fields' => ['required', 'array', 'min:1', 'max:100'],
+            'fields' => ['required', 'array', 'min:1', 'max:450'],
             'fields.*.verified' => ['required', 'accepted'],
-            'fields.*.name' => ['required', 'string', 'max:120', 'distinct:ignore_case'],
+            'fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
             'fields.*.ocr_text' => ['nullable', 'string', 'max:2000'],
             'fields.*.ocr_confidence' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'fields.*.verified_value' => ['required', 'string', 'max:2000'],

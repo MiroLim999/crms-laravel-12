@@ -44,6 +44,8 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSeeText('Short / Letter (8.5 × 11 in) · Portrait')
                 ->assertSee('"orientation":"portrait"', escape: false)
                 ->assertSee('id="ocrActionStatus"', escape: false)
+                ->assertSee('maxlength="500"', escape: false)
+                ->assertSee('maxFields: 450', escape: false)
                 ->assertSee('id="ocrProgressRing"', escape: false)
                 ->assertSee('id="ocrProgressValue"', escape: false)
                 ->assertSee('<kbd>Shift</kbd> + click', escape: false)
@@ -83,6 +85,18 @@ class DocumentUploadWorkflowTest extends TestCase
             ->assertSeeText('Custom size')
             ->assertSeeText('240.5 × 355.6 mm expected')
             ->assertSee('"aspectRatio":1.478', escape: false);
+    }
+
+    public function test_ocr_request_rejects_more_than_four_hundred_fifty_fields(): void
+    {
+        $field = ['name' => 'Registry field', 'image' => 'data:image/png;base64,AA=='];
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->postJson(route('documents.recognise'), [
+                'fields' => array_fill(0, 451, $field),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('fields');
     }
 
     public function test_only_explicitly_verified_fields_are_saved(): void

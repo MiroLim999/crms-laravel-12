@@ -14,7 +14,8 @@
         $builderConfig = [
             'initialFields' => $workingFields,
             'baselineFields' => $fields,
-            'maxFields' => 100,
+            'maxFields' => 450,
+            'maxFieldNameLength' => 500,
             'paperSizes' => collect($paperSizes)->map(fn ($size) => [
                 'value' => $size->value,
                 'label' => $size->label(),
@@ -329,7 +330,7 @@
                                 <label class="form-label small fw-medium" for="newFieldName">Add another field</label>
                                 <div class="input-group">
                                     <input type="text" id="newFieldName" class="form-control"
-                                           maxlength="120" placeholder="Field name">
+                                           maxlength="500" placeholder="Field name">
                                     <button class="btn btn-outline-primary" type="button" id="addFieldBtn">
                                         <i class="icon-base bx bx-plus me-1" aria-hidden="true"></i>Add
                                     </button>

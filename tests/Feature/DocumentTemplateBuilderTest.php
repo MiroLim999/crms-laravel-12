@@ -351,10 +351,10 @@ class DocumentTemplateBuilderTest extends TestCase
         ])->assertSessionHasErrors('fields.0.width');
     }
 
-    public function test_layouts_are_limited_to_one_hundred_fields(): void
+    public function test_layouts_are_limited_to_four_hundred_fifty_fields(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
-        $fields = collect(range(1, 101))
+        $fields = collect(range(1, 451))
             ->map(fn (int $number) => $this->field("Field {$number}"))
             ->all();
 

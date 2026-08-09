@@ -8,7 +8,8 @@ if (!(configNode instanceof HTMLScriptElement)) {
 }
 
 const config = JSON.parse(configNode.textContent || '{}');
-const maxFields = Number(config.maxFields) || 100;
+const maxFields = Number(config.maxFields) || 450;
+const maxFieldNameLength = Number(config.maxFieldNameLength) || 500;
 
 function element(id, Type = HTMLElement) {
     const node = document.getElementById(id);
@@ -261,7 +262,7 @@ function createFieldRow(index) {
 
     const input = document.createElement('input');
     input.type = 'text';
-    input.maxLength = 120;
+    input.maxLength = maxFieldNameLength;
     input.className = 'form-control form-control-sm template-builder-field-name';
     input.setAttribute('aria-label', `Field ${index + 1} name`);
     item.appendChild(input);
@@ -369,7 +370,6 @@ function centerFieldListRow(index) {
     if (!(row instanceof HTMLElement)) return;
 
     const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const behavior = smooth ? 'smooth' : 'auto';
     const listRect = list.getBoundingClientRect();
     const rowRect = row.getBoundingClientRect();
     const listTarget = list.scrollTop
@@ -379,24 +379,24 @@ function centerFieldListRow(index) {
         Math.max(0, list.scrollHeight - list.clientHeight),
         Math.max(0, listTarget),
     );
-    const listDelta = clampedListTarget - list.scrollTop;
-
-    list.scrollTo({ top: clampedListTarget, behavior });
+    // Apply the inner scroll immediately. Calculating the outer panel while a
+    // smooth inner scroll is still moving can leave distant rows off-screen.
+    list.scrollTop = clampedListTarget;
 
     const panel = list.closest('.template-builder-side-panel');
     if (!(panel instanceof HTMLElement) || panel.scrollHeight <= panel.clientHeight) return;
 
     const panelRect = panel.getBoundingClientRect();
-    const eventualRowTop = rowRect.top - listDelta;
+    const centeredRowRect = row.getBoundingClientRect();
     const panelTarget = panel.scrollTop
-        + eventualRowTop - panelRect.top
-        - (panel.clientHeight - rowRect.height) / 2;
+        + centeredRowRect.top - panelRect.top
+        - (panel.clientHeight - centeredRowRect.height) / 2;
     panel.scrollTo({
         top: Math.min(
             Math.max(0, panel.scrollHeight - panel.clientHeight),
             Math.max(0, panelTarget),
         ),
-        behavior,
+        behavior: smooth ? 'smooth' : 'auto',
     });
 }
 
@@ -513,12 +513,12 @@ function nextCopyName(name, takenNames) {
     const base = name.trim() || 'Field';
     let suffix = 1;
     let tail = ' copy';
-    let candidate = `${base.slice(0, 120 - tail.length)}${tail}`;
+    let candidate = `${base.slice(0, maxFieldNameLength - tail.length)}${tail}`;
 
     while (takenNames.has(candidate.toLocaleLowerCase())) {
         suffix += 1;
         tail = ` copy ${suffix}`;
-        candidate = `${base.slice(0, 120 - tail.length)}${tail}`;
+        candidate = `${base.slice(0, maxFieldNameLength - tail.length)}${tail}`;
     }
 
     takenNames.add(candidate.toLocaleLowerCase());
@@ -609,7 +609,7 @@ function validateFields() {
         const name = box.name.trim();
         const key = name.toLocaleLowerCase();
 
-        if (!name || name.length > 120) invalidFieldIndexes.add(index);
+        if (!name || name.length > maxFieldNameLength) invalidFieldIndexes.add(index);
         if (seen.has(key)) {
             invalidFieldIndexes.add(index);
             invalidFieldIndexes.add(seen.get(key));

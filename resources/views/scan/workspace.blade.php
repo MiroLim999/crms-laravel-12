@@ -173,7 +173,8 @@
 
                     <label class="form-label small fw-medium" for="newFieldName">Add another field</label>
                     <div class="input-group">
-                        <input type="text" id="newFieldName" class="form-control" placeholder="Field name">
+                        <input type="text" id="newFieldName" class="form-control" placeholder="Field name"
+                               maxlength="500">
                         <button class="btn btn-outline-primary" type="button" id="addFieldBtn">
                             <i class="icon-base bx bx-plus me-1"></i>Add
                         </button>
@@ -422,6 +423,8 @@
     const config = {
         boxes: @json($boxes),
         threshold: @json($threshold),
+        maxFields: 450,
+        maxFieldNameLength: 500,
         recogniseUrl: @json(route('documents.recognise')),
         csrf: @json(csrf_token()),
         paper: {!! Illuminate\Support\Js::encode([
@@ -470,6 +473,7 @@
     let activeValidationIndex = null;
     let syncingValidationSelection = false;
     let recordSubmitting = false;
+    let markerConstraintMessage = null;
 
     const markerOverlay = el('fieldOverlay');
     const marker = new FieldMarker({
@@ -557,12 +561,15 @@
     }
 
     function nextCopyName(name, takenNames) {
-        let candidate = `${name} copy`;
-        let suffix = 2;
+        const base = name.trim() || 'Field';
+        let suffix = 1;
+        let tail = ' copy';
+        let candidate = `${base.slice(0, config.maxFieldNameLength - tail.length)}${tail}`;
 
         while (takenNames.has(candidate.toLocaleLowerCase())) {
-            candidate = `${name} copy ${suffix}`;
             suffix += 1;
+            tail = ` copy ${suffix}`;
+            candidate = `${base.slice(0, config.maxFieldNameLength - tail.length)}${tail}`;
         }
 
         takenNames.add(candidate.toLocaleLowerCase());
@@ -573,6 +580,11 @@
         if (markerClipboard.length === 0) return;
 
         const existing = marker.toJSON();
+        if (existing.length + markerClipboard.length > config.maxFields) {
+            showOcrError(`You can use at most ${config.maxFields} fields. Delete some markers before pasting this selection.`);
+            return;
+        }
+
         const minX = Math.min(...markerClipboard.map((box) => box.x));
         const minY = Math.min(...markerClipboard.map((box) => box.y));
         const maxX = Math.max(...markerClipboard.map((box) => box.x + box.w));
@@ -738,8 +750,46 @@
 
         el('fieldCount').textContent = `${boxes.length} field${boxes.length === 1 ? '' : 's'}`;
         selectAllFieldsInput.disabled = boxes.length === 0;
-        el('scanNowBtn').disabled = boxes.length === 0;
+        const constraintMessage = markerSetValidationMessage(boxes);
+        el('scanNowBtn').disabled = boxes.length === 0 || constraintMessage !== null;
+        el('addFieldBtn').disabled = boxes.length >= config.maxFields;
+        el('newFieldName').disabled = boxes.length >= config.maxFields;
+        if (constraintMessage) {
+            markerConstraintMessage = constraintMessage;
+            showOcrError(constraintMessage);
+        } else if (markerConstraintMessage !== null
+            && el('ocrActionMessage').textContent === markerConstraintMessage) {
+            markerConstraintMessage = null;
+            clearOcrError();
+        }
         updateSelectionUI(marker.selectedIndexes());
+    }
+
+    function markerSetValidationMessage(boxes) {
+        if (boxes.length > config.maxFields) {
+            return `This document has ${boxes.length} fields. OCR supports at most ${config.maxFields}; delete extra markers or reset the layout.`;
+        }
+
+        const invalidNameIndex = boxes.findIndex((box) => (
+            typeof box.name !== 'string'
+            || box.name.trim() === ''
+            || box.name.length > config.maxFieldNameLength
+        ));
+        if (invalidNameIndex >= 0) {
+            return `Field ${invalidNameIndex + 1} has an invalid name. Field names must contain 1 to ${config.maxFieldNameLength} characters.`;
+        }
+
+        const names = new Set();
+        const duplicateNameIndex = boxes.findIndex((box) => {
+            const key = box.name.trim().toLocaleLowerCase();
+            if (names.has(key)) return true;
+            names.add(key);
+            return false;
+        });
+
+        return duplicateNameIndex >= 0
+            ? `Field ${duplicateNameIndex + 1} has a duplicate name. Give every field a unique name.`
+            : null;
     }
 
     function centerFieldListRow(index) {
@@ -748,7 +798,6 @@
         if (!(row instanceof HTMLElement)) return;
 
         const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        const behavior = smooth ? 'smooth' : 'auto';
         const listRect = list.getBoundingClientRect();
         const rowRect = row.getBoundingClientRect();
         const listTarget = list.scrollTop
@@ -758,24 +807,22 @@
             Math.max(0, list.scrollHeight - list.clientHeight),
             Math.max(0, listTarget),
         );
-        const listDelta = clampedListTarget - list.scrollTop;
-
-        list.scrollTo({ top: clampedListTarget, behavior });
+        list.scrollTop = clampedListTarget;
 
         const panel = list.closest('.document-side-panel');
         if (!(panel instanceof HTMLElement) || panel.scrollHeight <= panel.clientHeight) return;
 
         const panelRect = panel.getBoundingClientRect();
-        const eventualRowTop = rowRect.top - listDelta;
+        const centeredRowRect = row.getBoundingClientRect();
         const panelTarget = panel.scrollTop
-            + eventualRowTop - panelRect.top
-            - (panel.clientHeight - rowRect.height) / 2;
+            + centeredRowRect.top - panelRect.top
+            - (panel.clientHeight - centeredRowRect.height) / 2;
         panel.scrollTo({
             top: Math.min(
                 Math.max(0, panel.scrollHeight - panel.clientHeight),
                 Math.max(0, panelTarget),
             ),
-            behavior,
+            behavior: smooth ? 'smooth' : 'auto',
         });
     }
 
@@ -898,6 +945,21 @@
         const input = el('newFieldName');
         const name = input.value.trim();
         if (!name) return;
+
+        const boxes = marker.toJSON();
+        if (boxes.length >= config.maxFields) {
+            showOcrError(`You can use at most ${config.maxFields} fields. Delete a marker before adding another one.`);
+            return;
+        }
+        if (name.length > config.maxFieldNameLength) {
+            showOcrError(`Field names must not exceed ${config.maxFieldNameLength} characters.`);
+            return;
+        }
+        if (boxes.some((box) => box.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+            showOcrError('Field names must be unique. Choose a different name.');
+            return;
+        }
+
         marker.addBox(name);
         input.value = '';
         input.focus();
@@ -1001,6 +1063,12 @@
 
     el('scanNowBtn').addEventListener('click', async () => {
         if (scanInProgress) return;
+
+        const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
+        if (markerValidationMessage) {
+            showOcrError(markerValidationMessage);
+            return;
+        }
 
         const button = el('scanNowBtn');
         const originalButtonContent = button.innerHTML;
@@ -1158,7 +1226,7 @@
         });
     }
 
-    function handleValidationMarkerSelection(indexes) {
+    function handleValidationMarkerSelection(indexes, context = {}) {
         if (syncingValidationSelection) return;
         if (indexes.length === 0) {
             activeValidationIndex = null;
@@ -1168,21 +1236,28 @@
             });
             return;
         }
-        activateValidationField(indexes[0], 'marker');
+        const selectedIndex = Number.isInteger(context.activeIndex)
+            ? context.activeIndex
+            : indexes[indexes.length - 1];
+        activateValidationField(selectedIndex, 'marker');
     }
 
     function revealValidationRow(index) {
         const list = el('verifyRows');
         const row = list.querySelector(`[data-field-index="${index}"]`);
-        if (!row) return;
+        if (!(row instanceof HTMLElement)) return;
 
-        const rowTop = row.offsetTop;
-        const rowBottom = rowTop + row.offsetHeight;
-        if (rowTop < list.scrollTop) {
-            list.scrollTo({ top: rowTop - 8, behavior: 'smooth' });
-        } else if (rowBottom > list.scrollTop + list.clientHeight) {
-            list.scrollTo({ top: rowBottom - list.clientHeight + 8, behavior: 'smooth' });
-        }
+        const listRect = list.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        const target = list.scrollTop
+            + rowRect.top - listRect.top
+            - (list.clientHeight - rowRect.height) / 2;
+        const clampedTarget = Math.min(
+            Math.max(0, list.scrollHeight - list.clientHeight),
+            Math.max(0, target),
+        );
+        const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        list.scrollTo({ top: clampedTarget, behavior: smooth ? 'smooth' : 'auto' });
     }
 
     function revealValidationMarker(index) {
@@ -1387,7 +1462,7 @@
         if (!(event.target instanceof Element)) return;
         const box = event.target.closest('.field-box');
         if (!box) return;
-        validationMarker.selectBox(Number(box.dataset.index));
+        validationMarker.selectBox(Number(box.dataset.index), { source: 'marker' });
     });
 
     el('validationFieldOverlay').addEventListener('keydown', (event) => {
@@ -1395,7 +1470,7 @@
         const box = event.target.closest('.field-box');
         if (!box || !['Enter', ' '].includes(event.key)) return;
         event.preventDefault();
-        validationMarker.selectBox(Number(box.dataset.index));
+        validationMarker.selectBox(Number(box.dataset.index), { source: 'marker' });
     });
 
     function submissionErrorMessage(response, payload) {

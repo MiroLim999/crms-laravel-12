@@ -346,8 +346,8 @@ class DocumentTemplateController extends Controller
             'custom_width_mm' => ['nullable', 'required_if:paper_size,custom', 'numeric', 'min:50', 'max:2000'],
             'custom_height_mm' => ['nullable', 'required_if:paper_size,custom', 'numeric', 'min:50', 'max:2000'],
             'publish' => ['sometimes', 'boolean'],
-            'fields' => ['required', 'array', 'min:1', 'max:100'],
-            'fields.*.name' => ['required', 'string', 'max:120', 'distinct:ignore_case'],
+            'fields' => ['required', 'array', 'min:1', 'max:450'],
+            'fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
             // Fractions of the page. Bounds keep a box on the paper.
             'fields.*.x' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.y' => ['required', 'numeric', 'min:0', 'max:1'],
