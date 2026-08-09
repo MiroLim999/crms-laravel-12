@@ -423,6 +423,11 @@
 
     const config = {
         boxes: @json($boxes),
+        groupingMode: @json(
+            $template->grouping_mode instanceof \BackedEnum
+                ? $template->grouping_mode->value
+                : ($template->grouping_mode ?? 'auto')
+        ),
         threshold: @json($threshold),
         maxFields: 450,
         maxFieldNameLength: 500,
@@ -505,13 +510,33 @@
         onZoomChange: updateValidationZoomUI,
     });
 
-    const cloneBoxes = (boxes) => boxes.map(({ name, x, y, w, h }) => ({ name, x, y, w, h }));
+    const cloneBoxes = (boxes) => boxes.map(({
+        name, x, y, w, h, personGroup, personFieldOrder,
+    }) => ({
+        name,
+        x,
+        y,
+        w,
+        h,
+        ...(Number.isInteger(Number(personGroup)) && Number(personGroup) > 0
+            ? { personGroup: Number(personGroup) }
+            : {}),
+        ...(Number.isInteger(Number(personFieldOrder)) && Number(personFieldOrder) >= 0
+            ? { personFieldOrder: Number(personFieldOrder) }
+            : {}),
+    }));
     const templateBoxes = config.boxes.map((box) => ({
         name: box.name,
         x: +box.x,
         y: +box.y,
         w: +box.w,
         h: +box.h,
+        ...(Number.isInteger(Number(box.personGroup)) && Number(box.personGroup) > 0
+            ? { personGroup: Number(box.personGroup) }
+            : {}),
+        ...(Number.isInteger(Number(box.personFieldOrder)) && Number(box.personFieldOrder) >= 0
+            ? { personFieldOrder: Number(box.personFieldOrder) }
+            : {}),
     }));
 
     function fieldsMatchTemplate() {
@@ -598,12 +623,18 @@
         const dx = maxX + distance <= 1 ? distance : (minX - distance >= 0 ? -distance : 0);
         const dy = maxY + distance <= 1 ? distance : (minY - distance >= 0 ? -distance : 0);
         const takenNames = new Set(existing.map((box) => box.name.toLocaleLowerCase()));
-        const copies = markerClipboard.map((box) => ({
-            ...box,
-            name: nextCopyName(box.name, takenNames),
-            x: box.x + dx,
-            y: box.y + dy,
-        }));
+        const copies = markerClipboard.map((box) => {
+            // A pasted marker is a new, ad-hoc field. It must not silently join
+            // the original template person's validation group.
+            const { personGroup, personFieldOrder, ...ungroupedBox } = box;
+
+            return {
+                ...ungroupedBox,
+                name: nextCopyName(box.name, takenNames),
+                x: box.x + dx,
+                y: box.y + dy,
+            };
+        });
         const firstCopyIndex = existing.length;
 
         pasteSequence += 1;
@@ -1201,7 +1232,55 @@
             : sorted[middle];
     }
 
-    function buildValidationGroups() {
+    function buildCustomValidationGroups() {
+        const personGroups = new Map();
+        const detailIndexes = [];
+
+        cropped.forEach((box, index) => {
+            const personGroup = Number(box.personGroup);
+            const personFieldOrder = Number(box.personFieldOrder);
+            const grouped = Number.isInteger(personGroup) && personGroup > 0
+                && Number.isInteger(personFieldOrder) && personFieldOrder >= 0;
+
+            if (!grouped) {
+                detailIndexes.push(index);
+                return;
+            }
+
+            if (!personGroups.has(personGroup)) personGroups.set(personGroup, []);
+            personGroups.get(personGroup).push({ index, order: personFieldOrder });
+        });
+
+        const groups = [];
+        if (detailIndexes.length > 0) {
+            groups.push({
+                id: 'document-details',
+                kind: 'details',
+                mode: 'custom',
+                label: 'Document details',
+                indexes: detailIndexes,
+            });
+        }
+
+        [...personGroups.entries()]
+            .sort(([groupA], [groupB]) => groupA - groupB)
+            .forEach(([personGroup, members]) => {
+                members.sort((memberA, memberB) => (
+                    memberA.order - memberB.order || memberA.index - memberB.index
+                ));
+                groups.push({
+                    id: `person-${personGroup}`,
+                    kind: 'person',
+                    mode: 'custom',
+                    label: `Person ${String(personGroup).padStart(2, '0')}`,
+                    indexes: members.map((member) => member.index),
+                });
+            });
+
+        return groups;
+    }
+
+    function buildAutomaticValidationGroups() {
         const items = cropped.map((box, index) => ({
             index,
             x: Number(box.x ?? 0),
@@ -1246,6 +1325,7 @@
             return [{
                 id: 'record-details',
                 kind: 'details',
+                mode: 'auto',
                 label: 'Record details',
                 indexes: items.map((item) => item.index),
             }];
@@ -1269,6 +1349,7 @@
             return [{
                 id: 'record-details',
                 kind: 'details',
+                mode: 'auto',
                 label: 'Record details',
                 indexes: items.map((item) => item.index),
             }];
@@ -1320,6 +1401,7 @@
             return [{
                 id: 'record-details',
                 kind: 'details',
+                mode: 'auto',
                 label: 'Record details',
                 indexes: items.map((item) => item.index),
             }];
@@ -1342,6 +1424,7 @@
             return [{
                 id: 'record-details',
                 kind: 'details',
+                mode: 'auto',
                 label: 'Record details',
                 indexes: items.map((item) => item.index),
             }];
@@ -1357,6 +1440,7 @@
             groups.push({
                 id: 'document-details',
                 kind: 'details',
+                mode: 'auto',
                 label: 'Document details',
                 indexes: detailIndexes,
             });
@@ -1366,12 +1450,19 @@
             groups.push({
                 id: `person-${personIndex + 1}`,
                 kind: 'person',
+                mode: 'auto',
                 label: `Person ${String(personIndex + 1).padStart(2, '0')}`,
                 indexes: row.items.map((item) => item.index),
             });
         });
 
         return groups;
+    }
+
+    function buildValidationGroups() {
+        return config.groupingMode === 'custom'
+            ? buildCustomValidationGroups()
+            : buildAutomaticValidationGroups();
     }
 
     function validationGroupForField(index) {
@@ -1385,7 +1476,7 @@
     function groupIdentity(group) {
         if (group.kind !== 'person') return `${group.indexes.length} document field${group.indexes.length === 1 ? '' : 's'}`;
 
-        if (group.indexes.length === 11) {
+        if (group.mode === 'auto' && group.indexes.length === 11) {
             const childName = String(readings[group.indexes[2]]?.text ?? '').trim();
             if (childName) return childName;
         }
@@ -1417,7 +1508,8 @@
             'Remarks',
         ];
 
-        if (group.kind === 'person' && group.indexes.length === birthRegistryColumns.length) {
+        if (group.kind === 'person' && group.mode === 'auto'
+            && group.indexes.length === birthRegistryColumns.length) {
             return birthRegistryColumns[columnIndex];
         }
 

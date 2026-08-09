@@ -15,7 +15,7 @@ class DocumentTemplateField extends Model
 
     protected $fillable = [
         'document_template_id', 'name', 'x', 'y', 'width', 'height',
-        'sort_order', 'is_required',
+        'sort_order', 'is_required', 'person_group', 'person_field_order',
     ];
 
     protected function casts(): array
@@ -26,6 +26,8 @@ class DocumentTemplateField extends Model
             'width' => 'float',
             'height' => 'float',
             'is_required' => 'boolean',
+            'person_group' => 'integer',
+            'person_field_order' => 'integer',
         ];
     }
 
@@ -48,6 +50,8 @@ class DocumentTemplateField extends Model
             'w' => $this->width,
             'h' => $this->height,
             'required' => $this->is_required,
+            'personGroup' => $this->person_group,
+            'personFieldOrder' => $this->person_field_order,
         ];
     }
 }

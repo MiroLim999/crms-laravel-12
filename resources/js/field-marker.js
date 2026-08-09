@@ -24,6 +24,34 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 const HANDLE_SIZE = 10;
 const MIN_FRACTION = 0.01;
 
+/**
+ * Return the portable part of a marker box.
+ *
+ * Person metadata is optional because Staff may add ad-hoc fields while marking
+ * a document. Keeping it beside the coordinates lets a template's explicit
+ * validation groups survive moves, renames, undo, and cropping.
+ */
+function serialiseBox(box) {
+    const data = {
+        name: box.name,
+        x: box.x,
+        y: box.y,
+        w: box.w,
+        h: box.h,
+    };
+    const personGroup = Number(box.personGroup);
+    const personFieldOrder = Number(box.personFieldOrder);
+
+    if (Number.isInteger(personGroup) && personGroup > 0) {
+        data.personGroup = personGroup;
+    }
+    if (Number.isInteger(personFieldOrder) && personFieldOrder >= 0) {
+        data.personFieldOrder = personFieldOrder;
+    }
+
+    return data;
+}
+
 export class FieldMarker {
     /**
      * @param {object} options
@@ -52,7 +80,7 @@ export class FieldMarker {
         this.onSelectionChange = onSelectionChange;
         this.onZoomChange = onZoomChange;
 
-        /** @type {Array<{name: string, x: number, y: number, w: number, h: number, el: HTMLElement|null}>} */
+        /** @type {Array<{name: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number, el: HTMLElement|null}>} */
         this.boxes = [];
         this.selected = new Set();
         this.pdfDoc = null;
@@ -272,7 +300,7 @@ export class FieldMarker {
     // -------------------------------------------------------------------- boxes
 
     /**
-     * @param {Array<{name: string, x: number, y: number, w: number, h: number}>} boxes
+     * @param {Array<{name: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number}>} boxes
      */
     setBoxes(boxes) {
         // Remove marker elements without destroying overlay-owned tools such as
@@ -315,7 +343,7 @@ export class FieldMarker {
      * Fractional coordinates, ready to persist or submit.
      */
     toJSON() {
-        return this.boxes.map(({ name, x, y, w, h }) => ({ name, x, y, w, h }));
+        return this.boxes.map(serialiseBox);
     }
 
     selectedIndexes() {
@@ -584,16 +612,12 @@ export class FieldMarker {
      * Crops come from the full-resolution canvas, not the on-screen size, so the
      * model sees the sharpest available pixels.
      *
-     * @returns {Array<{name: string, image: string, x: number, y: number, w: number, h: number}>}
+     * @returns {Array<{name: string, image: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number}>}
      */
     crop() {
         return this.boxes.map((box) => ({
-            name: box.name,
+            ...serialiseBox(box),
             image: this._cropBox(box),
-            x: box.x,
-            y: box.y,
-            w: box.w,
-            h: box.h,
         }));
     }
 

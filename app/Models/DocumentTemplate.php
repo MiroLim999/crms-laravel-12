@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property PageOrientation $orientation
  * @property float|null $custom_width_mm
  * @property float|null $custom_height_mm
+ * @property string $grouping_mode
  * @property bool $is_active
  * @property int|null $document_type_id
  * @property string|null $sample_path
@@ -27,8 +28,13 @@ class DocumentTemplate extends Model
 {
     use HasFactory;
 
+    protected $attributes = [
+        'grouping_mode' => 'auto',
+    ];
+
     protected $fillable = [
         'name', 'doc_type', 'document_type_id', 'paper_size', 'orientation', 'custom_width_mm', 'custom_height_mm', 'description',
+        'grouping_mode',
         'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
         'is_active', 'created_by',
     ];
@@ -41,6 +47,7 @@ class DocumentTemplate extends Model
             'orientation' => PageOrientation::class,
             'custom_width_mm' => 'float',
             'custom_height_mm' => 'float',
+            'grouping_mode' => 'string',
             'is_active' => 'boolean',
             'sample_size' => 'integer',
         ];

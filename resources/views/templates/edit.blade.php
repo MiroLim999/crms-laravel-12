@@ -11,9 +11,12 @@
         $currentOrientation = old('orientation', $template?->orientation?->value ?? App\Enums\PageOrientation::Portrait->value);
         $currentCustomWidth = old('custom_width_mm', $template?->custom_width_mm ?? 210);
         $currentCustomHeight = old('custom_height_mm', $template?->custom_height_mm ?? 297);
+        $currentGroupingMode = old('grouping_mode', $template?->grouping_mode ?? 'auto');
         $builderConfig = [
             'initialFields' => $workingFields,
             'baselineFields' => $fields,
+            'initialGroupingMode' => $currentGroupingMode,
+            'baselineGroupingMode' => $template?->grouping_mode ?? 'auto',
             'maxFields' => 450,
             'maxFieldNameLength' => 500,
             'paperSizes' => collect($paperSizes)->map(fn ($size) => [
@@ -71,6 +74,7 @@
             <input type="hidden" name="doc_type" value="{{ $docType->value }}">
             <input type="hidden" name="document_type_id" value="{{ $docType->getKey() }}">
             <input type="hidden" name="publish" value="{{ $published ? 1 : 0 }}" id="publishIntent">
+            <input type="hidden" name="grouping_mode" value="{{ $currentGroupingMode }}" id="groupingMode">
             <div id="fieldInputs"></div>
 
             <div class="row g-3 template-builder-grid">
@@ -324,6 +328,36 @@
                                     </button>
                                 </div>
 
+                                <div class="template-person-builder" aria-labelledby="personGroupsHeading">
+                                    <div class="template-person-builder__heading">
+                                        <div>
+                                            <h3 class="h6 mb-1" id="personGroupsHeading">Person rows</h3>
+                                            <p class="mb-0">Select one person's fields. The selection count becomes that row's field count.</p>
+                                        </div>
+                                        <span class="badge bg-label-secondary" id="groupingModeBadge">Automatic</span>
+                                    </div>
+
+                                    <div class="template-person-builder__actions">
+                                        <button type="button" class="btn btn-sm btn-outline-primary"
+                                                id="groupSelectedBtn" disabled>
+                                            <i class="icon-base bx bx-group icon-sm me-1" aria-hidden="true"></i>
+                                            Group as person
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                id="ungroupSelectedBtn" disabled>
+                                            Ungroup selected
+                                        </button>
+                                    </div>
+
+                                    <div class="template-person-group-list" id="personGroupList"></div>
+
+                                    <button type="button" class="template-person-builder__automatic"
+                                            id="useAutomaticGroupsBtn" disabled>
+                                        <i class="icon-base bx bx-refresh icon-sm" aria-hidden="true"></i>
+                                        Use automatic row detection
+                                    </button>
+                                </div>
+
                                 <ul class="list-unstyled marker-field-list template-builder-field-list mb-3"
                                     id="fieldList"></ul>
 
@@ -414,7 +448,7 @@
                 </div>
                 <div class="modal-body">
                     <p class="mb-0 text-muted" id="resetFieldsModalDescription">
-                        Restore the markers, paper size, and orientation that were loaded when this editor opened. Added and copied fields will be removed.
+                        Restore the markers, person rows, paper size, and orientation that were loaded when this editor opened. Added and copied fields will be removed.
                     </p>
                 </div>
                 <div class="modal-footer">

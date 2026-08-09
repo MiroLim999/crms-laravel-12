@@ -9,8 +9,8 @@ use App\Models\DocumentTemplate;
 use App\Models\DocumentTypeDefinition;
 use App\Services\AuditLogger;
 use App\Services\TemplateSampleStorage;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -77,6 +77,7 @@ class DocumentTemplateController extends Controller
                 'custom_width_mm' => $validated['custom_width_mm'],
                 'custom_height_mm' => $validated['custom_height_mm'],
                 'description' => $validated['description'] ?? null,
+                'grouping_mode' => $validated['grouping_mode'],
                 'is_active' => false,
                 'created_by' => $request->user()->getKey(),
             ]);
@@ -97,6 +98,8 @@ class DocumentTemplateController extends Controller
                     'custom_width_mm' => $validated['custom_width_mm'],
                     'custom_height_mm' => $validated['custom_height_mm'],
                     'field_count' => count($validated['fields']),
+                    'grouping_mode' => $validated['grouping_mode'],
+                    'group_count' => $this->personGroupCount($validated['fields']),
                     'sample_document' => $template->sample_original_name],
                 description: "Created template '{$template->name}'.",
             );
@@ -131,6 +134,8 @@ class DocumentTemplateController extends Controller
                 'y' => $f->y,
                 'width' => $f->width,
                 'height' => $f->height,
+                'person_group' => $f->person_group,
+                'person_field_order' => $f->person_field_order,
             ])->all(),
             'paperSizes' => PaperSize::cases(),
             'orientations' => PageOrientation::cases(),
@@ -155,6 +160,7 @@ class DocumentTemplateController extends Controller
                 'custom_width_mm' => $validated['custom_width_mm'],
                 'custom_height_mm' => $validated['custom_height_mm'],
                 'description' => $validated['description'] ?? null,
+                'grouping_mode' => $validated['grouping_mode'],
             ]);
 
             $before = $template->fields()->count();
@@ -163,7 +169,8 @@ class DocumentTemplateController extends Controller
             $this->audit->saveAndLog(
                 'template.updated',
                 $template,
-                "Updated template '{$template->name}' ({$before} -> ".count($validated['fields']).' fields).',
+                "Updated template '{$template->name}' ({$before} -> ".count($validated['fields'])
+                    .' fields, '.$this->personGroupCount($validated['fields']).' person groups).',
             );
 
             if (($validated['sample_document'] ?? null) instanceof UploadedFile) {
@@ -313,6 +320,12 @@ class DocumentTemplateController extends Controller
     {
         $this->hydrateJsonFields($request);
 
+        if (! $request->has('grouping_mode')) {
+            $request->merge([
+                'grouping_mode' => $template?->grouping_mode ?: 'auto',
+            ]);
+        }
+
         $definition = $request->filled('document_type_id')
             ? DocumentTypeDefinition::find($request->integer('document_type_id'))
             : DocumentTypeDefinition::where('key', (string) $request->input('doc_type'))->first();
@@ -347,6 +360,7 @@ class DocumentTemplateController extends Controller
             'orientation' => ['required', Rule::enum(PageOrientation::class)],
             'custom_width_mm' => ['nullable', 'required_if:paper_size,custom', 'numeric', 'min:50', 'max:2000'],
             'custom_height_mm' => ['nullable', 'required_if:paper_size,custom', 'numeric', 'min:50', 'max:2000'],
+            'grouping_mode' => ['required', Rule::in(['auto', 'custom'])],
             'publish' => ['sometimes', 'boolean'],
             'fields' => ['required', 'array', 'min:1', 'max:450'],
             'fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
@@ -355,6 +369,20 @@ class DocumentTemplateController extends Controller
             'fields.*.y' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.width' => ['required', 'numeric', 'min:0.01', 'max:1'],
             'fields.*.height' => ['required', 'numeric', 'min:0.01', 'max:1'],
+            'fields.*.person_group' => [
+                Rule::excludeIf(fn () => $request->input('grouping_mode') !== 'custom'),
+                'nullable',
+                'integer',
+                'min:1',
+                'max:65535',
+            ],
+            'fields.*.person_field_order' => [
+                Rule::excludeIf(fn () => $request->input('grouping_mode') !== 'custom'),
+                'nullable',
+                'integer',
+                'min:0',
+                'max:65535',
+            ],
         ]);
 
         $validated['custom_width_mm'] ??= null;
@@ -365,20 +393,36 @@ class DocumentTemplateController extends Controller
             $validated['custom_height_mm'] = null;
         }
 
-        $coordinateErrors = [];
+        $fieldErrors = [];
         foreach ($validated['fields'] as $index => $field) {
             if ((float) $field['x'] + (float) $field['width'] > 1.00001) {
-                $coordinateErrors["fields.{$index}.width"] = 'This field marker extends beyond the document width.';
+                $fieldErrors["fields.{$index}.width"] = 'This field marker extends beyond the document width.';
             }
 
             if ((float) $field['y'] + (float) $field['height'] > 1.00001) {
-                $coordinateErrors["fields.{$index}.height"] = 'This field marker extends beyond the document height.';
+                $fieldErrors["fields.{$index}.height"] = 'This field marker extends beyond the document height.';
+            }
+
+            if ($validated['grouping_mode'] === 'custom') {
+                $hasGroup = isset($field['person_group']);
+                $hasOrder = isset($field['person_field_order']);
+
+                if ($hasGroup && ! $hasOrder) {
+                    $fieldErrors["fields.{$index}.person_field_order"] = 'Choose this field\'s order within its person group.';
+                } elseif ($hasOrder && ! $hasGroup) {
+                    $fieldErrors["fields.{$index}.person_group"] = 'Choose a person group for this ordered field.';
+                }
             }
         }
 
-        if ($coordinateErrors !== []) {
-            throw ValidationException::withMessages($coordinateErrors);
+        if ($fieldErrors !== []) {
+            throw ValidationException::withMessages($fieldErrors);
         }
+
+        $validated['fields'] = $this->canonicalizePersonGrouping(
+            $validated['fields'],
+            $validated['grouping_mode'],
+        );
 
         return $validated;
     }
@@ -462,7 +506,75 @@ class DocumentTemplateController extends Controller
                 'height' => $field['height'],
                 'sort_order' => $index,
                 'is_required' => true,
+                'person_group' => $field['person_group'],
+                'person_field_order' => $field['person_field_order'],
             ]);
         }
+    }
+
+    /**
+     * Group numbers and field positions are presentation order, not permanent
+     * identifiers. Closing gaps here keeps every saved layout deterministic even
+     * after a person or one of their fields is removed in the builder.
+     *
+     * @param  list<array<string, mixed>>  $fields
+     * @return list<array<string, mixed>>
+     */
+    private function canonicalizePersonGrouping(array $fields, string $mode): array
+    {
+        $fields = array_values($fields);
+
+        foreach ($fields as &$field) {
+            $field['person_group'] = $mode === 'custom'
+                ? ($field['person_group'] ?? null)
+                : null;
+            $field['person_field_order'] = $mode === 'custom'
+                ? ($field['person_field_order'] ?? null)
+                : null;
+        }
+        unset($field);
+
+        if ($mode !== 'custom') {
+            return $fields;
+        }
+
+        $membersByGroup = [];
+        foreach ($fields as $index => $field) {
+            if ($field['person_group'] === null) {
+                continue;
+            }
+
+            $group = (int) $field['person_group'];
+            $membersByGroup[$group][] = [
+                'field_index' => $index,
+                'requested_order' => (int) $field['person_field_order'],
+            ];
+        }
+
+        ksort($membersByGroup, SORT_NUMERIC);
+
+        $canonicalGroup = 1;
+        foreach ($membersByGroup as $members) {
+            usort($members, fn (array $left, array $right): int => $left['requested_order'] <=> $right['requested_order']
+                    ?: $left['field_index'] <=> $right['field_index']);
+
+            foreach ($members as $canonicalOrder => $member) {
+                $fields[$member['field_index']]['person_group'] = $canonicalGroup;
+                $fields[$member['field_index']]['person_field_order'] = $canonicalOrder;
+            }
+
+            $canonicalGroup++;
+        }
+
+        return $fields;
+    }
+
+    /** @param list<array<string, mixed>> $fields */
+    private function personGroupCount(array $fields): int
+    {
+        return count(array_unique(array_filter(
+            array_column($fields, 'person_group'),
+            fn ($group): bool => $group !== null,
+        )));
     }
 }

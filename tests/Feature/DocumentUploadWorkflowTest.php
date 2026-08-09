@@ -94,6 +94,45 @@ class DocumentUploadWorkflowTest extends TestCase
             ->assertSee('"aspectRatio":1.478', escape: false);
     }
 
+    public function test_staff_workspace_emits_custom_grouping_and_person_box_metadata(): void
+    {
+        $this->seed(DocumentTemplateSeeder::class);
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+        $template->update(['grouping_mode' => 'custom']);
+        $template->fields()->delete();
+
+        foreach ([
+            ['Person 1 Name', 0.10, 1, 0],
+            ['Person 1 Birth Date', 0.30, 1, 1],
+            ['Person 2 Name', 0.50, 2, 0],
+            ['Registry Book Number', 0.70, null, null],
+        ] as $index => [$name, $y, $personGroup, $personFieldOrder]) {
+            $template->fields()->create([
+                'name' => $name,
+                'x' => 0.1,
+                'y' => $y,
+                'width' => 0.3,
+                'height' => 0.05,
+                'sort_order' => $index,
+                'is_required' => true,
+                'person_group' => $personGroup,
+                'person_field_order' => $personFieldOrder,
+            ]);
+        }
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
+            ->assertOk()
+            ->assertSee('groupingMode: "custom"', escape: false)
+            ->assertSee('"name":"Person 1 Name"', escape: false)
+            ->assertSee('"personGroup":1', escape: false)
+            ->assertSee('"personFieldOrder":0', escape: false)
+            ->assertSee('"personGroup":2', escape: false)
+            ->assertSee('"name":"Registry Book Number"', escape: false)
+            ->assertSee('"personGroup":null', escape: false)
+            ->assertSee('"personFieldOrder":null', escape: false);
+    }
+
     public function test_ocr_request_rejects_more_than_four_hundred_fifty_fields(): void
     {
         $field = ['name' => 'Registry field', 'image' => 'data:image/png;base64,AA=='];

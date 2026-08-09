@@ -53,6 +53,15 @@ class DocumentTemplateBuilderTest extends TestCase
             ->assertSee('id="samplePageSize"', escape: false)
             ->assertSee('id="samplePhysicalSize"', escape: false)
             ->assertSee('id="useSampleSizeBtn"', escape: false)
+            ->assertSee('id="groupingMode"', escape: false)
+            ->assertSee('name="grouping_mode"', escape: false)
+            ->assertSee('id="groupSelectedBtn"', escape: false)
+            ->assertSee('id="ungroupSelectedBtn"', escape: false)
+            ->assertSee('id="useAutomaticGroupsBtn"', escape: false)
+            ->assertSee('id="personGroupList"', escape: false)
+            ->assertSee('id="groupingModeBadge"', escape: false)
+            ->assertSee('"initialGroupingMode":"auto"', escape: false)
+            ->assertSee('"baselineGroupingMode":"auto"', escape: false)
             ->assertSeeText('Save & publish for Staff');
     }
 
@@ -73,9 +82,194 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertFalse($template->is_active);
         $this->assertSame(PaperSize::LongBond, $template->paper_size);
         $this->assertSame(PageOrientation::Landscape, $template->orientation);
+        $this->assertSame('auto', $template->grouping_mode);
         $this->assertDatabaseHas('document_template_fields', [
             'document_template_id' => $template->getKey(),
             'name' => 'Child Full Name',
+            'person_group' => null,
+            'person_field_order' => null,
+        ]);
+    }
+
+    public function test_custom_person_groups_with_different_field_counts_are_saved_and_reopened(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $fields = [
+            $this->personField('Person 1 Name', 1, 0),
+            $this->personField('Person 1 Birth Date', 1, 1),
+            $this->personField('Person 1 Remarks', 1, 2),
+            $this->personField('Person 2 Name', 2, 0),
+            $this->personField('Person 2 Birth Date', 2, 1),
+            $this->field('Registry Book Number'),
+        ];
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'Custom person rows',
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'grouping_mode' => 'custom',
+            'fields_json' => json_encode($fields, JSON_THROW_ON_ERROR),
+        ])->assertRedirect();
+
+        $template = DocumentTemplate::where('name', 'Custom person rows')->firstOrFail();
+
+        $this->assertDatabaseHas('document_templates', [
+            'id' => $template->getKey(),
+            'grouping_mode' => 'custom',
+        ]);
+        $this->assertDatabaseHas('document_template_fields', [
+            'document_template_id' => $template->getKey(),
+            'name' => 'Person 1 Remarks',
+            'person_group' => 1,
+            'person_field_order' => 2,
+        ]);
+        $this->assertDatabaseHas('document_template_fields', [
+            'document_template_id' => $template->getKey(),
+            'name' => 'Person 2 Birth Date',
+            'person_group' => 2,
+            'person_field_order' => 1,
+        ]);
+        $this->assertDatabaseHas('document_template_fields', [
+            'document_template_id' => $template->getKey(),
+            'name' => 'Registry Book Number',
+            'person_group' => null,
+            'person_field_order' => null,
+        ]);
+
+        $this->actingAs($superAdmin)
+            ->get(route('templates.edit', $template))
+            ->assertOk()
+            ->assertSee('id="groupingMode"', escape: false)
+            ->assertSee('name="grouping_mode" value="custom"', escape: false)
+            ->assertSee('"initialGroupingMode":"custom"', escape: false)
+            ->assertSee('"baselineGroupingMode":"custom"', escape: false)
+            ->assertSee('"person_group":1', escape: false)
+            ->assertSee('"person_field_order":2', escape: false)
+            ->assertSee('"person_group":2', escape: false)
+            ->assertSee('"person_field_order":1', escape: false);
+    }
+
+    public function test_updating_a_custom_layout_persists_ungrouping_and_field_removal(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'Editable person rows',
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'grouping_mode' => 'custom',
+            'fields' => [
+                $this->personField('Person 1 Name', 1, 0),
+                $this->personField('Person 1 Birth Date', 1, 1),
+                $this->personField('Person 2 Name', 2, 0),
+                $this->personField('Person 2 Birth Date', 2, 1),
+            ],
+        ])->assertRedirect();
+
+        $template = DocumentTemplate::where('name', 'Editable person rows')->firstOrFail();
+
+        $this->actingAs($superAdmin)->put(route('templates.update', $template), [
+            'name' => 'Editable person rows',
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'grouping_mode' => 'custom',
+            'fields' => [
+                // The old second person becomes the first saved group after the
+                // first person is removed.
+                $this->personField('Person 2 Name', 2, 0),
+                [
+                    ...$this->field('Person 2 Birth Date'),
+                    'person_group' => null,
+                    'person_field_order' => null,
+                ],
+            ],
+        ])->assertRedirect();
+
+        $this->assertSame(2, $template->fields()->count());
+        $this->assertDatabaseHas('document_template_fields', [
+            'document_template_id' => $template->getKey(),
+            'name' => 'Person 2 Name',
+            'person_group' => 1,
+            'person_field_order' => 0,
+        ]);
+        $this->assertDatabaseHas('document_template_fields', [
+            'document_template_id' => $template->getKey(),
+            'name' => 'Person 2 Birth Date',
+            'person_group' => null,
+            'person_field_order' => null,
+        ]);
+        $this->assertDatabaseMissing('document_template_fields', [
+            'document_template_id' => $template->getKey(),
+            'name' => 'Person 1 Name',
+        ]);
+
+        $this->actingAs($superAdmin)
+            ->get(route('templates.edit', $template))
+            ->assertOk()
+            ->assertSee('"name":"Person 2 Birth Date","x":', escape: false)
+            ->assertSee('"person_group":null', escape: false)
+            ->assertSee('"person_field_order":null', escape: false)
+            ->assertDontSee('Person 1 Name');
+    }
+
+    public function test_malformed_custom_person_group_metadata_is_rejected(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $base = [
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'grouping_mode' => 'custom',
+        ];
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            ...$base,
+            'name' => 'Invalid grouping mode',
+            'grouping_mode' => 'manual-ish',
+            'fields' => [$this->field('Person Name')],
+        ])->assertSessionHasErrors('grouping_mode');
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            ...$base,
+            'name' => 'Invalid person group zero',
+            'fields' => [[
+                ...$this->field('Person Name'),
+                'person_group' => 0,
+                'person_field_order' => 0,
+            ]],
+        ])->assertSessionHasErrors('fields.0.person_group');
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            ...$base,
+            'name' => 'Invalid person field order',
+            'fields' => [[
+                ...$this->field('Person Name'),
+                'person_group' => 1,
+                'person_field_order' => -1,
+            ]],
+        ])->assertSessionHasErrors('fields.0.person_field_order');
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            ...$base,
+            'name' => 'Unpaired person group',
+            'fields' => [[
+                ...$this->field('Person Name'),
+                'person_group' => 1,
+                'person_field_order' => null,
+            ]],
+        ])->assertSessionHasErrors('fields.0.person_field_order');
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            ...$base,
+            'name' => 'Unpaired person field order',
+            'fields' => [[
+                ...$this->field('Person Name'),
+                'person_group' => null,
+                'person_field_order' => 0,
+            ]],
+        ])->assertSessionHasErrors('fields.0.person_group');
+
+        $this->assertDatabaseMissing('document_templates', [
+            'grouping_mode' => 'custom',
         ]);
     }
 
@@ -707,6 +901,16 @@ class DocumentTemplateBuilderTest extends TestCase
             'y' => 0.2,
             'width' => 0.3,
             'height' => 0.1,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function personField(string $name, int $group, int $order): array
+    {
+        return [
+            ...$this->field($name),
+            'person_group' => $group,
+            'person_field_order' => $order,
         ];
     }
 }

@@ -30,6 +30,7 @@ const fileLabel = element('sampleScanLabel');
 const selectAllInput = element('selectAllFields', HTMLInputElement);
 const newFieldInput = element('newFieldName', HTMLInputElement);
 const publishIntent = element('publishIntent', HTMLInputElement);
+const groupingModeInput = element('groupingMode', HTMLInputElement);
 const paperSizeSelect = element('paper_size', HTMLSelectElement);
 const customPaperFields = element('customPaperSizeFields');
 const customWidthInput = element('custom_width_mm', HTMLInputElement);
@@ -41,13 +42,27 @@ const baselinePaperSize = String(config.baselinePaperSize ?? 'letter');
 const baselineOrientation = String(config.baselineOrientation ?? 'portrait');
 const baselineCustomWidth = finiteNumber(config.baselineCustomWidth, 210);
 const baselineCustomHeight = finiteNumber(config.baselineCustomHeight, 297);
+const baselineGroupingMode = config.baselineGroupingMode === 'custom' ? 'custom' : 'auto';
+const initialGroupingMode = config.initialGroupingMode === 'custom' ? 'custom' : 'auto';
 
-const cloneBoxes = (boxes) => boxes.map(({ name, x, y, w, h }) => ({ name, x, y, w, h }));
+const cloneBoxes = (boxes) => boxes.map(({
+    name, x, y, w, h, personGroup = null, personFieldOrder = null,
+}) => ({ name, x, y, w, h, personGroup, personFieldOrder }));
 const snapshot = (boxes) => JSON.stringify(cloneBoxes(boxes));
 
 function finiteNumber(value, fallback) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
+}
+
+function positiveInteger(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function nonNegativeInteger(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
 function normaliseBoxes(fields) {
@@ -65,15 +80,21 @@ function normaliseBoxes(fields) {
             y,
             w: width,
             h: height,
+            personGroup: positiveInteger(field.personGroup ?? field.person_group),
+            personFieldOrder: nonNegativeInteger(
+                field.personFieldOrder ?? field.person_field_order,
+            ),
         };
     });
 }
 
 const baselineBoxes = normaliseBoxes(config.baselineFields);
 const initialBoxes = normaliseBoxes(config.initialFields);
+groupingModeInput.value = initialGroupingMode;
 
 let fieldHistory = [];
 let currentSnapshot = null;
+let currentGroupingModeSnapshot = null;
 let restoringHistory = false;
 let clipboard = [];
 let pasteSequence = 0;
@@ -227,6 +248,7 @@ function layoutMatchesBaseline() {
             && finiteNumber(customHeightInput.value, 297) === baselineCustomHeight);
 
     return snapshot(marker.toJSON()) === snapshot(baselineBoxes)
+        && groupingModeInput.value === baselineGroupingMode
         && paperSizeSelect.value === baselinePaperSize
         && selectedOrientation() === baselineOrientation
         && customDimensionsMatch;
@@ -240,15 +262,140 @@ function updateResetUI() {
 function handleMarkerChange(boxes) {
     const next = cloneBoxes(boxes);
     const nextSnapshot = snapshot(next);
+    const nextGroupingMode = groupingModeInput.value === 'custom' ? 'custom' : 'auto';
 
-    if (!restoringHistory && currentSnapshot !== null && nextSnapshot !== snapshot(currentSnapshot)) {
-        fieldHistory.push(cloneBoxes(currentSnapshot));
+    if (!restoringHistory && currentSnapshot !== null
+        && (nextSnapshot !== snapshot(currentSnapshot)
+            || nextGroupingMode !== currentGroupingModeSnapshot)) {
+        fieldHistory.push({
+            boxes: cloneBoxes(currentSnapshot),
+            groupingMode: currentGroupingModeSnapshot,
+        });
         if (fieldHistory.length > 100) fieldHistory.shift();
     }
 
     currentSnapshot = next;
+    currentGroupingModeSnapshot = nextGroupingMode;
     renderFieldList(boxes);
     updateResetUI();
+}
+
+function personGroups(boxes) {
+    const groups = new Map();
+
+    boxes.forEach((box, index) => {
+        const key = positiveInteger(box.personGroup);
+        if (key === null) return;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(index);
+    });
+
+    return [...groups.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([key, indexes], displayIndex) => ({
+            key,
+            displayNumber: displayIndex + 1,
+            indexes: indexes.sort((left, right) => {
+                const leftOrder = nonNegativeInteger(boxes[left].personFieldOrder);
+                const rightOrder = nonNegativeInteger(boxes[right].personFieldOrder);
+                return (leftOrder ?? left) - (rightOrder ?? right) || left - right;
+            }),
+        }));
+}
+
+function displayPersonGroup(boxes, key) {
+    const group = personGroups(boxes).find((candidate) => candidate.key === positiveInteger(key));
+    return group?.displayNumber ?? null;
+}
+
+function selectPersonGroup(indexes) {
+    marker.selectIndexes(indexes, { source: 'group' });
+}
+
+function removePersonGroup(key) {
+    const boxes = marker.toJSON().map((box) => (
+        positiveInteger(box.personGroup) === key
+            ? { ...box, personGroup: null, personFieldOrder: null }
+            : box
+    ));
+
+    groupingModeInput.value = 'custom';
+    marker.setBoxes(boxes);
+    clearBuilderError();
+}
+
+function renderPersonGroups(boxes) {
+    const custom = groupingModeInput.value === 'custom';
+    const groups = personGroups(boxes);
+    const list = element('personGroupList');
+    const modeBadge = element('groupingModeBadge');
+    const automaticButton = element('useAutomaticGroupsBtn', HTMLButtonElement);
+
+    modeBadge.textContent = custom ? 'Custom' : 'Automatic';
+    modeBadge.classList.toggle('bg-label-primary', custom);
+    modeBadge.classList.toggle('bg-label-secondary', !custom);
+    automaticButton.disabled = !custom;
+    list.replaceChildren();
+
+    if (!custom) {
+        const note = document.createElement('p');
+        note.className = 'template-person-group-list__empty';
+        note.textContent = 'Staff validation will detect repeated rows from the marker positions.';
+        list.appendChild(note);
+        return;
+    }
+
+    if (groups.length === 0) {
+        const note = document.createElement('p');
+        note.className = 'template-person-group-list__empty';
+        note.textContent = 'No person rows. All fields will appear under document details.';
+        list.appendChild(note);
+        return;
+    }
+
+    groups.forEach((group) => {
+        const row = document.createElement('div');
+        row.className = 'template-person-group';
+
+        const selectButton = document.createElement('button');
+        selectButton.type = 'button';
+        selectButton.className = 'template-person-group__select';
+        selectButton.setAttribute(
+            'aria-label',
+            `Select Person ${String(group.displayNumber).padStart(2, '0')}`,
+        );
+
+        const icon = document.createElement('span');
+        icon.className = 'template-person-group__number';
+        icon.textContent = String(group.displayNumber).padStart(2, '0');
+
+        const copy = document.createElement('span');
+        copy.className = 'template-person-group__copy';
+        const label = document.createElement('strong');
+        label.textContent = `Person ${String(group.displayNumber).padStart(2, '0')}`;
+        const count = document.createElement('small');
+        count.textContent = `${group.indexes.length} field${group.indexes.length === 1 ? '' : 's'} in this row`;
+        copy.append(label, count);
+        selectButton.append(icon, copy);
+        selectButton.addEventListener('click', () => selectPersonGroup(group.indexes));
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'template-person-group__remove';
+        removeButton.setAttribute(
+            'aria-label',
+            `Remove Person ${String(group.displayNumber).padStart(2, '0')} group`,
+        );
+        removeButton.title = 'Remove group and keep its fields';
+        const removeIcon = document.createElement('i');
+        removeIcon.className = 'icon-base bx bx-x icon-sm';
+        removeIcon.setAttribute('aria-hidden', 'true');
+        removeButton.appendChild(removeIcon);
+        removeButton.addEventListener('click', () => removePersonGroup(group.key));
+
+        row.append(selectButton, removeButton);
+        list.appendChild(row);
+    });
 }
 
 function createFieldRow(index) {
@@ -266,6 +413,10 @@ function createFieldRow(index) {
     input.className = 'form-control form-control-sm template-builder-field-name';
     input.setAttribute('aria-label', `Field ${index + 1} name`);
     item.appendChild(input);
+
+    const groupBadge = document.createElement('span');
+    groupBadge.className = 'template-builder-field-group d-none';
+    item.appendChild(groupBadge);
 
     const removeButton = document.createElement('button');
     removeButton.type = 'button';
@@ -348,6 +499,7 @@ function renderFieldList(boxes) {
 
         const number = item.querySelector('.template-builder-field-number');
         const input = item.querySelector('.template-builder-field-name');
+        const groupBadge = item.querySelector('.template-builder-field-group');
         const removeButton = item.querySelector('button');
 
         if (number) number.textContent = String(index + 1);
@@ -356,11 +508,18 @@ function renderFieldList(boxes) {
             input.classList.toggle('is-invalid', invalidFieldIndexes.has(index));
             input.setAttribute('aria-label', `Field ${index + 1} name`);
         }
+        if (groupBadge instanceof HTMLElement) {
+            const group = displayPersonGroup(boxes, box.personGroup);
+            groupBadge.classList.toggle('d-none', group === null);
+            groupBadge.textContent = group === null ? '' : `P${String(group).padStart(2, '0')}`;
+            groupBadge.title = group === null ? '' : `Person ${String(group).padStart(2, '0')}`;
+        }
         removeButton?.setAttribute('aria-label', `Remove field ${index + 1}`);
     });
 
     element('fieldCount').textContent = `${boxes.length} field${boxes.length === 1 ? '' : 's'}`;
     selectAllInput.disabled = boxes.length === 0;
+    renderPersonGroups(boxes);
     updateSelectionUI(marker.selectedIndexes());
 }
 
@@ -418,10 +577,69 @@ function updateSelectionUI(indexes, context = {}) {
     selectAllInput.indeterminate = count > 0 && count < total;
     element('deleteSelectedBtn', HTMLButtonElement).disabled = count === 0;
     element('deleteFieldsBtn', HTMLButtonElement).disabled = count === 0;
+    element('groupSelectedBtn', HTMLButtonElement).disabled = count === 0;
+    element('ungroupSelectedBtn', HTMLButtonElement).disabled = !indexes.some((index) => (
+        positiveInteger(marker.toJSON()[index]?.personGroup) !== null
+    ));
 
     if (context.source === 'marker' && Number.isInteger(context.activeIndex)) {
         centerFieldListRow(context.activeIndex);
     }
+}
+
+function groupSelectedAsPerson() {
+    const selected = marker.selectedIndexes();
+    if (selected.length === 0) return;
+
+    const boxes = marker.toJSON();
+    const nextGroup = Math.max(0, ...boxes.map((box) => positiveInteger(box.personGroup) ?? 0)) + 1;
+    const ordered = [...selected].sort((left, right) => (
+        boxes[left].x - boxes[right].x
+        || boxes[left].y - boxes[right].y
+        || left - right
+    ));
+
+    ordered.forEach((index, order) => {
+        boxes[index] = {
+            ...boxes[index],
+            personGroup: nextGroup,
+            personFieldOrder: order,
+        };
+    });
+
+    groupingModeInput.value = 'custom';
+    marker.setBoxes(boxes);
+    marker.selectIndexes(selected, { source: 'group' });
+    clearBuilderError();
+}
+
+function ungroupSelectedFields() {
+    const selected = marker.selectedIndexes();
+    if (selected.length === 0) return;
+
+    const selectedSet = new Set(selected);
+    const boxes = marker.toJSON().map((box, index) => (
+        selectedSet.has(index)
+            ? { ...box, personGroup: null, personFieldOrder: null }
+            : box
+    ));
+
+    groupingModeInput.value = 'custom';
+    marker.setBoxes(boxes);
+    marker.selectIndexes(selected, { source: 'group' });
+    clearBuilderError();
+}
+
+function useAutomaticPersonDetection() {
+    const boxes = marker.toJSON().map((box) => ({
+        ...box,
+        personGroup: null,
+        personFieldOrder: null,
+    }));
+
+    groupingModeInput.value = 'auto';
+    marker.setBoxes(boxes);
+    clearBuilderError();
 }
 
 function updateZoomUI(zoom) {
@@ -493,7 +711,8 @@ function undoFieldChange() {
     if (!previous) return;
 
     restoringHistory = true;
-    marker.setBoxes(cloneBoxes(previous));
+    groupingModeInput.value = previous.groupingMode;
+    marker.setBoxes(cloneBoxes(previous.boxes));
     restoringHistory = false;
     clearBuilderError();
 }
@@ -547,6 +766,8 @@ function pasteCopiedFields() {
         name: nextCopyName(box.name, takenNames),
         x: box.x + dx,
         y: box.y + dy,
+        personGroup: null,
+        personFieldOrder: null,
     }));
     const firstCopyIndex = existing.length;
 
@@ -646,6 +867,12 @@ function serialiseFields() {
             y: box.y.toFixed(5),
             width: box.w.toFixed(5),
             height: box.h.toFixed(5),
+            person_group: groupingModeInput.value === 'custom'
+                ? positiveInteger(box.personGroup)
+                : null,
+            person_field_order: groupingModeInput.value === 'custom'
+                ? nonNegativeInteger(box.personFieldOrder)
+                : null,
     }));
 
     // One JSON input avoids PHP's max_input_vars truncating large layouts.
@@ -742,6 +969,9 @@ element('zoomResetBtn', HTMLButtonElement).addEventListener('click', () => marke
 
 element('deleteSelectedBtn', HTMLButtonElement).addEventListener('click', () => marker.removeSelected());
 element('deleteFieldsBtn', HTMLButtonElement).addEventListener('click', () => marker.removeSelected());
+element('groupSelectedBtn', HTMLButtonElement).addEventListener('click', groupSelectedAsPerson);
+element('ungroupSelectedBtn', HTMLButtonElement).addEventListener('click', ungroupSelectedFields);
+element('useAutomaticGroupsBtn', HTMLButtonElement).addEventListener('click', useAutomaticPersonDetection);
 
 selectAllInput.addEventListener('change', () => {
     if (selectAllInput.checked) marker.selectAll();
@@ -792,6 +1022,7 @@ form.querySelectorAll('input[name="orientation"]').forEach((input) => {
 
 function restoreBaseline() {
     invalidFieldIndexes.clear();
+    groupingModeInput.value = baselineGroupingMode;
     paperSizeSelect.value = baselinePaperSize;
     customWidthInput.value = String(baselineCustomWidth);
     customHeightInput.value = String(baselineCustomHeight);
