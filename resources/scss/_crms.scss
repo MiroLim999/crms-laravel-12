@@ -1574,12 +1574,13 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .validation-field-overlay {
   .field-box {
     cursor: pointer;
+    border-width: 1px;
     border-color: rgba(105, 108, 255, .78);
     background: rgba(105, 108, 255, .09);
     transition: border-color .12s ease, background-color .12s ease, box-shadow .12s ease;
 
-    // Keep the source document uncluttered. Selection is communicated by the
-    // green marker itself; the field name is only revealed on direct intent.
+    // Keep the source document uncluttered. The field name is only revealed
+    // on direct intent.
     .field-box-label {
       visibility: hidden;
       opacity: 0;
@@ -1597,8 +1598,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
     &:focus-visible {
       z-index: 4;
-      outline: 3px solid rgba(40, 199, 111, .28);
-      outline-offset: 2px;
+      outline: 1px solid rgba(40, 199, 111, .55);
+      outline-offset: 1px;
     }
 
     &.is-verified:not(.is-selected) {
@@ -1615,7 +1616,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
       border-color: var(--bs-warning);
       border-style: solid;
       background: rgba(255, 171, 0, .18);
-      box-shadow: 0 0 0 3px rgba(255, 171, 0, .24);
+      box-shadow: none;
 
       .field-box-label {
         color: var(--bs-heading-color);
@@ -1623,15 +1624,13 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
       }
     }
 
-    // Orange identifies the selected person. Green identifies the exact field
-    // clicked within that row.
+    // Use fill intensity—not border thickness—to distinguish the exact field,
+    // so handwriting close to the marker edge remains unobstructed.
     &.is-selected.is-current {
       z-index: 7;
       border-color: var(--bs-success);
       background: rgba(40, 199, 111, .24);
-      box-shadow:
-        0 0 0 2px #fff,
-        0 0 0 5px rgba(40, 199, 111, .72);
+      box-shadow: none;
 
       .field-box-label {
         color: #fff;
@@ -1971,7 +1970,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   &.is-active {
     background: rgba(40, 199, 111, .07);
-    box-shadow: inset .22rem 0 0 var(--bs-success);
+    box-shadow: inset .16rem 0 0 var(--bs-success);
   }
 
   &.is-verified {
