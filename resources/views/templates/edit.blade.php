@@ -98,11 +98,6 @@
                                 @endif
 
                                 <span class="marker-toolbar__divider" aria-hidden="true"></span>
-                                <button type="button" class="marker-selection-tool" id="marqueeSelectBtn"
-                                        aria-pressed="true" title="Drag across the document to select fields">
-                                    <i class="icon-base bx bx-scan icon-sm" aria-hidden="true"></i>
-                                    <span>Area select</span>
-                                </button>
                                 <div class="marker-zoom-controls" role="group" aria-label="Document zoom controls">
                                     <button type="button" class="marker-tool-button" id="zoomOutBtn"
                                             aria-label="Zoom out">&minus;</button>

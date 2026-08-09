@@ -23,7 +23,6 @@ const form = element('templateBuilderForm', HTMLFormElement);
 const canvas = element('pageCanvas', HTMLCanvasElement);
 const overlay = element('fieldOverlay');
 const viewport = element('docViewport');
-const marqueeSelectButton = element('marqueeSelectBtn', HTMLButtonElement);
 const selectionMarquee = element('fieldSelectionMarquee');
 const fileInput = element('sampleScan', HTMLInputElement);
 const fileLabel = element('sampleScanLabel');
@@ -84,7 +83,6 @@ let sampleMeasurement = null;
 // dropped/selected File even when their file input is later reconstructed or
 // loses its FileList, which used to produce a saved layout with no sample.
 let pendingSampleFile = null;
-let marqueeEnabled = true;
 let marqueePointerId = null;
 let marqueeStart = null;
 let marqueeBaseIndexes = [];
@@ -220,15 +218,6 @@ const marker = new FieldMarker({
     onZoomChange: updateZoomUI,
 });
 
-function setMarqueeTool(enabled) {
-    marqueeEnabled = enabled;
-    marqueeSelectButton.setAttribute('aria-pressed', String(enabled));
-    marqueeSelectButton.classList.toggle('is-active', enabled);
-    overlay.classList.toggle('is-marquee-mode', enabled);
-
-    if (!enabled) cancelMarquee(true);
-}
-
 function marqueePoint(event) {
     const bounds = overlay.getBoundingClientRect();
 
@@ -324,8 +313,7 @@ function finishMarquee(event) {
 // Capture is intentional: FieldMarker's empty-overlay listener clears the
 // selection on pointerdown. The marquee owns that gesture while this tool is on.
 overlay.addEventListener('pointerdown', (event) => {
-    if (!marqueeEnabled || event.target !== overlay
-        || event.button !== 0 || !event.isPrimary) return;
+    if (event.target !== overlay || event.button !== 0 || !event.isPrimary) return;
 
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -344,8 +332,6 @@ overlay.addEventListener('pointermove', (event) => {
 
 overlay.addEventListener('pointerup', finishMarquee);
 overlay.addEventListener('pointercancel', () => cancelMarquee(true));
-marqueeSelectButton.addEventListener('click', () => setMarqueeTool(!marqueeEnabled));
-setMarqueeTool(true);
 
 function layoutMatchesBaseline() {
     const customDimensionsMatch = paperSizeSelect.value !== 'custom'
@@ -966,9 +952,9 @@ document.addEventListener('keydown', (event) => {
         && (target.matches('input, textarea, select') || target.isContentEditable);
     if (editing) return;
 
-    if (event.key === 'Escape' && marqueeEnabled) {
+    if (event.key === 'Escape' && marqueePointerId !== null) {
         event.preventDefault();
-        setMarqueeTool(false);
+        cancelMarquee(true);
         return;
     }
 

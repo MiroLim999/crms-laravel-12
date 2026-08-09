@@ -973,7 +973,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .marker-help-button,
-.marker-selection-tool,
 .marker-reset-button,
 .marker-delete-button {
   display: inline-flex;
@@ -996,28 +995,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     background: var(--bs-gray-100);
     border-color: var(--bs-border-color);
     outline: 0;
-  }
-}
-
-.marker-selection-tool {
-  color: var(--bs-primary);
-
-  &.is-active,
-  &[aria-pressed='true'] {
-    color: var(--bs-primary);
-    background: rgba(105, 108, 255, .1);
-    border-color: rgba(105, 108, 255, .28);
-  }
-}
-
-.field-overlay.is-marquee-mode {
-  cursor: crosshair;
-  touch-action: none;
-
-  // Markers keep their normal move/resize interaction. Only dragging the
-  // document area behind them begins a Windows-style selection rectangle.
-  .field-box {
-    cursor: move;
   }
 }
 
