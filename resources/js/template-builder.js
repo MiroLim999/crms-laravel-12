@@ -5,6 +5,10 @@ import {
     positiveInteger,
     templatePersonPayload,
 } from './person-grouping';
+import {
+    builderShortcutIsBlocked,
+    handleSelectedFieldDeletion,
+} from './template-builder-shortcuts';
 
 const configNode = document.getElementById('templateBuilderConfig');
 
@@ -1053,10 +1057,11 @@ element('confirmResetFieldsBtn', HTMLButtonElement).addEventListener('click', ()
 });
 
 document.addEventListener('keydown', (event) => {
-    const target = event.target;
-    const editing = target instanceof HTMLElement
-        && (target.matches('input, textarea, select') || target.isContentEditable);
-    if (editing) return;
+    const shortcutOptions = {
+        modalOpen: document.querySelector('.modal.show') !== null,
+    };
+
+    if (builderShortcutIsBlocked(event, shortcutOptions)) return;
 
     const commandPressed = event.ctrlKey || event.metaKey;
     const key = event.key.toLocaleLowerCase();
@@ -1079,10 +1084,7 @@ document.addEventListener('keydown', (event) => {
         return;
     }
 
-    if (['Backspace', 'Delete'].includes(event.key) && marker.selectedIndexes().length > 0) {
-        event.preventDefault();
-        marker.removeSelected();
-    }
+    handleSelectedFieldDeletion(event, marker, shortcutOptions);
 });
 
 form.querySelectorAll('button[type="submit"][data-publish]').forEach((button) => {
