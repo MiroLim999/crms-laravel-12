@@ -304,6 +304,25 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertFalse($previous->refresh()->is_active);
     }
 
+    public function test_existing_layout_can_update_many_fields_from_one_json_input(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $template = $this->template($superAdmin, DocumentType::Birth, 'Registry book');
+        $fields = collect(range(1, 199))
+            ->map(fn (int $number) => $this->field("Registry field {$number}"))
+            ->all();
+
+        $this->actingAs($superAdmin)->put(route('templates.update', $template), [
+            'name' => 'Updated registry book',
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(PaperSize::Letter, PageOrientation::Landscape),
+            'fields_json' => json_encode($fields, JSON_THROW_ON_ERROR),
+        ])->assertRedirect();
+
+        $this->assertSame('Updated registry book', $template->refresh()->name);
+        $this->assertSame(199, $template->fields()->count());
+    }
+
     public function test_legacy_publish_action_keeps_one_staff_layout_per_type(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();

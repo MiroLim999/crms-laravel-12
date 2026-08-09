@@ -1536,11 +1536,11 @@
         const data = new FormData(form);
         data.set('scan', scanFile, scanFile.name);
 
-        verifiedIndexes.forEach((sourceIndex, submitIndex) => {
+        const submittedFields = verifiedIndexes.map((sourceIndex) => {
             const reading = readings[sourceIndex];
             const crop = cropped[sourceIndex];
             const value = requiredInput(rows[sourceIndex], '.verified').value.trim();
-            const fields = {
+            return {
                 verified: '1',
                 name: String(reading.name ?? ''),
                 ocr_text: String(reading.text ?? ''),
@@ -1551,11 +1551,8 @@
                 width: Number(crop.w ?? 0).toFixed(5),
                 height: Number(crop.h ?? 0).toFixed(5),
             };
-
-            Object.entries(fields).forEach(([key, fieldValue]) => {
-                data.append(`fields[${submitIndex}][${key}]`, fieldValue);
-            });
         });
+        data.set('fields_json', JSON.stringify(submittedFields));
 
         const button = el('submitBtn');
         const idleButton = button.innerHTML;

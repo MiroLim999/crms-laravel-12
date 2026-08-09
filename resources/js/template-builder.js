@@ -640,23 +640,20 @@ function serialiseFields() {
     const container = element('fieldInputs');
     container.replaceChildren();
 
-    marker.toJSON().forEach((box, index) => {
-        const values = {
+    const fields = marker.toJSON().map((box) => ({
             name: box.name.trim(),
             x: box.x.toFixed(5),
             y: box.y.toFixed(5),
             width: box.w.toFixed(5),
             height: box.h.toFixed(5),
-        };
+    }));
 
-        Object.entries(values).forEach(([key, value]) => {
-            const input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = `fields[${index}][${key}]`;
-            input.value = value;
-            container.appendChild(input);
-        });
-    });
+    // One JSON input avoids PHP's max_input_vars truncating large layouts.
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'fields_json';
+    input.value = JSON.stringify(fields);
+    container.appendChild(input);
 }
 
 async function openSample(file, { pendingUpload = true } = {}) {

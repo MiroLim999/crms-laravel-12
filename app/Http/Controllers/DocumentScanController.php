@@ -132,6 +132,8 @@ class DocumentScanController extends Controller
      */
     public function store(Request $request): RedirectResponse|JsonResponse
     {
+        $this->hydrateJsonFields($request);
+
         $validated = $request->validate([
             'doc_type' => ['required', 'string', 'exists:document_types,key'],
             'document_template_id' => ['required', 'exists:document_templates,id'],
@@ -255,6 +257,29 @@ class DocumentScanController extends Controller
         return redirect()
             ->to($redirect)
             ->with('success', $message);
+    }
+
+    private function hydrateJsonFields(Request $request): void
+    {
+        if (! $request->filled('fields_json')) {
+            return;
+        }
+
+        try {
+            $fields = json_decode((string) $request->input('fields_json'), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw ValidationException::withMessages([
+                'fields' => 'The verified fields could not be read. Return to validation and try again.',
+            ]);
+        }
+
+        if (! is_array($fields)) {
+            throw ValidationException::withMessages([
+                'fields' => 'The verified fields must be a valid list.',
+            ]);
+        }
+
+        $request->merge(['fields' => $fields]);
     }
 
     // ------------------------------------------------------------------ internals

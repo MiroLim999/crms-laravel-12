@@ -129,6 +129,30 @@ class DocumentUploadWorkflowTest extends TestCase
         Storage::disk('local')->assertExists($record->scan_path);
     }
 
+    public function test_verified_fields_can_be_submitted_as_one_json_input(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTemplateSeeder::class);
+        $this->registerTestModel();
+
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+        $payload = $this->submissionPayload($template, [
+            $this->verifiedField('Child Full Name', 'Maria Santos'),
+        ]);
+        $payload['fields_json'] = json_encode($payload['fields'], JSON_THROW_ON_ERROR);
+        unset($payload['fields']);
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), $payload)
+            ->assertCreated();
+
+        $this->assertDatabaseHas('record_fields', [
+            'name' => 'Child Full Name',
+            'verified_value' => 'Maria Santos',
+        ]);
+    }
+
     public function test_unchecked_and_blank_verified_fields_are_rejected_without_saving(): void
     {
         Storage::fake('local');

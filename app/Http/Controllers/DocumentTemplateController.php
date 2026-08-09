@@ -311,6 +311,8 @@ class DocumentTemplateController extends Controller
      */
     private function validatePayload(Request $request, ?DocumentTemplate $template = null): array
     {
+        $this->hydrateJsonFields($request);
+
         $definition = $request->filled('document_type_id')
             ? DocumentTypeDefinition::find($request->integer('document_type_id'))
             : DocumentTypeDefinition::where('key', (string) $request->input('doc_type'))->first();
@@ -379,6 +381,29 @@ class DocumentTemplateController extends Controller
         }
 
         return $validated;
+    }
+
+    private function hydrateJsonFields(Request $request): void
+    {
+        if (! $request->filled('fields_json')) {
+            return;
+        }
+
+        try {
+            $fields = json_decode((string) $request->input('fields_json'), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw ValidationException::withMessages([
+                'fields' => 'The field layout could not be read. Refresh the page and try again.',
+            ]);
+        }
+
+        if (! is_array($fields)) {
+            throw ValidationException::withMessages([
+                'fields' => 'The field layout must be a valid list of markers.',
+            ]);
+        }
+
+        $request->merge(['fields' => $fields]);
     }
 
     /**
