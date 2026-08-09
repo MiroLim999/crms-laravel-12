@@ -22,6 +22,8 @@ export default defineConfig({
                 // NOTE: pdf.worker.mjs is now served from the CDN (see field-marker.js).
                 //       Do not add `pdfjs-dist/build/pdf.worker.mjs?url` back here.
                 'resources/js/field-marker.js',
+                // Shared Windows-style drag selection used by both marker editors.
+                'resources/js/marquee-selection.js',
                 // Template Builder interaction shell. It shares FieldMarker with
                 // Staff scanning but is only loaded on Super Admin layout pages.
                 'resources/js/template-builder.js',

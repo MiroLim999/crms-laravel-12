@@ -96,6 +96,8 @@
                                     <div class="marker-shortcuts-menu__title">Editor shortcuts</div>
                                     <div><span><kbd>Ctrl</kbd> + scroll</span><small>Zoom document</small></div>
                                     <div><span><kbd>Shift</kbd> + click</span><small>Select multiple</small></div>
+                                    <div><span>Drag empty document area</span><small>Select fields in a rectangle</small></div>
+                                    <div><span><kbd>Shift</kbd> + drag</span><small>Add fields to selection</small></div>
                                     <div><span>Drag selection</span><small>Move selected fields</small></div>
                                     <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
                                     <div><span><kbd>Ctrl</kbd> + <kbd>C</kbd></span><small>Copy selected</small></div>
@@ -126,7 +128,10 @@
                     <div class="doc-viewport" id="docViewport">
                         <div class="doc-stage" id="docStage">
                             <canvas id="pageCanvas"></canvas>
-                            <div class="field-overlay" id="fieldOverlay"></div>
+                            <div class="field-overlay" id="fieldOverlay">
+                                <div class="field-selection-marquee" id="staffFieldSelectionMarquee"
+                                     aria-hidden="true"></div>
+                            </div>
                         </div>
                     </div>
                 </x-card>
@@ -412,6 +417,7 @@
 @push('scripts')
 <script type="module">
     import { FieldMarker } from '{{ Vite::asset('resources/js/field-marker.js') }}';
+    import { attachMarqueeSelection } from '{{ Vite::asset('resources/js/marquee-selection.js') }}';
 
     const config = {
         boxes: @json($boxes),
@@ -465,13 +471,20 @@
     let syncingValidationSelection = false;
     let recordSubmitting = false;
 
+    const markerOverlay = el('fieldOverlay');
     const marker = new FieldMarker({
         canvas: el('pageCanvas'),
-        overlay: el('fieldOverlay'),
+        overlay: markerOverlay,
         viewport: el('docViewport'),
         onChange: handleMarkerChange,
         onSelectionChange: updateSelectionUI,
         onZoomChange: updateZoomUI,
+    });
+
+    attachMarqueeSelection({
+        marker,
+        overlay: markerOverlay,
+        marquee: el('staffFieldSelectionMarquee'),
     });
 
     const validationMarker = new FieldMarker({

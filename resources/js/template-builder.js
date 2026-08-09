@@ -1,4 +1,5 @@
 import { FieldMarker } from './field-marker';
+import { attachMarqueeSelection } from './marquee-selection';
 
 const configNode = document.getElementById('templateBuilderConfig');
 
@@ -23,7 +24,6 @@ const form = element('templateBuilderForm', HTMLFormElement);
 const canvas = element('pageCanvas', HTMLCanvasElement);
 const overlay = element('fieldOverlay');
 const viewport = element('docViewport');
-const selectionMarquee = element('fieldSelectionMarquee');
 const fileInput = element('sampleScan', HTMLInputElement);
 const fileLabel = element('sampleScanLabel');
 const selectAllInput = element('selectAllFields', HTMLInputElement);
@@ -83,9 +83,6 @@ let sampleMeasurement = null;
 // dropped/selected File even when their file input is later reconstructed or
 // loses its FileList, which used to produce a saved layout with no sample.
 let pendingSampleFile = null;
-let marqueePointerId = null;
-let marqueeStart = null;
-let marqueeBaseIndexes = [];
 
 function selectedOrientation() {
     const input = form.querySelector('input[name="orientation"]:checked');
@@ -217,121 +214,11 @@ const marker = new FieldMarker({
     onSelectionChange: updateSelectionUI,
     onZoomChange: updateZoomUI,
 });
-
-function marqueePoint(event) {
-    const bounds = overlay.getBoundingClientRect();
-
-    return {
-        x: Math.min(bounds.width, Math.max(0, event.clientX - bounds.left)),
-        y: Math.min(bounds.height, Math.max(0, event.clientY - bounds.top)),
-        width: bounds.width,
-        height: bounds.height,
-    };
-}
-
-function marqueeGeometry(current) {
-    if (!marqueeStart) return null;
-
-    const left = Math.min(marqueeStart.x, current.x);
-    const top = Math.min(marqueeStart.y, current.y);
-    const right = Math.max(marqueeStart.x, current.x);
-    const bottom = Math.max(marqueeStart.y, current.y);
-
-    return {
-        left,
-        top,
-        right,
-        bottom,
-        width: right - left,
-        height: bottom - top,
-        overlayWidth: current.width,
-        overlayHeight: current.height,
-    };
-}
-
-function indexesInsideMarquee(geometry) {
-    if (!geometry || geometry.width <= 2 && geometry.height <= 2) return [];
-
-    return marker.toJSON().flatMap((box, index) => {
-        const boxLeft = box.x * geometry.overlayWidth;
-        const boxTop = box.y * geometry.overlayHeight;
-        const boxRight = (box.x + box.w) * geometry.overlayWidth;
-        const boxBottom = (box.y + box.h) * geometry.overlayHeight;
-        const intersects = boxRight >= geometry.left && boxLeft <= geometry.right
-            && boxBottom >= geometry.top && boxTop <= geometry.bottom;
-
-        return intersects ? [index] : [];
-    });
-}
-
-function renderMarquee(current) {
-    const geometry = marqueeGeometry(current);
-    if (!geometry) return;
-
-    selectionMarquee.style.left = `${geometry.left}px`;
-    selectionMarquee.style.top = `${geometry.top}px`;
-    selectionMarquee.style.width = `${geometry.width}px`;
-    selectionMarquee.style.height = `${geometry.height}px`;
-    selectionMarquee.classList.toggle('is-visible', geometry.width > 2 || geometry.height > 2);
-
-    // Match Windows desktop: markers react while the rectangle is moving,
-    // rather than only after the mouse button is released.
-    marker.selectIndexes([
-        ...new Set([...marqueeBaseIndexes, ...indexesInsideMarquee(geometry)]),
-    ], { source: 'marquee' });
-}
-
-function resetMarqueeVisual() {
-    selectionMarquee.classList.remove('is-visible');
-    selectionMarquee.removeAttribute('style');
-}
-
-function cancelMarquee(restoreSelection = false) {
-    if (restoreSelection) marker.selectIndexes(marqueeBaseIndexes, { source: 'marquee' });
-
-    if (marqueePointerId !== null && overlay.hasPointerCapture(marqueePointerId)) {
-        overlay.releasePointerCapture(marqueePointerId);
-    }
-
-    marqueePointerId = null;
-    marqueeStart = null;
-    marqueeBaseIndexes = [];
-    resetMarqueeVisual();
-}
-
-function finishMarquee(event) {
-    if (event.pointerId !== marqueePointerId || !marqueeStart) return;
-
-    const geometry = marqueeGeometry(marqueePoint(event));
-    const dragged = geometry && (geometry.width > 2 || geometry.height > 2);
-    if (!dragged) marker.selectIndexes(marqueeBaseIndexes, { source: 'marquee' });
-    else renderMarquee(marqueePoint(event));
-
-    cancelMarquee(false);
-}
-
-// Capture is intentional: FieldMarker's empty-overlay listener clears the
-// selection on pointerdown. The marquee owns that gesture while this tool is on.
-overlay.addEventListener('pointerdown', (event) => {
-    if (event.target !== overlay || event.button !== 0 || !event.isPrimary) return;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    marqueePointerId = event.pointerId;
-    marqueeStart = marqueePoint(event);
-    marqueeBaseIndexes = event.shiftKey ? marker.selectedIndexes() : [];
-    overlay.setPointerCapture(event.pointerId);
-    renderMarquee(marqueeStart);
-}, { capture: true });
-
-overlay.addEventListener('pointermove', (event) => {
-    if (event.pointerId !== marqueePointerId || !marqueeStart) return;
-    event.preventDefault();
-    renderMarquee(marqueePoint(event));
+attachMarqueeSelection({
+    marker,
+    overlay,
+    marquee: element('fieldSelectionMarquee'),
 });
-
-overlay.addEventListener('pointerup', finishMarquee);
-overlay.addEventListener('pointercancel', () => cancelMarquee(true));
 
 function layoutMatchesBaseline() {
     const customDimensionsMatch = paperSizeSelect.value !== 'custom'
@@ -951,12 +838,6 @@ document.addEventListener('keydown', (event) => {
     const editing = target instanceof HTMLElement
         && (target.matches('input, textarea, select') || target.isContentEditable);
     if (editing) return;
-
-    if (event.key === 'Escape' && marqueePointerId !== null) {
-        event.preventDefault();
-        cancelMarquee(true);
-        return;
-    }
 
     const commandPressed = event.ctrlKey || event.metaKey;
     const key = event.key.toLocaleLowerCase();
