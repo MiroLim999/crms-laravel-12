@@ -4,6 +4,7 @@
     "scripts": {
         "build": "vite build",
         "dev": "vite",
+        "test:js": "node --test tests/JavaScript/*.test.js",
         "subset-icons": "node tools/subset-icons.mjs"
     },
     "devDependencies": {

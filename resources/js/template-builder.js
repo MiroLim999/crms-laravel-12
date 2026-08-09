@@ -1,5 +1,10 @@
 import { FieldMarker } from './field-marker';
 import { attachMarqueeSelection } from './marquee-selection';
+import {
+    nonNegativeInteger,
+    positiveInteger,
+    templatePersonPayload,
+} from './person-grouping';
 
 const configNode = document.getElementById('templateBuilderConfig');
 
@@ -55,16 +60,6 @@ function finiteNumber(value, fallback) {
     return Number.isFinite(number) ? number : fallback;
 }
 
-function positiveInteger(value) {
-    const number = Number(value);
-    return Number.isInteger(number) && number > 0 ? number : null;
-}
-
-function nonNegativeInteger(value) {
-    const number = Number(value);
-    return Number.isInteger(number) && number >= 0 ? number : null;
-}
-
 function normaliseBoxes(fields) {
     if (!Array.isArray(fields)) return [];
 
@@ -73,6 +68,7 @@ function normaliseBoxes(fields) {
         const y = Math.min(0.99, Math.max(0, finiteNumber(field.y, 0.08)));
         const width = Math.min(1 - x, Math.max(0.01, finiteNumber(field.width ?? field.w, 0.35)));
         const height = Math.min(1 - y, Math.max(0.01, finiteNumber(field.height ?? field.h, 0.06)));
+        const personGroup = positiveInteger(field.personGroup ?? field.person_group);
 
         return {
             name: String(field.name ?? `Field ${index + 1}`),
@@ -80,10 +76,10 @@ function normaliseBoxes(fields) {
             y,
             w: width,
             h: height,
-            personGroup: positiveInteger(field.personGroup ?? field.person_group),
-            personFieldOrder: nonNegativeInteger(
-                field.personFieldOrder ?? field.person_field_order,
-            ),
+            personGroup,
+            personFieldOrder: personGroup === null
+                ? null
+                : nonNegativeInteger(field.personFieldOrder ?? field.person_field_order),
         };
     });
 }
@@ -867,12 +863,7 @@ function serialiseFields() {
             y: box.y.toFixed(5),
             width: box.w.toFixed(5),
             height: box.h.toFixed(5),
-            person_group: groupingModeInput.value === 'custom'
-                ? positiveInteger(box.personGroup)
-                : null,
-            person_field_order: groupingModeInput.value === 'custom'
-                ? nonNegativeInteger(box.personFieldOrder)
-                : null,
+            ...templatePersonPayload(box, groupingModeInput.value === 'custom'),
     }));
 
     // One JSON input avoids PHP's max_input_vars truncating large layouts.

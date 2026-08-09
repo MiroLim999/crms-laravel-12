@@ -418,7 +418,10 @@
 
 @push('scripts')
 <script type="module">
-    import { FieldMarker } from '{{ Vite::asset('resources/js/field-marker.js') }}';
+    import {
+        FieldMarker,
+        markerPersonMetadata,
+    } from '{{ Vite::asset('resources/js/field-marker.js') }}';
     import { attachMarqueeSelection } from '{{ Vite::asset('resources/js/marquee-selection.js') }}';
 
     const config = {
@@ -518,12 +521,7 @@
         y,
         w,
         h,
-        ...(Number.isInteger(Number(personGroup)) && Number(personGroup) > 0
-            ? { personGroup: Number(personGroup) }
-            : {}),
-        ...(Number.isInteger(Number(personFieldOrder)) && Number(personFieldOrder) >= 0
-            ? { personFieldOrder: Number(personFieldOrder) }
-            : {}),
+        ...markerPersonMetadata({ personGroup, personFieldOrder }),
     }));
     const templateBoxes = config.boxes.map((box) => ({
         name: box.name,
@@ -531,12 +529,7 @@
         y: +box.y,
         w: +box.w,
         h: +box.h,
-        ...(Number.isInteger(Number(box.personGroup)) && Number(box.personGroup) > 0
-            ? { personGroup: Number(box.personGroup) }
-            : {}),
-        ...(Number.isInteger(Number(box.personFieldOrder)) && Number(box.personFieldOrder) >= 0
-            ? { personFieldOrder: Number(box.personFieldOrder) }
-            : {}),
+        ...markerPersonMetadata(box),
     }));
 
     function fieldsMatchTemplate() {

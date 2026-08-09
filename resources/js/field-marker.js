@@ -14,6 +14,7 @@
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
+import { markerPersonMetadata } from './person-grouping';
 
 // Use the CDN-hosted worker instead of bundling the 2.2 MB parser file.
 // The version must stay in sync with pdfjs-dist in package.json (currently 4.10.38).
@@ -32,24 +33,14 @@ const MIN_FRACTION = 0.01;
  * validation groups survive moves, renames, undo, and cropping.
  */
 function serialiseBox(box) {
-    const data = {
+    return {
         name: box.name,
         x: box.x,
         y: box.y,
         w: box.w,
         h: box.h,
+        ...markerPersonMetadata(box),
     };
-    const personGroup = Number(box.personGroup);
-    const personFieldOrder = Number(box.personFieldOrder);
-
-    if (Number.isInteger(personGroup) && personGroup > 0) {
-        data.personGroup = personGroup;
-    }
-    if (Number.isInteger(personFieldOrder) && personFieldOrder >= 0) {
-        data.personFieldOrder = personFieldOrder;
-    }
-
-    return data;
 }
 
 export class FieldMarker {
@@ -653,4 +644,4 @@ function clamp(value, min, max) {
     return Math.min(Math.max(value, min), Math.max(min, max));
 }
 
-export { HANDLE_SIZE };
+export { HANDLE_SIZE, markerPersonMetadata };

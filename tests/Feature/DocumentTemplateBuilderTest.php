@@ -149,6 +149,43 @@ class DocumentTemplateBuilderTest extends TestCase
             ->assertSee('"person_field_order":1', escape: false);
     }
 
+    public function test_eleven_person_fields_can_leave_one_document_field_ungrouped(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $personFields = collect(range(0, 10))
+            ->map(fn (int $order) => $this->personField(
+                'Person field '.str_pad((string) ($order + 1), 2, '0', STR_PAD_LEFT),
+                1,
+                $order,
+            ))
+            ->all();
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'Eleven fields and one detail',
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'grouping_mode' => 'custom',
+            'fields_json' => json_encode([
+                ...$personFields,
+                [
+                    ...$this->field('Document reference'),
+                    'person_group' => null,
+                    'person_field_order' => null,
+                ],
+            ], JSON_THROW_ON_ERROR),
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $template = DocumentTemplate::where('name', 'Eleven fields and one detail')->firstOrFail();
+
+        $this->assertSame(11, $template->fields()->where('person_group', 1)->count());
+        $this->assertDatabaseHas('document_template_fields', [
+            'document_template_id' => $template->getKey(),
+            'name' => 'Document reference',
+            'person_group' => null,
+            'person_field_order' => null,
+        ]);
+    }
+
     public function test_updating_a_custom_layout_persists_ungrouping_and_field_removal(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
