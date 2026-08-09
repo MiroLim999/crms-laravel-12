@@ -241,7 +241,7 @@
             <div class="validation-workspace">
                 <div class="validation-submit-error d-none" id="validationSubmitError"
                      role="alert" aria-live="assertive">
-                    <i class="icon-base bx bx-error-circle" aria-hidden="true"></i>
+                    <i class="icon-base bx bx-error" aria-hidden="true"></i>
                     <div>
                         <strong>Unable to submit this record</strong>
                         <div id="validationSubmitMessage"></div>
@@ -278,8 +278,8 @@
                         </div>
 
                         <footer class="validation-pane__hint">
-                            <i class="icon-base bx bx-mouse" aria-hidden="true"></i>
-                            Click a marker to locate its TrOCR output. Hold <kbd>Ctrl</kbd> and scroll to zoom.
+                            <i class="icon-base bx bx-scan" aria-hidden="true"></i>
+                            Click any marker to select its complete registry row. Hold <kbd>Ctrl</kbd> and scroll to zoom.
                         </footer>
                     </section>
 
@@ -322,10 +322,12 @@
                                    placeholder="As written on the certificate">
                         </div>
 
-                        <div class="validation-list-heading" aria-hidden="true">
-                            <span>Field</span>
-                            <span>TrOCR output</span>
-                            <span>Verified</span>
+                        <div class="validation-record-list-heading">
+                            <div>
+                                <i class="icon-base bx bx-list-check" aria-hidden="true"></i>
+                                <span>Registry records</span>
+                            </div>
+                            <small>Select a person to compare the complete row.</small>
                         </div>
                         <div class="validation-result-list" id="verifyRows"></div>
 
@@ -471,6 +473,10 @@
     let markerClipboard = [];
     let pasteSequence = 0;
     let activeValidationIndex = null;
+    let activeValidationGroupId = null;
+    let validationGroups = [];
+    let validationGroupByField = new Map();
+    let validationRowByIndex = new Map();
     let syncingValidationSelection = false;
     let recordSubmitting = false;
     let markerConstraintMessage = null;
@@ -1187,6 +1193,238 @@
         return Number.isFinite(confidence) ? Math.max(0, Math.min(100, confidence)) : 0;
     }
 
+    function median(values) {
+        if (values.length === 0) return 0;
+        const sorted = [...values].sort((a, b) => a - b);
+        const middle = Math.floor(sorted.length / 2);
+        return sorted.length % 2 === 0
+            ? (sorted[middle - 1] + sorted[middle]) / 2
+            : sorted[middle];
+    }
+
+    function buildValidationGroups() {
+        const items = cropped.map((box, index) => ({
+            index,
+            x: Number(box.x ?? 0),
+            y: Number(box.y ?? 0),
+            w: Number(box.w ?? 0),
+            h: Math.max(0.00001, Number(box.h ?? 0)),
+            centerY: Number(box.y ?? 0) + Math.max(0.00001, Number(box.h ?? 0)) / 2,
+        })).sort((a, b) => a.centerY - b.centerY || a.x - b.x);
+
+        if (items.length === 0) return [];
+
+        const typicalHeight = median(items.map((item) => item.h));
+        const centerTolerance = Math.max(0.004, typicalHeight * 0.58);
+        const geometricRows = [];
+
+        items.forEach((item) => {
+            let closest = null;
+            let closestDistance = Number.POSITIVE_INFINITY;
+            geometricRows.forEach((row) => {
+                const distance = Math.abs(item.centerY - row.centerY);
+                if (distance <= centerTolerance && distance < closestDistance) {
+                    closest = row;
+                    closestDistance = distance;
+                }
+            });
+
+            if (!closest) {
+                geometricRows.push({ centerY: item.centerY, items: [item] });
+                return;
+            }
+
+            closest.items.push(item);
+            closest.centerY = closest.items.reduce((sum, current) => sum + current.centerY, 0)
+                / closest.items.length;
+        });
+
+        geometricRows.sort((a, b) => a.centerY - b.centerY);
+        geometricRows.forEach((row) => row.items.sort((a, b) => a.x - b.x));
+
+        const repeatedRows = geometricRows.filter((row) => row.items.length >= 3);
+        if (repeatedRows.length < 2) {
+            return [{
+                id: 'record-details',
+                kind: 'details',
+                label: 'Record details',
+                indexes: items.map((item) => item.index),
+            }];
+        }
+
+        // A registry row is not merely a dense horizontal band. It repeats the
+        // same column geometry several times. Requiring that X signature keeps
+        // ordinary certificates and headings from becoming fake people.
+        const columnFrequency = new Map();
+        repeatedRows.forEach((row) => {
+            columnFrequency.set(row.items.length, (columnFrequency.get(row.items.length) ?? 0) + 1);
+        });
+        const dominantColumns = [...columnFrequency.entries()]
+            .sort(([columnsA, frequencyA], [columnsB, frequencyB]) => {
+                const scoreDifference = (columnsB * frequencyB) - (columnsA * frequencyA);
+                return scoreDifference || frequencyB - frequencyA || columnsB - columnsA;
+            })[0]?.[0] ?? 0;
+        const prototypeRows = repeatedRows.filter((row) => row.items.length === dominantColumns);
+
+        if (prototypeRows.length === 0) {
+            return [{
+                id: 'record-details',
+                kind: 'details',
+                label: 'Record details',
+                indexes: items.map((item) => item.index),
+            }];
+        }
+
+        const centersFor = (row) => row.items.map((item) => item.x + item.w / 2);
+        const prototype = prototypeRows
+            .map((row) => {
+                const centers = centersFor(row);
+                const typicalWidth = median(row.items.map((item) => item.w));
+                const spacing = centers.slice(1).map((center, index) => center - centers[index]);
+                const tolerance = Math.max(
+                    0.006,
+                    Math.min(typicalWidth * 0.48, (median(spacing) || typicalWidth) * 0.36),
+                );
+                const alignedPeers = prototypeRows.filter((candidate) => {
+                    const candidateCenters = centersFor(candidate);
+                    return candidateCenters.every((center, index) => Math.abs(center - centers[index]) <= tolerance);
+                }).length;
+                return { row, centers, tolerance, alignedPeers };
+            })
+            .sort((a, b) => b.alignedPeers - a.alignedPeers)[0];
+
+        const minimumColumns = Math.max(3, Math.ceil(dominantColumns * 0.6));
+        const alignedRows = geometricRows.filter((row) => {
+            if (row.items.length < minimumColumns || row.items.length > dominantColumns + 2) return false;
+            const available = new Set(prototype.centers.map((_, index) => index));
+            let matches = 0;
+            centersFor(row).forEach((center) => {
+                let nearestIndex = null;
+                let nearestDistance = Number.POSITIVE_INFINITY;
+                available.forEach((prototypeIndex) => {
+                    const distance = Math.abs(center - prototype.centers[prototypeIndex]);
+                    if (distance < nearestDistance) {
+                        nearestDistance = distance;
+                        nearestIndex = prototypeIndex;
+                    }
+                });
+                if (nearestIndex !== null && nearestDistance <= prototype.tolerance) {
+                    matches += 1;
+                    available.delete(nearestIndex);
+                }
+            });
+            return matches >= Math.max(3, Math.ceil(Math.min(row.items.length, dominantColumns) * 0.75));
+        });
+
+        const minimumRepeatedRows = dominantColumns >= 6 ? 2 : 3;
+        if (alignedRows.length < minimumRepeatedRows) {
+            return [{
+                id: 'record-details',
+                kind: 'details',
+                label: 'Record details',
+                indexes: items.map((item) => item.index),
+            }];
+        }
+
+        const rowGaps = alignedRows.slice(1).map((row, index) => row.centerY - alignedRows[index].centerY);
+        const typicalGap = median(rowGaps.filter((gap) => gap > 0));
+        const rowRuns = [[]];
+        alignedRows.forEach((row, index) => {
+            if (index > 0 && typicalGap > 0 && row.centerY - alignedRows[index - 1].centerY > typicalGap * 2.2) {
+                rowRuns.push([]);
+            }
+            rowRuns[rowRuns.length - 1].push(row);
+        });
+        const personRows = rowRuns
+            .filter((run) => run.length >= minimumRepeatedRows)
+            .sort((a, b) => b.length - a.length)[0] ?? [];
+
+        if (personRows.length === 0) {
+            return [{
+                id: 'record-details',
+                kind: 'details',
+                label: 'Record details',
+                indexes: items.map((item) => item.index),
+            }];
+        }
+
+        const personRowSet = new Set(personRows);
+        const detailIndexes = geometricRows
+            .filter((row) => !personRowSet.has(row))
+            .flatMap((row) => row.items.map((item) => item.index));
+        const groups = [];
+
+        if (detailIndexes.length > 0) {
+            groups.push({
+                id: 'document-details',
+                kind: 'details',
+                label: 'Document details',
+                indexes: detailIndexes,
+            });
+        }
+
+        personRows.forEach((row, personIndex) => {
+            groups.push({
+                id: `person-${personIndex + 1}`,
+                kind: 'person',
+                label: `Person ${String(personIndex + 1).padStart(2, '0')}`,
+                indexes: row.items.map((item) => item.index),
+            });
+        });
+
+        return groups;
+    }
+
+    function validationGroupForField(index) {
+        return validationGroupByField.get(index) ?? null;
+    }
+
+    function validationRow(index) {
+        return validationRowByIndex.get(index) ?? null;
+    }
+
+    function groupIdentity(group) {
+        if (group.kind !== 'person') return `${group.indexes.length} document field${group.indexes.length === 1 ? '' : 's'}`;
+
+        if (group.indexes.length === 11) {
+            const childName = String(readings[group.indexes[2]]?.text ?? '').trim();
+            if (childName) return childName;
+        }
+
+        const candidates = group.indexes
+            .map((index) => ({
+                index,
+                width: Number(cropped[index]?.w ?? 0),
+                text: String(readings[index]?.text ?? '').trim(),
+            }))
+            .filter((candidate) => candidate.text.length >= 3 && /[a-z]/i.test(candidate.text))
+            .sort((a, b) => b.width - a.width);
+
+        return candidates[0]?.text || `${group.indexes.length} fields`;
+    }
+
+    function validationFieldLabel(group, columnIndex, fallback) {
+        const birthRegistryColumns = [
+            'Entry no.',
+            'Date registered',
+            "Child's name",
+            'Sex',
+            'Date of birth',
+            'Place of birth',
+            "Father's name",
+            "Mother's name",
+            'Nationality',
+            'Informant',
+            'Remarks',
+        ];
+
+        if (group.kind === 'person' && group.indexes.length === birthRegistryColumns.length) {
+            return birthRegistryColumns[columnIndex];
+        }
+
+        return String(fallback || `Field ${columnIndex + 1}`);
+    }
+
     function prepareValidationComparison() {
         const source = el('pageCanvas');
         const target = el('validationPageCanvas');
@@ -1212,16 +1450,19 @@
             validationMarker.layout();
             makeValidationMarkersAccessible();
             updateValidationMarkerStates();
-            if (readings.length > 0) activateValidationField(0, 'initial');
+            const initialGroup = validationGroups.find((group) => group.kind === 'person')
+                ?? validationGroups[0];
+            if (initialGroup) activateValidationGroup(initialGroup.id, 'initial');
         });
     }
 
     function makeValidationMarkersAccessible() {
         const boxes = validationMarker.toJSON();
         el('validationFieldOverlay').querySelectorAll('.field-box').forEach((box, index) => {
+            const group = validationGroupForField(index);
             box.tabIndex = 0;
             box.setAttribute('role', 'button');
-            box.setAttribute('aria-label', `Compare ${boxes[index]?.name ?? `field ${index + 1}`}`);
+            box.setAttribute('aria-label', `Compare ${boxes[index]?.name ?? `field ${index + 1}`} in ${group?.label ?? 'this record'}`);
             box.title = `Compare ${boxes[index]?.name ?? `field ${index + 1}`}`;
         });
     }
@@ -1230,9 +1471,13 @@
         if (syncingValidationSelection) return;
         if (indexes.length === 0) {
             activeValidationIndex = null;
+            activeValidationGroupId = null;
             el('verifyRows').querySelectorAll('.validation-field').forEach((row) => {
                 row.classList.remove('is-active');
                 row.removeAttribute('aria-current');
+            });
+            el('verifyRows').querySelectorAll('.validation-record-group').forEach((group) => {
+                group.classList.remove('is-active');
             });
             return;
         }
@@ -1244,7 +1489,7 @@
 
     function revealValidationRow(index) {
         const list = el('verifyRows');
-        const row = list.querySelector(`[data-field-index="${index}"]`);
+        const row = validationRow(index);
         if (!(row instanceof HTMLElement)) return;
 
         const listRect = list.getBoundingClientRect();
@@ -1272,20 +1517,84 @@
         });
     }
 
+    function revealValidationGroup(group) {
+        const boxes = group.indexes
+            .map((index) => el('validationFieldOverlay').querySelector(`[data-index="${index}"]`))
+            .filter((box) => box instanceof HTMLElement);
+        if (boxes.length === 0) return;
+
+        const viewport = el('validationDocViewport');
+        const left = Math.min(...boxes.map((box) => box.offsetLeft));
+        const top = Math.min(...boxes.map((box) => box.offsetTop));
+        const right = Math.max(...boxes.map((box) => box.offsetLeft + box.offsetWidth));
+        const bottom = Math.max(...boxes.map((box) => box.offsetTop + box.offsetHeight));
+        viewport.scrollTo({
+            left: Math.max(0, (left + right) / 2 - viewport.clientWidth / 2),
+            top: Math.max(0, (top + bottom) / 2 - viewport.clientHeight / 2),
+            behavior: 'smooth',
+        });
+    }
+
+    function setExpandedValidationGroup(groupId) {
+        el('verifyRows').querySelectorAll('.validation-record-group').forEach((section) => {
+            const expanded = section.dataset.groupId === groupId;
+            section.classList.toggle('is-expanded', expanded);
+            const button = section.querySelector('.validation-record-group__toggle');
+            const body = section.querySelector('.validation-record-group__body');
+            button?.setAttribute('aria-expanded', String(expanded));
+            if (body instanceof HTMLElement) body.hidden = !expanded;
+        });
+    }
+
+    function selectValidationGroupMarkers(group) {
+        syncingValidationSelection = true;
+        validationMarker.selectIndexes(group.indexes, { source: 'group' });
+        syncingValidationSelection = false;
+    }
+
+    function activateValidationGroup(groupId, source = 'group') {
+        const group = validationGroups.find((candidate) => candidate.id === groupId);
+        if (!group) return;
+
+        activeValidationGroupId = group.id;
+        activeValidationIndex = group.indexes.includes(activeValidationIndex)
+            ? activeValidationIndex
+            : group.indexes[0];
+        setExpandedValidationGroup(group.id);
+        selectValidationGroupMarkers(group);
+
+        el('verifyRows').querySelectorAll('.validation-record-group').forEach((section) => {
+            section.classList.toggle('is-active', section.dataset.groupId === group.id);
+        });
+        el('verifyRows').querySelectorAll('.validation-field').forEach((row) => {
+            row.classList.remove('is-active');
+            row.removeAttribute('aria-current');
+        });
+
+        if (source === 'group') revealValidationGroup(group);
+        const section = el('verifyRows').querySelector(`[data-group-id="${group.id}"]`);
+        section?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
     function activateValidationField(index, source = 'row') {
         if (!Number.isInteger(index) || index < 0 || index >= readings.length) return;
-        activeValidationIndex = index;
+        const group = validationGroupForField(index);
+        if (!group) return;
 
-        if (source !== 'marker') {
-            syncingValidationSelection = true;
-            validationMarker.selectBox(index);
-            syncingValidationSelection = false;
-        }
+        activeValidationIndex = index;
+        activeValidationGroupId = group.id;
+        setExpandedValidationGroup(group.id);
+
+        selectValidationGroupMarkers(group);
 
         el('verifyRows').querySelectorAll('.validation-field').forEach((row) => {
             const active = Number(row.dataset.fieldIndex) === index;
             row.classList.toggle('is-active', active);
-            row.setAttribute('aria-current', active ? 'true' : 'false');
+            if (active) row.setAttribute('aria-current', 'true');
+            else row.removeAttribute('aria-current');
+        });
+        el('verifyRows').querySelectorAll('.validation-record-group').forEach((section) => {
+            section.classList.toggle('is-active', section.dataset.groupId === group.id);
         });
 
         if (source === 'marker') revealValidationRow(index);
@@ -1343,109 +1652,194 @@
         el('verifiedProgressBar').style.width = `${percentage}%`;
         el('submitVerifiedCount').textContent = String(verified);
         el('submitBtn').disabled = verified === 0 || recordSubmitting;
+        updateValidationGroupSummaries();
         updateValidationMarkerStates();
+    }
+
+    function updateValidationGroupSummaries() {
+        validationGroups.forEach((group) => {
+            const section = el('verifyRows').querySelector(`[data-group-id="${group.id}"]`);
+            if (!(section instanceof HTMLElement)) return;
+
+            const verified = group.indexes.filter((index) => {
+                const checkbox = validationRow(index)?.querySelector('.validation-verified');
+                return checkbox instanceof HTMLInputElement && checkbox.checked;
+            }).length;
+            const count = group.indexes.length;
+            const status = section.querySelector('.validation-record-group__status');
+            if (status) status.textContent = `${verified}/${count} verified`;
+            section.classList.toggle('is-complete', count > 0 && verified === count);
+        });
+    }
+
+    function createValidationFieldRow(reading, index, group, columnIndex) {
+        const confidence = normaliseConfidence(reading);
+        const flagged = confidence < config.threshold;
+        const inputId = `verifiedField${index}`;
+        const checkboxId = `verifyField${index}`;
+        const row = document.createElement('article');
+
+        row.className = 'validation-field';
+        row.dataset.fieldIndex = String(index);
+        row.tabIndex = 0;
+        validationRowByIndex.set(index, row);
+        row.innerHTML = `
+            <div class="validation-field__identity">
+                <span class="validation-field__number"></span>
+                <div class="min-w-0">
+                    <strong class="validation-field__name"></strong>
+                    <span class="confidence-badge validation-field__confidence"></span>
+                </div>
+            </div>
+            <div class="validation-field__value">
+                <label class="visually-hidden" for="${inputId}"></label>
+                <input type="text" id="${inputId}" class="form-control verified"
+                       maxlength="2000" autocomplete="off">
+                <div class="validation-field__reading">
+                    TrOCR read: <span></span>
+                </div>
+                <div class="validation-field__ocr-error d-none">
+                    TrOCR could not read this marker. Enter the value manually.
+                </div>
+                <div class="validation-field__error d-none" role="alert"></div>
+            </div>
+            <div class="validation-field__check">
+                <label class="validation-verified-control" for="${checkboxId}">
+                    <input class="form-check-input validation-verified" type="checkbox"
+                           id="${checkboxId}">
+                    <span>Verified</span>
+                </label>
+            </div>`;
+
+        const displayNumber = group.kind === 'person' ? columnIndex + 1 : index + 1;
+        requiredPart(row, '.validation-field__number').textContent = String(displayNumber).padStart(2, '0');
+        const displayName = validationFieldLabel(group, columnIndex, reading.name);
+        requiredPart(row, '.validation-field__name').textContent = displayName;
+        requiredPart(row, `label[for="${inputId}"]`).textContent = `Verified value for ${displayName}`;
+
+        const badge = requiredPart(row, '.validation-field__confidence');
+        badge.textContent = `${confidence.toFixed(1)}%`;
+        badge.classList.add(flagged ? 'is-low' : 'is-ready');
+
+        const readingText = String(reading.text ?? '');
+        requiredPart(row, '.validation-field__reading span').textContent = readingText || '(nothing read)';
+
+        const input = requiredInput(row, '.verified');
+        const checkbox = requiredInput(row, '.validation-verified');
+        input.value = readingText;
+        if (flagged) row.classList.add('needs-review');
+        if (reading.error) {
+            row.classList.add('has-ocr-error');
+            requiredPart(row, '.validation-field__ocr-error').classList.remove('d-none');
+        }
+
+        row.addEventListener('click', () => activateValidationField(index, 'row'));
+        row.addEventListener('focusin', () => activateValidationField(index, 'row'));
+        row.addEventListener('keydown', (event) => {
+            if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
+            event.preventDefault();
+            activateValidationField(index, 'row');
+            input.focus();
+        });
+
+        input.addEventListener('input', () => {
+            clearValidationFieldError(index);
+            clearValidationSubmitError();
+            if (checkbox.checked) {
+                checkbox.checked = false;
+                row.classList.remove('is-verified');
+                updateVerificationSummary();
+            }
+        });
+
+        checkbox.addEventListener('change', () => {
+            activateValidationField(index, 'row');
+            clearValidationFieldError(index);
+            clearValidationSubmitError();
+
+            if (checkbox.checked && input.value.trim() === '') {
+                checkbox.checked = false;
+                setValidationFieldError(index, 'Enter or confirm a value before marking this field as verified.');
+                input.focus();
+            }
+
+            row.classList.toggle('is-verified', checkbox.checked);
+            updateVerificationSummary();
+        });
+
+        return row;
+    }
+
+    function createValidationGroup(group) {
+        const section = document.createElement('section');
+        const bodyId = `validationGroupBody-${group.id}`;
+        section.className = 'validation-record-group';
+        section.dataset.groupId = group.id;
+        section.innerHTML = `
+            <button type="button" class="validation-record-group__toggle"
+                    aria-expanded="false" aria-controls="${bodyId}">
+                <span class="validation-record-group__number"></span>
+                <span class="validation-record-group__copy">
+                    <strong></strong>
+                    <small></small>
+                </span>
+                <span class="validation-record-group__meta">
+                    <span class="validation-record-group__review"></span>
+                    <span class="validation-record-group__status"></span>
+                </span>
+                <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
+            </button>
+            <div class="validation-record-group__body" id="${bodyId}" hidden></div>`;
+
+        const number = requiredPart(section, '.validation-record-group__number');
+        number.textContent = group.kind === 'person'
+            ? group.label.replace('Person ', '')
+            : 'i';
+        requiredPart(section, '.validation-record-group__copy strong').textContent = group.label;
+        requiredPart(section, '.validation-record-group__copy small').textContent = groupIdentity(group);
+
+        const reviewCount = group.indexes.filter((index) => normaliseConfidence(readings[index]) < config.threshold).length;
+        const review = requiredPart(section, '.validation-record-group__review');
+        review.textContent = reviewCount > 0 ? `${reviewCount} to review` : 'Ready to review';
+        review.classList.toggle('has-review', reviewCount > 0);
+
+        const body = requiredPart(section, '.validation-record-group__body');
+        group.indexes.forEach((index, columnIndex) => {
+            body.appendChild(createValidationFieldRow(readings[index], index, group, columnIndex));
+        });
+
+        const toggle = requiredPart(section, '.validation-record-group__toggle');
+        toggle.addEventListener('click', () => {
+            if (section.classList.contains('is-expanded')) {
+                section.classList.remove('is-expanded');
+                toggle.setAttribute('aria-expanded', 'false');
+                body.hidden = true;
+                activeValidationGroupId = group.id;
+                selectValidationGroupMarkers(group);
+                section.classList.add('is-active');
+                revealValidationGroup(group);
+                return;
+            }
+            activateValidationGroup(group.id, 'group');
+        });
+
+        return section;
     }
 
     function renderVerifyRows() {
         const container = el('verifyRows');
         container.innerHTML = '';
         activeValidationIndex = null;
+        activeValidationGroupId = null;
+        validationGroupByField = new Map();
+        validationRowByIndex = new Map();
         clearValidationSubmitError();
-
-        readings.forEach((reading, index) => {
-            const confidence = normaliseConfidence(reading);
-            const flagged = confidence < config.threshold;
-            const inputId = `verifiedField${index}`;
-            const checkboxId = `verifyField${index}`;
-            const row = document.createElement('article');
-
-            row.className = 'validation-field';
-            row.dataset.fieldIndex = String(index);
-            row.tabIndex = 0;
-            row.innerHTML = `
-                <div class="validation-field__identity">
-                    <span class="validation-field__number"></span>
-                    <div class="min-w-0">
-                        <strong class="validation-field__name"></strong>
-                        <span class="confidence-badge validation-field__confidence"></span>
-                    </div>
-                </div>
-                <div class="validation-field__value">
-                    <label class="visually-hidden" for="${inputId}"></label>
-                    <input type="text" id="${inputId}" class="form-control verified"
-                           maxlength="2000" autocomplete="off">
-                    <div class="validation-field__reading">
-                        TrOCR read: <span></span>
-                    </div>
-                    <div class="validation-field__ocr-error d-none">
-                        TrOCR could not read this marker. Enter the value manually.
-                    </div>
-                    <div class="validation-field__error d-none" role="alert"></div>
-                </div>
-                <div class="validation-field__check">
-                    <label class="validation-verified-control" for="${checkboxId}">
-                        <input class="form-check-input validation-verified" type="checkbox"
-                               id="${checkboxId}">
-                        <span>Verified</span>
-                    </label>
-                </div>`;
-
-            requiredPart(row, '.validation-field__number').textContent = String(index + 1).padStart(2, '0');
-            requiredPart(row, '.validation-field__name').textContent = reading.name;
-            requiredPart(row, `label[for="${inputId}"]`).textContent = `Verified value for ${reading.name}`;
-
-            const badge = requiredPart(row, '.validation-field__confidence');
-            badge.textContent = `${confidence.toFixed(1)}%`;
-            badge.classList.add(flagged ? 'is-low' : 'is-ready');
-
-            const readingText = String(reading.text ?? '');
-            requiredPart(row, '.validation-field__reading span').textContent = readingText || '(nothing read)';
-
-            const input = requiredInput(row, '.verified');
-            const checkbox = requiredInput(row, '.validation-verified');
-            input.value = readingText;
-            if (flagged) row.classList.add('needs-review');
-            if (reading.error) {
-                row.classList.add('has-ocr-error');
-                requiredPart(row, '.validation-field__ocr-error').classList.remove('d-none');
-            }
-
-            row.addEventListener('click', () => activateValidationField(index, 'row'));
-            row.addEventListener('focusin', () => activateValidationField(index, 'row'));
-            row.addEventListener('keydown', (event) => {
-                if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
-                event.preventDefault();
-                activateValidationField(index, 'row');
-                input.focus();
-            });
-
-            input.addEventListener('input', () => {
-                clearValidationFieldError(index);
-                clearValidationSubmitError();
-                if (checkbox.checked) {
-                    checkbox.checked = false;
-                    row.classList.remove('is-verified');
-                    updateVerificationSummary();
-                }
-            });
-
-            checkbox.addEventListener('change', () => {
-                activateValidationField(index, 'row');
-                clearValidationFieldError(index);
-                clearValidationSubmitError();
-
-                if (checkbox.checked && input.value.trim() === '') {
-                    checkbox.checked = false;
-                    setValidationFieldError(index, 'Enter or confirm a value before marking this field as verified.');
-                    input.focus();
-                }
-
-                row.classList.toggle('is-verified', checkbox.checked);
-                updateVerificationSummary();
-            });
-
-            container.appendChild(row);
+        validationGroups = buildValidationGroups();
+        validationGroups.forEach((group) => {
+            group.indexes.forEach((index) => validationGroupByField.set(index, group));
         });
+
+        validationGroups.forEach((group) => container.appendChild(createValidationGroup(group)));
 
         const confidences = readings.map(normaliseConfidence);
         const average = confidences.length
@@ -1484,13 +1878,20 @@
     }
 
     function applyServerFieldErrors(errors, submittedIndexes) {
+        const invalidIndexes = [];
         Object.entries(errors ?? {}).forEach(([key, messages]) => {
             const match = key.match(/^fields\.(\d+)\./);
             if (!match) return;
             const originalIndex = submittedIndexes[Number(match[1])];
             if (originalIndex === undefined) return;
             setValidationFieldError(originalIndex, Array.isArray(messages) ? messages[0] : String(messages));
+            invalidIndexes.push(originalIndex);
         });
+
+        if (invalidIndexes.length === 0) return;
+        activateValidationField(invalidIndexes[0], 'marker');
+        const firstInvalidRow = validationRow(invalidIndexes[0]);
+        if (firstInvalidRow) requiredInput(firstInvalidRow, '.verified').focus();
     }
 
     el('submitForm').addEventListener('submit', async (event) => {
@@ -1507,12 +1908,16 @@
 
         if (verifiedIndexes.length === 0) {
             showValidationSubmitError('Check Verified on at least one field before submitting.');
-            if (rows[0]) requiredInput(rows[0], '.validation-verified').focus();
+            if (rows[0]) {
+                const firstIndex = Number(rows[0].dataset.fieldIndex);
+                activateValidationField(firstIndex, 'marker');
+                requiredInput(rows[0], '.validation-verified').focus();
+            }
             return;
         }
 
         const invalidIndexes = verifiedIndexes.filter((index) => {
-            const row = rows[index];
+            const row = validationRow(index);
             if (!row) return true;
             const input = requiredInput(row, '.verified');
             if (input.value.trim()) return false;
@@ -1522,7 +1927,7 @@
         if (invalidIndexes.length > 0) {
             showValidationSubmitError('Some checked fields still need a value.');
             activateValidationField(invalidIndexes[0], 'marker');
-            const invalidRow = rows[invalidIndexes[0]];
+            const invalidRow = validationRow(invalidIndexes[0]);
             if (invalidRow) requiredInput(invalidRow, '.verified').focus();
             return;
         }
@@ -1539,7 +1944,10 @@
         const submittedFields = verifiedIndexes.map((sourceIndex) => {
             const reading = readings[sourceIndex];
             const crop = cropped[sourceIndex];
-            const value = requiredInput(rows[sourceIndex], '.verified').value.trim();
+            const row = validationRow(sourceIndex);
+            const value = row instanceof HTMLElement
+                ? requiredInput(row, '.verified').value.trim()
+                : '';
             return {
                 verified: '1',
                 name: String(reading.name ?? ''),

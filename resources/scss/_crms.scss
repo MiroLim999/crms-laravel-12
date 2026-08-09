@@ -1746,6 +1746,34 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+.validation-record-list-heading {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .6rem 1rem;
+  color: var(--bs-secondary-color);
+  background: var(--bs-gray-100);
+  border-block-end: 1px solid var(--bs-border-color);
+  font-size: .6875rem;
+
+  > div {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    color: var(--bs-heading-color);
+    font-weight: 700;
+    letter-spacing: .045em;
+    text-transform: uppercase;
+  }
+
+  small {
+    color: var(--bs-secondary-color);
+    font-size: .6875rem;
+  }
+}
+
 .validation-result-list {
   flex: 1 1 auto;
   min-block-size: 0;
@@ -1770,6 +1798,139 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   &::-webkit-scrollbar-button {
     display: none;
+  }
+}
+
+.validation-record-group {
+  position: relative;
+  background: #fff;
+  border-block-end: 1px solid var(--bs-border-color);
+
+  &::before {
+    position: absolute;
+    z-index: 2;
+    inset-block: 0;
+    inset-inline-start: 0;
+    inline-size: .22rem;
+    background: transparent;
+    content: '';
+  }
+
+  &.is-active::before {
+    background: var(--bs-success);
+  }
+
+  &.is-active > .validation-record-group__toggle {
+    background: rgba(40, 199, 111, .055);
+  }
+
+  &.is-complete .validation-record-group__number {
+    color: #fff;
+    background: var(--bs-success);
+  }
+
+  &.is-expanded .validation-record-group__toggle > .bx-chevron-down {
+    transform: rotate(180deg);
+  }
+}
+
+.validation-record-group__toggle {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto 1.25rem;
+  align-items: center;
+  gap: .7rem;
+  inline-size: 100%;
+  min-block-size: 4rem;
+  padding: .65rem 1rem;
+  color: var(--bs-body-color);
+  background: #fff;
+  border: 0;
+  text-align: start;
+  transition: background-color .12s ease;
+
+  &:hover,
+  &:focus-visible {
+    background: rgba(105, 108, 255, .035);
+    outline: 0;
+  }
+
+  &:focus-visible {
+    box-shadow: inset 0 0 0 2px rgba(105, 108, 255, .2);
+  }
+
+  > .bx-chevron-down {
+    color: var(--bs-secondary-color);
+    transition: transform .16s ease;
+  }
+}
+
+.validation-record-group__number {
+  display: inline-grid;
+  inline-size: 2rem;
+  block-size: 2rem;
+  place-items: center;
+  color: var(--bs-primary);
+  background: rgba(105, 108, 255, .1);
+  border-radius: .4rem;
+  font-size: .6875rem;
+  font-weight: 700;
+}
+
+.validation-record-group__copy {
+  min-inline-size: 0;
+
+  strong,
+  small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: var(--bs-heading-color);
+    font-size: .8125rem;
+    font-weight: 600;
+  }
+
+  small {
+    margin-block-start: .12rem;
+    color: var(--bs-secondary-color);
+    font-size: .6875rem;
+  }
+}
+
+.validation-record-group__meta {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: .15rem;
+  font-size: .625rem;
+  white-space: nowrap;
+}
+
+.validation-record-group__review {
+  color: var(--bs-success);
+
+  &.has-review {
+    color: #b77900;
+  }
+}
+
+.validation-record-group__status {
+  color: var(--bs-secondary-color);
+}
+
+.validation-record-group__body {
+  background: rgba(67, 89, 113, .018);
+  border-block-start: 1px solid var(--bs-border-color);
+
+  .validation-field {
+    padding-inline-start: 1.35rem;
+  }
+
+  .validation-field:last-child {
+    border-block-end: 0;
   }
 }
 
@@ -2057,6 +2218,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     display: none;
   }
 
+  .validation-record-list-heading small {
+    display: none;
+  }
+
   .validation-result-list {
     max-block-size: 65vh;
   }
@@ -2064,6 +2229,14 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .validation-field {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: .65rem;
+  }
+
+  .validation-record-group__toggle {
+    grid-template-columns: 2rem minmax(0, 1fr) 1.25rem;
+  }
+
+  .validation-record-group__meta {
+    display: none;
   }
 
   .validation-field__value {
