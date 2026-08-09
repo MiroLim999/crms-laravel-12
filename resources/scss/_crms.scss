@@ -1127,17 +1127,89 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   box-shadow: inset 0 1px .25rem rgba(67, 89, 113, .08);
 }
 
+.field-marker-comparison-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.04fr) minmax(31rem, .96fr);
+  gap: 1rem;
+  block-size: calc(100vh - 8rem);
+  block-size: calc(100dvh - 8rem);
+  min-block-size: 34rem;
+
+  > * {
+    min-inline-size: 0;
+    min-block-size: 0;
+  }
+}
+
+.field-marker-document-pane {
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+#step-mark .document-canvas-card {
+  display: flex;
+  block-size: 100%;
+  min-block-size: 0;
+  overflow: hidden;
+  flex-direction: column;
+
+  > .card-body {
+    display: flex;
+    min-block-size: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+  }
+
+  .doc-viewport {
+    block-size: auto;
+    min-block-size: 0;
+    flex: 1 1 auto;
+  }
+}
+
 .document-side-panel {
   position: sticky;
   top: 1.25rem;
 }
 
 #step-mark .document-side-panel {
-  max-block-size: calc(100vh - 3rem);
+  position: static;
+  display: flex;
+  block-size: 100%;
+  max-block-size: none;
   padding-inline-end: .2rem;
+  flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
+}
+
+#step-mark .document-fields-card {
+  display: flex;
+  min-block-size: 27rem;
+  flex: 1 1 auto;
+  flex-direction: column;
+
+  .card-header {
+    flex: 0 0 auto;
+  }
+
+  .card-body {
+    display: flex;
+    min-block-size: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+  }
+
+  .marker-field-list {
+    min-block-size: 5rem;
+    max-block-size: none;
+    flex: 1 1 auto;
+  }
+}
+
+.field-marker-actions {
+  flex: 0 0 auto;
 }
 
 .document-fields-card .card-body {
@@ -2169,6 +2241,30 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     block-size: auto;
   }
 
+  .field-marker-comparison-grid {
+    grid-template-columns: 1fr;
+    block-size: auto;
+  }
+
+  .field-marker-document-pane {
+    block-size: 62vh;
+    min-block-size: 30rem;
+  }
+
+  #step-mark .document-side-panel {
+    block-size: auto;
+    padding-inline-end: 0;
+    overflow: visible;
+  }
+
+  #step-mark .document-fields-card {
+    min-block-size: 0;
+
+    .marker-field-list {
+      max-block-size: 20rem;
+    }
+  }
+
   .validation-document-pane {
     block-size: 62vh;
     min-block-size: 30rem;
@@ -2209,6 +2305,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   .validation-document-pane {
+    block-size: 58vh;
+    min-block-size: 25rem;
+  }
+
+  .field-marker-document-pane {
     block-size: 58vh;
     min-block-size: 25rem;
   }

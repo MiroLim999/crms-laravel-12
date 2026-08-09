@@ -64,8 +64,8 @@
 
     {{-- Step 2: mark the fields --}}
     <section id="step-mark" class="document-step-panel d-none">
-        <div class="row g-4">
-            <div class="col-lg-8">
+        <div class="field-marker-comparison-grid">
+            <div class="field-marker-document-pane">
                 <x-card class="document-canvas-card" bodyClass="p-0">
                     <div class="marker-toolbar">
                         <div class="marker-toolbar__primary">
@@ -137,8 +137,7 @@
                 </x-card>
             </div>
 
-            <div class="col-lg-4">
-                <div class="document-side-panel">
+            <div class="document-side-panel field-marker-controls-pane">
                 <x-card title="Fields" class="mb-4 document-fields-card">
                     <x-slot:actions>
                         <span class="badge bg-label-primary" id="fieldCount">0 fields</span>
@@ -216,14 +215,13 @@
                     <span id="ocrActionMessage"></span>
                 </div>
 
-                <div class="d-grid gap-2">
+                <div class="d-grid gap-2 field-marker-actions">
                     <button class="btn btn-primary btn-lg" type="button" id="scanNowBtn">
                         <i class="icon-base bx bx-scan icon-sm me-1"></i> Scan with OCR
                     </button>
                     <button class="btn btn-outline-secondary" type="button" id="backToUpload">
                         <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Choose another file
                     </button>
-                </div>
                 </div>
             </div>
         </div>
