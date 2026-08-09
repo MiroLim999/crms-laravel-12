@@ -279,7 +279,8 @@
 
                         <footer class="validation-pane__hint">
                             <i class="icon-base bx bx-scan" aria-hidden="true"></i>
-                            Click any marker to select its complete registry row. Hold <kbd>Ctrl</kbd> and scroll to zoom.
+                            Green shows the complete person row; the primary outline identifies the exact field.
+                            Hold <kbd>Ctrl</kbd> and scroll to zoom.
                         </footer>
                     </section>
 
@@ -1479,6 +1480,7 @@
             el('verifyRows').querySelectorAll('.validation-record-group').forEach((group) => {
                 group.classList.remove('is-active');
             });
+            updateValidationMarkerStates();
             return;
         }
         const selectedIndex = Number.isInteger(context.activeIndex)
@@ -1557,9 +1559,7 @@
         if (!group) return;
 
         activeValidationGroupId = group.id;
-        activeValidationIndex = group.indexes.includes(activeValidationIndex)
-            ? activeValidationIndex
-            : group.indexes[0];
+        activeValidationIndex = null;
         setExpandedValidationGroup(group.id);
         selectValidationGroupMarkers(group);
 
@@ -1570,6 +1570,7 @@
             row.classList.remove('is-active');
             row.removeAttribute('aria-current');
         });
+        updateValidationMarkerStates();
 
         if (source === 'group') revealValidationGroup(group);
         const section = el('verifyRows').querySelector(`[data-group-id="${group.id}"]`);
@@ -1596,6 +1597,7 @@
         el('verifyRows').querySelectorAll('.validation-record-group').forEach((section) => {
             section.classList.toggle('is-active', section.dataset.groupId === group.id);
         });
+        updateValidationMarkerStates();
 
         if (source === 'marker') revealValidationRow(index);
         if (source === 'row') revealValidationMarker(index);
@@ -1607,6 +1609,10 @@
                 .querySelector(`[data-field-index="${index}"] .validation-verified`);
             const checked = checkbox instanceof HTMLInputElement && checkbox.checked;
             box.classList.toggle('is-verified', checked);
+            const current = index === activeValidationIndex;
+            box.classList.toggle('is-current', current);
+            if (current) box.setAttribute('aria-current', 'true');
+            else box.removeAttribute('aria-current');
         });
     }
 
@@ -1815,8 +1821,14 @@
                 toggle.setAttribute('aria-expanded', 'false');
                 body.hidden = true;
                 activeValidationGroupId = group.id;
+                activeValidationIndex = null;
                 selectValidationGroupMarkers(group);
                 section.classList.add('is-active');
+                el('verifyRows').querySelectorAll('.validation-field').forEach((row) => {
+                    row.classList.remove('is-active');
+                    row.removeAttribute('aria-current');
+                });
+                updateValidationMarkerStates();
                 revealValidationGroup(group);
                 return;
             }
