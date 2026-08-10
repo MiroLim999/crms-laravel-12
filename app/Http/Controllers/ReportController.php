@@ -157,12 +157,12 @@ class ReportController extends Controller
             ->when($filters['from'], fn (Builder $q, $from) => $q->where(
                 'records.created_at',
                 '>=',
-                Carbon::parse($from)->startOfDay(),
+                Carbon::parse($from, config('crms.reporting_timezone', 'Asia/Manila'))->startOfDay()->utc(),
             ))
             ->when($filters['to'], fn (Builder $q, $to) => $q->where(
                 'records.created_at',
                 '<=',
-                Carbon::parse($to)->endOfDay(),
+                Carbon::parse($to, config('crms.reporting_timezone', 'Asia/Manila'))->endOfDay()->utc(),
             ))
             ->when($filters['doc_type'], fn (Builder $q, $type) => $q->whereHas(
                 'documentTypeDefinition',

@@ -42,7 +42,6 @@ class Navigation
             [
                 'header' => 'Oversight',
                 'items' => [
-                    self::item('Analytics', 'analytics.index', 'bx-bar-chart-alt-2', 'analytics.view'),
                     self::item('Reports', 'reports.index', 'bx-file', 'reports.generate'),
                     self::item('User Accounts', 'users.index', 'bx-user', 'users.manage'),
                     self::item('Audit Log', 'audit.index', 'bx-history', 'audit.view'),

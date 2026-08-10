@@ -14,9 +14,9 @@ export default defineConfig({
                 // Auth-page decoration (centred card, corner shapes). Only the
                 // guest layout loads it, so it stays out of the main bundle.
                 'resources/scss/pages/page-auth.scss',
-                // Loaded only by the analytics page. Keeping it out of app.js
-                // saves everyone else ~154 KB gzip on every page load.
-                'resources/js/sneat/apexcharts.js',
+                // Consolidated dashboard analytics. Its ApexCharts dependency is
+                // isolated from app.js so non-dashboard pages do not pay for it.
+                'resources/js/dashboard-analytics.js',
                 // Own entry: pulls in the PDF.js module tree. Only the scanning
                 // workspace and the template builder use it.
                 // NOTE: pdf.worker.mjs is now served from the CDN (see field-marker.js).
@@ -92,9 +92,9 @@ export default defineConfig({
                         return 'vendor-pdfjs';
                     }
 
-                    // ApexCharts already has its own entry (apexcharts.js) which
-                    // prevents it from appearing in app.js, but mark it explicitly
-                    // to stop Rollup from hoisting it into a shared chunk.
+                    // ApexCharts enters through dashboard-analytics.js, which keeps
+                    // it out of app.js. Mark it explicitly so Rollup retains a
+                    // separately cached vendor chunk.
                     if (id.includes('node_modules/apexcharts')) {
                         return 'vendor-apexcharts';
                     }

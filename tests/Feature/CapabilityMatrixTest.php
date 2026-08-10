@@ -36,7 +36,8 @@ class CapabilityMatrixTest extends TestCase
             'upload & process documents' => ['documents.create', 200, 403, 200],
             'search records archive' => ['records.index', 200, 200, 200],
             'change requests' => ['change-requests.index', 200, 200, 200],
-            'analytics dashboard' => ['analytics.index', 403, 200, 200],
+            // Legacy bookmark: oversight users are redirected to the consolidated Dashboard.
+            'analytics dashboard' => ['analytics.index', 403, 302, 302],
             'generate reports' => ['reports.index', 403, 200, 200],
             'manage user accounts' => ['users.index', 403, 200, 200],
             'view audit log' => ['audit.index', 403, 200, 200],

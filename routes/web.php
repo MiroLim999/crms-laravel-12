@@ -7,6 +7,7 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordChangeController;
 use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DashboardSystemStatusController;
 use App\Http\Controllers\DocumentScanController;
 use App\Http\Controllers\DocumentTemplateController;
 use App\Http\Controllers\DocumentTypeDefinitionController;
@@ -63,6 +64,9 @@ Route::middleware('auth')->group(function () {
     Route::redirect('/', '/dashboard');
 
     Route::get('dashboard', DashboardController::class)->name('dashboard');
+    Route::get('dashboard/system-status', DashboardSystemStatusController::class)
+        ->middleware('can:ocr.manage')
+        ->name('dashboard.system-status');
 
     // Self-service settings, available to every role.
     Route::get('settings', [AccountSettingsController::class, 'edit'])->name('settings.edit');
@@ -128,8 +132,9 @@ Route::middleware('auth')->group(function () {
     /*
      * Oversight - Admin and Super Admin.
      *
-     * All three read-only: they aggregate, list, and export. None of them is a
-     * write path to record values, which is what keeps Admin out of data entry.
+     * Analytics now live on the role-aware Dashboard. Keep the old gated URL as a
+     * redirect so saved bookmarks continue to work. Reports still list/export,
+     * and neither route is a write path to record values.
      */
     Route::get('analytics', [AnalyticsController::class, 'index'])
         ->middleware('can:analytics.view')
