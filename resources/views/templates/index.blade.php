@@ -51,7 +51,7 @@
                     <header class="template-library-card__header">
                         <div class="template-library-card__identity">
                             <span class="template-library-card__icon" aria-hidden="true">
-                                <i class="icon-base bx {{ $type->icon() }}"></i>
+                                <i class="icon-base bx {{ $type->icon() }} icon-md"></i>
                             </span>
                             <div>
                                 <h2 class="h5 mb-1" id="template-type-{{ $type->getKey() }}">{{ $type->label() }}</h2>
@@ -287,7 +287,7 @@
                                         @enderror
                                     @endif
                                     <div class="template-document-type-rename-note">
-                                        <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
+                                        <i class="icon-base bx bx-info-circle icon-xs" aria-hidden="true"></i>
                                         <span>This changes the label shown on this card, its layouts, and the editor. Existing records and layouts stay connected.</span>
                                     </div>
                                 </div>

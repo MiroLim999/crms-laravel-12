@@ -3,11 +3,14 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
+        "check:icons": "node tools/subset-icons.mjs --check",
         "dev": "vite",
         "test:js": "node --test tests/JavaScript/*.test.js",
         "subset-icons": "node tools/subset-icons.mjs"
     },
     "devDependencies": {
+        "@iconify-json/bx": "^1.2.3",
+        "@iconify/utils": "^3.0.2",
         "@popperjs/core": "^2.11.8",
         "@tailwindcss/vite": "^4.0.0",
         "axios": "^1.7.4",

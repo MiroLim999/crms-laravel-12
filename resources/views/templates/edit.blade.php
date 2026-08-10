@@ -119,7 +119,7 @@
                                             aria-expanded="false" aria-label="Show editor shortcuts">
                                         <i class="icon-base bx bx-terminal icon-sm" aria-hidden="true"></i>
                                         <span>Shortcuts</span>
-                                        <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
+                                        <i class="icon-base bx bx-chevron-down icon-sm" aria-hidden="true"></i>
                                     </button>
                                     <div class="dropdown-menu dropdown-menu-end marker-shortcuts-menu">
                                         <div class="marker-shortcuts-menu__title">Editor shortcuts</div>
@@ -143,7 +143,7 @@
                                 </button>
 
                                 <span class="marker-selection-summary" id="selectionSummary">
-                                    <i class="icon-base bx bx-check-circle" aria-hidden="true"></i>
+                                    <i class="icon-base bx bx-list-check icon-sm" aria-hidden="true"></i>
                                     <span>0 selected</span>
                                 </span>
                                 <button type="button" class="marker-delete-button"
@@ -274,7 +274,7 @@
                                 </fieldset>
 
                                 <div class="template-paper-preview" id="paperPreviewStatus" role="status" aria-live="polite">
-                                    <i class="icon-base bx bx-file" aria-hidden="true"></i>
+                                    <i class="icon-base bx bx-file icon-sm" id="paperPreviewIcon" aria-hidden="true"></i>
                                     <div>
                                         <strong id="paperPreviewTitle"></strong>
                                         <span id="paperPreviewMessage"></span>
@@ -323,7 +323,7 @@
                                         <label class="form-check-label" for="selectAllFields">Select all</label>
                                     </div>
                                     <button type="button" class="marker-field-delete" id="deleteFieldsBtn" disabled>
-                                        <i class="icon-base bx bx-trash" aria-hidden="true"></i>
+                                        <i class="icon-base bx bx-trash icon-sm" aria-hidden="true"></i>
                                         <span>Delete</span>
                                     </button>
                                 </div>
@@ -345,6 +345,7 @@
                                         </button>
                                         <button type="button" class="btn btn-sm btn-outline-secondary"
                                                 id="ungroupSelectedBtn" disabled>
+                                            <i class="icon-base bx bx-x icon-sm me-1" aria-hidden="true"></i>
                                             Ungroup selected
                                         </button>
                                     </div>
@@ -366,12 +367,12 @@
                                     <input type="text" id="newFieldName" class="form-control"
                                            maxlength="500" placeholder="Field name">
                                     <button class="btn btn-outline-primary" type="button" id="addFieldBtn">
-                                        <i class="icon-base bx bx-plus me-1" aria-hidden="true"></i>Add
+                                        <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add
                                     </button>
                                 </div>
 
                                 <p class="document-tip mt-3 mb-0">
-                                    <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
+                                    <i class="icon-base bx bx-info-circle icon-xs" aria-hidden="true"></i>
                                     <span>Keep each marker tight around one handwritten value. The sample is stored privately with this layout after you save.</span>
                                 </p>
                             </div>
@@ -393,7 +394,7 @@
                                 </button>
                             @else
                                 <p class="template-builder-live-note">
-                                    <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
+                                    <i class="icon-base bx bx-info-circle icon-xs" aria-hidden="true"></i>
                                     Saved changes become the Staff default immediately.
                                 </p>
                                 <button type="submit" class="btn btn-primary" data-publish="1">

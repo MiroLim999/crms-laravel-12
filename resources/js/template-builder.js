@@ -424,7 +424,7 @@ function createFieldRow(index) {
     removeButton.setAttribute('aria-label', `Remove field ${index + 1}`);
 
     const removeIcon = document.createElement('i');
-    removeIcon.className = 'icon-base bx bx-x icon-sm';
+    removeIcon.className = 'icon-base bx bx-trash icon-sm';
     removeIcon.setAttribute('aria-hidden', 'true');
     removeButton.appendChild(removeIcon);
     item.appendChild(removeButton);
@@ -659,6 +659,7 @@ function clearBuilderError() {
 
 function updatePaperPreview() {
     const status = element('paperPreviewStatus');
+    const icon = element('paperPreviewIcon');
     const title = element('paperPreviewTitle');
     const message = element('paperPreviewMessage');
     const { paper, orientation, ratio } = expectedPaper();
@@ -666,6 +667,8 @@ function updatePaperPreview() {
 
     title.textContent = `${paper?.label ?? 'Paper'} · ${orientationLabel}`;
     status.classList.remove('is-warning', 'is-match');
+    icon.classList.remove('bx-error', 'bx-check-circle');
+    icon.classList.add('bx-file');
 
     if (!sampleLoaded) {
         message.textContent = `${paper?.dimensionsLabel ?? ''} blank preview. Upload a sample to check its page shape.`;
@@ -679,6 +682,8 @@ function updatePaperPreview() {
 
     if (orientationMismatch || ratioDifference > 0.1) {
         status.classList.add('is-warning');
+        icon.classList.remove('bx-file');
+        icon.classList.add('bx-error');
         message.textContent = orientationMismatch
             ? `The sample looks ${actualOrientation}, but this template is ${orientation}. It will not be stretched.`
             : 'The sample proportions differ from this paper preset. Check the selected paper size before publishing.';
@@ -686,6 +691,8 @@ function updatePaperPreview() {
     }
 
     status.classList.add('is-match');
+    icon.classList.remove('bx-file');
+    icon.classList.add('bx-check-circle');
     message.textContent = 'The sample proportions are consistent with this template setting.';
 }
 
