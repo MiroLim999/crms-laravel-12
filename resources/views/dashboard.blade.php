@@ -4,101 +4,11 @@
 @section('body-class', 'dashboard-page')
 
 @section('content')
-    <x-page-header
-        title="Welcome back, {{ $user->name }}"
-        :subtitle="$user->hasOversight()
-            ? 'Registry analytics, current priorities, and governance in one place.'
-            : 'Continue digitising records and follow your own requests.'">
-        @can('documents.process')
-            <a href="{{ route('documents.create') }}" class="btn btn-primary">
-                <i class="icon-base bx bx-scan me-1" aria-hidden="true"></i>
-                New document
-            </a>
-        @endcan
-        @can('change-requests.moderate')
-            <a href="{{ route('change-requests.index', ['status' => 'pending']) }}" class="btn btn-outline-primary">
-                Review requests
-            </a>
-        @endcan
-    </x-page-header>
-
     @if ($analytics)
-        <section class="dashboard-filter-card card mb-4" aria-labelledby="dashboard-filter-title">
-            <div class="card-body">
-                <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
-                    <div>
-                        <h5 class="mb-1" id="dashboard-filter-title">Reporting scope</h5>
-                        <p class="mb-0 text-muted small">
-                            Submission and OCR charts use {{ $scope['label'] }}
-                            <span class="dashboard-scope-timezone">({{ $scope['timezone'] }})</span>.
-                        </p>
-                    </div>
-                    <a href="{{ route('dashboard') }}" class="btn btn-sm btn-label-secondary">Reset filters</a>
-                </div>
-
-                <form method="GET" action="{{ route('dashboard') }}" class="dashboard-filter-grid">
-                    <div>
-                        <label for="dashboard-period" class="form-label">Period</label>
-                        <select id="dashboard-period" name="period" class="form-select">
-                            @foreach ($periodOptions as $value => $label)
-                                <option value="{{ $value }}" @selected($scope['period'] === $value)>{{ $label }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div>
-                        <label for="dashboard-from" class="form-label">From</label>
-                        <input id="dashboard-from" type="date" name="from" class="form-control"
-                               value="{{ $scope['period'] === 'custom' ? $scope['from'] : '' }}">
-                    </div>
-                    <div>
-                        <label for="dashboard-to" class="form-label">To</label>
-                        <input id="dashboard-to" type="date" name="to" class="form-control"
-                               value="{{ $scope['period'] === 'custom' ? $scope['to'] : '' }}">
-                    </div>
-                    <div>
-                        <label for="dashboard-type" class="form-label">Document type</label>
-                        <select id="dashboard-type" name="document_type" class="form-select">
-                            <option value="">All document types</option>
-                            @foreach ($filterOptions['document_types'] as $type)
-                                <option value="{{ $type->key }}" @selected($scope['document_type'] === $type->key)>
-                                    {{ $type->label() }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div>
-                        <label for="dashboard-model" class="form-label">OCR model</label>
-                        <select id="dashboard-model" name="ocr_model" class="form-select">
-                            <option value="">All OCR models</option>
-                            @foreach ($filterOptions['ocr_models'] as $model)
-                                <option value="{{ $model['key'] }}" @selected($scope['ocr_model'] === $model['key'])>
-                                    {{ $model['label'] }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="dashboard-filter-submit">
-                        <button type="submit" class="btn btn-primary w-100">Apply</button>
-                    </div>
-                </form>
-            </div>
-        </section>
-
         @php
             $headline = $analytics['headline'];
             $quality = $analytics['ocr_quality'];
-            $oldestPending = $headline['oldest_pending_at']
-                ? \Illuminate\Support\Carbon::parse($headline['oldest_pending_at'])
-                : null;
-            $readinessValue = $system
-                ? $system['ready_types'].'/'.$system['total_types']
-                : number_format($analytics['accounts']['active']);
-            $readinessLabel = $system ? 'Document types scan-ready' : 'Active accounts';
-            $readinessNote = $system
-                ? ($system['template_issues'] > 0
-                    ? $system['template_issues'].' '.\Illuminate\Support\Str::plural('type', $system['template_issues']).' need attention'
-                    : 'Every type has one published layout')
-                : $analytics['accounts']['password_change_required'].' password changes required';
+            $throughput = $analytics['throughput']->take(6)->values();
             $chartData = [
                 'volume' => $analytics['trend'],
                 'documentTypes' => $analytics['by_document_type']->map(fn ($row) => [
@@ -106,93 +16,91 @@
                     'total' => $row['total'],
                 ])->values(),
                 'quality' => [
-                    'passRate' => $quality['threshold_pass_rate'],
+                    'averageConfidence' => $quality['average_confidence'],
+                    'correctionRate' => $quality['correction_rate'],
                     'threshold' => $quality['threshold'],
                 ],
-                'governance' => $analytics['governance'],
+                'throughput' => [
+                    'labels' => $throughput->pluck('name')->values(),
+                    'totals' => $throughput->pluck('total')->values(),
+                ],
             ];
         @endphp
 
-        <section class="row g-4 mb-4" aria-label="Dashboard summary">
+        <section class="row g-4 mb-4" aria-label="CRMS performance summary">
             <div class="col-sm-6 col-xl-3">
-                <a href="{{ route('reports.index', array_filter([
-                    'from' => $scope['from'],
-                    'to' => $scope['to'],
-                    'doc_type' => $scope['document_type'],
-                    'status' => 'submitted',
-                ])) }}" class="dashboard-metric card h-100 text-reset">
+                <a href="{{ route('reports.index', ['status' => 'submitted']) }}"
+                   class="dashboard-kpi card h-100 text-reset">
                     <div class="card-body">
-                        <div class="dashboard-metric__topline">
-                            <span class="dashboard-metric__icon bg-label-primary">
+                        <div class="dashboard-kpi__header">
+                            <span class="dashboard-kpi__icon bg-label-primary">
                                 <i class="icon-base bx bx-archive" aria-hidden="true"></i>
                             </span>
-                            <span class="badge bg-label-primary">Selected period</span>
+                            <span class="badge bg-label-primary">All time</span>
                         </div>
-                        <div class="dashboard-metric__value">{{ number_format($headline['records']) }}</div>
-                        <div class="dashboard-metric__label">Records digitized</div>
-                        <small class="dashboard-metric__note">
-                            @if ($headline['records_delta'] === null)
-                                No comparable previous-period baseline
-                            @else
-                                {{ $headline['records_delta'] >= 0 ? '+' : '' }}{{ $headline['records_delta'] }}% vs previous period
-                            @endif
-                        </small>
+                        <span class="dashboard-kpi__label">Total digitized records</span>
+                        <strong class="dashboard-kpi__value">{{ number_format($headline['records']) }}</strong>
+                        <span class="dashboard-kpi__meta">
+                            {{ number_format($headline['period_records']) }} submitted in the last 12 months
+                        </span>
                     </div>
                 </a>
             </div>
 
             <div class="col-sm-6 col-xl-3">
-                <a href="{{ route('change-requests.index', ['status' => 'pending']) }}"
-                   class="dashboard-metric card h-100 text-reset {{ $headline['pending_requests'] > 0 ? 'dashboard-metric--warning' : '' }}">
+                <div class="dashboard-kpi card h-100">
                     <div class="card-body">
-                        <div class="dashboard-metric__topline">
-                            <span class="dashboard-metric__icon bg-label-warning">
-                                <i class="icon-base bx bx-git-pull-request" aria-hidden="true"></i>
-                            </span>
-                            <span class="badge bg-label-secondary">Current status</span>
-                        </div>
-                        <div class="dashboard-metric__value">{{ number_format($headline['pending_requests']) }}</div>
-                        <div class="dashboard-metric__label">Pending change requests</div>
-                        <small class="dashboard-metric__note">
-                            {{ $oldestPending ? 'Oldest submitted '.$oldestPending->diffForHumans() : 'Nothing is waiting for a decision' }}
-                        </small>
-                    </div>
-                </a>
-            </div>
-
-            <div class="col-sm-6 col-xl-3">
-                <div class="dashboard-metric card h-100">
-                    <div class="card-body">
-                        <div class="dashboard-metric__topline">
-                            <span class="dashboard-metric__icon bg-label-info">
+                        <div class="dashboard-kpi__header">
+                            <span class="dashboard-kpi__icon bg-label-info">
                                 <i class="icon-base bx bx-brain" aria-hidden="true"></i>
                             </span>
-                            <span class="badge bg-label-info">Selected period</span>
+                            <span class="badge bg-label-info">12 months</span>
                         </div>
-                        <div class="dashboard-metric__value">
-                            {{ $headline['threshold_pass_rate'] === null ? '—' : $headline['threshold_pass_rate'].'%' }}
-                        </div>
-                        <div class="dashboard-metric__label">Fields meeting review threshold</div>
-                        <small class="dashboard-metric__note">
-                            {{ number_format($headline['confidence_fields']) }} confidence-scored fields
-                        </small>
+                        <span class="dashboard-kpi__label">Average OCR confidence</span>
+                        <strong class="dashboard-kpi__value">
+                            {{ $quality['average_confidence'] === null ? '—' : $quality['average_confidence'].'%' }}
+                        </strong>
+                        <span class="dashboard-kpi__meta">
+                            {{ number_format($quality['confidence_fields']) }} confidence-scored fields
+                        </span>
                     </div>
                 </div>
             </div>
 
             <div class="col-sm-6 col-xl-3">
-                <a href="{{ $system ? route('templates.index') : route('users.index') }}"
-                   class="dashboard-metric card h-100 text-reset {{ $system && $system['template_issues'] > 0 ? 'dashboard-metric--danger' : '' }}">
+                <div class="dashboard-kpi card h-100">
                     <div class="card-body">
-                        <div class="dashboard-metric__topline">
-                            <span class="dashboard-metric__icon bg-label-success">
-                                <i class="icon-base bx {{ $system ? 'bx-layout' : 'bx-user-check' }}" aria-hidden="true"></i>
+                        <div class="dashboard-kpi__header">
+                            <span class="dashboard-kpi__icon bg-label-warning">
+                                <i class="icon-base bx bx-edit-alt" aria-hidden="true"></i>
                             </span>
-                            <span class="badge bg-label-secondary">Current status</span>
+                            <span class="badge bg-label-warning">12 months</span>
                         </div>
-                        <div class="dashboard-metric__value">{{ $readinessValue }}</div>
-                        <div class="dashboard-metric__label">{{ $readinessLabel }}</div>
-                        <small class="dashboard-metric__note">{{ $readinessNote }}</small>
+                        <span class="dashboard-kpi__label">Human correction rate</span>
+                        <strong class="dashboard-kpi__value">
+                            {{ $quality['correction_rate'] === null ? '—' : $quality['correction_rate'].'%' }}
+                        </strong>
+                        <span class="dashboard-kpi__meta">
+                            {{ number_format($quality['corrected_fields']) }} of {{ number_format($quality['comparable_fields']) }} OCR fields edited
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-sm-6 col-xl-3">
+                <a href="{{ route('users.index') }}" class="dashboard-kpi card h-100 text-reset">
+                    <div class="card-body">
+                        <div class="dashboard-kpi__header">
+                            <span class="dashboard-kpi__icon bg-label-success">
+                                <i class="icon-base bx bx-user-check" aria-hidden="true"></i>
+                            </span>
+                            <span class="badge bg-label-success">Current</span>
+                        </div>
+                        <span class="dashboard-kpi__label">Active accounts</span>
+                        <strong class="dashboard-kpi__value">{{ number_format($analytics['accounts']['active']) }}</strong>
+                        <span class="dashboard-kpi__meta">
+                            {{ number_format($analytics['accounts']['inactive']) }} inactive accounts
+                        </span>
                     </div>
                 </a>
             </div>
@@ -200,17 +108,49 @@
 
         <div class="row g-4 mb-4">
             <div class="col-xl-8">
-                <x-card class="h-100" title="Digitisation volume"
-                        :subtitle="'Submitted records by '.$analytics['trend']['mode'].' · '.$scope['label']">
-                    <div id="dashboard-volume-chart" class="dashboard-chart" aria-label="Digitisation volume chart"></div>
+                <x-card class="dashboard-panel h-100"
+                        title="Digitization Volume & Trend"
+                        subtitle="Monthly submissions by document type over the last 12 months.">
+                    <x-slot:actions>
+                        @if ($analytics['trend']['growth_rate'] !== null)
+                            <span class="badge bg-label-{{ $analytics['trend']['growth_rate'] >= 0 ? 'success' : 'danger' }}">
+                                @if ($analytics['trend']['growth_rate'] >= 0)
+                                    <i class="icon-base bx bx-trending-up me-1" aria-hidden="true"></i>
+                                @else
+                                    <i class="icon-base bx bx-trending-down me-1" aria-hidden="true"></i>
+                                @endif
+                                {{ $analytics['trend']['growth_rate'] >= 0 ? '+' : '' }}{{ $analytics['trend']['growth_rate'] }}% vs last month
+                            </span>
+                        @else
+                            <span class="badge bg-label-secondary">Last 12 months</span>
+                        @endif
+                    </x-slot:actions>
+
+                    <div id="dashboard-volume-chart" class="dashboard-chart dashboard-chart--volume"
+                         aria-label="Monthly digitization volume by document type"></div>
+
                     <details class="dashboard-chart-data mt-2">
                         <summary>View chart data</summary>
                         <div class="table-responsive mt-2">
                             <table class="table table-sm mb-0">
-                                <thead><tr><th>Period</th><th class="text-end">Submitted</th></tr></thead>
+                                <thead>
+                                    <tr>
+                                        <th>Month</th>
+                                        @foreach ($analytics['trend']['series'] as $series)
+                                            <th class="text-end">{{ $series['name'] }}</th>
+                                        @endforeach
+                                        <th class="text-end">Total</th>
+                                    </tr>
+                                </thead>
                                 <tbody>
                                     @foreach ($analytics['trend']['labels'] as $index => $label)
-                                        <tr><td>{{ $label }}</td><td class="text-end">{{ number_format($analytics['trend']['totals'][$index]) }}</td></tr>
+                                        <tr>
+                                            <td>{{ $label }}</td>
+                                            @foreach ($analytics['trend']['series'] as $series)
+                                                <td class="text-end">{{ number_format($series['data'][$index]) }}</td>
+                                            @endforeach
+                                            <td class="text-end fw-medium">{{ number_format($analytics['trend']['totals'][$index]) }}</td>
+                                        </tr>
                                     @endforeach
                                 </tbody>
                             </table>
@@ -220,24 +160,27 @@
             </div>
 
             <div class="col-xl-4">
-                <x-card class="h-100" title="Records by document type" subtitle="Share of the selected submissions.">
+                <x-card class="dashboard-panel h-100"
+                        title="Document Type Distribution"
+                        subtitle="Percentage share of records submitted in the last 12 months.">
                     @if ($analytics['by_document_type']->sum('total') > 0)
-                        <div id="dashboard-type-chart" class="dashboard-chart dashboard-chart--donut" aria-label="Records by document type chart"></div>
+                        <div id="dashboard-type-chart" class="dashboard-chart dashboard-chart--donut"
+                             aria-label="Document type distribution"></div>
                     @else
-                        <x-empty-state icon="bx-archive" title="No submissions in this period"
-                                       message="Try a wider date range or clear a filter." />
+                        <x-empty-state icon="bx-pie-chart-alt-2" title="No submissions yet"
+                                       message="Document type shares will appear after records are submitted." />
                     @endif
 
                     <div class="dashboard-ranked-list mt-2">
-                        @foreach ($analytics['by_document_type']->take(6) as $row)
+                        @foreach ($analytics['by_document_type'] as $row)
                             <div class="dashboard-ranked-list__row">
                                 <span class="d-inline-flex align-items-center gap-2 text-truncate">
-                                    <i class="icon-base bx {{ $row['type']->icon() }} text-muted" aria-hidden="true"></i>
+                                    <span class="dashboard-ranked-list__marker" aria-hidden="true"></span>
                                     <span class="text-truncate">{{ $row['type']->shortLabel() }}</span>
                                 </span>
                                 <span class="fw-medium text-nowrap">
                                     {{ number_format($row['total']) }}
-                                    <small class="text-muted">{{ $row['share'] }}%</small>
+                                    <small class="text-muted ms-1">{{ $row['share'] }}%</small>
                                 </span>
                             </div>
                         @endforeach
@@ -246,289 +189,120 @@
             </div>
         </div>
 
-        <div class="row g-4 mb-4">
+        <div class="row g-4">
             <div class="col-xl-5">
-                <x-card class="h-100" title="OCR review signals"
-                        subtitle="Confidence and human edits are review indicators, not validated accuracy.">
-                    <div class="dashboard-quality-layout">
-                        <div id="dashboard-quality-chart" class="dashboard-chart dashboard-chart--radial"
-                             aria-label="Fields meeting the review threshold"></div>
-                        <dl class="dashboard-signal-list mb-0">
-                            <div>
-                                <dt>Average confidence</dt>
-                                <dd>{{ $quality['average_confidence'] === null ? '—' : $quality['average_confidence'].'%' }}</dd>
-                            </div>
-                            <div>
-                                <dt>Below {{ $quality['threshold'] }}%</dt>
-                                <dd>{{ number_format($quality['below_threshold']) }}</dd>
-                            </div>
-                            <div>
-                                <dt>Human edit rate</dt>
-                                <dd>{{ $quality['correction_rate'] === null ? '—' : $quality['correction_rate'].'%' }}</dd>
-                            </div>
-                            <div>
-                                <dt>Comparable OCR fields</dt>
-                                <dd>{{ number_format($quality['comparable_fields']) }}</dd>
-                            </div>
-                        </dl>
-                    </div>
-                    <div class="alert alert-info d-flex align-items-start gap-2 mt-3 mb-0 small" role="note">
-                        <i class="icon-base bx bx-info-circle flex-shrink-0" aria-hidden="true"></i>
-                        <span>A human edit can be a formatting change, and an unchanged value can still be wrong. Use these signals to investigate—not as an accuracy score.</span>
-                    </div>
-                </x-card>
-            </div>
+                <x-card class="dashboard-panel h-100"
+                        title="OCR AI Quality & Accuracy"
+                        subtitle="OCR confidence and the share of fields corrected during verification.">
+                    <div id="dashboard-quality-chart" class="dashboard-chart dashboard-chart--radial"
+                         aria-label="OCR confidence and human correction rate"></div>
 
-            <div class="col-xl-7">
-                @if ($system)
-                    <x-card class="h-100" title="System readiness" subtitle="Current OCR and template configuration.">
-                        <x-slot:actions>
-                            <span class="badge bg-label-secondary">Current status</span>
-                        </x-slot:actions>
-
-                        <div class="dashboard-readiness-grid">
-                            <a href="{{ route('ocr.index') }}" class="dashboard-readiness-item text-reset">
-                                <span class="dashboard-readiness-item__icon bg-label-info">
-                                    <i class="icon-base bx bx-brain" aria-hidden="true"></i>
-                                </span>
-                                <span>
-                                    <small class="text-muted d-block">OCR engine</small>
-                                    <strong id="dashboard-ocr-status"
-                                            data-status-url="{{ route('dashboard.system-status') }}">Checking…</strong>
-                                    <small id="dashboard-ocr-detail" class="text-muted d-block">Live status loads separately</small>
-                                </span>
-                            </a>
-                            <a href="{{ route('ocr.index') }}" class="dashboard-readiness-item text-reset">
-                                <span class="dashboard-readiness-item__icon bg-label-primary">
-                                    <i class="icon-base bx bx-check-shield" aria-hidden="true"></i>
-                                </span>
-                                <span>
-                                    <small class="text-muted d-block">Active OCR model</small>
-                                    <strong>{{ $system['active_model']?->label ?: $system['active_model']?->key ?: 'Not configured' }}</strong>
-                                    <small class="text-muted d-block">Review threshold {{ $system['threshold'] }}%</small>
-                                </span>
-                            </a>
-                            <a href="{{ route('templates.index') }}" class="dashboard-readiness-item text-reset">
-                                <span class="dashboard-readiness-item__icon bg-label-success">
-                                    <i class="icon-base bx bx-layout" aria-hidden="true"></i>
-                                </span>
-                                <span>
-                                    <small class="text-muted d-block">Published coverage</small>
-                                    <strong>{{ $system['ready_types'] }} of {{ $system['total_types'] }} types ready</strong>
-                                    <small class="text-muted d-block">{{ $system['draft_templates'] }} draft layouts</small>
-                                </span>
-                            </a>
-                            <a href="{{ route('users.index') }}" class="dashboard-readiness-item text-reset">
-                                <span class="dashboard-readiness-item__icon bg-label-warning">
-                                    <i class="icon-base bx bx-user" aria-hidden="true"></i>
-                                </span>
-                                <span>
-                                    <small class="text-muted d-block">Account health</small>
-                                    <strong>{{ $analytics['accounts']['active'] }} active · {{ $analytics['accounts']['inactive'] }} inactive</strong>
-                                    <small class="text-muted d-block">{{ $analytics['accounts']['password_change_required'] }} require a password change</small>
-                                </span>
-                            </a>
-                            <div class="dashboard-readiness-item">
-                                <span class="dashboard-readiness-item__icon bg-label-secondary">
-                                    <i class="icon-base bx bx-folder" aria-hidden="true"></i>
-                                </span>
-                                <span>
-                                    <small class="text-muted d-block">Original scan storage</small>
-                                    <strong id="dashboard-storage-value">Calculating…</strong>
-                                    <small id="dashboard-storage-detail" class="text-muted d-block">Cached for 10 minutes</small>
-                                </span>
-                            </div>
+                    <div class="dashboard-quality-summary">
+                        <div>
+                            <span class="dashboard-quality-summary__dot bg-primary" aria-hidden="true"></span>
+                            <span>
+                                <small>Average confidence</small>
+                                <strong>{{ $quality['average_confidence'] === null ? '—' : $quality['average_confidence'].'%' }}</strong>
+                            </span>
                         </div>
-                    </x-card>
-                @else
-                    <x-card class="h-100" title="Account health" subtitle="Current account state across CRMS.">
-                        <x-slot:actions>
-                            <a href="{{ route('users.index') }}" class="btn btn-sm btn-label-secondary">Manage accounts</a>
-                        </x-slot:actions>
-                        <div class="dashboard-readiness-grid">
-                            @foreach ([
-                                ['Active accounts', $analytics['accounts']['active'], 'bx-user-check', 'success'],
-                                ['Inactive accounts', $analytics['accounts']['inactive'], 'bx-user', 'secondary'],
-                                ['Password change required', $analytics['accounts']['password_change_required'], 'bx-key', 'warning'],
-                                ['Never logged in', $analytics['accounts']['never_logged_in'], 'bx-time-five', 'info'],
-                            ] as [$label, $value, $icon, $tone])
-                                <div class="dashboard-readiness-item">
-                                    <span class="dashboard-readiness-item__icon bg-label-{{ $tone }}">
-                                        <i class="icon-base bx {{ $icon }}" aria-hidden="true"></i>
-                                    </span>
-                                    <span>
-                                        <strong class="d-block">{{ number_format($value) }}</strong>
-                                        <small class="text-muted">{{ $label }}</small>
-                                    </span>
-                                </div>
-                            @endforeach
+                        <div>
+                            <span class="dashboard-quality-summary__dot bg-warning" aria-hidden="true"></span>
+                            <span>
+                                <small>Human correction</small>
+                                <strong>{{ $quality['correction_rate'] === null ? '—' : $quality['correction_rate'].'%' }}</strong>
+                            </span>
                         </div>
-                    </x-card>
-                @endif
-            </div>
-        </div>
+                    </div>
 
-        @if ($system)
-            <x-card class="mb-4" title="Template usage and OCR review signals"
-                    subtitle="Current published layouts; signal values use the selected submissions.">
-                <x-slot:actions>
-                    <a href="{{ route('templates.index') }}" class="btn btn-sm btn-label-primary">Open Template Builder</a>
-                </x-slot:actions>
-
-                <div class="table-responsive">
-                    <table class="table align-middle mb-0">
-                        <thead>
-                            <tr>
-                                <th>Published layout</th>
-                                <th class="text-end">Records</th>
-                                <th class="text-end">Fields / groups</th>
-                                <th class="text-end">Avg. confidence</th>
-                                <th class="text-end">Below threshold</th>
-                                <th class="text-end">Human edit rate</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @forelse ($system['template_performance'] as $row)
-                                <tr>
-                                    <td>
-                                        <div class="fw-medium">{{ $row['template']->name }}</div>
-                                        <small class="text-muted">{{ $row['template']->typeLabel() }}</small>
-                                    </td>
-                                    <td class="text-end">{{ number_format($row['records']) }}</td>
-                                    <td class="text-end">
-                                        {{ $row['fields'] }} /
-                                        {{ $row['template']->grouping_mode === 'auto' ? 'Auto' : $row['person_groups'] }}
-                                    </td>
-                                    <td class="text-end">{{ $row['average_confidence'] === null ? '—' : $row['average_confidence'].'%' }}</td>
-                                    <td class="text-end">{{ $row['below_rate'] === null ? '—' : $row['below_rate'].'%' }}</td>
-                                    <td class="text-end">{{ $row['edit_rate'] === null ? '—' : $row['edit_rate'].'%' }}</td>
-                                </tr>
-                            @empty
-                                <tr><td colspan="6" class="text-center text-muted py-4">No published layouts yet.</td></tr>
-                            @endforelse
-                        </tbody>
-                    </table>
-                </div>
-            </x-card>
-        @endif
-
-        <div class="row g-4 mb-4">
-            <div class="col-xl-7">
-                <x-card class="h-100" title="Governance activity"
-                        subtitle="Successful audited actions in the selected date range.">
-                    <div id="dashboard-governance-chart" class="dashboard-chart" aria-label="Governance event chart"></div>
-                    <p class="small text-muted mb-0">
-                        Authentication represents successful sign-ins. Failed sign-ins and denied access are not currently captured.
+                    <p class="dashboard-quality-note mb-0">
+                        <i class="icon-base bx bx-target-lock" aria-hidden="true"></i>
+                        System review threshold: <strong>{{ $quality['threshold'] }}%</strong>
+                        <span>·</span>
+                        {{ number_format($quality['below_threshold']) }} fields below threshold
                     </p>
                 </x-card>
             </div>
 
-            <div class="col-xl-5">
-                <x-card class="h-100" title="Recent audited activity" subtitle="Latest recorded actions across CRMS.">
-                    <x-slot:actions>
-                        <a href="{{ route('audit.index') }}" class="btn btn-sm btn-label-secondary">View Audit Log</a>
-                    </x-slot:actions>
-
-                    @forelse ($recentActivity as $entry)
-                        @php
-                            [$activityIcon, $activityTone] = match (true) {
-                                str_starts_with($entry->action, 'template.'), str_starts_with($entry->action, 'document_type.') => ['bx-layout', 'primary'],
-                                str_starts_with($entry->action, 'ocr_'), str_starts_with($entry->action, 'ocr_model.') => ['bx-brain', 'info'],
-                                str_starts_with($entry->action, 'user.') => ['bx-user', 'warning'],
-                                str_starts_with($entry->action, 'change_request.') => ['bx-git-pull-request', 'success'],
-                                str_starts_with($entry->action, 'report.') => ['bx-file', 'secondary'],
-                                default => ['bx-check', 'secondary'],
-                            };
-                        @endphp
-                        <div class="dashboard-activity {{ ! $loop->last ? 'border-bottom' : '' }}">
-                            <span class="dashboard-activity__icon bg-label-{{ $activityTone }}">
-                                <i class="icon-base bx {{ $activityIcon }}" aria-hidden="true"></i>
-                            </span>
-                            <span class="min-w-0">
-                                <span class="d-block fw-medium">{{ $entry->description ?? str($entry->action)->replace(['.', '_'], ' ')->title() }}</span>
-                                <small class="text-muted">{{ $entry->actor_name ?? 'System' }} · {{ $entry->created_at->diffForHumans() }}</small>
-                            </span>
-                        </div>
-                    @empty
-                        <x-empty-state icon="bx-history" title="No activity yet"
-                                       message="Administrative actions will appear here." />
-                    @endforelse
-                </x-card>
-            </div>
-        </div>
-
-        <div class="row g-4">
             <div class="col-xl-7">
-                <x-card class="h-100" title="Recent submissions" subtitle="Latest records in the selected reporting scope.">
-                    <x-slot:actions>
-                        <a href="{{ route('records.index') }}" class="btn btn-sm btn-label-secondary">Open archive</a>
-                    </x-slot:actions>
-                    <div class="table-responsive">
-                        <table class="table align-middle mb-0">
-                            <thead><tr><th>Record</th><th>Type</th><th>Submitted by</th><th class="text-end">Submitted</th></tr></thead>
-                            <tbody>
-                                @forelse ($analytics['recent_records'] as $record)
-                                    <tr>
-                                        <td><a href="{{ route('records.show', $record) }}">{{ $record->registry_number ?: 'Record #'.$record->getKey() }}</a></td>
-                                        <td>{{ $record->typeShortLabel() }}</td>
-                                        <td>{{ $record->submitter?->name ?? 'Removed account' }}</td>
-                                        <td class="text-end text-nowrap">{{ $record->submitted_at?->diffForHumans() }}</td>
-                                    </tr>
-                                @empty
-                                    <tr><td colspan="4" class="text-center text-muted py-4">No submissions match this scope.</td></tr>
-                                @endforelse
-                            </tbody>
-                        </table>
-                    </div>
-                </x-card>
-            </div>
+                <x-card class="dashboard-panel h-100"
+                        title="Staff Processing & Throughput"
+                        subtitle="Verified and submitted records per staff member over the last 12 months.">
+                    @if ($throughput->isNotEmpty())
+                        <div class="dashboard-throughput-layout">
+                            <div id="dashboard-throughput-chart" class="dashboard-chart dashboard-chart--throughput"
+                                 aria-label="Staff throughput comparison"></div>
 
-            <div class="col-xl-5">
-                <x-card class="h-100" title="Submitted records by account"
-                        subtitle="Top accounts in the selected period; relative bars are visual comparison only.">
-                    @forelse ($analytics['throughput'] as $person)
-                        <div class="dashboard-account-row">
-                            <div class="d-flex align-items-center justify-content-between gap-3 mb-1">
-                                <span class="text-truncate">
-                                    {{ $person['name'] }}
-                                    <small class="text-muted">· {{ $person['role'] }}</small>
-                                </span>
-                                <strong>{{ number_format($person['total']) }}</strong>
-                            </div>
-                            <div class="dashboard-comparison-bar" aria-hidden="true">
-                                <span style="width: {{ $person['relative'] }}%"></span>
+                            <div class="table-responsive">
+                                <table class="table table-borderless align-middle dashboard-throughput-table mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Staff member</th>
+                                            <th class="text-end">Records</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach ($throughput as $person)
+                                            <tr>
+                                                <td>
+                                                    <div class="d-flex align-items-center gap-2 min-w-0">
+                                                        <span class="dashboard-throughput-avatar">
+                                                            {{ str($person['name'])->substr(0, 1)->upper() }}
+                                                        </span>
+                                                        <span class="min-w-0">
+                                                            <span class="d-block fw-medium text-truncate">{{ $person['name'] }}</span>
+                                                            <small class="text-muted">{{ $person['role'] }}</small>
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td class="text-end fw-semibold">{{ number_format($person['total']) }}</td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
-                    @empty
-                        <x-empty-state icon="bx-user" title="No submissions in this period"
-                                       message="Account comparisons appear after records are submitted." />
-                    @endforelse
+                    @else
+                        <x-empty-state icon="bx-group" title="No staff throughput yet"
+                                       message="The leaderboard will populate after staff submit records." />
+                    @endif
                 </x-card>
             </div>
         </div>
 
         <script id="dashboard-chart-data" type="application/json">@json($chartData)</script>
     @else
+        <x-page-header
+            title="Welcome back, {{ $user->name }}"
+            subtitle="Continue digitising records and follow your own requests.">
+            @can('documents.process')
+                <a href="{{ route('documents.create') }}" class="btn btn-primary">
+                    <i class="icon-base bx bx-scan me-1" aria-hidden="true"></i>
+                    New document
+                </a>
+            @endcan
+        </x-page-header>
+
         <section class="row g-4 mb-4" aria-label="Your work summary">
             <div class="col-sm-6 col-lg-4">
-                <div class="dashboard-metric card h-100">
+                <div class="dashboard-kpi card h-100">
                     <div class="card-body">
-                        <span class="dashboard-metric__icon bg-label-success mb-3">
+                        <span class="dashboard-kpi__icon bg-label-success mb-3">
                             <i class="icon-base bx bx-check-shield" aria-hidden="true"></i>
                         </span>
-                        <div class="dashboard-metric__value">{{ number_format($staffOverview['submitted_this_month']) }}</div>
-                        <div class="dashboard-metric__label">Your submissions this month</div>
+                        <strong class="dashboard-kpi__value">{{ number_format($staffOverview['submitted_this_month']) }}</strong>
+                        <span class="dashboard-kpi__label">Your submissions this month</span>
                     </div>
                 </div>
             </div>
             <div class="col-sm-6 col-lg-4">
-                <a href="{{ route('change-requests.index', ['status' => 'pending']) }}" class="dashboard-metric card h-100 text-reset">
+                <a href="{{ route('change-requests.index', ['status' => 'pending']) }}"
+                   class="dashboard-kpi card h-100 text-reset">
                     <div class="card-body">
-                        <span class="dashboard-metric__icon bg-label-warning mb-3">
+                        <span class="dashboard-kpi__icon bg-label-warning mb-3">
                             <i class="icon-base bx bx-git-pull-request" aria-hidden="true"></i>
                         </span>
-                        <div class="dashboard-metric__value">{{ number_format($staffOverview['pending_change_requests']) }}</div>
-                        <div class="dashboard-metric__label">Your pending change requests</div>
+                        <strong class="dashboard-kpi__value">{{ number_format($staffOverview['pending_change_requests']) }}</strong>
+                        <span class="dashboard-kpi__label">Your pending change requests</span>
                     </div>
                 </a>
             </div>

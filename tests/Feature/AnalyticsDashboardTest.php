@@ -4,11 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
-use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
-use App\Models\DocumentTemplate;
-use App\Models\DocumentTypeDefinition;
-use App\Models\OcrModel;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -19,8 +15,7 @@ use Tests\TestCase;
 
 /**
  * Analytics are consolidated into the role-aware dashboard. Staff receive only
- * their own work summary; Admin and Super Admin receive global read-only figures;
- * OCR/template governance stays Super Admin-only.
+ * their own work summary; Admin and Super Admin receive the focused CRM overview.
  */
 class AnalyticsDashboardTest extends TestCase
 {
@@ -60,12 +55,12 @@ class AnalyticsDashboardTest extends TestCase
         $admin = $this->actingAs(User::factory()->admin()->create())
             ->get(route('dashboard'))
             ->assertOk()
-            ->assertSee('Reporting scope')
-            ->assertSee('Digitisation volume')
-            ->assertSee('OCR review signals')
-            ->assertSee('Governance activity')
-            ->assertSee('Account health')
-            ->assertDontSee('Template usage and OCR review signals');
+            ->assertSee('Total digitized records')
+            ->assertSee('Digitization Volume &amp; Trend', escape: false)
+            ->assertSee('OCR AI Quality &amp; Accuracy', escape: false)
+            ->assertSee('Staff Processing &amp; Throughput', escape: false)
+            ->assertDontSee('Reporting scope')
+            ->assertDontSee('Governance activity');
 
         $this->assertNotNull($admin->viewData('analytics'));
         $this->assertNull($admin->viewData('system'));
@@ -73,14 +68,15 @@ class AnalyticsDashboardTest extends TestCase
         $super = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard'))
             ->assertOk()
-            ->assertSee('System readiness')
-            ->assertSee('Template usage and OCR review signals')
-            ->assertSee('Open Template Builder');
+            ->assertSee('Total digitized records')
+            ->assertSee('Document Type Distribution')
+            ->assertDontSee('System readiness')
+            ->assertDontSee('Open Template Builder');
 
-        $this->assertNotNull($super->viewData('system'));
+        $this->assertNull($super->viewData('system'));
     }
 
-    public function test_it_counts_submissions_pending_requests_and_ocr_threshold_compliance(): void
+    public function test_it_counts_digitized_records_and_ocr_quality_signals(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
         $staff = User::factory()->staff()->create();
@@ -101,26 +97,20 @@ class AnalyticsDashboardTest extends TestCase
             'ocr_confidence' => 70.0,
         ]);
 
-        ChangeRequest::create([
-            'record_id' => $submitted->getKey(),
-            'reason' => 'Misread surname.',
-            'requested_by' => $staff->getKey(),
-        ]);
-
         $analytics = $this->actingAs(User::factory()->admin()->create())
             ->get(route('dashboard'))
             ->assertOk()
             ->viewData('analytics');
 
         $this->assertSame(1, $analytics['headline']['records']);
-        $this->assertSame(1, $analytics['headline']['pending_requests']);
+        $this->assertSame(1, $analytics['headline']['period_records']);
         $this->assertSame(80.0, $analytics['ocr_quality']['average_confidence']);
         $this->assertSame(1, $analytics['ocr_quality']['below_threshold']);
         $this->assertSame(50.0, $analytics['ocr_quality']['threshold_pass_rate']);
         $this->assertSame(50.0, $analytics['ocr_quality']['correction_rate']);
     }
 
-    public function test_filters_apply_to_records_ocr_signals_and_account_counts(): void
+    public function test_crm_charts_use_a_fixed_twelve_month_scope(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
         $staff = User::factory()->staff()->create();
@@ -138,7 +128,7 @@ class AnalyticsDashboardTest extends TestCase
 
         $death = $this->record($staff, DocumentType::Death, RecordStatus::Submitted, [
             'ocr_model_key' => 'death-model',
-            'submitted_at' => Carbon::parse('2026-08-06 02:00:00'),
+            'submitted_at' => Carbon::parse('2025-08-20 02:00:00'),
         ]);
         $death->fields()->create([
             'name' => 'Deceased Full Name',
@@ -147,7 +137,7 @@ class AnalyticsDashboardTest extends TestCase
             'ocr_confidence' => 40.0,
         ]);
 
-        $analytics = $this->actingAs(User::factory()->admin()->create())
+        $response = $this->actingAs(User::factory()->admin()->create())
             ->get(route('dashboard', [
                 'period' => 'custom',
                 'from' => '2026-08-01',
@@ -155,10 +145,14 @@ class AnalyticsDashboardTest extends TestCase
                 'document_type' => 'birth',
                 'ocr_model' => 'birth-model',
             ]))
-            ->assertOk()
-            ->viewData('analytics');
+            ->assertOk();
 
-        $this->assertSame(1, $analytics['headline']['records']);
+        $analytics = $response->viewData('analytics');
+        $scope = $response->viewData('scope');
+
+        $this->assertSame('365', $scope['period']);
+        $this->assertSame(2, $analytics['headline']['records']);
+        $this->assertSame(1, $analytics['headline']['period_records']);
         $this->assertSame(95.0, $analytics['ocr_quality']['average_confidence']);
         $this->assertSame(['Birth'], $analytics['by_document_type']
             ->where('total', '>', 0)
@@ -166,42 +160,22 @@ class AnalyticsDashboardTest extends TestCase
             ->map->shortLabel()
             ->values()
             ->all());
-        $this->assertSame(['birth-model'], $analytics['recent_records']->pluck('ocr_model_key')->all());
         $this->assertSame([$staff->name], $analytics['throughput']->pluck('name')->all());
+        $this->assertCount(12, $analytics['trend']['labels']);
+        $this->assertSame(1, collect($analytics['trend']['series'])->sum(fn (array $series) => array_sum($series['data'])));
     }
 
-    public function test_super_admin_system_readiness_uses_published_template_and_model_state(): void
+    public function test_super_admin_uses_the_same_focused_crm_dashboard(): void
     {
-        $birth = DocumentTypeDefinition::where('key', 'birth')->firstOrFail();
-        $template = DocumentTemplate::create([
-            'name' => 'Birth Ledger v1',
-            'doc_type' => 'birth',
-            'document_type_id' => $birth->getKey(),
-            'is_active' => true,
-        ]);
-        $template->fields()->create([
-            'name' => 'Child Full Name',
-            'x' => .1,
-            'y' => .1,
-            'width' => .4,
-            'height' => .05,
-            'sort_order' => 0,
-        ]);
-        OcrModel::create(['key' => 'registry-model', 'label' => 'Registry model', 'is_active' => true]);
-
         $response = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard'))
             ->assertOk()
-            ->assertSee('Registry model')
-            ->assertSee('1 of 3 types ready');
+            ->assertSee('Average OCR confidence')
+            ->assertSee('Human correction rate')
+            ->assertSee('Active accounts')
+            ->assertDontSee('Template usage and OCR review signals');
 
-        $system = $response->viewData('system');
-
-        $this->assertSame(1, $system['ready_types']);
-        $this->assertSame(3, $system['total_types']);
-        $this->assertSame(2, $system['template_issues']);
-        $this->assertSame('registry-model', $system['active_model']->key);
-        $this->assertSame('Birth Ledger v1', $system['template_performance']->first()['template']->name);
+        $this->assertNull($response->viewData('system'));
     }
 
     public function test_analytics_is_removed_from_the_sidebar(): void
