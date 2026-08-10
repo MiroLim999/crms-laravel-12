@@ -309,7 +309,17 @@ function displayPersonGroup(boxes, key) {
 }
 
 function selectPersonGroup(indexes) {
+    const firstIndex = indexes[0];
     marker.selectIndexes(indexes, { source: 'group' });
+
+    if (!Number.isInteger(firstIndex)) return;
+    // Selection highlighting is synchronous, but wait for the browser's next
+    // layout pass before measuring the corresponding field row. Keep this
+    // navigation inside the field list so clicking a Person row never moves the
+    // surrounding side panel or page.
+    window.requestAnimationFrame(() => {
+        centerFieldListRow(firstIndex, { centerPanel: false });
+    });
 }
 
 function removePersonGroup(key) {
@@ -523,7 +533,7 @@ function renderFieldList(boxes) {
     updateSelectionUI(marker.selectedIndexes());
 }
 
-function centerFieldListRow(index) {
+function centerFieldListRow(index, { centerPanel = true } = {}) {
     const list = element('fieldList');
     const row = list.querySelector(`[data-field-index="${index}"]`);
     if (!(row instanceof HTMLElement)) return;
@@ -541,6 +551,8 @@ function centerFieldListRow(index) {
     // Apply the inner scroll immediately. Calculating the outer panel while a
     // smooth inner scroll is still moving can leave distant rows off-screen.
     list.scrollTop = clampedListTarget;
+
+    if (!centerPanel) return;
 
     const panel = list.closest('.template-builder-side-panel');
     if (!(panel instanceof HTMLElement) || panel.scrollHeight <= panel.clientHeight) return;

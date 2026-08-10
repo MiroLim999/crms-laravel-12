@@ -3011,6 +3011,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .template-builder-field-list {
   max-block-size: min(27vh, 17rem);
+  overscroll-behavior: contain;
 }
 
 .template-person-builder {
