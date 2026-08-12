@@ -204,10 +204,11 @@ Route::middleware('auth')->group(function () {
     /*
      * OCR workspace - Super Admin only, one page.
      *
-     * It does one job: decide which TrOCR model Staff scan with, and manage the
-     * models installed on disk. Fine-tuning, evaluation, dataset preparation, and
-     * batch prediction are command-line work under ml/ - deliberately not driven
-     * from here, and CRMS does not start or stop the service process either.
+     * It decides which TrOCR model Staff scan with, manages the models installed
+     * on disk, and presents read-only performance evidence. Fine-tuning, evaluation,
+     * dataset preparation, and batch prediction are command-line work under ml/ -
+     * deliberately not driven from here, and CRMS does not start or stop the service
+     * process either.
      *
      * These routes still reach through to a service that has no authentication of
      * its own and can delete ~1.3 GB of weights, which is why the gate never widens

@@ -1,3 +1,5 @@
+import ApexCharts from 'apexcharts';
+
 /**
  * OCR Workspace front end (Super Admin only).
  *
@@ -723,6 +725,180 @@ function initModelActions() {
     deleteForm?.addEventListener('submit', () => setButtonBusy(deleteSubmit, true, 'Deleting…'));
 }
 
+// ---------------------------------------------------------- model performance
+
+function readModelPerformance() {
+    const node = $('#ocr-model-performance-data');
+
+    if (!node) return null;
+
+    try {
+        return JSON.parse(node.textContent || '{}');
+    } catch {
+        return null;
+    }
+}
+
+function initModelPerformance() {
+    const data = readModelPerformance();
+    const target = $('#ocr-model-radar');
+    const selector = $('#ocr-performance-model');
+
+    if (!data || !target || !selector) return;
+
+    const metrics = Array.isArray(data.metrics) ? data.metrics : [];
+    const profiles = new Map(
+        (Array.isArray(data.models) ? data.models : []).map((profile) => [String(profile.key), profile]),
+    );
+    const empty = $('#ocr-performance-empty');
+    const emptyCopy = $('#ocr-performance-empty-copy');
+    const source = $('#ocr-performance-source');
+    const modelName = $('#ocr-performance-model-name');
+    const active = $('#ocr-performance-active');
+    const evidence = $('#ocr-performance-evidence');
+    let chart = null;
+
+    const scoreNodes = new Map(
+        Array.from(document.querySelectorAll('[data-performance-score]'))
+            .map((node) => [node.dataset.performanceScore, node]),
+    );
+
+    const theme = () => {
+        const styles = getComputedStyle(document.documentElement);
+
+        return {
+            primary: styles.getPropertyValue('--bs-primary').trim() || '#696cff',
+            text: styles.getPropertyValue('--bs-secondary-color').trim() || '#8592a3',
+            border: styles.getPropertyValue('--bs-border-color').trim() || 'rgba(67, 89, 113, .12)',
+            card: styles.getPropertyValue('--bs-card-bg').trim() || '#fff',
+            font: styles.getPropertyValue('--bs-body-font-family').trim() || 'Public Sans, sans-serif',
+        };
+    };
+
+    const scoreValue = (profile, key) => {
+        const value = profile?.scores?.[key];
+
+        return value === null || value === undefined || !Number.isFinite(Number(value))
+            ? null
+            : Number(value);
+    };
+
+    const updateSummary = (profile) => {
+        if (modelName) modelName.textContent = profile?.label || 'No model selected';
+        if (active) active.classList.toggle('d-none', !profile?.is_active);
+        if (evidence) evidence.textContent = profile?.evidence || 'No evidence available.';
+
+        if (source) {
+            const tone = profile?.source === 'evaluation'
+                ? 'primary'
+                : 'secondary';
+            source.className = `badge bg-label-${tone}`;
+            source.textContent = profile?.source_label || 'No data';
+        }
+
+        metrics.forEach((metric) => {
+            const node = scoreNodes.get(metric.key);
+            const value = scoreValue(profile, metric.key);
+            if (node) node.textContent = value === null ? '—' : `${value.toFixed(1)}%`;
+        });
+    };
+
+    const render = (profile) => {
+        updateSummary(profile);
+
+        const scores = metrics.map((metric) => scoreValue(profile, metric.key));
+        const hasData = Boolean(profile?.has_data)
+            && metrics.length >= 3
+            && scores.every((score) => score !== null);
+
+        chart?.destroy();
+        chart = null;
+
+        target.classList.toggle('d-none', !hasData);
+        empty?.classList.toggle('d-none', hasData);
+
+        if (!hasData) {
+            target.setAttribute('aria-label', 'No model performance data available');
+            if (emptyCopy) {
+                emptyCopy.textContent = profile
+                    ? `${profile.label} has no valid locked-test benchmark report.`
+                    : 'Add a model before reviewing its performance.';
+            }
+            return;
+        }
+
+        const colors = theme();
+        target.setAttribute('aria-label', `Performance radar for ${profile.label}`);
+
+        chart = new ApexCharts(target, {
+            chart: {
+                type: 'radar',
+                height: 350,
+                fontFamily: colors.font,
+                foreColor: colors.text,
+                parentHeightOffset: 0,
+                toolbar: { show: false },
+            },
+            colors: [colors.primary],
+            dataLabels: { enabled: false },
+            fill: { opacity: 0.16 },
+            markers: {
+                size: 4,
+                strokeColors: colors.card,
+                strokeWidth: 2,
+                hover: { size: 6 },
+            },
+            plotOptions: {
+                radar: {
+                    polygons: {
+                        strokeColors: colors.border,
+                        connectorColors: colors.border,
+                        fill: { colors: ['rgba(105, 108, 255, 0.045)', 'transparent'] },
+                    },
+                },
+            },
+            series: [{
+                name: profile.label,
+                data: scores,
+            }],
+            stroke: { width: 2.5 },
+            tooltip: {
+                y: { formatter: (value) => `${Number(value).toFixed(1)}%` },
+            },
+            xaxis: {
+                categories: metrics.map((metric) => metric.axis || metric.label),
+                labels: {
+                    style: {
+                        colors: Array(metrics.length).fill(colors.text),
+                        fontSize: '12px',
+                        fontWeight: 500,
+                    },
+                },
+            },
+            yaxis: {
+                min: 0,
+                max: 100,
+                tickAmount: 5,
+                labels: {
+                    formatter: (value) => `${Math.round(value)}`,
+                    style: { colors: [colors.text], fontSize: '10px' },
+                },
+            },
+        });
+
+        chart.render();
+    };
+
+    selector.addEventListener('change', () => render(profiles.get(selector.value)));
+
+    const initial = profiles.get(String(data.selected ?? selector.value))
+        ?? profiles.get(selector.value)
+        ?? profiles.values().next().value;
+
+    if (initial) selector.value = initial.key;
+    render(initial);
+}
+
 // ----------------------------------------------------------------------- bootstrap
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -730,4 +906,5 @@ document.addEventListener('DOMContentLoaded', () => {
     initSettingsForm();
     initModelActions();
     initEngineStatus();
+    initModelPerformance();
 });

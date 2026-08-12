@@ -92,9 +92,9 @@ export default defineConfig({
                         return 'vendor-pdfjs';
                     }
 
-                    // ApexCharts enters through dashboard-analytics.js, which keeps
-                    // it out of app.js. Mark it explicitly so Rollup retains a
-                    // separately cached vendor chunk.
+                    // ApexCharts enters through the page-scoped dashboard and OCR
+                    // analytics bundles, which keeps it out of app.js. Mark it
+                    // explicitly so Rollup retains a separately cached vendor chunk.
                     if (id.includes('node_modules/apexcharts')) {
                         return 'vendor-apexcharts';
                     }

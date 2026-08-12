@@ -7,6 +7,7 @@ use App\Models\OcrSetting;
 use App\Services\AuditLogger;
 use App\Services\Ocr\EngineStatus;
 use App\Services\Ocr\OcrModelManager;
+use App\Services\Ocr\OcrModelPerformance;
 use App\Services\Ocr\OcrServiceException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -15,11 +16,14 @@ use Illuminate\View\View;
 /**
  * The OCR workspace - Super Admin only, one page.
  *
- * Two responsibilities, and nothing else:
+ * Two management responsibilities:
  *
  *   1. Manage the model folders the service can serve - install, rename, delete.
  *   2. Save which of them Staff scan with, alongside the two settings that
  *      decision implies.
+ *
+ * The index also presents read-only performance evidence. Evaluation itself
+ * remains command-line work; this controller never starts a model evaluation.
  *
  * Installing a model is housekeeping. Saving the settings is the load-bearing
  * action: until it runs, a newly installed model is just a folder on disk.
@@ -28,6 +32,7 @@ class OcrModelController extends Controller
 {
     public function __construct(
         private readonly OcrModelManager $manager,
+        private readonly OcrModelPerformance $performance,
         private readonly EngineStatus $engine,
         private readonly AuditLogger $audit,
     ) {}
@@ -35,10 +40,12 @@ class OcrModelController extends Controller
     public function index(): View
     {
         $settings = OcrSetting::current();
+        $overview = $this->manager->overview();
 
         return view('ocr.index', [
             'engine' => $this->engine->status(),
-            'overview' => $this->manager->overview(),
+            'overview' => $overview,
+            'modelPerformance' => $this->performance->summary($overview['models']),
             'activeModel' => OcrModel::active(),
             'settings' => $settings,
             // Rendered into the form, so an empty override shows the value actually

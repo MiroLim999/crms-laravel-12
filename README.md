@@ -219,6 +219,10 @@ origin, and keep `OCR_API_URL` on a private server-to-server address where possi
    The best checkpoint by validation loss is saved to `ml/models/`.
 2. **Evaluate** — `python ml\test_trocr.py` and `python ml\test_finetuned.py`. Each writes a
    timestamped chart to `ml/evaluation-metrics/{base,finetuned}/`.
+   When training on Kaggle, `trocr-finetuning-code.ipynb` evaluates the best checkpoint on
+   the locked test split and writes `evaluation-report.json` beside the weights. The report
+   includes CER, WER, exact-match, dataset provenance, and SHA-256 digests for the manifest
+   and model weights.
 3. **Install** — sign in as Super Admin, open **OCR Workspace**, and add the model with
    _Add_. Either a `.zip` or the model folder is sent in one browser-to-FastAPI request,
    so PHP's upload limit and the former Laravel-to-FastAPI second copy do not apply.
@@ -231,9 +235,20 @@ Any folder dropped into `ml/models/` is auto-discovered — no restart needed, j
 _Rescan_. It needs `config.json` plus `model.safetensors` or `pytorch_model.bin`, and the
 tokenizer files.
 
+An uploaded `evaluation-report.json` is optional, but if present it must be valid and its
+weights digest must match the checkpoint or the OCR service rejects the upload. Laravel
+imports the normalized report during registration or _Rescan_. A model without a report is
+still usable for scanning, but its radar shows **No benchmark**; CRMS never manufactures
+benchmark scores from production scans.
+
 ### The OCR workspace
 
-One page, Super Admin only. It does exactly two things:
+One page, Super Admin only. It does three things:
+
+- **Review model performance** — a read-only radar compares character accuracy, word
+  accuracy, and exact text matches from the locked-test report packaged with the model.
+  Production scans are never substituted for missing benchmark data. The dataset, split,
+  sample count, and evaluation date stay visible beside the chart.
 
 - **Manage models** — install (folder or `.zip`), rename, delete. A `.zip` may wrap the
   model in a folder; the service finds it. The base model and the model currently in use
@@ -242,10 +257,10 @@ One page, Super Admin only. It does exactly two things:
   one per document, and the review threshold. _Save settings_ stays disabled until
   something actually differs from what is stored.
 
-There is deliberately no fine-tuning, dataset upload, evaluation, batch prediction, or
-Start/Stop button on that page. The first four are long-running command-line work; the
-last is an OS process, and spawning or killing one from a browser tab is a lot of blast
-radius for a convenience.
+The chart does not run an evaluation. There is deliberately no fine-tuning, dataset upload,
+evaluation runner, batch prediction, or Start/Stop button on that page. The first four are
+long-running command-line work; the last is an OS process, and spawning or killing one from
+a browser tab is a lot of blast radius for a convenience.
 
 **Staff model choice is off by default.** Left off, every reading in the archive came from
 the one model a Super Admin approved, which is the easier position to defend. Switched on,

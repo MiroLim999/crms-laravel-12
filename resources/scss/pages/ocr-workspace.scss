@@ -16,6 +16,7 @@
   }
 
   .ocr-engine-card,
+  .ocr-performance-card,
   .ocr-models-card,
   .ocr-policy-card {
     overflow: hidden;
@@ -265,6 +266,96 @@
     width: 7.5rem;
   }
 
+  // ------------------------------------------------------- model performance
+
+  .ocr-performance-picker {
+    flex: 0 1 19rem;
+    width: min(19rem, 100%);
+  }
+
+  .ocr-performance-layout {
+    display: grid;
+    gap: 1.5rem;
+    align-items: stretch;
+  }
+
+  .ocr-performance-visual {
+    display: grid;
+    min-width: 0;
+    min-height: 22rem;
+    place-items: center;
+  }
+
+  .ocr-performance-chart {
+    width: 100%;
+    min-height: 21.875rem;
+  }
+
+  .ocr-performance-empty {
+    max-width: 28rem;
+    padding: 2.5rem 1rem;
+    text-align: center;
+  }
+
+  .ocr-performance-summary {
+    min-width: 0;
+    padding: 1.25rem;
+    background: var(--bs-tertiary-bg);
+    border: 1px solid var(--ocr-soft-border);
+    border-radius: var(--bs-border-radius-lg);
+  }
+
+  .ocr-performance-metrics {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .ocr-performance-metric {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.2rem 0.75rem;
+    padding: 0.875rem 1rem;
+    background: var(--bs-card-bg, #fff);
+    border: 1px solid var(--ocr-soft-border);
+    border-radius: var(--bs-border-radius);
+
+    dt {
+      min-width: 0;
+      color: var(--bs-heading-color);
+      font-size: 0.875rem;
+      font-weight: 600;
+    }
+
+    dd {
+      margin: 0;
+      color: var(--bs-primary);
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    > span {
+      grid-column: 1 / -1;
+      color: var(--bs-secondary-color);
+      font-size: 0.75rem;
+      line-height: 1.4;
+    }
+  }
+
+  .ocr-performance-evidence {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    color: var(--bs-secondary-color);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+
+    > i {
+      flex: 0 0 auto;
+      margin-top: 0.1rem;
+      color: var(--bs-info);
+    }
+  }
+
   // --------------------------------------------------------------- modals
 
   .ocr-upload-zone {
@@ -376,6 +467,12 @@
   }
 }
 
+@media (min-width: 992px) {
+  .ocr-workspace .ocr-performance-layout {
+    grid-template-columns: minmax(0, 1.35fr) minmax(20rem, 0.65fr);
+  }
+}
+
 @media (max-width: 575.98px) {
   .ocr-workspace {
     .ocr-model-row {
@@ -404,6 +501,23 @@
     .ocr-threshold-control {
       flex-basis: 100%;
       width: 100%;
+    }
+
+    .ocr-performance-picker {
+      flex-basis: 100%;
+      width: 100%;
+    }
+
+    .ocr-performance-visual {
+      min-height: 19rem;
+    }
+
+    .ocr-performance-chart {
+      min-height: 19rem;
+    }
+
+    .ocr-performance-summary {
+      padding: 1rem;
     }
   }
 }

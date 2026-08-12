@@ -40,6 +40,7 @@ import tempfile
 import threading
 import zipfile
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, Optional
 
 # ml/ and ml/api/ go on sys.path so the sibling modules import by bare name
@@ -94,6 +95,8 @@ MAX_NEW_TOKENS = 32
 # Uploaded weights are ~1.3 GB, so they are copied to disk in chunks rather
 # than read into memory.
 UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
+EVALUATION_REPORT_FILE = "evaluation-report.json"
+MAX_EVALUATION_REPORT_BYTES = 1024 * 1024
 
 # Optional friendly labels for known folders. Any folder not listed here gets a
 # label auto-generated from its name.
@@ -115,6 +118,7 @@ DEFAULT_BROWSER_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$"
 # and each model is only loaded once.
 _device = None
 _models = {}  # cache_key -> {"model", "processor", "eos_id", "label"}
+_evaluation_cache = {}  # model_dir -> {signature, report}; avoids re-hashing 1.3 GB on every poll
 
 # Inference endpoints are plain `def`, so FastAPI runs them on a threadpool, and
 # evaluation jobs run on their own thread. Several of those can ask for the same
@@ -194,8 +198,9 @@ def _resolve_key(requested):
 def _model_info():
     """Descriptor list of every selectable model for /models and /health."""
     discovered = _discover_models()
-    infos = [
-        {
+    infos = []
+    for key, path in discovered.items():
+        info = {
             "key": key,
             "label": _label_for(key),
             "available": True,
@@ -208,8 +213,10 @@ def _model_info():
                 if os.path.isfile(os.path.join(path, name))
             ),
         }
-        for key, path in discovered.items()
-    ]
+        evaluation = _read_evaluation_report(path)
+        if evaluation is not None:
+            info["evaluation"] = evaluation
+        infos.append(info)
     base_is_local = _looks_like_model(BASE_MODEL_DIR)
     infos.append({
         "key": BASE_MODEL_KEY,
@@ -418,6 +425,7 @@ class ModelInfo(BaseModel):
     available: bool
     loaded: bool
     files: list[str] = Field(default_factory=list)
+    evaluation: Optional[dict[str, Any]] = None
 
 
 class HealthResponse(BaseModel):
@@ -623,11 +631,112 @@ _ALLOWED_MODEL_FILES = {
     "tokenizer.json", "tokenizer_config.json",
     "special_tokens_map.json", "added_tokens.json",
     "vocab.json", "merges.txt", "sentencepiece.bpe.model", "spm.model",
-    "model.safetensors", "pytorch_model.bin",
+    "model.safetensors", "pytorch_model.bin", EVALUATION_REPORT_FILE,
 }
 _ALLOWED_MODEL_EXTS = {".json", ".safetensors", ".bin", ".txt", ".model"}
 
 _WEIGHT_FILES = {"model.safetensors", "pytorch_model.bin"}
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        while chunk := source.read(UPLOAD_CHUNK_BYTES):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _read_evaluation_report(model_dir, strict=False):
+    """Return a normalized, artifact-bound benchmark report.
+
+    Reports are optional, but a report included in a new upload must be valid.
+    The weights digest prevents metrics from one Kaggle run being attached to a
+    different checkpoint by accidentally mixing files before upload.
+    """
+    path = os.path.join(model_dir, EVALUATION_REPORT_FILE)
+    if not os.path.isfile(path):
+        _evaluation_cache.pop(model_dir, None)
+        return None
+
+    try:
+        if os.path.getsize(path) > MAX_EVALUATION_REPORT_BYTES:
+            raise ValueError("the report is larger than 1 MB")
+        with open(path, "r", encoding="utf-8") as source:
+            report = json.load(source)
+
+        if not isinstance(report, dict) or report.get("schema_version") != 1:
+            raise ValueError("schema_version must be 1")
+        if report.get("split") != "test":
+            raise ValueError("split must be 'test'")
+
+        sample_count = int(report.get("sample_count", 0))
+        if sample_count < 1:
+            raise ValueError("sample_count must be positive")
+
+        dataset = str(report.get("dataset", "")).strip()
+        manifest_sha256 = str(report.get("manifest_sha256", "")).lower()
+        weights_file = os.path.basename(str(report.get("weights_file", "")))
+        expected_weights_sha256 = str(report.get("weights_sha256", "")).lower()
+        evaluated_at = str(report.get("evaluated_at", "")).strip()
+        if not dataset:
+            raise ValueError("dataset is required")
+        if len(manifest_sha256) != 64 or any(c not in "0123456789abcdef" for c in manifest_sha256):
+            raise ValueError("manifest_sha256 must be a SHA-256 digest")
+        if weights_file not in _WEIGHT_FILES:
+            raise ValueError("weights_file must name the model weights")
+        if len(expected_weights_sha256) != 64 or any(c not in "0123456789abcdef" for c in expected_weights_sha256):
+            raise ValueError("weights_sha256 must be a SHA-256 digest")
+        weights_path = os.path.join(model_dir, weights_file)
+        if not os.path.isfile(weights_path):
+            raise ValueError(f"{weights_file} is missing")
+
+        signature = (
+            os.stat(path).st_mtime_ns, os.path.getsize(path),
+            os.stat(weights_path).st_mtime_ns, os.path.getsize(weights_path),
+            expected_weights_sha256,
+        )
+        cached = _evaluation_cache.get(model_dir)
+        if not strict and cached is not None and cached["signature"] == signature:
+            return cached["report"]
+        if not hmac.compare_digest(_sha256_file(weights_path), expected_weights_sha256):
+            raise ValueError("weights_sha256 does not match the uploaded checkpoint")
+
+        parsed_time = datetime.fromisoformat(evaluated_at.replace("Z", "+00:00"))
+        if parsed_time.tzinfo is None:
+            raise ValueError("evaluated_at must include a timezone")
+
+        metrics = report.get("metrics")
+        if not isinstance(metrics, dict):
+            raise ValueError("metrics is required")
+        cer = float(metrics["cer"])
+        wer = float(metrics["wer"])
+        exact_match = float(metrics["exact_match"])
+        if not all(math.isfinite(value) and value >= 0 for value in (cer, wer)):
+            raise ValueError("CER and WER must be finite non-negative rates")
+        if not math.isfinite(exact_match) or not 0 <= exact_match <= 1:
+            raise ValueError("exact_match must be between 0 and 1")
+
+        normalized = {
+            "schema_version": 1,
+            "model_key": str(report.get("model_key", "")).strip(),
+            "dataset": dataset,
+            "manifest_sha256": manifest_sha256,
+            "split": "test",
+            "sample_count": sample_count,
+            "metrics": {"cer": cer, "wer": wer, "exact_match": exact_match},
+            "evaluated_at": parsed_time.isoformat(),
+            "weights_file": weights_file,
+            "weights_sha256": expected_weights_sha256,
+        }
+        _evaluation_cache[model_dir] = {"signature": signature, "report": normalized}
+        return normalized
+    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as error:
+        if strict:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid {EVALUATION_REPORT_FILE}: {error}.",
+            )
+        return None
 
 # A model folder is a dozen small files plus one big weights file. An archive with
 # thousands of members is not a model, and walking it would be the expensive part of
@@ -866,6 +975,10 @@ def add_model(
                     os.remove(staged)
                 except OSError:
                     pass
+
+        # Optional, but never silently accept a malformed or mismatched report.
+        # A valid report is exposed through /models for Laravel to persist.
+        _read_evaluation_report(target, strict=True)
     except HTTPException:
         shutil.rmtree(target, ignore_errors=True)  # never leave a half-written model
         raise

@@ -263,6 +263,48 @@ class OcrWorkspaceTest extends TestCase
         $this->assertDatabaseMissing('audit_logs', ['action' => 'ocr_model.added']);
     }
 
+    public function test_registration_imports_the_server_validated_test_benchmark(): void
+    {
+        $evaluation = [
+            'schema_version' => 1,
+            'model_key' => 'trocr-v1',
+            'dataset' => 'civil-records-v1',
+            'manifest_sha256' => str_repeat('a', 64),
+            'split' => 'test',
+            'sample_count' => 5000,
+            'metrics' => ['cer' => 0.0003, 'wer' => 0.001, 'exact_match' => 0.9978],
+            'evaluated_at' => '2026-08-12T00:00:00+00:00',
+            'weights_file' => 'model.safetensors',
+            'weights_sha256' => str_repeat('b', 64),
+        ];
+        $models = [[
+            'key' => 'trocr-v1',
+            'label' => 'TrOCR v1',
+            'available' => true,
+            'loaded' => false,
+            'files' => ['config.json', 'evaluation-report.json', 'model.safetensors'],
+            'evaluation' => $evaluation,
+        ]];
+        $this->fakeHealthyService([
+            '*/models' => Http::response(['default' => 'trocr-v1', 'models' => $models]),
+        ]);
+
+        $this->actingAs($this->superAdmin())
+            ->postJson(route('ocr.register'), ['name' => 'trocr-v1'])
+            ->assertOk();
+
+        $model = OcrModel::firstWhere('key', 'trocr-v1');
+        $this->assertSame(0.0003, $model->cer);
+        $this->assertSame(0.001, $model->wer);
+        $this->assertSame(0.9978, $model->exact_match);
+        $this->assertSame('civil-records-v1', $model->evaluation_dataset);
+        $this->assertSame('test', $model->evaluation_split);
+        $this->assertSame(5000, $model->evaluation_sample_count);
+        $this->assertSame(str_repeat('a', 64), $model->evaluation_manifest_sha256);
+        $this->assertSame(str_repeat('b', 64), $model->evaluation_weights_sha256);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'ocr_model.evaluation_imported']);
+    }
+
     // --------------------------------------------------------------------- save settings
 
     /**
