@@ -19,6 +19,40 @@
   cursor: pointer;
 }
 
+// Keep actions flat throughout CRMS. Sneat adds a colored blur to solid button
+// variants; remove it from every interaction state while retaining a crisp,
+// non-blurred keyboard focus indicator.
+:where(
+  button,
+  .btn,
+  .btn-close,
+  .pagination .page-link,
+  .nav-pills .nav-link,
+  input[type='button'],
+  input[type='submit'],
+  input[type='reset']
+) {
+  --bs-btn-box-shadow: none;
+  --bs-btn-focus-box-shadow: none;
+  --bs-btn-active-shadow: none;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+:where(
+  button,
+  .btn,
+  .btn-close,
+  .pagination .page-link,
+  .nav-pills .nav-link,
+  input[type='button'],
+  input[type='submit'],
+  input[type='reset']
+):focus-visible {
+  outline: 2px solid var(--bs-btn-border-color, var(--bs-primary));
+  outline-offset: 2px;
+}
+
 // ---------------------------------------------------------------- primary navigation
 
 #layout-menu {

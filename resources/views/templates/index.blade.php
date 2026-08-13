@@ -69,12 +69,12 @@
                             <span><strong>{{ $group->count() }}</strong> {{ Str::plural('layout', $group->count()) }}</span>
                             <span><strong>{{ $draftCount }}</strong> {{ Str::plural('draft', $draftCount) }}</span>
                             <a href="{{ route('templates.create', ['type' => $type->value]) }}"
-                               class="btn btn-sm btn-outline-primary">
+                               class="btn btn-sm btn-primary">
                                 <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>
                                 New layout
                             </a>
                             <div class="dropdown template-library-manage">
-                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                <button type="button" class="btn btn-sm btn-secondary"
                                         data-bs-toggle="dropdown" aria-expanded="false"
                                         aria-label="Manage {{ $type->label() }}">
                                     <i class="icon-base bx bx-dots-vertical-rounded icon-sm" aria-hidden="true"></i>
@@ -99,7 +99,7 @@
                                 </div>
                             </div>
                             <button type="button"
-                                    class="btn btn-sm btn-outline-secondary template-library-toggle {{ $expanded ? 'active' : '' }}"
+                                    class="btn btn-sm btn-info template-library-toggle {{ $expanded ? 'active' : '' }}"
                                     data-template-layout-toggle data-target="{{ $collapseId }}"
                                     data-storage-key="template-layouts:{{ $type->key }}"
                                     aria-expanded="{{ $expanded ? 'true' : 'false' }}"
@@ -173,7 +173,7 @@
                                             </td>
                                             <td class="text-end text-nowrap">
                                                 <a href="{{ route('templates.edit', $layout) }}"
-                                                   class="btn btn-sm btn-outline-secondary">
+                                                   class="btn btn-sm btn-info">
                                                     Edit layout
                                                 </a>
 
@@ -181,13 +181,13 @@
                                                     <form method="POST" action="{{ route('templates.activate', $layout) }}"
                                                           class="d-inline">
                                                         @csrf
-                                                        <button class="btn btn-sm btn-outline-primary" type="submit">
+                                                        <button class="btn btn-sm btn-success" type="submit">
                                                             Publish for Staff
                                                         </button>
                                                     </form>
                                                 @endunless
 
-                                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                                <button type="button" class="btn btn-sm btn-danger"
                                                         data-bs-toggle="modal"
                                                         data-bs-target="#deleteLayout{{ $layout->getKey() }}">
                                                     <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
