@@ -108,7 +108,7 @@
                              role="listitem"
                              data-model-key="{{ $model['key'] }}">
                         <div class="ocr-model-main">
-                            <span class="ocr-model-icon bg-label-{{ $model['is_active'] ? 'success' : ($model['is_base'] ? 'secondary' : 'primary') }}"
+                            <span class="ocr-model-icon {{ $model['is_active'] ? 'is-active' : ($model['is_base'] ? 'is-base' : '') }}"
                                   aria-hidden="true">
                                 <i class="icon-base bx bx-brain"></i>
                             </span>
@@ -224,7 +224,7 @@
                 </div>
             @endif
 
-            <div class="mb-4">
+            <div class="ocr-policy-model">
                 <label for="model-select" class="form-label fw-medium">Approved model</label>
                 <select class="form-select" id="model-select" name="model"
                         @disabled($selectable->isEmpty())>
@@ -251,7 +251,7 @@
                 </div>
             </div>
 
-            <div class="ocr-setting-block mb-3">
+            <div class="ocr-setting-block">
                 <div class="form-check form-switch mb-1">
                     <input class="form-check-input" type="checkbox" role="switch" value="1"
                            id="allow-staff-choice" name="allow_staff_model_choice"
@@ -266,8 +266,8 @@
             </div>
 
             <div class="ocr-setting-block">
-                <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
-                    <div class="flex-grow-1">
+                <div class="ocr-threshold-row">
+                    <div>
                         <label for="threshold-input" class="form-label fw-medium mb-1">Review threshold</label>
                         <p class="text-muted small mb-0">
                             Flag fields below this confidence for review. Confidence is not accuracy.
