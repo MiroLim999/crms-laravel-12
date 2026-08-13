@@ -768,12 +768,13 @@ function initModelPerformance() {
     );
 
     const theme = () => {
-        const styles = getComputedStyle(document.documentElement);
+        const styles = getComputedStyle(target.closest('.ocr-workspace') || document.documentElement);
 
         return {
             primary: styles.getPropertyValue('--bs-primary').trim() || '#696cff',
-            info: styles.getPropertyValue('--bs-info').trim() || '#03c3ec',
-            success: styles.getPropertyValue('--bs-success').trim() || '#71dd37',
+            character: styles.getPropertyValue('--ocr-metric-character').trim() || '#696cff',
+            word: styles.getPropertyValue('--ocr-metric-word').trim() || '#00a7c4',
+            exact: styles.getPropertyValue('--ocr-metric-exact').trim() || '#2aa876',
             text: styles.getPropertyValue('--bs-secondary-color').trim() || '#8592a3',
             border: styles.getPropertyValue('--bs-border-color').trim() || 'rgba(67, 89, 113, .12)',
             card: styles.getPropertyValue('--bs-card-bg').trim() || '#fff',
@@ -837,9 +838,9 @@ function initModelPerformance() {
 
         const colors = theme();
         const metricColors = metrics.map((metric) => ({
-            character_accuracy: colors.primary,
-            word_accuracy: colors.info,
-            exact_match: colors.success,
+            character_accuracy: colors.character,
+            word_accuracy: colors.word,
+            exact_match: colors.exact,
         })[metric.key] || colors.primary);
         target.setAttribute('aria-label', `Performance radar for ${profile.label}`);
 
@@ -866,9 +867,9 @@ function initModelPerformance() {
                     shadeIntensity: 0,
                     inverseColors: false,
                     colorStops: [
-                        { offset: 0, color: colors.success, opacity: 0.24 },
-                        { offset: 50, color: colors.primary, opacity: 0.22 },
-                        { offset: 100, color: colors.info, opacity: 0.24 },
+                        { offset: 0, color: colors.exact, opacity: 0.2 },
+                        { offset: 50, color: colors.character, opacity: 0.22 },
+                        { offset: 100, color: colors.word, opacity: 0.2 },
                     ],
                 },
             },
@@ -891,6 +892,7 @@ function initModelPerformance() {
             },
             plotOptions: {
                 radar: {
+                    size: 205,
                     polygons: {
                         strokeColors: colors.border,
                         strokeWidth: 1,
@@ -923,6 +925,7 @@ function initModelPerformance() {
                 max: 100,
                 tickAmount: 4,
                 labels: {
+                    show: false,
                     formatter: (value) => `${Math.round(value)}`,
                     style: { colors: [colors.text], fontSize: '11px', fontWeight: 500 },
                 },
@@ -933,6 +936,7 @@ function initModelPerformance() {
                     chart: { height: 350 },
                     grid: { padding: { top: 4, right: 4, bottom: 4, left: 4 } },
                     markers: { size: 5, strokeWidth: 2, hover: { size: 7 } },
+                    plotOptions: { radar: { size: 120 } },
                     xaxis: {
                         labels: {
                             style: {

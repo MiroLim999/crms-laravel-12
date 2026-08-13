@@ -4,6 +4,9 @@
 
 .ocr-workspace {
   --ocr-soft-border: color-mix(in srgb, var(--bs-border-color) 72%, transparent);
+  --ocr-metric-character: #696cff;
+  --ocr-metric-word: #00a7c4;
+  --ocr-metric-exact: #2aa876;
 
   .min-w-0 {
     min-width: 0;
@@ -275,7 +278,7 @@
 
   .ocr-performance-layout {
     display: grid;
-    gap: 1.75rem;
+    gap: 1.5rem;
     align-items: stretch;
   }
 
@@ -283,7 +286,7 @@
     display: grid;
     min-width: 0;
     min-height: 30.5rem;
-    padding: 0.75rem;
+    padding: 0.5rem;
     place-items: center;
     background: var(--bs-card-bg, #fff);
     border: 1px solid var(--ocr-soft-border);
@@ -302,9 +305,11 @@
   }
 
   .ocr-performance-summary {
+    display: flex;
     min-width: 0;
     padding: 1.25rem;
-    background: var(--bs-tertiary-bg);
+    flex-direction: column;
+    background: var(--bs-card-bg, #fff);
     border: 1px solid var(--ocr-soft-border);
     border-radius: var(--bs-border-radius-lg);
   }
@@ -318,17 +323,34 @@
 
   .ocr-performance-metrics {
     display: grid;
-    gap: 0.75rem;
+    gap: 0;
   }
 
   .ocr-performance-metric {
+    --ocr-metric-color: var(--ocr-metric-character);
+
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.2rem 0.75rem;
-    padding: 1rem;
-    background: var(--bs-card-bg, #fff);
-    border: 1px solid var(--ocr-soft-border);
-    border-radius: var(--bs-border-radius);
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--ocr-soft-border);
+
+    &:first-child {
+      padding-top: 0.5rem;
+    }
+
+    &:last-child {
+      padding-bottom: 0.5rem;
+      border-bottom: 0;
+    }
+
+    &[data-performance-metric='word_accuracy'] {
+      --ocr-metric-color: var(--ocr-metric-word);
+    }
+
+    &[data-performance-metric='exact_match'] {
+      --ocr-metric-color: var(--ocr-metric-exact);
+    }
 
     dt {
       display: flex;
@@ -342,6 +364,7 @@
 
     dd {
       margin: 0;
+      color: var(--ocr-metric-color);
       font-size: 1.125rem;
       font-weight: 700;
     }
@@ -358,6 +381,7 @@
     width: 0.5rem;
     height: 0.5rem;
     flex: 0 0 auto;
+    background: var(--ocr-metric-color);
     border-radius: 50%;
   }
 
@@ -369,6 +393,7 @@
     border-radius: 50rem;
 
     .progress-bar {
+      background: var(--ocr-metric-color);
       border-radius: inherit;
       transition: width 0.45s ease;
     }
@@ -378,14 +403,17 @@
     display: flex;
     gap: 0.5rem;
     align-items: flex-start;
+    margin-top: auto;
+    padding-top: 1rem;
     color: var(--bs-secondary-color);
+    border-top: 1px solid var(--ocr-soft-border);
     font-size: 0.8125rem;
     line-height: 1.45;
 
     > i {
       flex: 0 0 auto;
       margin-top: 0.1rem;
-      color: var(--bs-info);
+      color: var(--ocr-metric-word);
     }
   }
 
@@ -502,7 +530,7 @@
 
 @media (min-width: 992px) {
   .ocr-workspace .ocr-performance-layout {
-    grid-template-columns: minmax(0, 1.5fr) minmax(20rem, 0.65fr);
+    grid-template-columns: minmax(0, 1.3fr) minmax(23rem, 0.7fr);
   }
 }
 

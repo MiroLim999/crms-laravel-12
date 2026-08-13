@@ -88,24 +88,17 @@
 
                 <dl class="ocr-performance-metrics mb-3">
                     @foreach ($performanceMetrics as $metric)
-                        @php
-                            $score = $selectedPerformance['scores'][$metric['key']] ?? null;
-                            $metricTone = match ($metric['key']) {
-                                'word_accuracy' => 'info',
-                                'exact_match' => 'success',
-                                default => 'primary',
-                            };
-                        @endphp
-                        <div class="ocr-performance-metric">
+                        @php($score = $selectedPerformance['scores'][$metric['key']] ?? null)
+                        <div class="ocr-performance-metric" data-performance-metric="{{ $metric['key'] }}">
                             <dt>
-                                <span class="ocr-performance-metric__key bg-{{ $metricTone }}" aria-hidden="true"></span>
+                                <span class="ocr-performance-metric__key" aria-hidden="true"></span>
                                 {{ $metric['label'] }}
                             </dt>
-                            <dd class="text-{{ $metricTone }}" data-performance-score="{{ $metric['key'] }}">
+                            <dd data-performance-score="{{ $metric['key'] }}">
                                 {{ $score === null ? '—' : number_format($score, 1).'%' }}
                             </dd>
                             <div class="progress ocr-performance-metric__progress" aria-hidden="true">
-                                <div class="progress-bar bg-{{ $metricTone }}"
+                                <div class="progress-bar"
                                      data-performance-bar="{{ $metric['key'] }}"
                                      style="width: {{ $score === null ? 0 : max(0, min(100, (float) $score)) }}%"></div>
                             </div>
