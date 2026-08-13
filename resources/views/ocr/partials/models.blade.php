@@ -9,7 +9,7 @@
 
 <div class="ocr-workspace-grid">
     {{-- ------------------------------------------------------- model inventory --}}
-    <section class="card ocr-models-card" aria-labelledby="installed-models-title">
+    <section class="card ocr-models-card has-expanded-models" aria-labelledby="installed-models-title">
         <div class="card-header border-bottom">
             <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
                 <div class="d-flex align-items-center gap-3">
@@ -27,38 +27,53 @@
                     </div>
                 </div>
 
-                <button type="button"
-                        class="btn btn-sm btn-primary"
-                        data-bs-toggle="modal"
-                        data-bs-target="#addModelModal"
-                        @disabled(! $engine['reachable'])
-                        title="{{ $engine['reachable'] ? 'Install a model' : 'The OCR service must be online.' }}">
-                    <i class="icon-base bx bx-plus icon-sm me-1"></i>Add model
-                </button>
-            </div>
-        </div>
+                <div class="d-flex align-items-center gap-2">
+                    <button type="button"
+                            class="btn btn-sm btn-primary"
+                            data-bs-toggle="modal"
+                            data-bs-target="#addModelModal"
+                            @disabled(! $engine['reachable'])
+                            title="{{ $engine['reachable'] ? 'Install a model' : 'The OCR service must be online.' }}">
+                        <i class="icon-base bx bx-plus icon-sm me-1"></i>Add model
+                    </button>
 
-        @if ($models->isEmpty())
-            <div class="card-body">
-                <div class="ocr-empty-state">
-                    <span class="ocr-empty-icon" aria-hidden="true">
-                        <i class="icon-base bx bx-brain"></i>
-                    </span>
-                    <h3 class="h6 mb-1">No models available</h3>
-                    <p class="text-muted small mb-3">
-                        Upload a model, or copy its folder into <span class="font-monospace">ml/models/</span>
-                        and rescan.
-                    </p>
-                    <button type="button" class="btn btn-sm btn-primary"
-                            data-bs-toggle="modal" data-bs-target="#addModelModal"
-                            @disabled(! $engine['reachable'])>
-                        Add model
+                    <button type="button"
+                            class="btn btn-sm btn-outline-primary ocr-models-toggle"
+                            data-models-toggle
+                            aria-expanded="true"
+                            aria-controls="installed-models-list"
+                            aria-label="Hide models"
+                            title="Hide models">
+                        <span>Hide models</span>
+                        <i class="icon-base bx bx-chevron-down icon-sm ms-1" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>
-        @else
-            <div class="ocr-model-list" role="list">
-                @foreach ($models as $model)
+        </div>
+
+        <div class="ocr-models-panel is-expanded" id="installed-models-list" aria-hidden="false">
+            <div class="ocr-models-scroll">
+                @if ($models->isEmpty())
+                    <div class="card-body">
+                        <div class="ocr-empty-state">
+                            <span class="ocr-empty-icon" aria-hidden="true">
+                                <i class="icon-base bx bx-brain"></i>
+                            </span>
+                            <h3 class="h6 mb-1">No models available</h3>
+                            <p class="text-muted small mb-3">
+                                Upload a model, or copy its folder into <span class="font-monospace">ml/models/</span>
+                                and rescan.
+                            </p>
+                            <button type="button" class="btn btn-sm btn-primary"
+                                    data-bs-toggle="modal" data-bs-target="#addModelModal"
+                                    @disabled(! $engine['reachable'])>
+                                Add model
+                            </button>
+                        </div>
+                    </div>
+                @else
+                    <div class="ocr-model-list" role="list">
+                        @foreach ($models as $model)
                     @php
                         $showKey = strcasecmp((string) $model['label'], (string) $model['key']) !== 0;
                         $canManage = $engine['reachable']
@@ -190,9 +205,11 @@
                             </div>
                         </div>
                     </article>
-                @endforeach
+                        @endforeach
+                    </div>
+                @endif
             </div>
-        @endif
+        </div>
     </section>
 
     {{-- -------------------------------------------------------- scanning policy --}}

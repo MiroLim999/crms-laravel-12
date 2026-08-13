@@ -131,6 +131,49 @@
 
   // ------------------------------------------------------------- model list
 
+  .ocr-models-card {
+    align-self: start;
+    min-height: 0;
+  }
+
+  .ocr-models-toggle > i {
+    transition: transform 0.2s ease;
+  }
+
+  .ocr-models-toggle[aria-expanded='true'] > i {
+    transform: rotate(180deg);
+  }
+
+  .ocr-models-panel {
+    display: grid;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 0;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+      grid-template-rows 0.3s ease,
+      max-height 0.3s ease,
+      opacity 0.2s ease;
+
+    &.is-expanded {
+      max-height: 32rem;
+      grid-template-rows: 1fr;
+      opacity: 1;
+    }
+  }
+
+  .ocr-models-scroll {
+    min-height: 0;
+    overflow: hidden;
+    scrollbar-color: var(--bs-secondary-bg) transparent;
+    scrollbar-width: thin;
+  }
+
+  .ocr-models-panel.is-expanded .ocr-models-scroll {
+    overflow-y: auto;
+  }
+
   .ocr-model-list {
     display: flex;
     flex-direction: column;
@@ -570,7 +613,17 @@
 
 @media (min-width: 1200px) {
   .ocr-workspace .ocr-workspace-grid {
+    align-items: stretch;
     grid-template-columns: minmax(0, 1.45fr) minmax(24rem, 0.95fr);
+  }
+
+  .ocr-workspace .ocr-models-card.has-expanded-models {
+    align-self: stretch;
+    contain: size;
+  }
+
+  .ocr-workspace .ocr-models-panel.is-expanded {
+    max-height: 100%;
   }
 }
 

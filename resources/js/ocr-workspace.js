@@ -73,6 +73,70 @@ const setButtonBusy = (button, busy, busyLabel) => {
     button.setAttribute('aria-busy', busy ? 'true' : 'false');
 };
 
+// --------------------------------------------------------------- model list
+
+function initModelList() {
+    const toggle = $('[data-models-toggle]');
+    const list = $('#installed-models-list');
+    const card = toggle?.closest('.ocr-models-card');
+    const header = $('.card-header', card);
+    const policyCard = $('.ocr-policy-card');
+    const desktopLayout = window.matchMedia('(min-width: 1200px)');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let cardAnimation;
+
+    if (!toggle || !list || !card || !header) return;
+
+    toggle.addEventListener('click', () => {
+        const expanded = toggle.getAttribute('aria-expanded') !== 'true';
+        const startHeight = card.getBoundingClientRect().height;
+
+        cardAnimation?.cancel();
+
+        if (expanded) {
+            card.classList.add('has-expanded-models');
+        }
+
+        list.classList.toggle('is-expanded', expanded);
+        list.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+        list.inert = !expanded;
+        toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        toggle.setAttribute('aria-label', expanded ? 'Hide models' : 'Show models');
+        toggle.setAttribute('title', expanded ? 'Hide models' : 'Show models');
+
+        const label = $('span', toggle);
+        if (label) label.textContent = expanded ? 'Hide models' : 'Show models';
+
+        if (!desktopLayout.matches || reducedMotion.matches) {
+            if (!expanded) card.classList.remove('has-expanded-models');
+            return;
+        }
+
+        const endHeight = expanded
+            ? (policyCard?.getBoundingClientRect().height ?? card.getBoundingClientRect().height)
+            : header.getBoundingClientRect().height;
+
+        cardAnimation = card.animate(
+            [
+                { height: `${startHeight}px` },
+                { height: `${endHeight}px` },
+            ],
+            {
+                duration: 300,
+                easing: 'cubic-bezier(.4, 0, .2, 1)',
+            },
+        );
+
+        cardAnimation.addEventListener('finish', () => {
+            if (toggle.getAttribute('aria-expanded') === 'false') {
+                card.classList.remove('has-expanded-models');
+            }
+
+            cardAnimation = null;
+        }, { once: true });
+    });
+}
+
 // -------------------------------------------------------------- direct upload
 
 /** Paths supplied by folder pickers and directory drag traversal. */
@@ -966,6 +1030,7 @@ function initModelPerformance() {
 // ----------------------------------------------------------------------- bootstrap
 
 document.addEventListener('DOMContentLoaded', () => {
+    initModelList();
     initModelUpload();
     initSettingsForm();
     initModelActions();
