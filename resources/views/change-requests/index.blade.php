@@ -21,7 +21,7 @@
                 </select>
             </div>
             <div class="col-md-2 d-grid">
-                <button class="btn btn-outline-secondary" type="submit">Filter</button>
+                <button class="btn btn-primary" type="submit">Filter</button>
             </div>
         </form>
 

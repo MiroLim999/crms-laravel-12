@@ -77,8 +77,8 @@
             <div class="ocr-performance-summary" aria-live="polite">
                 <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
                     <div class="min-w-0">
-                        <div class="text-muted small">Selected model</div>
-                        <div class="fw-semibold text-truncate" id="ocr-performance-model-name">
+                        <div class="text-muted small text-uppercase fw-medium">Selected model</div>
+                        <div class="ocr-performance-model-name text-truncate" id="ocr-performance-model-name">
                             {{ $selectedPerformance['label'] ?? 'No model selected' }}
                         </div>
                     </div>
@@ -88,12 +88,27 @@
 
                 <dl class="ocr-performance-metrics mb-3">
                     @foreach ($performanceMetrics as $metric)
-                        @php($score = $selectedPerformance['scores'][$metric['key']] ?? null)
+                        @php
+                            $score = $selectedPerformance['scores'][$metric['key']] ?? null;
+                            $metricTone = match ($metric['key']) {
+                                'word_accuracy' => 'info',
+                                'exact_match' => 'success',
+                                default => 'primary',
+                            };
+                        @endphp
                         <div class="ocr-performance-metric">
-                            <dt>{{ $metric['label'] }}</dt>
-                            <dd data-performance-score="{{ $metric['key'] }}">
+                            <dt>
+                                <span class="ocr-performance-metric__key bg-{{ $metricTone }}" aria-hidden="true"></span>
+                                {{ $metric['label'] }}
+                            </dt>
+                            <dd class="text-{{ $metricTone }}" data-performance-score="{{ $metric['key'] }}">
                                 {{ $score === null ? '—' : number_format($score, 1).'%' }}
                             </dd>
+                            <div class="progress ocr-performance-metric__progress" aria-hidden="true">
+                                <div class="progress-bar bg-{{ $metricTone }}"
+                                     data-performance-bar="{{ $metric['key'] }}"
+                                     style="width: {{ $score === null ? 0 : max(0, min(100, (float) $score)) }}%"></div>
+                            </div>
                             <span>{{ $metric['description'] }}</span>
                         </div>
                     @endforeach

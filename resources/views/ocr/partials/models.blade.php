@@ -148,7 +148,7 @@
 
                             <div class="dropdown">
                                 <button type="button"
-                                        class="btn btn-sm btn-icon btn-text-secondary rounded-pill dropdown-toggle hide-arrow"
+                                        class="btn p-0 dropdown-toggle hide-arrow"
                                         data-bs-toggle="dropdown"
                                         aria-expanded="false"
                                         aria-label="Manage {{ $model['label'] }}">

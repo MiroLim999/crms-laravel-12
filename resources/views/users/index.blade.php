@@ -56,7 +56,7 @@
                 </select>
             </div>
             <div class="col-md-2 d-grid">
-                <button class="btn btn-outline-secondary" type="submit">Filter</button>
+                <button class="btn btn-primary" type="submit">Filter</button>
             </div>
         </form>
 
@@ -107,7 +107,7 @@
                                 <td class="text-end">
                                     @can('users.update', $account)
                                         <div class="dropdown">
-                                            <button class="btn btn-sm btn-icon btn-text-secondary rounded-pill dropdown-toggle hide-arrow"
+                                            <button class="btn p-0 dropdown-toggle hide-arrow"
                                                     data-bs-toggle="dropdown" aria-label="Actions">
                                                 <i class="icon-base bx bx-dots-vertical-rounded"></i>
                                             </button>

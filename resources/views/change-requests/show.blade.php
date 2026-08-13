@@ -102,7 +102,7 @@
                     </p>
                     <form method="POST" action="{{ route('change-requests.withdraw', $changeRequest) }}">
                         @csrf
-                        <button type="submit" class="btn btn-outline-secondary w-100">Withdraw request</button>
+                        <button type="submit" class="btn btn-outline-danger w-100">Withdraw request</button>
                     </form>
                 </x-card>
             @endif

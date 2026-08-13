@@ -50,10 +50,10 @@
                 <input type="date" id="to" name="to" value="{{ request('to') }}" class="form-control">
             </div>
             <div class="col-12 d-flex gap-2">
-                <button class="btn btn-outline-secondary" type="submit">
+                <button class="btn btn-primary" type="submit">
                     <i class="icon-base bx bx-search icon-sm me-1"></i> Search
                 </button>
-                <a href="{{ route('records.index') }}" class="btn btn-text-secondary">Reset</a>
+                <a href="{{ route('records.index') }}" class="btn btn-outline-secondary">Reset</a>
             </div>
         </form>
     </x-card>

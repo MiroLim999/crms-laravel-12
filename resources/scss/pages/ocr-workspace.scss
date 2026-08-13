@@ -275,20 +275,24 @@
 
   .ocr-performance-layout {
     display: grid;
-    gap: 1.5rem;
+    gap: 1.75rem;
     align-items: stretch;
   }
 
   .ocr-performance-visual {
     display: grid;
     min-width: 0;
-    min-height: 22rem;
+    min-height: 30.5rem;
+    padding: 0.75rem;
     place-items: center;
+    background: var(--bs-card-bg, #fff);
+    border: 1px solid var(--ocr-soft-border);
+    border-radius: var(--bs-border-radius-lg);
   }
 
   .ocr-performance-chart {
     width: 100%;
-    min-height: 21.875rem;
+    min-height: 28.75rem;
   }
 
   .ocr-performance-empty {
@@ -305,6 +309,13 @@
     border-radius: var(--bs-border-radius-lg);
   }
 
+  .ocr-performance-model-name {
+    margin-top: 0.15rem;
+    color: var(--bs-heading-color);
+    font-size: 1.125rem;
+    font-weight: 700;
+  }
+
   .ocr-performance-metrics {
     display: grid;
     gap: 0.75rem;
@@ -314,12 +325,15 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.2rem 0.75rem;
-    padding: 0.875rem 1rem;
+    padding: 1rem;
     background: var(--bs-card-bg, #fff);
     border: 1px solid var(--ocr-soft-border);
     border-radius: var(--bs-border-radius);
 
     dt {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
       min-width: 0;
       color: var(--bs-heading-color);
       font-size: 0.875rem;
@@ -328,8 +342,7 @@
 
     dd {
       margin: 0;
-      color: var(--bs-primary);
-      font-size: 1rem;
+      font-size: 1.125rem;
       font-weight: 700;
     }
 
@@ -338,6 +351,26 @@
       color: var(--bs-secondary-color);
       font-size: 0.75rem;
       line-height: 1.4;
+    }
+  }
+
+  .ocr-performance-metric__key {
+    width: 0.5rem;
+    height: 0.5rem;
+    flex: 0 0 auto;
+    border-radius: 50%;
+  }
+
+  .ocr-performance-metric__progress {
+    grid-column: 1 / -1;
+    height: 0.35rem;
+    margin-block: 0.35rem 0.15rem;
+    background: var(--bs-border-color);
+    border-radius: 50rem;
+
+    .progress-bar {
+      border-radius: inherit;
+      transition: width 0.45s ease;
     }
   }
 
@@ -469,7 +502,7 @@
 
 @media (min-width: 992px) {
   .ocr-workspace .ocr-performance-layout {
-    grid-template-columns: minmax(0, 1.35fr) minmax(20rem, 0.65fr);
+    grid-template-columns: minmax(0, 1.5fr) minmax(20rem, 0.65fr);
   }
 }
 
@@ -509,11 +542,12 @@
     }
 
     .ocr-performance-visual {
-      min-height: 19rem;
+      min-height: 23rem;
+      padding: 0.25rem;
     }
 
     .ocr-performance-chart {
-      min-height: 19rem;
+      min-height: 21.875rem;
     }
 
     .ocr-performance-summary {

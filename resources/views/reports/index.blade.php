@@ -54,10 +54,10 @@
                 </select>
             </div>
             <div class="col-md-8 d-flex align-items-end gap-2">
-                <button class="btn btn-outline-secondary" type="submit">
+                <button class="btn btn-primary" type="submit">
                     <i class="icon-base bx bx-filter-alt icon-sm me-1"></i> Apply filters
                 </button>
-                <a href="{{ route('reports.index') }}" class="btn btn-text-secondary">Reset</a>
+                <a href="{{ route('reports.index') }}" class="btn btn-outline-secondary">Reset</a>
             </div>
         </form>
     </x-card>

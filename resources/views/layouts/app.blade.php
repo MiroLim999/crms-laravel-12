@@ -59,7 +59,7 @@
             @include('layouts.partials.sidebar')
 
             <button type="button"
-                    class="layout-menu-toggle global-sidebar-toggle"
+                    class="btn btn-sm btn-icon btn-outline-secondary rounded-pill layout-menu-toggle global-sidebar-toggle"
                     data-menu-toggle-control
                     aria-controls="layout-menu"
                     aria-expanded="true"

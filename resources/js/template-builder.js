@@ -369,7 +369,7 @@ function renderPersonGroups(boxes) {
 
         const selectButton = document.createElement('button');
         selectButton.type = 'button';
-        selectButton.className = 'template-person-group__select';
+        selectButton.className = 'btn btn-outline-secondary border-0 rounded-0 template-person-group__select';
         selectButton.setAttribute(
             'aria-label',
             `Select Person ${String(group.displayNumber).padStart(2, '0')}`,
@@ -391,7 +391,7 @@ function renderPersonGroups(boxes) {
 
         const removeButton = document.createElement('button');
         removeButton.type = 'button';
-        removeButton.className = 'template-person-group__remove';
+        removeButton.className = 'btn btn-sm btn-icon btn-outline-danger border-0 rounded-0 template-person-group__remove';
         removeButton.setAttribute(
             'aria-label',
             `Remove Person ${String(group.displayNumber).padStart(2, '0')} group`,
@@ -430,7 +430,7 @@ function createFieldRow(index) {
 
     const removeButton = document.createElement('button');
     removeButton.type = 'button';
-    removeButton.className = 'btn btn-sm btn-icon btn-text-danger';
+    removeButton.className = 'btn btn-sm btn-icon btn-outline-danger rounded-pill';
     removeButton.setAttribute('aria-label', `Remove field ${index + 1}`);
 
     const removeIcon = document.createElement('i');

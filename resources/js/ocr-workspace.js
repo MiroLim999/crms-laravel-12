@@ -762,12 +762,18 @@ function initModelPerformance() {
         Array.from(document.querySelectorAll('[data-performance-score]'))
             .map((node) => [node.dataset.performanceScore, node]),
     );
+    const scoreBars = new Map(
+        Array.from(document.querySelectorAll('[data-performance-bar]'))
+            .map((node) => [node.dataset.performanceBar, node]),
+    );
 
     const theme = () => {
         const styles = getComputedStyle(document.documentElement);
 
         return {
             primary: styles.getPropertyValue('--bs-primary').trim() || '#696cff',
+            info: styles.getPropertyValue('--bs-info').trim() || '#03c3ec',
+            success: styles.getPropertyValue('--bs-success').trim() || '#71dd37',
             text: styles.getPropertyValue('--bs-secondary-color').trim() || '#8592a3',
             border: styles.getPropertyValue('--bs-border-color').trim() || 'rgba(67, 89, 113, .12)',
             card: styles.getPropertyValue('--bs-card-bg').trim() || '#fff',
@@ -798,8 +804,10 @@ function initModelPerformance() {
 
         metrics.forEach((metric) => {
             const node = scoreNodes.get(metric.key);
+            const bar = scoreBars.get(metric.key);
             const value = scoreValue(profile, metric.key);
             if (node) node.textContent = value === null ? '—' : `${value.toFixed(1)}%`;
+            if (bar) bar.style.width = `${Math.max(0, Math.min(100, value ?? 0))}%`;
         });
     };
 
@@ -828,32 +836,66 @@ function initModelPerformance() {
         }
 
         const colors = theme();
+        const metricColors = metrics.map((metric) => ({
+            character_accuracy: colors.primary,
+            word_accuracy: colors.info,
+            exact_match: colors.success,
+        })[metric.key] || colors.primary);
         target.setAttribute('aria-label', `Performance radar for ${profile.label}`);
 
         chart = new ApexCharts(target, {
             chart: {
                 type: 'radar',
-                height: 350,
+                height: 460,
                 fontFamily: colors.font,
                 foreColor: colors.text,
                 parentHeightOffset: 0,
                 toolbar: { show: false },
+                animations: {
+                    enabled: true,
+                    easing: 'easeinout',
+                    speed: 450,
+                },
             },
             colors: [colors.primary],
             dataLabels: { enabled: false },
-            fill: { opacity: 0.16 },
+            fill: {
+                type: 'gradient',
+                gradient: {
+                    type: 'horizontal',
+                    shadeIntensity: 0,
+                    inverseColors: false,
+                    colorStops: [
+                        { offset: 0, color: colors.success, opacity: 0.24 },
+                        { offset: 50, color: colors.primary, opacity: 0.22 },
+                        { offset: 100, color: colors.info, opacity: 0.24 },
+                    ],
+                },
+            },
+            grid: {
+                padding: { top: 12, right: 24, bottom: 12, left: 24 },
+            },
+            legend: { show: false },
             markers: {
-                size: 4,
+                size: 6,
                 strokeColors: colors.card,
-                strokeWidth: 2,
-                hover: { size: 6 },
+                strokeWidth: 3,
+                discrete: metricColors.map((color, dataPointIndex) => ({
+                    seriesIndex: 0,
+                    dataPointIndex,
+                    fillColor: color,
+                    strokeColor: colors.card,
+                    size: 7,
+                })),
+                hover: { size: 8 },
             },
             plotOptions: {
                 radar: {
                     polygons: {
                         strokeColors: colors.border,
+                        strokeWidth: 1,
                         connectorColors: colors.border,
-                        fill: { colors: ['rgba(105, 108, 255, 0.045)', 'transparent'] },
+                        fill: { colors: ['rgba(67, 89, 113, 0.035)', 'transparent'] },
                     },
                 },
             },
@@ -861,29 +903,47 @@ function initModelPerformance() {
                 name: profile.label,
                 data: scores,
             }],
-            stroke: { width: 2.5 },
+            stroke: { width: 3.5 },
             tooltip: {
+                marker: { show: false },
                 y: { formatter: (value) => `${Number(value).toFixed(1)}%` },
             },
             xaxis: {
                 categories: metrics.map((metric) => metric.axis || metric.label),
                 labels: {
                     style: {
-                        colors: Array(metrics.length).fill(colors.text),
-                        fontSize: '12px',
-                        fontWeight: 500,
+                        colors: metricColors,
+                        fontSize: '14px',
+                        fontWeight: 600,
                     },
                 },
             },
             yaxis: {
                 min: 0,
                 max: 100,
-                tickAmount: 5,
+                tickAmount: 4,
                 labels: {
                     formatter: (value) => `${Math.round(value)}`,
-                    style: { colors: [colors.text], fontSize: '10px' },
+                    style: { colors: [colors.text], fontSize: '11px', fontWeight: 500 },
                 },
             },
+            responsive: [{
+                breakpoint: 575,
+                options: {
+                    chart: { height: 350 },
+                    grid: { padding: { top: 4, right: 4, bottom: 4, left: 4 } },
+                    markers: { size: 5, strokeWidth: 2, hover: { size: 7 } },
+                    xaxis: {
+                        labels: {
+                            style: {
+                                colors: metricColors,
+                                fontSize: '12px',
+                                fontWeight: 600,
+                            },
+                        },
+                    },
+                },
+            }],
         });
 
         chart.render();

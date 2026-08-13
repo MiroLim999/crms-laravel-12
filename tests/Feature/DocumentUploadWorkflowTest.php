@@ -33,7 +33,7 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('class="document-side-panel field-marker-controls-pane"', escape: false)
                 ->assertSee('id="docViewport"', escape: false)
                 ->assertSee('id="staffFieldSelectionMarquee"', escape: false)
-                ->assertSee('class="layout-menu-toggle global-sidebar-toggle"', escape: false)
+                ->assertSee('class="btn btn-sm btn-icon btn-outline-secondary rounded-pill layout-menu-toggle global-sidebar-toggle"', escape: false)
                 ->assertSee('aria-controls="layout-menu"', escape: false)
                 ->assertSee('id="zoomResetBtn"', escape: false)
                 ->assertSee('id="resetFieldsBtn"', escape: false)

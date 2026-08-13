@@ -147,34 +147,13 @@
 .global-sidebar-toggle {
   position: fixed;
   z-index: 1090;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  inline-size: 2rem;
-  block-size: 2rem;
-  padding: 0;
-  color: var(--bs-body-color);
-  background: #fff;
-  border: 1px solid var(--bs-border-color);
-  border-radius: 50%;
-  cursor: pointer;
   inset-block-start: 1.375rem;
   inset-inline-start: calc(var(--bs-menu-width) - 1rem);
   transition: inset-inline-start .3s cubic-bezier(.4, 0, .2, 1), opacity .15s ease,
-              visibility .15s ease, color .15s ease, background-color .15s ease,
-              border-color .15s ease;
+              visibility .15s ease;
 
   .icon-base {
     font-size: 1.25rem;
-  }
-
-  &:hover,
-  &:focus-visible {
-    color: var(--bs-primary);
-    background: #fff;
-    border-color: rgba(105, 108, 255, .55);
-    outline: 3px solid rgba(105, 108, 255, .12);
-    outline-offset: 1px;
   }
 }
 
@@ -386,17 +365,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 // ---------------------------------------------------------------- audit log diff panel
-
-.audit-diff-toggle {
-  border-radius: 1rem;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
-
-  &.active {
-    background-color: var(--bs-primary);
-    border-color: var(--bs-primary);
-    color: #fff;
-  }
-}
 
 .audit-expand-row > td {
   // No border between the data row and the panel row — the panel's own top
@@ -932,70 +900,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   min-inline-size: 0;
 }
 
-.marker-zoom-controls {
-  display: inline-flex;
-  overflow: hidden;
-  background: #fff;
-  border: 1px solid var(--bs-border-color);
-  border-radius: .55rem;
-}
-
-.marker-tool-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-inline-size: 2rem;
-  block-size: 2.25rem;
-  padding: 0 .45rem;
-  color: var(--bs-primary);
-  background: #fff;
-  border: 0;
-  border-radius: 0;
-  font-size: .875rem;
-  transition: color .12s ease, background-color .12s ease;
-
-  + .marker-tool-button {
-    border-inline-start: 1px solid var(--bs-border-color);
-  }
-
-  &:hover,
-  &:focus-visible {
-    color: var(--bs-primary);
-    background: rgba(105, 108, 255, .08);
-    outline: 0;
-  }
-}
-
 .marker-tool-button.marker-zoom-value {
-  color: var(--bs-primary);
-  background: #fff;
+  inline-size: auto;
   font-weight: 600;
-}
-
-.marker-help-button,
-.marker-reset-button,
-.marker-delete-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: .35rem;
-  block-size: 2.3rem;
-  padding: 0 .65rem;
-  color: var(--bs-secondary-color);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: .5rem;
-  font-size: .8125rem;
-  font-weight: 500;
-  transition: color .12s ease, background-color .12s ease, border-color .12s ease;
-
-  &:hover,
-  &:focus-visible {
-    color: var(--bs-body-color);
-    background: var(--bs-gray-100);
-    border-color: var(--bs-border-color);
-    outline: 0;
-  }
 }
 
 .field-selection-marquee {
@@ -1009,42 +916,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   &.is-visible {
     display: block;
-  }
-}
-
-.marker-help-button .bx-terminal,
-.marker-reset-button .bx-refresh {
-  color: var(--bs-primary);
-}
-
-.marker-reset-button:disabled {
-  color: var(--bs-secondary-color);
-  background: transparent;
-  border-color: transparent;
-  cursor: not-allowed;
-  opacity: .45;
-
-  .bx-refresh {
-    color: currentColor;
-  }
-}
-
-.marker-delete-button {
-  color: var(--bs-danger);
-  background: rgba(255, 62, 29, .06);
-
-  &:hover,
-  &:focus-visible {
-    color: var(--bs-danger);
-    background: rgba(255, 62, 29, .12);
-    border-color: rgba(255, 62, 29, .2);
-  }
-
-  &:disabled {
-    color: var(--bs-secondary-color);
-    background: transparent;
-    border-color: transparent;
-    opacity: .45;
   }
 }
 
@@ -1293,30 +1164,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     font-weight: 500;
     cursor: pointer;
     user-select: none;
-  }
-}
-
-.marker-field-delete {
-  display: inline-flex;
-  align-items: center;
-  gap: .3rem;
-  padding: .25rem .45rem;
-  color: var(--bs-danger);
-  background: transparent;
-  border: 0;
-  border-radius: .35rem;
-  font-size: .75rem;
-  font-weight: 500;
-
-  &:hover:not(:disabled),
-  &:focus-visible:not(:disabled) {
-    background: rgba(255, 62, 29, .08);
-    outline: 0;
-  }
-
-  &:disabled {
-    color: var(--bs-secondary-color);
-    opacity: .45;
   }
 }
 
@@ -1937,20 +1784,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   inline-size: 100%;
   min-block-size: 4rem;
   padding: .65rem 1rem;
-  color: var(--bs-body-color);
-  background: #fff;
-  border: 0;
   text-align: start;
-  transition: background-color .12s ease;
 
-  &:hover,
-  &:focus-visible {
-    background: rgba(105, 108, 255, .035);
-    outline: 0;
-  }
-
-  &:focus-visible {
-    box-shadow: inset 0 0 0 2px rgba(105, 108, 255, .2);
+  &::after {
+    display: none;
   }
 
   > .bx-chevron-down {
@@ -3235,13 +3072,16 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .template-sample-control {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  max-inline-size: 15rem;
   cursor: pointer;
-  outline: 0;
 
-  &:hover,
-  &:focus-visible {
-    background: rgba(105, 108, 255, .15);
-    box-shadow: 0 0 0 .2rem rgba(105, 108, 255, .12);
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &.is-loading {
@@ -3350,30 +3190,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   justify-content: center;
   gap: .5rem;
   min-block-size: 2.65rem;
-  padding: .45rem .6rem;
-  color: var(--bs-secondary-color);
-  background: #fff;
-  border: 1px solid var(--bs-border-color);
-  border-radius: .45rem;
   font-size: .75rem;
-  font-weight: 500;
   cursor: pointer;
-  transition: color .12s ease, background-color .12s ease, border-color .12s ease, box-shadow .12s ease;
-
-  &:hover {
-    color: var(--bs-primary);
-    border-color: rgba(105, 108, 255, .35);
-  }
-
-  .btn-check:focus-visible + & {
-    box-shadow: 0 0 0 .2rem rgba(105, 108, 255, .18);
-  }
-
-  .btn-check:checked + & {
-    color: var(--bs-primary);
-    background: rgba(105, 108, 255, .08);
-    border-color: var(--bs-primary);
-  }
 }
 
 .template-orientation-sheet {
@@ -3509,8 +3327,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   .btn {
     flex: 0 0 auto;
-    padding: .3rem .55rem;
-    font-size: .6875rem;
   }
 }
 
@@ -3608,18 +3424,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .template-person-group__select {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: .5rem;
   min-inline-size: 0;
-  padding: .45rem .5rem;
-  color: inherit;
   text-align: start;
-  background: transparent;
-  border: 0;
-
-  &:hover,
-  &:focus-visible {
-    background: rgba(3, 195, 236, .08);
-  }
 }
 
 .template-person-group__number {
@@ -3653,35 +3461,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .template-person-group__remove {
-  display: grid;
-  inline-size: 2.4rem;
-  place-items: center;
-  color: var(--bs-danger);
-  background: transparent;
-  border: 0;
-  border-inline-start: 1px solid var(--bs-border-color);
-
-  &:hover,
-  &:focus-visible {
-    background: rgba(255, 62, 29, .07);
-  }
+  border-inline-start: 1px solid var(--bs-border-color) !important;
 }
 
 .template-person-builder__automatic {
-  display: inline-flex;
-  align-items: center;
   justify-self: start;
-  gap: .3rem;
-  padding: 0;
-  color: var(--bs-primary);
-  background: transparent;
-  border: 0;
   font-size: .6875rem;
-
-  &:disabled {
-    color: var(--bs-secondary-color);
-    opacity: .65;
-  }
 }
 
 .template-builder-field-item {

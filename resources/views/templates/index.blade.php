@@ -99,7 +99,7 @@
                                 </div>
                             </div>
                             <button type="button"
-                                    class="btn btn-sm btn-outline-secondary audit-diff-toggle template-library-toggle {{ $expanded ? 'active' : '' }}"
+                                    class="btn btn-sm btn-outline-secondary template-library-toggle {{ $expanded ? 'active' : '' }}"
                                     data-template-layout-toggle data-target="{{ $collapseId }}"
                                     data-storage-key="template-layouts:{{ $type->key }}"
                                     aria-expanded="{{ $expanded ? 'true' : 'false' }}"
@@ -238,7 +238,7 @@
                                     <p class="mb-0 text-muted small">This action cannot be undone.</p>
                                 </div>
                                 <div class="modal-footer">
-                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
                                     <form method="POST" action="{{ route('templates.destroy', $layout) }}">
                                         @csrf
                                         @method('DELETE')
@@ -292,7 +292,7 @@
                                     </div>
                                 </div>
                                 <div class="modal-footer">
-                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
                                     <button type="submit" class="btn btn-primary" data-document-type-rename-submit>Save name</button>
                                 </div>
                             </form>
@@ -324,7 +324,7 @@
                                     @endif
                                 </div>
                                 <div class="modal-footer">
-                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">
                                         {{ $type->records_count > 0 ? 'Close' : 'Cancel' }}
                                     </button>
                                     @if ($type->records_count === 0)
@@ -374,7 +374,7 @@
                         <div class="form-text">Document type display names can be changed later.</div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
                         <button type="submit" class="btn btn-primary">Create and build layout</button>
                     </div>
                 </form>

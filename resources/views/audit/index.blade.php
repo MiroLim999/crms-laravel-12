@@ -55,10 +55,10 @@
                 <input type="date" id="to" name="to" value="{{ $filters['to'] ?? '' }}" class="form-control">
             </div>
             <div class="col-md-6 d-flex align-items-end gap-2">
-                <button class="btn btn-outline-secondary" type="submit">
+                <button class="btn btn-primary" type="submit">
                     <i class="icon-base bx bx-filter-alt icon-sm me-1"></i> Filter
                 </button>
-                <a href="{{ route('audit.index') }}" class="btn btn-text-secondary">Reset</a>
+                <a href="{{ route('audit.index') }}" class="btn btn-outline-secondary">Reset</a>
             </div>
         </form>
     </x-card>

@@ -83,7 +83,7 @@
                              aria-label="Template document editor">
                         <div class="marker-toolbar">
                             <div class="marker-toolbar__primary">
-                                <label for="sampleScan" class="document-file-chip template-sample-control"
+                                <label for="sampleScan" class="btn btn-sm btn-outline-secondary template-sample-control"
                                        id="sampleScanLabel" tabindex="0" role="button"
                                        title="{{ $template?->sample_path ? 'Replace the stored sample document' : 'Choose a sample document' }}">
                                     <i class="icon-base bx bx-file" aria-hidden="true"></i>
@@ -103,23 +103,26 @@
                                 @endif
 
                                 <span class="marker-toolbar__divider" aria-hidden="true"></span>
-                                <div class="marker-zoom-controls" role="group" aria-label="Document zoom controls">
-                                    <button type="button" class="marker-tool-button" id="zoomOutBtn"
-                                            aria-label="Zoom out">&minus;</button>
-                                    <button type="button" class="marker-tool-button marker-zoom-value"
+                                <div class="btn-group marker-zoom-controls" role="group" aria-label="Document zoom controls">
+                                    <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="zoomOutBtn"
+                                            aria-label="Zoom out">
+                                        <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary marker-tool-button marker-zoom-value"
                                             id="zoomResetBtn" title="Fit document to the workspace">100%</button>
-                                    <button type="button" class="marker-tool-button" id="zoomInBtn"
-                                            aria-label="Zoom in">+</button>
+                                    <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="zoomInBtn"
+                                            aria-label="Zoom in">
+                                        <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
+                                    </button>
                                 </div>
                             </div>
 
                             <div class="marker-toolbar__actions">
                                 <div class="dropdown">
-                                    <button type="button" class="marker-help-button" data-bs-toggle="dropdown"
+                                    <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle marker-help-button" data-bs-toggle="dropdown"
                                             aria-expanded="false" aria-label="Show editor shortcuts">
-                                        <i class="icon-base bx bx-terminal icon-sm" aria-hidden="true"></i>
+                                        <i class="icon-base bx bx-terminal icon-sm me-1" aria-hidden="true"></i>
                                         <span>Shortcuts</span>
-                                        <i class="icon-base bx bx-chevron-down icon-sm" aria-hidden="true"></i>
                                     </button>
                                     <div class="dropdown-menu dropdown-menu-end marker-shortcuts-menu">
                                         <div class="marker-shortcuts-menu__title">Editor shortcuts</div>
@@ -136,9 +139,9 @@
                                     </div>
                                 </div>
 
-                                <button type="button" class="marker-reset-button" id="resetFieldsBtn"
+                                <button type="button" class="btn btn-sm btn-outline-secondary marker-reset-button" id="resetFieldsBtn"
                                         title="Restore the saved layout and document view" disabled>
-                                    <i class="icon-base bx bx-refresh icon-sm" aria-hidden="true"></i>
+                                    <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
                                     <span>Reset</span>
                                 </button>
 
@@ -146,9 +149,9 @@
                                     <i class="icon-base bx bx-list-check icon-sm" aria-hidden="true"></i>
                                     <span>0 selected</span>
                                 </span>
-                                <button type="button" class="marker-delete-button"
+                                <button type="button" class="btn btn-sm btn-outline-danger marker-delete-button"
                                         id="deleteSelectedBtn" disabled>
-                                    <i class="icon-base bx bx-trash icon-sm" aria-hidden="true"></i>
+                                    <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
                                     <span>Delete</span>
                                 </button>
                             </div>
@@ -260,7 +263,7 @@
                                                    id="orientation_{{ $orientation->value }}"
                                                    value="{{ $orientation->value }}"
                                                    @checked($currentOrientation === $orientation->value) required>
-                                            <label class="template-orientation-option"
+                                            <label class="btn btn-outline-primary template-orientation-option"
                                                    for="orientation_{{ $orientation->value }}">
                                                 <span class="template-orientation-sheet is-{{ $orientation->value }}"
                                                       aria-hidden="true"></span>
@@ -322,8 +325,8 @@
                                         <input class="form-check-input" type="checkbox" id="selectAllFields">
                                         <label class="form-check-label" for="selectAllFields">Select all</label>
                                     </div>
-                                    <button type="button" class="marker-field-delete" id="deleteFieldsBtn" disabled>
-                                        <i class="icon-base bx bx-trash icon-sm" aria-hidden="true"></i>
+                                    <button type="button" class="btn btn-sm btn-outline-danger marker-field-delete" id="deleteFieldsBtn" disabled>
+                                        <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
                                         <span>Delete</span>
                                     </button>
                                 </div>
@@ -352,9 +355,9 @@
 
                                     <div class="template-person-group-list" id="personGroupList"></div>
 
-                                    <button type="button" class="template-person-builder__automatic"
+                                    <button type="button" class="btn btn-sm btn-outline-secondary template-person-builder__automatic"
                                             id="useAutomaticGroupsBtn" disabled>
-                                        <i class="icon-base bx bx-refresh icon-sm" aria-hidden="true"></i>
+                                        <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
                                         Use automatic row detection
                                     </button>
                                 </div>
@@ -423,7 +426,7 @@
                         <p class="mb-0 text-muted small">The field markers and layout settings will not be changed.</p>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
                         <form method="POST" action="{{ route('templates.sample.destroy', $template) }}">
                             @csrf
                             @method('DELETE')
@@ -453,7 +456,7 @@
                     </p>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-primary" id="confirmResetFieldsBtn">
                         Reset fields
                     </button>
