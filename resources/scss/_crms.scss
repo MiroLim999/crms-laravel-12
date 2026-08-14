@@ -2057,6 +2057,24 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+.validation-record-group__bulk {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-block-size: 2.75rem;
+  padding: .35rem 1rem;
+  background: rgba(105, 108, 255, .035);
+  border-block-end: 1px solid var(--bs-border-color);
+}
+
+.validation-group-verified-control {
+  color: var(--bs-primary);
+
+  strong {
+    font-weight: 600;
+  }
+}
+
 .validation-field {
   position: relative;
   align-items: center;

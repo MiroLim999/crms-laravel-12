@@ -15,6 +15,10 @@
 
 import * as pdfjsLib from 'pdfjs-dist';
 import { markerPersonMetadata } from './person-grouping';
+import {
+    canVerifyValue,
+    verificationGroupState,
+} from './verification-groups';
 
 // Use the CDN-hosted worker instead of bundling the 2.2 MB parser file.
 // The version must stay in sync with pdfjs-dist in package.json (currently 4.10.38).
@@ -644,4 +648,9 @@ function clamp(value, min, max) {
     return Math.min(Math.max(value, min), Math.max(min, max));
 }
 
-export { HANDLE_SIZE, markerPersonMetadata };
+export {
+    canVerifyValue,
+    HANDLE_SIZE,
+    markerPersonMetadata,
+    verificationGroupState,
+};

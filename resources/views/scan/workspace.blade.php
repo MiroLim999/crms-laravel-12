@@ -426,8 +426,10 @@
 @push('scripts')
 <script type="module">
     import {
+        canVerifyValue,
         FieldMarker,
         markerPersonMetadata,
+        verificationGroupState,
     } from '{{ Vite::asset('resources/js/field-marker.js') }}';
     import { attachMarqueeSelection } from '{{ Vite::asset('resources/js/marquee-selection.js') }}';
 
@@ -1758,15 +1760,61 @@
             const section = el('verifyRows').querySelector(`[data-group-id="${group.id}"]`);
             if (!(section instanceof HTMLElement)) return;
 
-            const verified = group.indexes.filter((index) => {
+            const checkedStates = group.indexes.map((index) => {
                 const checkbox = validationRow(index)?.querySelector('.validation-verified');
                 return checkbox instanceof HTMLInputElement && checkbox.checked;
-            }).length;
-            const count = group.indexes.length;
+            });
+            const state = verificationGroupState(checkedStates);
             const status = section.querySelector('.validation-record-group__status');
-            if (status) status.textContent = `${verified}/${count} verified`;
-            section.classList.toggle('is-complete', count > 0 && verified === count);
+            if (status) status.textContent = `${state.verified}/${state.total} verified`;
+            section.classList.toggle('is-complete', state.checked);
+
+            const groupCheckbox = section.querySelector('.validation-group-verified');
+            if (groupCheckbox instanceof HTMLInputElement) {
+                groupCheckbox.checked = state.checked;
+                groupCheckbox.indeterminate = state.indeterminate;
+                groupCheckbox.setAttribute(
+                    'aria-checked',
+                    state.indeterminate ? 'mixed' : String(state.checked),
+                );
+            }
         });
+    }
+
+    function setGroupVerified(group, checked) {
+        let firstBlankIndex = null;
+
+        group.indexes.forEach((index) => {
+            const row = validationRow(index);
+            if (!(row instanceof HTMLElement)) return;
+
+            const input = requiredInput(row, '.verified');
+            const checkbox = requiredInput(row, '.validation-verified');
+
+            if (checked && !canVerifyValue(input.value)) {
+                checkbox.checked = false;
+                row.classList.remove('is-verified');
+                setValidationFieldError(index, 'Enter or confirm a value before marking this field as verified.');
+                firstBlankIndex ??= index;
+                return;
+            }
+
+            checkbox.checked = checked;
+            row.classList.toggle('is-verified', checked);
+            clearValidationFieldError(index);
+        });
+
+        updateVerificationSummary();
+
+        if (firstBlankIndex !== null) {
+            showValidationSubmitError(`${group.label} has blank fields that could not be verified.`);
+            activateValidationField(firstBlankIndex, 'marker');
+            const row = validationRow(firstBlankIndex);
+            if (row) requiredInput(row, '.verified').focus();
+            return;
+        }
+
+        clearValidationSubmitError();
     }
 
     function createValidationFieldRow(reading, index, group, columnIndex) {
@@ -1901,6 +1949,26 @@
         review.classList.toggle('has-review', reviewCount > 0);
 
         const body = requiredPart(section, '.validation-record-group__body');
+        if (group.kind === 'person') {
+            const bulk = document.createElement('div');
+            const checkboxId = `verifyGroup-${group.id}`;
+            bulk.className = 'validation-record-group__bulk';
+            bulk.innerHTML = `
+                <label class="validation-verified-control validation-group-verified-control"
+                       for="${checkboxId}">
+                    <input class="form-check-input validation-group-verified" type="checkbox"
+                           id="${checkboxId}">
+                    <span>Verify all fields for <strong></strong></span>
+                </label>`;
+            requiredPart(bulk, 'strong').textContent = group.label;
+
+            const groupCheckbox = requiredInput(bulk, '.validation-group-verified');
+            groupCheckbox.addEventListener('change', () => {
+                setGroupVerified(group, groupCheckbox.checked);
+            });
+            body.appendChild(bulk);
+        }
+
         group.indexes.forEach((index, columnIndex) => {
             body.appendChild(createValidationFieldRow(readings[index], index, group, columnIndex));
         });

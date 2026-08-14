@@ -71,6 +71,7 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('id="validationFieldOverlay"', escape: false)
                 ->assertSee('id="verifiedProgress"', escape: false)
                 ->assertSee('id="validationSubmitError"', escape: false)
+                ->assertSee('Verify all fields for')
                 ->assertDontSee('Only checked fields are submitted.');
         }
     }
