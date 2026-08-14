@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ChangeRequestStatus;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
+use App\Models\RecordField;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -27,9 +28,15 @@ class ChangeRequestService
      * Raise a request against a locked record.
      *
      * @param  array<int, string|null>  $proposals  Keyed by record_field id.
+     * @param  array{registry_number?: string|null}  $recordProposals
      */
-    public function open(CivilRecord $record, array $proposals, string $reason, User $requester): ChangeRequest
-    {
+    public function open(
+        CivilRecord $record,
+        array $proposals,
+        string $reason,
+        User $requester,
+        array $recordProposals = [],
+    ): ChangeRequest {
         if (! $record->isLocked()) {
             throw new RuntimeException('This record is still a draft and does not need a change request.');
         }
@@ -41,21 +48,49 @@ class ChangeRequestService
         $fields = $record->fields->keyBy('id');
 
         // Only keep fields whose value actually differs, so a reviewer is not
-        // asked to approve no-ops.
-        $changes = collect($proposals)
-            ->filter(fn ($value, $id) => $fields->has($id)
-                && trim((string) $value) !== trim((string) $fields[$id]->verified_value))
-            ->all();
+        // asked to approve no-ops. Requiredness is a capture-time invariant and
+        // cannot be bypassed by manually posting an empty proposal.
+        $changes = [];
+        foreach ($proposals as $fieldId => $value) {
+            $field = $fields->get((int) $fieldId);
 
-        if ($changes === []) {
+            if (! $field instanceof RecordField) {
+                continue;
+            }
+
+            $proposed = $this->normaliseFieldValue($field, $value);
+            if ($proposed !== $this->normaliseValue($field->verified_value)) {
+                $changes[$field->getKey()] = $proposed;
+            }
+        }
+
+        $changesRegistryNumber = array_key_exists('registry_number', $recordProposals)
+            && $this->normaliseValue($recordProposals['registry_number'])
+                !== $this->normaliseValue($record->registry_number);
+        $proposedRegistryNumber = $changesRegistryNumber
+            ? $this->normaliseValue($recordProposals['registry_number'])
+            : null;
+
+        if ($changes === [] && ! $changesRegistryNumber) {
             throw new RuntimeException('None of those values differ from what is on record.');
         }
 
-        return DB::transaction(function () use ($record, $changes, $fields, $reason, $requester) {
+        return DB::transaction(function () use (
+            $record,
+            $changes,
+            $fields,
+            $reason,
+            $requester,
+            $changesRegistryNumber,
+            $proposedRegistryNumber,
+        ) {
             $request = $record->changeRequests()->create([
                 'status' => ChangeRequestStatus::Pending,
                 'reason' => $reason,
                 'requested_by' => $requester->getKey(),
+                'changes_registry_number' => $changesRegistryNumber,
+                'current_registry_number' => $changesRegistryNumber ? $record->registry_number : null,
+                'proposed_registry_number' => $proposedRegistryNumber,
             ]);
 
             foreach ($changes as $fieldId => $proposed) {
@@ -66,12 +101,17 @@ class ChangeRequestService
                 ]);
             }
 
+            $changeCount = count($changes) + ($changesRegistryNumber ? 1 : 0);
+
             $this->audit->log(
                 'change_request.opened',
                 $request,
-                new: ['record_id' => $record->getKey(), 'field_count' => count($changes)],
-                description: 'Requested changes to '.count($changes)
-                    ." field(s) on record #{$record->getKey()}.",
+                new: [
+                    'record_id' => $record->getKey(),
+                    'field_count' => count($changes),
+                    'registry_number_changed' => $changesRegistryNumber,
+                ],
+                description: "Requested {$changeCount} change(s) on record #{$record->getKey()}.",
                 actor: $requester,
             );
 
@@ -97,10 +137,21 @@ class ChangeRequestService
                     continue;
                 }
 
-                $previous[$field->name] = $field->verified_value;
-                $applied[$field->name] = $item->proposed_value;
+                $proposed = $this->normaliseFieldValue($field, $item->proposed_value);
 
-                $field->forceFill(['verified_value' => $item->proposed_value])->save();
+                $previous[$field->name] = $field->verified_value;
+                $applied[$field->name] = $proposed;
+
+                $field->forceFill(['verified_value' => $proposed])->save();
+            }
+
+            if ($request->changes_registry_number) {
+                $previous['Registry Number'] = $request->record->registry_number;
+                $applied['Registry Number'] = $request->proposed_registry_number;
+
+                $request->record->forceFill([
+                    'registry_number' => $request->proposed_registry_number,
+                ])->save();
             }
 
             $request->forceFill([
@@ -172,5 +223,27 @@ class ChangeRequestService
                 "This request is already {$request->status->value} and cannot be changed.",
             );
         }
+    }
+
+    private function normaliseFieldValue(RecordField $field, mixed $value): ?string
+    {
+        $normalised = $this->normaliseValue($value);
+
+        if ($field->is_required && $normalised === null) {
+            throw new RuntimeException("{$field->name} is required and cannot be blank.");
+        }
+
+        return $normalised;
+    }
+
+    private function normaliseValue(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalised = trim((string) $value);
+
+        return $normalised === '' ? null : $normalised;
     }
 }

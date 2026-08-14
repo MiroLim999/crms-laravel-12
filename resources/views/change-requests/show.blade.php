@@ -16,12 +16,19 @@
                     <table class="table align-middle mb-0">
                         <thead>
                             <tr>
-                                <th>Field</th>
+                                <th>Attribute</th>
                                 <th>Current</th>
                                 <th>Proposed</th>
                             </tr>
                         </thead>
                         <tbody>
+                            @if ($changeRequest->changes_registry_number)
+                                <tr>
+                                    <td class="text-muted">Registry number</td>
+                                    <td><del class="text-danger">{{ $changeRequest->current_registry_number ?: '—' }}</del></td>
+                                    <td><span class="text-success fw-medium">{{ $changeRequest->proposed_registry_number ?: '—' }}</span></td>
+                                </tr>
+                            @endif
                             @foreach ($changeRequest->items as $item)
                                 <tr>
                                     <td class="text-muted">{{ $item->field?->name ?? 'Removed field' }}</td>

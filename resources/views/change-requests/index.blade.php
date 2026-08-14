@@ -35,7 +35,7 @@
                         <tr>
                             <th>Request</th>
                             <th>Record</th>
-                            <th>Fields</th>
+                            <th>Changes</th>
                             <th>Requested</th>
                             <th>Status</th>
                             <th class="text-end"></th>
@@ -59,7 +59,7 @@
                                         <span class="text-muted">—</span>
                                     @endif
                                 </td>
-                                <td>{{ $request->items->count() }}</td>
+                                <td>{{ $request->changeCount() }}</td>
                                 <td class="text-muted">
                                     {{ $request->requester?->name }}
                                     <div><small>{{ $request->created_at->diffForHumans() }}</small></div>

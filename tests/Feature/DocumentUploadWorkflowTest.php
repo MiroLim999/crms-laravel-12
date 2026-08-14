@@ -169,6 +169,7 @@ class DocumentUploadWorkflowTest extends TestCase
         $this->assertDatabaseHas('record_fields', [
             'name' => 'Child Full Name',
             'verified_value' => 'Maria Santos',
+            'is_required' => true,
         ]);
 
         $record = CivilRecord::firstOrFail();

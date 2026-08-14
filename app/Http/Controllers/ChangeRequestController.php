@@ -66,7 +66,8 @@ class ChangeRequestController extends Controller
 
         $validated = $request->validate([
             'reason' => ['required', 'string', 'min:10', 'max:2000'],
-            'values' => ['required', 'array'],
+            'registry_number' => ['nullable', 'string', 'max:64'],
+            'values' => ['nullable', 'array'],
             'values.*' => ['nullable', 'string', 'max:2000'],
         ], [
             'reason.min' => 'Explain the correction in a sentence or two — a reviewer needs the context.',
@@ -75,9 +76,12 @@ class ChangeRequestController extends Controller
         try {
             $changeRequest = $this->service->open(
                 $record->load('fields'),
-                $validated['values'],
+                $validated['values'] ?? [],
                 $validated['reason'],
                 $request->user(),
+                array_key_exists('registry_number', $validated)
+                    ? ['registry_number' => $validated['registry_number']]
+                    : [],
             );
         } catch (RuntimeException $e) {
             return back()->withInput()->with('error', $e->getMessage());

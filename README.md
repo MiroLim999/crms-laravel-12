@@ -49,8 +49,9 @@ Three seeded roles. **There is no public sign-up** — every account is created 
 | Document template builder         | No    | No    | Yes         |
 | OCR model management              | No    | No    | Yes         |
 
-**Admin cannot edit record values.** Data entry belongs to Staff; corrections go through the
-change-request flow. This is intentional — it is what keeps the audit trail meaningful.
+**Admin cannot edit record values.** Data entry belongs to Staff; corrections to verified fields
+and registry numbers go through the change-request flow. This is intentional — it is what keeps
+the audit trail meaningful. Required captured fields cannot be cleared during correction.
 
 ## Project structure
 

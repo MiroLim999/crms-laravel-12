@@ -9,7 +9,7 @@
     <div class="alert alert-info d-flex align-items-start" role="alert">
         <i class="icon-base bx bx-info-circle icon-md me-2"></i>
         <div>
-            Edit only the values that need correcting. An Admin reviews the proposal, and
+            Edit only the registry number or values that need correcting. An Admin reviews the proposal, and
             approving it is what applies the change — the record stays as it is until then.
         </div>
     </div>
@@ -20,16 +20,33 @@
         <div class="row g-4">
             <div class="col-lg-8">
                 <x-card title="Proposed values">
+                    <div class="mb-4">
+                        <label for="registry-number" class="form-label">Registry number</label>
+                        <input type="text"
+                               id="registry-number"
+                               name="registry_number"
+                               value="{{ old('registry_number', $record->registry_number) }}"
+                               maxlength="64"
+                               class="form-control @error('registry_number') is-invalid @enderror">
+                        @error('registry_number')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        <div class="form-text">
+                            On record: <strong>{{ $record->registry_number ?: '—' }}</strong>
+                        </div>
+                    </div>
+
                     @foreach ($record->fields as $field)
                         <div class="mb-3">
                             <label for="field-{{ $field->getKey() }}" class="form-label">
                                 {{ $field->name }}
+                                @if ($field->is_required)<span class="text-danger" aria-label="required">*</span>@endif
                             </label>
                             <input type="text"
                                    id="field-{{ $field->getKey() }}"
                                    name="values[{{ $field->getKey() }}]"
                                    value="{{ old('values.' . $field->getKey(), $field->verified_value) }}"
-                                   class="form-control">
+                                   class="form-control @error('values.' . $field->getKey()) is-invalid @enderror"
+                                   @required($field->is_required)>
+                            @error('values.' . $field->getKey())<div class="invalid-feedback">{{ $message }}</div>@enderror
                             <div class="form-text">
                                 On record: <strong>{{ $field->verified_value ?: '—' }}</strong>
                             </div>

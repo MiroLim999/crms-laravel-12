@@ -159,13 +159,17 @@ class DocumentScanController extends Controller
 
         $templateId = (int) $validated['document_template_id'];
         $documentType = DocumentTypeDefinition::where('key', (string) $validated['doc_type'])->firstOrFail();
-        $template = DocumentTemplate::with('documentTypeDefinition')->find($templateId);
+        $template = DocumentTemplate::with(['documentTypeDefinition', 'fields'])->find($templateId);
 
         if ($template?->document_type_id !== $documentType->getKey()) {
             throw ValidationException::withMessages([
                 'document_template_id' => 'The selected template does not belong to this document type.',
             ]);
         }
+
+        $requiredByName = $template->fields->mapWithKeys(
+            fn ($field) => [mb_strtolower(trim($field->name)) => $field->is_required],
+        );
 
         $coordinateErrors = [];
         foreach ($validated['fields'] as $index => $field) {
@@ -190,7 +194,7 @@ class DocumentScanController extends Controller
         $path = $scan->store('scans', 'local');
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType) {
+            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $requiredByName) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -212,6 +216,10 @@ class DocumentScanController extends Controller
                         'ocr_text' => $field['ocr_text'] ?? null,
                         'ocr_confidence' => $field['ocr_confidence'] ?? null,
                         'verified_value' => $field['verified_value'],
+                        'is_required' => $requiredByName->get(
+                            mb_strtolower(trim($field['name'])),
+                            true,
+                        ),
                         'x' => $field['x'],
                         'y' => $field['y'],
                         'width' => $field['width'],

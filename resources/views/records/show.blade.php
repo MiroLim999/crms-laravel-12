@@ -111,7 +111,7 @@
                                     <div class="small text-muted">
                                         {{ $request->requester?->name }}
                                         · {{ $request->created_at->diffForHumans() }}
-                                        · {{ $request->items->count() }} field(s)
+                                        · {{ $request->changeCount() }} change(s)
                                     </div>
                                 </div>
                                 <span class="badge {{ $request->status->badgeClass() }}">

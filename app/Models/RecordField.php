@@ -12,13 +12,14 @@ class RecordField extends Model
 
     protected $fillable = [
         'record_id', 'name', 'ocr_text', 'ocr_confidence', 'verified_value',
-        'crop_path', 'x', 'y', 'width', 'height', 'sort_order',
+        'is_required', 'crop_path', 'x', 'y', 'width', 'height', 'sort_order',
     ];
 
     protected function casts(): array
     {
         return [
             'ocr_confidence' => 'float',
+            'is_required' => 'boolean',
             'x' => 'float',
             'y' => 'float',
             'width' => 'float',
