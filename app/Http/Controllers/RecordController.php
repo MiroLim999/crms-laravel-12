@@ -57,8 +57,6 @@ class RecordController extends Controller
     {
         $record->load([
             'fields',
-            'submitter',
-            'template',
             'documentTypeDefinition',
             'changeRequests.requester',
             'changeRequests.reviewer',

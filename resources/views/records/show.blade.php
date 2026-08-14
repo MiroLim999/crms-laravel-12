@@ -249,29 +249,6 @@
                         </x-card>
                     @endif
 
-                    <details class="card record-provenance-card mt-4">
-                        <summary class="card-header record-disclosure-summary">
-                            <span>
-                                <strong>Provenance</strong>
-                                <small>Submission and OCR traceability</small>
-                            </span>
-                            <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
-                        </summary>
-                        <div class="card-body">
-                            <dl class="record-provenance-list">
-                                <dt>Status</dt>
-                                <dd><span class="badge {{ $record->status->badgeClass() }}">{{ $record->status->label() }}</span></dd>
-                                <dt>Submitted by</dt>
-                                <dd>{{ $record->submitter?->name ?? '—' }}</dd>
-                                <dt>Submitted at</dt>
-                                <dd>{{ $record->submitted_at?->format('j M Y, H:i') ?? '—' }}</dd>
-                                <dt>Template</dt>
-                                <dd>{{ $record->template?->name ?? '—' }}</dd>
-                                <dt>OCR model</dt>
-                                <dd><code class="record-model-key">{{ $record->ocr_model_key ?? '—' }}</code></dd>
-                            </dl>
-                        </div>
-                    </details>
                 </div>
             </section>
         </div>

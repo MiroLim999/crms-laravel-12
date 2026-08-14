@@ -3484,12 +3484,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   --record-scan-width: 58%;
 
   display: grid;
-  grid-template-areas:
-    'data'
-    'scan';
+  grid-template-areas: 'data';
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: 1.5rem;
+  gap: 0;
   inline-size: 100%;
 
   &.has-scan.is-comparing {
@@ -3544,8 +3542,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   &:hover::before,
   &:focus-visible::before,
   .is-resizing &::before {
-    inline-size: 3px;
-    background: rgba(105, 108, 255, .5);
+    inline-size: 2px;
+    background: rgba(67, 89, 113, .38);
   }
 }
 
@@ -3558,8 +3556,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     position: static;
   }
 
-  .record-provenance-card {
-    margin-block-start: 0 !important;
+  .record-scan-pane {
+    display: none;
   }
 }
 
@@ -3571,9 +3569,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   inline-size: .875rem;
   block-size: 5.5rem;
   place-items: center;
-  color: #fff;
-  background: var(--bs-primary);
-  border: 1px solid rgba(255, 255, 255, .7);
+  color: var(--bs-secondary-color);
+  background: #fff;
+  border: 1px solid rgba(67, 89, 113, .3);
   border-radius: .35rem;
   box-shadow: 0 .18rem .55rem rgba(67, 89, 113, .22);
   transition: background-color .15s ease, box-shadow .15s ease, transform .15s ease;
@@ -3581,8 +3579,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .record-splitter:hover &,
   .record-splitter:focus-visible &,
   .is-resizing & {
-    background: #5661dc;
-    box-shadow: 0 0 0 3px rgba(105, 108, 255, .16), 0 .25rem .7rem rgba(67, 89, 113, .25);
+    color: var(--bs-heading-color);
+    background: var(--bs-gray-100);
+    border-color: rgba(67, 89, 113, .45);
+    box-shadow: 0 .25rem .7rem rgba(67, 89, 113, .2);
     transform: scaleX(1.08);
   }
 }
@@ -3865,6 +3865,16 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   background-position: 0 0, 0 .45rem, .45rem -.45rem, -.45rem 0;
   background-size: .9rem .9rem;
   overscroll-behavior: contain;
+
+  &.is-panning {
+    cursor: grabbing;
+    user-select: none;
+
+    img,
+    .record-scan-overlay {
+      pointer-events: none;
+    }
+  }
 }
 
 .record-scan-stage {
@@ -3965,31 +3975,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   details[open] & > .bx-chevron-down {
     transform: rotate(180deg);
   }
-}
-
-.record-provenance-list {
-  display: grid;
-  grid-template-columns: minmax(7rem, .7fr) minmax(0, 1.3fr);
-  gap: .65rem 1rem;
-  margin: 0;
-
-  dt {
-    color: var(--bs-secondary-color);
-    font-weight: 400;
-  }
-
-  dd {
-    min-inline-size: 0;
-    margin: 0;
-    overflow-wrap: anywhere;
-  }
-}
-
-.record-model-key {
-  color: var(--bs-body-color);
-  background: var(--bs-gray-100);
-  border-radius: .3rem;
-  padding: .12rem .35rem;
 }
 
 .record-history-entry {

@@ -47,7 +47,8 @@ class RecordDetailPresentationTest extends TestCase
                 'record-group-list',
             ], escape: false)
             ->assertSee('Original scan')
-            ->assertSee('Provenance')
+            ->assertDontSee('Submission details')
+            ->assertDontSee('Provenance')
             ->assertSee('class="record-split-workspace has-scan"', escape: false)
             ->assertSee('data-record-splitter', escape: false)
             ->assertSee('role="separator"', escape: false)

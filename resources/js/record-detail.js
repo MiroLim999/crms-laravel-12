@@ -3,6 +3,9 @@ import { setDisclosureExpanded } from './disclosure-motion.js';
 export const RECORD_SPLIT_MIN = 35;
 export const RECORD_SPLIT_MAX = 75;
 export const RECORD_SPLIT_DEFAULT = 58;
+export const RECORD_SCAN_ZOOM_MIN = 1;
+export const RECORD_SCAN_ZOOM_MAX = 3;
+export const RECORD_SCAN_WHEEL_STEP = 0.1;
 
 export function clampRecordSplit(value) {
     if (value === null || value === undefined || value === '') return RECORD_SPLIT_DEFAULT;
@@ -36,6 +39,31 @@ export function recordComparisonFrames(visible, stacked = false) {
     const shown = { opacity: 1, transform: 'translate(0, 0)' };
 
     return visible ? [hidden, shown] : [shown, hidden];
+}
+
+export function clampRecordScanZoom(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return RECORD_SCAN_ZOOM_MIN;
+
+    return Math.min(
+        RECORD_SCAN_ZOOM_MAX,
+        Math.max(RECORD_SCAN_ZOOM_MIN, Math.round(numeric * 10) / 10),
+    );
+}
+
+export function recordScanZoomFromWheel(current, deltaY) {
+    if (!Number.isFinite(deltaY) || deltaY === 0) return clampRecordScanZoom(current);
+
+    return clampRecordScanZoom(
+        current + (deltaY < 0 ? RECORD_SCAN_WHEEL_STEP : -RECORD_SCAN_WHEEL_STEP),
+    );
+}
+
+export function recordScanPanPosition(scrollLeft, scrollTop, movementX, movementY) {
+    return {
+        left: Math.max(0, scrollLeft - movementX),
+        top: Math.max(0, scrollTop - movementY),
+    };
 }
 
 function initRecordDetail(root) {
@@ -210,15 +238,112 @@ function initRecordDetail(root) {
     const zoomLabel = root.querySelector('[data-scan-zoom-reset]');
     let zoom = 1;
 
-    const setZoom = (nextZoom) => {
-        zoom = Math.min(3, Math.max(1, Math.round(nextZoom * 10) / 10));
+    const setZoom = (nextZoom, focalEvent = null) => {
+        const canKeepFocalPoint = viewport instanceof HTMLElement
+            && stage instanceof HTMLElement
+            && focalEvent !== null;
+        let focalPoint = null;
+
+        if (canKeepFocalPoint) {
+            const bounds = viewport.getBoundingClientRect();
+            const stageWidth = stage.offsetWidth || 1;
+            const stageHeight = stage.offsetHeight || 1;
+            const localX = focalEvent.clientX - bounds.left;
+            const localY = focalEvent.clientY - bounds.top;
+            focalPoint = {
+                localX,
+                localY,
+                documentX: (viewport.scrollLeft + localX) / stageWidth,
+                documentY: (viewport.scrollTop + localY) / stageHeight,
+            };
+        }
+
+        const previousTransition = canKeepFocalPoint ? stage.style.transition : null;
+        if (canKeepFocalPoint) stage.style.transition = 'none';
+
+        zoom = clampRecordScanZoom(nextZoom);
         if (stage instanceof HTMLElement) stage.style.inlineSize = `${zoom * 100}%`;
         if (zoomLabel instanceof HTMLButtonElement) zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+
+        if (focalPoint && viewport instanceof HTMLElement && stage instanceof HTMLElement) {
+            viewport.scrollLeft = focalPoint.documentX * stage.offsetWidth - focalPoint.localX;
+            viewport.scrollTop = focalPoint.documentY * stage.offsetHeight - focalPoint.localY;
+            window.requestAnimationFrame(() => {
+                stage.style.transition = previousTransition ?? '';
+            });
+        }
     };
 
     root.querySelector('[data-scan-zoom-out]')?.addEventListener('click', () => setZoom(zoom - 0.25));
     root.querySelector('[data-scan-zoom-in]')?.addEventListener('click', () => setZoom(zoom + 0.25));
     zoomLabel?.addEventListener('click', () => setZoom(1));
+    viewport?.addEventListener('wheel', (event) => {
+        if (!event.ctrlKey || event.deltaY === 0) return;
+
+        event.preventDefault();
+        setZoom(recordScanZoomFromWheel(zoom, event.deltaY), event);
+    }, { passive: false });
+
+    let panning = false;
+    let panX = 0;
+    let panY = 0;
+    let panStartX = 0;
+    let panStartY = 0;
+    let suppressPanClick = false;
+
+    viewport?.addEventListener('pointerdown', (event) => {
+        if (!event.ctrlKey || event.button !== 0) return;
+
+        event.preventDefault();
+        panning = true;
+        panX = event.clientX;
+        panY = event.clientY;
+        panStartX = event.clientX;
+        panStartY = event.clientY;
+        suppressPanClick = false;
+        viewport.setPointerCapture?.(event.pointerId);
+        viewport.classList.add('is-panning');
+    });
+
+    viewport?.addEventListener('pointermove', (event) => {
+        if (!panning) return;
+
+        event.preventDefault();
+        const next = recordScanPanPosition(
+            viewport.scrollLeft,
+            viewport.scrollTop,
+            event.clientX - panX,
+            event.clientY - panY,
+        );
+        viewport.scrollLeft = next.left;
+        viewport.scrollTop = next.top;
+        panX = event.clientX;
+        panY = event.clientY;
+        if (Math.hypot(event.clientX - panStartX, event.clientY - panStartY) > 3) {
+            suppressPanClick = true;
+        }
+    });
+
+    const finishPan = (event) => {
+        if (!panning) return;
+
+        panning = false;
+        viewport.classList.remove('is-panning');
+        if (event.type === 'pointercancel') suppressPanClick = false;
+        if (viewport.hasPointerCapture?.(event.pointerId)) {
+            viewport.releasePointerCapture(event.pointerId);
+        }
+    };
+
+    viewport?.addEventListener('pointerup', finishPan);
+    viewport?.addEventListener('pointercancel', finishPan);
+    viewport?.addEventListener('click', (event) => {
+        if (!suppressPanClick) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        suppressPanClick = false;
+    }, true);
 
     const activateField = (fieldId, scrollRow = false) => {
         const row = root.querySelector(`[data-record-field="${fieldId}"]`);

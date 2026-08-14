@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    clampRecordScanZoom,
     clampRecordSplit,
     RECORD_SPLIT_DEFAULT,
     recordComparisonFrames,
+    recordScanPanPosition,
+    recordScanZoomFromWheel,
     recordSplitFromKey,
     recordSplitFromPointer,
 } from '../../resources/js/record-detail.js';
@@ -38,4 +41,23 @@ test('record split supports precise and accelerated keyboard resizing', () => {
     assert.equal(recordSplitFromKey('Home', 58), 35);
     assert.equal(recordSplitFromKey('End', 58), 75);
     assert.equal(recordSplitFromKey('Enter', 58), null);
+});
+
+test('Ctrl-wheel scan zoom follows wheel direction and stays within limits', () => {
+    assert.equal(recordScanZoomFromWheel(1.6, -100), 1.7);
+    assert.equal(recordScanZoomFromWheel(1.6, 100), 1.5);
+    assert.equal(recordScanZoomFromWheel(3, -100), 3);
+    assert.equal(recordScanZoomFromWheel(1, 100), 1);
+    assert.equal(clampRecordScanZoom(Number.NaN), 1);
+});
+
+test('Ctrl-drag pans the scan opposite the pointer movement', () => {
+    assert.deepEqual(recordScanPanPosition(300, 200, 40, -25), {
+        left: 260,
+        top: 225,
+    });
+    assert.deepEqual(recordScanPanPosition(10, 15, 50, 30), {
+        left: 0,
+        top: 0,
+    });
 });
