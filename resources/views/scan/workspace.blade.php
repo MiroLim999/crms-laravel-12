@@ -1954,15 +1954,22 @@
             const checkboxId = `verifyGroup-${group.id}`;
             bulk.className = 'validation-record-group__bulk';
             bulk.innerHTML = `
-                <label class="validation-verified-control validation-group-verified-control"
-                       for="${checkboxId}">
-                    <input class="form-check-input validation-group-verified" type="checkbox"
-                           id="${checkboxId}">
-                    <span>Verify all fields for <strong></strong></span>
-                </label>`;
-            requiredPart(bulk, 'strong').textContent = group.label;
+                <div class="validation-record-group__bulk-copy">
+                    <strong>All fields</strong>
+                    <small></small>
+                </div>
+                <div class="validation-record-group__bulk-action">
+                    <label class="validation-verified-control validation-group-verified-control"
+                           for="${checkboxId}">
+                        <input class="form-check-input validation-group-verified" type="checkbox"
+                               id="${checkboxId}">
+                        <span>Verify all</span>
+                    </label>
+                </div>`;
+            requiredPart(bulk, 'small').textContent = `Mark every populated field in ${group.label} as verified.`;
 
             const groupCheckbox = requiredInput(bulk, '.validation-group-verified');
+            groupCheckbox.setAttribute('aria-label', `Verify all fields for ${group.label}`);
             groupCheckbox.addEventListener('change', () => {
                 setGroupVerified(group, groupCheckbox.checked);
             });
