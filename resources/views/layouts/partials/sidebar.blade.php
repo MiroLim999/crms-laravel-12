@@ -31,6 +31,9 @@
                        @if ($item['active']) aria-current="page" @endif>
                         <i class="menu-icon icon-base bx {{ $item['icon'] }}" aria-hidden="true"></i>
                         <span class="sidebar-nav__label">{{ $item['label'] }}</span>
+                        @if (! empty($item['badge']))
+                            <span class="badge rounded-pill {{ $item['badge']['class'] ?? 'bg-primary' }} ms-auto">{{ $item['badge']['count'] }}</span>
+                        @endif
                     </a>
                 </li>
             @endforeach

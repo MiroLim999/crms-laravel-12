@@ -61,6 +61,7 @@ class UserProvisioner
      */
     public function update(User $user, string $name, string $email, RoleSlug $role, User $actor): User
     {
+        $oldRoleId = $user->role_id;
         $user->fill([
             'name' => $name,
             'email' => $email,
@@ -71,7 +72,15 @@ class UserProvisioner
             return $user;
         }
 
-        $this->audit->saveAndLog('user.updated', $user, "Updated account {$user->email}.");
+        $roleChanged = $user->isDirty('role_id');
+        $oldRole = $roleChanged ? Role::find($oldRoleId)?->name : null;
+
+        $description = "Updated account {$user->email}.";
+        if ($roleChanged && $oldRole) {
+            $description .= " Role changed from {$oldRole} to {$role->label()}.";
+        }
+
+        $this->audit->saveAndLog('user.updated', $user, $description);
 
         return $user;
     }

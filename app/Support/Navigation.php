@@ -85,12 +85,21 @@ class Navigation
             default => true,
         };
 
+        $badge = null;
+        if ($route === 'change-requests.index' && Gate::allows('change-requests.moderate')) {
+            $pendingCount = \App\Models\ChangeRequest::where('status', \App\Enums\ChangeRequestStatus::Pending)->count();
+            if ($pendingCount > 0) {
+                $badge = ['count' => $pendingCount, 'class' => 'bg-warning text-dark'];
+            }
+        }
+
         return [
             'label' => $label,
             'route' => $route,
             'icon' => $icon,
             'visible' => $visible && Route::has($route),
             'active' => self::isActive($route),
+            'badge' => $badge,
         ];
     }
 
