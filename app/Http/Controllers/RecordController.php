@@ -6,7 +6,6 @@ use App\Enums\ChangeRequestStatus;
 use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
-use App\Models\OcrSetting;
 use App\Services\RecordFieldGrouper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
@@ -78,7 +77,6 @@ class RecordController extends Controller
 
         return view('records.show', [
             'record' => $record,
-            'threshold' => OcrSetting::threshold(),
             'fieldGroups' => $fieldGroups,
             'recordHeading' => $this->fieldGrouper->heading($record, $fieldGroups),
             'fieldChanges' => $fieldChanges,

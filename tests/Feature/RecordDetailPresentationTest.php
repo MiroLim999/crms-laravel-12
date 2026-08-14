@@ -38,7 +38,14 @@ class RecordDetailPresentationTest extends TestCase
             ->assertSee('Person 01')
             ->assertSee('Juan Miguel D. Abad')
             ->assertSee('Person 02')
-            ->assertSee('Show OCR comparison')
+            ->assertSee('Compare original')
+            ->assertDontSee('Show OCR comparison')
+            ->assertDontSee('Model read')
+            ->assertSeeInOrder([
+                'record-values-card',
+                'data-original-toggle',
+                'record-group-list',
+            ], escape: false)
             ->assertSee('Original scan')
             ->assertSee('Provenance')
             ->assertSee('class="record-split-workspace has-scan"', escape: false)

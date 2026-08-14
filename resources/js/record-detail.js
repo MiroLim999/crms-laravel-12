@@ -30,6 +30,14 @@ export function recordSplitFromKey(key, current, largeStep = false) {
     }[key] ?? null;
 }
 
+export function recordComparisonFrames(visible, stacked = false) {
+    const offset = stacked ? 'translateY(-1rem)' : 'translateX(-1.5rem)';
+    const hidden = { opacity: 0, transform: offset };
+    const shown = { opacity: 1, transform: 'translate(0, 0)' };
+
+    return visible ? [hidden, shown] : [shown, hidden];
+}
+
 function initRecordDetail(root) {
     const split = root.querySelector('[data-record-split]');
     const splitter = root.querySelector('[data-record-splitter]');
@@ -106,14 +114,68 @@ function initRecordDetail(root) {
         updateSplit(percentage);
     }
 
-    const comparisonToggle = root.querySelector('[data-ocr-toggle]');
-    comparisonToggle?.addEventListener('click', () => {
-        const visible = root.classList.toggle('show-ocr-comparison');
-        comparisonToggle.setAttribute('aria-pressed', String(visible));
-        comparisonToggle.textContent = visible ? 'Hide OCR comparison' : 'Show OCR comparison';
-        root.querySelectorAll('.record-field-row__ocr').forEach((comparison) => {
-            comparison.setAttribute('aria-hidden', String(!visible));
+    const originalToggle = root.querySelector('[data-original-toggle]');
+    const originalToggleLabel = root.querySelector('[data-original-toggle-label]');
+    const scanCard = root.querySelector('.record-scan-card');
+    let comparisonVisible = false;
+    let comparisonAnimation = null;
+    let comparisonSequence = 0;
+
+    const setOriginalComparison = (visible) => {
+        if (!(split instanceof HTMLElement)) return;
+        if (visible === comparisonVisible && !split.classList.contains('is-closing-comparison')) return;
+
+        comparisonVisible = visible;
+        const sequence = ++comparisonSequence;
+        comparisonAnimation?.cancel();
+        comparisonAnimation = null;
+
+        originalToggle?.setAttribute('aria-pressed', String(visible));
+        if (originalToggleLabel) {
+            originalToggleLabel.textContent = visible ? 'Hide original' : 'Compare original';
+        }
+
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const canAnimate = scanCard instanceof HTMLElement
+            && typeof scanCard.animate === 'function'
+            && !reducedMotion;
+
+        if (visible) {
+            split.classList.remove('is-closing-comparison');
+            split.classList.add('is-comparing');
+            if (!canAnimate) return;
+
+            comparisonAnimation = scanCard.animate(
+                recordComparisonFrames(true, window.matchMedia('(max-width: 1199.98px)').matches),
+                { duration: 260, easing: 'cubic-bezier(.2, .72, .2, 1)' },
+            );
+            comparisonAnimation.finished.catch(() => undefined).then(() => {
+                if (comparisonSequence === sequence) comparisonAnimation = null;
+            });
+            return;
+        }
+
+        if (!split.classList.contains('is-comparing')) return;
+        if (!canAnimate) {
+            split.classList.remove('is-comparing', 'is-closing-comparison');
+            return;
+        }
+
+        split.classList.add('is-closing-comparison');
+        comparisonAnimation = scanCard.animate(
+            recordComparisonFrames(false, window.matchMedia('(max-width: 1199.98px)').matches),
+            { duration: 210, easing: 'cubic-bezier(.4, 0, 1, 1)' },
+        );
+        comparisonAnimation.finished.catch(() => undefined).then(() => {
+            if (comparisonSequence !== sequence) return;
+
+            comparisonAnimation = null;
+            split.classList.remove('is-comparing', 'is-closing-comparison');
         });
+    };
+
+    originalToggle?.addEventListener('click', () => {
+        setOriginalComparison(!comparisonVisible);
     });
 
     const setGroupExpanded = (group, expanded) => {
@@ -163,6 +225,7 @@ function initRecordDetail(root) {
         const marker = root.querySelector(`[data-scan-marker="${fieldId}"]`);
         if (!(row instanceof HTMLElement) || !(marker instanceof HTMLElement)) return;
 
+        setOriginalComparison(true);
         root.querySelectorAll('.record-field-row.is-active, .record-scan-marker.is-active')
             .forEach((element) => element.classList.remove('is-active'));
         row.classList.add('is-active');

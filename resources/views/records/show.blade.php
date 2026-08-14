@@ -84,13 +84,16 @@
             <section class="record-split-pane record-data-pane" id="recordDataPane">
                 <x-card class="record-values-card" bodyClass="p-0"
                         title="Verified data"
-                        subtitle="Verified values are the record. Open OCR comparison only when traceability is needed.">
-                    <x-slot:actions>
-                        <button type="button" class="btn btn-sm btn-outline-secondary record-ocr-toggle"
-                                aria-pressed="false" data-ocr-toggle>
-                            Show OCR comparison
-                        </button>
-                    </x-slot:actions>
+                        subtitle="Verified values are the official record. Compare with the original scan only when needed.">
+                    @if ($record->scan_path)
+                        <x-slot:actions>
+                            <button type="button" class="btn btn-sm btn-outline-secondary record-compare-toggle"
+                                    data-original-toggle aria-pressed="false" aria-controls="recordScanPane">
+                                <i class="icon-base bx bx-images icon-sm me-1" aria-hidden="true"></i>
+                                <span data-original-toggle-label>Compare original</span>
+                            </button>
+                        </x-slot:actions>
+                    @endif
 
                     <div class="record-group-list">
                         @forelse ($fieldGroups as $group)
@@ -140,22 +143,6 @@
                                                 @endif
                                             </div>
 
-                                            <div class="record-field-row__ocr" aria-hidden="true">
-                                                <div>
-                                                    <span>Model read</span>
-                                                    <strong>{{ filled($field->ocr_text) ? $field->ocr_text : 'Nothing read' }}</strong>
-                                                </div>
-                                                <div class="record-field-row__ocr-meta">
-                                                    @if ($field->ocr_confidence !== null)
-                                                        <span class="confidence-badge {{ $field->ocr_confidence < $threshold ? 'is-low' : '' }}">
-                                                            {{ number_format($field->ocr_confidence, 1) }}%
-                                                        </span>
-                                                    @endif
-                                                    @if ($field->wasCorrected())
-                                                        <span class="badge bg-label-info">Adjusted</span>
-                                                    @endif
-                                                </div>
-                                            </div>
                                         </div>
                                     @endforeach
                                 </div>
@@ -166,8 +153,11 @@
                     </div>
 
                     <div class="record-values-card__footnote">
-                        Select a value to locate it on the original scan. OCR confidence describes the model’s
-                        reading, not the reliability of the human-verified record.
+                        @if ($record->scan_path)
+                            Select a value to open the original scan and locate its source.
+                        @else
+                            These values were confirmed during document verification.
+                        @endif
                     </div>
                 </x-card>
 

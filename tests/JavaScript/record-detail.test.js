@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
     clampRecordSplit,
     RECORD_SPLIT_DEFAULT,
+    recordComparisonFrames,
     recordSplitFromKey,
     recordSplitFromPointer,
 } from '../../resources/js/record-detail.js';
@@ -12,6 +13,17 @@ test('record split width stays inside usable panel limits', () => {
     assert.equal(clampRecordSplit(10), 35);
     assert.equal(clampRecordSplit(58.4), 58);
     assert.equal(clampRecordSplit(95), 75);
+});
+
+test('original comparison slides horizontally or vertically into the workspace', () => {
+    assert.deepEqual(recordComparisonFrames(true), [
+        { opacity: 0, transform: 'translateX(-1.5rem)' },
+        { opacity: 1, transform: 'translate(0, 0)' },
+    ]);
+    assert.deepEqual(recordComparisonFrames(false, true), [
+        { opacity: 1, transform: 'translate(0, 0)' },
+        { opacity: 0, transform: 'translateY(-1rem)' },
+    ]);
 });
 
 test('record split follows the horizontal mouse position', () => {
