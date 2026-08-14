@@ -41,6 +41,10 @@ class RecordDetailPresentationTest extends TestCase
             ->assertSee('Show OCR comparison')
             ->assertSee('Original scan')
             ->assertSee('Provenance')
+            ->assertSee('class="record-split-workspace has-scan"', escape: false)
+            ->assertSee('data-record-splitter', escape: false)
+            ->assertSee('role="separator"', escape: false)
+            ->assertSee('aria-controls="recordScanPane recordDataPane"', escape: false)
             ->assertSee('data-group-id="person-1"', escape: false)
             ->assertSee('data-scan-marker="'.$record->fields()->firstOrFail()->getKey().'"', escape: false);
     }

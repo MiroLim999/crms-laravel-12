@@ -2047,6 +2047,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .validation-record-group__body {
   background: rgba(67, 89, 113, .018);
   border-block-start: 1px solid var(--bs-border-color);
+  transform-origin: top;
+  will-change: height, opacity;
 
   .validation-field {
     padding-inline-start: 1.35rem;
@@ -3464,6 +3466,93 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+.record-split-workspace {
+  --record-scan-width: 58%;
+
+  display: grid;
+  grid-template-areas: 'scan divider data';
+  grid-template-columns: minmax(0, var(--record-scan-width)) .875rem minmax(0, 1fr);
+  align-items: start;
+  inline-size: 100%;
+
+  &.has-no-scan {
+    grid-template-areas:
+      'data'
+      'scan';
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+  }
+
+  &.is-resizing {
+    cursor: col-resize;
+    user-select: none;
+  }
+}
+
+.record-split-pane {
+  min-inline-size: 0;
+}
+
+.record-data-pane {
+  grid-area: data;
+}
+
+.record-scan-pane {
+  grid-area: scan;
+}
+
+.record-splitter {
+  position: relative;
+  align-self: stretch;
+  grid-area: divider;
+  min-block-size: 28rem;
+  cursor: col-resize;
+  outline: 0;
+  touch-action: none;
+
+  &::before {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 50%;
+    inline-size: 1px;
+    background: var(--bs-border-color);
+    content: '';
+    transform: translateX(-50%);
+    transition: background-color .15s ease, inline-size .15s ease;
+  }
+
+  &:hover::before,
+  &:focus-visible::before,
+  .is-resizing &::before {
+    inline-size: 3px;
+    background: rgba(105, 108, 255, .5);
+  }
+}
+
+.record-splitter__grip {
+  position: sticky;
+  z-index: 2;
+  inset-block-start: calc(50vh - 2.75rem);
+  display: grid;
+  inline-size: .875rem;
+  block-size: 5.5rem;
+  place-items: center;
+  color: #fff;
+  background: var(--bs-primary);
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: .35rem;
+  box-shadow: 0 .18rem .55rem rgba(67, 89, 113, .22);
+  transition: background-color .15s ease, box-shadow .15s ease, transform .15s ease;
+
+  .record-splitter:hover &,
+  .record-splitter:focus-visible &,
+  .is-resizing & {
+    background: #5661dc;
+    box-shadow: 0 0 0 3px rgba(105, 108, 255, .16), 0 .25rem .7rem rgba(67, 89, 113, .25);
+    transform: scaleX(1.08);
+  }
+}
+
 .record-values-card {
   overflow: hidden;
 
@@ -3485,7 +3574,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     border-block-end: 0;
   }
 
-  &[open] > .record-field-group__summary {
+  &.is-expanded > .record-field-group__summary {
     background: rgba(105, 108, 255, .035);
 
     > .bx-chevron-down {
@@ -3572,6 +3661,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .record-field-group__body {
   border-block-start: 1px solid var(--bs-border-color);
+  transform-origin: top;
+  will-change: height, opacity;
 }
 
 .record-field-row {
@@ -3888,12 +3979,34 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 @media (max-width: 1199.98px) {
+  .record-split-workspace,
+  .record-split-workspace.has-scan {
+    grid-template-areas:
+      'scan'
+      'data';
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+  }
+
+  .record-splitter {
+    display: none;
+  }
+
   .record-detail-sidebar {
     position: static;
   }
 
   .record-scan-viewport {
     max-block-size: 70vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .record-field-group__body,
+  .validation-record-group__body,
+  .record-splitter::before,
+  .record-splitter__grip {
+    transition: none !important;
   }
 }
 

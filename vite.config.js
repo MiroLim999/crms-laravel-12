@@ -11,6 +11,9 @@ export default defineConfig({
                 'resources/scss/app.scss',
                 'resources/css/app.css',
                 'resources/js/app.js',
+                // Page-scoped archive split view and shared disclosure animation.
+                'resources/js/record-detail.js',
+                'resources/js/disclosure-motion.js',
                 // Auth-page decoration (centred card, corner shapes). Only the
                 // guest layout loads it, so it stays out of the main bundle.
                 'resources/scss/pages/page-auth.scss',

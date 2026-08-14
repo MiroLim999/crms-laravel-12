@@ -80,8 +80,8 @@
             </div>
         </section>
 
-        <div class="row g-4 align-items-start">
-            <div class="col-xl-7">
+        <div class="record-split-workspace {{ $record->scan_path ? 'has-scan' : 'has-no-scan' }}" data-record-split>
+            <section class="record-split-pane record-data-pane" id="recordDataPane">
                 <x-card class="record-values-card" bodyClass="p-0"
                         title="Verified data"
                         subtitle="Verified values are the record. Open OCR comparison only when traceability is needed.">
@@ -201,9 +201,22 @@
                         </div>
                     </details>
                 @endif
-            </div>
+            </section>
 
-            <div class="col-xl-5">
+            @if ($record->scan_path)
+                <div class="record-splitter" data-record-splitter
+                     role="separator" tabindex="0" aria-orientation="vertical"
+                     aria-label="Resize original scan and verified data panels"
+                     aria-controls="recordScanPane recordDataPane"
+                     aria-valuemin="35" aria-valuemax="75" aria-valuenow="58"
+                     aria-valuetext="Original scan 58%, verified data 42%">
+                    <span class="record-splitter__grip" aria-hidden="true">
+                        <i class="icon-base bx bx-dots-vertical-rounded"></i>
+                    </span>
+                </div>
+            @endif
+
+            <section class="record-split-pane record-scan-pane" id="recordScanPane">
                 <div class="record-detail-sidebar">
                     @if ($record->scan_path)
                         <x-card class="record-scan-card" bodyClass="p-0" title="Original scan"
@@ -272,79 +285,11 @@
                         </div>
                     </details>
                 </div>
-            </div>
+            </section>
         </div>
     </main>
 @endsection
 
 @push('scripts')
-<script>
-    (() => {
-        const root = document.querySelector('[data-record-detail]');
-        if (!(root instanceof HTMLElement)) return;
-
-        const comparisonToggle = root.querySelector('[data-ocr-toggle]');
-        comparisonToggle?.addEventListener('click', () => {
-            const visible = root.classList.toggle('show-ocr-comparison');
-            comparisonToggle.setAttribute('aria-pressed', String(visible));
-            comparisonToggle.textContent = visible ? 'Hide OCR comparison' : 'Show OCR comparison';
-            root.querySelectorAll('.record-field-row__ocr').forEach((comparison) => {
-                comparison.setAttribute('aria-hidden', String(!visible));
-            });
-        });
-
-        const viewport = root.querySelector('[data-scan-viewport]');
-        const stage = root.querySelector('[data-scan-stage]');
-        const zoomLabel = root.querySelector('[data-scan-zoom-reset]');
-        let zoom = 1;
-
-        const setZoom = (nextZoom) => {
-            zoom = Math.min(3, Math.max(1, Math.round(nextZoom * 10) / 10));
-            if (stage instanceof HTMLElement) stage.style.inlineSize = `${zoom * 100}%`;
-            if (zoomLabel instanceof HTMLButtonElement) zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
-        };
-
-        root.querySelector('[data-scan-zoom-out]')?.addEventListener('click', () => setZoom(zoom - .25));
-        root.querySelector('[data-scan-zoom-in]')?.addEventListener('click', () => setZoom(zoom + .25));
-        zoomLabel?.addEventListener('click', () => setZoom(1));
-
-        const activateField = (fieldId, scrollRow = false) => {
-            const row = root.querySelector(`[data-record-field="${fieldId}"]`);
-            const marker = root.querySelector(`[data-scan-marker="${fieldId}"]`);
-            if (!(row instanceof HTMLElement) || !(marker instanceof HTMLElement)) return;
-
-            root.querySelectorAll('.record-field-row.is-active, .record-scan-marker.is-active')
-                .forEach((element) => element.classList.remove('is-active'));
-            row.classList.add('is-active');
-            marker.classList.add('is-active');
-            row.closest('details')?.setAttribute('open', '');
-            setZoom(Math.max(zoom, 1.6));
-
-            window.requestAnimationFrame(() => {
-                if (viewport instanceof HTMLElement) {
-                    viewport.scrollTo({
-                        left: Math.max(0, marker.offsetLeft + marker.offsetWidth / 2 - viewport.clientWidth / 2),
-                        top: Math.max(0, marker.offsetTop + marker.offsetHeight / 2 - viewport.clientHeight / 2),
-                        behavior: 'smooth',
-                    });
-                }
-                if (scrollRow) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
-            });
-        };
-
-        root.querySelectorAll('[data-record-field]').forEach((row) => {
-            const activate = () => activateField(row.dataset.recordField);
-            row.addEventListener('click', activate);
-            row.addEventListener('keydown', (event) => {
-                if (!['Enter', ' '].includes(event.key)) return;
-                event.preventDefault();
-                activate();
-            });
-        });
-
-        root.querySelectorAll('[data-scan-marker]').forEach((marker) => {
-            marker.addEventListener('click', () => activateField(marker.dataset.scanMarker, true));
-        });
-    })();
-</script>
+    @vite('resources/js/record-detail.js')
 @endpush

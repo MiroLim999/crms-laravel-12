@@ -432,6 +432,7 @@
         verificationGroupState,
     } from '{{ Vite::asset('resources/js/field-marker.js') }}';
     import { attachMarqueeSelection } from '{{ Vite::asset('resources/js/marquee-selection.js') }}';
+    import { setDisclosureExpanded } from '{{ Vite::asset('resources/js/disclosure-motion.js') }}';
 
     const config = {
         boxes: @json($boxes),
@@ -1637,7 +1638,7 @@
             const body = section.querySelector('.validation-record-group__body');
             button?.setAttribute('aria-expanded', String(expanded));
             button?.classList.toggle('collapsed', !expanded);
-            if (body instanceof HTMLElement) body.hidden = !expanded;
+            if (body instanceof HTMLElement) setDisclosureExpanded(body, expanded);
         });
     }
 
@@ -1986,7 +1987,7 @@
                 section.classList.remove('is-expanded');
                 toggle.setAttribute('aria-expanded', 'false');
                 toggle.classList.add('collapsed');
-                body.hidden = true;
+                setDisclosureExpanded(body, false);
                 activeValidationGroupId = group.id;
                 activeValidationIndex = null;
                 selectValidationGroupMarkers(group);
