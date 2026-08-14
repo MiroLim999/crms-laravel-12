@@ -99,7 +99,7 @@
                                 </div>
                             </div>
                             <button type="button"
-                                    class="btn btn-sm btn-info template-library-toggle {{ $expanded ? 'active' : '' }}"
+                                    class="btn btn-sm btn-outline-secondary template-library-toggle {{ $expanded ? 'active' : '' }}"
                                     data-template-layout-toggle data-target="{{ $collapseId }}"
                                     data-storage-key="template-layouts:{{ $type->key }}"
                                     aria-expanded="{{ $expanded ? 'true' : 'false' }}"
@@ -163,7 +163,7 @@
                                             <td>{{ $layout->records_count }}</td>
                                             <td>
                                                 @if ($layout->is_active)
-                                                    <span class="badge bg-label-success">
+                                                    <span class="badge bg-label-success template-status-badge--published">
                                                         <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
                                                         Published
                                                     </span>
@@ -173,7 +173,7 @@
                                             </td>
                                             <td class="text-end text-nowrap">
                                                 <a href="{{ route('templates.edit', $layout) }}"
-                                                   class="btn btn-sm btn-info">
+                                                   class="btn btn-sm btn-label-primary template-library-edit-btn">
                                                     Edit layout
                                                 </a>
 
