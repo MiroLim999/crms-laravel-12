@@ -3588,19 +3588,28 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   justify-content: center;
   inline-size: 10.25rem;
   min-inline-size: 10.25rem;
-  color: var(--bs-secondary-color) !important;
+  color: var(--bs-primary) !important;
   white-space: nowrap;
   background: #fff !important;
-  border-color: var(--bs-secondary-color) !important;
+  border-color: var(--bs-primary) !important;
 
-  &:hover,
+  .icon-base {
+    color: currentColor;
+  }
+
   &:focus,
   &:focus-visible,
   &:active,
   &[aria-pressed='true'] {
-    color: var(--bs-secondary-color) !important;
-    background: var(--bs-gray-100) !important;
-    border-color: var(--bs-secondary-color) !important;
+    color: var(--bs-primary) !important;
+    background: #fff !important;
+    border-color: var(--bs-primary) !important;
+  }
+
+  &:hover {
+    color: #fff !important;
+    background: var(--bs-primary) !important;
+    border-color: var(--bs-primary) !important;
   }
 }
 

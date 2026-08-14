@@ -87,7 +87,7 @@
                         subtitle="Verified values are the official record. Compare with the original scan only when needed.">
                     @if ($record->scan_path)
                         <x-slot:actions>
-                            <button type="button" class="btn btn-sm btn-outline-secondary record-compare-toggle"
+                            <button type="button" class="btn btn-sm btn-outline-primary record-compare-toggle"
                                     data-original-toggle aria-pressed="false" aria-controls="recordScanPane">
                                 <i class="icon-base bx bx-images icon-sm me-1" aria-hidden="true"></i>
                                 <span data-original-toggle-label>Compare original</span>
