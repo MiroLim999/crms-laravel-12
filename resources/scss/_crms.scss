@@ -3577,8 +3577,34 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   overflow: hidden;
 
   > .card-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
     align-items: center !important;
+    gap: .3rem 1rem !important;
     border-block-end: 1px solid var(--bs-border-color);
+
+    > div:first-child {
+      display: contents;
+    }
+
+    .card-title {
+      grid-column: 1;
+      grid-row: 1;
+      align-self: center;
+    }
+
+    small {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      line-height: 1.45;
+    }
+
+    > div:last-child:not(:first-child) {
+      grid-column: 2;
+      grid-row: 1;
+      align-self: center;
+    }
   }
 }
 
@@ -4016,8 +4042,13 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   .record-values-card > .card-header {
-    align-items: stretch !important;
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
+
+    > div:last-child:not(:first-child) {
+      grid-column: 1;
+      grid-row: 3;
+      margin-block-start: .35rem;
+    }
   }
 
   .record-compare-toggle {

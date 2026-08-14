@@ -82,9 +82,7 @@
 
         <div class="record-split-workspace {{ $record->scan_path ? 'has-scan' : 'has-no-scan' }}" data-record-split>
             <section class="record-split-pane record-data-pane" id="recordDataPane">
-                <x-card class="record-values-card" bodyClass="p-0"
-                        title="Verified data"
-                        subtitle="Verified values are the official record. Compare with the original scan only when needed.">
+                <x-card class="record-values-card" bodyClass="p-0" title="Verified data">
                     @if ($record->scan_path)
                         <x-slot:actions>
                             <button type="button" class="btn btn-sm btn-outline-primary record-compare-toggle"
