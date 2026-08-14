@@ -22,6 +22,7 @@
 
     <title>@yield('title', 'Sign In') · {{ config('app.name') }}</title>
 
+    <link rel="icon" type="image/x-icon" href="{{ asset('favicon.ico') }}">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('assets/img/favicon-32.png') }}">
     <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('assets/img/apple-touch-icon.png') }}">
 
@@ -49,7 +50,7 @@
                         <div class="app-brand justify-content-center mb-6">
                             <span class="app-brand-link gap-2">
                                 <span class="app-brand-logo demo">
-                                    <img src="{{ asset('assets/img/logo.png') }}" alt="{{ config('app.name') }} logo"
+                                    <img src="{{ asset('assets/img/crms-logo.png') }}" alt="{{ config('app.name') }} logo"
                                          width="40" height="40" class="d-block rounded">
                                 </span>
                                 <span class="app-brand-text demo text-heading fw-bold ms-2 fs-4">CRMS</span>

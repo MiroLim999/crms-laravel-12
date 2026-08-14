@@ -6,7 +6,7 @@
         <a href="{{ route('dashboard') }}" class="app-brand-link sidebar-brand__link"
            aria-label="{{ config('app.name') }} dashboard">
             <span class="app-brand-logo sidebar-brand__mark">
-                <img src="{{ asset('assets/img/logo.png') }}" alt="{{ config('app.name') }} logo"
+                <img src="{{ asset('assets/img/crms-logo.png') }}" alt="{{ config('app.name') }} logo"
                      width="36" height="36">
             </span>
             <span class="app-brand-text menu-text sidebar-brand__name">CRMS</span>

@@ -2,7 +2,7 @@
 
 - Status: ready for implementation
 - Scope: the complete Laravel/Blade, Bootstrap/Sneat, Tailwind, ApexCharts, OCR, scanning, and template-builder interface
-- Brand reference: `public/assets/img/logo.png`
+- Brand reference: `public/assets/img/crms-logo.png`
 
 ## Instruction to the implementer
 
