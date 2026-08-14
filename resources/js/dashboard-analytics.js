@@ -1,16 +1,16 @@
 import ApexCharts from 'apexcharts';
 
 const palette = {
-  primary: '#696cff',
+  primary: '#0d6efd',
   info: '#03c3ec',
   success: '#71dd37',
   warning: '#ffab00',
   danger: '#ff3e1d',
   secondary: '#8592a3',
-  purple: '#8e5be8',
+  teal: '#20c997',
 };
 
-const chartColors = [palette.primary, palette.info, palette.warning, palette.success, palette.purple, palette.danger];
+const chartColors = [palette.primary, palette.info, palette.warning, palette.success, palette.teal, palette.danger];
 
 function readChartData() {
   const node = document.getElementById('dashboard-chart-data');

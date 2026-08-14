@@ -2713,7 +2713,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   flex: 0 0 auto;
   inline-size: .55rem;
   block-size: .55rem;
-  background: #696cff;
+  background: var(--bs-primary, #0d6efd);
   border-radius: 50%;
 }
 
@@ -2730,7 +2730,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .dashboard-ranked-list__row:nth-child(5) .dashboard-ranked-list__marker {
-  background: #8e5be8;
+  background: #20c997;
 }
 
 .dashboard-ranked-list__row:nth-child(6) .dashboard-ranked-list__marker {

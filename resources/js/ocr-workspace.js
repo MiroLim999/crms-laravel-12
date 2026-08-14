@@ -835,8 +835,8 @@ function initModelPerformance() {
         const styles = getComputedStyle(target.closest('.ocr-workspace') || document.documentElement);
 
         return {
-            primary: styles.getPropertyValue('--bs-primary').trim() || '#696cff',
-            character: styles.getPropertyValue('--ocr-metric-character').trim() || '#696cff',
+            primary: styles.getPropertyValue('--bs-primary').trim() || '#0d6efd',
+            character: styles.getPropertyValue('--ocr-metric-character').trim() || '#0d6efd',
             word: styles.getPropertyValue('--ocr-metric-word').trim() || '#00a7c4',
             exact: styles.getPropertyValue('--ocr-metric-exact').trim() || '#2aa876',
             text: styles.getPropertyValue('--bs-secondary-color').trim() || '#8592a3',

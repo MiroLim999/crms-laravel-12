@@ -4,7 +4,7 @@
 
 .ocr-workspace {
   --ocr-soft-border: color-mix(in srgb, var(--bs-border-color) 72%, transparent);
-  --ocr-metric-character: #696cff;
+  --ocr-metric-character: var(--bs-primary, #0d6efd);
   --ocr-metric-word: #00a7c4;
   --ocr-metric-exact: #2aa876;
 
