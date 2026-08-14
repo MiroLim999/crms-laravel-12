@@ -3561,32 +3561,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.record-splitter__grip {
-  position: sticky;
-  z-index: 2;
-  inset-block-start: calc(50vh - 2.75rem);
-  display: grid;
-  inline-size: .875rem;
-  block-size: 5.5rem;
-  place-items: center;
-  color: var(--bs-secondary-color);
-  background: #fff;
-  border: 1px solid rgba(67, 89, 113, .3);
-  border-radius: .35rem;
-  box-shadow: 0 .18rem .55rem rgba(67, 89, 113, .22);
-  transition: background-color .15s ease, box-shadow .15s ease, transform .15s ease;
-
-  .record-splitter:hover &,
-  .record-splitter:focus-visible &,
-  .is-resizing & {
-    color: var(--bs-heading-color);
-    background: var(--bs-gray-100);
-    border-color: rgba(67, 89, 113, .45);
-    box-shadow: 0 .25rem .7rem rgba(67, 89, 113, .2);
-    transform: scaleX(1.08);
-  }
-}
-
 .record-values-card {
   overflow: hidden;
 
@@ -4029,8 +4003,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 @media (prefers-reduced-motion: reduce) {
   .record-field-group__body,
   .validation-record-group__body,
-  .record-splitter::before,
-  .record-splitter__grip {
+  .record-splitter::before {
     transition: none !important;
   }
 }

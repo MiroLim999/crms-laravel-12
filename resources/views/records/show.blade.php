@@ -197,11 +197,7 @@
                      aria-label="Resize original scan and verified data panels"
                      aria-controls="recordScanPane recordDataPane"
                      aria-valuemin="35" aria-valuemax="75" aria-valuenow="58"
-                     aria-valuetext="Original scan 58%, verified data 42%">
-                    <span class="record-splitter__grip" aria-hidden="true">
-                        <i class="icon-base bx bx-dots-vertical-rounded"></i>
-                    </span>
-                </div>
+                     aria-valuetext="Original scan 58%, verified data 42%"></div>
             @endif
 
             <section class="record-split-pane record-scan-pane" id="recordScanPane">
