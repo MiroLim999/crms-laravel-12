@@ -28,6 +28,8 @@ class RecordFieldFactory extends Factory
             'ocr_text' => $value,
             'verified_value' => $value,
             'is_required' => true,
+            'person_group' => null,
+            'person_field_order' => null,
             'ocr_confidence' => fake()->randomFloat(1, 80, 99),
             'x' => 0.3,
             'y' => 0.3,

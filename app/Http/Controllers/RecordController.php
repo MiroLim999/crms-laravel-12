@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ChangeRequestStatus;
 use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
 use App\Models\OcrSetting;
+use App\Services\RecordFieldGrouper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
@@ -20,6 +22,8 @@ use Illuminate\View\View;
  */
 class RecordController extends Controller
 {
+    public function __construct(private readonly RecordFieldGrouper $fieldGrouper) {}
+
     public function index(Request $request): View
     {
         $records = CivilRecord::query()
@@ -62,9 +66,27 @@ class RecordController extends Controller
             'changeRequests.items.field',
         ]);
 
+        $fieldGroups = $this->fieldGrouper->groups($record->fields);
+        $approvedRequests = $record->changeRequests
+            ->filter(fn ($changeRequest) => $changeRequest->status === ChangeRequestStatus::Approved);
+        $fieldChanges = $approvedRequests
+            ->flatMap(fn ($changeRequest) => $changeRequest->items->map(
+                fn ($item) => ['field_id' => $item->record_field_id, 'request' => $changeRequest],
+            ))
+            ->groupBy('field_id');
+        $registryWasCorrected = $approvedRequests->contains->changes_registry_number;
+
         return view('records.show', [
             'record' => $record,
             'threshold' => OcrSetting::threshold(),
+            'fieldGroups' => $fieldGroups,
+            'recordHeading' => $this->fieldGrouper->heading($record, $fieldGroups),
+            'fieldChanges' => $fieldChanges,
+            'personCount' => collect($fieldGroups)->where('kind', 'person')->count(),
+            'firstPersonGroupId' => collect($fieldGroups)->firstWhere('kind', 'person')['id'] ?? null,
+            'registryWasCorrected' => $registryWasCorrected,
+            'ocrAdjustedCount' => $record->fields->filter->wasCorrected()->count(),
+            'postSubmissionChangeCount' => $fieldChanges->count() + ($registryWasCorrected ? 1 : 0),
         ]);
     }
 

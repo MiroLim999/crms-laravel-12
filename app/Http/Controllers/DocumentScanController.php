@@ -151,6 +151,8 @@ class DocumentScanController extends Controller
             'fields.*.ocr_text' => ['nullable', 'string', 'max:2000'],
             'fields.*.ocr_confidence' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'fields.*.verified_value' => ['required', 'string', 'max:2000'],
+            'fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:450'],
+            'fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:449'],
             'fields.*.x' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.y' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.width' => ['required', 'numeric', 'min:0.00001', 'max:1'],
@@ -173,6 +175,12 @@ class DocumentScanController extends Controller
 
         $coordinateErrors = [];
         foreach ($validated['fields'] as $index => $field) {
+            $hasPersonGroup = isset($field['person_group']);
+            $hasPersonOrder = isset($field['person_field_order']);
+            if ($hasPersonGroup !== $hasPersonOrder) {
+                $coordinateErrors["fields.{$index}.person_group"] =
+                    'A grouped field must include both its person and field order.';
+            }
             if ((float) $field['x'] + (float) $field['width'] > 1.00001) {
                 $coordinateErrors["fields.{$index}.width"] = 'This field marker extends beyond the document width.';
             }
@@ -220,6 +228,8 @@ class DocumentScanController extends Controller
                             mb_strtolower(trim($field['name'])),
                             true,
                         ),
+                        'person_group' => $field['person_group'] ?? null,
+                        'person_field_order' => $field['person_field_order'] ?? null,
                         'x' => $field['x'],
                         'y' => $field['y'],
                         'width' => $field['width'],

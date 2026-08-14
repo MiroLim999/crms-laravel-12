@@ -2120,9 +2120,17 @@
         const data = new FormData(form);
         data.set('scan', scanFile, scanFile.name);
 
+        const personGroups = validationGroups.filter((candidate) => candidate.kind === 'person');
         const submittedFields = verifiedIndexes.map((sourceIndex) => {
             const reading = readings[sourceIndex];
             const crop = cropped[sourceIndex];
+            const group = validationGroupForField(sourceIndex);
+            const personGroup = group?.kind === 'person'
+                ? personGroups.findIndex((candidate) => candidate.id === group.id) + 1
+                : null;
+            const personFieldOrder = group?.kind === 'person'
+                ? group.indexes.indexOf(sourceIndex)
+                : null;
             const row = validationRow(sourceIndex);
             const value = row instanceof HTMLElement
                 ? requiredInput(row, '.verified').value.trim()
@@ -2133,6 +2141,8 @@
                 ocr_text: String(reading.text ?? ''),
                 ocr_confidence: normaliseConfidence(reading).toFixed(1),
                 verified_value: value,
+                person_group: personGroup,
+                person_field_order: personFieldOrder,
                 x: Number(crop.x ?? 0).toFixed(5),
                 y: Number(crop.y ?? 0).toFixed(5),
                 width: Number(crop.w ?? 0).toFixed(5),
