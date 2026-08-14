@@ -341,10 +341,24 @@
   background-color: #fff;
   border-color: var(--bs-secondary-color);
   transition: inset-inline-start .3s cubic-bezier(.4, 0, .2, 1), opacity .15s ease,
-              visibility .15s ease;
+              visibility .15s ease, color .15s ease, background-color .15s ease,
+              border-color .15s ease, box-shadow .15s ease;
 
   .icon-base {
     font-size: 1.25rem;
+  }
+
+  &:hover,
+  &:focus-visible {
+    color: var(--bs-primary) !important;
+    background-color: #fff !important;
+    border-color: var(--bs-primary) !important;
+    box-shadow: inset 0 0 .45rem rgba(105, 108, 255, .16),
+                0 0 0 .14rem rgba(105, 108, 255, .08);
+
+    .icon-base {
+      color: var(--bs-primary);
+    }
   }
 }
 
