@@ -3917,6 +3917,50 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   min-inline-size: 3.75rem;
 }
 
+@media (min-width: 1200px) {
+  .record-split-workspace.has-scan.is-comparing {
+    align-items: stretch;
+    block-size: min(52rem, calc(100dvh - 10rem));
+    min-block-size: 32rem;
+
+    .record-data-pane {
+      block-size: 100%;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+    }
+
+    .record-scan-pane,
+    .record-detail-sidebar,
+    .record-scan-card {
+      min-block-size: 0;
+      block-size: 100%;
+    }
+
+    .record-detail-sidebar {
+      position: static;
+    }
+
+    .record-scan-card {
+      display: flex;
+      flex-direction: column;
+
+      > .card-body {
+        display: flex;
+        min-block-size: 0;
+        flex: 1 1 auto;
+        flex-direction: column;
+      }
+    }
+
+    .record-scan-viewport {
+      min-block-size: 0;
+      max-block-size: none;
+      flex: 1 1 auto;
+    }
+  }
+}
+
 .record-disclosure-summary {
   display: flex;
   align-items: center;
