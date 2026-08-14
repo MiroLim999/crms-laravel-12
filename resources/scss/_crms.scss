@@ -3582,6 +3582,28 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+.record-compare-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 10.25rem;
+  min-inline-size: 10.25rem;
+  color: var(--bs-secondary-color) !important;
+  white-space: nowrap;
+  background: #fff !important;
+  border-color: var(--bs-secondary-color) !important;
+
+  &:hover,
+  &:focus,
+  &:focus-visible,
+  &:active,
+  &[aria-pressed='true'] {
+    color: var(--bs-secondary-color) !important;
+    background: var(--bs-gray-100) !important;
+    border-color: var(--bs-secondary-color) !important;
+  }
+}
+
 .record-group-list {
   background: rgba(67, 89, 113, .018);
 }
@@ -3987,6 +4009,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .record-values-card > .card-header {
     align-items: stretch !important;
     flex-direction: column;
+  }
+
+  .record-compare-toggle {
+    inline-size: 100%;
+    min-inline-size: 0;
   }
 
   .record-field-group__summary {
