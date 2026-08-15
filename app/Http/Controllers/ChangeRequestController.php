@@ -6,6 +6,7 @@ use App\Enums\ChangeRequestStatus;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
 use App\Services\ChangeRequestService;
+use App\Services\RecordFieldGrouper;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -20,27 +21,80 @@ use RuntimeException;
  */
 class ChangeRequestController extends Controller
 {
-    public function __construct(private readonly ChangeRequestService $service) {}
+    public function __construct(
+        private readonly ChangeRequestService $service,
+        private readonly RecordFieldGrouper $fieldGrouper,
+    ) {}
 
     public function index(Request $request): View
     {
         $user = $request->user();
+        $search = trim($request->string('q')->toString());
+        $selectedStatus = ChangeRequestStatus::tryFrom($request->string('status')->toString());
 
-        $requests = ChangeRequest::query()
-            ->with(['record.documentTypeDefinition', 'requester', 'reviewer', 'items'])
+        $visibleRequests = ChangeRequest::query()
             // Staff see their own requests; reviewers see everything.
             ->when(! $user->can('change-requests.moderate'),
-                fn ($q) => $q->where('requested_by', $user->getKey()))
-            ->when($request->filled('status'),
-                fn ($q) => $q->where('status', $request->string('status')))
+                fn ($query) => $query->where('requested_by', $user->getKey()));
+
+        $statusCounts = (clone $visibleRequests)
+            ->selectRaw('status, COUNT(*) as aggregate')
+            ->groupBy('status')
+            ->pluck('aggregate', 'status')
+            ->map(fn ($count) => (int) $count);
+
+        $requests = (clone $visibleRequests)
+            ->with(['record.documentTypeDefinition', 'record.fields', 'requester', 'reviewer', 'items'])
+            ->when($search !== '', function ($query) use ($search, $user): void {
+                $term = "%{$search}%";
+
+                $query->where(function ($query) use ($search, $term, $user): void {
+                    $query->where('reason', 'like', $term)
+                        ->orWhereHas('record', function ($recordQuery) use ($search, $term): void {
+                            $recordQuery->where('registry_number', 'like', $term)
+                                ->orWhereHas('documentTypeDefinition', fn ($typeQuery) => $typeQuery
+                                    ->where('name', 'like', $term)
+                                    ->orWhere('short_name', 'like', $term));
+
+                            if (ctype_digit($search)) {
+                                $recordQuery->orWhereKey((int) $search);
+                            }
+                        });
+
+                    if (ctype_digit($search)) {
+                        $query->orWhereKey((int) $search);
+                    }
+
+                    if ($user->can('change-requests.moderate')) {
+                        $query->orWhereHas('requester', fn ($requesterQuery) => $requesterQuery
+                            ->where('name', 'like', $term));
+                    }
+                });
+            })
+            ->when($selectedStatus,
+                fn ($query) => $query->where('status', $selectedStatus->value))
             ->orderByRaw("FIELD(status, 'pending') DESC")
             ->orderByDesc('created_at')
             ->paginate(15)
             ->withQueryString();
 
+        $recordHeadings = $requests->getCollection()
+            ->pluck('record')
+            ->filter()
+            ->unique('id')
+            ->mapWithKeys(function (CivilRecord $record): array {
+                $groups = $this->fieldGrouper->groups($record->fields);
+
+                return [$record->getKey() => $this->fieldGrouper->heading($record, $groups)];
+            });
+
         return view('change-requests.index', [
             'requests' => $requests,
             'statuses' => ChangeRequestStatus::cases(),
+            'statusCounts' => $statusCounts,
+            'recordHeadings' => $recordHeadings,
+            'selectedStatus' => $selectedStatus,
+            'search' => $search,
             'canModerate' => $user->can('change-requests.moderate'),
         ]);
     }
@@ -48,7 +102,7 @@ class ChangeRequestController extends Controller
     /**
      * Propose corrections to a locked record.
      */
-    public function create(CivilRecord $record): View|RedirectResponse
+    public function create(CivilRecord $record, Request $request): View|RedirectResponse
     {
         $this->authorize('change-requests.create');
 
@@ -57,7 +111,31 @@ class ChangeRequestController extends Controller
                 ->with('error', 'This record is not locked, so it needs no change request.');
         }
 
-        return view('change-requests.create', ['record' => $record->load(['fields', 'documentTypeDefinition'])]);
+        $record->load(['fields', 'documentTypeDefinition']);
+
+        if ($pendingRequest = $record->changeRequests()
+            ->where('status', ChangeRequestStatus::Pending->value)
+            ->first()) {
+            if (! $request->user()->can('change-requests.moderate')
+                && $pendingRequest->requested_by !== $request->user()->getKey()) {
+                return redirect()
+                    ->route('records.show', $record)
+                    ->with('error', 'This record already has a change request waiting for review.');
+            }
+
+            return redirect()
+                ->route('change-requests.show', $pendingRequest)
+                ->with('info', 'This record already has a change request waiting for review.');
+        }
+
+        $fieldGroups = $this->fieldGrouper->groups($record->fields);
+
+        return view('change-requests.create', [
+            'record' => $record,
+            'fieldGroups' => $fieldGroups,
+            'recordHeading' => $this->fieldGrouper->heading($record, $fieldGroups),
+            'personCount' => collect($fieldGroups)->where('kind', 'person')->count(),
+        ]);
     }
 
     public function store(Request $request, CivilRecord $record): RedirectResponse
@@ -101,10 +179,32 @@ class ChangeRequestController extends Controller
             403,
         );
 
+        $changeRequest->load([
+            'record.fields', 'record.documentTypeDefinition', 'requester', 'reviewer', 'items.field',
+        ]);
+        $record = $changeRequest->record;
+        $recordGroups = $this->fieldGrouper->groups($record->fields);
+        $itemsByField = $changeRequest->items
+            ->filter(fn ($item) => $item->field !== null)
+            ->keyBy('record_field_id');
+        $changeGroups = collect($recordGroups)
+            ->map(function (array $group) use ($itemsByField): ?array {
+                $items = $group['fields']
+                    ->map(fn ($field) => $itemsByField->get($field->getKey()))
+                    ->filter()
+                    ->values();
+
+                return $items->isEmpty() ? null : [...$group, 'items' => $items];
+            })
+            ->filter()
+            ->values();
+
         return view('change-requests.show', [
-            'changeRequest' => $changeRequest->load([
-                'record.fields', 'record.documentTypeDefinition', 'requester', 'reviewer', 'items.field',
-            ]),
+            'changeRequest' => $changeRequest,
+            'changeGroups' => $changeGroups,
+            'orphanItems' => $changeRequest->items->whereNull('field')->values(),
+            'changedFields' => $changeRequest->items->pluck('field')->filter()->values(),
+            'recordHeading' => $this->fieldGrouper->heading($record, $recordGroups),
             'canModerate' => $request->user()->can('change-requests.moderate'),
         ]);
     }

@@ -14,6 +14,8 @@ export default defineConfig({
                 // Page-scoped archive split view and shared disclosure animation.
                 'resources/js/record-detail.js',
                 'resources/js/disclosure-motion.js',
+                // Grouped correction editor with live no-op detection.
+                'resources/js/change-request.js',
                 // Auth-page decoration (centred card, corner shapes). Only the
                 // guest layout loads it, so it stays out of the main bundle.
                 'resources/scss/pages/page-auth.scss',
