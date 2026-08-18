@@ -453,6 +453,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     }
 
     #layout-menu .sidebar-nav__link {
+      position: relative;
       justify-content: center;
       inline-size: 2.75rem;
       block-size: 2.75rem;
@@ -461,6 +462,25 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
       margin-block: .125rem !important;
       margin-inline: 1rem 0 !important;
       border-radius: .4rem !important;
+    }
+
+    #layout-menu .sidebar-nav__badge {
+      position: absolute !important;
+      inset-block-start: .15rem;
+      inset-inline-end: .15rem;
+      margin: 0 !important;
+      padding: .15rem .35rem !important;
+      font-size: .65rem !important;
+      font-weight: 600;
+      line-height: 1 !important;
+      min-inline-size: 1.125rem;
+      min-block-size: 1.125rem;
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50rem !important;
+      box-shadow: 0 0 0 2px #fff;
+      z-index: 2;
     }
 
     #layout-menu .sidebar-nav__link .menu-icon {
@@ -531,6 +551,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     }
 
     #layout-menu .sidebar-nav__link {
+      position: relative;
       justify-content: center;
       inline-size: 2.75rem;
       block-size: 2.75rem;
@@ -538,6 +559,25 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
       padding: 0 !important;
       margin-block: .125rem !important;
       margin-inline: 1rem 0 !important;
+    }
+
+    #layout-menu .sidebar-nav__badge {
+      position: absolute !important;
+      inset-block-start: .15rem;
+      inset-inline-end: .15rem;
+      margin: 0 !important;
+      padding: .15rem .35rem !important;
+      font-size: .65rem !important;
+      font-weight: 600;
+      line-height: 1 !important;
+      min-inline-size: 1.125rem;
+      min-block-size: 1.125rem;
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50rem !important;
+      box-shadow: 0 0 0 2px #fff;
+      z-index: 2;
     }
 
     #layout-menu .sidebar-nav__link .menu-icon {
