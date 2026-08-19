@@ -127,6 +127,7 @@
                                     <div class="dropdown-menu dropdown-menu-end marker-shortcuts-menu">
                                         <div class="marker-shortcuts-menu__title">Editor shortcuts</div>
                                         <div><span><kbd>Ctrl</kbd> + scroll</span><small>Zoom document</small></div>
+                                        <div><span><kbd>Ctrl</kbd> + drag</span><small>Move document</small></div>
                                         <div><span>Drag empty document area</span><small>Select fields in a rectangle</small></div>
                                         <div><span><kbd>Shift</kbd> + drag</span><small>Add to selection</small></div>
                                         <div><span><kbd>Shift</kbd> + click</span><small>Select multiple</small></div>

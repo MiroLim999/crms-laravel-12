@@ -88,7 +88,7 @@ export function attachMarqueeSelection({ marker, overlay, marquee }) {
     };
 
     const onPointerDown = (event) => {
-        if (event.target !== overlay || event.button !== 0 || !event.isPrimary) return;
+        if (event.ctrlKey || event.target !== overlay || event.button !== 0 || !event.isPrimary) return;
 
         event.preventDefault();
         // FieldMarker also listens for an empty-overlay press to clear selection.

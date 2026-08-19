@@ -52,6 +52,8 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('id="ocrProgressRing"', escape: false)
                 ->assertSee('id="ocrProgressValue"', escape: false)
                 ->assertSee('<kbd>Shift</kbd> + click', escape: false)
+                ->assertSee('<kbd>Ctrl</kbd> + drag', escape: false)
+                ->assertSee('Move document')
                 ->assertSee('Select fields in a rectangle')
                 ->assertSee('<kbd>Shift</kbd> + drag', escape: false)
                 ->assertSee('Resize selected fields')

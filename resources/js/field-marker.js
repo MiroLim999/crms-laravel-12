@@ -14,11 +14,11 @@
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
-import { markerPersonMetadata } from './person-grouping';
+import { markerPersonMetadata } from './person-grouping.js';
 import {
     canVerifyValue,
     verificationGroupState,
-} from './verification-groups';
+} from './verification-groups.js';
 
 // Use the CDN-hosted worker instead of bundling the 2.2 MB parser file.
 // The version must stay in sync with pdfjs-dist in package.json (currently 4.10.38).
@@ -44,6 +44,13 @@ function serialiseBox(box) {
         w: box.w,
         h: box.h,
         ...markerPersonMetadata(box),
+    };
+}
+
+export function fieldMarkerPanPosition(scrollLeft, scrollTop, movementX, movementY) {
+    return {
+        left: Math.max(0, scrollLeft - movementX),
+        top: Math.max(0, scrollTop - movementY),
     };
 }
 
@@ -84,6 +91,13 @@ export class FieldMarker {
         this.minZoom = 0.5;
         this.maxZoom = 3;
 
+        this._panning = false;
+        this._panX = 0;
+        this._panY = 0;
+        this._panStartX = 0;
+        this._panStartY = 0;
+        this._suppressPanClick = false;
+
         // Boxes are positioned in display pixels, so a resize has to reposition them.
         this._onResize = () => this.viewport ? this._applyZoom() : this.layout();
         this._onWheel = (event) => {
@@ -93,17 +107,86 @@ export class FieldMarker {
             this.zoomBy(event.deltaY < 0 ? 0.1 : -0.1, event);
         };
         this._onOverlayPointerDown = (event) => {
+            if (event.ctrlKey) return;
             if (event.target === this.overlay) this.clearSelection();
         };
 
+        this._onViewportPointerDown = (event) => {
+            if (!event.ctrlKey || event.button !== 0) return;
+
+            event.preventDefault();
+            this._panning = true;
+            this._panX = event.clientX;
+            this._panY = event.clientY;
+            this._panStartX = event.clientX;
+            this._panStartY = event.clientY;
+            this._suppressPanClick = false;
+            this.viewport?.setPointerCapture?.(event.pointerId);
+            this.viewport?.classList.add('is-panning');
+        };
+
+        this._onViewportPointerMove = (event) => {
+            if (!this._panning || !this.viewport) return;
+
+            event.preventDefault();
+            const next = fieldMarkerPanPosition(
+                this.viewport.scrollLeft,
+                this.viewport.scrollTop,
+                event.clientX - this._panX,
+                event.clientY - this._panY,
+            );
+            this.viewport.scrollLeft = next.left;
+            this.viewport.scrollTop = next.top;
+            this._panX = event.clientX;
+            this._panY = event.clientY;
+            if (Math.hypot(event.clientX - this._panStartX, event.clientY - this._panStartY) > 3) {
+                this._suppressPanClick = true;
+            }
+        };
+
+        this._onViewportPointerFinish = (event) => {
+            if (!this._panning) return;
+
+            this._panning = false;
+            this.viewport?.classList.remove('is-panning');
+            if (event.type === 'pointercancel') {
+                this._suppressPanClick = false;
+            }
+            if (this.viewport?.hasPointerCapture?.(event.pointerId)) {
+                this.viewport.releasePointerCapture(event.pointerId);
+            }
+        };
+
+        this._onViewportClick = (event) => {
+            if (!this._suppressPanClick) return;
+
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            this._suppressPanClick = false;
+        };
+
         window.addEventListener('resize', this._onResize);
-        this.viewport?.addEventListener('wheel', this._onWheel, { passive: false });
+        if (this.viewport) {
+            this.viewport.addEventListener('wheel', this._onWheel, { passive: false });
+            this.viewport.addEventListener('pointerdown', this._onViewportPointerDown);
+            this.viewport.addEventListener('pointermove', this._onViewportPointerMove);
+            this.viewport.addEventListener('pointerup', this._onViewportPointerFinish);
+            this.viewport.addEventListener('pointercancel', this._onViewportPointerFinish);
+            this.viewport.addEventListener('click', this._onViewportClick, true);
+        }
         this.overlay.addEventListener('pointerdown', this._onOverlayPointerDown);
     }
 
     destroy() {
         window.removeEventListener('resize', this._onResize);
-        this.viewport?.removeEventListener('wheel', this._onWheel);
+        if (this.viewport) {
+            this.viewport.removeEventListener('wheel', this._onWheel);
+            this.viewport.removeEventListener('pointerdown', this._onViewportPointerDown);
+            this.viewport.removeEventListener('pointermove', this._onViewportPointerMove);
+            this.viewport.removeEventListener('pointerup', this._onViewportPointerFinish);
+            this.viewport.removeEventListener('pointercancel', this._onViewportPointerFinish);
+            this.viewport.removeEventListener('click', this._onViewportClick, true);
+        }
         this.overlay.removeEventListener('pointerdown', this._onOverlayPointerDown);
     }
 
@@ -590,10 +673,14 @@ export class FieldMarker {
         };
 
         el.addEventListener('pointerdown', (e) => {
+            if (e.ctrlKey) return;
             if (e.target === handle) return;
             begin(e, 'move');
         });
-        handle.addEventListener('pointerdown', (e) => begin(e, 'resize'));
+        handle.addEventListener('pointerdown', (e) => {
+            if (e.ctrlKey) return;
+            begin(e, 'resize');
+        });
         el.addEventListener('pointermove', move);
         el.addEventListener('pointerup', end);
         el.addEventListener('pointercancel', end);
