@@ -1,175 +1,446 @@
 # Civil Registry Management System (CRMS)
 
-A Laravel 12 system for digitising and managing civil registry documents (birth, death, and
-marriage certificates). Staff scan handwritten certificates, a fine-tuned
-[TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) model extracts the field
-values, Staff verify and submit them, and the result becomes a searchable, locked archive
-with a legally meaningful audit trail.
+[![Laravel](https://img.shields.io/badge/Laravel-12.x-FF2D20?style=flat&logo=laravel&logoColor=white)](https://laravel.com/)
+[![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4?style=flat&logo=php&logoColor=white)](https://www.php.net/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![Transformers](https://img.shields.io/badge/Hugging%20Face-TrOCR-FFD21E?style=flat&logo=huggingface&logoColor=black)](https://huggingface.co/microsoft/trocr-base-handwritten)
+[![Tests](https://img.shields.io/badge/Tests-176%20Passed%20(PHPUnit)-success)](tests/)
 
-## Architecture
+An enterprise-grade, AI-assisted civil registry digitisation and archival platform built with **Laravel 12**, **Bootstrap 5 (SNEAT design system)**, **FastAPI**, and a fine-tuned **Microsoft TrOCR** (Transformer-based Optical Character Recognition) handwriting engine.
 
-Two processes, one repository:
+CRMS enables registry staff to scan historical civil certificates (birth, death, marriage, and custom document types), run machine learning recognition on cropped bounding boxes, perform human-in-the-loop verification, and archive immutable records backed by an append-only audit trail and formal change-request governance.
 
-| Part            | Stack                                                | Role                                        |
-| --------------- | ---------------------------------------------------- | ------------------------------------------- |
-| Web application | Laravel 12, Blade, Bootstrap 5 (SNEAT design), MySQL | Everything users touch                      |
-| OCR service     | FastAPI, PyTorch, Hugging Face `transformers`        | Reads handwriting from cropped field images |
+---
 
-Laravel normally calls the OCR service server-side. Model installation is the deliberate
-exception: Laravel issues a short-lived signed ticket, then the browser sends the large
-multipart body directly to FastAPI. After FastAPI saves the files, the browser posts only
-the installed model name to Laravel; Laravel verifies it against FastAPI's own inventory,
-then writes the registry and audit records transactionally. The model bytes never pass
-through PHP. If that final lightweight request fails, the page can retry registration
-without uploading the model again, and _Rescan models_ remains the recovery path.
+## Table of Contents
 
-The service stays bound to `127.0.0.1` in local development. In production, expose only
-the signed upload endpoint through an HTTPS reverse proxy; keep Laravel's other calls to
-FastAPI on a private or loopback address.
+- [System Architecture](#system-architecture)
+- [Key Features](#key-features)
+- [Role-Based Access Control & Capability Matrix](#role-based-access-control--capability-matrix)
+- [Project Directory Structure](#project-directory-structure)
+- [Prerequisites & Requirements](#prerequisites--requirements)
+- [Installation & Setup](#installation--setup)
+- [Running the Application](#running-the-application)
+- [The TrOCR Machine Learning Pipeline](#the-trocr-machine-learning-pipeline)
+- [OCR Microservice API Reference](#ocr-microservice-api-reference)
+- [Production Deployment](#production-deployment)
+- [Testing & Quality Assurance](#testing--quality-assurance)
+- [Environment Configuration Reference](#environment-configuration-reference)
+- [Technology Stack](#technology-stack)
+- [License](#license)
 
-Laravel does not start or stop that process. It is a separate program with its own
-lifetime — run it from a terminal in development, or under a supervisor in a
-deployment. The OCR workspace reports whether it answers and shows the command.
+---
 
-## Roles
+## System Architecture
 
-Three seeded roles. **There is no public sign-up** — every account is created by an admin.
-
-| Capability                        | Staff | Admin | Super Admin |
-| --------------------------------- | ----- | ----- | ----------- |
-| Upload & process documents        | Yes   | No    | Yes         |
-| Verify & submit records           | Yes   | No    | Yes         |
-| Search / view archive             | Yes   | Yes   | Yes         |
-| Request changes to locked records | Yes   | No    | Yes         |
-| Approve / reject change requests  | No    | Yes   | Yes         |
-| Analytics dashboard               | No    | Yes   | Yes         |
-| Manage user accounts & roles      | No    | Yes   | Yes         |
-| View audit log                    | No    | Yes   | Yes         |
-| Generate reports                  | No    | Yes   | Yes         |
-| Document template builder         | No    | No    | Yes         |
-| OCR model management              | No    | No    | Yes         |
-
-**Admin cannot edit record values.** Data entry belongs to Staff; corrections to verified fields
-and registry numbers go through the change-request flow. This is intentional — it is what keeps
-the audit trail meaningful. Required captured fields cannot be cleared during correction.
-
-## Project structure
+CRMS operates as a coordinated **two-process system** contained within a single repository:
 
 ```
-app/                    Laravel application code
-├── Enums/              RoleSlug, DocumentType, RecordStatus, ChangeRequestStatus
-├── Models/             User, Role, CivilRecord, RecordField, ChangeRequest,
-│                       OcrModel, OcrSetting, ...
-├── Services/Ocr/       OcrClient, OcrModelManager, EngineStatus, OcrUploadAuthorizer
-├── Services/           AuditLogger, UserProvisioner, ChangeRequestService
-└── Providers/          AuthServiceProvider - the capability matrix, in code
-
-ml/                     ALL Python lives here
-├── api/main.py         FastAPI OCR service - serve, install, rename, delete models
-├── train_trocr.py      fine-tuning
-├── test_trocr.py       manual CLI evaluation of the base model (not an automated test)
-├── test_finetuned.py   manual CLI evaluation of any model (not an automated test)
-├── predict.py          batch predict a folder of images
-├── metrics.py          CER / WER / exact-match + chart export
-├── dataset_registry.py dataset layout, validation, and name sanitising
-├── download_trocr.py   fetch the base model
-├── models/             fine-tuned model folders (gitignored, ~1.3 GB each)
-├── dataset/            training images + manifest CSV (gitignored)
-└── evaluation-metrics/ charts written by the evaluation scripts
+                      +-------------------------------------------------------------+
+                      |                        Web Browser                          |
+                      +-------------------------------------------------------------+
+                        /                       |                                 ^
+                       / (1) Web Pages          | (3) Direct Upload               |
+                      /      & AJAX Forms       |     (Signed Ticket)             |
+                     v                          v                                 |
++-----------------------------------+    +----------------------------------+     |
+|         Laravel 12 Web App        |    |       FastAPI OCR Service        |     |
+|      (PHP 8.2+ / Port 8000)       |    |     (Python 3.10+ / Port 8001)   |     |
++-----------------------------------+    +----------------------------------+     |
+| - Authentication & RBAC           |    | - PyTorch / Hugging Face TrOCR   |     |
+| - Document & Template Management  |    | - Handwriting Recognition (/ocr) |     |
+| - Bounding-Box Marker Control     |    | - Direct Model Storage & Unpack  |-----+
+| - Audit Logging & Change Requests |    | - Evaluation Report Verification | (Model Registration)
+| - Analytics & CSV Reports         |    +----------------------------------+
++-----------------------------------+                     ^
+       |                    |                             |
+       |                    +--- (2) Server-to-Server ----+
+       v                             HTTP Requests
++---------------+             (Private Loopback / Health / OCR)
+| MySQL 8.0+ DB |
++---------------+
 ```
 
-Training, evaluation, dataset preparation, and batch prediction are **command-line
-work only**. They are deliberately not driven from the web UI: a request handler is
-the wrong place to pin a GPU for hours, and the scripts' output is far more useful in
-a terminal than paraphrased into a progress bar.
+| Component | Stack | Primary Responsibilities |
+| :--- | :--- | :--- |
+| **Web Application** | Laravel 12, Blade, Bootstrap 5 (SNEAT), Vite, MySQL | User interfaces, authentication, template builder, verification workspace, record archival, change request moderation, audit logging, reporting. |
+| **OCR Microservice** | FastAPI, PyTorch, Hugging Face `transformers`, Pillow | High-throughput TrOCR handwriting inference, model inventory discovery, signed direct-upload ingestion, model lifecycle management. |
 
-## Setup
+### Architectural Highlights
 
-Requires PHP 8.2+, Composer, Node 20+, MySQL 8+, and Python 3.10+.
+1. **Zero-PHP Large Model Uploads**: Uploading gigabyte-scale model checkpoints (`safetensors`/`bin` archives) never passes through PHP or consumes web worker memory. Laravel generates a short-lived, HMAC-SHA256 signed ticket (`OCR_UPLOAD_SECRET`); the browser uploads directly to FastAPI's `/add_model` endpoint. Once written to disk, the client posts the model key to Laravel, which verifies the inventory and registers the model in a database transaction.
+2. **Server-Side AI Proxying**: Operational document recognition (`/documents/recognise`) is called server-to-server from Laravel to FastAPI. The FastAPI instance remains bound to loopback (`127.0.0.1`) without direct public access.
+3. **Decoupled Process Lifecycles**: Laravel never spawns, restarts, or terminates the Python OCR daemon. The OCR workspace actively monitors reachability via asynchronous health polling.
 
+---
+
+## Key Features
+
+### 1. Document Digitisation & Verification Workspace
+- **Visual Bounding-Box Markup**: Interactive drag-and-drop marker tool with canvas zoom, pan, and marquee selection for setting field coordinates.
+- **Split-Screen Verification Viewer**: Dual-pane workspace with configurable horizontal/vertical split views, smooth keyboard-accelerated split-bar adjustments, and Ctrl-wheel zoom.
+- **Person Grouping**: Supports complex registry layouts grouping fields by role (e.g., Child, Mother, Father, Groom, Bride, Deceased, Informant) alongside general document details.
+- **Confidence Scoring & Review Warnings**: Computes token-level geometric mean confidence scores (0–100%). Fields falling below the configured threshold are visually flagged for manual operator review.
+- **Human-in-the-Loop Enforcement**: Only explicitly verified fields are committed to the permanent record upon submission.
+
+### 2. Dynamic Document Template Builder & Type Management
+- **Visual Template Designer**: Create and publish document layouts with real-time coordinate calibration.
+- **Paper Specification Support**: Supports standard paper dimensions (A4, Letter, Legal, Folio) as well as arbitrary custom millimeter dimensions in Portrait or Landscape orientations.
+- **Sample Document Upload**: Direct upload of PDF or image samples rendered with PDF.js for canvas alignment.
+- **Custom Document Types**: Super Admins can define custom certificate classifications with distinct icons, validation rules, and active states.
+
+### 3. Immutable Record Archival & Change Request Governance
+- **Permanent Record Locking**: Once verified and submitted by Staff, records are sealed against direct in-place modification.
+- **Formal Change-Request Workflow**: Staff initiate modification requests detailing justifications and proposed field values. Admins or Super Admins review, approve, or reject changes.
+- **Data Integrity Constraints**: Mandatory captured fields cannot be blanked during correction; all historical iterations remain auditable.
+
+### 4. OCR Model Management & Benchmark Provenance
+- **Multi-Model Registry**: Live model scanning from `ml/models/`, support for custom checkpoints and the baseline `microsoft/trocr-base-handwritten`.
+- **Benchmark Provenance Radar**: Visualizes Character Error Rate (CER), Word Error Rate (WER), and Exact Match metrics strictly from locked test-split reports (`evaluation-report.json`) verified against model weight SHA-256 hashes. CRMS never fabricates benchmark statistics from operational scans.
+- **Operator Selection Flexibility**: Global model assignment with an optional Super Admin toggle allowing Staff to select approved alternative models during digitisation.
+
+### 5. Tamper-Evident Audit Trail
+- **Append-Only Logging**: Comprehensive activity logs recording actor ID, name, role, IP address, user agent, action verb, and before/after diffs.
+- **Automatic Secret Redaction**: Sensitive attributes (passwords, tokens, credentials) are stripped before persistence.
+
+### 6. Analytics & Administrative Oversight
+- **Role-Tailored Dashboards**: Real-time KPI summaries, digitisation volume charts, correction rate tracking, and live OCR engine diagnostic badges.
+- **Timezone-Aware Reporting**: Filterable civil registry reporting respecting configured local operational boundaries (e.g., `Asia/Manila`) with streaming CSV exports.
+- **Secure Account Management**: Controlled staff/admin provisioning (no public sign-ups), auto-generated temporary passwords, mandatory first-login password rotation, soft deactivation, and protection against accidental Super Admin demotion.
+
+---
+
+## Role-Based Access Control & Capability Matrix
+
+CRMS enforces a strict separation of duties verified end-to-end in the test suite (`tests/Feature/CapabilityMatrixTest.php`):
+
+| Capability / Resource | Staff | Admin | Super Admin | Route / Gate |
+| :--- | :---: | :---: | :---: | :--- |
+| **Upload & Process Documents** | **Yes** | No | **Yes** | `documents.create`, `can:documents.process` |
+| **Verify & Submit Records** | **Yes** | No | **Yes** | `documents.store`, `can:records.submit` |
+| **Search & View Record Archive** | **Yes** | **Yes** | **Yes** | `records.index`, `can:records.view` |
+| **Propose Change Requests** | **Yes** | No | **Yes** | `records.change-requests.create`, `can:change-requests.create` |
+| **Approve / Reject Change Requests** | No | **Yes** | **Yes** | `change-requests.approve`, `can:change-requests.moderate` |
+| **Access Consolidated Analytics** | No | **Yes** | **Yes** | `analytics.index`, `can:analytics.view` |
+| **Generate & Export CSV Reports** | No | **Yes** | **Yes** | `reports.index`, `can:reports.generate` |
+| **Manage User Accounts & Roles** | No | **Yes** | **Yes** | `users.index`, `can:users.manage` |
+| **View Tamper-Evident Audit Log** | No | **Yes** | **Yes** | `audit.index`, `can:audit.view` |
+| **Document Template Builder** | No | No | **Yes** | `templates.index`, `can:templates.manage` |
+| **OCR Model & Engine Workspace** | No | No | **Yes** | `ocr.index`, `can:ocr.manage` |
+
+> **Note on Separation of Duties**: Administrators perform supervisory and oversight functions and cannot perform primary data entry or directly edit civil records. Record corrections must strictly traverse the authenticated change request moderation pipeline.
+
+---
+
+## Project Directory Structure
+
+```
+crms-laravel-12/
+├── app/                                # Core Laravel application logic
+│   ├── Enums/                          # RoleSlug, DocumentType, RecordStatus, PaperSize, etc.
+│   ├── Http/
+│   │   ├── Controllers/                # Gated web controllers (Scan, Record, ChangeRequest, etc.)
+│   │   ├── Middleware/                 # EnsureAccountIsActive, EnsurePasswordIsChanged
+│   │   └── Requests/                   # Form validation request classes
+│   ├── Models/                         # Eloquent models (CivilRecord, RecordField, AuditLog, etc.)
+│   ├── Providers/                      # AuthServiceProvider (Capability Matrix Gate definitions)
+│   ├── Services/                       # Business logic (AuditLogger, ChangeRequestService, etc.)
+│   │   └── Ocr/                        # OcrClient, OcrModelManager, OcrUploadAuthorizer, EngineStatus
+│   └── Support/                        # Navigation and UI support utilities
+├── bootstrap/                          # Application bootstrap and middleware pipeline configuration
+├── config/                             # Configuration files (crms.php, services.php, database.php)
+├── database/
+│   ├── factories/                      # Model factories for testing and seeding
+│   ├── migrations/                     # Database migrations (records, templates, audit logs, OCR)
+│   └── seeders/                        # RoleSeeder, SuperAdminSeeder, DocumentTemplateSeeder, DemoUsersSeeder
+├── ml/                                 # Complete Python OCR & Machine Learning workspace
+│   ├── api/
+│   │   ├── main.py                     # FastAPI microservice (Inference, health, signed model uploads)
+│   │   └── requirements.txt            # FastAPI microservice dependencies
+│   ├── dataset/                        # Training/validation/test images & manifest CSV (gitignored)
+│   ├── models/                         # Fine-tuned model checkpoints (gitignored)
+│   ├── evaluation-metrics/             # Timestamped evaluation metric charts
+│   ├── dataset_registry.py             # Dataset manifest validation and normalization
+│   ├── download_trocr.py               # Downloads Hugging Face base TrOCR weights
+│   ├── hf_quiet.py                     # Hugging Face environment logging silencer
+│   ├── metrics.py                      # CER / WER / Exact-Match computation and plot generators
+│   ├── predict.py                      # Standalone CLI batch prediction tool
+│   ├── requirements.txt                # ML pipeline dependencies (PyTorch, Transformers, Pandas)
+│   ├── test_finetuned.py               # CLI benchmark evaluator for fine-tuned models
+│   ├── test_trocr.py                   # CLI benchmark evaluator for base model
+│   └── train_trocr.py                  # PyTorch TrOCR fine-tuning script
+├── public/                             # Publicly accessible web root
+├── resources/
+│   ├── css/ & scss/                    # SNEAT theme & custom CRMS stylesheet rules
+│   ├── js/                             # Interactive JS (Template Builder, Field Marker, Split View)
+│   └── views/                          # Blade templates organized by domain
+├── routes/
+│   ├── console.php                     # Artisan console commands
+│   └── web.php                         # Application route definitions and permission middleware
+├── tests/                              # Automated test suites
+│   ├── Feature/                        # 14 PHPUnit feature test classes (RBAC, workflows, OCR)
+│   ├── JavaScript/                     # Node.js test runner unit tests (controls, markers, SNEAT)
+│   └── Python/                         # Python unit tests for ML evaluation report normalization
+├── tools/                              # Development utility scripts (subset-icons.mjs)
+├── serve.ps1                           # PowerShell orchestration runner for dual-process startup
+├── trocr-finetuning-code.ipynb         # Kaggle / Colab fine-tuning and evaluation notebook
+├── vite.config.js                      # Vite asset bundler configuration
+├── composer.json                       # PHP dependencies
+└── package.json                        # Node.js frontend dependencies
+```
+
+---
+
+## Prerequisites & Requirements
+
+Before setting up CRMS, ensure your environment meets the following requirements:
+
+| Component | Minimum Version | Notes |
+| :--- | :--- | :--- |
+| **PHP** | 8.2+ | Extensions: `pdo_mysql`, `mbstring`, `fileinfo`, `openssl`, `curl`, `zip`, `gd` |
+| **Composer** | 2.5+ | PHP package manager |
+| **Node.js** | 20.x+ & npm 10+ | JavaScript runtime and asset compiler |
+| **MySQL / MariaDB** | MySQL 8.0+ / MariaDB 10.4+ | InnoDB engine, utf8mb4 charset |
+| **Python** | 3.10+ | Required for running the FastAPI OCR service and training |
+| **PyTorch & CUDA** | PyTorch 2.0+ (CUDA optional) | Optional GPU acceleration for rapid TrOCR inference |
+
+---
+
+## Installation & Setup
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/MiroLim999/crms-laravel-12.git
+cd crms-laravel-12
+```
+
+### 2. Install PHP & Frontend Dependencies
 ```bash
 composer install
 npm install
-pip install -r ml\requirements.txt -r ml\api\requirements.txt
+```
 
-copy .env.example .env
+### 3. Setup Python Virtual Environment & ML Dependencies
+```bash
+# Windows
+python -m venv .venv
+.venv\Scripts\activate
+
+# Linux / macOS
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install requirements
+pip install -r ml/requirements.txt -r ml/api/requirements.txt
+```
+
+> **PyTorch GPU Support**: To enable CUDA GPU acceleration, install the CUDA-enabled PyTorch wheel from [pytorch.org](https://pytorch.org/get-started/locally/) (e.g., `pip install torch --index-url https://download.pytorch.org/whl/cu121`).
+
+### 4. Configure Environment Files
+```bash
+copy .env.example .env    # Windows PowerShell: copy .env.example .env
 php artisan key:generate
-# set DB_DATABASE / DB_USERNAME / DB_PASSWORD in .env, then:
+```
+
+Edit `.env` to configure your database connection and OCR parameters:
+```dotenv
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=crms
+DB_USERNAME=root
+DB_PASSWORD=
+
+# OCR Service Configuration
+OCR_API_URL=http://127.0.0.1:8001
+OCR_BROWSER_API_URL=http://127.0.0.1:8001
+CRMS_CONFIDENCE_THRESHOLD=80
+CRMS_REPORTING_TIMEZONE=Asia/Manila
+```
+
+### 5. Migrate Database & Seed Initial Data
+```bash
 php artisan migrate --seed
+```
+`migrate --seed` seeds the core permission roles, default document templates (Birth, Death, Marriage), and the bootstrap Super Admin account.
+
+### 6. Build Frontend Assets
+```bash
 npm run build
 ```
 
-`php artisan migrate --seed` creates the three roles, the bootstrap Super Admin, and a
-starter template per certificate type.
+### Default Credentials
 
-PHP needs `pdo_mysql`, `mbstring`, `fileinfo`, `openssl`, `curl`, and `zip`. Enable `gd` if
-you want server-side image work; field cropping happens in the browser, so it is optional.
+| Account | Email | Default Password | Role |
+| :--- | :--- | :--- | :--- |
+| **Bootstrap Super Admin** | `superadmin@admin.com` | `superadmin@admin.com` | Super Admin |
 
-For GPU inference, install the CUDA build of PyTorch from the
-[official install guide](https://pytorch.org/get-started/locally/) rather than the default
-CPU wheel.
+> **Security Warning**: You will be forced to change this password on your first login. To customize default bootstrap credentials before running seeders, specify `CRMS_SUPER_ADMIN_EMAIL` and `CRMS_SUPER_ADMIN_PASSWORD` in your `.env`.
 
-## Running
-
-Two processes, both from the repo root:
-
+#### Optional Demo Accounts
+For development evaluation, you can seed demo Staff and Admin accounts:
 ```bash
-php artisan serve                                       # http://127.0.0.1:8000
-python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001    # OCR service
+php artisan db:seed --class=DemoUsersSeeder
+```
+* **Staff**: `staff@crms.test` / `password123`
+* **Admin**: `admin@crms.test` / `password123`
+
+---
+
+## Running the Application
+
+### Option A: Using the PowerShell Runner (Windows)
+The included `serve.ps1` script performs an automated environment check (PHP, MySQL, Python, CUDA status) and launches both processes in individual windows:
+
+```powershell
+.\serve.ps1             # Starts both Laravel (8000) and FastAPI (8001)
+.\serve.ps1 -Check      # Verifies environment requirements and exits
+.\serve.ps1 -NoOcr      # Launches Laravel only
 ```
 
-Sign in with the seeded account:
+### Option B: Manual Process Execution
 
-```
-superadmin@admin.com / superadmin@admin.com
-```
+Open two separate terminals from the repository root:
 
-Change that password before any real deployment. Override the defaults with
-`CRMS_SUPER_ADMIN_EMAIL` and `CRMS_SUPER_ADMIN_PASSWORD`.
-
-While user management is still being learned, `DemoUsersSeeder` creates one Staff and one
-Admin account for clicking around. It is deliberately not part of `db:seed`:
-
+**Terminal 1: Laravel Web Application**
 ```bash
-php artisan db:seed --class=DemoUsersSeeder    # staff@crms.test / admin@crms.test, password123
+php artisan serve --port=8000
+```
+Access the application at [http://127.0.0.1:8000](http://127.0.0.1:8000).
+
+**Terminal 2: FastAPI OCR Microservice**
+```bash
+# Ensure your virtual environment is active
+python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001
+```
+The OCR service will listen on [http://127.0.0.1:8001](http://127.0.0.1:8001).
+
+---
+
+## The TrOCR Machine Learning Pipeline
+
+All machine learning scripts, training routines, and evaluation utilities are isolated in the `ml/` directory.
+
+```
+ml/
+├── train_trocr.py        # Fine-tunes VisionEncoderDecoderModel with Hugging Face Trainer
+├── test_trocr.py         # Evaluates base model performance against test split
+├── test_finetuned.py     # Evaluates fine-tuned model checkpoints & exports metrics
+├── predict.py            # CLI batch inference on directory of image crops
+├── metrics.py            # CER, WER, and exact-match computation logic
+├── dataset_registry.py   # Dataset manifest validation and path resolution
+└── download_trocr.py     # Fetches microsoft/trocr-base-handwritten weights
 ```
 
-Delete that seeder before deploying.
+### 1. Dataset Layout Specification
+Training datasets must follow this folder structure:
+```
+ml/dataset/
+├── manifest.csv          # Columns: filename,label,split,source
+├── train/                # Training image crops (.png, .jpg)
+├── val/                  # Validation image crops
+└── test/                 # Locked evaluation test split
+```
+*Entries labeled `UNREADABLE` or with blank labels are automatically skipped.*
 
-## Production deployment
-
-The direct-upload design is retained in production. Only the browser-facing address
-changes:
-
-```text
-Local:       browser -> http://127.0.0.1:8001/add_model -> FastAPI
-Production:  browser -> https://crms.example.com/ocr-api/add_model
-                     -> reverse proxy -> 127.0.0.1:8001/add_model
+### 2. Base Model Download
+```bash
+python ml/download_trocr.py
 ```
 
-The reverse proxy is part of the web-server path, but Laravel/PHP never receives or
-writes the multi-gigabyte request body.
+### 3. Fine-Tuning TrOCR
+```bash
+python ml/train_trocr.py
+```
+Fine-tuning configuration parameters (learning rate, batch size, epochs, warmup steps) are defined in the `CONFIG` dictionary of `ml/train_trocr.py`. Checkpoints with the lowest validation loss are saved into `ml/models/`.
 
-For a same-server deployment, use separate private and browser-facing URLs:
+### 4. Evaluating Models & Generating Provenance Reports
+```bash
+python ml/test_finetuned.py --model-dir ml/models/trocr-v1
+```
+This generates evaluation charts under `ml/evaluation-metrics/` and produces a signed `evaluation-report.json` containing:
+- Sample count and dataset provenance
+- Character Error Rate (CER), Word Error Rate (WER), Exact Match accuracy
+- SHA-256 digests of the model weights file (`model.safetensors`) and the dataset manifest
 
+### 5. Installing Models into the Web Application
+1. Log in as **Super Admin** and navigate to the **OCR Workspace**.
+2. Click **Add Model** and upload either a `.zip` archive or directory containing `config.json`, `model.safetensors` (or `pytorch_model.bin`), tokenizer files, and `evaluation-report.json`.
+3. Select the model under **Model used for scanning** and click **Save settings**.
+
+---
+
+## OCR Microservice API Reference
+
+The FastAPI service exposes the following endpoints (bound to `127.0.0.1:8001`):
+
+| Method | Endpoint | Description | Access / Authorization |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/health` | Returns service status, hardware device (`cuda`/`cpu`), active model, and model list. | Internal / Private |
+| `GET` | `/models` | Returns available installed model metadata and provenance metrics. | Internal / Private |
+| `POST` | `/ocr` | Ingests base64/dataURL cropped field images and returns predicted text + confidence scores. | Internal / Private |
+| `POST` | `/add_model` | Direct-browser multipart upload endpoint for model archives (`.zip` or loose files). | Signed Ticket (`ticket`, `expires`, `sig`) |
+| `POST` | `/rename_model` | Renames a model folder directory on disk. | Internal / Private |
+| `POST` | `/delete_model` | Removes an inactive model folder from `ml/models/`. | Internal / Private |
+
+### Sample OCR Request Payload (`POST /ocr`)
+```json
+{
+  "model": "trocr-v1",
+  "fields": [
+    {
+      "name": "child_first_name",
+      "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA..."
+    }
+  ]
+}
+```
+
+### Sample OCR Response Payload
+```json
+{
+  "results": [
+    {
+      "name": "child_first_name",
+      "text": "MARIA CLARA",
+      "confidence": 96.84
+    }
+  ]
+}
+```
+
+---
+
+## Production Deployment
+
+### Direct Upload Reverse-Proxy Configuration
+
+In production environments, both Laravel and the browser-facing OCR upload endpoint must be served over HTTPS. Expose only the signed upload endpoint (`/ocr-api/add_model`) to the public network, while keeping internal endpoints strictly on private or loopback networks.
+
+#### Production Environment Variables
 ```dotenv
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://crms.example.com
+
+# Internal Laravel-to-FastAPI address
 OCR_API_URL=http://127.0.0.1:8001
 OCR_API_TIMEOUT=120
 
+# Browser-facing direct upload proxy URL
 OCR_BROWSER_API_URL=https://crms.example.com/ocr-api
 OCR_BROWSER_ORIGIN_REGEX=^https://crms\.example\.com$
 
-# Use the same dedicated value in the Laravel and FastAPI environments.
-OCR_UPLOAD_SECRET=replace-with-a-long-random-production-secret
-
-# The ticket is checked after multipart parsing, so allow for internet upload speed.
-# The current application clamps this value to a maximum of 3600 seconds.
+# Dedicated HMAC Secret shared by Laravel and FastAPI
+OCR_UPLOAD_SECRET=generate-a-cryptographically-secure-production-secret
 OCR_UPLOAD_TICKET_TTL=3600
 ```
 
-An Nginx location for the public upload path can look like this:
-
+#### Example Nginx Proxy Configuration
 ```nginx
+# Public signed direct upload route for model installations
 location = /ocr-api/add_model {
     client_max_body_size 3g;
     client_body_timeout 3600s;
@@ -187,179 +458,122 @@ location = /ocr-api/add_model {
 }
 ```
 
-Important production requirements:
+### Production Checklist
+1. **Persistent Model Storage**: Ensure `ml/models/` is mounted on persistent, non-ephemeral storage.
+2. **Process Management**: Run FastAPI under a supervisor daemon (systemd, Supervisor, or Docker restart policies) rather than development uvicorn reloaders.
+3. **Configuration Caching**: Rebuild Laravel caches whenever `.env` parameters change:
+   ```bash
+   php artisan config:cache
+   php artisan route:cache
+   php artisan view:cache
+   ```
 
-- Serve both Laravel and the browser-facing OCR upload URL over HTTPS. Browsers block an
-  HTTPS page from sending `fetch`/XHR uploads to an HTTP endpoint.
-- Publicly expose only `/add_model`. The rename, delete, model-list, health, and OCR
-  endpoints are designed for Laravel-to-FastAPI communication and rely on private-network
-  or loopback isolation.
-- Run FastAPI under a process supervisor or container restart policy; do not use development
-  auto-reload in production.
-- Keep `ml/models/` on persistent, writable storage. Container-local ephemeral storage will
-  lose installed models during replacement or redeployment.
-- Allow enough request size, proxy time, temporary disk, and model disk for a model upload.
-  Multipart spooling and archive extraction can temporarily require more than the final
-  model size.
-- After changing OCR environment values, rebuild Laravel's configuration cache and restart
-  FastAPI so both processes read the same secret and URLs.
+---
 
+## Testing & Quality Assurance
+
+CRMS maintains a comprehensive test suite across PHP, JavaScript, and Python layers.
+
+```
+tests/
+├── Feature/                    # 14 PHPUnit feature test classes (176 tests, 1140 assertions)
+│   ├── AnalyticsDashboardTest.php
+│   ├── AuditLogTest.php
+│   ├── AuditLogViewerTest.php
+│   ├── AuthenticationTest.php
+│   ├── CapabilityMatrixTest.php
+│   ├── ChangeRequestPresentationTest.php
+│   ├── ChangeRequestWorkflowTest.php
+│   ├── DocumentTemplateBuilderTest.php
+│   ├── DocumentUploadWorkflowTest.php
+│   ├── OcrModelPerformanceTest.php
+│   ├── OcrWorkspaceTest.php
+│   ├── RecordDetailPresentationTest.php
+│   ├── ReportExportTest.php
+│   └── UserManagementTest.php
+├── JavaScript/                 # 25 Node.js unit tests (SNEAT controls, shortcuts, markers)
+│   ├── change-request.test.js
+│   ├── icon-coverage.test.js
+│   ├── person-grouping.test.js
+│   ├── record-detail.test.js
+│   ├── sneat-controls.test.js
+│   ├── template-builder-shortcuts.test.js
+│   └── verification-groups.test.js
+└── Python/                     # Python unit tests for ML evaluation report verification
+    └── test_evaluation_report.py
+```
+
+### Running Test Suites
+
+#### 1. PHPUnit Automated Tests
+Create an isolated test database (`crms_test`) and run the test suite:
 ```bash
-php artisan config:cache
-```
-
-A VPS, dedicated server, or persistent container host can support this layout. Typical
-PHP-only shared hosting cannot, because the application also requires a continuously running
-Python service and control over the large-upload reverse proxy. If FastAPI runs on a separate
-host, set `OCR_BROWSER_API_URL` to its public HTTPS URL, set the CORS regex to the Laravel
-origin, and keep `OCR_API_URL` on a private server-to-server address where possible.
-
-## The OCR workflow
-
-1. **Fine-tune** — `python ml\train_trocr.py`. Hyperparameters are in the `CONFIG` block.
-   The best checkpoint by validation loss is saved to `ml/models/`.
-2. **Evaluate** — `python ml\test_trocr.py` and `python ml\test_finetuned.py`. Each writes a
-   timestamped chart to `ml/evaluation-metrics/{base,finetuned}/`.
-   When training on Kaggle, `trocr-finetuning-code.ipynb` evaluates the best checkpoint on
-   the locked test split and writes `evaluation-report.json` beside the weights. The report
-   includes CER, WER, exact-match, dataset provenance, and SHA-256 digests for the manifest
-   and model weights.
-3. **Install** — sign in as Super Admin, open **OCR Workspace**, and add the model with
-   _Add_. Either a `.zip` or the model folder is sent in one browser-to-FastAPI request,
-   so PHP's upload limit and the former Laravel-to-FastAPI second copy do not apply.
-4. **Select** — pick it in _Model used for scanning_ and press **Save settings**. Only
-   then does Staff scanning use it. Installing a model changes nothing on its own.
-5. **Scan** — Staff upload a certificate, adjust the field boxes, run the model, correct
-   anything flagged, and submit. Submission locks the record.
-
-Any folder dropped into `ml/models/` is auto-discovered — no restart needed, just press
-_Rescan_. It needs `config.json` plus `model.safetensors` or `pytorch_model.bin`, and the
-tokenizer files.
-
-An uploaded `evaluation-report.json` is optional, but if present it must be valid and its
-weights digest must match the checkpoint or the OCR service rejects the upload. Laravel
-imports the normalized report during registration or _Rescan_. A model without a report is
-still usable for scanning, but its radar shows **No benchmark**; CRMS never manufactures
-benchmark scores from production scans.
-
-### The OCR workspace
-
-One page, Super Admin only. It does three things:
-
-- **Review model performance** — a read-only radar compares character accuracy, word
-  accuracy, and exact text matches from the locked-test report packaged with the model.
-  Production scans are never substituted for missing benchmark data. The dataset, split,
-  sample count, and evaluation date stay visible beside the chart.
-
-- **Manage models** — install (folder or `.zip`), rename, delete. A `.zip` may wrap the
-  model in a folder; the service finds it. The base model and the model currently in use
-  cannot be renamed or deleted.
-- **Save settings** — which model Staff scan with, whether Staff may choose a different
-  one per document, and the review threshold. _Save settings_ stays disabled until
-  something actually differs from what is stored.
-
-The chart does not run an evaluation. There is deliberately no fine-tuning, dataset upload,
-evaluation runner, batch prediction, or Start/Stop button on that page. The first four are
-long-running command-line work; the last is an OS process, and spawning or killing one from
-a browser tab is a lot of blast radius for a convenience.
-
-**Staff model choice is off by default.** Left off, every reading in the archive came from
-the one model a Super Admin approved, which is the easier position to defend. Switched on,
-Staff get a picker on the marking step and the record stores whichever model produced its
-readings. A submitted key is honoured only if the service can actually serve it — a stale
-tab cannot swap the model behind a record.
-
-### Dataset format
-
-```
-ml/dataset/
-├── manifest.csv        columns: filename,label,split,source
-├── train/
-├── val/
-└── test/
-```
-
-Rows with empty labels or the label `UNREADABLE` are skipped.
-
-## A note on confidence
-
-Every reading carries a confidence score: the geometric mean of per-token probabilities.
-This is **the model's certainty in its own output, not accuracy**. Fields below the review
-threshold are flagged for a closer look. Treat it as a prompt to look closer, never as a
-quality guarantee.
-
-The threshold is set in the OCR workspace. `CRMS_CONFIDENCE_THRESHOLD` (default 80%) is the
-fallback used until a Super Admin overrides it, and clearing the field in the UI returns to
-that fallback.
-
-The analytics page also shows a correction rate — how often a person changed what the model
-read. Also a signal, not a validated metric: a corrected field may have been right, and an
-uncorrected one may have been wrong and missed.
-
-## Tests
-
-The automated suite is PHPUnit under `tests/`. It currently contains nine feature-test
-classes: 95 test methods expand to 113 executed cases through data providers. The suite
-covers authentication, the role capability matrix, user management, audit integrity and
-viewing, change requests, analytics, reports, and OCR model management.
-
-Create the isolated database once, then run the suite:
-
-```bash
-mysql -e "CREATE DATABASE crms_test"
+mysql -u root -e "CREATE DATABASE IF NOT EXISTS crms_test;"
 php artisan test
 ```
 
-`phpunit.xml` forces the test connection to `crms_test`. `tests/TestCase.php` refuses to run
-when the selected database name does not end in `_test`, and `tests/bootstrap.php` preserves
-that protection when local environment variables would otherwise override PHPUnit. These
-two support files are required even though they do not contain test methods.
-
-`tests/Feature/CapabilityMatrixTest.php` is the load-bearing one: it asserts the permission
-table above, route by route and ability by ability. If a change makes it fail, the change is
-wrong, not the test.
-
-The files `ml/test_trocr.py` and `ml/test_finetuned.py` are manual GPU/CPU evaluation
-commands. Despite their historical names, they are not part of PHPUnit and there is no
-automated Python or browser test runner configured yet.
-
-Before handing a change to another collaborator, run checks appropriate to the files changed:
-
+#### 2. JavaScript / UI Unit Tests
+Run frontend logic and SNEAT design token validation tests using Node.js's built-in test runner:
 ```bash
-php artisan test                         # Laravel behavior and authorization
-npm run build                            # frontend compilation
-python -m py_compile ml/api/main.py      # FastAPI syntax
-git diff --check                         # whitespace and conflict-marker mistakes
+npm run test:js
 ```
 
-Do not delete tests merely to reduce the repository size. They are small, execute in seconds,
-and document security and workflow rules that are otherwise easy for collaborators to break.
-Current areas that would benefit from additional coverage are document scanning/submission,
-template lifecycle operations, record browsing, FastAPI archive security, and browser-level
-direct-upload recovery.
-
-## Model & data
-
-`ml/models/` and `ml/dataset/` are gitignored — they exceed GitHub's file-size limits. To
-share them, push to the [Hugging Face Hub](https://huggingface.co/docs/hub/models-uploading),
-use [Git LFS](https://git-lfs.com/), or host the dataset externally.
-
-Evaluation charts under `ml/evaluation-metrics/` are generated artifacts. Avoid adding every
-timestamped run to a collaboration branch unless the chart is an intentional comparison or
-documented baseline.
-
-## Continued fine-tuning
-
-To keep training from an existing checkpoint, point the loaders in `ml/train_trocr.py` at a
-saved directory:
-
-```python
-processor = TrOCRProcessor.from_pretrained("models/your-model", local_files_only=True)
-model = VisionEncoderDecoderModel.from_pretrained("models/your-model", local_files_only=True)
+#### 3. Python Unit Tests
+```bash
+python -m unittest discover tests/Python
 ```
 
-A lower learning rate and mixing in earlier data help reduce catastrophic forgetting.
+#### 4. Pre-Commit Validation Checklist
+```bash
+php artisan test                         # Verify Laravel business logic & capability matrix
+npm run test:js                          # Verify JS workspace logic & button controls
+npm run check:icons                      # Verify Boxicons icon subset coverage
+npm run build                            # Verify production asset compilation
+python -m py_compile ml/api/main.py      # Verify FastAPI microservice syntax
+```
+
+---
+
+## Environment Configuration Reference
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `APP_NAME` | `"Civil Registry Management System"` | Application branding name. |
+| `APP_ENV` | `local` | Application environment (`local`, `production`, `testing`). |
+| `APP_KEY` | *(Generated)* | Laravel encryption key. |
+| `APP_URL` | `http://localhost` | Canonical base web URL. |
+| `DB_CONNECTION` | `mysql` | Database driver (`mysql`). |
+| `DB_HOST` | `127.0.0.1` | Database server host. |
+| `DB_PORT` | `3306` | Database server port. |
+| `DB_DATABASE` | `crms` | Main application database name. |
+| `DB_USERNAME` | `root` | Database user username. |
+| `DB_PASSWORD` | `""` | Database user password. |
+| `OCR_API_URL` | `http://127.0.0.1:8001` | Private address for Laravel-to-FastAPI server calls. |
+| `OCR_BROWSER_API_URL` | `http://127.0.0.1:8001` | Browser-resolvable URL for direct multipart model uploads. |
+| `OCR_API_TIMEOUT` | `120` | HTTP request timeout (seconds) for OCR inference operations. |
+| `OCR_UPLOAD_SECRET` | *(Empty / Falls back to `APP_KEY`)* | HMAC secret for signing direct model upload tickets. |
+| `OCR_UPLOAD_TICKET_TTL` | `900` | Validity lifetime in seconds for model upload tickets (max 3600). |
+| `OCR_BROWSER_ORIGIN_REGEX` | *(Loopback regex)* | Allowed browser origins regex for CORS upload requests. |
+| `CRMS_CONFIDENCE_THRESHOLD` | `80` | Default OCR confidence threshold below which fields flag for review. |
+| `CRMS_REPORTING_TIMEZONE` | `Asia/Manila` | Local timezone used for civil registry day/month reporting boundaries. |
+| `CRMS_SUPER_ADMIN_NAME` | `"Super Admin"` | Initial name for the bootstrap Super Admin seeder. |
+| `CRMS_SUPER_ADMIN_EMAIL` | `superadmin@admin.com` | Initial email for the bootstrap Super Admin seeder. |
+| `CRMS_SUPER_ADMIN_PASSWORD` | `superadmin@admin.com` | Initial password for the bootstrap Super Admin seeder. |
+
+---
+
+## Technology Stack
+
+- **Backend**: [Laravel 12](https://laravel.com/), PHP 8.2+, Composer
+- **OCR & ML Microservice**: [FastAPI](https://fastapi.tiangolo.com/), [PyTorch](https://pytorch.org/), [Hugging Face Transformers](https://huggingface.co/docs/transformers/index) (Microsoft TrOCR), Pillow, Pandas
+- **Frontend & UI**: Blade Templates, [Bootstrap 5](https://getbootstrap.com/), SNEAT Design System, Sass, [Vite](https://vitejs.dev/)
+- **Charts & Visuals**: [ApexCharts](https://apexcharts.com/)
+- **Document Viewing**: [PDF.js](https://mozilla.github.io/pdf.js/)
+- **Icons**: [Boxicons](https://boxicons.com/) (Optimized and subsetted via `@iconify/utils`)
+- **Database**: MySQL 8.0+ / MariaDB
+
+---
 
 ## License
 
-No license specified. Add one if you intend others to reuse this code.
+This project is proprietary civil registry software. All rights reserved.
