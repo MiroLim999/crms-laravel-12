@@ -37,9 +37,19 @@ class OcrModelController extends Controller
         private readonly AuditLogger $audit,
     ) {}
 
-    public function index(): View
+    public function index(Request $request): View
     {
         $settings = OcrSetting::current();
+
+        // Keep the registry honest with disk on every visit, so a folder removed by
+        // hand stops showing as "Missing" without the Super Admin having to click
+        // Rescan. Silently skipped when the service is down; overview() below
+        // already reports that.
+        try {
+            $this->manager->reconcile($request->user());
+        } catch (OcrServiceException) {
+        }
+
         $overview = $this->manager->overview();
 
         return view('ocr.index', [
