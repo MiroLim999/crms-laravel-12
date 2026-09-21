@@ -111,8 +111,15 @@
                                 </div>
                             </div>
 
+                            <button type="button" class="btn btn-sm btn-outline-primary marker-fit-button" id="fitInkBtn"
+                                    title="Snap each crop to the handwriting so no characters are cut off and a neighbour's writing is left out. Applies to the selected fields, or to every field when none are selected."
+                                    disabled>
+                                <i class="icon-base bx bx-target-lock icon-sm me-1" aria-hidden="true"></i>
+                                <span id="fitInkLabel">Fit to ink</span>
+                            </button>
+
                             <button type="button" class="btn btn-sm btn-outline-secondary marker-reset-button" id="resetFieldsBtn"
-                                    title="Restore the original template fields and document view" disabled>
+                                    title="Restore the original template fields, clear fitted crops, and reset the document view" disabled>
                                 <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
                                 <span>Reset</span>
                             </button>
@@ -159,6 +166,11 @@
                          role="alert" aria-live="polite">
                         <i class="icon-base bx bx-error" aria-hidden="true"></i>
                         <span id="paperMismatchMessage"></span>
+                    </div>
+
+                    <div class="marker-fit-summary d-none" id="fitSummary" role="status" aria-live="polite">
+                        <i class="icon-base bx bx-target-lock" aria-hidden="true"></i>
+                        <span id="fitSummaryMessage"></span>
                     </div>
 
                     <div class="marker-field-bulk-actions">
@@ -377,7 +389,8 @@
                         Restore all field markers to the positions and sizes configured in the original template?
                     </p>
                     <p class="small text-muted mb-0">
-                        Added or copied fields will be removed, and deleted fields will be restored.
+                        Added or copied fields will be removed, deleted fields will be restored,
+                        and any fitted crops will be cleared.
                     </p>
                 </div>
 
@@ -498,6 +511,26 @@
     let syncingValidationSelection = false;
     let recordSubmitting = false;
     let markerConstraintMessage = null;
+    let fitInProgress = false;
+
+    // How each fit outcome reads in the field list.
+    const fitStatusDisplay = {
+        fitted: {
+            icon: 'bx-check-circle',
+            tone: 'is-fitted',
+            label: 'Crop fitted to the handwriting',
+        },
+        ambiguous: {
+            icon: 'bx-error',
+            tone: 'is-review',
+            label: 'Writing here touches a neighbouring field, so the box was left as placed. Check it by hand.',
+        },
+        empty: {
+            icon: 'bx-info-circle',
+            tone: 'is-empty',
+            label: 'No writing of its own was found in this box.',
+        },
+    };
 
     const markerOverlay = el('fieldOverlay');
     const marker = new FieldMarker({
@@ -550,11 +583,18 @@
     function updateResetUI() {
         const layoutChanged = !fieldsMatchTemplate();
         const zoomChanged = Math.abs(marker.zoom - 1) > 0.001;
-        el('resetFieldsBtn').disabled = !layoutChanged && !zoomChanged;
+        el('resetFieldsBtn').disabled = !layoutChanged && !zoomChanged && !marker.hasFits();
+    }
+
+    function hideFitSummary() {
+        el('fitSummary').classList.add('d-none');
+        el('fitSummaryMessage').textContent = '';
     }
 
     function handleMarkerChange(boxes) {
         const next = cloneBoxes(boxes);
+        // A fit summary describes the fits as they were made; once none remain it is stale.
+        if (!marker.hasFits()) hideFitSummary();
 
         if (!restoringFieldHistory && currentFieldSnapshot !== null
             && JSON.stringify(next) !== JSON.stringify(currentFieldSnapshot)) {
@@ -714,6 +754,7 @@
             showStep('mark');
             resetFieldHistory();
             marker.setBoxes(cloneBoxes(templateBoxes));
+            hideFitSummary();
 
             // The marking section was hidden while the file loaded, so fit only
             // after it becomes measurable in the layout.
@@ -777,6 +818,17 @@
                     <i class="icon-base bx bx-x icon-sm"></i>
                 </button>`;
             li.querySelector('span.flex-grow-1').textContent = box.name;
+
+            const fitStatus = fitStatusDisplay[marker.fitStatus(index)];
+            if (fitStatus) {
+                const chip = document.createElement('i');
+                chip.className = `icon-base bx ${fitStatus.icon} field-list-item__fit ${fitStatus.tone}`;
+                chip.title = fitStatus.label;
+                chip.setAttribute('role', 'img');
+                chip.setAttribute('aria-label', fitStatus.label);
+                li.insertBefore(chip, li.querySelector('button'));
+            }
+
             li.addEventListener('click', (event) => marker.selectBox(index, {
                 additive: event.shiftKey,
                 toggle: event.shiftKey,
@@ -792,6 +844,7 @@
         selectAllFieldsInput.disabled = boxes.length === 0;
         const constraintMessage = markerSetValidationMessage(boxes);
         el('scanNowBtn').disabled = boxes.length === 0 || constraintMessage !== null;
+        el('fitInkBtn').disabled = boxes.length === 0 || fitInProgress;
         el('addFieldBtn').disabled = boxes.length >= config.maxFields;
         el('newFieldName').disabled = boxes.length >= config.maxFields;
         if (constraintMessage) {
@@ -881,6 +934,9 @@
         selectAllFieldsInput.indeterminate = count > 0 && count < total;
         el('deleteSelectedBtn').disabled = count === 0;
         el('deleteFieldsBtn').disabled = count === 0;
+        if (!fitInProgress) {
+            el('fitInkLabel').textContent = count > 0 ? `Fit ${count} selected` : 'Fit to ink';
+        }
 
         if (context.source === 'marker' && Number.isInteger(context.activeIndex)) {
             centerFieldListRow(context.activeIndex);
@@ -904,7 +960,10 @@
     el('validationZoomResetBtn').addEventListener('click', () => validationMarker.resetZoom());
 
     function restoreTemplateFields() {
+        // setBoxes keeps a fit wherever its box is unchanged, so clear them explicitly.
+        marker.clearFits();
         marker.setBoxes(cloneBoxes(templateBoxes));
+        hideFitSummary();
         marker.resetZoom();
         el('docViewport').scrollTo({ top: 0, left: 0 });
         clearOcrError();
@@ -913,7 +972,7 @@
     el('resetFieldsBtn').addEventListener('click', () => {
         const layoutChanged = !fieldsMatchTemplate();
         const zoomChanged = Math.abs(marker.zoom - 1) > 0.001;
-        if (!layoutChanged && !zoomChanged) return;
+        if (!layoutChanged && !zoomChanged && !marker.hasFits()) return;
 
         if (!layoutChanged) {
             restoreTemplateFields();
@@ -1018,6 +1077,66 @@
     el('backToMark').addEventListener('click', () => {
         clearValidationSubmitError();
         showStep('mark');
+    });
+
+    const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+    function showFitSummary({ fitted, ambiguous, empty, skipped }) {
+        const attempted = fitted + ambiguous + empty;
+        const parts = [];
+
+        if (attempted > 0) {
+            parts.push(`Fitted ${fitted} of ${plural(attempted, 'crop')} to the handwriting.`);
+        }
+        if (ambiguous > 0) {
+            parts.push(`${plural(ambiguous, 'field')} touch${ambiguous === 1 ? 'es' : ''} a neighbour's writing, so `
+                + `${ambiguous === 1 ? 'its box was' : 'their boxes were'} left as placed and outlined in amber. Check `
+                + `${ambiguous === 1 ? 'it' : 'them'} by hand.`);
+        }
+        if (empty > 0) {
+            parts.push(`${plural(empty, 'field')} had no writing of ${empty === 1 ? 'its' : 'their'} own.`);
+        }
+        if (skipped > 0) {
+            parts.push(`${plural(skipped, 'box')} you adjusted by hand ${skipped === 1 ? 'was' : 'were'} left alone. `
+                + `Select ${skipped === 1 ? 'it' : 'them'} and choose Fit to include ${skipped === 1 ? 'it' : 'them'}.`);
+        }
+        if (parts.length === 0) parts.push('Nothing to fit.');
+
+        el('fitSummaryMessage').textContent = parts.join(' ');
+        el('fitSummary').classList.toggle('has-review', ambiguous > 0);
+        el('fitSummary').classList.remove('d-none');
+    }
+
+    el('fitInkBtn').addEventListener('click', async () => {
+        if (fitInProgress || scanInProgress) return;
+
+        const button = el('fitInkBtn');
+        // Swap the icon and text in place. The label element must survive: fitting
+        // emits a change, which re-renders the field list and reads it.
+        const icon = requiredPart(button, 'i');
+        const idleIconClass = icon.className;
+
+        fitInProgress = true;
+        button.disabled = true;
+        icon.className = 'spinner-border spinner-border-sm me-1';
+        el('fitInkLabel').textContent = 'Fitting...';
+
+        // Let the button repaint before the page analysis occupies the thread.
+        await new Promise((resolve) => window.requestAnimationFrame(() => window.setTimeout(resolve, 0)));
+
+        try {
+            const selected = marker.selectedIndexes();
+            const summary = marker.fitToInk({ indexes: selected.length > 0 ? selected : null });
+            if (summary) showFitSummary(summary);
+        } catch (error) {
+            console.error('Fit to ink failed:', error);
+            showOcrError('The crops could not be fitted to the handwriting. You can still scan with the boxes as placed.');
+        } finally {
+            fitInProgress = false;
+            icon.className = idleIconClass;
+            button.disabled = marker.toJSON().length === 0;
+            updateSelectionUI(marker.selectedIndexes());
+        }
     });
 
     let scanInProgress = false;
@@ -1536,7 +1655,8 @@
         context.fillRect(0, 0, target.width, target.height);
         context.drawImage(source, 0, 0);
 
-        validationMarker.setBoxes(cropped.map(({ name, x, y, w, h }) => ({ name, x, y, w, h })));
+        // Highlight what was actually read: the fitted crop, or the box when unfitted.
+        validationMarker.setBoxes(cropped.map(({ name, region }) => ({ name, ...region })));
         validationMarker.resetZoom();
         el('validationDocViewport').scrollTo({ top: 0, left: 0 });
         el('validationFileName').textContent = scanFile?.name || 'Document';
@@ -2137,6 +2257,8 @@
             const value = row instanceof HTMLElement
                 ? requiredInput(row, '.verified').value.trim()
                 : '';
+            // Store the region that was read, so the record highlights the real writing.
+            const region = crop.region ?? crop;
             return {
                 verified: '1',
                 name: String(reading.name ?? ''),
@@ -2145,10 +2267,10 @@
                 verified_value: value,
                 person_group: personGroup,
                 person_field_order: personFieldOrder,
-                x: Number(crop.x ?? 0).toFixed(5),
-                y: Number(crop.y ?? 0).toFixed(5),
-                width: Number(crop.w ?? 0).toFixed(5),
-                height: Number(crop.h ?? 0).toFixed(5),
+                x: Number(region.x ?? 0).toFixed(5),
+                y: Number(region.y ?? 0).toFixed(5),
+                width: Number(region.w ?? 0).toFixed(5),
+                height: Number(region.h ?? 0).toFixed(5),
             };
         });
         data.set('fields_json', JSON.stringify(submittedFields));

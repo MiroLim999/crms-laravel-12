@@ -745,6 +745,24 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   touch-action: none;
 }
 
+// Fit to ink. The crop the OCR will actually read, drawn where it differs from the
+// box; the box itself stays as the person placed it.
+.field-fit {
+  position: absolute;
+  z-index: 2;
+  border: 2px dashed var(--bs-success);
+  border-radius: 2px;
+  background-color: rgba(113, 221, 55, 0.08);
+  pointer-events: none;
+}
+
+// The writing here touches a neighbour's, so the box was left as placed. An outline
+// rather than a border colour, so it still reads when the box is also selected.
+.field-box.is-fit-review {
+  outline: 2px solid var(--bs-warning);
+  outline-offset: 2px;
+}
+
 // Read-only rendering in the archive: show where a value came from without
 // implying it can be moved.
 .field-overlay--readonly .field-box {
@@ -1405,6 +1423,53 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   i {
     flex: 0 0 auto;
     margin-block-start: .08rem;
+  }
+}
+
+.marker-fit-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  margin-block-end: .65rem;
+  padding: .65rem .75rem;
+  color: var(--bs-body-color);
+  background: rgba(113, 221, 55, .1);
+  border: 1px solid rgba(113, 221, 55, .28);
+  border-radius: .5rem;
+  font-size: .72rem;
+  line-height: 1.4;
+
+  i {
+    flex: 0 0 auto;
+    margin-block-start: .08rem;
+    color: var(--bs-success);
+  }
+
+  &.has-review {
+    background: rgba(255, 171, 0, .1);
+    border-color: rgba(255, 171, 0, .24);
+
+    i {
+      color: #8a6500;
+    }
+  }
+}
+
+.field-list-item__fit {
+  flex: 0 0 auto;
+  font-size: 1rem;
+  line-height: 1;
+
+  &.is-fitted {
+    color: var(--bs-success);
+  }
+
+  &.is-review {
+    color: #d68b00;
+  }
+
+  &.is-empty {
+    color: var(--bs-secondary-color);
   }
 }
 

@@ -14,6 +14,7 @@
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
+import { fitFields, preparePage, toGrayscale, whitenNeighbourInk } from './ink-fit.js';
 import { markerPersonMetadata } from './person-grouping.js';
 import {
     canVerifyValue,
@@ -28,6 +29,12 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 
 const HANDLE_SIZE = 10;
 const MIN_FRACTION = 0.01;
+
+// Ink analysis runs on a downscaled copy of the page. Coordinates are fractions,
+// so the result applies unchanged to the full-resolution canvas that is cropped.
+const ANALYSIS_MAX_SIDE = 2000;
+
+const sameGeometry = (a, b) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 
 /**
  * Return the portable part of a marker box.
@@ -82,11 +89,18 @@ export class FieldMarker {
         this.onSelectionChange = onSelectionChange;
         this.onZoomChange = onZoomChange;
 
-        /** @type {Array<{name: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number, el: HTMLElement|null}>} */
+        /**
+         * `fit` is an optional refinement of the crop, produced by fitToInk(). It never
+         * changes x/y/w/h: the box stays the person's anchor, and the fit is dropped
+         * the moment that box is moved or resized.
+         *
+         * @type {Array<{name: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number, el: HTMLElement|null, fitEl: HTMLElement|null, fit: object|null, pinned: boolean}>}
+         */
         this.boxes = [];
         this.selected = new Set();
         this.pdfDoc = null;
         this.pageMeasurement = null;
+        this._inkPage = null;
         this.zoom = 1;
         this.minZoom = 0.5;
         this.maxZoom = 3;
@@ -196,6 +210,8 @@ export class FieldMarker {
      * Render a File (image or PDF) onto the canvas.
      */
     async load(file) {
+        this._forgetInk();
+
         const isPdf = file.type === 'application/pdf'
             || file.name.toLowerCase().endsWith('.pdf');
 
@@ -217,6 +233,8 @@ export class FieldMarker {
      * Render from a URL, used when revisiting an already-stored scan.
      */
     async loadFromUrl(url, isPdf = false) {
+        this._forgetInk();
+
         if (isPdf) {
             this.pdfDoc = await pdfjsLib.getDocument({ url }).promise;
             await this.renderPdfPage(1);
@@ -381,10 +399,26 @@ export class FieldMarker {
      * @param {Array<{name: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number}>} boxes
      */
     setBoxes(boxes) {
+        const previous = new Map(this.boxes.map((box) => [box.name, box]));
+
         // Remove marker elements without destroying overlay-owned tools such as
         // Template Builder's Windows-style marquee selection rectangle.
-        this.overlay.querySelectorAll(':scope > .field-box').forEach((element) => element.remove());
-        this.boxes = boxes.map((box) => ({ ...box, el: null }));
+        this.overlay
+            .querySelectorAll(':scope > .field-box, :scope > .field-fit')
+            .forEach((element) => element.remove());
+        this.boxes = boxes.map((box) => {
+            const next = { ...box, el: null, fitEl: null, fit: null, pinned: false };
+
+            // Pasting, undoing, and resetting rebuild every box. A fit describes the
+            // ink around one exact box, so it survives only where that box is unchanged.
+            const before = previous.get(box.name);
+            if (before && sameGeometry(before, next)) {
+                next.fit = before.fit ?? null;
+                next.pinned = before.pinned ?? false;
+            }
+
+            return next;
+        });
         this.selected.clear();
         this.layout();
         this._emit();
@@ -392,7 +426,7 @@ export class FieldMarker {
     }
 
     addBox(name, fraction = { x: 0.3, y: 0.1, w: 0.35, h: 0.05 }) {
-        const box = { name, ...fraction, el: null };
+        const box = { name, ...fraction, el: null, fitEl: null, fit: null, pinned: false };
         this.boxes.push(box);
         this.selected = new Set([box]);
         this.layout();
@@ -404,6 +438,7 @@ export class FieldMarker {
         const [removed] = this.boxes.splice(index, 1);
         this.selected.delete(removed);
         removed?.el?.remove();
+        removed?.fitEl?.remove();
         this.layout();
         this._emit();
         this._emitSelection();
@@ -478,6 +513,7 @@ export class FieldMarker {
         this.boxes = this.boxes.filter((box) => {
             if (!this.selected.has(box)) return true;
             box.el?.remove();
+            box.fitEl?.remove();
             return false;
         });
 
@@ -485,6 +521,133 @@ export class FieldMarker {
         this.layout();
         this._emit();
         this._emitSelection();
+    }
+
+    // -------------------------------------------------------------- ink fitting
+
+    /**
+     * Refine crops to the handwriting.
+     *
+     * Each box is an anchor ("this field is roughly here"). Its crop becomes the
+     * rectangle holding the writing it owns, and ink belonging to neighbouring
+     * fields is painted out of the crop. See ink-fit.js for how ownership is decided.
+     *
+     * A box whose writing touches a neighbour's is left as it is and flagged
+     * 'ambiguous'. Guessing where two entries meet is how a wrong name reaches the
+     * registry, so that call stays with the person.
+     *
+     * Boxes the person adjusted by hand after a fit are skipped unless named in
+     * `indexes`.
+     *
+     * @param {{indexes?: number[]|null}} [options] Fit only these boxes; null fits every box.
+     * @returns {{fitted: number, ambiguous: number, empty: number, skipped: number}|null}
+     */
+    fitToInk({ indexes = null } = {}) {
+        if (this.readOnly || this.boxes.length === 0 || !this.canvas.width || !this.canvas.height) {
+            return null;
+        }
+
+        this._inkPage ??= this._prepareInkPage();
+
+        // Ownership needs every box even when only some are refitted: a neighbour's
+        // writing is what tells a box where its own ends.
+        const result = fitFields(this._inkPage, this.boxes.map(({ x, y, w, h }) => ({ x, y, w, h })));
+        const grid = {
+            width: result.width,
+            height: result.height,
+            labels: result.labels,
+            labelCount: result.labelCount,
+        };
+        const targets = indexes === null ? null : new Set(indexes);
+        const summary = { fitted: 0, ambiguous: 0, empty: 0, skipped: 0 };
+
+        this.boxes.forEach((box, index) => {
+            if (targets !== null && !targets.has(index)) return;
+
+            if (targets === null && box.pinned) {
+                summary.skipped++;
+                return;
+            }
+
+            const field = result.fields[index];
+            box.pinned = false;
+            box.fit = {
+                status: field.status,
+                rect: field.rect,
+                grid,
+                // Who owned each painted-out blob, so a later crop can tell whether
+                // that neighbour has since moved and the paint-out no longer holds.
+                mask: field.maskLabels.map((label) => {
+                    const { name, x, y, w, h } = this.boxes[result.owners[label]];
+                    return { label, owner: { name, x, y, w, h } };
+                }),
+            };
+            summary[field.status]++;
+        });
+
+        this.layout();
+        this._emit();
+
+        return summary;
+    }
+
+    /** 'fitted', 'ambiguous', 'empty', or null when the box has not been fitted. */
+    fitStatus(index) {
+        return this.boxes[index]?.fit?.status ?? null;
+    }
+
+    hasFits() {
+        return this.boxes.some((box) => Boolean(box.fit));
+    }
+
+    clearFits() {
+        if (!this.hasFits() && !this.boxes.some((box) => box.pinned)) return;
+
+        this.boxes.forEach((box) => {
+            box.fit = null;
+            box.pinned = false;
+        });
+        this.layout();
+        this._emit();
+    }
+
+    /**
+     * A box moved or resized after a fit is now the person's choice: drop the stale
+     * fit, and remember not to override that choice on the next "fit all".
+     */
+    _overrideFit(box) {
+        if (!box.fit) return;
+
+        box.fit = null;
+        box.pinned = true;
+    }
+
+    _forgetInk() {
+        this._inkPage = null;
+        this.boxes.forEach((box) => {
+            box.fit = null;
+            box.pinned = false;
+        });
+    }
+
+    _prepareInkPage() {
+        const { width, height } = this.canvas;
+        const scale = Math.min(1, ANALYSIS_MAX_SIDE / Math.max(width, height));
+        const analysisWidth = Math.max(1, Math.round(width * scale));
+        const analysisHeight = Math.max(1, Math.round(height * scale));
+
+        const scratch = document.createElement('canvas');
+        scratch.width = analysisWidth;
+        scratch.height = analysisHeight;
+
+        const ctx = scratch.getContext('2d', { willReadFrequently: true });
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(this.canvas, 0, 0, analysisWidth, analysisHeight);
+
+        const { data } = ctx.getImageData(0, 0, analysisWidth, analysisHeight);
+
+        return preparePage(toGrayscale(data, analysisWidth, analysisHeight), analysisWidth, analysisHeight);
     }
 
     // --------------------------------------------------------------------- zoom
@@ -557,7 +720,35 @@ export class FieldMarker {
             box.el.style.height = `${box.h * height}px`;
             box.el.dataset.index = String(index);
             box.el.classList.toggle('is-selected', this.selected.has(box));
+            box.el.classList.toggle('is-fit-review', box.fit?.status === 'ambiguous');
+
+            this._layoutFit(box, width, height);
         });
+    }
+
+    /**
+     * Outline the fitted crop when it differs from the box. Only fitted boxes draw
+     * one; an ambiguous box is flagged on the box itself and keeps its own crop.
+     */
+    _layoutFit(box, width, height) {
+        const rect = box.fit?.status === 'fitted' ? box.fit.rect : null;
+
+        if (!rect) {
+            box.fitEl?.remove();
+            box.fitEl = null;
+            return;
+        }
+
+        if (!box.fitEl) {
+            box.fitEl = document.createElement('div');
+            box.fitEl.className = 'field-fit';
+            this.overlay.appendChild(box.fitEl);
+        }
+
+        box.fitEl.style.left = `${rect.x * width}px`;
+        box.fitEl.style.top = `${rect.y * height}px`;
+        box.fitEl.style.width = `${rect.w * width}px`;
+        box.fitEl.style.height = `${rect.h * height}px`;
     }
 
     _createElement(box, index) {
@@ -669,6 +860,11 @@ export class FieldMarker {
             mode = null;
             el.releasePointerCapture(event.pointerId);
             el.classList.remove('is-active');
+
+            origins.forEach((origin) => {
+                if (!sameGeometry(origin.box, origin)) this._overrideFit(origin.box);
+            });
+            this.layout();
             this._emit();
         };
 
@@ -694,29 +890,80 @@ export class FieldMarker {
      * Crops come from the full-resolution canvas, not the on-screen size, so the
      * model sees the sharpest available pixels.
      *
-     * @returns {Array<{name: string, image: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number}>}
+     * x/y/w/h stay the person's box, which is what row grouping is judged on.
+     * `region` is the rectangle actually read: the fitted crop, or the box itself
+     * when it has not been fitted. That is what to store and highlight.
+     *
+     * @returns {Array<{name: string, image: string, x: number, y: number, w: number, h: number, region: {x: number, y: number, w: number, h: number}, fit: string|null, personGroup?: number, personFieldOrder?: number}>}
      */
     crop() {
-        return this.boxes.map((box) => ({
-            ...serialiseBox(box),
-            image: this._cropBox(box),
-        }));
+        const byName = new Map(this.boxes.map((box) => [box.name, box]));
+
+        return this.boxes.map((box) => {
+            const region = this._readRegion(box);
+
+            return {
+                ...serialiseBox(box),
+                region,
+                fit: box.fit?.status ?? null,
+                image: this._cropRegion(box, region, byName),
+            };
+        });
     }
 
-    _cropBox(box) {
-        const sx = box.x * this.canvas.width;
-        const sy = box.y * this.canvas.height;
-        const sw = Math.max(1, box.w * this.canvas.width);
-        const sh = Math.max(1, box.h * this.canvas.height);
+    _readRegion(box) {
+        const { x, y, w, h } = box.fit?.status === 'fitted' ? box.fit.rect : box;
+
+        return { x, y, w, h };
+    }
+
+    /**
+     * Neighbour ink to paint out, kept only while the neighbour that owned it is
+     * still exactly where it was when the fit was made.
+     */
+    _liveMaskLabels(box, byName) {
+        if (box.fit?.status !== 'fitted') return [];
+
+        return box.fit.mask
+            .filter(({ owner }) => {
+                const live = byName.get(owner.name);
+                return live !== undefined && sameGeometry(live, owner);
+            })
+            .map(({ label }) => label);
+    }
+
+    _cropRegion(box, region, byName) {
+        // Snap outward to whole source pixels and copy 1:1. A fractional source
+        // rectangle makes drawImage interpolate, which blurs thin strokes: exactly
+        // the detail handwriting recognition depends on.
+        const sx = clamp(Math.floor(region.x * this.canvas.width), 0, this.canvas.width - 1);
+        const sy = clamp(Math.floor(region.y * this.canvas.height), 0, this.canvas.height - 1);
+        const sw = clamp(Math.ceil((region.x + region.w) * this.canvas.width) - sx, 1, this.canvas.width - sx);
+        const sh = clamp(Math.ceil((region.y + region.h) * this.canvas.height) - sy, 1, this.canvas.height - sy);
 
         const out = document.createElement('canvas');
-        out.width = Math.round(sw);
-        out.height = Math.round(sh);
+        out.width = sw;
+        out.height = sh;
 
-        const ctx = out.getContext('2d');
+        const ctx = out.getContext('2d', { willReadFrequently: true });
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, out.width, out.height);
-        ctx.drawImage(this.canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+        ctx.drawImage(this.canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+
+        const maskLabels = this._liveMaskLabels(box, byName);
+        if (maskLabels.length > 0) {
+            const pixels = ctx.getImageData(0, 0, out.width, out.height);
+            whitenNeighbourInk(
+                pixels.data,
+                out.width,
+                out.height,
+                { x: sx, y: sy, w: sw, h: sh },
+                { width: this.canvas.width, height: this.canvas.height },
+                box.fit.grid,
+                maskLabels,
+            );
+            ctx.putImageData(pixels, 0, 0);
+        }
 
         return out.toDataURL('image/png');
     }
