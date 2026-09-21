@@ -2,11 +2,11 @@
  * Ink-aware crop fitting.
  *
  * A template box says which field is being read and roughly where it is. On old
- * handwritten registers it makes a poor crop: writing drifts past the box edge
- * (characters are clipped) and neighbouring entries intrude (the model reads
- * someone else's ink). This module finds the ink, groups it into word blobs,
- * decides which field each blob belongs to, and reports the rectangle holding a
- * field's own writing together with the neighbour ink to paint out.
+ * handwritten registers it makes a poor crop: writing drifts past the box edge,
+ * so characters are clipped, and much of the box is blank paper. This module finds
+ * the ink, groups it into word blobs, decides which field each blob belongs to, and
+ * reports the rectangle around a field's own writing, plus that writing's outline
+ * for the marker to draw.
  *
  * Everything here is DOM-free and works on plain typed arrays, so it can be unit
  * tested in Node. FieldMarker supplies the pixels and applies the result.
@@ -57,6 +57,11 @@ export const FIT_DEFAULTS = Object.freeze({
     maxGrowthHeight: 2.5,
     maxGrowthWidth: 3,
     maxGrowthArea: 3,
+    // How far the drawn outline reaches past the field's own ink, so the letters of
+    // a word read as one shape rather than a row of separate blobs.
+    inkOutlineMargin: 0.35,
+    // Outline simplification, in analysis pixels. Only affects what is drawn.
+    polygonTolerance: 1.2,
 });
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), Math.max(min, max));
@@ -191,6 +196,7 @@ export function preparePage(gray, width, height, options = {}) {
         width,
         height,
         ink: binarise(stretchContrast(gray), width, height, options),
+        analyses: new Map(),
     };
 }
 
@@ -421,27 +427,20 @@ export function findBlobs(ink, width, height, { smearX, smearY, minArea, maxPage
  * @returns {number|null} Height in pixels, or null when there is too little ink to judge.
  */
 export function estimateTextHeight(writing, width, height) {
-    const { labels, count } = labelComponents(writing, width, height);
-    const area = new Int32Array(count + 1);
-    const top = new Int32Array(count + 1).fill(height);
-    const bottom = new Int32Array(count + 1);
-
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const i = y * width + x;
-            if (!writing[i]) continue;
-
-            const label = labels[i];
-            area[label]++;
-            if (y < top[label]) top[label] = y;
-            if (y + 1 > bottom[label]) bottom[label] = y + 1;
-        }
-    }
+    // Unsmeared, so each piece is a connected stroke group; findBlobs measures it.
+    const pieces = findBlobs(writing, width, height, {
+        smearX: 0,
+        smearY: 0,
+        minArea: 8,
+        maxPageFraction: 1,
+    });
 
     const samples = [];
-    for (let label = 1; label <= count; label++) {
-        const tall = bottom[label] - top[label];
-        if (area[label] >= 8 && tall >= 4 && tall <= height * 0.2) samples.push([tall, area[label]]);
+    for (let label = 1; label <= pieces.count; label++) {
+        if (!pieces.valid[label]) continue;
+
+        const tall = pieces.y1[label] - pieces.y0[label];
+        if (tall >= 4 && tall <= height * 0.2) samples.push([tall, pieces.area[label]]);
     }
     if (samples.length < 5) return null;
 
@@ -455,6 +454,135 @@ export function estimateTextHeight(writing, width, height) {
     }
 
     return samples[samples.length - 1][0];
+}
+
+// ------------------------------------------------------------------ outlines
+
+const RING_STEP = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+// For the edge leaving a corner in each direction, the pixel on its right and on
+// its left, as offsets from that corner.
+const RING_RIGHT = [[0, 0], [-1, 0], [-1, -1], [0, -1]];
+const RING_LEFT = [[0, -1], [0, 0], [-1, 0], [-1, -1]];
+
+/**
+ * Trace the outlines of a binary mask.
+ *
+ * Walks the cracks between kept and dropped pixels, keeping the kept side on the
+ * right, so every boundary edge is walked exactly once and each loop comes back
+ * to where it started. Holes (the inside of an 'o') come back as their own loops,
+ * wound the other way, which is what a stroked outline wants.
+ *
+ * @returns {Array<Array<[number, number]>>} Closed rings in mask pixel coordinates.
+ */
+export function traceRings(mask, width, height) {
+    const at = (x, y) => (x < 0 || y < 0 || x >= width || y >= height ? 0 : mask[y * width + x]);
+    const edgeValid = (cx, cy, direction) => {
+        const right = RING_RIGHT[direction];
+        const left = RING_LEFT[direction];
+
+        return at(cx + right[0], cy + right[1]) === 1 && at(cx + left[0], cy + left[1]) === 0;
+    };
+
+    const stride = width + 1;
+    const seen = new Uint8Array(stride * (height + 1) * 4);
+    const rings = [];
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            // The top edge of a kept pixel with nothing kept above it. Every ring,
+            // outer or hole, has at least one of these.
+            if (at(x, y) !== 1 || at(x, y - 1) !== 0) continue;
+            if (seen[(y * stride + x) * 4]) continue;
+
+            const ring = [];
+            let cx = x;
+            let cy = y;
+            let direction = 0;
+
+            while (true) {
+                const key = (cy * stride + cx) * 4 + direction;
+                if (seen[key]) break;
+
+                seen[key] = 1;
+                ring.push([cx, cy]);
+                cx += RING_STEP[direction][0];
+                cy += RING_STEP[direction][1];
+
+                // Turning left first keeps pixels that meet only at a corner inside
+                // one ring, matching the 8-connected blobs the mask is built from.
+                let next = -1;
+                for (const candidate of [(direction + 3) % 4, direction, (direction + 1) % 4]) {
+                    if (edgeValid(cx, cy, candidate)) {
+                        next = candidate;
+                        break;
+                    }
+                }
+                if (next < 0) break;
+                direction = next;
+            }
+
+            if (ring.length >= 4) rings.push(ring);
+        }
+    }
+
+    return rings;
+}
+
+/**
+ * Drop the points of a closed ring that say nothing about its shape: first the
+ * ones continuing a straight run, then Douglas-Peucker to the given tolerance.
+ */
+export function simplifyRing(ring, tolerance) {
+    const straight = [];
+    for (let i = 0; i < ring.length; i++) {
+        const previous = ring[(i - 1 + ring.length) % ring.length];
+        const next = ring[(i + 1) % ring.length];
+        const cross = (ring[i][0] - previous[0]) * (next[1] - ring[i][1])
+            - (ring[i][1] - previous[1]) * (next[0] - ring[i][0]);
+        if (cross !== 0) straight.push(ring[i]);
+    }
+    if (straight.length <= 4 || tolerance <= 0) return straight;
+
+    // Douglas-Peucker over the ring opened at its first point.
+    const closed = [...straight, straight[0]];
+    const keep = new Uint8Array(closed.length);
+    keep[0] = 1;
+    keep[closed.length - 1] = 1;
+    const stack = [[0, closed.length - 1]];
+
+    while (stack.length > 0) {
+        const [from, to] = stack.pop();
+        if (to - from < 2) continue;
+
+        const [ax, ay] = closed[from];
+        const [bx, by] = closed[to];
+        const dx = bx - ax;
+        const dy = by - ay;
+        const span = Math.hypot(dx, dy);
+        let worst = 0;
+        let worstIndex = -1;
+
+        for (let i = from + 1; i < to; i++) {
+            const [px, py] = closed[i];
+            const distance = span === 0
+                ? Math.hypot(px - ax, py - ay)
+                : Math.abs(dy * px - dx * py + bx * ay - by * ax) / span;
+            if (distance > worst) {
+                worst = distance;
+                worstIndex = i;
+            }
+        }
+
+        if (worst <= tolerance || worstIndex < 0) continue;
+
+        keep[worstIndex] = 1;
+        stack.push([from, worstIndex], [worstIndex, to]);
+    }
+
+    const simplified = [];
+    for (let i = 0; i < closed.length - 1; i++) if (keep[i]) simplified.push(closed[i]);
+
+    return simplified.length >= 3 ? simplified : straight;
 }
 
 // ---------------------------------------------------------------- fitting
@@ -471,7 +599,70 @@ function pixelRect(anchor, width, height) {
     };
 }
 
-const emptyField = (status) => ({ status, rect: null, maskLabels: [] });
+const emptyField = (status, reason = null) => ({
+    status, reason, rect: null, polygons: [],
+});
+
+/**
+ * The part of fitting that depends on the page and the settings but not on where
+ * the boxes are: ruling removal, writing height, and the labelled blobs.
+ *
+ * It is the bulk of the work and it produces the page-sized label grid that every
+ * fit keeps alive for painting out neighbours. Doing it once per page (per rounded
+ * box height, which is all the boxes contribute) means a fit of three boxes costs
+ * the same as a fit of three hundred, and repeated fits share one grid instead of
+ * each pinning its own.
+ */
+function analysePage(page, boxHeight, config) {
+    const key = JSON.stringify([
+        Math.round(boxHeight),
+        config.lineMinHorizontal, config.lineMinVertical, config.lineMaxGap,
+        config.lineMinDensity, config.lineSkewTolerance,
+        config.smearX, config.smearY, config.minBlobArea, config.maxBlobPageFraction,
+    ]);
+    page.analyses ??= new Map();
+
+    const cached = page.analyses.get(key);
+    if (cached) return cached;
+
+    const { width, height } = page;
+
+    // The boxes over-state the writing height (a register box is a whole cell), so
+    // they only set a deliberately strict line length. Real ruling is page-long and
+    // clears it easily; the writing height is measured once the ruling is gone.
+    const ruling = detectRuledLines(page.ink, width, height, {
+        minHorizontal: Math.max(24, Math.round(config.lineMinHorizontal * boxHeight)),
+        minVertical: Math.max(16, Math.round(config.lineMinVertical * boxHeight)),
+        maxGap: config.lineMaxGap,
+        minDensity: config.lineMinDensity,
+        skewTolerance: config.lineSkewTolerance,
+    });
+    const writing = new Uint8Array(page.ink.length);
+    for (let i = 0; i < writing.length; i++) writing[i] = page.ink[i] && !ruling[i] ? 1 : 0;
+
+    const measured = estimateTextHeight(writing, width, height);
+    const textHeight = measured === null
+        ? boxHeight
+        : clamp(measured, Math.max(6, boxHeight * 0.12), boxHeight);
+
+    const analysis = {
+        writing,
+        textHeight,
+        blobs: findBlobs(writing, width, height, {
+            smearX: Math.max(1, Math.round((config.smearX * textHeight) / 2)),
+            smearY: Math.max(1, Math.round((config.smearY * textHeight) / 2)),
+            minArea: Math.max(4, Math.round(config.minBlobArea * textHeight * textHeight)),
+            maxPageFraction: config.maxBlobPageFraction,
+        }),
+    };
+
+    // A page holds a few analyses at most (box height rarely changes). Keep it that
+    // way: each one carries a page-sized label grid.
+    if (page.analyses.size >= 3) page.analyses.delete(page.analyses.keys().next().value);
+    page.analyses.set(key, analysis);
+
+    return analysis;
+}
 
 /**
  * Decide, for every template box, which ink is its own.
@@ -479,16 +670,28 @@ const emptyField = (status) => ({ status, rect: null, maskLabels: [] });
  * Each blob is scored by the share of its ink that lies inside each box. A blob
  * with a real share in exactly one box belongs to that box, even when most of it
  * hangs outside (a word running past the cell edge). A blob with a real share in
- * two boxes is contested. Fields that own something are cropped to that ink plus
- * padding, and the ink owned by *other* fields that falls inside the crop is
- * listed so it can be painted out.
+ * two boxes is contested. A field that owns something is cropped to that ink plus
+ * padding, and carries the outline of that ink for the marker to draw.
+ *
+ * The crop is the rectangle, not the outline. Whitening the paper outside the
+ * writing was measured against the project's own TrOCR model and read slightly
+ * worse than leaving the crop alone, so the outline is shown, not applied.
+ *
+ * An 'ambiguous' field keeps its own box, for one of two reasons: its writing
+ * touches a neighbour's ('touching'), or the ink it would own is far bigger than
+ * the box ('oversized': a stain, a stray mark, a long flourish).
  *
  * @param {{width: number, height: number, ink: Uint8Array}} page  From preparePage().
  * @param {Array<{x: number, y: number, w: number, h: number}>} anchors  Template boxes, as fractions.
  * @returns {{
  *   width: number, height: number, textHeight: number,
  *   labels: Int32Array, labelCount: number, owners: Int32Array,
- *   fields: Array<{status: 'fitted'|'ambiguous'|'empty', rect: {x: number, y: number, w: number, h: number}|null, maskLabels: number[]}>
+ *   fields: Array<{
+ *     status: 'fitted'|'ambiguous'|'empty',
+ *     reason: 'touching'|'oversized'|null,
+ *     rect: {x: number, y: number, w: number, h: number}|null,
+ *     polygons: Array<Array<[number, number]>>
+ *   }>
  * }}
  */
 export function fitFields(page, anchors, options = {}) {
@@ -509,31 +712,8 @@ export function fitFields(page, anchors, options = {}) {
 
     const rects = anchors.map((anchor) => pixelRect(anchor, width, height));
 
-    // The boxes over-state the writing height (a register box is a whole cell), so
-    // they only set a deliberately strict line length. Real ruling is page-long and
-    // clears it easily; the writing height is measured once the ruling is gone.
     const boxHeight = clamp(median(anchors.map((anchor) => anchor.h * height)), 6, height * 0.2);
-    const ruling = detectRuledLines(page.ink, width, height, {
-        minHorizontal: Math.max(24, Math.round(config.lineMinHorizontal * boxHeight)),
-        minVertical: Math.max(16, Math.round(config.lineMinVertical * boxHeight)),
-        maxGap: config.lineMaxGap,
-        minDensity: config.lineMinDensity,
-        skewTolerance: config.lineSkewTolerance,
-    });
-    const writing = new Uint8Array(page.ink.length);
-    for (let i = 0; i < writing.length; i++) writing[i] = page.ink[i] && !ruling[i] ? 1 : 0;
-
-    const measured = estimateTextHeight(writing, width, height);
-    const textHeight = measured === null
-        ? boxHeight
-        : clamp(measured, Math.max(6, boxHeight * 0.12), boxHeight);
-
-    const blobs = findBlobs(writing, width, height, {
-        smearX: Math.max(1, Math.round((config.smearX * textHeight) / 2)),
-        smearY: Math.max(1, Math.round((config.smearY * textHeight) / 2)),
-        minArea: Math.max(4, Math.round(config.minBlobArea * textHeight * textHeight)),
-        maxPageFraction: config.maxBlobPageFraction,
-    });
+    const { writing, textHeight, blobs } = analysePage(page, boxHeight, config);
     const { labels, count, valid } = blobs;
 
     // Score every (box, blob) pair by the share of the blob's ink inside the box.
@@ -575,7 +755,6 @@ export function fitFields(page, anchors, options = {}) {
     });
 
     const owners = new Int32Array(count + 1).fill(OWNER_NONE);
-    const ownedLabels = [];
     const union = anchors.map(() => ({
         x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, owned: 0,
     }));
@@ -590,7 +769,6 @@ export function fitFields(page, anchors, options = {}) {
 
         const owner = bestAnchor[label];
         owners[label] = owner;
-        ownedLabels.push(label);
 
         const box = union[owner];
         box.x0 = Math.min(box.x0, blobs.x0[label]);
@@ -602,7 +780,7 @@ export function fitFields(page, anchors, options = {}) {
 
     const fields = rects.map((rect, index) => {
         if (strongLabels[index].some((label) => owners[label] === OWNER_CONTESTED)) {
-            return emptyField('ambiguous');
+            return emptyField('ambiguous', 'touching');
         }
 
         const ink = union[index];
@@ -626,24 +804,42 @@ export function fitFields(page, anchors, options = {}) {
         if (fittedH > config.maxGrowthHeight * anchorH
             || fittedW > config.maxGrowthWidth * anchorW
             || fittedW * fittedH > config.maxGrowthArea * anchorW * anchorH) {
-            return emptyField('ambiguous');
+            return emptyField('ambiguous', 'oversized');
         }
 
-        const maskLabels = ownedLabels.filter((label) => (
-            owners[label] !== index
-            && blobs.x0[label] < fitted.x1 && blobs.x1[label] > fitted.x0
-            && blobs.y0[label] < fitted.y1 && blobs.y1[label] > fitted.y0
-        ));
+        // The shape of this field's own writing, grown by a margin so the letters of
+        // a word join into one outline. It is what the crop is measured from, and
+        // what the marker draws; the crop itself stays the rectangle around it.
+        const margin = Math.max(1, Math.round(config.inkOutlineMargin * textHeight));
+        const own = new Uint8Array(fittedW * fittedH);
+        for (let y = fitted.y0; y < fitted.y1; y++) {
+            for (let x = fitted.x0; x < fitted.x1; x++) {
+                const i = y * width + x;
+                if (writing[i] && owners[labels[i]] === index) {
+                    own[(y - fitted.y0) * fittedW + (x - fitted.x0)] = 1;
+                }
+            }
+        }
+
+        const keep = dilate(own, fittedW, fittedH, margin, margin);
+        const polygons = traceRings(keep, fittedW, fittedH)
+            .map((ring) => simplifyRing(ring, config.polygonTolerance))
+            .filter((ring) => ring.length >= 3)
+            .map((ring) => ring.map(([px, py]) => [
+                (fitted.x0 + px) / width,
+                (fitted.y0 + py) / height,
+            ]));
 
         return {
             status: 'fitted',
+            reason: null,
             rect: {
                 x: fitted.x0 / width,
                 y: fitted.y0 / height,
                 w: fittedW / width,
                 h: fittedH / height,
             },
-            maskLabels,
+            polygons,
         };
     });
 
@@ -651,52 +847,3 @@ export function fitFields(page, anchors, options = {}) {
 }
 
 // ----------------------------------------------------------------- masking
-
-/**
- * Paint the given blobs white inside a cropped RGBA image.
- *
- * The blob labels live at analysis resolution while the crop comes from the
- * full-resolution page, so each crop pixel is mapped back to the label grid.
- * Labels cover the smeared region around a blob, and two blobs' regions never
- * overlap, so painting a neighbour's label cannot touch this field's own ink.
- *
- * @param {Uint8ClampedArray} rgba  Crop pixels, modified in place.
- * @param {number} width            Crop width in pixels.
- * @param {number} height           Crop height in pixels.
- * @param {{x: number, y: number, w: number, h: number}} source  The crop's rectangle on the full page, in page pixels.
- * @param {{width: number, height: number}} page  Full-resolution page size.
- * @param {{width: number, height: number, labels: Int32Array, labelCount: number}} map  Label grid.
- * @param {number[]} maskLabels     Blob labels to erase.
- * @returns {number} Pixels painted.
- */
-export function whitenNeighbourInk(rgba, width, height, source, page, map, maskLabels) {
-    if (maskLabels.length === 0) return 0;
-
-    const erase = new Uint8Array(map.labelCount + 1);
-    maskLabels.forEach((label) => { erase[label] = 1; });
-
-    const columns = new Int32Array(width);
-    for (let i = 0; i < width; i++) {
-        const pageX = source.x + ((i + 0.5) * source.w) / width;
-        columns[i] = clamp(Math.floor((pageX * map.width) / page.width), 0, map.width - 1);
-    }
-
-    let painted = 0;
-
-    for (let j = 0; j < height; j++) {
-        const pageY = source.y + ((j + 0.5) * source.h) / height;
-        const row = clamp(Math.floor((pageY * map.height) / page.height), 0, map.height - 1) * map.width;
-
-        for (let i = 0; i < width; i++) {
-            if (!erase[map.labels[row + columns[i]]]) continue;
-
-            const p = (j * width + i) * 4;
-            rgba[p] = 255;
-            rgba[p + 1] = 255;
-            rgba[p + 2] = 255;
-            painted++;
-        }
-    }
-
-    return painted;
-}

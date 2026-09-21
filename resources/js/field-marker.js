@@ -14,7 +14,7 @@
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
-import { fitFields, preparePage, toGrayscale, whitenNeighbourInk } from './ink-fit.js';
+import { fitFields, preparePage, toGrayscale } from './ink-fit.js';
 import { markerPersonMetadata } from './person-grouping.js';
 import {
     canVerifyValue,
@@ -35,6 +35,20 @@ const MIN_FRACTION = 0.01;
 const ANALYSIS_MAX_SIDE = 2000;
 
 const sameGeometry = (a, b) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+const rectOf = ({ x, y, w, h }) => ({ x, y, w, h });
+
+function median(values) {
+    if (values.length === 0) return 0;
+
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+
+    return sorted.length % 2 === 0
+        ? (sorted[middle - 1] + sorted[middle]) / 2
+        : sorted[middle];
+}
+
+const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
 /**
  * Return the portable part of a marker box.
@@ -94,13 +108,16 @@ export class FieldMarker {
          * changes x/y/w/h: the box stays the person's anchor, and the fit is dropped
          * the moment that box is moved or resized.
          *
-         * @type {Array<{name: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number, el: HTMLElement|null, fitEl: HTMLElement|null, fit: object|null, pinned: boolean}>}
+         * @type {Array<{name: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number, el: HTMLElement|null, fit: object|null, pinned: boolean}>}
          */
         this.boxes = [];
         this.selected = new Set();
         this.pdfDoc = null;
         this.pageMeasurement = null;
         this._inkPage = null;
+        this._fitLayer = null;
+        this._fitVersion = 0;
+        this._renderedFitVersion = -1;
         this.zoom = 1;
         this.minZoom = 0.5;
         this.maxZoom = 3;
@@ -224,6 +241,9 @@ export class FieldMarker {
             this.pageMeasurement = await this._measureImage(file);
         }
 
+        // Forgotten again now the new page is on the canvas: a fit requested while the
+        // file was still loading would otherwise have cached the previous page's ink.
+        this._forgetInk();
         this.layout();
 
         return this.pageMeasurement;
@@ -242,6 +262,7 @@ export class FieldMarker {
             await this._drawImage(url);
         }
 
+        this._forgetInk();
         this.layout();
     }
 
@@ -404,10 +425,14 @@ export class FieldMarker {
         // Remove marker elements without destroying overlay-owned tools such as
         // Template Builder's Windows-style marquee selection rectangle.
         this.overlay
-            .querySelectorAll(':scope > .field-box, :scope > .field-fit')
+            .querySelectorAll(':scope > .field-box')
             .forEach((element) => element.remove());
+        // Every rectangle that is new, edited, or gone. A fit that sits near one of
+        // these was decided against boxes that are no longer there.
+        const changed = [];
+
         this.boxes = boxes.map((box) => {
-            const next = { ...box, el: null, fitEl: null, fit: null, pinned: false };
+            const next = { ...box, el: null, fit: null, pinned: false };
 
             // Pasting, undoing, and resetting rebuild every box. A fit describes the
             // ink around one exact box, so it survives only where that box is unchanged.
@@ -415,10 +440,20 @@ export class FieldMarker {
             if (before && sameGeometry(before, next)) {
                 next.fit = before.fit ?? null;
                 next.pinned = before.pinned ?? false;
+            } else {
+                changed.push(rectOf(next));
             }
 
             return next;
         });
+
+        const current = new Map(this.boxes.map((box) => [box.name, box]));
+        previous.forEach((before, name) => {
+            const now = current.get(name);
+            if (!now || !sameGeometry(before, now)) changed.push(rectOf(before));
+        });
+
+        this._refitAffected(changed);
         this.selected.clear();
         this.layout();
         this._emit();
@@ -426,9 +461,10 @@ export class FieldMarker {
     }
 
     addBox(name, fraction = { x: 0.3, y: 0.1, w: 0.35, h: 0.05 }) {
-        const box = { name, ...fraction, el: null, fitEl: null, fit: null, pinned: false };
+        const box = { name, ...fraction, el: null, fit: null, pinned: false };
         this.boxes.push(box);
         this.selected = new Set([box]);
+        this._refitAffected([rectOf(box)]);
         this.layout();
         this._emit();
         this._emitSelection();
@@ -438,7 +474,7 @@ export class FieldMarker {
         const [removed] = this.boxes.splice(index, 1);
         this.selected.delete(removed);
         removed?.el?.remove();
-        removed?.fitEl?.remove();
+        if (removed) this._refitAffected([rectOf(removed)]);
         this.layout();
         this._emit();
         this._emitSelection();
@@ -510,13 +546,15 @@ export class FieldMarker {
     removeSelected() {
         if (this.selected.size === 0) return;
 
+        const removed = [];
         this.boxes = this.boxes.filter((box) => {
             if (!this.selected.has(box)) return true;
             box.el?.remove();
-            box.fitEl?.remove();
+            removed.push(rectOf(box));
             return false;
         });
 
+        this._refitAffected(removed);
         this.selected.clear();
         this.layout();
         this._emit();
@@ -539,51 +577,27 @@ export class FieldMarker {
      * Boxes the person adjusted by hand after a fit are skipped unless named in
      * `indexes`.
      *
+     * 'ambiguous' has two causes, told apart by fitReason(): the writing touches a
+     * neighbour's ('touching'), or the ink found is far bigger than the box
+     * ('oversized').
+     *
+     * A fit stays true as the layout changes: moving, adding, or deleting a box
+     * re-evaluates the fits nearby (see _refitAffected), so a crop never keeps a
+     * "fitted" mark over a paint-out that no longer matches its neighbours.
+     *
      * @param {{indexes?: number[]|null}} [options] Fit only these boxes; null fits every box.
-     * @returns {{fitted: number, ambiguous: number, empty: number, skipped: number}|null}
+     * @returns {{fitted: number, ambiguous: number, oversized: number, empty: number, skipped: number}|null}
      */
     fitToInk({ indexes = null } = {}) {
         if (this.readOnly || this.boxes.length === 0 || !this.canvas.width || !this.canvas.height) {
             return null;
         }
 
-        this._inkPage ??= this._prepareInkPage();
-
-        // Ownership needs every box even when only some are refitted: a neighbour's
-        // writing is what tells a box where its own ends.
-        const result = fitFields(this._inkPage, this.boxes.map(({ x, y, w, h }) => ({ x, y, w, h })));
-        const grid = {
-            width: result.width,
-            height: result.height,
-            labels: result.labels,
-            labelCount: result.labelCount,
-        };
-        const targets = indexes === null ? null : new Set(indexes);
-        const summary = { fitted: 0, ambiguous: 0, empty: 0, skipped: 0 };
-
-        this.boxes.forEach((box, index) => {
-            if (targets !== null && !targets.has(index)) return;
-
-            if (targets === null && box.pinned) {
-                summary.skipped++;
-                return;
-            }
-
-            const field = result.fields[index];
-            box.pinned = false;
-            box.fit = {
-                status: field.status,
-                rect: field.rect,
-                grid,
-                // Who owned each painted-out blob, so a later crop can tell whether
-                // that neighbour has since moved and the paint-out no longer holds.
-                mask: field.maskLabels.map((label) => {
-                    const { name, x, y, w, h } = this.boxes[result.owners[label]];
-                    return { label, owner: { name, x, y, w, h } };
-                }),
-            };
-            summary[field.status]++;
-        });
+        const targets = indexes === null
+            ? this.boxes.filter((box) => !box.pinned)
+            : indexes.map((index) => this.boxes[index]).filter(Boolean);
+        const skipped = indexes === null ? this.boxes.length - targets.length : 0;
+        const summary = { ...this._assignFits(targets), skipped };
 
         this.layout();
         this._emit();
@@ -591,9 +605,92 @@ export class FieldMarker {
         return summary;
     }
 
+    /**
+     * Decide ownership for the whole page and record the outcome on `targets`.
+     *
+     * Ownership needs every box even when only some are being fitted: a neighbour's
+     * writing is what tells a box where its own ends.
+     *
+     * @param {Array<object>} targets Boxes to (re)fit.
+     */
+    _assignFits(targets) {
+        const summary = { fitted: 0, ambiguous: 0, oversized: 0, empty: 0 };
+        if (targets.length === 0) return summary;
+
+        this._inkPage ??= this._prepareInkPage();
+
+        const result = fitFields(this._inkPage, this.boxes.map(rectOf));
+        const indexOf = new Map(this.boxes.map((box, index) => [box, index]));
+
+        targets.forEach((box) => {
+            const field = result.fields[indexOf.get(box)];
+
+            box.pinned = false;
+            box.fit = {
+                status: field.status,
+                reason: field.reason,
+                rect: field.rect,
+                polygons: field.polygons,
+            };
+            summary[field.reason === 'oversized' ? 'oversized' : field.status]++;
+        });
+
+        this._fitVersion++;
+
+        return summary;
+    }
+
+    /**
+     * Re-evaluate the fits a layout change could have altered.
+     *
+     * A fit records which ink belonged to which neighbour, so it is only true while
+     * those neighbours stay put. When a box is moved, added, or deleted, every fit
+     * that sits near it, or that painted out ink it owned, is decided again against
+     * the boxes as they now are. Left alone, such a box would keep its green mark
+     * while its crop quietly took back the neighbour's handwriting.
+     *
+     * Only boxes that already have a fit are touched. Boxes the person has never
+     * fitted, or adjusted by hand, stay as they are.
+     *
+     * @param {Array<{x: number, y: number, w: number, h: number}>} changed Old and new
+     *        rectangles of every box that was moved, added, or removed.
+     */
+    _refitAffected(changed) {
+        if (changed.length === 0 || this._inkPage === null) return;
+
+        // Two fields compete for the same writing when they sit within about a line
+        // of each other, which on a register is the usual case for neighbouring
+        // cells that do not overlap at all. Widen what counts as "near" to match.
+        const near = median(this.boxes.map((box) => box.h)) || 0.02;
+        const reachOf = (rect) => ({
+            x: rect.x - near,
+            y: rect.y - near,
+            w: rect.w + near * 2,
+            h: rect.h + near * 2,
+        });
+        const widened = changed.map(reachOf);
+
+        const affected = this.boxes.filter((box) => {
+            if (!box.fit) return false;
+
+            // A box near where something was, or now is, may have been given ink that
+            // is no longer its own, or denied ink that now is.
+            const reach = box.fit.rect ?? box;
+
+            return widened.some((rect) => overlaps(rect, box) || overlaps(rect, reach));
+        });
+
+        this._assignFits(affected);
+    }
+
     /** 'fitted', 'ambiguous', 'empty', or null when the box has not been fitted. */
     fitStatus(index) {
         return this.boxes[index]?.fit?.status ?? null;
+    }
+
+    /** Why a box is 'ambiguous': 'touching' or 'oversized'. Null otherwise. */
+    fitReason(index) {
+        return this.boxes[index]?.fit?.reason ?? null;
     }
 
     hasFits() {
@@ -607,6 +704,7 @@ export class FieldMarker {
             box.fit = null;
             box.pinned = false;
         });
+        this._fitVersion++;
         this.layout();
         this._emit();
     }
@@ -620,6 +718,7 @@ export class FieldMarker {
 
         box.fit = null;
         box.pinned = true;
+        this._fitVersion++;
     }
 
     _forgetInk() {
@@ -628,6 +727,7 @@ export class FieldMarker {
             box.fit = null;
             box.pinned = false;
         });
+        this._fitVersion++;
     }
 
     _prepareInkPage() {
@@ -721,34 +821,58 @@ export class FieldMarker {
             box.el.dataset.index = String(index);
             box.el.classList.toggle('is-selected', this.selected.has(box));
             box.el.classList.toggle('is-fit-review', box.fit?.status === 'ambiguous');
-
-            this._layoutFit(box, width, height);
         });
+
+        this._renderFitOutlines();
     }
 
     /**
-     * Outline the fitted crop when it differs from the box. Only fitted boxes draw
-     * one; an ambiguous box is flagged on the box itself and keeps its own crop.
+     * Draw each fit: the writing it found, and the rectangle it will read.
+     *
+     * The filled shape is the handwriting the fit gave to this field. The dashed
+     * rectangle around it is the crop itself, because a crop has to be rectangular
+     * and the image is sent exactly as scanned.
+     *
+     * One SVG for the whole overlay. Its viewBox is the unit square, so the shapes
+     * are the same fractions the fits are stored in and never need rebuilding when
+     * the page is zoomed or resized - only when a fit changes, which `_fitVersion`
+     * tracks.
      */
-    _layoutFit(box, width, height) {
-        const rect = box.fit?.status === 'fitted' ? box.fit.rect : null;
+    _renderFitOutlines() {
+        if (this._renderedFitVersion === this._fitVersion) return;
+        this._renderedFitVersion = this._fitVersion;
 
-        if (!rect) {
-            box.fitEl?.remove();
-            box.fitEl = null;
+        const paths = [];
+        this.boxes.forEach((box) => {
+            const rect = box.fit?.status === 'fitted' ? box.fit.rect : null;
+            if (!rect) return;
+
+            paths.push(`<rect class="field-fit-crop" x="${rect.x.toFixed(5)}" y="${rect.y.toFixed(5)}"`
+                + ` width="${rect.w.toFixed(5)}" height="${rect.h.toFixed(5)}"/>`);
+
+            box.fit.polygons.forEach((ring) => {
+                const points = ring.map(([x, y]) => `${x.toFixed(5)} ${y.toFixed(5)}`);
+                paths.push(`<path class="field-fit-ink" d="M${points.join('L')}Z"/>`);
+            });
+        });
+
+        if (paths.length === 0) {
+            this._fitLayer?.remove();
+            this._fitLayer = null;
             return;
         }
 
-        if (!box.fitEl) {
-            box.fitEl = document.createElement('div');
-            box.fitEl.className = 'field-fit';
-            this.overlay.appendChild(box.fitEl);
+        if (!this._fitLayer) {
+            this._fitLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            this._fitLayer.setAttribute('class', 'field-fit-layer');
+            this._fitLayer.setAttribute('viewBox', '0 0 1 1');
+            // The overlay is not square, so the unit square has to stretch to it.
+            this._fitLayer.setAttribute('preserveAspectRatio', 'none');
+            this._fitLayer.setAttribute('aria-hidden', 'true');
+            this.overlay.appendChild(this._fitLayer);
         }
 
-        box.fitEl.style.left = `${rect.x * width}px`;
-        box.fitEl.style.top = `${rect.y * height}px`;
-        box.fitEl.style.width = `${rect.w * width}px`;
-        box.fitEl.style.height = `${rect.h * height}px`;
+        this._fitLayer.innerHTML = paths.join('');
     }
 
     _createElement(box, index) {
@@ -861,9 +985,16 @@ export class FieldMarker {
             el.releasePointerCapture(event.pointerId);
             el.classList.remove('is-active');
 
+            // Where each moved box was and where it is now: neighbours' fits were
+            // decided against the old position.
+            const changed = [];
             origins.forEach((origin) => {
-                if (!sameGeometry(origin.box, origin)) this._overrideFit(origin.box);
+                if (sameGeometry(origin.box, origin)) return;
+
+                changed.push(rectOf(origin), rectOf(origin.box));
+                this._overrideFit(origin.box);
             });
+            this._refitAffected(changed);
             this.layout();
             this._emit();
         };
@@ -897,8 +1028,6 @@ export class FieldMarker {
      * @returns {Array<{name: string, image: string, x: number, y: number, w: number, h: number, region: {x: number, y: number, w: number, h: number}, fit: string|null, personGroup?: number, personFieldOrder?: number}>}
      */
     crop() {
-        const byName = new Map(this.boxes.map((box) => [box.name, box]));
-
         return this.boxes.map((box) => {
             const region = this._readRegion(box);
 
@@ -906,7 +1035,7 @@ export class FieldMarker {
                 ...serialiseBox(box),
                 region,
                 fit: box.fit?.status ?? null,
-                image: this._cropRegion(box, region, byName),
+                image: this._cropRegion(box, region),
             };
         });
     }
@@ -917,22 +1046,7 @@ export class FieldMarker {
         return { x, y, w, h };
     }
 
-    /**
-     * Neighbour ink to paint out, kept only while the neighbour that owned it is
-     * still exactly where it was when the fit was made.
-     */
-    _liveMaskLabels(box, byName) {
-        if (box.fit?.status !== 'fitted') return [];
-
-        return box.fit.mask
-            .filter(({ owner }) => {
-                const live = byName.get(owner.name);
-                return live !== undefined && sameGeometry(live, owner);
-            })
-            .map(({ label }) => label);
-    }
-
-    _cropRegion(box, region, byName) {
+    _cropRegion(box, region) {
         // Snap outward to whole source pixels and copy 1:1. A fractional source
         // rectangle makes drawImage interpolate, which blurs thin strokes: exactly
         // the detail handwriting recognition depends on.
@@ -950,21 +1064,10 @@ export class FieldMarker {
         ctx.fillRect(0, 0, out.width, out.height);
         ctx.drawImage(this.canvas, sx, sy, sw, sh, 0, 0, sw, sh);
 
-        const maskLabels = this._liveMaskLabels(box, byName);
-        if (maskLabels.length > 0) {
-            const pixels = ctx.getImageData(0, 0, out.width, out.height);
-            whitenNeighbourInk(
-                pixels.data,
-                out.width,
-                out.height,
-                { x: sx, y: sy, w: sw, h: sh },
-                { width: this.canvas.width, height: this.canvas.height },
-                box.fit.grid,
-                maskLabels,
-            );
-            ctx.putImageData(pixels, 0, 0);
-        }
-
+        // The crop is handed over exactly as scanned. Whitening the paper outside
+        // the writing, so only the outlined ink remained, was measured against this
+        // project's own TrOCR model and read slightly worse than this, so the
+        // outline is drawn for the person and never burned into the image.
         return out.toDataURL('image/png');
     }
 

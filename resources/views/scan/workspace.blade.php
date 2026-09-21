@@ -112,7 +112,7 @@
                             </div>
 
                             <button type="button" class="btn btn-sm btn-outline-primary marker-fit-button" id="fitInkBtn"
-                                    title="Snap each crop to the handwriting so no characters are cut off and a neighbour's writing is left out. Applies to the selected fields, or to every field when none are selected."
+                                    title="Find the handwriting in each box and snap the crop around it, so nothing is cut off and little blank paper is read. Applies to the selected fields, or to every field when none are selected."
                                     disabled>
                                 <i class="icon-base bx bx-target-lock icon-sm me-1" aria-hidden="true"></i>
                                 <span id="fitInkLabel">Fit to ink</span>
@@ -197,8 +197,9 @@
 
                     <p class="document-tip mt-3 mb-0">
                         <i class="icon-base bx bx-info-circle"></i>
-                        <span>Position each box tightly around the handwriting. Loose boxes pick up
-                        neighbouring text and read badly.</span>
+                        <span>Position each box over the handwriting, then use Fit to ink to snap the
+                        crops around it. The green shape is the writing found; the dashed rectangle
+                        is what will be read.</span>
                     </p>
                 </x-card>
 
@@ -518,12 +519,17 @@
         fitted: {
             icon: 'bx-check-circle',
             tone: 'is-fitted',
-            label: 'Crop fitted to the handwriting',
+            label: 'Crop snapped around the handwriting found here',
         },
         ambiguous: {
             icon: 'bx-error',
             tone: 'is-review',
             label: 'Writing here touches a neighbouring field, so the box was left as placed. Check it by hand.',
+        },
+        oversized: {
+            icon: 'bx-error',
+            tone: 'is-review',
+            label: 'The writing found here is much bigger than the box (a stain or a long flourish?), so the box was left as placed. Check it by hand.',
         },
         empty: {
             icon: 'bx-info-circle',
@@ -593,8 +599,12 @@
 
     function handleMarkerChange(boxes) {
         const next = cloneBoxes(boxes);
-        // A fit summary describes the fits as they were made; once none remain it is stale.
-        if (!marker.hasFits()) hideFitSummary();
+        // A fit summary reports the fits as they were when the button was pressed. Once
+        // the layout is edited (which also re-evaluates nearby fits) its counts are stale.
+        if (!marker.hasFits()
+            || (currentFieldSnapshot !== null && JSON.stringify(next) !== JSON.stringify(currentFieldSnapshot))) {
+            hideFitSummary();
+        }
 
         if (!restoringFieldHistory && currentFieldSnapshot !== null
             && JSON.stringify(next) !== JSON.stringify(currentFieldSnapshot)) {
@@ -819,7 +829,9 @@
                 </button>`;
             li.querySelector('span.flex-grow-1').textContent = box.name;
 
-            const fitStatus = fitStatusDisplay[marker.fitStatus(index)];
+            const fitStatus = fitStatusDisplay[
+                marker.fitReason(index) === 'oversized' ? 'oversized' : marker.fitStatus(index)
+            ];
             if (fitStatus) {
                 const chip = document.createElement('i');
                 chip.className = `icon-base bx ${fitStatus.icon} field-list-item__fit ${fitStatus.tone}`;
@@ -1081,8 +1093,8 @@
 
     const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-    function showFitSummary({ fitted, ambiguous, empty, skipped }) {
-        const attempted = fitted + ambiguous + empty;
+    function showFitSummary({ fitted, ambiguous, oversized, empty, skipped }) {
+        const attempted = fitted + ambiguous + oversized + empty;
         const parts = [];
 
         if (attempted > 0) {
@@ -1092,6 +1104,10 @@
             parts.push(`${plural(ambiguous, 'field')} touch${ambiguous === 1 ? 'es' : ''} a neighbour's writing, so `
                 + `${ambiguous === 1 ? 'its box was' : 'their boxes were'} left as placed and outlined in amber. Check `
                 + `${ambiguous === 1 ? 'it' : 'them'} by hand.`);
+        }
+        if (oversized > 0) {
+            parts.push(`${plural(oversized, 'field')} found writing much bigger than ${oversized === 1 ? 'its box' : 'their boxes'} `
+                + `(a stain or a long flourish?), so ${oversized === 1 ? 'it was' : 'they were'} left as placed and outlined in amber.`);
         }
         if (empty > 0) {
             parts.push(`${plural(empty, 'field')} had no writing of ${empty === 1 ? 'its' : 'their'} own.`);
@@ -1103,7 +1119,7 @@
         if (parts.length === 0) parts.push('Nothing to fit.');
 
         el('fitSummaryMessage').textContent = parts.join(' ');
-        el('fitSummary').classList.toggle('has-review', ambiguous > 0);
+        el('fitSummary').classList.toggle('has-review', ambiguous + oversized > 0);
         el('fitSummary').classList.remove('d-none');
     }
 
@@ -1121,8 +1137,9 @@
         icon.className = 'spinner-border spinner-border-sm me-1';
         el('fitInkLabel').textContent = 'Fitting...';
 
-        // Let the button repaint before the page analysis occupies the thread.
-        await new Promise((resolve) => window.requestAnimationFrame(() => window.setTimeout(resolve, 0)));
+        // Let the button repaint before the page analysis occupies the thread. A timer,
+        // not requestAnimationFrame: that never fires in a background tab.
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
 
         try {
             const selected = marker.selectedIndexes();
@@ -1221,7 +1238,7 @@
     }
 
     el('scanNowBtn').addEventListener('click', async () => {
-        if (scanInProgress) return;
+        if (scanInProgress || fitInProgress) return;
 
         const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
         if (markerValidationMessage) {

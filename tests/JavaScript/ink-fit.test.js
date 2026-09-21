@@ -9,7 +9,8 @@ import {
     preparePage,
     stretchContrast,
     toGrayscale,
-    whitenNeighbourInk,
+    simplifyRing,
+    traceRings,
 } from '../../resources/js/ink-fit.js';
 
 const W = 600;
@@ -169,7 +170,10 @@ test('a word that straddles two boxes makes both fall back to their template box
     assert.equal(result.fields[0].status, 'ambiguous');
     assert.equal(result.fields[1].status, 'ambiguous');
     assert.equal(result.fields[0].rect, null);
+    assert.equal(result.fields[0].reason, 'touching');
+    assert.equal(result.fields[1].reason, 'touching');
     assert.equal(result.fields[2].status, 'fitted', 'unrelated fields are unaffected');
+    assert.equal(result.fields[2].reason, null);
 });
 
 test('a box with no writing stays empty', () => {
@@ -199,74 +203,77 @@ test('a fit that balloons far past its box is handed back to the person', () => 
     const result = fit(gray, [anchor(90, 120, 240, 160)]);
 
     assert.equal(result.fields[0].status, 'ambiguous');
+    assert.equal(result.fields[0].reason, 'oversized', 'not blamed on a neighbour');
 });
 
-test('a neighbour hanging into the gap of a fitted box is listed for masking', () => {
+test('a fitted field comes with an outline that wraps its writing', () => {
     const gray = blankPage();
-    word(gray, 40, 125, 8);                      // 40-85
-    word(gray, 200, 125, 8);                     // 200-245
-    // Belongs to the box above; its tail dips 2px into this one, between the words.
-    // Words closer than about one word gap (the text height) would join into one blob.
-    const intruder = word(gray, 130, 100, 4, 22);
-    const result = fit(gray, [anchor(30, 120, 300, 160), anchor(30, 80, 300, 120)]);
+    const own = word(gray, 60, 125, 10);
+    const result = fit(gray, [anchor(30, 110, 300, 170)]);
 
-    const [lower, upper] = result.fields;
-    assert.equal(lower.status, 'fitted');
-    assert.equal(upper.status, 'fitted');
-    assert.equal(lower.maskLabels.length, 1);
+    const [field] = result.fields;
+    assert.equal(field.status, 'fitted');
+    assert.ok(field.polygons.length >= 1);
 
-    // Paint the crop out at scale 1 and confirm only the intruder disappears.
-    const crop = {
-        x: Math.floor(lower.rect.x * W),
-        y: Math.floor(lower.rect.y * H),
-        w: Math.ceil(lower.rect.w * W),
-        h: Math.ceil(lower.rect.h * H),
-    };
-    const rgba = new Uint8ClampedArray(crop.w * crop.h * 4);
-    for (let j = 0; j < crop.h; j++) {
-        for (let i = 0; i < crop.w; i++) {
-            const value = gray[(crop.y + j) * W + crop.x + i];
-            rgba.set([value, value, value, 255], (j * crop.w + i) * 4);
-        }
-    }
-    const pixel = (x, y) => rgba[((y - crop.y) * crop.w + (x - crop.x)) * 4];
+    const points = field.polygons.flat();
+    const xs = points.map(([x]) => x * W);
+    const ys = points.map(([, y]) => y * H);
 
-    assert.equal(pixel(131, 121), INK, 'intruder is dark before masking');
-    assert.equal(pixel(41, 130), INK, 'own writing is dark before masking');
-
-    const painted = whitenNeighbourInk(
-        rgba, crop.w, crop.h, crop, { width: W, height: H },
-        { width: result.width, height: result.height, labels: result.labels, labelCount: result.labelCount },
-        lower.maskLabels,
-    );
-
-    assert.ok(painted > 0);
-    assert.equal(pixel(131, 121), 255, 'intruder is erased');
-    assert.equal(pixel(41, 130), INK, 'own writing is untouched');
-    assert.equal(pixel(201, 130), INK, 'own writing is untouched');
-    assert.ok(intruder.y1 > lower.rect.y * H, 'the intruder really was inside the crop');
+    // It surrounds the writing...
+    assert.ok(Math.min(...xs) <= own.x0 && Math.max(...xs) >= own.x1);
+    assert.ok(Math.min(...ys) <= own.y0 && Math.max(...ys) >= own.y1);
+    // ...without reaching across the empty rest of the box.
+    assert.ok(Math.max(...xs) < own.x1 + 30, 'stops just past the last letter');
+    assert.ok(points.every(([x, y]) => x >= 0 && x <= 1 && y >= 0 && y <= 1));
 });
 
-test('masking maps a full-resolution crop onto a coarser label grid', () => {
-    // A 4x4 label grid over an 8x8 page: label 1 covers the top-left grid cell.
-    const labels = new Int32Array(16);
-    labels[0] = 1;
-    const rgba = new Uint8ClampedArray(8 * 8 * 4).fill(0);
-    for (let p = 3; p < rgba.length; p += 4) rgba[p] = 255;
+test('outlines follow holes and separate shapes, and simplify to their corners', () => {
+    const w = 20;
+    const h = 20;
+    const mask = new Uint8Array(w * h);
+    const set = (x0, y0, x1, y1, value = 1) => {
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) mask[y * w + x] = value;
+    };
 
-    const painted = whitenNeighbourInk(
-        rgba, 8, 8, { x: 0, y: 0, w: 8, h: 8 }, { width: 8, height: 8 },
-        { width: 4, height: 4, labels, labelCount: 1 }, [1],
-    );
+    set(2, 2, 10, 10);            // a square...
+    set(4, 4, 6, 6, 0);           // ...with a hole
+    set(13, 13, 18, 18);          // and a separate square
 
-    assert.equal(painted, 4);
-    assert.equal(rgba[0], 255);
-    assert.equal(rgba[(1 * 8 + 1) * 4], 255);
-    assert.equal(rgba[(2 * 8 + 2) * 4], 0);
+    const rings = traceRings(mask, w, h);
+    assert.equal(rings.length, 3, 'outer, hole, and the separate square');
+
+    const corners = rings.map((ring) => simplifyRing(ring, 0.6));
+    corners.forEach((ring) => assert.equal(ring.length, 4, 'a rectangle needs four corners'));
+
+    const outer = corners.find((ring) => ring.some(([x, y]) => x === 2 && y === 2));
+    assert.ok(outer, 'the outer ring starts at the square corner');
+    assert.equal(traceRings(new Uint8Array(w * h), w, h).length, 0, 'nothing to trace');
 });
 
 test('fitting no boxes returns no fields', () => {
     const result = fit(blankPage(), []);
 
     assert.deepEqual(result.fields, []);
+});
+
+test('fits of one page share a single label grid instead of each keeping their own', () => {
+    const gray = blankPage();
+    word(gray, 60, 130, 10);
+    word(gray, 360, 130, 10);
+    const page = preparePage(gray, W, H);
+
+    const all = fitFields(page, [anchor(30, 120, 240, 160), anchor(330, 120, 570, 160)]);
+    const one = fitFields(page, [anchor(30, 120, 240, 160)]);
+
+    assert.equal(one.labels, all.labels);
+    assert.equal(page.analyses.size, 1);
+    assert.equal(one.fields[0].status, 'fitted');
+});
+
+test('a page never keeps more than a few analyses alive', () => {
+    const page = preparePage(blankPage(), W, H);
+
+    [20, 30, 40, 50, 60].forEach((tall) => fitFields(page, [anchor(30, 100, 240, 100 + tall)]));
+
+    assert.ok(page.analyses.size <= 3);
 });

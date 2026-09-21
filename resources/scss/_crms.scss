@@ -745,15 +745,39 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   touch-action: none;
 }
 
-// Fit to ink. The crop the OCR will actually read, drawn where it differs from the
-// box; the box itself stays as the person placed it.
-.field-fit {
+// Fit to ink. The outline of the handwriting each crop keeps; the box itself stays
+// where the person put it. One stretched unit-square SVG holds every outline, so
+// it must not take pointer events away from the boxes or the selection rectangle.
+.field-fit-layer {
   position: absolute;
+  inset: 0;
   z-index: 2;
-  border: 2px dashed var(--bs-success);
-  border-radius: 2px;
-  background-color: rgba(113, 221, 55, 0.08);
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: visible;
   pointer-events: none;
+
+  // The unit square is stretched to the page, so strokes must opt out of it.
+  .field-fit-ink,
+  .field-fit-crop {
+    vector-effect: non-scaling-stroke;
+  }
+
+  // The handwriting the fit gave to this field.
+  .field-fit-ink {
+    fill: rgba(113, 221, 55, 0.18);
+    stroke: var(--bs-success);
+    stroke-width: 1.25;
+  }
+
+  // The rectangle that will actually be read.
+  .field-fit-crop {
+    fill: none;
+    stroke: var(--bs-success);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+    opacity: 0.75;
+  }
 }
 
 // The writing here touches a neighbour's, so the box was left as placed. An outline
