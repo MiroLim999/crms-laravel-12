@@ -44,7 +44,20 @@ function serialiseBox(box) {
         w: box.w,
         h: box.h,
         ...markerPersonMetadata(box),
+        ...markerColumnMetadata(box),
     };
+}
+
+/**
+ * A ledger column marker: aligned like any field, but read line by line inside
+ * the template's ruled rows instead of cropped as one rectangle.
+ */
+export function markerColumnMetadata(box) {
+    if (box?.kind !== 'column') return {};
+    const columnIndex = Number(box.columnIndex);
+    return Number.isInteger(columnIndex) && columnIndex >= 0
+        ? { kind: 'column', columnIndex }
+        : { kind: 'column' };
 }
 
 export function fieldMarkerPanPosition(scrollLeft, scrollTop, movementX, movementY) {
@@ -562,7 +575,7 @@ export class FieldMarker {
 
     _createElement(box, index) {
         const el = document.createElement('div');
-        el.className = 'field-box';
+        el.className = box.kind === 'column' ? 'field-box is-column' : 'field-box';
         el.dataset.index = String(index);
 
         const label = document.createElement('span');

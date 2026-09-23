@@ -23,6 +23,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $sample_original_name
  * @property string|null $sample_mime
  * @property int|null $sample_size
+ * @property list<array{name: string, box: list<float>}>|null $columns
+ * @property list<float>|null $ruled_ys
  */
 class DocumentTemplate extends Model
 {
@@ -34,7 +36,7 @@ class DocumentTemplate extends Model
 
     protected $fillable = [
         'name', 'doc_type', 'document_type_id', 'paper_size', 'orientation', 'custom_width_mm', 'custom_height_mm', 'description',
-        'grouping_mode',
+        'grouping_mode', 'columns', 'ruled_ys',
         'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
         'is_active', 'created_by',
     ];
@@ -48,8 +50,61 @@ class DocumentTemplate extends Model
             'custom_width_mm' => 'float',
             'custom_height_mm' => 'float',
             'grouping_mode' => 'string',
+            'columns' => 'array',
+            'ruled_ys' => 'array',
             'is_active' => 'boolean',
             'sample_size' => 'integer',
+        ];
+    }
+
+    /**
+     * Whether this is a ruled register template: columns plus printed row lines,
+     * read line by line instead of one rectangle per field.
+     */
+    public function isLedger(): bool
+    {
+        return count($this->columns ?? []) > 0 && count($this->ruled_ys ?? []) >= 2;
+    }
+
+    /**
+     * Column markers in the shape the field-marking UI consumes.
+     *
+     * Staff align these like any other marker; the row lines are then placed
+     * inside them and snapped to each page's own printed rules.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function columnBoxes(): array
+    {
+        if (! $this->isLedger()) {
+            return [];
+        }
+
+        return collect($this->columns)
+            ->values()
+            ->map(fn (array $column, int $index) => [
+                'name' => (string) $column['name'],
+                'x' => (float) $column['box'][0],
+                'y' => (float) $column['box'][1],
+                'w' => (float) $column['box'][2],
+                'h' => (float) $column['box'][3],
+                'required' => true,
+                'kind' => 'column',
+                'columnIndex' => $index,
+            ])
+            ->all();
+    }
+
+    /**
+     * Every marker Staff align: rectangle fields, then ledger columns.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function markerBoxes(): array
+    {
+        return [
+            ...$this->fields->map->toBox()->values()->all(),
+            ...$this->columnBoxes(),
         ];
     }
 

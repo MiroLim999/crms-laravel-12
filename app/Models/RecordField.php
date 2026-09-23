@@ -14,6 +14,7 @@ class RecordField extends Model
         'record_id', 'name', 'ocr_text', 'ocr_confidence', 'verified_value',
         'is_required', 'person_group', 'person_field_order',
         'crop_path', 'x', 'y', 'width', 'height', 'sort_order',
+        'polygon', 'line_column', 'line_row', 'line_flags',
     ];
 
     protected function casts(): array
@@ -27,6 +28,9 @@ class RecordField extends Model
             'y' => 'float',
             'width' => 'float',
             'height' => 'float',
+            'polygon' => 'array',
+            'line_row' => 'integer',
+            'line_flags' => 'array',
         ];
     }
 

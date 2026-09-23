@@ -219,7 +219,24 @@
                     <span id="ocrActionMessage"></span>
                 </div>
 
+                {{-- Filled in after Detect: what was found on this page. --}}
+                <div class="detect-summary d-none" id="detectSummary" role="status" aria-live="polite">
+                    <i class="icon-base bx bx-radar" aria-hidden="true"></i>
+                    <div class="detect-summary__copy">
+                        <strong id="detectSummaryTitle"></strong>
+                        <span id="detectSummaryText"></span>
+                        <div class="form-check form-switch mb-0 mt-1">
+                            <input class="form-check-input" type="checkbox" id="detectPreviewToggle" checked>
+                            <label class="form-check-label" for="detectPreviewToggle">Show detected lines</label>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="d-grid gap-2 field-marker-actions">
+                    <button class="btn btn-outline-primary" type="button" id="detectBtn"
+                            title="Straighten this page, find its table, and outline every handwritten line before reading">
+                        <i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Detect fields and ink
+                    </button>
                     <button class="btn btn-primary btn-lg" type="button" id="scanNowBtn">
                         <i class="icon-base bx bx-scan icon-sm me-1"></i> Scan with OCR
                     </button>
@@ -239,6 +256,7 @@
             <input type="hidden" name="doc_type" value="{{ $docType->value }}">
             <input type="hidden" name="document_template_id" value="{{ $template->getKey() }}">
             <input type="hidden" name="ocr_model_key" id="ocrModelKey">
+            <input type="hidden" name="document_page_id" id="documentPageId">
 
             <div class="validation-workspace">
                 <div class="validation-submit-error d-none" id="validationSubmitError"
@@ -275,6 +293,34 @@
                             </div>
                         </header>
 
+                        {{-- Shown while a reviewer redraws one line's outline. --}}
+                        <div class="line-edit-toolbar d-none" id="lineEditToolbar" role="toolbar"
+                             aria-label="Adjust outline">
+                            <div class="line-edit-toolbar__copy">
+                                <strong>Adjust outline</strong>
+                                <span id="lineEditName"></span>
+                            </div>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="Outline tool">
+                                <input type="radio" class="btn-check" name="lineEditMode" id="lineEditPoints"
+                                       value="points" checked>
+                                <label class="btn btn-outline-secondary" for="lineEditPoints">
+                                    <i class="icon-base bx bx-shape-polygon icon-sm me-1" aria-hidden="true"></i>Move points
+                                </label>
+                                <input type="radio" class="btn-check" name="lineEditMode" id="lineEditRectangle"
+                                       value="rectangle">
+                                <label class="btn btn-outline-secondary" for="lineEditRectangle">
+                                    <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>Draw rectangle
+                                </label>
+                            </div>
+                            <div class="line-edit-toolbar__actions">
+                                <button type="button" class="btn btn-sm btn-label-secondary" id="lineEditCancel">Cancel</button>
+                                <button type="button" class="btn btn-sm btn-primary" id="lineEditSave">
+                                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>Save and re-read
+                                </button>
+                            </div>
+                            <div class="line-edit-toolbar__status d-none" id="lineEditStatus" role="status" aria-live="polite"></div>
+                        </div>
+
                         <div class="doc-viewport validation-doc-viewport" id="validationDocViewport">
                             <div class="doc-stage" id="validationDocStage">
                                 <canvas id="validationPageCanvas"></canvas>
@@ -285,7 +331,8 @@
 
                         <footer class="validation-pane__hint">
                             <i class="icon-base bx bx-scan" aria-hidden="true"></i>
-                            Orange shows the complete person row; green identifies the exact field.
+                            Orange shows the complete person row; green identifies the exact field;
+                            red outlines need review.
                             Hold <kbd>Ctrl</kbd> and scroll to zoom or drag to move.
                         </footer>
                     </section>
@@ -350,7 +397,9 @@
                                 </button>
                                 <button class="btn btn-primary" type="submit" id="submitBtn" disabled>
                                     <i class="icon-base bx bx-check-shield icon-sm me-1"></i>
-                                    Submit <span id="submitVerifiedCount">0</span> verified
+                                    {{-- One inline span: .btn is a flex container, which drops the
+                                         spaces between separate text and element children. --}}
+                                    <span>Submit <span id="submitVerifiedCount">0</span> verified</span>
                                 </button>
                             </div>
                         </footer>
@@ -429,14 +478,26 @@
     import {
         canVerifyValue,
         FieldMarker,
+        markerColumnMetadata,
         markerPersonMetadata,
         verificationGroupState,
     } from '{{ Vite::asset('resources/js/field-marker.js') }}';
     import { attachMarqueeSelection } from '{{ Vite::asset('resources/js/marquee-selection.js') }}';
     import { setDisclosureExpanded } from '{{ Vite::asset('resources/js/disclosure-motion.js') }}';
+    import {
+        alignedGeometry,
+        detectionSummary,
+        flagExplanation,
+        FLAG_NO_ROW,
+        geometryMarkers,
+        verificationItems,
+    } from '{{ Vite::asset('resources/js/line-geometry.js') }}';
+    import { LineOverlay } from '{{ Vite::asset('resources/js/line-overlay.js') }}';
 
     const config = {
         boxes: @json($boxes),
+        ruledYs: @json($ruledYs),
+        templateId: @json($template->getKey()),
         groupingMode: @json(
             $template->grouping_mode instanceof \BackedEnum
                 ? $template->grouping_mode->value
@@ -446,6 +507,8 @@
         maxFields: 450,
         maxFieldNameLength: 500,
         recogniseUrl: @json(route('documents.recognise')),
+        pagesUrl: @json(route('documents.pages.store')),
+        lineUpdateUrl: @json(route('documents.pages.lines.update', ['page' => '__PAGE__', 'line' => '__LINE__'])),
         csrf: @json(csrf_token()),
         paper: {!! Illuminate\Support\Js::encode([
             'sizeLabel' => $template->paper_size->label(),
@@ -483,8 +546,11 @@
     const selectAllFieldsInput = requiredInput(document, '#selectAllFields');
 
     let scanFile = null;
+    // One entry per outlined line of the processed page (see verificationItems).
     let cropped = [];
     let readings = [];
+    let processedPage = null;
+    let editingLineIndex = null;
     let fieldHistory = [];
     let currentFieldSnapshot = null;
     let restoringFieldHistory = false;
@@ -515,6 +581,8 @@
         marquee: el('staffFieldSelectionMarquee'),
     });
 
+    // Zoom and pan for the Verify page. It holds no boxes: the outlines are
+    // drawn by lineOverlay, one SVG stretched over the same canvas.
     const validationMarker = new FieldMarker({
         canvas: el('validationPageCanvas'),
         overlay: el('validationFieldOverlay'),
@@ -524,8 +592,22 @@
         onZoomChange: updateValidationZoomUI,
     });
 
+    const lineOverlay = new LineOverlay({
+        container: el('validationFieldOverlay'),
+        onSelect: (index) => activateValidationField(index, 'marker'),
+    });
+
+    // Detect's preview in the Align step: outlines and fitted row lines over
+    // the page, read-only so the markers underneath stay draggable.
+    const alignPreview = new LineOverlay({ container: markerOverlay, preview: true });
+
+    // What Detect found on this page and the markers it fitted. Scan with OCR
+    // reads Detect's crops only while the markers are still exactly these;
+    // once Staff move one, the page is outlined again from their markers.
+    let detection = null;
+
     const cloneBoxes = (boxes) => boxes.map(({
-        name, x, y, w, h, personGroup, personFieldOrder,
+        name, x, y, w, h, personGroup, personFieldOrder, kind, columnIndex,
     }) => ({
         name,
         x,
@@ -533,6 +615,7 @@
         w,
         h,
         ...markerPersonMetadata({ personGroup, personFieldOrder }),
+        ...markerColumnMetadata({ kind, columnIndex }),
     }));
     const templateBoxes = config.boxes.map((box) => ({
         name: box.name,
@@ -541,7 +624,9 @@
         w: +box.w,
         h: +box.h,
         ...markerPersonMetadata(box),
+        ...markerColumnMetadata(box),
     }));
+    const templateColumns = templateBoxes.filter((box) => box.kind === 'column');
 
     function fieldsMatchTemplate() {
         return JSON.stringify(marker.toJSON()) === JSON.stringify(templateBoxes);
@@ -565,7 +650,72 @@
         currentFieldSnapshot = next;
         renderFieldList(boxes);
         updateResetUI();
+        markDetectionStale();
     }
+
+    // ------------------------------------------------------------- detection
+    function detectionIsCurrent() {
+        return detection !== null && !detection.stale
+            && JSON.stringify(marker.toJSON()) === detection.snapshot;
+    }
+
+    function markDetectionStale() {
+        if (!detection || detection.stale || JSON.stringify(marker.toJSON()) === detection.snapshot) return;
+        detection.stale = true;
+        alignPreview.setVisible(false);
+        el('detectSummaryTitle').textContent = 'Markers moved after Detect';
+        el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers. Detect again to refit them.';
+        el('detectSummary').classList.add('is-stale');
+    }
+
+    function clearDetection() {
+        detection = null;
+        alignPreview.clear();
+        el('detectSummary').classList.add('d-none');
+        el('detectSummary').classList.remove('is-stale', 'has-review');
+    }
+
+    /**
+     * Show what Detect found: the page as it was straightened, the markers
+     * fitted to this page's own table, and every outline it will read.
+     */
+    async function applyDetection(page) {
+        // The same pixels the outlines were found on, and that go on to TrOCR.
+        await marker.loadFromUrl(page.imageUrl);
+        updatePaperMatchWarning();
+        const fitted = cloneBoxes(geometryMarkers(page.geometry));
+        marker.setBoxes(fitted);
+        window.requestAnimationFrame(() => marker.resetZoom());
+
+        detection = {
+            page,
+            snapshot: JSON.stringify(marker.toJSON()),
+            stale: false,
+            columns: fitted.filter((box) => box.kind === 'column'),
+        };
+
+        alignPreview.setLines(page, verificationItems(page.lines, page));
+        const columns = page.geometry?.columns ?? [];
+        if (columns.length > 0) {
+            const left = Math.min(...columns.map((column) => column.box[0])) * page.width;
+            const right = Math.max(...columns.map((column) => column.box[0] + column.box[2])) * page.width;
+            alignPreview.setGuides((page.geometry?.ruled_ys ?? [])
+                .map((y) => [left, y * page.height, right, y * page.height]));
+        } else {
+            alignPreview.setGuides([]);
+        }
+        alignPreview.setVisible(el('detectPreviewToggle').checked);
+
+        const summary = detectionSummary(page);
+        el('detectSummaryTitle').textContent = summary.title;
+        el('detectSummaryText').textContent = summary.text;
+        el('detectSummary').classList.remove('d-none', 'is-stale');
+        el('detectSummary').classList.toggle('has-review', summary.flagged > 0);
+    }
+
+    el('detectPreviewToggle').addEventListener('change', (event) => {
+        alignPreview.setVisible(event.currentTarget.checked && detection !== null && !detection.stale);
+    });
 
     function resetFieldHistory() {
         fieldHistory = [];
@@ -629,8 +779,9 @@
         const takenNames = new Set(existing.map((box) => box.name.toLocaleLowerCase()));
         const copies = markerClipboard.map((box) => {
             // A pasted marker is a new, ad-hoc field. It must not silently join
-            // the original template person's validation group.
-            const { personGroup, personFieldOrder, ...ungroupedBox } = box;
+            // the original template person's validation group, nor become a
+            // second copy of a ledger column.
+            const { personGroup, personFieldOrder, kind, columnIndex, ...ungroupedBox } = box;
 
             return {
                 ...ungroupedBox,
@@ -708,6 +859,7 @@
 
         try {
             scanFile = file;
+            clearDetection();
             await marker.load(file);
             updatePaperMatchWarning();
             el('selectedFileName').textContent = file.name;
@@ -792,6 +944,7 @@
         selectAllFieldsInput.disabled = boxes.length === 0;
         const constraintMessage = markerSetValidationMessage(boxes);
         el('scanNowBtn').disabled = boxes.length === 0 || constraintMessage !== null;
+        el('detectBtn').disabled = el('scanNowBtn').disabled || scanInProgress;
         el('addFieldBtn').disabled = boxes.length >= config.maxFields;
         el('newFieldName').disabled = boxes.length >= config.maxFields;
         if (constraintMessage) {
@@ -894,6 +1047,8 @@
 
     function updateValidationZoomUI(zoom) {
         el('validationZoomResetBtn').textContent = `${Math.round(zoom * 100)}%`;
+        // Edit handles are sized in page pixels; keep them a constant size on screen.
+        lineOverlay?.refresh();
     }
 
     el('zoomOutBtn').addEventListener('click', () => marker.zoomBy(-0.1));
@@ -1016,6 +1171,7 @@
         showStep('upload');
     });
     el('backToMark').addEventListener('click', () => {
+        cancelOutlineEdit();
         clearValidationSubmitError();
         showStep('mark');
     });
@@ -1047,28 +1203,98 @@
         if (note) el('scanningNote').textContent = note;
     }
 
-    function beginOcrProgress(fieldCount) {
+    // The ring creeps toward the current phase's ceiling, then waits for the
+    // page's real status to open the next phase.
+    let ocrProgressCeiling = 12;
+
+    function beginOcrProgress(markerCount) {
         if (ocrProgressTimer !== null) window.clearInterval(ocrProgressTimer);
 
-        el('ocrProgressFields').textContent = `${fieldCount} marked field${fieldCount === 1 ? '' : 's'}`;
-        setOcrProgress(4, 'Preparing document', 'Creating clear image crops for each marked field.');
+        el('ocrProgressFields').textContent = `${markerCount} marker${markerCount === 1 ? '' : 's'} aligned`;
+        ocrProgressCeiling = 12;
+        setOcrProgress(4, 'Preparing document', 'Saving the aligned page for line detection.');
 
         ocrProgressTimer = window.setInterval(() => {
-            if (ocrProgress >= 92) return;
+            if (ocrProgress >= ocrProgressCeiling) return;
+            setOcrProgress(Math.min(ocrProgressCeiling, ocrProgress + 0.6));
+        }, 400);
+    }
 
-            const increment = ocrProgress < 30 ? 4 : (ocrProgress < 70 ? 2 : 1);
-            const next = Math.min(92, ocrProgress + increment);
+    function showPageStatus(page, waitedMs, mode = 'scan') {
+        if (page.status === 'detecting' && mode === 'detect') {
+            ocrProgressCeiling = 92;
+            setOcrProgress(Math.max(ocrProgress, 18), 'Detecting fields and ink',
+                'Straightening the page, fitting the columns and rows to its table, and outlining every handwritten line.');
+            return;
+        }
+        if (page.status === 'queued') {
+            ocrProgressCeiling = 18;
+            setOcrProgress(
+                Math.max(ocrProgress, 12),
+                'Waiting for the line detector',
+                waitedMs > 20000
+                    ? 'No background worker has picked this page up. Start one with: php artisan queue:work (serve.ps1 starts it for you).'
+                    : 'The page is queued for line detection.',
+            );
+        } else if (page.status === 'detecting') {
+            ocrProgressCeiling = 60;
+            setOcrProgress(Math.max(ocrProgress, 18), 'Finding handwritten lines',
+                'Outlining every handwritten line, including capitals and tails that cross the ruled lines.');
+        } else if (page.status === 'reading') {
+            ocrProgressCeiling = 92;
+            setOcrProgress(Math.max(ocrProgress, 60), 'Reading handwriting',
+                'The selected TrOCR model is reading each outlined line.');
+        }
+    }
 
-            if (next < 18) {
-                setOcrProgress(next, 'Preparing document', 'Creating clear image crops for each marked field.');
-            } else if (next < 30) {
-                setOcrProgress(next, 'Sending marked fields', 'Uploading the field crops securely to the OCR service.');
-            } else if (next < 78) {
-                setOcrProgress(next, 'Reading handwriting', 'The selected TrOCR model is reading the marked areas.');
-            } else {
-                setOcrProgress(next, 'Finalizing results', 'Checking the OCR response before validation.');
+    function canvasBlob(canvas) {
+        return new Promise((resolve, reject) => {
+            canvas.toBlob(
+                (blob) => (blob ? resolve(blob) : reject(new Error('The aligned page could not be prepared. Please try again.'))),
+                'image/png',
+            );
+        });
+    }
+
+    function wait(ms, signal) {
+        return new Promise((resolve, reject) => {
+            const timer = window.setTimeout(resolve, ms);
+            signal?.addEventListener('abort', () => {
+                window.clearTimeout(timer);
+                reject(new DOMException('Aborted', 'AbortError'));
+            }, { once: true });
+        });
+    }
+
+    /**
+     * Poll the page until line detection and reading are finished. The results
+     * are stored server-side, so this only ever loads them.
+     */
+    async function waitForPage(initial, signal, done = 'ready', mode = 'scan') {
+        const started = Date.now();
+        let page = initial;
+
+        for (;;) {
+            showPageStatus(page, Date.now() - started, mode);
+            if (page.status === done) return page;
+            if (page.status === 'failed') {
+                throw new Error(page.error || 'The page could not be processed. Please scan again.');
             }
-        }, 350);
+
+            await wait(1500, signal);
+            const response = await fetch(page.statusUrl, {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+                signal,
+            });
+            const next = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            if (!response.ok || !next) {
+                throw new Error(responseErrorMessage(response, next));
+            }
+            page = next;
+        }
     }
 
     function stopOcrProgress() {
@@ -1077,11 +1303,75 @@
         ocrProgressTimer = null;
     }
 
-    async function completeOcrProgress() {
+    async function completeOcrProgress(title = 'Scan complete', note = 'Opening the validation results.') {
         stopOcrProgress();
         await new Promise((resolve) => window.setTimeout(resolve, 180));
-        setOcrProgress(100, 'Scan complete', 'Opening the validation results.');
+        setOcrProgress(100, title, note);
         await new Promise((resolve) => window.setTimeout(resolve, 420));
+    }
+
+    /**
+     * Send the page exactly as rendered here, with the markers as they stand,
+     * so every outline that comes back lines up with this canvas pixel for pixel.
+     */
+    async function uploadPage({ detect }, signal) {
+        const aligned = marker.toJSON();
+        // After Detect, small marker edits are measured from what Detect fitted
+        // rather than from the template's own positions.
+        const base = detection
+            ? { columns: detection.columns, ruledYs: detection.page.geometry?.ruled_ys ?? config.ruledYs }
+            : { columns: templateColumns, ruledYs: config.ruledYs };
+
+        const form = new FormData();
+        form.set('document_template_id', String(config.templateId));
+        form.set('geometry_json', JSON.stringify(alignedGeometry(aligned, base.columns, base.ruledYs)));
+        form.set('page', await canvasBlob(marker.canvas), 'page.png');
+        // Absent unless Staff choice is enabled; the server falls back to the
+        // promoted model and re-checks that the key is one it allows.
+        if (modelSelect instanceof HTMLSelectElement) form.set('model', modelSelect.value);
+        if (detect) form.set('detect', '1');
+
+        const response = await fetch(config.pagesUrl, {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            signal,
+            body: form,
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.statusUrl) {
+            throw new Error(responseErrorMessage(response, payload));
+        }
+        return payload;
+    }
+
+    /** Scan with OCR after Detect: read the crops Detect already made. */
+    async function readDetectedPage(signal) {
+        const response = await fetch(detection.page.readUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            signal,
+            body: JSON.stringify({ model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null }),
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.statusUrl) {
+            throw new Error(responseErrorMessage(response, payload));
+        }
+        return payload;
     }
 
     function responseErrorMessage(response, payload) {
@@ -1089,7 +1379,7 @@
             return 'Your session expired. Refresh the page, reopen the document, and try again.';
         }
         if (response.status === 413) {
-            return 'The marked image crops are too large to send. Use tighter field boxes and try again.';
+            return 'The aligned page is too large to send. Use a smaller scan and try again.';
         }
         if (response.status === 422) {
             const validationMessage = payload?.errors
@@ -1120,6 +1410,7 @@
         clearOcrError();
         button.disabled = true;
         button.innerHTML = '<i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i> OCR in progress...';
+        el('detectBtn').disabled = true;
 
         try {
             // Cropping and modal creation used to happen outside the try block. A
@@ -1129,71 +1420,46 @@
                 throw new Error('The OCR loading interface did not finish loading. Refresh the page and try again.');
             }
 
+            const aligned = marker.toJSON();
             modal = Modal.getOrCreateInstance(el('scanningModal'));
-            beginOcrProgress(marker.toJSON().length);
+            beginOcrProgress(aligned.length);
             modal.show();
 
             await new Promise((resolve) => window.requestAnimationFrame(resolve));
-            cropped = marker.crop();
 
-            if (!cropped.length) {
+            if (!aligned.length) {
                 throw new Error('Add at least one field before reading.');
             }
 
-            setOcrProgress(Math.max(ocrProgress, 18), 'Sending marked fields', 'Uploading the field crops securely to the OCR service.');
-            timeoutId = window.setTimeout(() => controller.abort(), 125000);
-
-            const response = await fetch(config.recogniseUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': config.csrf,
-                    'X-Requested-With': 'XMLHttpRequest',
-                    Accept: 'application/json',
-                },
-                credentials: 'same-origin',
-                signal: controller.signal,
-                body: JSON.stringify({
-                    fields: cropped.map((c) => ({ name: c.name, image: c.image })),
-                    // Absent unless Staff choice is enabled; the server falls back to
-                    // the promoted model and re-checks that the key is one it allows.
-                    model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null,
-                }),
-            });
-
-            const contentType = response.headers.get('content-type') || '';
-            const payload = contentType.includes('application/json')
-                ? await response.json()
-                : null;
-
-            if (!response.ok) {
-                throw new Error(responseErrorMessage(response, payload));
+            timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
+            let payload;
+            if (detectionIsCurrent()) {
+                // The outlines Staff just checked are the ones read.
+                setOcrProgress(Math.max(ocrProgress, 60), 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
+                payload = await readDetectedPage(controller.signal);
+            } else {
+                // Finishing Align hands the page to the background line detector.
+                setOcrProgress(Math.max(ocrProgress, 8), 'Sending the aligned page', 'Uploading the page securely for line detection.');
+                payload = await uploadPage({ detect: false }, controller.signal);
             }
 
-            if (!Array.isArray(payload?.results) || payload.results.length === 0) {
-                throw new Error('The OCR service returned no field readings. Please try again.');
+            const page = await waitForPage(payload, controller.signal);
+            clearDetection();
+
+            if (!Array.isArray(page.lines) || page.lines.length === 0) {
+                throw new Error('No handwriting was found inside the markers. Check the alignment and scan again.');
             }
 
-            if (typeof payload.modelKey !== 'string' || payload.modelKey.trim() === '') {
+            if (typeof page.modelKey !== 'string' || page.modelKey.trim() === '') {
                 throw new Error('The OCR service did not identify the model used. No data was saved; please scan again.');
             }
 
-            if (payload.results.length !== cropped.length) {
-                throw new Error('The OCR service returned an incomplete result. No data was saved; please scan again.');
-            }
-
-            const hasMismatchedResult = payload.results.some((result, index) => (
-                !result
-                || typeof result !== 'object'
-                || String(result?.name ?? '') !== String(cropped[index]?.name ?? '')
-            ));
-            if (hasMismatchedResult) {
-                throw new Error('The OCR fields no longer match their markers. No data was saved; please scan again.');
-            }
-
-            readings = payload.results;
-            requiredInput(document, '#ocrModelKey').value = payload.modelKey.trim();
-            el('summaryModel').textContent = payload.model || '—';
+            processedPage = page;
+            cropped = verificationItems(page.lines, page);
+            readings = cropped.map((item) => item.reading);
+            requiredInput(document, '#ocrModelKey').value = page.modelKey.trim();
+            requiredInput(document, '#documentPageId').value = String(page.id);
+            el('summaryModel').textContent = page.model || '—';
 
             setOcrProgress(96, 'Preparing validation', 'The handwriting results are ready for your review.');
             renderVerifyRows();
@@ -1207,9 +1473,12 @@
             }
         } catch (error) {
             const message = error.name === 'AbortError'
-                ? 'OCR timed out after two minutes. Check the OCR service and try again.'
+                ? 'Line detection and reading timed out. Check the OCR service and the background worker, then try again.'
                 : (error.message || 'The document could not be scanned.');
             console.error('Document OCR failed:', error);
+            // A failed read leaves the detected page unusable; the next scan
+            // outlines the page afresh from the markers.
+            if (detection) detection.stale = true;
             showOcrError(message);
         } finally {
             if (timeoutId !== null) window.clearTimeout(timeoutId);
@@ -1218,6 +1487,68 @@
             scanInProgress = false;
             button.innerHTML = originalButtonContent;
             button.disabled = marker.toJSON().length === 0;
+            el('detectBtn').disabled = button.disabled;
+        }
+    });
+
+    // Detect: straighten this page, fit the template's columns and rows to its
+    // own table, and outline every handwritten line - before anything is read.
+    el('detectBtn').addEventListener('click', async () => {
+        if (scanInProgress) return;
+
+        const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
+        if (markerValidationMessage) {
+            showOcrError(markerValidationMessage);
+            return;
+        }
+
+        const button = el('detectBtn');
+        const originalButtonContent = button.innerHTML;
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
+        let modal = null;
+
+        scanInProgress = true;
+        clearOcrError();
+        button.disabled = true;
+        el('scanNowBtn').disabled = true;
+        button.innerHTML = '<i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Detecting...';
+
+        try {
+            const Modal = window.bootstrap?.Modal;
+            if (!Modal) {
+                throw new Error('The detection interface did not finish loading. Refresh the page and try again.');
+            }
+
+            modal = Modal.getOrCreateInstance(el('scanningModal'));
+            beginOcrProgress(marker.toJSON().length);
+            modal.show();
+            await new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+            setOcrProgress(Math.max(ocrProgress, 8), 'Sending the page', 'Uploading the page securely for detection.');
+            const payload = await uploadPage({ detect: true }, controller.signal);
+            const page = await waitForPage(payload, controller.signal, 'detected', 'detect');
+
+            if (!Array.isArray(page.lines) || page.lines.length === 0) {
+                throw new Error('No handwriting was found on this page. Check that the right template and file were chosen.');
+            }
+
+            await applyDetection(page);
+            await completeOcrProgress('Detection complete', 'Check the outlines, then Scan with OCR.');
+        } catch (error) {
+            const message = error.name === 'AbortError'
+                ? 'Detection timed out. Check the background worker, then try again.'
+                : (error.message || 'The page could not be detected.');
+            console.error('Detection failed:', error);
+            showOcrError(message);
+        } finally {
+            window.clearTimeout(timeoutId);
+            stopOcrProgress();
+            modal?.hide();
+            scanInProgress = false;
+            button.innerHTML = originalButtonContent;
+            button.disabled = marker.toJSON().length === 0;
+            el('scanNowBtn').disabled = button.disabled;
         }
     });
 
@@ -1239,12 +1570,20 @@
     function buildCustomValidationGroups() {
         const personGroups = new Map();
         const detailIndexes = [];
+        const unplacedIndexes = [];
 
         cropped.forEach((box, index) => {
             const personGroup = Number(box.personGroup);
             const personFieldOrder = Number(box.personFieldOrder);
             const grouped = Number.isInteger(personGroup) && personGroup > 0
                 && Number.isInteger(personFieldOrder) && personFieldOrder >= 0;
+
+            // A ledger line that could not be placed in a row belongs to no
+            // person until a reviewer decides.
+            if (!grouped && Array.isArray(box.flags) && box.flags.includes(FLAG_NO_ROW)) {
+                unplacedIndexes.push(index);
+                return;
+            }
 
             if (!grouped) {
                 detailIndexes.push(index);
@@ -1280,6 +1619,16 @@
                     indexes: members.map((member) => member.index),
                 });
             });
+
+        if (unplacedIndexes.length > 0) {
+            groups.push({
+                id: 'needs-review',
+                kind: 'details',
+                mode: 'custom',
+                label: 'Needs review',
+                indexes: unplacedIndexes,
+            });
+        }
 
         return groups;
     }
@@ -1464,7 +1813,8 @@
     }
 
     function buildValidationGroups() {
-        return config.groupingMode === 'custom'
+        // A ledger's rows are its people, so its lines always group by row.
+        return config.groupingMode === 'custom' || templateColumns.length > 0
             ? buildCustomValidationGroups()
             : buildAutomaticValidationGroups();
     }
@@ -1536,29 +1886,19 @@
         context.fillRect(0, 0, target.width, target.height);
         context.drawImage(source, 0, 0);
 
-        validationMarker.setBoxes(cropped.map(({ name, x, y, w, h }) => ({ name, x, y, w, h })));
+        cancelOutlineEdit();
+        validationMarker.setBoxes([]);
+        lineOverlay.setLines(processedPage, cropped);
         validationMarker.resetZoom();
         el('validationDocViewport').scrollTo({ top: 0, left: 0 });
         el('validationFileName').textContent = scanFile?.name || 'Document';
 
         window.requestAnimationFrame(() => {
             validationMarker.layout();
-            makeValidationMarkersAccessible();
             updateValidationMarkerStates();
             const initialGroup = validationGroups.find((group) => group.kind === 'person')
                 ?? validationGroups[0];
             if (initialGroup) activateValidationGroup(initialGroup.id, 'initial');
-        });
-    }
-
-    function makeValidationMarkersAccessible() {
-        const boxes = validationMarker.toJSON();
-        el('validationFieldOverlay').querySelectorAll('.field-box').forEach((box, index) => {
-            const group = validationGroupForField(index);
-            box.tabIndex = 0;
-            box.setAttribute('role', 'button');
-            box.setAttribute('aria-label', `Compare ${boxes[index]?.name ?? `field ${index + 1}`} in ${group?.label ?? 'this record'}`);
-            box.title = `Compare ${boxes[index]?.name ?? `field ${index + 1}`}`;
         });
     }
 
@@ -1601,34 +1941,24 @@
         list.scrollTo({ top: clampedTarget, behavior: smooth ? 'smooth' : 'auto' });
     }
 
-    function revealValidationMarker(index) {
-        const viewport = el('validationDocViewport');
-        const box = el('validationFieldOverlay').querySelector(`[data-index="${index}"]`);
-        if (!box) return;
+    function revealValidationLines(indexes) {
+        const bounds = lineOverlay.displayBounds(indexes);
+        if (!bounds) return;
 
+        const viewport = el('validationDocViewport');
         viewport.scrollTo({
-            left: Math.max(0, box.offsetLeft + (box.offsetWidth / 2) - (viewport.clientWidth / 2)),
-            top: Math.max(0, box.offsetTop + (box.offsetHeight / 2) - (viewport.clientHeight / 2)),
+            left: Math.max(0, (bounds.left + bounds.right) / 2 - viewport.clientWidth / 2),
+            top: Math.max(0, (bounds.top + bounds.bottom) / 2 - viewport.clientHeight / 2),
             behavior: 'smooth',
         });
     }
 
-    function revealValidationGroup(group) {
-        const boxes = group.indexes
-            .map((index) => el('validationFieldOverlay').querySelector(`[data-index="${index}"]`))
-            .filter((box) => box instanceof HTMLElement);
-        if (boxes.length === 0) return;
+    function revealValidationMarker(index) {
+        revealValidationLines([index]);
+    }
 
-        const viewport = el('validationDocViewport');
-        const left = Math.min(...boxes.map((box) => box.offsetLeft));
-        const top = Math.min(...boxes.map((box) => box.offsetTop));
-        const right = Math.max(...boxes.map((box) => box.offsetLeft + box.offsetWidth));
-        const bottom = Math.max(...boxes.map((box) => box.offsetTop + box.offsetHeight));
-        viewport.scrollTo({
-            left: Math.max(0, (left + right) / 2 - viewport.clientWidth / 2),
-            top: Math.max(0, (top + bottom) / 2 - viewport.clientHeight / 2),
-            behavior: 'smooth',
-        });
+    function revealValidationGroup(group) {
+        revealValidationLines(group.indexes);
     }
 
     function setExpandedValidationGroup(groupId) {
@@ -1644,9 +1974,7 @@
     }
 
     function selectValidationGroupMarkers(group) {
-        syncingValidationSelection = true;
-        validationMarker.selectIndexes(group.indexes, { source: 'group' });
-        syncingValidationSelection = false;
+        lineOverlay.setSelection(group.indexes, activeValidationIndex);
     }
 
     function activateValidationGroup(groupId, source = 'group') {
@@ -1699,16 +2027,12 @@
     }
 
     function updateValidationMarkerStates() {
-        el('validationFieldOverlay').querySelectorAll('.field-box').forEach((box, index) => {
-            const checkbox = el('verifyRows')
-                .querySelector(`[data-field-index="${index}"] .validation-verified`);
-            const checked = checkbox instanceof HTMLInputElement && checkbox.checked;
-            box.classList.toggle('is-verified', checked);
-            const current = index === activeValidationIndex;
-            box.classList.toggle('is-current', current);
-            if (current) box.setAttribute('aria-current', 'true');
-            else box.removeAttribute('aria-current');
+        cropped.forEach((_, index) => {
+            const checkbox = validationRow(index)?.querySelector('.validation-verified');
+            lineOverlay.setVerified(index, checkbox instanceof HTMLInputElement && checkbox.checked);
         });
+        const group = validationGroups.find((candidate) => candidate.id === activeValidationGroupId);
+        lineOverlay.setSelection(group?.indexes ?? [], activeValidationIndex);
     }
 
     function clearValidationFieldError(index) {
@@ -1840,11 +2164,18 @@
             </div>
             <div class="validation-field__value">
                 <label class="visually-hidden" for="${inputId}"></label>
-                <input type="text" id="${inputId}" class="form-control verified"
-                       maxlength="2000" autocomplete="off">
-                <div class="validation-field__reading">
-                    TrOCR read: <span></span>
+                <div class="validation-field__entry">
+                    <img class="validation-field__crop" alt="" loading="lazy" decoding="async">
+                    <input type="text" id="${inputId}" class="form-control verified"
+                           maxlength="2000" autocomplete="off">
                 </div>
+                <div class="validation-field__reading">
+                    <span class="validation-field__reading-text">TrOCR read: <span></span></span>
+                    <button type="button" class="btn btn-link btn-sm validation-field__adjust">
+                        <i class="icon-base bx bx-shape-polygon" aria-hidden="true"></i>Adjust outline
+                    </button>
+                </div>
+                <div class="validation-field__flag d-none"></div>
                 <div class="validation-field__ocr-error d-none">
                     TrOCR could not read this marker. Enter the value manually.
                 </div>
@@ -1860,7 +2191,8 @@
 
         const displayNumber = group.kind === 'person' ? columnIndex + 1 : index + 1;
         requiredPart(row, '.validation-field__number').textContent = String(displayNumber).padStart(2, '0');
-        const displayName = validationFieldLabel(group, columnIndex, reading.name);
+        const item = cropped[index] ?? {};
+        const displayName = validationFieldLabel(group, columnIndex, item.label || reading.name);
         requiredPart(row, '.validation-field__name').textContent = displayName;
         requiredPart(row, `label[for="${inputId}"]`).textContent = `Verified value for ${displayName}`;
 
@@ -1868,8 +2200,33 @@
         badge.textContent = `${confidence.toFixed(1)}%`;
         badge.classList.add(flagged ? 'is-low' : 'is-ready');
 
+        // The exact masked crop TrOCR read, beside the value it produced.
+        const thumbnail = row.querySelector('.validation-field__crop');
+        if (thumbnail instanceof HTMLImageElement && item.cropUrl) {
+            thumbnail.src = item.cropUrl;
+            thumbnail.alt = `Crop TrOCR read for ${displayName}`;
+            thumbnail.title = 'The exact image TrOCR read';
+        } else {
+            thumbnail?.remove();
+        }
+
+        const adjust = requiredPart(row, '.validation-field__adjust');
+        adjust.setAttribute('aria-label', `Adjust the outline of ${displayName}`);
+        adjust.addEventListener('click', (event) => {
+            event.stopPropagation();
+            startOutlineEdit(index);
+        });
+
+        const explanation = flagExplanation(item.flags ?? []);
+        if (explanation) {
+            row.classList.add('has-line-flag');
+            const flag = requiredPart(row, '.validation-field__flag');
+            flag.textContent = explanation;
+            flag.classList.remove('d-none');
+        }
+
         const readingText = String(reading.text ?? '');
-        requiredPart(row, '.validation-field__reading span').textContent = readingText || '(nothing read)';
+        requiredPart(row, '.validation-field__reading-text span').textContent = readingText || '(nothing read)';
 
         const input = requiredInput(row, '.verified');
         const checkbox = requiredInput(row, '.validation-verified');
@@ -1945,7 +2302,9 @@
         requiredPart(section, '.validation-record-group__copy strong').textContent = group.label;
         requiredPart(section, '.validation-record-group__copy small').textContent = groupIdentity(group);
 
-        const reviewCount = group.indexes.filter((index) => normaliseConfidence(readings[index]) < config.threshold).length;
+        const reviewCount = group.indexes.filter((index) => (
+            normaliseConfidence(readings[index]) < config.threshold || cropped[index]?.needsReview
+        )).length;
         const review = requiredPart(section, '.validation-record-group__review');
         review.textContent = reviewCount > 0 ? `${reviewCount} to review` : 'Ready to review';
         review.classList.toggle('has-review', reviewCount > 0);
@@ -2026,26 +2385,149 @@
         const average = confidences.length
             ? confidences.reduce((a, b) => a + b, 0) / confidences.length
             : 0;
-        const flaggedCount = confidences.filter((confidence) => confidence < config.threshold).length;
+        const flaggedCount = confidences.filter((confidence, index) => (
+            confidence < config.threshold || cropped[index]?.needsReview
+        )).length;
 
         el('summaryConfidence').textContent = `${average.toFixed(1)}%`;
         el('summaryReview').textContent = `${flaggedCount}/${confidences.length}`;
         updateVerificationSummary();
     }
 
-    el('validationFieldOverlay').addEventListener('click', (event) => {
-        if (!(event.target instanceof Element)) return;
-        const box = event.target.closest('.field-box');
-        if (!box) return;
-        validationMarker.selectBox(Number(box.dataset.index), { source: 'marker' });
-    });
+    // ---------------------------------------------------------- outline fixes
+    function lineUpdateUrl(lineId) {
+        return config.lineUpdateUrl
+            .replace('__PAGE__', String(processedPage?.id ?? ''))
+            .replace('__LINE__', String(lineId));
+    }
 
-    el('validationFieldOverlay').addEventListener('keydown', (event) => {
-        if (!(event.target instanceof Element)) return;
-        const box = event.target.closest('.field-box');
-        if (!box || !['Enter', ' '].includes(event.key)) return;
-        event.preventDefault();
-        validationMarker.selectBox(Number(box.dataset.index), { source: 'marker' });
+    function showLineEditStatus(message, isError = false) {
+        const status = el('lineEditStatus');
+        status.textContent = message;
+        status.classList.toggle('d-none', message === '');
+        status.classList.toggle('is-error', isError);
+    }
+
+    function startOutlineEdit(index) {
+        if (!processedPage || !cropped[index]) return;
+        cancelOutlineEdit();
+
+        editingLineIndex = index;
+        activateValidationField(index, 'row');
+        el('lineEditName').textContent = cropped[index].name;
+        el('lineEditToolbar').classList.remove('d-none');
+        showLineEditStatus('');
+        const mode = document.querySelector('input[name="lineEditMode"]:checked')?.value ?? 'points';
+        lineOverlay.beginEdit(index, mode);
+    }
+
+    function cancelOutlineEdit() {
+        if (editingLineIndex === null) return;
+        lineOverlay.cancelEdit();
+        editingLineIndex = null;
+        el('lineEditToolbar').classList.add('d-none');
+        el('lineEditSave').disabled = false;
+    }
+
+    /**
+     * Save the redrawn outline: the server crops along it with crop_line() and
+     * TrOCR reads that one line again. Every other field keeps what the
+     * reviewer typed and checked.
+     */
+    async function saveOutlineEdit() {
+        const index = editingLineIndex;
+        const polygon = lineOverlay.editedPolygon();
+        if (index === null || !polygon) return;
+
+        const item = cropped[index];
+        const button = el('lineEditSave');
+        button.disabled = true;
+        showLineEditStatus('Cropping along the new outline and reading it again…');
+
+        try {
+            const response = await fetch(lineUpdateUrl(item.lineId), {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ polygon }),
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+
+            if (!payload?.line) {
+                throw new Error(responseErrorMessage(response, payload));
+            }
+
+            applyLineUpdate(payload.line, payload.flags ?? {});
+            cancelOutlineEdit();
+            if (!response.ok) {
+                showOcrLineWarning(payload.line.id, payload.message || 'The outline was saved, but TrOCR could not read it.');
+            }
+        } catch (error) {
+            button.disabled = false;
+            showLineEditStatus(error.message || 'The outline could not be saved.', true);
+        }
+    }
+
+    function showOcrLineWarning(lineId, message) {
+        const index = cropped.findIndex((candidate) => candidate.lineId === lineId);
+        if (index >= 0) setValidationFieldError(index, message);
+    }
+
+    /**
+     * Fold one re-read line (and any flags that changed with it) back into the
+     * Verify list, keeping every other field's typed value and check.
+     */
+    function applyLineUpdate(line, flagsById) {
+        const kept = new Map();
+        cropped.forEach((item, index) => {
+            const row = validationRow(index);
+            if (!row || item.lineId === line.id) return;
+            kept.set(item.lineId, {
+                value: requiredInput(row, '.verified').value,
+                verified: requiredInput(row, '.validation-verified').checked,
+            });
+        });
+
+        processedPage.lines = processedPage.lines.map((candidate) => {
+            const next = candidate.id === line.id ? line : candidate;
+            const flags = flagsById[next.id];
+            return Array.isArray(flags) ? { ...next, flags } : next;
+        });
+        cropped = verificationItems(processedPage.lines, processedPage);
+        readings = cropped.map((item) => item.reading);
+
+        renderVerifyRows();
+        cropped.forEach((item, index) => {
+            const previous = kept.get(item.lineId);
+            const row = validationRow(index);
+            if (!previous || !row) return;
+            requiredInput(row, '.verified').value = previous.value;
+            requiredInput(row, '.validation-verified').checked = previous.verified;
+            row.classList.toggle('is-verified', previous.verified);
+        });
+        lineOverlay.setLines(processedPage, cropped);
+        updateVerificationSummary();
+
+        const index = cropped.findIndex((item) => item.lineId === line.id);
+        if (index >= 0) activateValidationField(index, 'row');
+    }
+
+    document.querySelectorAll('input[name="lineEditMode"]').forEach((input) => {
+        input.addEventListener('change', () => {
+            if (input instanceof HTMLInputElement && input.checked) lineOverlay.setEditMode(input.value);
+        });
+    });
+    el('lineEditCancel').addEventListener('click', cancelOutlineEdit);
+    el('lineEditSave').addEventListener('click', saveOutlineEdit);
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && editingLineIndex !== null) cancelOutlineEdit();
     });
 
     function submissionErrorMessage(response, payload) {
@@ -2149,6 +2631,8 @@
                 y: Number(crop.y ?? 0).toFixed(5),
                 width: Number(crop.w ?? 0).toFixed(5),
                 height: Number(crop.h ?? 0).toFixed(5),
+                // The record keeps this line's outline and the exact crop TrOCR read.
+                line_id: crop.lineId ?? null,
             };
         });
         data.set('fields_json', JSON.stringify(submittedFields));

@@ -8,6 +8,7 @@ use App\Http\Controllers\Auth\PasswordChangeController;
 use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DashboardSystemStatusController;
+use App\Http\Controllers\DocumentPageController;
 use App\Http\Controllers\DocumentScanController;
 use App\Http\Controllers\DocumentTemplateController;
 use App\Http\Controllers\DocumentTypeDefinitionController;
@@ -87,6 +88,24 @@ Route::middleware('auth')->group(function () {
         Route::post('documents/recognise', [DocumentScanController::class, 'recognise'])
             ->name('documents.recognise');
         Route::post('documents', [DocumentScanController::class, 'store'])->name('documents.store');
+
+        // Finishing Align uploads the page and starts line detection in the
+        // background; Verify polls for the outlines and readings, shows the crop
+        // TrOCR read, and re-reads a line after its outline is redrawn.
+        Route::post('documents/pages', [DocumentPageController::class, 'store'])
+            ->name('documents.pages.store');
+        Route::get('documents/pages/{page}', [DocumentPageController::class, 'show'])
+            ->name('documents.pages.show');
+        Route::get('documents/pages/{page}/image', [DocumentPageController::class, 'image'])
+            ->name('documents.pages.image');
+        Route::post('documents/pages/{page}/read', [DocumentPageController::class, 'read'])
+            ->name('documents.pages.read');
+        Route::get('documents/pages/{page}/lines/{line}/crop', [DocumentPageController::class, 'crop'])
+            ->scopeBindings()
+            ->name('documents.pages.lines.crop');
+        Route::put('documents/pages/{page}/lines/{line}', [DocumentPageController::class, 'updateLine'])
+            ->scopeBindings()
+            ->name('documents.pages.lines.update');
     });
 
     /*
@@ -186,6 +205,9 @@ Route::middleware('auth')->group(function () {
             ->name('templates.document-types.destroy');
         Route::get('templates', [DocumentTemplateController::class, 'index'])->name('templates.index');
         Route::get('templates/create', [DocumentTemplateController::class, 'create'])->name('templates.create');
+        // Suggests a ledger grid from the printed rules on a sample page.
+        Route::post('templates/detect-grid', [DocumentTemplateController::class, 'detectGrid'])
+            ->name('templates.detect-grid');
         Route::post('templates', [DocumentTemplateController::class, 'store'])->name('templates.store');
         Route::get('templates/{template}/edit', [DocumentTemplateController::class, 'edit'])
             ->name('templates.edit');

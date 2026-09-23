@@ -8,6 +8,8 @@ use App\Enums\PaperSize;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTypeDefinition;
 use App\Services\AuditLogger;
+use App\Services\Lines\LineMarkers;
+use App\Services\Lines\LineMarkersException;
 use App\Services\TemplateSampleStorage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -57,8 +59,39 @@ class DocumentTemplateController extends Controller
             'docType' => $type,
             // Start from the prototype's field boxes rather than a blank page.
             'fields' => $type->defaultFields(),
+            'columns' => [],
+            'ruledYs' => [],
             'paperSizes' => PaperSize::cases(),
             'orientations' => PageOrientation::cases(),
+        ]);
+    }
+
+    /**
+     * Find the printed rules on a sample page and suggest a ledger grid.
+     *
+     * The builder posts the sample exactly as it renders it; the image is
+     * processed locally and deleted straight away.
+     */
+    public function detectGrid(Request $request, LineMarkers $markers): JsonResponse
+    {
+        $request->validate([
+            'image' => ['required', 'file', 'mimes:png', 'max:40960'],
+        ]);
+
+        $path = $request->file('image')->store('template-grid', 'local');
+
+        try {
+            $grid = $markers->grid(Storage::disk('local')->path($path));
+        } catch (LineMarkersException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } finally {
+            Storage::disk('local')->delete($path);
+        }
+
+        return response()->json([
+            'ruled_ys' => $grid['suggestion']['ruled_ys'] ?? [],
+            'columns' => $grid['suggestion']['columns'] ?? [],
+            'estimated_ys' => $grid['suggestion']['estimated_ys'] ?? 0,
         ]);
     }
 
@@ -78,6 +111,8 @@ class DocumentTemplateController extends Controller
                 'custom_height_mm' => $validated['custom_height_mm'],
                 'description' => $validated['description'] ?? null,
                 'grouping_mode' => $validated['grouping_mode'],
+                'columns' => $validated['columns'],
+                'ruled_ys' => $validated['ruled_ys'],
                 'is_active' => false,
                 'created_by' => $request->user()->getKey(),
             ]);
@@ -98,6 +133,8 @@ class DocumentTemplateController extends Controller
                     'custom_width_mm' => $validated['custom_width_mm'],
                     'custom_height_mm' => $validated['custom_height_mm'],
                     'field_count' => count($validated['fields']),
+                    'column_count' => count($validated['columns'] ?? []),
+                    'ruled_line_count' => count($validated['ruled_ys'] ?? []),
                     'grouping_mode' => $validated['grouping_mode'],
                     'group_count' => $this->personGroupCount($validated['fields']),
                     'sample_document' => $template->sample_original_name],
@@ -137,6 +174,8 @@ class DocumentTemplateController extends Controller
                 'person_group' => $f->person_group,
                 'person_field_order' => $f->person_field_order,
             ])->all(),
+            'columns' => array_values($template->columns ?? []),
+            'ruledYs' => array_values($template->ruled_ys ?? []),
             'paperSizes' => PaperSize::cases(),
             'orientations' => PageOrientation::cases(),
         ]);
@@ -161,16 +200,21 @@ class DocumentTemplateController extends Controller
                 'custom_height_mm' => $validated['custom_height_mm'],
                 'description' => $validated['description'] ?? null,
                 'grouping_mode' => $validated['grouping_mode'],
+                'columns' => $validated['columns'],
+                'ruled_ys' => $validated['ruled_ys'],
             ]);
 
             $before = $template->fields()->count();
             $this->syncFields($template, $validated['fields']);
 
+            $ledger = $validated['columns']
+                ? ', '.count($validated['columns']).' ledger columns, '.count($validated['ruled_ys']).' ruled lines'
+                : '';
             $this->audit->saveAndLog(
                 'template.updated',
                 $template,
                 "Updated template '{$template->name}' ({$before} -> ".count($validated['fields'])
-                    .' fields, '.$this->personGroupCount($validated['fields']).' person groups).',
+                    .' fields, '.$this->personGroupCount($validated['fields']).' person groups'.$ledger.').',
             );
 
             if (($validated['sample_document'] ?? null) instanceof UploadedFile) {
@@ -213,8 +257,8 @@ class DocumentTemplateController extends Controller
      */
     public function activate(DocumentTemplate $template): RedirectResponse
     {
-        if ($template->fields()->doesntExist()) {
-            return back()->with('error', 'Add at least one field before publishing.');
+        if ($template->fields()->doesntExist() && ! $template->isLedger()) {
+            return back()->with('error', 'Add at least one field or ledger column before publishing.');
         }
 
         DB::transaction(fn () => $this->publishTemplate($template));
@@ -362,7 +406,14 @@ class DocumentTemplateController extends Controller
             'custom_height_mm' => ['nullable', 'required_if:paper_size,custom', 'numeric', 'min:50', 'max:2000'],
             'grouping_mode' => ['required', Rule::in(['auto', 'custom'])],
             'publish' => ['sometimes', 'boolean'],
-            'fields' => ['required', 'array', 'min:1', 'max:450'],
+            // A ruled register may be described entirely by its ledger grid.
+            'fields' => ['nullable', 'array', 'max:450'],
+            'columns' => ['nullable', 'array', 'max:60'],
+            'columns.*.name' => ['required', 'string', 'max:120', 'distinct:ignore_case'],
+            'columns.*.box' => ['required', 'array', 'size:4'],
+            'columns.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],
+            'ruled_ys' => ['nullable', 'array', 'max:400'],
+            'ruled_ys.*' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
             // Fractions of the page. Bounds keep a box on the paper.
             'fields.*.x' => ['required', 'numeric', 'min:0', 'max:1'],
@@ -387,6 +438,12 @@ class DocumentTemplateController extends Controller
 
         $validated['custom_width_mm'] ??= null;
         $validated['custom_height_mm'] ??= null;
+        $validated['fields'] = array_values($validated['fields'] ?? []);
+        [$validated['columns'], $validated['ruled_ys']] = $this->checkedLedgerGrid(
+            $validated['columns'] ?? [],
+            $validated['ruled_ys'] ?? [],
+            $validated['fields'],
+        );
 
         if ($validated['paper_size'] !== PaperSize::Custom->value) {
             $validated['custom_width_mm'] = null;
@@ -429,6 +486,8 @@ class DocumentTemplateController extends Controller
 
     private function hydrateJsonFields(Request $request): void
     {
+        $this->hydrateLedgerGrid($request);
+
         if (! $request->filled('fields_json')) {
             return;
         }
@@ -448,6 +507,78 @@ class DocumentTemplateController extends Controller
         }
 
         $request->merge(['fields' => $fields]);
+    }
+
+    private function hydrateLedgerGrid(Request $request): void
+    {
+        foreach (['columns_json' => 'columns', 'ruled_ys_json' => 'ruled_ys'] as $input => $key) {
+            if (! $request->filled($input)) {
+                continue;
+            }
+            try {
+                $value = json_decode((string) $request->input($input), true, 64, JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                throw ValidationException::withMessages([
+                    $key => 'The ledger grid could not be read. Refresh the page and try again.',
+                ]);
+            }
+            $request->merge([$key => is_array($value) ? $value : []]);
+        }
+    }
+
+    /**
+     * The ledger grid, checked and normalised: null when a layout has none.
+     *
+     * @param  list<array<string, mixed>>  $columns
+     * @param  list<float|int|string>  $ruledYs
+     * @param  list<array<string, mixed>>  $fields
+     * @return array{0: list<array{name: string, box: list<float>}>|null, 1: list<float>|null}
+     */
+    private function checkedLedgerGrid(array $columns, array $ruledYs, array $fields): array
+    {
+        $columns = array_values($columns);
+        $ruled = array_values(array_map('floatval', $ruledYs));
+        $errors = [];
+
+        if ($columns === [] && $fields === []) {
+            $errors['fields'] = 'Add at least one field or ledger column before saving this layout.';
+        }
+        if ($columns !== [] && count($ruled) < 2) {
+            $errors['ruled_ys'] = 'A ledger needs its ruled row lines. Detect them from the sample or add them.';
+        }
+        for ($i = 1; $i < count($ruled); $i++) {
+            if ($ruled[$i] <= $ruled[$i - 1]) {
+                $errors['ruled_ys'] = 'Ruled row lines must run from top to bottom without repeating.';
+                break;
+            }
+        }
+
+        $fieldNames = collect($fields)->map(fn ($f) => mb_strtolower(trim((string) $f['name'])))->flip();
+        foreach ($columns as $index => $column) {
+            [$x, $y, $w, $h] = array_map('floatval', $column['box']);
+            if ($w < 0.005 || $h < 0.005 || $x + $w > 1.00001 || $y + $h > 1.00001) {
+                $errors["columns.{$index}.box"] = 'This ledger column extends beyond the document.';
+            }
+            if ($fieldNames->has(mb_strtolower(trim((string) $column['name'])))) {
+                $errors["columns.{$index}.name"] = 'A ledger column and a field cannot share a name.';
+            }
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+
+        if ($columns === []) {
+            return [null, null];
+        }
+
+        return [
+            array_map(fn (array $column) => [
+                'name' => trim((string) $column['name']),
+                'box' => array_map(fn ($v) => round((float) $v, 5), $column['box']),
+            ], $columns),
+            array_map(fn (float $y) => round($y, 5), $ruled),
+        ];
     }
 
     /**

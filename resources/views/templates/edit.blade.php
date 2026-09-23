@@ -12,9 +12,17 @@
         $currentCustomWidth = old('custom_width_mm', $template?->custom_width_mm ?? 210);
         $currentCustomHeight = old('custom_height_mm', $template?->custom_height_mm ?? 297);
         $currentGroupingMode = old('grouping_mode', $template?->grouping_mode ?? 'auto');
+        $workingColumns = old('columns_json') ? json_decode(old('columns_json'), true) : $columns;
+        $workingRuledYs = old('ruled_ys_json') ? json_decode(old('ruled_ys_json'), true) : $ruledYs;
         $builderConfig = [
             'initialFields' => $workingFields,
             'baselineFields' => $fields,
+            'initialColumns' => is_array($workingColumns) ? $workingColumns : [],
+            'baselineColumns' => $columns,
+            'initialRuledYs' => is_array($workingRuledYs) ? $workingRuledYs : [],
+            'baselineRuledYs' => $ruledYs,
+            'detectGridUrl' => route('templates.detect-grid'),
+            'csrf' => csrf_token(),
             'initialGroupingMode' => $currentGroupingMode,
             'baselineGroupingMode' => $template?->grouping_mode ?? 'auto',
             'maxFields' => 450,
@@ -378,6 +386,57 @@
                                 <p class="document-tip mt-3 mb-0">
                                     <i class="icon-base bx bx-info-circle icon-xs" aria-hidden="true"></i>
                                     <span>Keep each marker tight around one handwritten value. The sample is stored privately with this layout after you save.</span>
+                                </p>
+                            </div>
+                        </section>
+
+                        <section class="card template-ledger-card mb-3" aria-labelledby="ledgerGridHeading">
+                            <div class="card-header d-flex align-items-center justify-content-between gap-2">
+                                <div>
+                                    <h2 class="card-title h5 mb-0" id="ledgerGridHeading">Ledger grid</h2>
+                                    <small class="text-muted">For ruled register books.</small>
+                                </div>
+                                <span class="badge bg-label-secondary" id="ledgerGridBadge">None</span>
+                            </div>
+                            <div class="card-body">
+                                <p class="template-ledger-card__intro">
+                                    Name each column and record every printed row line. Staff scans are then
+                                    outlined line by line, so handwriting that drifts across a rule, or a capital
+                                    that reaches into the next row, is read whole.
+                                </p>
+
+                                <div class="template-ledger-card__actions">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="detectGridBtn">
+                                        <i class="icon-base bx bx-grid-alt icon-sm me-1" aria-hidden="true"></i>
+                                        Detect from sample
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="makeColumnsBtn" disabled>
+                                        <i class="icon-base bx bx-columns icon-sm me-1" aria-hidden="true"></i>
+                                        Make selected columns
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="addRuledLineBtn">
+                                        <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>
+                                        Add row line
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" id="clearGridBtn" disabled>
+                                        <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
+                                        Remove grid
+                                    </button>
+                                </div>
+
+                                <p class="template-ledger-card__summary" id="ledgerGridSummary" aria-live="polite"></p>
+
+                                <div class="template-ledger-card__covered d-none" id="ledgerCoveredNotice">
+                                    <span id="ledgerCoveredMessage"></span>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" id="removeCoveredFieldsBtn">
+                                        Remove them
+                                    </button>
+                                </div>
+
+                                <p class="document-tip mt-3 mb-0">
+                                    <i class="icon-base bx bx-info-circle icon-xs" aria-hidden="true"></i>
+                                    <span>Drag a row line to move it; double-click it to remove it. Column markers
+                                        can be moved and resized like fields.</span>
                                 </p>
                             </div>
                         </section>

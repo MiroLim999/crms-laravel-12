@@ -4,13 +4,16 @@ namespace App\Http\Controllers;
 
 use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
+use App\Models\DocumentPage;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTypeDefinition;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
+use App\Models\PageLine;
 use App\Services\AuditLogger;
 use App\Services\Ocr\OcrClient;
 use App\Services\Ocr\OcrServiceException;
+use App\Services\Ocr\ScanModelChoice;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -37,6 +40,7 @@ class DocumentScanController extends Controller
     public function __construct(
         private readonly OcrClient $ocr,
         private readonly AuditLogger $audit,
+        private readonly ScanModelChoice $modelChoice,
     ) {}
 
     /**
@@ -86,7 +90,9 @@ class DocumentScanController extends Controller
         return view('scan.workspace', [
             'docType' => $type,
             'template' => $template,
-            'boxes' => $template->fields->map->toBox()->values(),
+            // Rectangle fields, then ledger columns. Staff align both the same way.
+            'boxes' => $template->markerBoxes(),
+            'ruledYs' => $template->isLedger() ? array_values($template->ruled_ys) : [],
             'activeModel' => OcrModel::active(),
             // Empty unless a Super Admin has allowed it, in which case the reading
             // step offers a picker instead of silently using the promoted model.
@@ -157,6 +163,9 @@ class DocumentScanController extends Controller
             'fields.*.y' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.width' => ['required', 'numeric', 'min:0.00001', 'max:1'],
             'fields.*.height' => ['required', 'numeric', 'min:0.00001', 'max:1'],
+            // The processed page whose outlined lines these fields were read from.
+            'document_page_id' => ['nullable', 'integer'],
+            'fields.*.line_id' => ['nullable', 'integer', 'distinct'],
         ]);
 
         $templateId = (int) $validated['document_template_id'];
@@ -192,6 +201,8 @@ class DocumentScanController extends Controller
             throw ValidationException::withMessages($coordinateErrors);
         }
 
+        [$page, $linesById] = $this->pageLinesFor($request, $validated, $templateId);
+
         $scan = $request->file('scan');
         if (! $scan instanceof UploadedFile) {
             throw ValidationException::withMessages([
@@ -200,9 +211,10 @@ class DocumentScanController extends Controller
         }
 
         $path = $scan->store('scans', 'local');
+        $copiedCrops = [];
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $requiredByName) {
+            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $requiredByName, $page, $linesById, &$copiedCrops) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -212,6 +224,9 @@ class DocumentScanController extends Controller
                     'status' => RecordStatus::Submitted,
                     'scan_path' => $path,
                     'scan_mime' => $scan->getMimeType(),
+                    // Field outlines are fractions of the page as outlined,
+                    // which Detect may have straightened.
+                    'scan_rotation' => $page?->deskew_degrees,
                     'ocr_model_key' => $validated['ocr_model_key'],
                     'created_by' => $request->user()->getKey(),
                     'submitted_by' => $request->user()->getKey(),
@@ -219,6 +234,8 @@ class DocumentScanController extends Controller
                 ]);
 
                 foreach (array_values($validated['fields']) as $index => $field) {
+                    $line = isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null;
+
                     $record->fields()->create([
                         'name' => $field['name'],
                         'ocr_text' => $field['ocr_text'] ?? null,
@@ -235,6 +252,7 @@ class DocumentScanController extends Controller
                         'width' => $field['width'],
                         'height' => $field['height'],
                         'sort_order' => $index,
+                        ...($line ? $this->lineAttributes($record, $page, $line, $index, $copiedCrops) : []),
                     ]);
                 }
 
@@ -250,6 +268,7 @@ class DocumentScanController extends Controller
                         'registry_number' => $validated['registry_number'] ?? null,
                         'field_count' => $record->fields->count(),
                         'corrected_fields' => $corrected,
+                        'outlined_fields' => $record->fields->whereNotNull('polygon')->count(),
                         'ocr_model' => $validated['ocr_model_key'],
                     ],
                     description: "Submitted and locked a {$record->typeShortLabel()} record.",
@@ -258,8 +277,15 @@ class DocumentScanController extends Controller
                 return $record;
             });
         } catch (Throwable $exception) {
-            Storage::disk('local')->delete($path);
+            Storage::disk('local')->delete([$path, ...$copiedCrops]);
             throw $exception;
+        }
+
+        // The record now holds its own copies of every crop it kept. The page's
+        // working files (image, remaining crops, overlay) are no longer needed.
+        if ($page !== null) {
+            Storage::disk('local')->deleteDirectory($page->directory());
+            $page->delete();
         }
 
         $redirect = route('records.show', $record);
@@ -303,58 +329,93 @@ class DocumentScanController extends Controller
     // ------------------------------------------------------------------ internals
 
     /**
-     * Models Staff may pick from, or an empty list when they may not pick at all.
+     * The processed page and its lines that the submitted fields point at.
      *
-     * Empty is the default: a registry where every reading came from the one model
-     * a Super Admin approved is easier to stand behind than one where each Staff
-     * member chose for themselves.
+     * @param  array<string, mixed>  $validated
+     * @return array{0: DocumentPage|null, 1: \Illuminate\Support\Collection<int, PageLine>}
+     */
+    private function pageLinesFor(Request $request, array $validated, int $templateId): array
+    {
+        $lineIds = collect($validated['fields'])->pluck('line_id')->filter()->map(fn ($id) => (int) $id);
+
+        if (empty($validated['document_page_id'])) {
+            if ($lineIds->isNotEmpty()) {
+                throw ValidationException::withMessages([
+                    'document_page_id' => 'The outlined page these fields came from is missing. Scan the page again.',
+                ]);
+            }
+
+            return [null, collect()];
+        }
+
+        $page = DocumentPage::query()
+            ->whereKey((int) $validated['document_page_id'])
+            ->where('created_by', $request->user()->getKey())
+            ->first();
+
+        if ($page === null || $page->status !== DocumentPage::STATUS_READY
+            || (int) $page->document_template_id !== $templateId) {
+            throw ValidationException::withMessages([
+                'document_page_id' => 'This page is no longer available. Scan it again before submitting.',
+            ]);
+        }
+
+        $lines = $page->lines()->whereIn('id', $lineIds)->get()->keyBy('id');
+
+        $errors = [];
+        foreach ($validated['fields'] as $index => $field) {
+            if (isset($field['line_id']) && ! $lines->has((int) $field['line_id'])) {
+                $errors["fields.{$index}.line_id"] = 'This field no longer matches an outlined line on the page.';
+            }
+        }
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+
+        return [$page, $lines];
+    }
+
+    /**
+     * Keep the exact crop TrOCR read and the outline it was read from.
      *
+     * The crop is copied, not re-made, so the archive and the training export
+     * always hold the very image the model saw.
+     *
+     * @param  list<string>  $copiedCrops
+     * @return array<string, mixed>
+     */
+    private function lineAttributes(CivilRecord $record, DocumentPage $page, PageLine $line, int $index, array &$copiedCrops): array
+    {
+        $disk = Storage::disk('local');
+        $cropPath = sprintf('records/%d/crops/%03d.png', $record->getKey(), $index + 1);
+        $disk->copy($line->crop_path, $cropPath);
+        $copiedCrops[] = $cropPath;
+
+        $width = max(1, $page->width);
+        $height = max(1, $page->height);
+
+        return [
+            'crop_path' => $cropPath,
+            'polygon' => array_map(
+                fn (array $point) => [round($point[0] / $width, 5), round($point[1] / $height, 5)],
+                $line->polygon,
+            ),
+            'line_column' => $line->column_name,
+            'line_row' => $line->row,
+            'line_flags' => $line->flags ?: [],
+        ];
+    }
+
+    /**
      * @return list<array{key: string, label: string, is_active: bool}>
      */
     private function selectableModels(): array
     {
-        if (! OcrSetting::staffMayChooseModel()) {
-            return [];
-        }
-
-        $health = $this->ocr->health();
-
-        if (! $health['reachable']) {
-            return [];
-        }
-
-        $activeKey = OcrModel::active()?->key;
-
-        return collect($health['models'])
-            ->map(fn (array $model) => [
-                'key' => $model['key'],
-                'label' => $model['label'] ?? $model['key'],
-                'is_active' => $model['key'] === $activeKey,
-            ])
-            // The promoted model first, so the default is the obvious choice.
-            ->sortByDesc(fn (array $model) => (int) $model['is_active'])
-            ->values()
-            ->all();
+        return $this->modelChoice->selectable();
     }
 
-    /**
-     * Which model this reading should run against.
-     *
-     * A submitted key is honoured only when Staff choice is switched on and the
-     * service can actually serve it. Anything else falls back to the promoted model,
-     * so a stale tab or a hand-edited request cannot silently swap the model behind
-     * a record.
-     */
     private function resolveModelKey(?string $requested): ?string
     {
-        $active = OcrModel::active()?->key;
-
-        if ($requested === null || $requested === '') {
-            return $active;
-        }
-
-        $allowed = array_column($this->selectableModels(), 'key');
-
-        return in_array($requested, $allowed, true) ? $requested : $active;
+        return $this->modelChoice->resolve($requested);
     }
 }

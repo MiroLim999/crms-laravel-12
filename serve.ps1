@@ -1,10 +1,12 @@
 <#
     serve.ps1
-    Starts the two processes CRMS needs, each in its own window, from the repo root.
+    Starts the processes CRMS needs, each in its own window, from the repo root:
+    Laravel, the queue worker that outlines and reads aligned pages, and the
+    OCR service.
 
-        .\serve.ps1            start both
+        .\serve.ps1            start all three
         .\serve.ps1 -Check     verify the environment and exit
-        .\serve.ps1 -NoOcr     Laravel only
+        .\serve.ps1 -NoOcr     Laravel and the queue worker only
 
     Apache is NOT used. Laravel is served by `php artisan serve` on port 8000, so
     the only XAMPP module that has to be running is MySQL. Sitting in htdocs is
@@ -111,6 +113,20 @@ else:
     }
 }
 
+# --- Line detection (Kraken, its own environment) ------------------------
+# Aligned pages are outlined line by line by ml\line_markers.py in
+# ml\.venv-kraken. Without it, ledger templates cannot be scanned (older
+# rectangle templates still work).
+$krakenPython = Join-Path $root 'ml\.venv-kraken\Scripts\python.exe'
+if (Test-Path $krakenPython) {
+    $kraken = (& $krakenPython -c "from importlib.metadata import version; print('kraken ' + version('kraken'))" 2>$null)
+    if ($LASTEXITCODE -eq 0) { Write-Good "$kraken (ml\.venv-kraken)" }
+    else { Write-Warn 'ml\.venv-kraken exists but kraken does not import. Re-run ml\setup_kraken.ps1.'; $problems++ }
+} else {
+    Write-Warn 'Kraken environment missing. Run .\ml\setup_kraken.ps1 to scan ledger templates.'
+    $problems++
+}
+
 Write-Host ('-' * 40)
 
 if ($Check) {
@@ -140,6 +156,14 @@ if (Test-Port $AppPort) {
         "Set-Location '$root'; php artisan serve --port=$AppPort"
     )
 }
+
+# Finishing the Align step queues a job that outlines every handwritten line
+# and reads it. Without a worker, pages wait in "queued" forever.
+Write-Step 'Queue worker   -> line detection and reading'
+Start-Process powershell -ArgumentList @(
+    '-NoExit', '-Command',
+    "Set-Location '$root'; php artisan queue:work --timeout=900 --tries=1"
+)
 
 if (-not $NoOcr) {
     if (Test-Port $OcrPort) {

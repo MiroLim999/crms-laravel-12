@@ -65,4 +65,28 @@ return [
         'upload_ticket_ttl' => env('OCR_UPLOAD_TICKET_TTL', 900),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Line markers (ml/line_markers.py)
+    |--------------------------------------------------------------------------
+    |
+    | Outlines every handwritten line on an aligned page and crops along the
+    | outlines. Runs as a local subprocess in its own Python environment,
+    | ml/.venv-kraken, because Kraken needs a newer torch than the TrOCR service.
+    | Build it with ml\setup_kraken.ps1. Leave `python` empty to use that
+    | environment when it exists.
+    |
+    | Nothing leaves the machine: Kraken's model ships inside its wheel.
+    |
+    */
+
+    'line_markers' => [
+        'python' => env('LINE_MARKERS_PYTHON'),
+        'script' => base_path('ml/line_markers.py'),
+        // One page on CPU takes about half a minute; a slow machine gets room.
+        'timeout' => (int) env('LINE_MARKERS_TIMEOUT', 600),
+        // Unsubmitted pages older than this are removed by documents:prune-pages.
+        'keep_hours' => (int) env('LINE_MARKERS_KEEP_HOURS', 24),
+    ],
+
 ];

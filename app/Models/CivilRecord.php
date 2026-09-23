@@ -25,7 +25,7 @@ class CivilRecord extends Model
 
     protected $fillable = [
         'doc_type', 'document_type_id', 'document_template_id', 'registry_number', 'status',
-        'scan_path', 'scan_mime', 'ocr_model_key', 'created_by',
+        'scan_path', 'scan_mime', 'scan_rotation', 'ocr_model_key', 'created_by',
         'submitted_by', 'submitted_at',
     ];
 

@@ -1,0 +1,18 @@
+# Line detection environment (Kraken), kept apart from the TrOCR stack.
+#
+# Kraken 7 requires torch >= 2.9, while the TrOCR service runs torch 2.6 with
+# CUDA 12.4. One interpreter cannot hold both, so Kraken gets its own virtualenv
+# at ml/.venv-kraken. ml/setup_kraken.ps1 builds it; run that rather than this
+# file directly, because torch must come from the CPU index first:
+#
+#   uv venv ml\.venv-kraken --python 3.13
+#   uv pip install --python ml\.venv-kraken torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   uv pip install --python ml\.venv-kraken -r ml\requirements-kraken.txt
+#
+# CPU on purpose: line segmentation of one page takes a few seconds on CPU, and
+# keeping it off the GPU means it never competes with TrOCR for VRAM.
+#
+# The default baseline segmentation model (blla.mlmodel) ships inside the kraken
+# wheel. Nothing is downloaded at run time and no page ever leaves the machine.
+
+kraken==7.1.1

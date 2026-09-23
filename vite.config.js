@@ -29,6 +29,10 @@ export default defineConfig({
                 'resources/js/field-marker.js',
                 // Shared Windows-style drag selection used by both marker editors.
                 'resources/js/marquee-selection.js',
+                // Line outlines in the Verify step: the geometry helpers and the
+                // SVG overlay, imported by the scanning workspace's inline module.
+                'resources/js/line-geometry.js',
+                'resources/js/line-overlay.js',
                 // Template Builder interaction shell. It shares FieldMarker with
                 // Staff scanning but is only loaded on Super Admin layout pages.
                 'resources/js/template-builder.js',

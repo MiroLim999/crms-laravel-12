@@ -1321,10 +1321,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   scrollbar-width: thin;
 }
 
+// At least 27rem, and never shorter than its own content: a paper-size warning
+// or a long tip makes the card taller (the panel scrolls) instead of spilling
+// over the Detect summary below it. Only the field list scrolls inside.
 #step-mark .document-fields-card {
   display: flex;
-  min-block-size: 27rem;
-  flex: 1 1 auto;
+  flex: 1 0 27rem;
   flex-direction: column;
 
   .card-header {
@@ -1341,7 +1343,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .marker-field-list {
     min-block-size: 5rem;
     max-block-size: none;
-    flex: 1 1 auto;
+    flex: 1 1 0;
   }
 }
 
@@ -1823,6 +1825,399 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
       }
     }
   }
+}
+
+// Handwritten line outlines in the Verify step. One SVG whose viewBox is the
+// page's pixel size, stretched over the canvas, so outlines sit on the ink at
+// every zoom. Colours match the rectangle markers they replace: orange for the
+// selected person's row, green for the exact field, red for lines to review.
+.line-overlay {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: visible;
+  pointer-events: none;
+
+  &.is-editing {
+    pointer-events: all;
+  }
+
+  &.is-editing[data-edit-mode="rectangle"] {
+    cursor: crosshair;
+  }
+}
+
+// The Align step's Detect preview: outlines only, never in the way of the
+// markers Staff drag underneath.
+.line-overlay.is-preview {
+  z-index: 1;
+
+  .line-marker {
+    cursor: default;
+    pointer-events: none;
+  }
+}
+
+.line-overlay__guide {
+  stroke: #0e9aa7;
+  stroke-width: 1px;
+  stroke-dasharray: 5 4;
+  opacity: .75;
+  vector-effect: non-scaling-stroke;
+}
+
+.detect-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  margin-block-end: .75rem;
+  padding: .65rem .75rem;
+  color: #0b5f67;
+  background: rgba(14, 154, 167, .09);
+  border: 1px solid rgba(14, 154, 167, .3);
+  border-radius: .5rem;
+  font-size: .8125rem;
+
+  > .bx {
+    flex: 0 0 auto;
+    margin-block-start: .1rem;
+    font-size: 1.15rem;
+  }
+
+  &.has-review {
+    color: #8a2c1c;
+    background: rgba(255, 62, 29, .07);
+    border-color: rgba(255, 62, 29, .3);
+  }
+
+  &.is-stale {
+    color: #8a6500;
+    background: rgba(255, 171, 0, .1);
+    border-color: rgba(255, 171, 0, .35);
+  }
+
+  .form-check-label {
+    color: var(--bs-body-color);
+    font-size: .75rem;
+  }
+}
+
+.detect-summary__copy {
+  display: flex;
+  flex-direction: column;
+  gap: .1rem;
+  min-inline-size: 0;
+
+  strong {
+    color: inherit;
+  }
+}
+
+.line-marker {
+  cursor: pointer;
+  pointer-events: visiblePainted;
+  outline: none;
+
+  .line-marker__shape {
+    fill: rgba(105, 108, 255, .07);
+    stroke: rgba(105, 108, 255, .72);
+    stroke-width: 1.1px;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+    transition: fill .12s ease, stroke .12s ease;
+  }
+
+  &:hover .line-marker__shape,
+  &:focus-visible .line-marker__shape {
+    stroke-width: 1.8px;
+  }
+
+  &.is-verified:not(.is-selected) .line-marker__shape {
+    fill: rgba(40, 199, 111, .08);
+    stroke: rgba(40, 199, 111, .72);
+  }
+
+  &.is-selected .line-marker__shape {
+    fill: rgba(255, 171, 0, .18);
+    stroke: var(--bs-warning);
+    stroke-width: 1.6px;
+  }
+
+  &.is-selected.is-current .line-marker__shape {
+    fill: rgba(40, 199, 111, .26);
+    stroke: var(--bs-success);
+    stroke-width: 2.2px;
+  }
+
+  // Flagged lines stay red whatever else is selected; selection shows in the fill.
+  &.needs-review .line-marker__shape {
+    fill: rgba(255, 62, 29, .1);
+    stroke: var(--bs-danger);
+    stroke-width: 1.8px;
+    stroke-dasharray: 5 3;
+  }
+
+  &.needs-review.is-selected .line-marker__shape {
+    fill: rgba(255, 171, 0, .2);
+  }
+
+  &.needs-review.is-selected.is-current .line-marker__shape {
+    fill: rgba(40, 199, 111, .26);
+  }
+
+  &.is-editing {
+    opacity: .25;
+  }
+}
+
+.line-review-label {
+  pointer-events: none;
+
+  rect {
+    fill: var(--bs-danger);
+  }
+
+  text {
+    fill: #fff;
+    font-family: var(--bs-body-font-family);
+    font-weight: 600;
+  }
+}
+
+.line-edit__shape {
+  fill: rgba(40, 199, 111, .16);
+  stroke: var(--bs-success);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.line-edit__handle {
+  fill: #fff;
+  stroke: var(--bs-success);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+  pointer-events: all;
+
+  &:hover {
+    fill: var(--bs-success);
+  }
+}
+
+.line-edit-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem .75rem;
+  padding: .55rem .85rem;
+  background: rgba(40, 199, 111, .08);
+  border-block-end: 1px solid rgba(40, 199, 111, .35);
+
+  .btn-group .btn {
+    white-space: nowrap;
+  }
+}
+
+.line-edit-toolbar__copy {
+  display: flex;
+  flex: 1 1 10rem;
+  flex-direction: column;
+  min-inline-size: 0;
+  font-size: .75rem;
+
+  strong {
+    color: var(--bs-heading-color);
+  }
+
+  span {
+    overflow: hidden;
+    color: var(--bs-secondary-color);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.line-edit-toolbar__actions {
+  display: flex;
+  gap: .4rem;
+}
+
+.line-edit-toolbar__status {
+  flex: 1 0 100%;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+
+  &.is-error {
+    color: var(--bs-danger);
+  }
+}
+
+// Template builder: printed row lines of a ruled register, drawn over the
+// sample. Only the lines take the pointer, so marquee selection still works
+// on the page around them.
+.ledger-rule-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ledger-rule {
+  cursor: ns-resize;
+
+  .ledger-rule__line {
+    stroke: #0e9aa7;
+    stroke-width: 1.5px;
+    stroke-dasharray: 6 3;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .ledger-rule__hit {
+    stroke: transparent;
+    stroke-width: 9px;
+    vector-effect: non-scaling-stroke;
+    pointer-events: stroke;
+  }
+
+  &:hover .ledger-rule__line,
+  &.is-dragging .ledger-rule__line {
+    stroke: var(--bs-danger);
+    stroke-width: 2px;
+  }
+}
+
+.template-builder-field-group.is-column {
+  color: #0b7e88;
+  background: rgba(14, 154, 167, .12);
+}
+
+.template-ledger-card__intro,
+.template-ledger-card__summary {
+  margin-block-end: .75rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  line-height: 1.4;
+}
+
+.template-ledger-card__summary {
+  margin-block: .75rem 0;
+  color: var(--bs-body-color);
+}
+
+.template-ledger-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.template-ledger-card__covered {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-block-start: .6rem;
+  padding: .5rem .6rem;
+  color: #8a6500;
+  background: rgba(255, 171, 0, .12);
+  border-radius: .4rem;
+  font-size: .75rem;
+
+  .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
+
+// Ledger column markers in the Align step: aligned like any field, but read
+// line by line, so they read as a frame rather than a crop box.
+.field-box.is-column {
+  border-style: dashed;
+  border-color: #0e9aa7;
+  background-color: rgba(14, 154, 167, .06);
+
+  .field-box-label {
+    background-color: #0e9aa7;
+  }
+
+  &.is-selected {
+    border-style: dashed;
+  }
+}
+
+.validation-field__entry {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-inline-size: 0;
+
+  .form-control {
+    flex: 1 1 auto;
+    min-inline-size: 6rem;
+  }
+}
+
+// The exact crop TrOCR read, beside the value it produced.
+.validation-field__crop {
+  flex: 0 1 auto;
+  max-inline-size: 45%;
+  max-block-size: 2.35rem;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: .3rem;
+}
+
+.validation-field__reading {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.validation-field__reading .validation-field__reading-text {
+  overflow: hidden;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  span {
+    font-style: italic;
+  }
+}
+
+.validation-field__adjust {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .2rem;
+  margin-inline-start: auto;
+  padding: 0;
+  color: var(--bs-primary);
+  background: none;
+  border: 0;
+  font-size: .6875rem;
+
+  &:hover,
+  &:focus-visible {
+    text-decoration: underline;
+  }
+}
+
+.validation-field__flag {
+  margin-block-start: .25rem;
+  color: var(--bs-danger);
+  font-size: .6875rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.validation-field.has-line-flag {
+  border-inline-start: 3px solid var(--bs-danger);
 }
 
 .validation-pane__hint {
@@ -2413,10 +2808,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   #step-mark .document-fields-card {
-    min-block-size: 0;
+    flex: 0 0 auto;
 
     .marker-field-list {
       max-block-size: 20rem;
+      flex: 0 1 auto;
     }
   }
 

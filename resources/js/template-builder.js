@@ -55,8 +55,10 @@ const baselineGroupingMode = config.baselineGroupingMode === 'custom' ? 'custom'
 const initialGroupingMode = config.initialGroupingMode === 'custom' ? 'custom' : 'auto';
 
 const cloneBoxes = (boxes) => boxes.map(({
-    name, x, y, w, h, personGroup = null, personFieldOrder = null,
-}) => ({ name, x, y, w, h, personGroup, personFieldOrder }));
+    name, x, y, w, h, personGroup = null, personFieldOrder = null, kind = null,
+}) => ({
+    name, x, y, w, h, personGroup, personFieldOrder, ...(kind === 'column' ? { kind } : {}),
+}));
 const snapshot = (boxes) => JSON.stringify(cloneBoxes(boxes));
 
 function finiteNumber(value, fallback) {
@@ -88,8 +90,46 @@ function normaliseBoxes(fields) {
     });
 }
 
-const baselineBoxes = normaliseBoxes(config.baselineFields);
-const initialBoxes = normaliseBoxes(config.initialFields);
+/** Ledger columns become ordinary markers flagged as columns. */
+function normaliseColumns(columns) {
+    if (!Array.isArray(columns)) return [];
+
+    return columns.map((column, index) => {
+        const [bx, by, bw, bh] = Array.isArray(column.box) ? column.box : [];
+        const x = Math.min(0.99, Math.max(0, finiteNumber(bx, 0.1)));
+        const y = Math.min(0.99, Math.max(0, finiteNumber(by, 0.1)));
+        return {
+            name: String(column.name ?? `Column ${index + 1}`),
+            x,
+            y,
+            w: Math.min(1 - x, Math.max(0.01, finiteNumber(bw, 0.1))),
+            h: Math.min(1 - y, Math.max(0.01, finiteNumber(bh, 0.5))),
+            personGroup: null,
+            personFieldOrder: null,
+            kind: 'column',
+        };
+    });
+}
+
+function normaliseRuledYs(values) {
+    if (!Array.isArray(values)) return [];
+    return values
+        .map((value) => finiteNumber(value, NaN))
+        .filter((value) => value >= 0 && value <= 1)
+        .sort((a, b) => a - b);
+}
+
+const baselineBoxes = [
+    ...normaliseBoxes(config.baselineFields),
+    ...normaliseColumns(config.baselineColumns),
+];
+const initialBoxes = [
+    ...normaliseBoxes(config.initialFields),
+    ...normaliseColumns(config.initialColumns),
+];
+const baselineRuledYs = normaliseRuledYs(config.baselineRuledYs);
+// Printed row lines of a ruled register, page fractions, top to bottom.
+let ruledYs = normaliseRuledYs(config.initialRuledYs);
 groupingModeInput.value = initialGroupingMode;
 
 let fieldHistory = [];
@@ -248,6 +288,7 @@ function layoutMatchesBaseline() {
             && finiteNumber(customHeightInput.value, 297) === baselineCustomHeight);
 
     return snapshot(marker.toJSON()) === snapshot(baselineBoxes)
+        && JSON.stringify(ruledYs) === JSON.stringify(baselineRuledYs)
         && groupingModeInput.value === baselineGroupingMode
         && paperSizeSelect.value === baselinePaperSize
         && selectedOrientation() === baselineOrientation
@@ -277,6 +318,7 @@ function handleMarkerChange(boxes) {
     currentSnapshot = next;
     currentGroupingModeSnapshot = nextGroupingMode;
     renderFieldList(boxes);
+    renderLedgerGrid();
     updateResetUI();
 }
 
@@ -520,9 +562,17 @@ function renderFieldList(boxes) {
         }
         if (groupBadge instanceof HTMLElement) {
             const group = displayPersonGroup(boxes, box.personGroup);
-            groupBadge.classList.toggle('d-none', group === null);
-            groupBadge.textContent = group === null ? '' : `P${String(group).padStart(2, '0')}`;
-            groupBadge.title = group === null ? '' : `Person ${String(group).padStart(2, '0')}`;
+            if (box.kind === 'column') {
+                groupBadge.classList.remove('d-none');
+                groupBadge.classList.add('is-column');
+                groupBadge.textContent = 'Col';
+                groupBadge.title = 'Ledger column: read line by line inside the ruled rows';
+            } else {
+                groupBadge.classList.remove('is-column');
+                groupBadge.classList.toggle('d-none', group === null);
+                groupBadge.textContent = group === null ? '' : `P${String(group).padStart(2, '0')}`;
+                groupBadge.title = group === null ? '' : `Person ${String(group).padStart(2, '0')}`;
+            }
         }
         removeButton?.setAttribute('aria-label', `Remove field ${index + 1}`);
     });
@@ -573,6 +623,7 @@ function centerFieldListRow(index, { centerPanel = true } = {}) {
 
 function updateSelectionUI(indexes, context = {}) {
     const selected = new Set(indexes);
+    updateLedgerButtons(indexes);
 
     document.querySelectorAll('#fieldList .template-builder-field-item').forEach((item) => {
         item.classList.toggle('is-selected', selected.has(Number(item.dataset.fieldIndex)));
@@ -780,7 +831,8 @@ function pasteCopiedFields() {
     const dx = maxX + distance <= 1 ? distance : (minX - distance >= 0 ? -distance : 0);
     const dy = maxY + distance <= 1 ? distance : (minY - distance >= 0 ? -distance : 0);
     const takenNames = new Set(existing.map((box) => box.name.trim().toLocaleLowerCase()));
-    const copies = clipboard.map((box) => ({
+    // A pasted copy is an ordinary field, never a second ledger column.
+    const copies = clipboard.map(({ kind, columnIndex, ...box }) => ({
         ...box,
         name: nextCopyName(box.name, takenNames),
         x: box.x + dx,
@@ -880,7 +932,8 @@ function serialiseFields() {
     const container = element('fieldInputs');
     container.replaceChildren();
 
-    const fields = marker.toJSON().map((box) => ({
+    const boxes = marker.toJSON();
+    const fields = boxes.filter((box) => box.kind !== 'column').map((box) => ({
             name: box.name.trim(),
             x: box.x.toFixed(5),
             y: box.y.toFixed(5),
@@ -888,13 +941,27 @@ function serialiseFields() {
             height: box.h.toFixed(5),
             ...templatePersonPayload(box, groupingModeInput.value === 'custom'),
     }));
+    // Left to right: a ledger row is read in column order.
+    const columns = boxes
+        .filter((box) => box.kind === 'column')
+        .sort((a, b) => a.x - b.x)
+        .map((box) => ({
+            name: box.name.trim(),
+            box: [box.x, box.y, box.w, box.h].map((value) => Number(value.toFixed(5))),
+        }));
 
-    // One JSON input avoids PHP's max_input_vars truncating large layouts.
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'fields_json';
-    input.value = JSON.stringify(fields);
-    container.appendChild(input);
+    // One JSON input each avoids PHP's max_input_vars truncating large layouts.
+    [
+        ['fields_json', fields],
+        ['columns_json', columns],
+        ['ruled_ys_json', columns.length > 0 ? ruledYs.map((y) => Number(y.toFixed(5))) : []],
+    ].forEach(([name, value]) => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = JSON.stringify(value);
+        container.appendChild(input);
+    });
 }
 
 async function openSample(file, { pendingUpload = true } = {}) {
@@ -1048,6 +1115,7 @@ function restoreBaseline() {
         drawBlankPage();
     }
 
+    ruledYs = [...baselineRuledYs];
     marker.setBoxes(cloneBoxes(baselineBoxes));
     marker.resetZoom();
     viewport.scrollTo({ top: 0, left: 0 });
@@ -1141,7 +1209,287 @@ form.addEventListener('formdata', (event) => {
     }
 });
 
+// ------------------------------------------------------------- ledger grid
+//
+// A ruled register is described by its columns (ordinary markers flagged as
+// columns) and the y of every printed row line. Row lines are drawn in one
+// SVG over the page whose viewBox is 0-1000 in both directions, so they follow
+// every zoom without re-layout.
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ledgerLayer = document.createElementNS(SVG_NS, 'svg');
+ledgerLayer.setAttribute('class', 'ledger-rule-layer');
+ledgerLayer.setAttribute('viewBox', '0 0 1000 1000');
+ledgerLayer.setAttribute('preserveAspectRatio', 'none');
+ledgerLayer.setAttribute('aria-hidden', 'true');
+overlay.appendChild(ledgerLayer);
+
+let coveredFieldIndexes = [];
+
+function ledgerColumns(boxes = marker.toJSON()) {
+    return boxes.filter((box) => box.kind === 'column');
+}
+
+function medianGap(values) {
+    const gaps = values.slice(1).map((value, index) => value - values[index]).sort((a, b) => a - b);
+    return gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0.03;
+}
+
+function renderLedgerGrid() {
+    const columns = ledgerColumns();
+    const left = columns.length ? Math.min(...columns.map((c) => c.x)) : 0.02;
+    const right = columns.length ? Math.max(...columns.map((c) => c.x + c.w)) : 0.98;
+
+    ledgerLayer.replaceChildren();
+    ruledYs.forEach((y, index) => {
+        const group = document.createElementNS(SVG_NS, 'g');
+        group.setAttribute('class', 'ledger-rule');
+        group.dataset.index = String(index);
+        const line = document.createElementNS(SVG_NS, 'line');
+        const hit = document.createElementNS(SVG_NS, 'line');
+        [line, hit].forEach((node) => {
+            node.setAttribute('x1', String(left * 1000));
+            node.setAttribute('x2', String(right * 1000));
+            node.setAttribute('y1', String(y * 1000));
+            node.setAttribute('y2', String(y * 1000));
+        });
+        line.setAttribute('class', 'ledger-rule__line');
+        hit.setAttribute('class', 'ledger-rule__hit');
+        const title = document.createElementNS(SVG_NS, 'title');
+        title.textContent = `Row line ${index + 1}: drag to move, double-click to remove`;
+        group.append(line, hit, title);
+        ledgerLayer.appendChild(group);
+    });
+
+    const rows = Math.max(0, ruledYs.length - 1);
+    const badge = element('ledgerGridBadge');
+    const ready = columns.length > 0 && ruledYs.length >= 2;
+    badge.textContent = ready ? 'Ledger' : 'None';
+    badge.className = `badge ${ready ? 'bg-label-info' : 'bg-label-secondary'}`;
+    element('ledgerGridSummary').textContent = columns.length === 0 && ruledYs.length === 0
+        ? 'No ledger grid. This layout reads each field as a rectangle.'
+        : `${columns.length} column${columns.length === 1 ? '' : 's'} · ${ruledYs.length} row line${ruledYs.length === 1 ? '' : 's'} (${rows} row${rows === 1 ? '' : 's'})`
+            + (columns.length > 0 && ruledYs.length < 2 ? ' — add the row lines before saving.' : '');
+    element('clearGridBtn', HTMLButtonElement).disabled = columns.length === 0 && ruledYs.length === 0;
+}
+
+function setRuledYs(next) {
+    ruledYs = normaliseRuledYs(next).filter((y, index, all) => index === 0 || y - all[index - 1] > 0.001);
+    renderLedgerGrid();
+    updateResetUI();
+}
+
+// Drag a row line vertically; double-click removes it.
+ledgerLayer.addEventListener('pointerdown', (event) => {
+    const group = event.target instanceof Element ? event.target.closest('.ledger-rule') : null;
+    if (!group || event.button !== 0 || event.ctrlKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const index = Number(group.dataset.index);
+    group.classList.add('is-dragging');
+    const move = (moveEvent) => {
+        const bounds = overlay.getBoundingClientRect();
+        const y = Math.min(1, Math.max(0, (moveEvent.clientY - bounds.top) / Math.max(1, bounds.height)));
+        ruledYs[index] = y;
+        group.querySelectorAll('line').forEach((line) => {
+            line.setAttribute('y1', String(y * 1000));
+            line.setAttribute('y2', String(y * 1000));
+        });
+    };
+    const end = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', end);
+        window.removeEventListener('pointercancel', end);
+        setRuledYs(ruledYs);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+});
+
+ledgerLayer.addEventListener('dblclick', (event) => {
+    const group = event.target instanceof Element ? event.target.closest('.ledger-rule') : null;
+    if (!group) return;
+    event.preventDefault();
+    const index = Number(group.dataset.index);
+    setRuledYs(ruledYs.filter((_, candidate) => candidate !== index));
+});
+
+function uniqueName(base, taken) {
+    let name = base;
+    let suffix = 2;
+    while (taken.has(name.toLocaleLowerCase())) {
+        name = `${base} ${suffix}`;
+        suffix += 1;
+    }
+    taken.add(name.toLocaleLowerCase());
+    return name;
+}
+
+/**
+ * Fields sitting inside the ruled table: after switching to a ledger grid they
+ * would still be cropped as rectangles, so the admin is offered to remove them.
+ */
+function updateCoveredFields() {
+    const boxes = marker.toJSON();
+    const columns = ledgerColumns(boxes);
+    coveredFieldIndexes = [];
+
+    if (columns.length > 0 && ruledYs.length >= 2) {
+        const left = Math.min(...columns.map((c) => c.x));
+        const right = Math.max(...columns.map((c) => c.x + c.w));
+        const top = ruledYs[0];
+        const bottom = ruledYs[ruledYs.length - 1];
+        coveredFieldIndexes = boxes.flatMap((box, index) => {
+            if (box.kind === 'column') return [];
+            const cx = box.x + box.w / 2;
+            const cy = box.y + box.h / 2;
+            return cx >= left && cx <= right && cy >= top && cy <= bottom ? [index] : [];
+        });
+    }
+
+    const notice = element('ledgerCoveredNotice');
+    notice.classList.toggle('d-none', coveredFieldIndexes.length === 0);
+    element('ledgerCoveredMessage').textContent = coveredFieldIndexes.length === 1
+        ? '1 field sits inside the ruled table and would still be read as a rectangle.'
+        : `${coveredFieldIndexes.length} fields sit inside the ruled table and would still be read as rectangles.`;
+}
+
+async function detectLedgerGrid() {
+    if (!sampleLoaded) {
+        showBuilderError('Choose a sample page first: the grid is found from its printed rules.');
+        return;
+    }
+
+    const button = element('detectGridBtn', HTMLButtonElement);
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    clearBuilderError();
+
+    try {
+        const blob = await new Promise((resolve, reject) => {
+            canvas.toBlob((result) => (result ? resolve(result) : reject(new Error('The sample could not be prepared.'))), 'image/png');
+        });
+        const data = new FormData();
+        data.set('image', blob, 'sample.png');
+
+        const response = await window.fetch(config.detectGridUrl, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+            body: data,
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+            throw new Error(payload?.message || `Grid detection failed with HTTP ${response.status}.`);
+        }
+        if (!Array.isArray(payload?.ruled_ys) || payload.ruled_ys.length < 2) {
+            throw new Error('No evenly ruled rows were found on this sample. Add the row lines by hand.');
+        }
+
+        const boxes = marker.toJSON();
+        const top = payload.ruled_ys[0];
+        const bottom = payload.ruled_ys[payload.ruled_ys.length - 1];
+        let next = boxes;
+
+        if (ledgerColumns(boxes).length === 0 && Array.isArray(payload.columns) && payload.columns.length > 0) {
+            // Name each column after the topmost field already sitting in it.
+            const fields = boxes.filter((box) => box.kind !== 'column');
+            const taken = new Set(boxes.map((box) => box.name.trim().toLocaleLowerCase()));
+            const columns = payload.columns.map((column, index) => {
+                const [x, , w] = column.box;
+                const inside = fields
+                    .filter((field) => field.x + field.w / 2 >= x && field.x + field.w / 2 <= x + w)
+                    .sort((a, b) => a.y - b.y)[0];
+                const fieldName = inside?.name?.trim();
+                return {
+                    name: uniqueName(fieldName ? `${fieldName} column` : `Column ${index + 1}`, taken),
+                    x,
+                    y: top,
+                    w,
+                    h: bottom - top,
+                    personGroup: null,
+                    personFieldOrder: null,
+                    kind: 'column',
+                };
+            });
+            next = [...boxes, ...columns];
+        } else {
+            // Keep the admin's columns; stretch them over the detected rows.
+            next = boxes.map((box) => (box.kind === 'column' ? { ...box, y: top, h: bottom - top } : box));
+        }
+
+        ruledYs = normaliseRuledYs(payload.ruled_ys);
+        marker.setBoxes(cloneBoxes(next));
+        updateCoveredFields();
+
+        const estimated = Number(payload.estimated_ys) || 0;
+        element('ledgerGridSummary').textContent += estimated > 0
+            ? ` — ${estimated} line${estimated === 1 ? '' : 's'} below the last printed rule were estimated; check them against the page.`
+            : ' — check every line against the page.';
+    } catch (error) {
+        showBuilderError(error instanceof Error ? error.message : 'The grid could not be detected.');
+    } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+    }
+}
+
+function updateLedgerButtons(indexes = marker.selectedIndexes()) {
+    const boxes = marker.toJSON();
+    element('makeColumnsBtn', HTMLButtonElement).disabled = indexes.length === 0
+        || indexes.every((index) => boxes[index]?.kind === 'column');
+}
+
+element('detectGridBtn', HTMLButtonElement).addEventListener('click', detectLedgerGrid);
+
+element('makeColumnsBtn', HTMLButtonElement).addEventListener('click', () => {
+    const selected = new Set(marker.selectedIndexes());
+    if (selected.size === 0) return;
+    const top = ruledYs.length >= 2 ? ruledYs[0] : null;
+    const bottom = ruledYs.length >= 2 ? ruledYs[ruledYs.length - 1] : null;
+
+    marker.setBoxes(cloneBoxes(marker.toJSON().map((box, index) => {
+        if (!selected.has(index)) return box;
+        return {
+            ...box,
+            kind: 'column',
+            personGroup: null,
+            personFieldOrder: null,
+            ...(top !== null ? { y: top, h: bottom - top } : {}),
+        };
+    })));
+    updateCoveredFields();
+});
+
+element('addRuledLineBtn', HTMLButtonElement).addEventListener('click', () => {
+    if (ruledYs.length === 0) {
+        setRuledYs([0.2, 0.25]);
+        return;
+    }
+    const last = ruledYs[ruledYs.length - 1];
+    setRuledYs([...ruledYs, Math.min(1, last + medianGap(ruledYs))]);
+});
+
+element('clearGridBtn', HTMLButtonElement).addEventListener('click', () => {
+    ruledYs = [];
+    marker.setBoxes(cloneBoxes(marker.toJSON().filter((box) => box.kind !== 'column')));
+    updateCoveredFields();
+});
+
+element('removeCoveredFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
+    const covered = new Set(coveredFieldIndexes);
+    marker.setBoxes(cloneBoxes(marker.toJSON().filter((_, index) => !covered.has(index))));
+    updateCoveredFields();
+});
+
 marker.setBoxes(cloneBoxes(initialBoxes));
+renderLedgerGrid();
 updatePaperPreview();
 window.requestAnimationFrame(() => marker.resetZoom());
 openStoredSample();
