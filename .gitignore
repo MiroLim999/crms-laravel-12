@@ -64,3 +64,6 @@ web/saved_docs/
 /.kiro
 
 /sneat-reference
+
+# Laravel VS Code extension temp helpers
+storage/framework/lsp-*.php
