@@ -6,11 +6,13 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![Transformers](https://img.shields.io/badge/Hugging%20Face-TrOCR-FFD21E?style=flat&logo=huggingface&logoColor=black)](https://huggingface.co/microsoft/trocr-base-handwritten)
-[![Tests](https://img.shields.io/badge/Tests-176%20Passed%20(PHPUnit)-success)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-204%20Passed%20(PHPUnit)-success)](tests/)
 
 An enterprise-grade, AI-assisted civil registry digitisation and archival platform built with **Laravel 12**, **Bootstrap 5 (SNEAT design system)**, **FastAPI**, and a fine-tuned **Microsoft TrOCR** (Transformer-based Optical Character Recognition) handwriting engine.
 
-CRMS enables registry staff to scan historical civil certificates (birth, death, marriage, and custom document types), run machine learning recognition on cropped bounding boxes, perform human-in-the-loop verification, and archive immutable records backed by an append-only audit trail and formal change-request governance.
+CRMS enables registry staff to scan historical civil certificates and register ledgers (birth, death, marriage, and custom document types), detect and outline each handwritten line on the page, run machine learning recognition on the outlined crops, perform human-in-the-loop verification, and archive immutable records backed by an append-only audit trail and formal change-request governance.
+
+Everything runs locally. Page images and their text are never sent to an external API or cloud service: the records are covered by the Data Privacy Act.
 
 ---
 
@@ -35,7 +37,7 @@ CRMS enables registry staff to scan historical civil certificates (birth, death,
 
 ## System Architecture
 
-CRMS operates as a coordinated **two-process system** contained within a single repository:
+CRMS runs as **three local processes** from a single repository: the Laravel web app, a Laravel **queue worker** that detects and outlines handwritten lines in the background, and the FastAPI OCR service. The diagram shows the web app and the OCR service; the queue worker is described below it.
 
 ```
                       +-------------------------------------------------------------+
@@ -66,6 +68,7 @@ CRMS operates as a coordinated **two-process system** contained within a single 
 | Component | Stack | Primary Responsibilities |
 | :--- | :--- | :--- |
 | **Web Application** | Laravel 12, Blade, Bootstrap 5 (SNEAT), Vite, MySQL | User interfaces, authentication, template builder, verification workspace, record archival, change request moderation, audit logging, reporting. |
+| **Queue Worker** | `php artisan queue:work` (database queue), `ml/line_markers.py`, Kraken in `ml/.venv-kraken` | Runs the page job queued by **Detect** and **Scan with OCR**: straightens the page, fits the template to it, outlines every handwritten line, crops along the outlines and sends the crops to the OCR service. Without a running worker, pages wait at "Waiting for the line detector". |
 | **OCR Microservice** | FastAPI, PyTorch, Hugging Face `transformers`, Pillow | High-throughput TrOCR handwriting inference, model inventory discovery, signed direct-upload ingestion, model lifecycle management. |
 
 ### Architectural Highlights
@@ -73,6 +76,7 @@ CRMS operates as a coordinated **two-process system** contained within a single 
 1. **Zero-PHP Large Model Uploads**: Uploading gigabyte-scale model checkpoints (`safetensors`/`bin` archives) never passes through PHP or consumes web worker memory. Laravel generates a short-lived, HMAC-SHA256 signed ticket (`OCR_UPLOAD_SECRET`); the browser uploads directly to FastAPI's `/add_model` endpoint. Once written to disk, the client posts the model key to Laravel, which verifies the inventory and registers the model in a database transaction.
 2. **Server-Side AI Proxying**: Operational document recognition (`/documents/recognise`) is called server-to-server from Laravel to FastAPI. The FastAPI instance remains bound to loopback (`127.0.0.1`) without direct public access.
 3. **Decoupled Process Lifecycles**: Laravel never spawns, restarts, or terminates the Python OCR daemon. The OCR workspace actively monitors reachability via asynchronous health polling.
+4. **Separate Python Environment for Line Detection**: Kraken needs a newer PyTorch than the TrOCR service, so `ml/line_markers.py` runs in its own environment (`ml/.venv-kraken`, CPU). The queue worker calls it as a local subprocess; Kraken's model ships inside its package, so nothing is downloaded at run time.
 
 ---
 
@@ -85,27 +89,34 @@ CRMS operates as a coordinated **two-process system** contained within a single 
 - **Confidence Scoring & Review Warnings**: Computes token-level geometric mean confidence scores (0–100%). Fields falling below the configured threshold are visually flagged for manual operator review.
 - **Human-in-the-Loop Enforcement**: Only explicitly verified fields are committed to the permanent record upon submission.
 
-### 2. Dynamic Document Template Builder & Type Management
+### 2. Handwritten Line Detection (Detect)
+- **Per-Document Detect**: In the Align step, **Detect fields and ink** straightens a tilted page, fits the template's ledger columns and ruled rows to where this page actually printed them, and outlines every handwritten line before anything is read. Every document can sit at a different position, scale and tilt.
+- **Outlines, Not Rectangles**: Each line gets a polygon traced around its own strokes, so capitals and tails that cross a printed rule stay with their line and a neighbour's ink stays out. TrOCR reads a masked crop along that outline.
+- **Drawn Boxes Split into Lines**: A rectangle field drawn over a handwritten list is split into one outlined field per written line ("Diseases · line 1", "· line 2", ...). Scan with OCR without Detect keeps the rectangle as one field.
+- **Review Flags**: Lines between two ruled rows (`no_row`) or sharing a cell (`shared_cell`) are outlined in red and marked **Needs review** in Verify. A reviewer can redraw an outline; only that line is re-cropped and re-read.
+- **Training Export**: `php artisan crms:export-training` writes verified crops and their corrected text as a TrOCR training CSV (`file_name, text, doc_id, column, row`).
+
+### 3. Dynamic Document Template Builder & Type Management
 - **Visual Template Designer**: Create and publish document layouts with real-time coordinate calibration.
 - **Paper Specification Support**: Supports standard paper dimensions (A4, Letter, Legal, Folio) as well as arbitrary custom millimeter dimensions in Portrait or Landscape orientations.
 - **Sample Document Upload**: Direct upload of PDF or image samples rendered with PDF.js for canvas alignment.
 - **Custom Document Types**: Super Admins can define custom certificate classifications with distinct icons, validation rules, and active states.
 
-### 3. Immutable Record Archival & Change Request Governance
+### 4. Immutable Record Archival & Change Request Governance
 - **Permanent Record Locking**: Once verified and submitted by Staff, records are sealed against direct in-place modification.
 - **Formal Change-Request Workflow**: Staff initiate modification requests detailing justifications and proposed field values. Admins or Super Admins review, approve, or reject changes.
 - **Data Integrity Constraints**: Mandatory captured fields cannot be blanked during correction; all historical iterations remain auditable.
 
-### 4. OCR Model Management & Benchmark Provenance
+### 5. OCR Model Management & Benchmark Provenance
 - **Multi-Model Registry**: Live model scanning from `ml/models/`, support for custom checkpoints and the baseline `microsoft/trocr-base-handwritten`.
 - **Benchmark Provenance Radar**: Visualizes Character Error Rate (CER), Word Error Rate (WER), and Exact Match metrics strictly from locked test-split reports (`evaluation-report.json`) verified against model weight SHA-256 hashes. CRMS never fabricates benchmark statistics from operational scans.
 - **Operator Selection Flexibility**: Global model assignment with an optional Super Admin toggle allowing Staff to select approved alternative models during digitisation.
 
-### 5. Tamper-Evident Audit Trail
+### 6. Tamper-Evident Audit Trail
 - **Append-Only Logging**: Comprehensive activity logs recording actor ID, name, role, IP address, user agent, action verb, and before/after diffs.
 - **Automatic Secret Redaction**: Sensitive attributes (passwords, tokens, credentials) are stripped before persistence.
 
-### 6. Analytics & Administrative Oversight
+### 7. Analytics & Administrative Oversight
 - **Role-Tailored Dashboards**: Real-time KPI summaries, digitisation volume charts, correction rate tracking, and live OCR engine diagnostic badges.
 - **Timezone-Aware Reporting**: Filterable civil registry reporting respecting configured local operational boundaries (e.g., `Asia/Manila`) with streaming CSV exports.
 - **Secure Account Management**: Controlled staff/admin provisioning (no public sign-ups), auto-generated temporary passwords, mandatory first-login password rotation, soft deactivation, and protection against accidental Super Admin demotion.
@@ -138,15 +149,19 @@ CRMS enforces a strict separation of duties verified end-to-end in the test suit
 
 ```
 crms-laravel-12/
+├── .vscode/tasks.json                  # (local, gitignored) Kiro / VS Code tasks that start the three processes
 ├── app/                                # Core Laravel application logic
+│   ├── Console/Commands/               # crms:export-training, documents:prune-pages
 │   ├── Enums/                          # RoleSlug, DocumentType, RecordStatus, PaperSize, etc.
 │   ├── Http/
 │   │   ├── Controllers/                # Gated web controllers (Scan, Record, ChangeRequest, etc.)
 │   │   ├── Middleware/                 # EnsureAccountIsActive, EnsurePasswordIsChanged
 │   │   └── Requests/                   # Form validation request classes
-│   ├── Models/                         # Eloquent models (CivilRecord, RecordField, AuditLog, etc.)
+│   ├── Jobs/                           # ProcessDocumentPage (Detect / outline / read, on the queue)
+│   ├── Models/                         # Eloquent models (CivilRecord, RecordField, DocumentPage, PageLine, AuditLog, etc.)
 │   ├── Providers/                      # AuthServiceProvider (Capability Matrix Gate definitions)
 │   ├── Services/                       # Business logic (AuditLogger, ChangeRequestService, etc.)
+│   │   ├── Lines/                      # LineMarkers (runs ml/line_markers.py), PageLineReader
 │   │   └── Ocr/                        # OcrClient, OcrModelManager, OcrUploadAuthorizer, EngineStatus
 │   └── Support/                        # Navigation and UI support utilities
 ├── bootstrap/                          # Application bootstrap and middleware pipeline configuration
@@ -165,6 +180,9 @@ crms-laravel-12/
 │   ├── dataset_registry.py             # Dataset manifest validation and normalization
 │   ├── download_trocr.py               # Downloads Hugging Face base TrOCR weights
 │   ├── hf_quiet.py                     # Hugging Face environment logging silencer
+│   ├── line_markers.py                 # Deskew, template fit, line outlines and masked crops (Kraken)
+│   ├── requirements-kraken.txt         # Line-detection environment (ml/.venv-kraken)
+│   ├── setup_kraken.ps1                # Builds ml/.venv-kraken
 │   ├── metrics.py                      # CER / WER / Exact-Match computation and plot generators
 │   ├── predict.py                      # Standalone CLI batch prediction tool
 │   ├── requirements.txt                # ML pipeline dependencies (PyTorch, Transformers, Pandas)
@@ -184,7 +202,7 @@ crms-laravel-12/
 │   ├── JavaScript/                     # Node.js test runner unit tests (controls, markers, SNEAT)
 │   └── Python/                         # Python unit tests for ML evaluation report normalization
 ├── tools/                              # Development utility scripts (subset-icons.mjs)
-├── serve.ps1                           # PowerShell orchestration runner for dual-process startup
+├── serve.ps1                           # Starts the web app, queue worker and OCR service (see Running)
 ├── trocr-finetuning-code.ipynb         # Kaggle / Colab fine-tuning and evaluation notebook
 ├── vite.config.js                      # Vite asset bundler configuration
 ├── composer.json                       # PHP dependencies
@@ -205,6 +223,7 @@ Before setting up CRMS, ensure your environment meets the following requirements
 | **MySQL / MariaDB** | MySQL 8.0+ / MariaDB 10.4+ | InnoDB engine, utf8mb4 charset |
 | **Python** | 3.10+ | Required for running the FastAPI OCR service and training |
 | **PyTorch & CUDA** | PyTorch 2.0+ (CUDA optional) | Optional GPU acceleration for rapid TrOCR inference |
+| **Kraken environment** | `ml/.venv-kraken` (kraken 7.1, CPU PyTorch 2.9+) | Line detection for Detect and ledger templates. Built by `ml\setup_kraken.ps1`; older rectangle-only templates work without it |
 
 ---
 
@@ -237,6 +256,14 @@ pip install -r ml/requirements.txt -r ml/api/requirements.txt
 ```
 
 > **PyTorch GPU Support**: To enable CUDA GPU acceleration, install the CUDA-enabled PyTorch wheel from [pytorch.org](https://pytorch.org/get-started/locally/) (e.g., `pip install torch --index-url https://download.pytorch.org/whl/cu121`).
+
+#### Line-Detection Environment (Kraken)
+Kraken needs a newer PyTorch than the TrOCR service, so it gets its own environment. The script uses [`uv`](https://docs.astral.sh/uv/). From the repository root:
+```powershell
+pip install uv            # once, if uv is not on PATH yet
+.\ml\setup_kraken.ps1
+```
+This creates `ml\.venv-kraken` (CPU only). The app finds it automatically; set `LINE_MARKERS_PYTHON` only to use a different interpreter.
 
 ### 4. Configure Environment Files
 ```bash
@@ -291,31 +318,49 @@ php artisan db:seed --class=DemoUsersSeeder
 
 ## Running the Application
 
-### Option A: Using the PowerShell Runner (Windows)
-The included `serve.ps1` script performs an automated environment check (PHP, MySQL, Python, CUDA status) and launches both processes in individual windows:
+CRMS needs **three processes** running, plus MySQL (start it in the XAMPP Control Panel; Apache is not used):
+
+| Process | Command | Port |
+| :--- | :--- | :--- |
+| Web app | `php artisan serve` | [8000](http://127.0.0.1:8000) |
+| Queue worker | `php artisan queue:work --timeout=900 --tries=1` | – |
+| OCR service | `python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001` | [8001](http://127.0.0.1:8001) |
+
+> **Do not skip the queue worker.** `php artisan serve` starts the website only. Detect and Scan with OCR queue a background job, and without a worker the page stays on **"Waiting for the line detector"**.
+
+### Option A: Automatically When the Project Opens (Kiro / VS Code)
+`.vscode/tasks.json` starts all three as tabs in the editor's terminal panel whenever the project folder opens: **CRMS: website**, **CRMS: queue worker** and **CRMS: OCR service**. Closing the editor stops them. Each tab skips its process if it is already running, so nothing starts twice.
+
+- **First time only**: the editor asks whether to allow automatic tasks. Choose **Allow**. (Kiro ships with automatic tasks off; if you missed the prompt, run **Tasks: Manage Automatic Tasks → Allow Automatic Tasks** from the Command Palette.)
+- **Start them by hand**: Command Palette (**Ctrl+Shift+P**) → **Tasks: Run Task** → **CRMS: start services**.
+- `.vscode/` is gitignored, so this file is local to each machine. To set it up on a new machine, create `.vscode/tasks.json` with one task per process that runs `powershell.exe -NoProfile -ExecutionPolicy Bypass -File serve.ps1 -Only web` (and `-Only worker`, `-Only ocr`), each with `"isBackground": true` and `"runOptions": { "runOn": "folderOpen" }`.
+
+### Option B: The PowerShell Runner (Windows)
+From the repository root, `serve.ps1` checks the environment (PHP, MySQL, Python, CUDA, Kraken) and opens each process in its own window:
 
 ```powershell
-.\serve.ps1             # Starts both Laravel (8000) and FastAPI (8001)
-.\serve.ps1 -Check      # Verifies environment requirements and exits
-.\serve.ps1 -NoOcr      # Launches Laravel only
+.\serve.ps1               # Web app, queue worker and OCR service, one window each
+.\serve.ps1 -Check        # Check the environment and exit
+.\serve.ps1 -NoOcr        # Web app and queue worker only
+.\serve.ps1 -Only worker  # One process in the current terminal (web | worker | ocr)
 ```
 
-### Option B: Manual Process Execution
+If PowerShell refuses to run scripts, use `powershell -ExecutionPolicy Bypass -File .\serve.ps1`.
 
-Open two separate terminals from the repository root:
+### Option C: Manual Process Execution
+Open three terminals in the repository root and run one command from the table above in each. For the OCR service, activate `.venv` first.
 
-**Terminal 1: Laravel Web Application**
+### Notes on the Queue Worker
+- The worker started by Option A or B restarts itself: after a crash, after MySQL comes up late, and after `php artisan queue:restart`. Run `queue:restart` after changing job code (for example `app/Jobs/ProcessDocumentPage.php`), because a running worker keeps the old code loaded. A worker started by hand (Option C) does not come back; start it again.
+- While idle, the worker uses about 50 MB of memory and no noticeable CPU. Line detection uses the CPU for roughly 20–60 seconds per page when Detect or Scan runs; reading uses the GPU when CUDA is available.
+- The yellow `PHP_CLI_SERVER_WORKERS` warning from `php artisan serve` is harmless: PHP cannot run several server workers on Windows.
+
+### Housekeeping Commands
 ```bash
-php artisan serve --port=8000
+php artisan documents:prune-pages          # Remove unsubmitted pages older than LINE_MARKERS_KEEP_HOURS
+php artisan schedule:work                  # Runs prune-pages hourly while developing (use cron / Task Scheduler in production)
+php artisan crms:export-training           # Export verified line crops + corrected text as a TrOCR training CSV
 ```
-Access the application at [http://127.0.0.1:8000](http://127.0.0.1:8000).
-
-**Terminal 2: FastAPI OCR Microservice**
-```bash
-# Ensure your virtual environment is active
-python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001
-```
-The OCR service will listen on [http://127.0.0.1:8001](http://127.0.0.1:8001).
 
 ---
 
@@ -460,7 +505,7 @@ location = /ocr-api/add_model {
 
 ### Production Checklist
 1. **Persistent Model Storage**: Ensure `ml/models/` is mounted on persistent, non-ephemeral storage.
-2. **Process Management**: Run FastAPI under a supervisor daemon (systemd, Supervisor, or Docker restart policies) rather than development uvicorn reloaders.
+2. **Process Management**: Run FastAPI and `php artisan queue:work --timeout=900 --tries=1` under a supervisor daemon (systemd, Supervisor, NSSM on Windows, or Docker restart policies) rather than development uvicorn reloaders, and run `php artisan schedule:run` every minute so unsubmitted pages are pruned.
 3. **Configuration Caching**: Rebuild Laravel caches whenever `.env` parameters change:
    ```bash
    php artisan config:cache
@@ -476,7 +521,7 @@ CRMS maintains a comprehensive test suite across PHP, JavaScript, and Python lay
 
 ```
 tests/
-├── Feature/                    # 14 PHPUnit feature test classes (176 tests, 1140 assertions)
+├── Feature/                    # 16 PHPUnit feature test classes (204 tests)
 │   ├── AnalyticsDashboardTest.php
 │   ├── AuditLogTest.php
 │   ├── AuditLogViewerTest.php
@@ -486,21 +531,26 @@ tests/
 │   ├── ChangeRequestWorkflowTest.php
 │   ├── DocumentTemplateBuilderTest.php
 │   ├── DocumentUploadWorkflowTest.php
+│   ├── LedgerTemplateAndExportTest.php      # Ledger grids, training CSV export
+│   ├── LineOutlinePipelineTest.php          # Page job, Detect, outlines, manual fixes
 │   ├── OcrModelPerformanceTest.php
 │   ├── OcrWorkspaceTest.php
 │   ├── RecordDetailPresentationTest.php
 │   ├── ReportExportTest.php
 │   └── UserManagementTest.php
-├── JavaScript/                 # 25 Node.js unit tests (SNEAT controls, shortcuts, markers)
+├── JavaScript/                 # Node.js unit tests (SNEAT controls, shortcuts, markers, line geometry)
 │   ├── change-request.test.js
+│   ├── field-marker.test.js
 │   ├── icon-coverage.test.js
+│   ├── line-geometry.test.js
 │   ├── person-grouping.test.js
 │   ├── record-detail.test.js
 │   ├── sneat-controls.test.js
 │   ├── template-builder-shortcuts.test.js
 │   └── verification-groups.test.js
-└── Python/                     # Python unit tests for ML evaluation report verification
-    └── test_evaluation_report.py
+└── Python/                     # Python unit tests
+    ├── test_evaluation_report.py   # ML evaluation report verification
+    └── test_line_markers.py        # Line detection on synthetic pages (needs ml/.venv-kraken)
 ```
 
 ### Running Test Suites
@@ -521,6 +571,10 @@ npm run test:js
 #### 3. Python Unit Tests
 ```bash
 python -m unittest discover tests/Python
+```
+The line-detection tests need scipy, scikit-image and shapely, which the Kraken environment has. Run them with it; under another interpreter the tests that need those packages are skipped:
+```powershell
+ml.venv-krakenScriptspython.exe -m unittest tests.Python.test_line_markers
 ```
 
 #### 4. Pre-Commit Validation Checklist
@@ -553,6 +607,11 @@ python -m py_compile ml/api/main.py      # Verify FastAPI microservice syntax
 | `OCR_API_TIMEOUT` | `120` | HTTP request timeout (seconds) for OCR inference operations. |
 | `OCR_UPLOAD_SECRET` | *(Empty / Falls back to `APP_KEY`)* | HMAC secret for signing direct model upload tickets. |
 | `OCR_UPLOAD_TICKET_TTL` | `900` | Validity lifetime in seconds for model upload tickets (max 3600). |
+| `QUEUE_CONNECTION` | `database` | Queue for the page job (Detect / outline / read). A worker must be running. |
+| `DB_QUEUE_RETRY_AFTER` | `960` | Seconds before a stuck page job is retried; keep it above the worker's `--timeout=900`. |
+| `LINE_MARKERS_PYTHON` | *(Empty: uses `ml/.venv-kraken`)* | Python interpreter that runs `ml/line_markers.py`. |
+| `LINE_MARKERS_TIMEOUT` | `600` | Seconds one page's line detection may take. |
+| `LINE_MARKERS_KEEP_HOURS` | `24` | Unsubmitted pages older than this are removed by `documents:prune-pages`. |
 | `OCR_BROWSER_ORIGIN_REGEX` | *(Loopback regex)* | Allowed browser origins regex for CORS upload requests. |
 | `CRMS_CONFIDENCE_THRESHOLD` | `80` | Default OCR confidence threshold below which fields flag for review. |
 | `CRMS_REPORTING_TIMEZONE` | `Asia/Manila` | Local timezone used for civil registry day/month reporting boundaries. |
@@ -565,6 +624,7 @@ python -m py_compile ml/api/main.py      # Verify FastAPI microservice syntax
 ## Technology Stack
 
 - **Backend**: [Laravel 12](https://laravel.com/), PHP 8.2+, Composer
+- **Line Detection**: [Kraken](https://kraken.re/) 7 baseline segmentation, SciPy, scikit-image, Shapely
 - **OCR & ML Microservice**: [FastAPI](https://fastapi.tiangolo.com/), [PyTorch](https://pytorch.org/), [Hugging Face Transformers](https://huggingface.co/docs/transformers/index) (Microsoft TrOCR), Pillow, Pandas
 - **Frontend & UI**: Blade Templates, [Bootstrap 5](https://getbootstrap.com/), SNEAT Design System, Sass, [Vite](https://vitejs.dev/)
 - **Charts & Visuals**: [ApexCharts](https://apexcharts.com/)
