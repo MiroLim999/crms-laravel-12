@@ -169,6 +169,71 @@ def _rect_polygon(x, y, w, h):
     return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
 
 
+def _turned_rect_polygon(x, y, w, h, degrees):
+    """A rectangle turned clockwise (as seen on screen) about its centre.
+
+    Corners in the order top left, top right, bottom right, bottom left of the
+    rectangle itself, so the first edge runs along its top.
+    """
+    if not degrees:
+        return _rect_polygon(x, y, w, h)
+    cx, cy = x + w / 2, y + h / 2
+    cos, sin = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    return [
+        [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos]
+        for dx, dy in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2))
+    ]
+
+
+def _polygon_turn(polygon):
+    """(centre, width, height, degrees) of a turned four-corner rectangle."""
+    (x0, y0), (x1, y1), _, (x3, y3) = [(float(x), float(y)) for x, y in polygon[:4]]
+    centre = (sum(float(p[0]) for p in polygon[:4]) / 4, sum(float(p[1]) for p in polygon[:4]) / 4)
+    return centre, math.hypot(x1 - x0, y1 - y0), math.hypot(x3 - x0, y3 - y0), math.degrees(math.atan2(y1 - y0, x1 - x0))
+
+
+def crop_turned_box(image, polygon, out_path=None, fill=CROP_FILL, padding=CROP_PADDING):
+    """Crop a turned rectangle so that it reads level.
+
+    A tilted field marker holds tilted writing. Masking its outline, as
+    crop_line does, would hand TrOCR the writing still on a slant; this turns
+    the rectangle upright instead. Returns the crop and the bounding box
+    [x, y, w, h] of the turned rectangle in page pixels, like crop_line.
+    """
+    if isinstance(image, str):
+        image = Image.open(image)
+    image = image.convert("RGB")
+    (cx, cy), w, h, degrees = _polygon_turn(polygon)
+    if w < 2 or h < 2:
+        raise ValueError("That outline lies outside the page.")
+
+    xs = [float(p[0]) for p in polygon]
+    ys = [float(p[1]) for p in polygon]
+    width, height = image.size
+    x0, y0 = max(0, int(math.floor(min(xs)))), max(0, int(math.floor(min(ys))))
+    x1, y1 = min(width, int(math.ceil(max(xs))) + 1), min(height, int(math.ceil(max(ys))) + 1)
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        raise ValueError("That outline lies outside the page.")
+    if fill == "paper":
+        pixels = np.asarray(image.crop((x0, y0, x1, y1))).reshape(-1, 3)
+        fill = tuple(int(v) for v in np.percentile(pixels, 75, axis=0))
+
+    out_w, out_h = int(round(w)) + 2 * padding, int(round(h)) + 2 * padding
+    cos, sin = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    # Output pixel (u, v) comes from the page point centre + turn(u - W/2, v - H/2).
+    coefficients = (
+        cos, -sin, cx - cos * out_w / 2 + sin * out_h / 2,
+        sin, cos, cy - sin * out_w / 2 - cos * out_h / 2,
+    )
+    out = image.transform((out_w, out_h), Image.AFFINE, coefficients, resample=Image.BICUBIC, fillcolor=fill)
+
+    if out_path:
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+        out.save(out_path, "PNG")
+
+    return out, [x0, y0, x1 - x0, y1 - y0]
+
+
 def _page_geometry(geometry, width, height):
     """Convert the template geometry (page fractions) into page pixels."""
     columns = []
@@ -187,15 +252,18 @@ def _page_geometry(geometry, width, height):
 
     fields = []
     for index, field in enumerate(geometry.get("fields") or []):
+        angle = float(field.get("angle") or 0.0)
         if field.get("polygon"):
             polygon = [[float(px) * width, float(py) * height] for px, py in field["polygon"]]
         else:
             x, y, w, h = [float(v) for v in field["box"]]
-            polygon = _rect_polygon(x * width, y * height, w * width, h * height)
+            polygon = _turned_rect_polygon(x * width, y * height, w * width, h * height, angle)
         fields.append({
             "index": index,
             "name": str(field.get("name") or f"Field {index + 1}"),
             "polygon": polygon,
+            # A turned rectangle is cropped level (crop_turned_box).
+            "turned": abs(angle) >= 0.05 and len(polygon) == 4,
             "person_group": field.get("person_group"),
             "person_field_order": field.get("person_field_order"),
         })
@@ -1328,7 +1396,8 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
     columns_by_index = {c["index"]: c for c in columns}
     for number, line in enumerate(lines, start=1):
         crop_name = _crop_name(number, line, columns_by_index)
-        _, bbox = crop_line(image, line.polygon, os.path.join(out_dir, "crops", crop_name))
+        crop = crop_turned_box if line.source == SOURCE_TEMPLATE and line.field.get("turned") else crop_line
+        _, bbox = crop(image, line.polygon, os.path.join(out_dir, "crops", crop_name))
         record = {
             "id": number,
             "source": line.source,
@@ -1715,6 +1784,102 @@ def straighten_page(image, degrees):
     return image.rotate(float(degrees), resample=Image.BICUBIC, expand=True, fillcolor=paper)
 
 
+def _straightened_point(x, y, degrees, old_size, new_size):
+    """Where page pixel (x, y) lands after straighten_page(image, degrees)."""
+    (width, height), (new_width, new_height) = old_size, new_size
+    cos, sin = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    dx, dy = x - width / 2, y - height / 2
+    return new_width / 2 + dx * cos + dy * sin, new_height / 2 - dx * sin + dy * cos
+
+
+def grid_tilt(geometry):
+    """The ledger's tilt as Staff marked it, in degrees clockwise (0 if none).
+
+    Staff tilt each column marker on its own; the columns' typical (median)
+    tilt is taken as the page's.
+    """
+    angles = [float(column.get("angle") or 0.0) for column in geometry.get("columns") or []]
+    return float(np.median(angles)) if angles else 0.0
+
+
+def _straighten_geometry(geometry, degrees, old_size, new_size, grid_frame):
+    """The markers moved onto the page straightened by `degrees`.
+
+    Every field corner goes where the page takes it, so a field keeps its
+    place and loses the page's tilt from its own.
+
+    Columns and row lines are moved only when `grid_frame` (Staff tilted the
+    columns to match the page); otherwise they stay for Detect to refit. A
+    column turned about its own centre lands with that centre where the page
+    takes it, standing upright: what remains of its own tilt after the page's
+    is a column slightly off the typical one, and the printed rule it is
+    snapped to decides its edges anyway. Row lines keep their distance from
+    the columns' tops.
+    """
+    (width, height), (new_width, new_height) = old_size, new_size
+    moved = dict(geometry)
+    columns = geometry.get("columns") or []
+    if grid_frame and columns:
+        placed = []
+        for column in columns:
+            x, y, w, h = [float(v) for v in column["box"]]
+            cx, cy = _straightened_point((x + w / 2) * width, (y + h / 2) * height, degrees, old_size, new_size)
+            placed.append((column, cx, cy, w * width, h * height))
+        moved["columns"] = [
+            {key: value for key, value in column.items() if key != "angle"} | {"box": [
+                (cx - w / 2) / new_width, (cy - h / 2) / new_height, w / new_width, h / new_height,
+            ]}
+            for column, cx, cy, w, h in placed
+        ]
+        old_top = float(np.median([float(column["box"][1]) * height for column in columns]))
+        new_top = float(np.median([cy - h / 2 for _, _, cy, _, h in placed]))
+        moved["ruled_ys"] = [(new_top + float(y) * height - old_top) / new_height for y in geometry.get("ruled_ys") or []]
+
+    fields = []
+    for field in geometry.get("fields") or []:
+        angle = float(field.get("angle") or 0.0)
+        if field.get("polygon"):
+            corners = [[float(x) * width, float(y) * height] for x, y in field["polygon"]]
+        else:
+            x, y, w, h = [float(v) for v in field["box"]]
+            corners = _turned_rect_polygon(x * width, y * height, w * width, h * height, angle)
+        placed = [_straightened_point(x, y, degrees, old_size, new_size) for x, y in corners]
+        polygon = [[min(1.0, max(0.0, x / new_width)), min(1.0, max(0.0, y / new_height))] for x, y in placed]
+        xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
+        fields.append(field | {
+            "polygon": polygon,
+            "box": [min(xs), min(ys), max(1e-3, max(xs) - min(xs)), max(1e-3, max(ys) - min(ys))],
+            "angle": round(angle - degrees, 3),
+        })
+    moved["fields"] = fields
+    return moved
+
+
+def outline_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None):
+    """Scan with OCR from Staff's markers, straightening a tilted page first.
+
+    When Staff tilted the ledger columns to match the page, the page is
+    straightened by their typical tilt and saved in place (as Detect does), so the
+    outlines, the crops and the page shown in Verify share one pixel grid.
+    The result then also carries "deskew" and the "geometry" used.
+    """
+    degrees = grid_tilt(geometry)
+    if abs(degrees) < 0.05:
+        return process_page(page_path, geometry, out_dir, detector=detector, debug=debug)
+
+    image = Image.open(page_path).convert("RGB")
+    straight = straighten_page(image, degrees)
+    straight.save(page_path, "PNG")
+    moved = _straighten_geometry(geometry, degrees, image.size, straight.size, grid_frame=True)
+
+    result = process_page(page_path, moved, out_dir, detector=detector, debug=debug)
+    result["deskew"] = round(degrees, 3)
+    result["geometry"] = _snapped_geometry(result, moved)
+    with open(os.path.join(out_dir, "lines.json"), "w", encoding="utf-8") as handle:
+        json.dump(result, handle)
+    return result
+
+
 def _fit_1d(template, found, tolerance, prior=None, max_gap=None):
     """Scale and shift that put the most template positions on found positions.
 
@@ -1810,7 +1975,9 @@ def fit_geometry(image, geometry):
         "ruled_ys": new_ruled,
         "fields": [
             {**field, "box": [clamp(tx + sx * field["box"][0]), clamp(ty + sy * field["box"][1]),
-                              max(0.001, sx * field["box"][2]), max(0.001, sy * field["box"][3])]}
+                              max(0.001, sx * field["box"][2]), max(0.001, sy * field["box"][3])],
+             **({"polygon": [[clamp(tx + sx * float(x)), clamp(ty + sy * float(y))] for x, y in field["polygon"]]}
+                if field.get("polygon") else {})}
             for field in fields
         ],
     }
@@ -1853,8 +2020,13 @@ def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None)
     image = Image.open(page_path).convert("RGB")
     degrees = estimate_skew(image)
     if abs(degrees) >= 0.1:
+        original_size = image.size
         image = straighten_page(image, degrees)
         image.save(page_path, "PNG")
+        # Fields follow the page. Columns do too if Staff had already tilted
+        # them with the page; upright columns are refitted below.
+        geometry = _straighten_geometry(geometry, degrees, original_size, image.size,
+                                        grid_frame=abs(grid_tilt(geometry)) >= 0.05)
     else:
         degrees = 0.0
 
@@ -1909,11 +2081,12 @@ def main(argv=None):
 
     try:
         if args.command == "process":
-            result = process_page(args.page, _read_json_arg(args.geometry), args.out)
+            result = outline_page(args.page, _read_json_arg(args.geometry), args.out)
             summary = {
                 "ok": True,
                 "lines": len(result["lines"]),
                 "flagged": sum(1 for line in result["lines"] if line["flags"]),
+                **({"deskew": result["deskew"]} if "deskew" in result else {}),
                 "timings": result["timings"],
             }
         elif args.command == "detect":

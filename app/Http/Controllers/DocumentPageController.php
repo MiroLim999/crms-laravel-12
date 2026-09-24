@@ -59,12 +59,14 @@ class DocumentPageController extends Controller
             'geometry.columns.*.name' => ['required', 'string', 'max:500'],
             'geometry.columns.*.box' => ['required', 'array', 'size:4'],
             'geometry.columns.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],
+            'geometry.columns.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
             'geometry.ruled_ys' => ['present', 'array', 'max:400'],
             'geometry.ruled_ys.*' => ['required', 'numeric', 'min:0', 'max:1'],
             'geometry.fields' => ['present', 'array', 'max:450'],
             'geometry.fields.*.name' => ['required', 'string', 'max:500'],
             'geometry.fields.*.box' => ['required', 'array', 'size:4'],
             'geometry.fields.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],
+            'geometry.fields.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
             'geometry.fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:65535'],
             'geometry.fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:65535'],
         ]);
@@ -358,10 +360,14 @@ class DocumentPageController extends Controller
             throw ValidationException::withMessages($errors);
         }
 
+        // Every marker has its own tilt; only a turned one carries an angle.
+        $angle = fn (array $marker) => round((float) ($marker['angle'] ?? 0), 1);
+
         return [
             'columns' => array_map(fn (array $c) => [
                 'name' => (string) $c['name'],
                 'box' => array_map('floatval', $c['box']),
+                ...($angle($c) != 0.0 ? ['angle' => $angle($c)] : []),
             ], $columns),
             'ruled_ys' => $ruled,
             'fields' => array_map(fn (array $f) => [
@@ -369,6 +375,7 @@ class DocumentPageController extends Controller
                 'box' => array_map('floatval', $f['box']),
                 'person_group' => isset($f['person_group']) ? (int) $f['person_group'] : null,
                 'person_field_order' => isset($f['person_field_order']) ? (int) $f['person_field_order'] : null,
+                ...($angle($f) != 0.0 ? ['angle' => $angle($f)] : []),
             ], $fields),
         ];
     }

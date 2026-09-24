@@ -104,6 +104,9 @@
                                     <div><span><kbd>Shift</kbd> + drag</span><small>Add fields to selection</small></div>
                                     <div><span>Drag selection</span><small>Move selected fields</small></div>
                                     <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
+                                    <div><span>Drag the rotate knob below a field</span><small>Tilt that field (<kbd>Shift</kbd>: 5° steps)</small></div>
+                                    <div><span><kbd>[</kbd> or <kbd>]</kbd></span><small>Tilt selected 0.5° (<kbd>Shift</kbd>: 5°)</small></div>
+                                    <div><span>Double-click the knob</span><small>Straighten</small></div>
                                     <div><span><kbd>Ctrl</kbd> + <kbd>C</kbd></span><small>Copy selected</small></div>
                                     <div><span><kbd>Ctrl</kbd> + <kbd>V</kbd></span><small>Paste fields</small></div>
                                     <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Delete selected</small></div>
@@ -478,6 +481,7 @@
     import {
         canVerifyValue,
         FieldMarker,
+        markerAngleMetadata,
         markerColumnMetadata,
         markerPersonMetadata,
         verificationGroupState,
@@ -607,7 +611,7 @@
     let detection = null;
 
     const cloneBoxes = (boxes) => boxes.map(({
-        name, x, y, w, h, personGroup, personFieldOrder, kind, columnIndex,
+        name, x, y, w, h, personGroup, personFieldOrder, kind, columnIndex, angle,
     }) => ({
         name,
         x,
@@ -616,6 +620,7 @@
         h,
         ...markerPersonMetadata({ personGroup, personFieldOrder }),
         ...markerColumnMetadata({ kind, columnIndex }),
+        ...markerAngleMetadata({ angle }),
     }));
     const templateBoxes = config.boxes.map((box) => ({
         name: box.name,
@@ -625,6 +630,7 @@
         h: +box.h,
         ...markerPersonMetadata(box),
         ...markerColumnMetadata(box),
+        ...markerAngleMetadata(box),
     }));
     const templateColumns = templateBoxes.filter((box) => box.kind === 'column');
 
@@ -683,7 +689,7 @@
         // The same pixels the outlines were found on, and that go on to TrOCR.
         await marker.loadFromUrl(page.imageUrl);
         updatePaperMatchWarning();
-        const fitted = cloneBoxes(geometryMarkers(page.geometry));
+        const fitted = cloneBoxes(geometryMarkers(page.geometry, page));
         marker.setBoxes(fitted);
         window.requestAnimationFrame(() => marker.resetZoom());
 
@@ -1130,6 +1136,13 @@
             return;
         }
 
+        // [ and ] tilt the selection half a degree; with Shift, five degrees.
+        if (!commandPressed && ['BracketLeft', 'BracketRight'].includes(event.code) && marker.selectedIndexes().length > 0) {
+            event.preventDefault();
+            marker.rotateSelected((event.code === 'BracketLeft' ? -1 : 1) * (event.shiftKey ? 5 : 0.5));
+            return;
+        }
+
         if (['Backspace', 'Delete'].includes(event.key) && marker.selectedIndexes().length > 0) {
             event.preventDefault();
             marker.removeSelected();
@@ -1433,7 +1446,8 @@
 
             timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
             let payload;
-            if (detectionIsCurrent()) {
+            const readingDetectedPage = detectionIsCurrent();
+            if (readingDetectedPage) {
                 // The outlines Staff just checked are the ones read.
                 setOcrProgress(Math.max(ocrProgress, 60), 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
                 payload = await readDetectedPage(controller.signal);
@@ -1445,6 +1459,13 @@
 
             const page = await waitForPage(payload, controller.signal);
             clearDetection();
+
+            // A tilted ledger grid makes the server straighten the page before
+            // outlining it; show that page so the outlines sit on their writing.
+            if (!readingDetectedPage && Math.abs(Number(page.deskew) || 0) >= 0.05) {
+                await marker.loadFromUrl(page.imageUrl);
+                marker.setBoxes(cloneBoxes(geometryMarkers(page.geometry, page)));
+            }
 
             if (!Array.isArray(page.lines) || page.lines.length === 0) {
                 throw new Error('No handwriting was found inside the markers. Check the alignment and scan again.');

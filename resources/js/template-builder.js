@@ -1,4 +1,4 @@
-import { FieldMarker } from './field-marker';
+import { FieldMarker, markerAngleMetadata, normaliseAngle } from './field-marker';
 import { attachMarqueeSelection } from './marquee-selection';
 import {
     nonNegativeInteger,
@@ -55,9 +55,17 @@ const baselineGroupingMode = config.baselineGroupingMode === 'custom' ? 'custom'
 const initialGroupingMode = config.initialGroupingMode === 'custom' ? 'custom' : 'auto';
 
 const cloneBoxes = (boxes) => boxes.map(({
-    name, x, y, w, h, personGroup = null, personFieldOrder = null, kind = null,
+    name, x, y, w, h, personGroup = null, personFieldOrder = null, kind = null, angle = 0,
 }) => ({
-    name, x, y, w, h, personGroup, personFieldOrder, ...(kind === 'column' ? { kind } : {}),
+    name,
+    x,
+    y,
+    w,
+    h,
+    personGroup,
+    personFieldOrder,
+    ...(kind === 'column' ? { kind } : {}),
+    ...markerAngleMetadata({ angle }),
 }));
 const snapshot = (boxes) => JSON.stringify(cloneBoxes(boxes));
 
@@ -86,6 +94,7 @@ function normaliseBoxes(fields) {
             personFieldOrder: personGroup === null
                 ? null
                 : nonNegativeInteger(field.personFieldOrder ?? field.person_field_order),
+            ...markerAngleMetadata(field),
         };
     });
 }
@@ -107,6 +116,7 @@ function normaliseColumns(columns) {
             personGroup: null,
             personFieldOrder: null,
             kind: 'column',
+            ...markerAngleMetadata(column),
         };
     });
 }
@@ -939,6 +949,7 @@ function serialiseFields() {
             y: box.y.toFixed(5),
             width: box.w.toFixed(5),
             height: box.h.toFixed(5),
+            angle: normaliseAngle(box.angle),
             ...templatePersonPayload(box, groupingModeInput.value === 'custom'),
     }));
     // Left to right: a ledger row is read in column order.
@@ -948,6 +959,7 @@ function serialiseFields() {
         .map((box) => ({
             name: box.name.trim(),
             box: [box.x, box.y, box.w, box.h].map((value) => Number(value.toFixed(5))),
+            ...markerAngleMetadata(box),
         }));
 
     // One JSON input each avoids PHP's max_input_vars truncating large layouts.
@@ -1168,6 +1180,13 @@ document.addEventListener('keydown', (event) => {
     if (commandPressed && !event.shiftKey && key === 'z' && fieldHistory.length > 0) {
         event.preventDefault();
         undoFieldChange();
+        return;
+    }
+
+    // [ and ] tilt the selection half a degree; with Shift, five degrees.
+    if (!commandPressed && ['BracketLeft', 'BracketRight'].includes(event.code) && marker.selectedIndexes().length > 0) {
+        event.preventDefault();
+        marker.rotateSelected((event.code === 'BracketLeft' ? -1 : 1) * (event.shiftKey ? 5 : 0.5));
         return;
     }
 

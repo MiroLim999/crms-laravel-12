@@ -89,9 +89,10 @@ class ProcessDocumentPage implements ShouldQueue
             : $markers->process($disk->path($page->image_path), $page->geometry, $disk->path($page->directory()));
 
         DB::transaction(function () use ($page, $result) {
-            if ($this->mode === self::MODE_DETECT) {
-                // The page was straightened in place, which can change its size,
-                // and the template was fitted to it: keep both.
+            // Detect straightens the page in place, and so does a scan whose
+            // ledger grid Staff tilted; that can change its size, and the
+            // markers were moved onto the straightened page: keep both.
+            if ($this->mode === self::MODE_DETECT || isset($result['deskew'])) {
                 [$width, $height] = $result['size'];
                 $page->forceFill([
                     'width' => $width,

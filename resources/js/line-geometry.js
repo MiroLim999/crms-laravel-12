@@ -19,6 +19,15 @@ export const SOURCE_FIELD = 'field';
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 
+/**
+ * A marker's tilt (degrees clockwise) as the server takes it: present only
+ * when the marker is turned. Columns share the grid's tilt.
+ */
+function angleOf(marker) {
+    const angle = Math.round(Number(marker?.angle) * 10) / 10;
+    return Number.isFinite(angle) && angle !== 0 ? { angle } : {};
+}
+
 function median(values) {
     if (values.length === 0) return null;
     const sorted = [...values].sort((a, b) => a - b);
@@ -65,6 +74,7 @@ export function alignedGeometry(aligned, templateColumns, ruledYs) {
         columns: columns.map((column) => ({
             name: column.name,
             box: [column.x, column.y, column.w, column.h],
+            ...angleOf(column),
         })),
         ruled_ys: ruled,
         fields: fields.map((field) => ({
@@ -72,6 +82,7 @@ export function alignedGeometry(aligned, templateColumns, ruledYs) {
             box: [field.x, field.y, field.w, field.h],
             person_group: Number.isInteger(field.personGroup) ? field.personGroup : null,
             person_field_order: Number.isInteger(field.personFieldOrder) ? field.personFieldOrder : null,
+            ...angleOf(field),
         })),
     };
 }
@@ -159,13 +170,10 @@ export function verificationItems(lines, page) {
  *
  * @param {{columns: Array<{name: string, box: number[]}>, fields: Array<{name: string, box: number[], person_group?: number|null, person_field_order?: number|null}>}} geometry
  */
-export function geometryMarkers(geometry) {
+export function geometryMarkers(geometry, page = null) {
     const fields = (geometry?.fields ?? []).map((field) => ({
         name: field.name,
-        x: field.box[0],
-        y: field.box[1],
-        w: field.box[2],
-        h: field.box[3],
+        ...fieldBox(field, page),
         ...(Number.isInteger(field.person_group) ? { personGroup: field.person_group } : {}),
         ...(Number.isInteger(field.person_group) && Number.isInteger(field.person_field_order)
             ? { personFieldOrder: field.person_field_order } : {}),
@@ -178,8 +186,39 @@ export function geometryMarkers(geometry) {
         h: column.box[3],
         kind: 'column',
         columnIndex,
+        ...angleOf(column),
     }));
     return [...fields, ...columns];
+}
+
+/**
+ * A field's marker box (and tilt) from what the server sent back.
+ *
+ * When the server straightened a page it moves each field onto it as a turned
+ * four-corner outline; the marker is that outline's own upright box, turned.
+ * Undoing the turn needs the page's pixel size, because a turn is only a turn
+ * in pixels, not in page fractions of a non-square page.
+ */
+function fieldBox(field, page) {
+    const polygon = Array.isArray(field.polygon) ? field.polygon : null;
+    const width = Number(page?.width);
+    const height = Number(page?.height);
+    if (!polygon || polygon.length !== 4 || !(width > 0) || !(height > 0)) {
+        return { x: field.box[0], y: field.box[1], w: field.box[2], h: field.box[3], ...angleOf(field) };
+    }
+    const corners = polygon.map(([x, y]) => [x * width, y * height]);
+    const [[x0, y0], [x1, y1], , [x3, y3]] = corners;
+    const w = Math.hypot(x1 - x0, y1 - y0);
+    const h = Math.hypot(x3 - x0, y3 - y0);
+    const cx = corners.reduce((sum, [x]) => sum + x, 0) / 4;
+    const cy = corners.reduce((sum, [, y]) => sum + y, 0) / 4;
+    return {
+        x: clamp01((cx - w / 2) / width),
+        y: clamp01((cy - h / 2) / height),
+        w: Math.min(1, w / width),
+        h: Math.min(1, h / height),
+        ...angleOf({ angle: Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI }),
+    };
 }
 
 /**

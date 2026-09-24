@@ -84,6 +84,7 @@ CRMS runs as **three local processes** from a single repository: the Laravel web
 
 ### 1. Document Digitisation & Verification Workspace
 - **Visual Bounding-Box Markup**: Interactive drag-and-drop marker tool with canvas zoom, pan, and marquee selection for setting field coordinates.
+- **Tiltable Markers**: In both the Staff workspace and the Template Builder, every marker, including each ledger column and any newly added field, can be tilted on its own: drag the rotate knob below it (<kbd>Shift</kbd> snaps to 5°), or use <kbd>[</kbd> / <kbd>]</kbd> in 0.5° steps (<kbd>Shift</kbd>: 5°); double-click the knob to straighten. A marker turns about its own centre, and a tilted field is cropped level for TrOCR. For a ledger, the columns' typical tilt is taken as the page's: the page is straightened by it before line detection, as Detect does, and each column is placed where its centre lands.
 - **Split-Screen Verification Viewer**: Dual-pane workspace with configurable horizontal/vertical split views, smooth keyboard-accelerated split-bar adjustments, and Ctrl-wheel zoom.
 - **Person Grouping**: Supports complex registry layouts grouping fields by role (e.g., Child, Mother, Father, Groom, Bride, Deceased, Informant) alongside general document details.
 - **Confidence Scoring & Review Warnings**: Computes token-level geometric mean confidence scores (0–100%). Fields falling below the configured threshold are visually flagged for manual operator review.

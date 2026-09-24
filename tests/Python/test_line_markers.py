@@ -479,5 +479,99 @@ class FieldLinesTest(unittest.TestCase):
         self.assertEqual(2, len(rules))
 
 
+class TurnedMarkersTest(unittest.TestCase):
+    """Markers Staff tilted by hand: fields turn alone, the ledger grid turns with the page."""
+
+    def test_a_turned_field_is_cropped_level(self):
+        # A dark 200 x 12 px stroke of "writing", turned 12 degrees clockwise.
+        image = Image.new("RGB", (400, 300), (PAPER,) * 3)
+        stroke = lm._turned_rect_polygon(100, 144, 200, 12, 12)
+        ImageDraw.Draw(image).polygon([tuple(p) for p in stroke], fill=(INK,) * 3)
+        field = lm._turned_rect_polygon(90, 125, 220, 50, 12)
+
+        crop, _ = lm.crop_turned_box(image, field, fill=(255, 255, 255), padding=0)
+        dark = np.asarray(crop.convert("L")) < 128
+
+        self.assertEqual((220, 50), crop.size)
+        rows = np.nonzero(dark.any(axis=1))[0]
+        # Level: the stroke spans the crop's width within a band about as thick as it is.
+        self.assertLessEqual(rows.max() - rows.min() + 1, 16)
+        self.assertGreater(dark.any(axis=0).sum(), 190)
+
+    def test_points_land_where_straightening_takes_them(self):
+        image = Image.new("RGB", (500, 300), (PAPER,) * 3)
+        ImageDraw.Draw(image).ellipse([395, 55, 405, 65], fill=(0, 0, 0))
+        straight = lm.straighten_page(image, 7.0)
+
+        ys, xs = np.nonzero(np.asarray(straight.convert("L")) < 100)
+        expected = lm._straightened_point(400, 60, 7.0, image.size, straight.size)
+        self.assertAlmostEqual(expected[0], xs.mean(), delta=1.0)
+        self.assertAlmostEqual(expected[1], ys.mean(), delta=1.0)
+
+    def test_a_turned_template_field_is_read_from_a_level_crop(self):
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "page.png")
+        blank_page().save(path)
+
+        result = lm.process_page(path, {"fields": [
+            {"name": "Remarks", "box": [0.1, 0.05, 0.3, 0.05], "angle": 8},
+        ]}, os.path.join(folder, "out"), detector=lambda _image: [])
+
+        line = result["lines"][0]
+        with Image.open(os.path.join(folder, "out", line["crop"])) as crop:
+            size = crop.size
+        # The field's own 240 x 28 px box plus padding, not the wider box around its turned corners.
+        pad = 2 * lm.CROP_PADDING
+        self.assertEqual((240 + pad, 28 + pad), size)
+        self.assertEqual(4, len(line["polygon"]))
+
+    @unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
+    def test_ledger_columns_tilted_one_by_one_to_the_page_are_straightened_and_read(self):
+        page = Page()
+        for row in (1, 2, 3):
+            page.word(f"name{row}", 70, 250, base_of(row))
+            page.word(f"date{row}", 320, 480, base_of(row))
+        # The scan came out turned 3 degrees clockwise. Staff tilted each column
+        # marker 3 degrees and dragged it onto its column: its centre goes
+        # where the turn of the page took it.
+        page.image = page.image.rotate(-3, resample=Image.BICUBIC, fillcolor=(PAPER,) * 3)
+        tilted = geometry()
+        cos, sin = np.cos(np.radians(3)), np.sin(np.radians(3))
+        tops = []
+        for column in tilted["columns"]:
+            x, y, w, h = column["box"]
+            dx, dy = (x + w / 2 - 0.5) * WIDTH, (y + h / 2 - 0.5) * HEIGHT
+            cx, cy = WIDTH / 2 + dx * cos - dy * sin, HEIGHT / 2 + dx * sin + dy * cos
+            column["box"] = [cx / WIDTH - w / 2, cy / HEIGHT - h / 2, w, h]
+            column["angle"] = 3
+            tops.append(column["box"][1])
+        # Row lines follow the columns' typical top, as the Align step sends them.
+        top = float(np.median(tops))
+        tilted["ruled_ys"] = [top + (y - RULED[0]) / HEIGHT for y in RULED]
+
+        def detector(image):
+            # Straightening grows the canvas; the writing moves with it.
+            shift_x, shift_y = (image.width - WIDTH) / 2, (image.height - HEIGHT) / 2
+            moved = []
+            for line in page.detected:
+                moved.append({key: [[x + shift_x, y + shift_y] for x, y in points] for key, points in line.items()})
+            return moved
+
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "page.png")
+        page.image.save(path)
+        result = lm.outline_page(path, tilted, os.path.join(folder, "out"), detector=detector)
+
+        self.assertEqual(3.0, result["deskew"])
+        with Image.open(path) as saved:
+            self.assertGreater(saved.width, WIDTH)  # saved straightened, in place
+        cells = by_cell(result)
+        for row in (1, 2, 3):
+            self.assertEqual(1, len(cells[("Name", row)]), f"Name row {row}")
+            self.assertEqual(1, len(cells[("Date", row)]), f"Date row {row}")
+        self.assertTrue(all(not line["flags"] for line in result["lines"]))
+        self.assertNotIn("angle", result["geometry"]["columns"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

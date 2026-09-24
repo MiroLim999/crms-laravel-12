@@ -664,7 +664,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     canvas,
     .field-overlay,
     .field-box,
-    .field-box-handle {
+    .field-box-handle,
+    .field-box-rotate {
       cursor: grabbing !important;
       pointer-events: none;
     }
@@ -743,6 +744,92 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-radius: 50%;
   cursor: nwse-resize;
   touch-action: none;
+}
+
+// Tilt knob: a round button with a turning arrow on a short stem below the
+// bottom edge (the name label sits above the top edge). Shown on the hovered
+// or selected marker only, so a full ledger does not bristle with knobs.
+.field-box-rotate {
+  position: absolute;
+  bottom: -32px;
+  left: 50%;
+  z-index: 2;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  color: var(--bs-info);
+  background-color: #fff;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(34, 48, 62, .25);
+  cursor: grab;
+  touch-action: none;
+
+  // The stem up to the marker's bottom edge.
+  &::before {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    width: 2px;
+    height: 10px;
+    margin-left: -1px;
+    content: "";
+    background-color: currentColor;
+    pointer-events: none;
+  }
+
+  // An invisible bridge over the stem, so the pointer can travel from the
+  // marker to the knob without leaving the marker's hover.
+  &::after {
+    position: absolute;
+    right: -4px;
+    bottom: 100%;
+    left: -4px;
+    height: 12px;
+    content: "";
+  }
+
+  svg {
+    width: 14px;
+    height: 14px;
+    pointer-events: none;
+  }
+
+  &:hover {
+    color: #fff;
+    background-color: var(--bs-info);
+    border-color: var(--bs-info);
+
+    &::before {
+      background-color: var(--bs-info);
+    }
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.field-box:hover .field-box-rotate,
+.field-box.is-selected .field-box-rotate {
+  display: flex;
+}
+
+.field-box.is-column .field-box-rotate {
+  color: #0e9aa7;
+
+  &:hover {
+    color: #fff;
+    background-color: #0e9aa7;
+    border-color: #0e9aa7;
+
+    &::before {
+      background-color: #0e9aa7;
+    }
+  }
 }
 
 // Read-only rendering in the archive: show where a value came from without

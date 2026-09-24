@@ -88,6 +88,7 @@ class DocumentTemplate extends Model
                 'y' => (float) $column['box'][1],
                 'w' => (float) $column['box'][2],
                 'h' => (float) $column['box'][3],
+                'angle' => (float) ($column['angle'] ?? 0),
                 'required' => true,
                 'kind' => 'column',
                 'columnIndex' => $index,

@@ -171,6 +171,7 @@ class DocumentTemplateController extends Controller
                 'y' => $f->y,
                 'width' => $f->width,
                 'height' => $f->height,
+                'angle' => $f->angle,
                 'person_group' => $f->person_group,
                 'person_field_order' => $f->person_field_order,
             ])->all(),
@@ -412,6 +413,8 @@ class DocumentTemplateController extends Controller
             'columns.*.name' => ['required', 'string', 'max:120', 'distinct:ignore_case'],
             'columns.*.box' => ['required', 'array', 'size:4'],
             'columns.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],
+            // Degrees clockwise about the column's own centre.
+            'columns.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
             'ruled_ys' => ['nullable', 'array', 'max:400'],
             'ruled_ys.*' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
@@ -420,6 +423,8 @@ class DocumentTemplateController extends Controller
             'fields.*.y' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.width' => ['required', 'numeric', 'min:0.01', 'max:1'],
             'fields.*.height' => ['required', 'numeric', 'min:0.01', 'max:1'],
+            // Degrees clockwise about the field's own centre.
+            'fields.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
             'fields.*.person_group' => [
                 Rule::excludeIf(fn () => $request->input('grouping_mode') !== 'custom'),
                 'nullable',
@@ -576,6 +581,7 @@ class DocumentTemplateController extends Controller
             array_map(fn (array $column) => [
                 'name' => trim((string) $column['name']),
                 'box' => array_map(fn ($v) => round((float) $v, 5), $column['box']),
+                ...(round((float) ($column['angle'] ?? 0), 1) != 0.0 ? ['angle' => round((float) $column['angle'], 1)] : []),
             ], $columns),
             array_map(fn (float $y) => round($y, 5), $ruled),
         ];
@@ -635,6 +641,7 @@ class DocumentTemplateController extends Controller
                 'y' => $field['y'],
                 'width' => $field['width'],
                 'height' => $field['height'],
+                'angle' => round((float) ($field['angle'] ?? 0), 1),
                 'sort_order' => $index,
                 'is_required' => true,
                 'person_group' => $field['person_group'],

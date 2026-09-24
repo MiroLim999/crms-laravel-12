@@ -154,6 +154,32 @@ test('Detect\'s fitted geometry becomes markers, and round-trips through aligned
     assert.deepEqual(again.ruled_ys, fitted.ruled_ys);
 });
 
+test('tilted markers send their angle; upright ones send none', () => {
+    const geometry = alignedGeometry([
+        { name: 'Remarks', x: 0.1, y: 0.05, w: 0.2, h: 0.04, angle: -4.26 },
+        { name: 'Child', x: 0.4, y: 0.05, w: 0.2, h: 0.04 },
+        ...templateColumns.map((column) => ({ ...column, angle: 2 })),
+    ], templateColumns, ruledYs);
+
+    assert.deepEqual(geometry.fields.map((field) => field.angle), [-4.3, undefined]);
+    assert.deepEqual(geometry.columns.map((column) => column.angle), [2, 2]);
+});
+
+test('a field the server moved onto a straightened page comes back as its own box, turned', () => {
+    // A 200 x 50 px field turned 10 degrees clockwise about (500, 300) on a 1000 x 600 page.
+    const radians = 10 * Math.PI / 180;
+    const corner = (dx, dy) => [
+        (500 + dx * Math.cos(radians) - dy * Math.sin(radians)) / 1000,
+        (300 + dx * Math.sin(radians) + dy * Math.cos(radians)) / 600,
+    ];
+    const polygon = [corner(-100, -25), corner(100, -25), corner(100, 25), corner(-100, 25)];
+    const [marker] = geometryMarkers({ fields: [{ name: 'Remarks', box: [0, 0, 1, 1], polygon }] }, { width: 1000, height: 600 });
+
+    assert.equal(marker.angle, 10);
+    assert.ok(Math.abs(marker.x - 0.4) < 1e-9 && Math.abs(marker.w - 0.2) < 1e-9);
+    assert.ok(Math.abs(marker.y - 275 / 600) < 1e-9 && Math.abs(marker.h - 50 / 600) < 1e-9);
+});
+
 test('the Detect summary says what was found and what needs review', () => {
     const summary = detectionSummary({
         deskew: -2.46,

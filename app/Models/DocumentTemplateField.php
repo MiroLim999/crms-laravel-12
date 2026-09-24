@@ -14,7 +14,7 @@ class DocumentTemplateField extends Model
     use HasFactory;
 
     protected $fillable = [
-        'document_template_id', 'name', 'x', 'y', 'width', 'height',
+        'document_template_id', 'name', 'x', 'y', 'width', 'height', 'angle',
         'sort_order', 'is_required', 'person_group', 'person_field_order',
     ];
 
@@ -25,6 +25,7 @@ class DocumentTemplateField extends Model
             'y' => 'float',
             'width' => 'float',
             'height' => 'float',
+            'angle' => 'float',
             'is_required' => 'boolean',
             'person_group' => 'integer',
             'person_field_order' => 'integer',
@@ -49,6 +50,7 @@ class DocumentTemplateField extends Model
             'y' => $this->y,
             'w' => $this->width,
             'h' => $this->height,
+            'angle' => (float) ($this->angle ?? 0),
             'required' => $this->is_required,
             'personGroup' => $this->person_group,
             'personFieldOrder' => $this->person_field_order,

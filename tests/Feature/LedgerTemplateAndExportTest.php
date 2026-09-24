@@ -54,6 +54,46 @@ class LedgerTemplateAndExportTest extends TestCase
         $this->assertSame(1, $template->columnBoxes()[1]['columnIndex']);
     }
 
+    public function test_tilted_fields_and_a_tilted_grid_are_saved_and_offered_to_staff(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create())->post(route('templates.store'), [
+            'name' => 'Tilted register',
+            'doc_type' => DocumentType::Birth->value,
+            'paper_size' => 'letter',
+            'orientation' => 'landscape',
+            'grouping_mode' => 'auto',
+            'fields_json' => json_encode([
+                ['name' => 'Remarks', 'x' => 0.1, 'y' => 0.05, 'width' => 0.3, 'height' => 0.05, 'angle' => -4.26],
+                ['name' => 'Page number', 'x' => 0.6, 'y' => 0.05, 'width' => 0.1, 'height' => 0.05],
+            ], JSON_THROW_ON_ERROR),
+            // Each column keeps its own tilt.
+            'columns_json' => json_encode([
+                [...self::COLUMNS[0], 'angle' => 1.5],
+                [...self::COLUMNS[1], 'angle' => -0.5],
+            ], JSON_THROW_ON_ERROR),
+            'ruled_ys_json' => json_encode([0.2, 0.35, 0.5, 0.65, 0.8], JSON_THROW_ON_ERROR),
+            'publish' => 1,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $template = DocumentTemplate::where('name', 'Tilted register')->firstOrFail();
+        $this->assertSame([-4.3, 0.0], $template->fields->pluck('angle')->all());
+        $this->assertEquals([1.5, -0.5], array_column($template->columns, 'angle'));
+
+        $boxes = collect($template->markerBoxes())->keyBy('name');
+        $this->assertSame(-4.3, $boxes['Remarks']['angle']);
+        $this->assertSame(0.0, $boxes['Page number']['angle']);
+        $this->assertSame(1.5, $boxes["Child's Name"]['angle']);
+
+        $this->actingAs(User::factory()->superAdmin()->create())->post(route('templates.store'), [
+            'name' => 'Over-turned',
+            'doc_type' => DocumentType::Birth->value,
+            'paper_size' => 'letter',
+            'orientation' => 'landscape',
+            'grouping_mode' => 'auto',
+            'fields_json' => json_encode([['name' => 'A', 'x' => 0.1, 'y' => 0.1, 'width' => 0.2, 'height' => 0.1, 'angle' => 200]], JSON_THROW_ON_ERROR),
+        ])->assertSessionHasErrors('fields.0.angle');
+    }
+
     public function test_columns_need_ruled_lines_running_top_to_bottom(): void
     {
         $admin = User::factory()->superAdmin()->create();

@@ -28,6 +28,13 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 
 const HANDLE_SIZE = 10;
 const MIN_FRACTION = 0.01;
+// Holding Shift while turning a marker snaps it to this many degrees.
+const ROTATE_SNAP_DEGREES = 5;
+// A turning arrow for the tilt knob. Inline, not from the subset icon font.
+const ROTATE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+    + '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>'
+    + '<path d="M19.8 3.8v4.6h-4.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'
+    + '</svg>';
 
 /**
  * Return the portable part of a marker box.
@@ -45,7 +52,47 @@ function serialiseBox(box) {
         h: box.h,
         ...markerPersonMetadata(box),
         ...markerColumnMetadata(box),
+        ...markerAngleMetadata(box),
     };
+}
+
+/**
+ * A marker's tilt in degrees, clockwise as seen on screen, in (-180, 180].
+ * Rounded to a tenth of a degree: finer than a hand can place it, and it keeps
+ * saved layouts free of floating-point noise.
+ */
+export function normaliseAngle(degrees) {
+    const value = Number(degrees);
+    if (!Number.isFinite(value)) return 0;
+    let angle = Math.round((((value % 360) + 540) % 360 - 180) * 10) / 10;
+    if (angle === -180) angle = 180;
+    return angle === 0 ? 0 : angle;
+}
+
+/**
+ * The tilt of a marker, present only when it is turned, so upright layouts
+ * serialise exactly as they did before markers could turn.
+ *
+ * Every marker, a ledger column too, turns on its own about its own centre.
+ * For a ledger, the server takes the columns' typical tilt as the page's and
+ * straightens the page by it before reading the rows.
+ */
+export function markerAngleMetadata(box) {
+    const angle = normaliseAngle(box?.angle);
+    return angle === 0 ? {} : { angle };
+}
+
+/** The point a marker turns about (its centre), in the units of width and height. */
+export function markerPivot(box, width, height) {
+    return { x: (box.x + box.w / 2) * width, y: (box.y + box.h / 2) * height };
+}
+
+/** (x, y) turned clockwise on screen by the given degrees (y points down). */
+export function turnPoint(x, y, degrees) {
+    const radians = degrees * Math.PI / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    return { x: x * cos - y * sin, y: x * sin + y * cos };
 }
 
 /**
@@ -500,6 +547,35 @@ export class FieldMarker {
         this._emitSelection();
     }
 
+    // ----------------------------------------------------------------- rotation
+
+    /**
+     * Turn each selected marker clockwise by the given degrees, each about
+     * its own centre.
+     */
+    rotateSelected(degrees) {
+        if (this.selected.size === 0 || !Number.isFinite(degrees) || degrees === 0) return;
+        this._turnBoxes([...this.selected].map((box) => ({ box, angle: box.angle })), degrees);
+        this.layout();
+        this._emit();
+    }
+
+    /** Stand the selected markers upright again. */
+    straightenSelected() {
+        const turned = [...this.selected].filter((box) => normaliseAngle(box.angle) !== 0);
+        if (turned.length === 0) return;
+        turned.forEach((box) => { box.angle = 0; });
+        this.layout();
+        this._emit();
+    }
+
+    /** Apply one turn to a set of markers, from the angles they started at. */
+    _turnBoxes(origins, degrees) {
+        origins.forEach((origin) => {
+            origin.box.angle = normaliseAngle((Number(origin.angle) || 0) + degrees);
+        });
+    }
+
     // --------------------------------------------------------------------- zoom
 
     resetZoom() {
@@ -568,6 +644,17 @@ export class FieldMarker {
             box.el.style.top = `${box.y * height}px`;
             box.el.style.width = `${box.w * width}px`;
             box.el.style.height = `${box.h * height}px`;
+
+            const angle = normaliseAngle(box.angle);
+            if (angle === 0) {
+                box.el.style.transform = '';
+                box.el.style.transformOrigin = '';
+            } else {
+                const pivot = markerPivot(box, width, height);
+                box.el.style.transformOrigin = `${pivot.x - box.x * width}px ${pivot.y - box.y * height}px`;
+                box.el.style.transform = `rotate(${angle}deg)`;
+            }
+            box.el.classList.toggle('is-rotated', angle !== 0);
             box.el.dataset.index = String(index);
             box.el.classList.toggle('is-selected', this.selected.has(box));
         });
@@ -588,7 +675,15 @@ export class FieldMarker {
             handle.className = 'field-box-handle';
             el.appendChild(handle);
 
-            this._makeInteractive(el, handle, box);
+            // Below the bottom edge, where the label above does not cover it.
+            const rotator = document.createElement('span');
+            rotator.className = 'field-box-rotate';
+            rotator.title = 'Drag to tilt this marker. Shift snaps to 5°. Double-click to straighten.';
+            rotator.setAttribute('aria-label', 'Tilt marker');
+            rotator.innerHTML = ROTATE_ICON;
+            el.appendChild(rotator);
+
+            this._makeInteractive(el, handle, box, rotator);
         }
 
         return el;
@@ -598,15 +693,26 @@ export class FieldMarker {
      * Drag to move, corner handle to resize. Pointer events so it works with
      * touch and pen as well as mouse.
      */
-    _makeInteractive(el, handle, box) {
+    _makeInteractive(el, handle, box, rotator = null) {
         let mode = null;
         let startX = 0;
         let startY = 0;
         let origins = [];
+        let pivot = null;
+        let startAngle = 0;
+        // A turn captures the pointer on the knob, so that a double-click on
+        // the knob still reaches it (and straightens the marker).
+        let captured = el;
 
         const begin = (event, nextMode) => {
             event.preventDefault();
             event.stopPropagation();
+            // preventDefault also keeps focus where it was, often the "field
+            // name" box just used to add this marker, and there the marker
+            // shortcuts ([ ], Delete) are only typing. Working on a marker
+            // takes focus off it.
+            const focused = document.activeElement;
+            if (focused instanceof HTMLElement && focused.matches('input, textarea, select')) focused.blur();
 
             const index = Number(el.dataset.index);
 
@@ -636,7 +742,14 @@ export class FieldMarker {
             // keeps its own origin and size, while receiving the same delta.
             origins = [...this.selected]
                 .map((selected) => ({ box: selected, ...selected }));
-            el.setPointerCapture(event.pointerId);
+            if (nextMode === 'rotate') {
+                const bounds = this.overlay.getBoundingClientRect();
+                const point = markerPivot(box, this.canvas.clientWidth, this.canvas.clientHeight);
+                pivot = { x: bounds.left + point.x, y: bounds.top + point.y };
+                startAngle = Math.atan2(event.clientY - pivot.y, event.clientX - pivot.x);
+            }
+            captured = nextMode === 'rotate' && rotator ? rotator : el;
+            captured.setPointerCapture(event.pointerId);
             el.classList.add('is-active');
         };
 
@@ -648,7 +761,19 @@ export class FieldMarker {
             const dx = (event.clientX - startX) / width;
             const dy = (event.clientY - startY) / height;
 
-            if (mode === 'move') {
+            if (mode === 'rotate') {
+                const current = Math.atan2(event.clientY - pivot.y, event.clientX - pivot.x);
+                let degrees = (current - startAngle) * 180 / Math.PI;
+                if (event.shiftKey) {
+                    // Snap the grabbed marker itself; the rest keep their offsets.
+                    const grabbed = origins.find((origin) => origin.box === box);
+                    const from = Number(grabbed?.angle) || 0;
+                    degrees = Math.round((from + degrees) / ROTATE_SNAP_DEGREES) * ROTATE_SNAP_DEGREES - from;
+                }
+                this._turnBoxes(origins, degrees);
+            } else if (origins.some((origin) => normaliseAngle(origin.angle) !== 0)) {
+                this._dragTurned(origins, mode, event.clientX - startX, event.clientY - startY, width, height);
+            } else if (mode === 'move') {
                 const minDx = Math.max(...origins.map((origin) => -origin.x));
                 const maxDx = Math.min(...origins.map((origin) => 1 - origin.x - origin.w));
                 const minDy = Math.max(...origins.map((origin) => -origin.y));
@@ -680,23 +805,66 @@ export class FieldMarker {
         const end = (event) => {
             if (!mode) return;
             mode = null;
-            el.releasePointerCapture(event.pointerId);
+            if (captured.hasPointerCapture(event.pointerId)) captured.releasePointerCapture(event.pointerId);
             el.classList.remove('is-active');
             this._emit();
         };
 
         el.addEventListener('pointerdown', (e) => {
             if (e.ctrlKey) return;
-            if (e.target === handle) return;
+            if (e.target === handle || e.target === rotator) return;
             begin(e, 'move');
         });
         handle.addEventListener('pointerdown', (e) => {
             if (e.ctrlKey) return;
             begin(e, 'resize');
         });
+        rotator?.addEventListener('pointerdown', (e) => {
+            if (e.ctrlKey) return;
+            begin(e, 'rotate');
+        });
+        rotator?.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.straightenSelected();
+        });
         el.addEventListener('pointermove', move);
         el.addEventListener('pointerup', end);
         el.addEventListener('pointercancel', end);
+    }
+
+    /**
+     * Move or resize markers when any of them is turned. The pointer moves in
+     * screen space; each marker's box is kept in its own upright frame.
+     *
+     * A marker turns about its centre, so a move is the same on screen and in
+     * its box, and a resize grows it along its own sides while its turned top
+     * left corner stays put.
+     */
+    _dragTurned(origins, mode, pixelDx, pixelDy, width, height) {
+        origins.forEach((origin) => {
+            const angle = normaliseAngle(origin.angle);
+            const target = origin.box;
+
+            if (mode === 'move') {
+                target.x = clamp(origin.x + pixelDx / width, 0, 1 - origin.w);
+                target.y = clamp(origin.y + pixelDy / height, 0, 1 - origin.h);
+                return;
+            }
+
+            const local = turnPoint(pixelDx, pixelDy, -angle);
+            const w = clamp(origin.w + local.x / width, MIN_FRACTION, 1);
+            const h = clamp(origin.h + local.y / height, MIN_FRACTION, 1);
+            // Keep the turned top-left corner where it is: the centre moves by
+            // half the growth, turned into the page's frame.
+            const grow = turnPoint((w - origin.w) * width / 2, (h - origin.h) * height / 2, angle);
+            const cx = (origin.x + origin.w / 2) * width + grow.x;
+            const cy = (origin.y + origin.h / 2) * height + grow.y;
+            target.w = w;
+            target.h = h;
+            target.x = clamp(cx / width - w / 2, 0, 1 - w);
+            target.y = clamp(cy / height - h / 2, 0, 1 - h);
+        });
     }
 
     // ------------------------------------------------------------------ cropping
@@ -729,7 +897,19 @@ export class FieldMarker {
         const ctx = out.getContext('2d');
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, out.width, out.height);
-        ctx.drawImage(this.canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+
+        const angle = normaliseAngle(box.angle);
+        if (angle === 0) {
+            ctx.drawImage(this.canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+        } else {
+            // Turn the page back about the marker's pivot so the marker stands
+            // upright, then take its box: the crop reads level.
+            const pivot = markerPivot(box, this.canvas.width, this.canvas.height);
+            ctx.translate(pivot.x - sx, pivot.y - sy);
+            ctx.rotate(-angle * Math.PI / 180);
+            ctx.translate(-pivot.x, -pivot.y);
+            ctx.drawImage(this.canvas, 0, 0);
+        }
 
         return out.toDataURL('image/png');
     }
@@ -752,5 +932,6 @@ export {
     canVerifyValue,
     HANDLE_SIZE,
     markerPersonMetadata,
+    ROTATE_SNAP_DEGREES,
     verificationGroupState,
 };

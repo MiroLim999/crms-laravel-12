@@ -83,6 +83,58 @@ class LineOutlinePipelineTest extends TestCase
         Queue::assertPushed(ProcessDocumentPage::class, fn ($job) => $job->pageId === $page->getKey());
     }
 
+    public function test_tilted_markers_reach_the_line_detector_with_their_angles(): void
+    {
+        Queue::fake();
+        $geometry = $this->geometry();
+        // Staff tilted each column and one field, each on its own.
+        $geometry['columns'][0]['angle'] = 2.04;
+        $geometry['columns'][1]['angle'] = -1.26;
+        $geometry['fields'] = [
+            ['name' => 'Remarks', 'box' => [0.1, 0.8, 0.3, 0.05], 'angle' => -6],
+            ['name' => 'Page', 'box' => [0.6, 0.8, 0.1, 0.05], 'angle' => 0],
+        ];
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.store'), [
+                'document_template_id' => $this->ledgerTemplate()->getKey(),
+                'page' => UploadedFile::fake()->image('page.png', 800, 600),
+                'geometry_json' => json_encode($geometry, JSON_THROW_ON_ERROR),
+            ])
+            ->assertAccepted();
+
+        $stored = DocumentPage::firstOrFail()->geometry;
+        $this->assertEquals([2.0, -1.3], array_column($stored['columns'], 'angle'));
+        $this->assertEquals(-6.0, $stored['fields'][0]['angle']);
+        $this->assertArrayNotHasKey('angle', $stored['fields'][1]);
+    }
+
+    public function test_a_scan_the_detector_straightened_keeps_the_straightened_page(): void
+    {
+        $inner = $this->stubMarkers();
+        $this->app->instance(LineMarkers::class, new class($inner) extends LineMarkers
+        {
+            public function __construct(private readonly LineMarkers $inner) {}
+
+            public function process(string $pagePath, array $geometry, string $outDirectory): array
+            {
+                // A tilted grid: line_markers.py straightened the page first.
+                return [...$this->inner->process($pagePath, $geometry, $outDirectory),
+                    'size' => [830, 640], 'deskew' => 2.0, 'geometry' => [...$geometry, 'ruled_ys' => [0.11, 0.21, 0.31, 0.41]]];
+            }
+        });
+        $page = $this->storedPage();
+
+        ProcessDocumentPage::dispatchSync($page->getKey());
+
+        $page->refresh();
+        $this->assertSame(DocumentPage::STATUS_READY, $page->status);
+        $this->assertSame([830, 640], [$page->width, $page->height]);
+        $this->assertSame(2.0, $page->deskew_degrees);
+        $this->assertSame([0.11, 0.21, 0.31, 0.41], $page->geometry['ruled_ys']);
+    }
+
     public function test_detect_is_queued_as_detection_only(): void
     {
         Queue::fake();
