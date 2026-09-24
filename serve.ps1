@@ -7,6 +7,9 @@
         .\serve.ps1            start all three
         .\serve.ps1 -Check     verify the environment and exit
         .\serve.ps1 -NoOcr     Laravel and the queue worker only
+        .\serve.ps1 -Only web|worker|ocr
+                               run one of them in this terminal (Kiro's tasks
+                               in .vscode\tasks.json do this, one tab each)
 
     Apache is NOT used. Laravel is served by `php artisan serve` on port 8000, so
     the only XAMPP module that has to be running is MySQL. Sitting in htdocs is
@@ -22,6 +25,8 @@
 param(
     [switch]$Check,
     [switch]$NoOcr,
+    [ValidateSet('web', 'worker', 'ocr')]
+    [string]$Only,
     [int]$AppPort = 8000,
     [int]$OcrPort = 8001
 )
@@ -36,6 +41,51 @@ function Write-Bad ($message) { Write-Host "  FAIL  $message" -ForegroundColor R
 
 function Test-Port([int]$Port) {
     $null -ne (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+}
+
+# A queue worker, or the loop that keeps one running (in its 5 s pause there is
+# no php process), other than this script itself.
+function Test-QueueWorker {
+    $null -ne (Get-CimInstance Win32_Process -Filter "Name='php.exe' OR Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -like '*artisan queue:work*' -or $_.CommandLine -like '*serve.ps1*-Only worker*') })
+}
+
+# --- One service in this terminal ----------------------------------------
+# Each skips itself when that service is already running, so opening Kiro while
+# serve.ps1's windows are still up does not start anything twice.
+if ($Only) {
+    Set-Location $root
+    $ErrorActionPreference = 'Continue'
+    switch ($Only) {
+        'web' {
+            if (Test-Port $AppPort) { Write-Warn "Port $AppPort is already in use - Laravel is already running."; exit 0 }
+            # The warning about PHP_CLI_SERVER_WORKERS is harmless: PHP cannot
+            # run several server workers on Windows ("forking is not supported
+            # on this platform"), with or without --no-reload.
+            php artisan serve --port=$AppPort
+        }
+        'worker' {
+            if (Test-QueueWorker) { Write-Warn 'A queue worker is already running - not starting another.'; exit 0 }
+            # Finishing Align, and Detect, queue a job that outlines every
+            # handwritten line and reads it; without a worker, pages wait in
+            # "queued" forever. The loop brings it back after
+            # `php artisan queue:restart` (it exits so that new code loads),
+            # after a crash, and once MySQL is up if it started before MySQL.
+            $host.UI.RawUI.WindowTitle = 'CRMS queue worker'
+            while ($true) {
+                php artisan queue:work --timeout=900 --tries=1
+                Write-Host 'Worker stopped. Starting again in 5 s - close this terminal to stop it.' -ForegroundColor Yellow
+                Start-Sleep -Seconds 5
+            }
+        }
+        'ocr' {
+            if (Test-Port $OcrPort) { Write-Warn "Port $OcrPort is already in use - the OCR service is already running."; exit 0 }
+            # 127.0.0.1 only. The service has no authentication of its own;
+            # every authorization decision happens in Laravel.
+            python -m uvicorn ml.api.main:app --host 127.0.0.1 --port $OcrPort
+        }
+    }
+    exit $LASTEXITCODE
 }
 
 Write-Host ''
@@ -145,37 +195,36 @@ Write-Host ''
 Write-Host 'Starting' -ForegroundColor White
 Write-Host ('-' * 40)
 
-# Each service gets its own window with -NoExit, so its log stays readable and
-# Ctrl+C in that window stops only that service.
+# Each service gets its own window, running this script with -Only, so its log
+# stays readable and Ctrl+C in that window stops only that service. In Kiro,
+# .vscode	asks.json runs the same three commands as terminal tabs instead.
+function Start-ServiceWindow([string]$Service) {
+    Start-Process powershell -ArgumentList @(
+        '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', "`"$PSCommandPath`"", '-Only', $Service, '-AppPort', $AppPort, '-OcrPort', $OcrPort
+    )
+}
+
 if (Test-Port $AppPort) {
     Write-Warn "Port $AppPort is already in use - assuming Laravel is already running."
 } else {
     Write-Step "Laravel        -> http://127.0.0.1:$AppPort"
-    Start-Process powershell -ArgumentList @(
-        '-NoExit', '-Command',
-        "Set-Location '$root'; php artisan serve --port=$AppPort"
-    )
+    Start-ServiceWindow 'web'
 }
 
-# Finishing the Align step queues a job that outlines every handwritten line
-# and reads it. Without a worker, pages wait in "queued" forever.
-Write-Step 'Queue worker   -> line detection and reading'
-Start-Process powershell -ArgumentList @(
-    '-NoExit', '-Command',
-    "Set-Location '$root'; php artisan queue:work --timeout=900 --tries=1"
-)
+if (Test-QueueWorker) {
+    Write-Warn 'A queue worker is already running - not starting another.'
+} else {
+    Write-Step 'Queue worker   -> line detection and reading (restarts itself)'
+    Start-ServiceWindow 'worker'
+}
 
 if (-not $NoOcr) {
     if (Test-Port $OcrPort) {
         Write-Warn "Port $OcrPort is already in use - assuming the OCR service is already running."
     } else {
         Write-Step "OCR service    -> http://127.0.0.1:$OcrPort"
-        # 127.0.0.1 only. The service has no authentication of its own; every
-        # authorization decision happens in Laravel.
-        Start-Process powershell -ArgumentList @(
-            '-NoExit', '-Command',
-            "Set-Location '$root'; python -m uvicorn ml.api.main:app --host 127.0.0.1 --port $OcrPort"
-        )
+        Start-ServiceWindow 'ocr'
     }
 }
 
