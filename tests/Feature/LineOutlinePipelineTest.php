@@ -366,6 +366,42 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertSame(['line-'.$flagged->getKey()], array_column($this->ocrCalls[0]['fields'], 'name'));
     }
 
+    public function test_after_detect_an_outline_is_recropped_but_not_read_until_scan(): void
+    {
+        $page = $this->detectedPage();
+        $line = $page->lines->firstWhere('column_name', 'Date');
+        $this->ocrCalls = [];
+
+        $this->actingAs($page->creator)
+            ->putJson(route('documents.pages.lines.update', ['page' => $page, 'line' => $line]), [
+                'polygon' => [[405, 118], [565, 118], [565, 152], [405, 152]],
+            ])
+            ->assertOk()
+            ->assertJsonPath('line.adjusted', true)
+            ->assertJsonPath('line.text', '');
+
+        $this->assertSame([], $this->ocrCalls, 'Nothing is read before Scan with OCR.');
+        $this->assertSame(DocumentPage::STATUS_DETECTED, $page->fresh()->status);
+        $line->refresh();
+        $this->assertSame(2, $line->crop_version);
+        Storage::disk('local')->assertExists($line->crop_path);
+
+        // Reset: the detector's outline again, no longer counted as adjusted.
+        $this->actingAs($page->creator)
+            ->putJson(route('documents.pages.lines.update', ['page' => $page, 'line' => $line]), [
+                'polygon' => [[400, 105], [560, 105], [560, 130], [400, 130]],
+                'reset' => true,
+            ])
+            ->assertOk()
+            ->assertJsonPath('line.adjusted', false);
+        $this->assertSame([], $this->ocrCalls);
+
+        // Scan with OCR then reads the crops as they now are.
+        $this->actingAs($page->creator)->postJson(route('documents.pages.read', $page))->assertAccepted();
+        $this->assertSame(DocumentPage::STATUS_READY, $page->fresh()->status);
+        $this->assertContains('line-'.$line->getKey(), array_merge(...array_map(fn ($call) => array_column($call['fields'], 'name'), $this->ocrCalls)));
+    }
+
     public function test_moving_a_line_into_an_occupied_cell_flags_both_as_shared(): void
     {
         $page = $this->processedPage();

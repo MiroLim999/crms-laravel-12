@@ -149,6 +149,7 @@ export function verificationItems(lines, page) {
             ...(personGroup !== null ? { personGroup } : {}),
             ...(personGroup !== null && personFieldOrder !== null ? { personFieldOrder } : {}),
             needsReview: flags.length > 0,
+            adjusted: Boolean(line.adjusted),
             flags,
             polygon: line.polygon,
             cropUrl: line.cropUrl,

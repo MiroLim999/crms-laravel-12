@@ -174,7 +174,11 @@ class DocumentPageController extends Controller
         $this->authorizePage($request, $page);
         abort_unless((int) $line->document_page_id === (int) $page->getKey(), 404);
 
-        if ($page->status !== DocumentPage::STATUS_READY) {
+        // A read page (Verify) or a detected one (the Align step, after Detect
+        // and before anything is read). A detected line is only re-cropped:
+        // Scan with OCR reads it with all the others.
+        $detected = $page->status === DocumentPage::STATUS_DETECTED;
+        if (! $detected && $page->status !== DocumentPage::STATUS_READY) {
             return response()->json(['message' => 'This page is still being processed.'], 409);
         }
 
@@ -182,6 +186,8 @@ class DocumentPageController extends Controller
             'polygon' => ['required', 'array', 'min:3', 'max:2000'],
             'polygon.*' => ['required', 'array', 'size:2'],
             'polygon.*.*' => ['required', 'numeric'],
+            // Back to the outline the detector drew: no longer counts as adjusted.
+            'reset' => ['sometimes', 'boolean'],
         ]);
 
         $polygon = array_map(fn (array $point) => [
@@ -210,7 +216,7 @@ class DocumentPageController extends Controller
             'bbox' => $placed['bbox'],
             'crop_path' => $cropPath,
             'crop_version' => $version,
-            'adjusted_at' => now(),
+            'adjusted_at' => $request->boolean('reset') ? null : now(),
         ]);
 
         // A field line keeps its field identity. A ledger line is placed
@@ -235,7 +241,9 @@ class DocumentPageController extends Controller
         $status = 200;
         $message = null;
         try {
-            $this->reader->read($page, collect([$line]));
+            if (! $detected) {
+                $this->reader->read($page, collect([$line]));
+            }
         } catch (OcrServiceException $e) {
             // The new outline and crop are kept; only the reading is missing.
             $line->forceFill(['ocr_text' => '', 'ocr_confidence' => 0, 'ocr_error' => mb_substr($e->getMessage(), 0, 500)])->save();

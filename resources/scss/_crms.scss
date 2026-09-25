@@ -1946,6 +1946,227 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// Edit lines (after Detect): the outlines take the pointer, and the field
+// markers underneath are locked and faded so a click never grabs one.
+.line-overlay.is-preview.is-interactive {
+  z-index: 3;
+  pointer-events: all;
+
+  .line-marker {
+    cursor: pointer;
+    pointer-events: visiblePainted;
+  }
+}
+
+.field-overlay.is-editing-lines .field-box {
+  opacity: .45;
+  pointer-events: none;
+}
+
+.line-edit__box {
+  fill: none;
+  stroke: var(--bs-success);
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.line-edit__grip {
+  rx: 1;
+}
+
+.line-overlay.is-editing[data-edit-mode="draw"] {
+  cursor: crosshair;
+}
+
+// Points mode: a faint dot halfway along each edge adds a corner when dragged;
+// the corner last touched is filled, for Delete.
+.line-edit__midpoint {
+  fill: rgba(255, 255, 255, .85);
+  stroke: var(--bs-success);
+  stroke-width: 1px;
+  stroke-dasharray: 2 1.5;
+  vector-effect: non-scaling-stroke;
+  cursor: copy;
+  pointer-events: all;
+  opacity: .8;
+
+  &:hover {
+    fill: var(--bs-success);
+    opacity: 1;
+  }
+}
+
+.line-edit__handle.is-active {
+  fill: var(--bs-success);
+}
+
+// Drawing a new outline: the old one fades, the new one follows the pointer.
+.line-edit__shape.is-replaced {
+  fill: none;
+  stroke-dasharray: 4 3;
+  opacity: .45;
+}
+
+.line-edit__draft {
+  fill: rgba(40, 199, 111, .12);
+  stroke: var(--bs-success);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.line-edit__vertex {
+  fill: #fff;
+  stroke: var(--bs-success);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+
+  // The first point: click it again to close the outline.
+  &.is-start {
+    fill: var(--bs-success);
+  }
+}
+
+.line-adjust-card__draw {
+  display: flex;
+  gap: .4rem;
+
+  &.d-none {
+    display: none !important;
+  }
+
+  .btn-success {
+    flex: 1 1 auto;
+  }
+}
+
+.line-adjust-card__modes {
+  display: flex;
+
+  .btn {
+    flex: 1 1 0;
+  }
+}
+
+.line-marker.is-adjusted .line-marker__shape {
+  stroke: #7367f0;
+  stroke-width: 1.6px;
+}
+
+// Changed here but not saved yet: not what Scan with OCR would read.
+.line-marker.is-unsaved .line-marker__shape {
+  fill: rgba(255, 171, 0, .14);
+  stroke: var(--bs-warning);
+  stroke-width: 2px;
+  stroke-dasharray: 6 3;
+}
+
+.line-adjust-card__save {
+  display: flex;
+  gap: .4rem;
+
+  .btn-primary {
+    flex: 1 1 auto;
+  }
+}
+
+.line-adjusted-mark {
+  fill: #7367f0;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.line-adjust-card {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  margin-block-end: .75rem;
+  padding: .7rem .75rem;
+  background: var(--bs-body-bg);
+  border: 1px solid rgba(40, 199, 111, .45);
+  border-radius: .5rem;
+  box-shadow: 0 1px 3px rgba(34, 48, 62, .08);
+  font-size: .8125rem;
+}
+
+.line-adjust-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .5rem;
+
+  strong {
+    min-inline-size: 0;
+    overflow: hidden;
+    color: var(--bs-heading-color);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.line-adjust-card__position {
+  flex: 0 0 auto;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+}
+
+.line-adjust-card__note {
+  margin: 0;
+  color: var(--bs-danger);
+  font-size: .75rem;
+}
+
+.line-adjust-card__crop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 3.5rem;
+  max-block-size: 9rem;
+  padding: .35rem;
+  overflow: hidden;
+  background: repeating-conic-gradient(#f3f4f6 0% 25%, #fff 0% 50%) 0 / 12px 12px;
+  border: 1px dashed var(--bs-border-color);
+  border-radius: .35rem;
+
+  canvas {
+    max-inline-size: 100%;
+    max-block-size: 8rem;
+    object-fit: contain;
+
+    &.is-empty {
+      display: none;
+    }
+  }
+}
+
+.line-adjust-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .4rem;
+}
+
+.line-adjust-card__status {
+  min-block-size: 1rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+
+  &.is-error {
+    color: var(--bs-danger);
+  }
+}
+
+.line-adjust-card__hint {
+  color: var(--bs-secondary-color);
+  font-size: .6875rem;
+  line-height: 1.4;
+}
+
 .line-overlay__guide {
   stroke: #0e9aa7;
   stroke-width: 1px;

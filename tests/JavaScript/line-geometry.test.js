@@ -9,7 +9,15 @@ import {
     geometryMarkers,
     verificationItems,
 } from '../../resources/js/line-geometry.js';
-import { polygonBounds, polygonPoints, rectanglePolygon } from '../../resources/js/line-overlay.js';
+import {
+    dragBounds,
+    handlePoint,
+    offsetPolygon,
+    polygonBounds,
+    polygonPoints,
+    rectanglePolygon,
+    scalePolygon,
+} from '../../resources/js/line-overlay.js';
 
 const templateColumns = [
     { name: 'Name', x: 0.1, y: 0.2, w: 0.3, h: 0.6, kind: 'column', columnIndex: 0 },
@@ -197,4 +205,37 @@ test('overlay polygon helpers', () => {
     assert.equal(polygonPoints([[1.04, 2], [3, 4.55]]), '1,2 3,4.6');
     assert.deepEqual(polygonBounds([[5, 9], [2, 3], [7, 4]]), { left: 2, top: 3, right: 7, bottom: 9 });
     assert.deepEqual(rectanglePolygon(10, 20, 4, 8), [[4, 8], [10, 8], [10, 20], [4, 20]]);
+});
+
+const near = (actual, expected) => actual.forEach(([x, y], i) => {
+    assert.ok(Math.abs(x - expected[i][0]) < 1e-9 && Math.abs(y - expected[i][1]) < 1e-9, `point ${i}: ${x},${y}`);
+});
+
+test('stretching an outline by a handle moves only that side', () => {
+    const bounds = { left: 10, top: 20, right: 110, bottom: 60 };
+    assert.deepEqual(handlePoint(bounds, 'se'), [110, 60]);
+    assert.deepEqual(handlePoint(bounds, 'n'), [60, 20]);
+
+    const taller = dragBounds(bounds, 'n', [999, 5]);
+    assert.deepEqual(taller, { left: 10, top: 5, right: 110, bottom: 60 });
+    // A handle cannot fold the box inside out.
+    assert.equal(dragBounds(bounds, 'w', [500, 0]).left, 106);
+
+    // The outline follows its box: a point halfway down stays halfway down.
+    const outline = [[10, 20], [110, 40], [60, 60]];
+    near(scalePolygon(outline, bounds, taller), [[10, 5], [110, 32.5], [60, 60]]);
+});
+
+test('growing an outline moves every side out by the same distance, either way round', () => {
+    const clockwise = [[0, 0], [10, 0], [10, 10], [0, 10]];
+    near(offsetPolygon(clockwise, 2), [[-2, -2], [12, -2], [12, 12], [-2, 12]]);
+    near(offsetPolygon([...clockwise].reverse(), 2), [[-2, 12], [12, 12], [12, -2], [-2, -2]]);
+    near(offsetPolygon(clockwise, -2), [[2, 2], [8, 2], [8, 8], [2, 8]]);
+    assert.deepEqual(offsetPolygon(clockwise, 0), clockwise);
+});
+
+test('an adjusted line is marked as such for the overlay', () => {
+    const [item] = verificationItems([line({ adjusted: true })], page);
+    assert.equal(item.adjusted, true);
+    assert.equal(verificationItems([line()], page)[0].adjusted, false);
 });

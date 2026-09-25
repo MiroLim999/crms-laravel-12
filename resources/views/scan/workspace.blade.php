@@ -232,7 +232,75 @@
                             <input class="form-check-input" type="checkbox" id="detectPreviewToggle" checked>
                             <label class="form-check-label" for="detectPreviewToggle">Show detected lines</label>
                         </div>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="lineEditToggle">
+                            <label class="form-check-label" for="lineEditToggle">Edit lines</label>
+                        </div>
                     </div>
+                </div>
+
+                {{--
+                    Line editing after Detect: click an outline on the page, stretch it
+                    by its handles or grow/shrink it, and see the crop TrOCR will read.
+                    Saved as you go; nothing is read until Scan with OCR.
+                --}}
+                <div class="line-adjust-card d-none" id="lineAdjustCard" aria-live="polite">
+                    <div class="line-adjust-card__head">
+                        <strong id="lineAdjustName">Click a line on the page</strong>
+                        <span class="line-adjust-card__position" id="lineAdjustPosition"></span>
+                    </div>
+                    <p class="line-adjust-card__note d-none" id="lineAdjustNote"></p>
+                    <div class="line-adjust-card__crop">
+                        <canvas id="lineAdjustThumb" aria-label="What TrOCR will read for this line"></canvas>
+                    </div>
+                    <div class="btn-group btn-group-sm line-adjust-card__modes" role="radiogroup" aria-label="How to change the outline" id="lineModeGroup">
+                        <input type="radio" class="btn-check" name="lineEditMode" id="lineModeBox" value="box" autocomplete="off" checked>
+                        <label class="btn btn-outline-primary" for="lineModeBox" title="Stretch the outline by its handles">Stretch</label>
+                        <input type="radio" class="btn-check" name="lineEditMode" id="lineModePoints" value="points" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="lineModePoints" title="Drag the outline's own corners">Points</label>
+                        <input type="radio" class="btn-check" name="lineEditMode" id="lineModeDraw" value="draw" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="lineModeDraw" title="Draw a new outline round the writing">Draw</label>
+                    </div>
+                    <div class="line-adjust-card__draw d-none" id="lineDrawActions">
+                        <button type="button" class="btn btn-sm btn-success" id="lineDrawUseBtn" disabled
+                                title="Make this drawing the line's outline and crop (Enter)">
+                            <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>Use this outline
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="lineDrawCancelBtn"
+                                title="Throw the drawing away (Esc)">Cancel</button>
+                    </div>
+                    <div class="line-adjust-card__actions" id="lineAdjustActions">
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Outline size">
+                            <button type="button" class="btn btn-outline-secondary" id="lineShrinkBtn" title="Shrink the outline (−)">
+                                <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i><span class="visually-hidden">Shrink</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="lineGrowBtn" title="Grow the outline (+)">
+                                <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i><span class="visually-hidden">Grow</span>
+                            </button>
+                        </div>
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Undo outline changes">
+                            <button type="button" class="btn btn-outline-secondary" id="lineUndoBtn" title="Undo (Ctrl+Z)" disabled>
+                                <i class="icon-base bx bx-undo icon-sm" aria-hidden="true"></i><span class="visually-hidden">Undo</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="lineRedoBtn" title="Redo (Ctrl+Y)" disabled>
+                                <i class="icon-base bx bx-redo icon-sm" aria-hidden="true"></i><span class="visually-hidden">Redo</span>
+                            </button>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="lineResetBtn" disabled
+                                title="Back to the outline Detect drew">
+                            <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>Reset line
+                        </button>
+                    </div>
+                    <div class="line-adjust-card__save">
+                        <button type="button" class="btn btn-sm btn-primary" id="lineSaveBtn" disabled
+                                title="Make this outline the line's crop (Ctrl+S)">
+                            <i class="icon-base bx bx-save icon-sm me-1" aria-hidden="true"></i>Save crop
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="lineDiscardBtn" disabled
+                                title="Back to the last saved outline">Discard</button>
+                    </div>
+                    <span class="line-adjust-card__status" id="lineAdjustStatus"></span>
+                    <small class="line-adjust-card__hint" id="lineAdjustHint"></small>
                 </div>
 
                 <div class="d-grid gap-2 field-marker-actions">
@@ -496,7 +564,7 @@
         geometryMarkers,
         verificationItems,
     } from '{{ Vite::asset('resources/js/line-geometry.js') }}';
-    import { LineOverlay } from '{{ Vite::asset('resources/js/line-overlay.js') }}';
+    import { LineOverlay, polygonBounds } from '{{ Vite::asset('resources/js/line-overlay.js') }}';
 
     const config = {
         boxes: @json($boxes),
@@ -603,7 +671,15 @@
 
     // Detect's preview in the Align step: outlines and fitted row lines over
     // the page, read-only so the markers underneath stay draggable.
-    const alignPreview = new LineOverlay({ container: markerOverlay, preview: true });
+    const alignPreview = new LineOverlay({
+        container: markerOverlay,
+        preview: true,
+        onSelect: (index) => selectLine(index),
+        onBackground: () => selectLine(null),
+        onEdit: (polygon, final) => lineEdited(polygon, final),
+        onModeChange: (mode) => showLineMode(mode),
+        onDraftChange: (points) => showDraft(points),
+    });
 
     // What Detect found on this page and the markers it fitted. Scan with OCR
     // reads Detect's crops only while the markers are still exactly these;
@@ -667,14 +743,20 @@
 
     function markDetectionStale() {
         if (!detection || detection.stale || JSON.stringify(marker.toJSON()) === detection.snapshot) return;
+        const adjusted = adjustedLineCount();
+        setLineEditing(false);
         detection.stale = true;
         alignPreview.setVisible(false);
+        el('lineEditToggle').disabled = true;
         el('detectSummaryTitle').textContent = 'Markers moved after Detect';
-        el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers. Detect again to refit them.';
+        el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers. Detect again to refit them.'
+            + (adjusted > 0 ? ` Your ${adjusted} line adjustment${adjusted === 1 ? ' is' : 's are'} no longer used.` : '');
         el('detectSummary').classList.add('is-stale');
     }
 
     function clearDetection() {
+        setLineEditing(false);
+        resetLineHistory();
         detection = null;
         alignPreview.clear();
         el('detectSummary').classList.add('d-none');
@@ -693,12 +775,16 @@
         marker.setBoxes(fitted);
         window.requestAnimationFrame(() => marker.resetZoom());
 
+        setLineEditing(false);
         detection = {
             page,
             snapshot: JSON.stringify(marker.toJSON()),
             stale: false,
             columns: fitted.filter((box) => box.kind === 'column'),
+            // The detector's outlines, for Reset line.
+            originalOutlines: new Map(page.lines.map((line) => [line.id, line.polygon.map((point) => [...point])])),
         };
+        resetLineHistory();
 
         alignPreview.setLines(page, verificationItems(page.lines, page));
         const columns = page.geometry?.columns ?? [];
@@ -712,16 +798,516 @@
         }
         alignPreview.setVisible(el('detectPreviewToggle').checked);
 
-        const summary = detectionSummary(page);
-        el('detectSummaryTitle').textContent = summary.title;
-        el('detectSummaryText').textContent = summary.text;
         el('detectSummary').classList.remove('d-none', 'is-stale');
-        el('detectSummary').classList.toggle('has-review', summary.flagged > 0);
+        el('lineEditToggle').disabled = page.lines.length === 0;
+        showDetectionSummary();
     }
 
     el('detectPreviewToggle').addEventListener('change', (event) => {
         alignPreview.setVisible(event.currentTarget.checked && detection !== null && !detection.stale);
+        if (!event.currentTarget.checked) setLineEditing(false);
     });
+
+    // ------------------------------------------------------- line editing
+    // After Detect, each outline can be clicked, stretched by its handles,
+    // grown/shrunk, have its corners moved, or be drawn anew, with a live
+    // preview of the crop TrOCR will read. Changes stay here until the
+    // reviewer presses Save crop: only then is the line re-cropped on the
+    // server (not read). Scan with OCR reads the saved crops, and offers to
+    // save any line still unsaved. The field markers are locked meanwhile:
+    // moving one would mean Detect again and drop these adjustments.
+
+    const LINE_GROW_STEP = 2;
+    const LINE_MODE_HINTS = {
+        box: 'Drag the handles to stretch. + / − grow or shrink. Save crop (Ctrl+S) keeps the change. Ctrl+Z undo, Ctrl+Y redo. Tab: next line. Esc: done.',
+        points: 'Drag a corner to move it. Drag a small dot between corners to add one. Delete (or double-click) removes the corner last touched. Ctrl+Z undo.',
+        draw: 'Click to place as many points as you like, or hold and trace. Then press Use this outline, Enter, or double-click, or click the first point. Ctrl+Z takes back the last point. Esc cancels.',
+    };
+    let lineEditing = false;
+    let editedLineIndex = null;
+    let lineSaveQueue = Promise.resolve();
+    // Undo and redo of outline changes: each entry is one line before and
+    // after one change. lineShown is each line as last changed here; a line
+    // whose shown outline differs from its saved one is unsaved.
+    let lineUndo = [];
+    let lineRedo = [];
+    let lineShown = new Map();
+
+    function resetLineHistory() {
+        lineUndo = [];
+        lineRedo = [];
+        lineShown = new Map();
+        updateLineHistoryButtons();
+    }
+
+    function updateLineHistoryButtons() {
+        el('lineUndoBtn').disabled = lineUndo.length === 0;
+        el('lineRedoBtn').disabled = lineRedo.length === 0;
+    }
+
+    function shownLine(index) {
+        const line = detection.page.lines[index];
+        return lineShown.get(line.id) ?? { polygon: line.polygon.map((point) => [...point]), adjusted: Boolean(line.adjusted) };
+    }
+
+    /** Remember one change to a line, so it can be undone. */
+    function recordLineChange(index, polygon, adjusted) {
+        const id = detection.page.lines[index].id;
+        const after = { polygon: polygon.map((point) => [...point]), adjusted };
+        lineUndo.push({ id, before: shownLine(index), after });
+        if (lineUndo.length > 200) lineUndo.shift();
+        lineRedo = [];
+        lineShown.set(id, after);
+        updateLineHistoryButtons();
+        lineChanged(index);
+    }
+
+    /** Is this line's outline here different from the one saved on the server? */
+    function isLineUnsaved(line) {
+        const shown = lineShown.get(line.id);
+        if (!shown) return false;
+        return shown.adjusted !== Boolean(line.adjusted)
+            || JSON.stringify(shown.polygon) !== JSON.stringify(line.polygon);
+    }
+
+    function unsavedLineCount() {
+        return detection ? detection.page.lines.filter(isLineUnsaved).length : 0;
+    }
+
+    /** Redraw a changed line and the save state everywhere it shows. */
+    function lineChanged(index) {
+        alignPreview.updateLine(index, lineItems()[index]);
+        showDetectionSummary();
+        if (editedLineIndex !== index) return;
+        const unsaved = isLineUnsaved(detection.page.lines[index]);
+        el('lineSaveBtn').disabled = !unsaved;
+        el('lineDiscardBtn').disabled = !unsaved;
+        el('lineResetBtn').disabled = !shownLine(index).adjusted;
+        const status = el('lineAdjustStatus');
+        status.classList.remove('is-error');
+        status.textContent = unsaved
+            ? 'Not saved yet. Press Save crop (Ctrl+S) to make this the crop.'
+            : 'Same as the saved crop.';
+    }
+
+    /** Put a line back to a remembered outline (undo, redo, reset, discard). */
+    function applyLineState(id, state) {
+        const index = detection?.page.lines.findIndex((line) => line.id === id) ?? -1;
+        if (index < 0) return;
+        if (editedLineIndex !== index) selectLine(index);
+        if (alignPreview.editing?.mode !== 'box') alignPreview.setEditMode('box');
+        alignPreview.setEditedPolygon(state.polygon, { notify: false });
+        drawLineThumbnail(state.polygon);
+        lineShown.set(id, { polygon: state.polygon.map((point) => [...point]), adjusted: state.adjusted });
+        lineChanged(index);
+    }
+
+    function undoLineChange() {
+        const entry = lineUndo.pop();
+        if (!entry) return false;
+        lineRedo.push(entry);
+        applyLineState(entry.id, entry.before);
+        updateLineHistoryButtons();
+        return true;
+    }
+
+    function redoLineChange() {
+        const entry = lineRedo.pop();
+        if (!entry) return false;
+        lineUndo.push(entry);
+        applyLineState(entry.id, entry.after);
+        updateLineHistoryButtons();
+        return true;
+    }
+
+    function lineItems() {
+        if (!detection) return [];
+        const lines = detection.page.lines.map((line) => {
+            const shown = lineShown.get(line.id);
+            return shown ? { ...line, polygon: shown.polygon, adjusted: shown.adjusted } : line;
+        });
+        return verificationItems(lines, detection.page).map((item, index) => ({
+            ...item,
+            unsaved: isLineUnsaved(detection.page.lines[index]),
+        }));
+    }
+
+    function adjustedLineCount() {
+        return detection ? detection.page.lines.filter((line) => line.adjusted).length : 0;
+    }
+
+    function showDetectionSummary() {
+        const summary = detectionSummary(detection.page);
+        const adjusted = adjustedLineCount();
+        const unsaved = unsavedLineCount();
+        el('detectSummaryTitle').textContent = summary.title;
+        el('detectSummaryText').textContent = summary.text
+            + (adjusted > 0 ? ` · ${adjusted} line${adjusted === 1 ? '' : 's'} adjusted` : '')
+            + (unsaved > 0 ? ` · ${unsaved} not saved` : '');
+        el('detectSummary').classList.toggle('has-review', summary.flagged > 0);
+    }
+
+    function setLineEditing(on) {
+        const allowed = on && detection !== null && !detection.stale && detection.page.lines.length > 0;
+        if (!allowed && lineEditing) applyOpenDrawing();
+        if (!allowed) {
+            editedLineIndex = null;
+            alignPreview.cancelEdit();
+            alignPreview.setSelection([]);
+        }
+        lineEditing = allowed;
+        el('lineEditToggle').checked = allowed;
+        alignPreview.setInteractive(allowed);
+        markerOverlay.classList.toggle('is-editing-lines', allowed);
+        if (allowed) {
+            // Editing needs the outlines on screen.
+            el('detectPreviewToggle').checked = true;
+            alignPreview.setVisible(true);
+            marker.clearSelection();
+            el('lineAdjustCard').classList.remove('d-none');
+            if (editedLineIndex === null) showLineCard(null);
+        } else {
+            el('lineAdjustCard').classList.add('d-none');
+        }
+    }
+
+    el('lineEditToggle').addEventListener('change', (event) => {
+        setLineEditing(event.currentTarget.checked);
+        // Off the switch, so the line keys (Tab, +, -, Esc) work at once.
+        event.currentTarget.blur();
+    });
+
+    function selectLine(index) {
+        if (!lineEditing) return;
+        if (index !== editedLineIndex) applyOpenDrawing();
+        if (index === null || !detection?.page.lines[index]) {
+            editedLineIndex = null;
+            alignPreview.cancelEdit();
+            alignPreview.setSelection([]);
+            showLineCard(null);
+            return;
+        }
+        editedLineIndex = index;
+        alignPreview.setSelection([index], index);
+        alignPreview.beginEdit(index, 'box');
+        showLineCard(index);
+        showLineMode('box');
+        // Bring it into view when Tab moved to a line off screen.
+        alignPreview.groups[index]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    }
+
+    function showLineCard(index) {
+        const items = lineItems();
+        const item = index === null ? null : items[index];
+        const line = index === null ? null : detection.page.lines[index];
+        el('lineAdjustName').textContent = item ? item.name : 'Click a line on the page';
+        el('lineAdjustPosition').textContent = item ? `${index + 1} of ${items.length}` : '';
+        const note = item ? flagExplanation(item.flags) : '';
+        el('lineAdjustNote').textContent = note;
+        el('lineAdjustNote').classList.toggle('d-none', note === '');
+        el('lineAdjustActions').querySelectorAll('button').forEach((button) => { button.disabled = !item; });
+        // Undo and redo follow the history, whichever line is selected.
+        updateLineHistoryButtons();
+        el('lineModeGroup').querySelectorAll('input').forEach((input) => { input.disabled = !item; });
+        if (!item) el('lineDrawActions').classList.add('d-none');
+        el('lineAdjustHint').textContent = item ? LINE_MODE_HINTS.box : 'Click an outline on the page to adjust it.';
+        const unsaved = Boolean(line && isLineUnsaved(line));
+        el('lineResetBtn').disabled = !(line && shownLine(index).adjusted);
+        el('lineSaveBtn').disabled = !unsaved;
+        el('lineDiscardBtn').disabled = !unsaved;
+        el('lineAdjustStatus').textContent = unsaved ? 'Not saved yet. Press Save crop (Ctrl+S) to make this the crop.' : '';
+        el('lineAdjustStatus').classList.remove('is-error');
+        drawLineThumbnail(item ? item.polygon : null);
+    }
+
+    /** The crop TrOCR will read: the page inside the outline, with a margin. */
+    function drawLineThumbnail(polygon) {
+        const canvas = el('lineAdjustThumb');
+        const source = marker.canvas;
+        if (!polygon || polygon.length < 3 || !source.width) {
+            canvas.width = 1;
+            canvas.height = 1;
+            canvas.classList.add('is-empty');
+            return;
+        }
+        const pad = 8;
+        const bounds = polygonBounds(polygon);
+        const left = Math.max(0, Math.floor(bounds.left - pad));
+        const top = Math.max(0, Math.floor(bounds.top - pad));
+        const right = Math.min(source.width, Math.ceil(bounds.right + pad));
+        const bottom = Math.min(source.height, Math.ceil(bounds.bottom + pad));
+        canvas.width = Math.max(1, right - left);
+        canvas.height = Math.max(1, bottom - top);
+        canvas.classList.remove('is-empty');
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.save();
+        context.beginPath();
+        polygon.forEach(([x, y], i) => (i === 0 ? context.moveTo(x - left, y - top) : context.lineTo(x - left, y - top)));
+        context.closePath();
+        context.clip();
+        context.drawImage(source, -left, -top);
+        context.restore();
+    }
+
+    function lineEdited(polygon, final) {
+        if (!lineEditing || editedLineIndex === null) return;
+        drawLineThumbnail(polygon);
+        if (!final) return;
+        // Pressing a corner without moving it (to pick it for Delete) changes nothing.
+        if (JSON.stringify(polygon) === JSON.stringify(shownLine(editedLineIndex).polygon)) return;
+        recordLineChange(editedLineIndex, polygon, true);
+    }
+
+    /** Save crop: the selected line's outline becomes its crop. */
+    function saveSelectedLine() {
+        if (!lineEditing || editedLineIndex === null) return;
+        applyOpenDrawing();
+        const index = editedLineIndex;
+        if (!isLineUnsaved(detection.page.lines[index])) return;
+        const shown = shownLine(index);
+        // Back to the detector's own outline counts as not adjusted.
+        saveLine(index, shown.polygon, { reset: !shown.adjusted });
+    }
+
+    /** Discard: back to the last saved outline (undoable). */
+    function discardSelectedLine() {
+        if (!lineEditing || editedLineIndex === null) return;
+        if (alignPreview.editing?.mode === 'draw') alignPreview.setEditMode('box');
+        const line = detection.page.lines[editedLineIndex];
+        if (!isLineUnsaved(line)) return;
+        const saved = { polygon: line.polygon.map((point) => [...point]), adjusted: Boolean(line.adjusted) };
+        recordLineChange(editedLineIndex, saved.polygon, saved.adjusted);
+        applyLineState(line.id, saved);
+    }
+
+    /** Save every unsaved line, and wait for all saves to finish. */
+    function saveAllUnsavedLines() {
+        detection?.page.lines.forEach((line, index) => {
+            if (!isLineUnsaved(line)) return;
+            const shown = shownLine(index);
+            saveLine(index, shown.polygon, { reset: !shown.adjusted });
+        });
+        return lineSaveQueue;
+    }
+
+    el('lineSaveBtn').addEventListener('click', saveSelectedLine);
+    el('lineDiscardBtn').addEventListener('click', discardSelectedLine);
+
+    /** Keep the Stretch / Points / Draw switch and its hint in step with the overlay. */
+    function showLineMode(mode) {
+        const input = el('lineModeGroup').querySelector(`input[value="${mode}"]`);
+        if (input) input.checked = true;
+        el('lineDrawActions').classList.toggle('d-none', mode !== 'draw' || editedLineIndex === null);
+        if (editedLineIndex !== null) {
+            el('lineAdjustHint').textContent = LINE_MODE_HINTS[mode] ?? '';
+            // The preview shows the outline in force until a drawing has three points.
+            const polygon = alignPreview.editedPolygon();
+            if (polygon) drawLineThumbnail(polygon);
+        }
+    }
+
+    function showDraft(points) {
+        el('lineDrawUseBtn').disabled = points < 3;
+        if (editedLineIndex === null || alignPreview.editing?.mode !== 'draw') return;
+        const status = el('lineAdjustStatus');
+        status.classList.remove('is-error');
+        status.textContent = points === 0
+            ? 'Click round the writing, or hold and trace.'
+            : points < 3
+                ? `${points} point${points === 1 ? '' : 's'}. At least 3 to make an outline.`
+                : `${points} points. The preview shows the new crop: press Use this outline (or Enter) to keep it.`;
+        if (points < 3) drawLineThumbnail(alignPreview.editedPolygon());
+    }
+
+    /**
+     * A drawing of three points or more is applied, not lost, when the
+     * reviewer moves on without closing it (another mode, another line,
+     * Edit lines off, Scan with OCR). Only Esc or Cancel throw it away.
+     */
+    function applyOpenDrawing() {
+        return alignPreview.isDrawing() && alignPreview.finishDrawing();
+    }
+
+    /** Close the drawing, or say why it cannot be an outline yet. */
+    function useDrawing() {
+        if (alignPreview.finishDrawing()) return;
+        const status = el('lineAdjustStatus');
+        status.textContent = 'This drawing has no height or width to crop. Add points round the writing.';
+        status.classList.add('is-error');
+    }
+
+    el('lineDrawUseBtn').addEventListener('click', useDrawing);
+    el('lineDrawCancelBtn').addEventListener('click', () => alignPreview.setEditMode('box'));
+
+    el('lineModeGroup').addEventListener('change', (event) => {
+        if (!(event.target instanceof HTMLInputElement) || editedLineIndex === null) return;
+        const target = event.target.value;
+        if (target !== 'draw' && applyOpenDrawing()) {
+            // The drawing is the outline now (and the mode is Stretch).
+            if (target !== 'box') alignPreview.setEditMode(target);
+        } else {
+            alignPreview.setEditMode(target);
+        }
+        // Off the switch, so Enter and Esc reach the drawing.
+        event.target.blur();
+    });
+
+    function growLine(distance) {
+        if (!lineEditing || editedLineIndex === null || alignPreview.editing?.mode === 'draw') return;
+        alignPreview.growEdit(distance);
+    }
+
+    function resetLine() {
+        if (!lineEditing || editedLineIndex === null) return;
+        const line = detection.page.lines[editedLineIndex];
+        const original = detection.originalOutlines.get(line.id);
+        if (!original) return;
+        // A reset is a change like any other: Ctrl+Z brings the adjustment back.
+        recordLineChange(editedLineIndex, original, false);
+        applyLineState(line.id, { polygon: original, adjusted: false });
+    }
+
+    el('lineShrinkBtn').addEventListener('click', () => growLine(-LINE_GROW_STEP));
+    el('lineGrowBtn').addEventListener('click', () => growLine(LINE_GROW_STEP));
+    el('lineResetBtn').addEventListener('click', resetLine);
+    el('lineUndoBtn').addEventListener('click', () => (alignPreview.isDrawing() ? alignPreview.undoDrawStep() : undoLineChange()));
+    el('lineRedoBtn').addEventListener('click', redoLineChange);
+
+    /** Re-crop one line on the server from its new outline. Saves run one at a time. */
+    function saveLine(index, polygon, { reset = false } = {}) {
+        const page = detection?.page;
+        const line = page?.lines[index];
+        if (!line) return Promise.resolve();
+        const status = el('lineAdjustStatus');
+        status.textContent = 'Saving…';
+        status.classList.remove('is-error');
+
+        lineSaveQueue = lineSaveQueue.then(async () => {
+            if (detection?.page !== page) return;
+            const response = await fetch(config.lineUpdateUrl
+                .replace('__PAGE__', String(page.id))
+                .replace('__LINE__', String(line.id)), {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ polygon, reset }),
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            if (!response.ok || !payload?.line) {
+                throw new Error(payload?.message || `The outline could not be saved (HTTP ${response.status}).`);
+            }
+            if (detection?.page !== page) return;
+
+            // One line moved can make or clear a shared cell elsewhere.
+            page.lines = page.lines.map((existing) => {
+                if (existing.id === payload.line.id) return payload.line;
+                const flags = payload.flags?.[existing.id];
+                return Array.isArray(flags) ? { ...existing, flags } : existing;
+            });
+            // Unless it was changed again meanwhile, what is shown is now the
+            // saved outline (the server rounds it to a tenth of a pixel).
+            const shownNow = lineShown.get(line.id);
+            if (!shownNow || JSON.stringify(shownNow.polygon) === JSON.stringify(polygon)) {
+                lineShown.set(line.id, { polygon: payload.line.polygon, adjusted: Boolean(payload.line.adjusted) });
+            }
+            const items = lineItems();
+            items.forEach((item, i) => alignPreview.updateLine(i, item));
+            showDetectionSummary();
+            if (editedLineIndex === index) {
+                const unsaved = isLineUnsaved(page.lines[index]);
+                el('lineSaveBtn').disabled = !unsaved;
+                el('lineDiscardBtn').disabled = !unsaved;
+                el('lineResetBtn').disabled = !shownLine(index).adjusted;
+                const note = flagExplanation(items[index].flags);
+                el('lineAdjustNote').textContent = note;
+                el('lineAdjustNote').classList.toggle('d-none', note === '');
+                status.textContent = unsaved
+                    ? 'Saved an earlier version. Press Save crop again for the latest.'
+                    : reset ? 'Saved: back to the detected outline.' : 'Saved. Scan with OCR reads this crop.';
+            }
+        }).catch((error) => {
+            console.error('Saving the line outline failed:', error);
+            if (editedLineIndex === index) {
+                status.textContent = error.message || 'The outline could not be saved.';
+                status.classList.add('is-error');
+            }
+        });
+        return lineSaveQueue;
+    }
+
+    /** Line editing keys, handled before the marker shortcuts. Returns true when used. */
+    function handleLineEditKey(event) {
+        if (!lineEditing) return false;
+        const items = detection?.page.lines ?? [];
+        // Tab steps through lines while working on the page; in the side
+        // panel it keeps moving focus as usual.
+        const onPage = document.activeElement === document.body
+            || el('docViewport').contains(document.activeElement);
+        if (event.key === 'Tab' && items.length > 0 && onPage) {
+            event.preventDefault();
+            const step = event.shiftKey ? -1 : 1;
+            const from = editedLineIndex ?? (step > 0 ? -1 : 0);
+            selectLine((from + step + items.length) % items.length);
+            return true;
+        }
+        if (['+', '=', 'Add'].includes(event.key) || event.code === 'NumpadAdd') {
+            event.preventDefault();
+            growLine(event.shiftKey && event.key !== '+' ? LINE_GROW_STEP * 3 : LINE_GROW_STEP);
+            return true;
+        }
+        if (['-', '_', 'Subtract'].includes(event.key) || event.code === 'NumpadSubtract') {
+            event.preventDefault();
+            growLine(event.shiftKey ? -LINE_GROW_STEP * 3 : -LINE_GROW_STEP);
+            return true;
+        }
+        if (event.key === 'Enter' && alignPreview.isDrawing()) {
+            event.preventDefault();
+            useDrawing();
+            return true;
+        }
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            // Esc first leaves a drawing or point editing, then the line, then editing.
+            if (editedLineIndex !== null && alignPreview.editing && alignPreview.editing.mode !== 'box') alignPreview.setEditMode('box');
+            else if (editedLineIndex !== null) selectLine(null);
+            else setLineEditing(false);
+            return true;
+        }
+        const command = event.ctrlKey || event.metaKey;
+        const key = event.key.toLowerCase();
+        if (command && key === 's') {
+            event.preventDefault();
+            saveSelectedLine();
+            return true;
+        }
+        // Ctrl+Z: the last point while drawing, else the last outline change.
+        if (command && !event.shiftKey && key === 'z') {
+            event.preventDefault();
+            if (!alignPreview.undoDrawStep()) undoLineChange();
+            return true;
+        }
+        if (command && (key === 'y' || (event.shiftKey && key === 'z'))) {
+            event.preventDefault();
+            redoLineChange();
+            return true;
+        }
+        if (['Delete', 'Backspace'].includes(event.key)) {
+            event.preventDefault();
+            alignPreview.deleteActivePoint();
+            return true;
+        }
+        // The markers are locked while lines are edited: no marker shortcuts.
+        return ['BracketLeft', 'BracketRight'].includes(event.code) || (command && ['c', 'v'].includes(key));
+    }
 
     function resetFieldHistory() {
         fieldHistory = [];
@@ -1049,6 +1635,8 @@
     function updateZoomUI(zoom) {
         el('zoomResetBtn').textContent = `${Math.round(zoom * 100)}%`;
         updateResetUI();
+        // Line edit handles are sized in page pixels; keep them a constant size on screen.
+        alignPreview?.refresh();
     }
 
     function updateValidationZoomUI(zoom) {
@@ -1110,6 +1698,8 @@
         if (isEditing) {
             return;
         }
+
+        if (handleLineEditKey(event)) return;
 
         const commandPressed = event.ctrlKey || event.metaKey;
         const key = event.key.toLowerCase();
@@ -1407,6 +1997,21 @@
     el('scanNowBtn').addEventListener('click', async () => {
         if (scanInProgress) return;
 
+        // Outline changes are only read once saved: offer to save them first.
+        applyOpenDrawing();
+        const unsavedLines = detectionIsCurrent() ? unsavedLineCount() : 0;
+        if (unsavedLines > 0) {
+            const plural = unsavedLines === 1 ? 'line has an outline change' : 'lines have outline changes';
+            if (!window.confirm(`${unsavedLines} ${plural} that ${unsavedLines === 1 ? 'is' : 'are'} not saved.\n\nOK: save and scan.\nCancel: go back without scanning.`)) {
+                return;
+            }
+            await saveAllUnsavedLines();
+            if (unsavedLineCount() > 0) {
+                showOcrError('Some outline changes could not be saved. Check the lines marked not saved and try again.');
+                return;
+            }
+        }
+
         const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
         if (markerValidationMessage) {
             showOcrError(markerValidationMessage);
@@ -1448,6 +2053,9 @@
             let payload;
             const readingDetectedPage = detectionIsCurrent();
             if (readingDetectedPage) {
+                // Saves still on their way are part of what is read.
+                await lineSaveQueue;
+                setLineEditing(false);
                 // The outlines Staff just checked are the ones read.
                 setOcrProgress(Math.max(ocrProgress, 60), 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
                 payload = await readDetectedPage(controller.signal);

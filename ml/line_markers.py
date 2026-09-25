@@ -178,7 +178,7 @@ def crop_line(image, polygon, out_path=None, fill=CROP_FILL, padding=CROP_PADDIN
     x1 = min(width, int(math.ceil(max(p[0] for p in points))) + 1)
     y1 = min(height, int(math.ceil(max(p[1] for p in points))) + 1)
     if x1 - x0 < 2 or y1 - y0 < 2:
-        raise ValueError("That outline lies outside the page.")
+        raise ValueError("That outline is too small, or lies outside the page.")
 
     region = image.crop((x0, y0, x1, y1))
     if fill == "paper":
@@ -239,7 +239,7 @@ def crop_turned_box(image, polygon, out_path=None, fill=CROP_FILL, padding=CROP_
     image = image.convert("RGB")
     (cx, cy), w, h, degrees = _polygon_turn(polygon)
     if w < 2 or h < 2:
-        raise ValueError("That outline lies outside the page.")
+        raise ValueError("That outline is too small, or lies outside the page.")
 
     xs = [float(p[0]) for p in polygon]
     ys = [float(p[1]) for p in polygon]
@@ -247,7 +247,7 @@ def crop_turned_box(image, polygon, out_path=None, fill=CROP_FILL, padding=CROP_
     x0, y0 = max(0, int(math.floor(min(xs)))), max(0, int(math.floor(min(ys))))
     x1, y1 = min(width, int(math.ceil(max(xs))) + 1), min(height, int(math.ceil(max(ys))) + 1)
     if x1 - x0 < 2 or y1 - y0 < 2:
-        raise ValueError("That outline lies outside the page.")
+        raise ValueError("That outline is too small, or lies outside the page.")
     if fill == "paper":
         pixels = np.asarray(image.crop((x0, y0, x1, y1))).reshape(-1, 3)
         fill = tuple(int(v) for v in np.percentile(pixels, 75, axis=0))
