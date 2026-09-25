@@ -140,7 +140,11 @@ class LineMarkers
     {
         $result = Process::timeout((int) config('services.line_markers.timeout', 600))
             ->path(base_path())
-            ->env(['PYTHONIOENCODING' => 'utf-8', 'PYTHONWARNINGS' => 'ignore'])
+            ->env([
+                'PYTHONIOENCODING' => 'utf-8',
+                'PYTHONWARNINGS' => 'ignore',
+                'LINE_MARKERS_DEVICE' => (string) config('services.line_markers.device', 'auto'),
+            ])
             ->run([$this->python(), config('services.line_markers.script'), ...$arguments]);
 
         $summary = $this->lastJsonLine($result->output());

@@ -85,6 +85,9 @@ return [
         'script' => base_path('ml/line_markers.py'),
         // One page on CPU takes about half a minute; a slow machine gets room.
         'timeout' => (int) env('LINE_MARKERS_TIMEOUT', 600),
+        // Where Kraken finds the lines: auto (the GPU when ml/.venv-kraken has
+        // CUDA PyTorch and a card is present, else the CPU), cuda, or cpu.
+        'device' => env('LINE_MARKERS_DEVICE', 'auto'),
         // Unsubmitted pages older than this are removed by documents:prune-pages.
         'keep_hours' => (int) env('LINE_MARKERS_KEEP_HOURS', 24),
     ],

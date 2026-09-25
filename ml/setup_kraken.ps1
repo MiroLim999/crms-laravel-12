@@ -2,7 +2,11 @@
     setup_kraken.ps1
     Builds the separate Python environment that runs Kraken line detection.
 
-        .\ml\setup_kraken.ps1
+        .\ml\setup_kraken.ps1          CPU PyTorch
+        .\ml\setup_kraken.ps1 -Cuda    CUDA PyTorch: Kraken finds lines on the
+                                     GPU, falling back to the CPU if the GPU
+                                     fails. Needs an NVIDIA driver for CUDA 13;
+                                     about 2.5 GB more to download.
 
     Why a second environment: Kraken 7 needs torch >= 2.9, while the TrOCR
     service in .venv runs torch 2.6 + CUDA 12.4. Installing Kraken into .venv
@@ -16,7 +20,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$Python = '3.13'
+    [string]$Python = '3.13',
+    [switch]$Cuda
 )
 
 # Not 'Stop': uv reports progress on stderr, which Windows PowerShell 5.1 turns
@@ -36,17 +41,23 @@ if (-not (Test-Path (Join-Path $venv 'Scripts\python.exe'))) {
     if ($LASTEXITCODE -ne 0) { throw 'uv venv failed.' }
 }
 
-# torch first, from the CPU index, so kraken's dependency on it is already met
-# and uv never pulls a CUDA build from PyPI.
-Write-Host 'Installing CPU torch' -ForegroundColor Cyan
-uv pip install --python $venv 'torch>=2.9,<=2.14' torchvision --index-url https://download.pytorch.org/whl/cpu
+# torch first, from PyTorch's own index, so kraken's dependency on it is
+# already met and uv never pulls a different build from PyPI. Exact versions,
+# because a CPU build and a CUDA build of one version satisfy each other.
+if ($Cuda) {
+    Write-Host 'Installing CUDA torch' -ForegroundColor Cyan
+    uv pip install --python $venv 'torch==2.14.0+cu130' 'torchvision==0.29.0+cu130' --index-url https://download.pytorch.org/whl/cu130
+} else {
+    Write-Host 'Installing CPU torch' -ForegroundColor Cyan
+    uv pip install --python $venv 'torch==2.14.0+cpu' 'torchvision==0.29.0+cpu' --index-url https://download.pytorch.org/whl/cpu
+}
 if ($LASTEXITCODE -ne 0) { throw 'torch install failed.' }
 
 Write-Host 'Installing kraken' -ForegroundColor Cyan
 uv pip install --python $venv -r $requirements
 if ($LASTEXITCODE -ne 0) { throw 'kraken install failed.' }
 
-& (Join-Path $venv 'Scripts\python.exe') -c "import kraken, torch; from importlib.metadata import version; print('kraken', version('kraken'), '| torch', torch.__version__)"
+& (Join-Path $venv 'Scripts\python.exe') -c "import kraken, torch; from importlib.metadata import version; print('kraken', version('kraken'), '| torch', torch.__version__, '| GPU', torch.cuda.is_available())"
 if ($LASTEXITCODE -ne 0) { throw 'kraken import check failed.' }
 
 Write-Host 'Kraken environment ready.' -ForegroundColor Green

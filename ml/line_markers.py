@@ -85,7 +85,27 @@ CROP_FILL = "paper"
 
 # ============================================================ line detector
 
-def kraken_lines(image, device="cpu"):
+def detector_device(requested=None):
+    """The device Kraken runs on: "cuda" when a GPU can be used, else "cpu".
+
+    LINE_MARKERS_DEVICE chooses: "auto" (the default) uses the GPU when this
+    environment's PyTorch was built with CUDA and a card is present, "cuda"
+    asks for it, "cpu" never uses it. The setting lives in Laravel's .env.
+    """
+    requested = (requested or os.environ.get("LINE_MARKERS_DEVICE") or "auto").strip().lower()
+    if requested == "cpu":
+        return "cpu"
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "cuda"
+    except ImportError:  # pragma: no cover - depends on the environment
+        pass
+    return "cpu"
+
+
+def kraken_lines(image, device=None):
     """Baselines and boundary polygons for every text line Kraken finds.
 
     This is the single place Kraken is called. Swapping the detector means
@@ -95,6 +115,10 @@ def kraken_lines(image, device="cpu"):
 
     in page pixels. Imported lazily so the rest of this module (and the
     rectangle path used by older templates) works without Kraken installed.
+
+    Runs on the GPU when there is one (see detector_device). If the GPU
+    fails - out of memory while TrOCR holds it, a driver hiccup - the page is
+    segmented again on the CPU rather than failing the scan.
     """
     import warnings
 
@@ -107,7 +131,17 @@ def kraken_lines(image, device="cpu"):
             "Run ml\\setup_kraken.ps1, or point LINE_MARKERS_PYTHON at ml\\.venv-kraken."
         ) from error
 
-    segmentation = blla.segment(image.convert("RGB"), device=device)
+    device = detector_device(device)
+    try:
+        segmentation = blla.segment(image.convert("RGB"), device=device)
+    except RuntimeError as error:
+        if device == "cpu":
+            raise
+        print(f"[line_markers] GPU line detection failed ({error}); using the CPU.", file=sys.stderr)
+        device = "cpu (GPU failed)"
+        segmentation = blla.segment(image.convert("RGB"), device="cpu")
+    # Recorded in lines.json, so a page shows where its lines were found.
+    kraken_lines.used_device = device
     lines = []
     for line in segmentation.lines:
         baseline = [[float(x), float(y)] for x, y in (line.baseline or [])]
@@ -1113,6 +1147,7 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
     lines = []
     ignored = []
     grid = None
+    detector_used = None
     has_table = bool(columns) and len(ruled) >= 2
     # In Detect, every rectangle field is split into the written lines inside
     # it. Otherwise a rectangle stays one four-point polygon, as it always was.
@@ -1130,6 +1165,7 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
         # writing it finds tells how thick a printed rule can be here.
         raw = detector(image)
         timings["detector"] = time.time() - started
+        detector_used = getattr(detector, "used_device", None)
         heights = [float(np.ptp(np.asarray(entry["boundary"], float)[:, 1])) for entry in raw]
         max_thickness = float(np.median(heights)) / 7 if heights else None
 
@@ -1442,6 +1478,8 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
         "grid": grid,
         "ignored": len(ignored),
         "timings": {k: round(v, 2) for k, v in timings.items()},
+        # "cuda", "cpu", or "cpu (GPU failed)"; None when no detector ran.
+        "detector_device": detector_used,
     }
     result["timings"]["total"] = round(time.time() - started, 2)
 
@@ -2087,6 +2125,7 @@ def main(argv=None):
                 "lines": len(result["lines"]),
                 "flagged": sum(1 for line in result["lines"] if line["flags"]),
                 **({"deskew": result["deskew"]} if "deskew" in result else {}),
+                "detector_device": result["detector_device"],
                 "timings": result["timings"],
             }
         elif args.command == "detect":
@@ -2097,6 +2136,7 @@ def main(argv=None):
                 "flagged": sum(1 for line in result["lines"] if line["flags"]),
                 "deskew": result["deskew"],
                 "fit": result["fit"],
+                "detector_device": result["detector_device"],
                 "timings": result["timings"],
             }
         elif args.command == "crop":

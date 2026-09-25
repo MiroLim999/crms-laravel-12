@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -571,6 +572,32 @@ class TurnedMarkersTest(unittest.TestCase):
             self.assertEqual(1, len(cells[("Date", row)]), f"Date row {row}")
         self.assertTrue(all(not line["flags"] for line in result["lines"]))
         self.assertNotIn("angle", result["geometry"]["columns"][0])
+
+
+@unittest.skipUnless(importlib.util.find_spec("kraken"), "needs Kraken (ml/.venv-kraken)")
+class DetectorDeviceTest(unittest.TestCase):
+    """Kraken on the GPU when there is one, and never a failed scan because of it."""
+
+    def test_cpu_can_be_forced(self):
+        self.assertEqual("cpu", lm.detector_device("cpu"))
+        with unittest.mock.patch.dict(os.environ, {"LINE_MARKERS_DEVICE": "cpu"}):
+            self.assertEqual("cpu", lm.detector_device())
+
+    def test_a_failing_gpu_falls_back_to_the_cpu(self):
+        from kraken import blla
+
+        calls = []
+
+        def segment(_image, device):
+            calls.append(device)
+            if device == "cuda":
+                raise RuntimeError("CUDA out of memory")
+            return type("Segmentation", (), {"lines": []})()
+
+        with unittest.mock.patch.object(lm, "detector_device", return_value="cuda"), \
+                unittest.mock.patch.object(blla, "segment", side_effect=segment):
+            self.assertEqual([], lm.kraken_lines(Image.new("RGB", (40, 30), (PAPER,) * 3)))
+        self.assertEqual(["cuda", "cpu"], calls)
 
 
 if __name__ == "__main__":

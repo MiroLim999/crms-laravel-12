@@ -264,7 +264,7 @@ Kraken needs a newer PyTorch than the TrOCR service, so it gets its own environm
 pip install uv            # once, if uv is not on PATH yet
 .\ml\setup_kraken.ps1
 ```
-This creates `ml\.venv-kraken` (CPU only). The app finds it automatically; set `LINE_MARKERS_PYTHON` only to use a different interpreter.
+This creates `ml\.venv-kraken` with CPU PyTorch. With an NVIDIA GPU, use `.\ml\setup_kraken.ps1 -Cuda` instead (about 2.5 GB more): Kraken's neural network then runs on the GPU, falling back to the CPU if the GPU fails. On an RTX 4050 laptop this cut Kraken from about 24 s to about 17 s per ledger page; most of Kraken's time is outline tracing on the CPU, which the GPU does not speed up. The app finds the environment automatically; set `LINE_MARKERS_PYTHON` only to use a different interpreter.
 
 ### 4. Configure Environment Files
 ```bash
@@ -612,6 +612,7 @@ python -m py_compile ml/api/main.py      # Verify FastAPI microservice syntax
 | `DB_QUEUE_RETRY_AFTER` | `960` | Seconds before a stuck page job is retried; keep it above the worker's `--timeout=900`. |
 | `LINE_MARKERS_PYTHON` | *(Empty: uses `ml/.venv-kraken`)* | Python interpreter that runs `ml/line_markers.py`. |
 | `LINE_MARKERS_TIMEOUT` | `600` | Seconds one page's line detection may take. |
+| `LINE_MARKERS_DEVICE` | `auto` | Where Kraken runs: `auto` (the GPU when `ml/.venv-kraken` has CUDA PyTorch, else the CPU), `cuda`, or `cpu`. |
 | `LINE_MARKERS_KEEP_HOURS` | `24` | Unsubmitted pages older than this are removed by `documents:prune-pages`. |
 | `OCR_BROWSER_ORIGIN_REGEX` | *(Loopback regex)* | Allowed browser origins regex for CORS upload requests. |
 | `CRMS_CONFIDENCE_THRESHOLD` | `80` | Default OCR confidence threshold below which fields flag for review. |
