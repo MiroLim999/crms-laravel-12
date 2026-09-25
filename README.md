@@ -230,7 +230,7 @@ python -m venv .venv
 
 # Linux / macOS
 python3 -m venv .venv
-source .venv/bin/activate
+source ./venv/bin/activate
 
 # Install requirements
 pip install -r ml/requirements.txt -r ml/api/requirements.txt
