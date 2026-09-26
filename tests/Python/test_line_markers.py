@@ -364,6 +364,47 @@ class DetectTest(unittest.TestCase):
         self.assertGreaterEqual(len(result["lines"]["vertical"]), len(edges) - 1)
         self.assertGreaterEqual(len(result["lines"]["horizontal"]), len(ruled))
 
+    def test_a_rule_found_twice_does_not_cut_the_table_short(self):
+        # Warped paper: part of the third rule comes back as a second rule 5 px
+        # below it, which used to split the rows into two runs and anchor the
+        # template's first row at the longer, lower one.
+        page = Page()
+        ImageDraw.Draw(page.image).line([(300, RULED[2] + 5), (700, RULED[2] + 5)], fill=(RULE,) * 3, width=1)
+
+        fitted, fit = lm.fit_geometry(page.image, geometry())
+
+        self.assertTrue(fit["fitted"])
+        for y, expected in zip(fitted["ruled_ys"], RULED):
+            self.assertAlmostEqual(expected, y * HEIGHT, delta=6)
+
+    def test_a_header_a_little_taller_than_a_row_is_not_taken_for_the_first_row(self):
+        page = Page()
+        ImageDraw.Draw(page.image).line([(COLUMN_EDGES[0], RULED[0] - 48), (COLUMN_EDGES[-1], RULED[0] - 48)],
+                                        fill=(RULE,) * 3, width=1)
+
+        suggested = lm.detect_grid(page.image)["suggestion"]["ruled_ys"]
+        fitted, _ = lm.fit_geometry(page.image, geometry())
+
+        self.assertAlmostEqual(RULED[0], suggested[0] * HEIGHT, delta=2)
+        self.assertAlmostEqual(RULED[0], fitted["ruled_ys"][0] * HEIGHT, delta=2)
+
+    def test_rows_staff_already_placed_on_the_rules_survive_a_faded_rule(self):
+        # The third rule faded away: the evenly ruled run now starts two rows
+        # down, but Staff's rows already sit on every rule that is printed.
+        image = Image.new("RGB", (WIDTH, HEIGHT), (PAPER,) * 3)
+        draw = ImageDraw.Draw(image)
+        for y in RULED:
+            if y != RULED[2]:
+                draw.line([(COLUMN_EDGES[0], y), (COLUMN_EDGES[-1], y)], fill=(RULE,) * 3, width=1)
+        for x in COLUMN_EDGES:
+            draw.line([(x, RULED[0] - 40), (x, RULED[-1] + 60)], fill=(RULE,) * 3, width=1)
+
+        fitted, fit = lm.fit_geometry(image, geometry())
+
+        self.assertTrue(fit["fitted"])
+        for y, expected in zip(fitted["ruled_ys"], RULED):
+            self.assertAlmostEqual(expected, y * HEIGHT, delta=2)
+
     def test_a_page_without_a_matching_table_keeps_the_markers(self):
         blank = Image.new("RGB", (WIDTH, HEIGHT), (PAPER,) * 3)
         fitted, fit = lm.fit_geometry(blank, geometry())

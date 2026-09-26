@@ -1709,6 +1709,20 @@ def detect_grid(page):
     rows = sorted(h_rules, key=lambda r: r["a"] + r["b"] * centre)
     ys = [r["a"] + r["b"] * centre for r in rows]
     if len(ys) >= 3:
+        # A rule on warped paper, or printed twice, can come back as two
+        # near-parallel rules a few pixels apart; that short gap would break
+        # the even rhythm the table body is found by. Keep the longer one.
+        typical = float(np.median(np.diff(ys)))
+        kept = []
+        for rule, y in zip(rows, ys):
+            if kept and y - kept[-1][1] < 0.3 * typical:
+                if rule["hi"] - rule["lo"] > kept[-1][0]["hi"] - kept[-1][0]["lo"]:
+                    kept[-1] = (rule, y)
+                continue
+            kept.append((rule, y))
+        rows = [rule for rule, _ in kept]
+        ys = [y for _, y in kept]
+    if len(ys) >= 3:
         gaps = np.diff(ys)
         typical = float(np.median(gaps))
         # The ruled body of the table is the longest run of evenly spaced rules;
@@ -1721,6 +1735,11 @@ def detect_grid(page):
             if k + 1 - start > best[1] - best[0]:
                 best = (start, k + 1)
         first, last = best
+        # A header band a little taller than a row can pass for one; the
+        # rows inside the run keep a steadier spacing than that.
+        while last - first >= 3 and abs(gaps[first] - float(np.median(gaps[first:last]))) \
+                > 0.15 * float(np.median(gaps[first:last])):
+            first += 1
         run = ys[first:last + 1]
         run_rules = rows[first:last + 1]
         if len(run) >= 3:
@@ -1995,6 +2014,19 @@ def fit_geometry(image, geometry, found=None):
     sx, tx, x_hits = x_fit
     sy = float(np.median(np.diff(printed))) / max(1e-6, float(np.median(np.diff(ruled))))
     ty = printed[0] - sy * ruled[0]
+
+    # A faded or damaged rule can cut the ruled run short, and its top then
+    # lies rows below the table's. Rows Staff already placed on the printed
+    # rules are never traded for a fit that puts fewer of them there.
+    reach = 0.25 * sy * float(np.median(np.diff(ruled)))
+    horizontal = np.asarray(found["horizontal"] or printed, dtype=float)
+
+    def row_hits(scale, shift):
+        lines = shift + scale * np.asarray(ruled)
+        return int(np.sum(np.abs(horizontal[None, :] - lines[:, None]).min(axis=1) <= reach))
+
+    if row_hits(1.0, 0.0) > row_hits(sy, ty):
+        sy, ty = 1.0, 0.0
     y_hits = len(printed)
 
     def clamp(value):
