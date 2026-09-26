@@ -54,21 +54,7 @@ class DocumentPageController extends Controller
             // Detect: straighten the page and fit the template to it, outline
             // every line, and stop before reading so Staff can check first.
             'detect' => ['sometimes', 'boolean'],
-            'geometry' => ['required', 'array'],
-            'geometry.columns' => ['present', 'array', 'max:60'],
-            'geometry.columns.*.name' => ['required', 'string', 'max:500'],
-            'geometry.columns.*.box' => ['required', 'array', 'size:4'],
-            'geometry.columns.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],
-            'geometry.columns.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
-            'geometry.ruled_ys' => ['present', 'array', 'max:400'],
-            'geometry.ruled_ys.*' => ['required', 'numeric', 'min:0', 'max:1'],
-            'geometry.fields' => ['present', 'array', 'max:450'],
-            'geometry.fields.*.name' => ['required', 'string', 'max:500'],
-            'geometry.fields.*.box' => ['required', 'array', 'size:4'],
-            'geometry.fields.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],
-            'geometry.fields.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
-            'geometry.fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:65535'],
-            'geometry.fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:65535'],
+            ...$this->geometryRules(),
         ]);
 
         $geometry = $this->checkedGeometry($validated['geometry']);
@@ -105,6 +91,43 @@ class DocumentPageController extends Controller
     /**
      * Scan with OCR after Detect: read the crops Detect made, as they are.
      */
+    /**
+     * Snap to table: fit the markers Staff are aligning onto this page's
+     * printed table, and return the printed rules for magnetic edges.
+     *
+     * Nothing is stored: the page image is read from the upload itself and
+     * the result goes straight back to the Align step. Well under a second,
+     * because no handwriting is detected.
+     */
+    public function snap(Request $request): JsonResponse
+    {
+        $this->hydrateGeometry($request);
+
+        $validated = $request->validate([
+            'page' => ['required', 'file', 'mimes:png', 'max:40960'],
+            ...$this->geometryRules(),
+        ]);
+
+        $geometry = $this->checkedGeometry($validated['geometry']);
+        $image = $request->file('page');
+        if (! $image instanceof UploadedFile || @getimagesize($image->getRealPath()) === false) {
+            throw ValidationException::withMessages(['page' => 'The page could not be read as an image.']);
+        }
+
+        try {
+            $result = $this->markers->snap($image->getRealPath(), $geometry);
+        } catch (LineMarkersException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'fitted' => (bool) ($result['fit']['fitted'] ?? false),
+            'reason' => $result['fit']['reason'] ?? null,
+            'geometry' => $result['geometry'] ?? $geometry,
+            'lines' => $result['lines'] ?? ['vertical' => [], 'horizontal' => []],
+        ]);
+    }
+
     public function read(Request $request, DocumentPage $page): JsonResponse
     {
         $this->authorizePage($request, $page);
@@ -335,6 +358,33 @@ class DocumentPageController extends Controller
                 $line->forceFill(['flags' => $flags])->save();
             }
         }
+    }
+
+    /**
+     * Validation for aligned markers (page fractions), shared by the page
+     * upload and Snap to table.
+     *
+     * @return array<string, list<mixed>>
+     */
+    private function geometryRules(): array
+    {
+        return [
+            'geometry' => ['required', 'array'],
+            'geometry.columns' => ['present', 'array', 'max:60'],
+            'geometry.columns.*.name' => ['required', 'string', 'max:500'],
+            'geometry.columns.*.box' => ['required', 'array', 'size:4'],
+            'geometry.columns.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],
+            'geometry.columns.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
+            'geometry.ruled_ys' => ['present', 'array', 'max:400'],
+            'geometry.ruled_ys.*' => ['required', 'numeric', 'min:0', 'max:1'],
+            'geometry.fields' => ['present', 'array', 'max:450'],
+            'geometry.fields.*.name' => ['required', 'string', 'max:500'],
+            'geometry.fields.*.box' => ['required', 'array', 'size:4'],
+            'geometry.fields.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],
+            'geometry.fields.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
+            'geometry.fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:65535'],
+            'geometry.fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:65535'],
+        ];
     }
 
     private function hydrateGeometry(Request $request): void

@@ -80,3 +80,20 @@ test('a turned marker moves the way the pointer moves on screen', () => {
     assert.ok(Math.abs(column.x - 0.2) < 1e-9);
     assert.ok(Math.abs(column.y - 0.4) < 1e-9);
 });
+
+import { magnetShift } from '../../resources/js/field-marker.js';
+
+test('a dragged edge snaps to the nearest printed line within reach, and only then', () => {
+    // Edges at 0.200 (left) and 0.400 (right); printed lines at 0.205 and 0.43.
+    const near = magnetShift([0.2, 0.4], [0.205, 0.43], 0.01);
+    assert.ok(Math.abs(near.shift - 0.005) < 1e-12);
+    assert.equal(near.line, 0.205);
+
+    // The closest of both edges wins.
+    const closest = magnetShift([0.2, 0.4], [0.208, 0.403], 0.01);
+    assert.equal(closest.line, 0.403);
+
+    // Nothing within reach: no shift.
+    assert.deepEqual(magnetShift([0.2, 0.4], [0.3], 0.01), { shift: 0, line: null });
+    assert.deepEqual(magnetShift([0.2], null, 0.01), { shift: 0, line: null });
+});

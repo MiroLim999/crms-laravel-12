@@ -180,6 +180,31 @@ class LineOutlinePipelineTest extends TestCase
             ->assertNotFound();
     }
 
+    public function test_snap_to_table_returns_the_fitted_markers_and_printed_lines_without_storing_anything(): void
+    {
+        Queue::fake();
+        $this->app->instance(LineMarkers::class, $this->stubMarkers());
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.snap'), [
+                'page' => UploadedFile::fake()->image('page.png', 800, 600),
+                'geometry_json' => json_encode($this->geometry(), JSON_THROW_ON_ERROR),
+            ])
+            ->assertOk()
+            ->assertJsonPath('fitted', true)
+            ->assertJsonPath('geometry.columns.0.box', [0.06, 0.11, 0.44, 0.3])
+            ->assertJsonPath('lines.vertical', [0.06, 0.5, 0.8]);
+
+        $this->assertSame(0, DocumentPage::count());
+        Queue::assertNothingPushed();
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->postJson(route('documents.pages.snap'), ['geometry_json' => json_encode($this->geometry())])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('page');
+    }
+
     public function test_detect_is_queued_as_detection_only(): void
     {
         Queue::fake();
@@ -772,6 +797,15 @@ class LineOutlinePipelineTest extends TestCase
 
                 return array_merge($result, ['size' => [820, 610], 'deskew' => 1.5, 'geometry' => $fitted,
                     'fit' => ['fitted' => true]]);
+            }
+
+            public function snap(string $imagePath, array $geometry): array
+            {
+                $fitted = $geometry;
+                $fitted['columns'][0]['box'] = [0.06, 0.11, 0.44, 0.3];
+
+                return ['fit' => ['fitted' => true], 'geometry' => $fitted, 'size' => [800, 600],
+                    'lines' => ['vertical' => [0.06, 0.5, 0.8], 'horizontal' => [0.11, 0.21, 0.31, 0.41]]];
             }
 
             public function crop(string $pagePath, array $polygon, string $outPath, ?string $linesPath = null): array

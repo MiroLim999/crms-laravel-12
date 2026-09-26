@@ -94,6 +94,9 @@ Route::middleware('auth')->group(function () {
         // TrOCR read, and re-reads a line after its outline is redrawn.
         Route::post('documents/pages', [DocumentPageController::class, 'store'])
             ->name('documents.pages.store');
+        // Snap to table in Align: fit the markers to the printed table, fast.
+        Route::post('documents/pages/snap', [DocumentPageController::class, 'snap'])
+            ->name('documents.pages.snap');
         Route::get('documents/pages/{page}', [DocumentPageController::class, 'show'])
             ->name('documents.pages.show');
         Route::get('documents/pages/{page}/image', [DocumentPageController::class, 'image'])

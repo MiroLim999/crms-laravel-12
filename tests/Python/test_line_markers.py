@@ -344,6 +344,26 @@ class DetectTest(unittest.TestCase):
         self.assertAlmostEqual(ruled[0], fitted["ruled_ys"][0] * HEIGHT, delta=3)
         self.assertAlmostEqual(ruled[-1], fitted["ruled_ys"][-1] * HEIGHT, delta=4)
 
+    def test_snap_to_table_puts_every_column_edge_and_row_line_on_its_printed_rule(self):
+        page, ruled, edges = self.moved_page(dx=37, dy=-22, scale=0.9)
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "page.png")
+        page.image.save(path)
+
+        result = lm.snap_page(path, geometry())
+        snapped = result["geometry"]
+
+        self.assertTrue(result["fit"]["fitted"])
+        for column, (left, right) in zip(snapped["columns"], zip(edges[:-1], edges[1:])):
+            self.assertAlmostEqual(left, column["box"][0] * WIDTH, delta=1.5)
+            self.assertAlmostEqual(right, (column["box"][0] + column["box"][2]) * WIDTH, delta=1.5)
+        for y, expected in zip(snapped["ruled_ys"], ruled):
+            self.assertAlmostEqual(expected, y * HEIGHT, delta=1.5)
+        # The printed lines themselves, for magnetic edges while dragging (a
+        # faint or short one may be missed; the fit does not need them all).
+        self.assertGreaterEqual(len(result["lines"]["vertical"]), len(edges) - 1)
+        self.assertGreaterEqual(len(result["lines"]["horizontal"]), len(ruled))
+
     def test_a_page_without_a_matching_table_keeps_the_markers(self):
         blank = Image.new("RGB", (WIDTH, HEIGHT), (PAPER,) * 3)
         fitted, fit = lm.fit_geometry(blank, geometry())

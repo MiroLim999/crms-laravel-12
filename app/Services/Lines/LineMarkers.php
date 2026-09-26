@@ -105,6 +105,25 @@ class LineMarkers
     }
 
     /**
+     * Snap to table: the markers fitted to the page's printed table, plus every
+     * printed rule found (for magnetic edges). No handwriting is detected, so
+     * it takes well under a second.
+     *
+     * @param  array<string, mixed>  $geometry
+     * @return array{fit: array<string, mixed>, geometry: array<string, mixed>, lines: array{vertical: list<float>, horizontal: list<float>}, size: list<int>}
+     */
+    public function snap(string $imagePath, array $geometry): array
+    {
+        $geometryPath = tempnam(sys_get_temp_dir(), 'crms-snap-');
+        File::put($geometryPath, json_encode($geometry, JSON_THROW_ON_ERROR));
+        try {
+            return $this->run(['snap', '--page', $imagePath, '--geometry', $geometryPath]);
+        } finally {
+            File::delete($geometryPath);
+        }
+    }
+
+    /**
      * The interpreter that runs line_markers.py.
      *
      * An explicit LINE_MARKERS_PYTHON wins. Otherwise the Kraken environment is

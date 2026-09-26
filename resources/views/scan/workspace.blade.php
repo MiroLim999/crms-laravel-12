@@ -104,6 +104,7 @@
                                     <div><span><kbd>Shift</kbd> + drag</span><small>Add fields to selection</small></div>
                                     <div><span>Drag selection</span><small>Move selected fields</small></div>
                                     <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
+                                    <div><span><kbd>Alt</kbd> + drag</span><small>Place without snapping to printed lines</small></div>
                                     <div><span>Drag the rotate knob below a field</span><small>Tilt that field (<kbd>Shift</kbd>: 5° steps)</small></div>
                                     <div><span><kbd>[</kbd> or <kbd>]</kbd></span><small>Tilt selected 0.5° (<kbd>Shift</kbd>: 5°)</small></div>
                                     <div><span>Double-click the knob</span><small>Straighten</small></div>
@@ -113,6 +114,12 @@
                                     <div><span><kbd>Ctrl</kbd> + <kbd>Z</kbd></span><small>Undo last change</small></div>
                                 </div>
                             </div>
+
+                            <button type="button" class="btn btn-sm btn-outline-primary marker-snap-button" id="snapTableBtn"
+                                    title="Fit the column and row markers onto the page's printed table lines">
+                                <i class="icon-base bx bx-grid-alt icon-sm me-1" aria-hidden="true"></i>
+                                <span>Snap to table</span>
+                            </button>
 
                             <button type="button" class="btn btn-sm btn-outline-secondary marker-reset-button" id="resetFieldsBtn"
                                     title="Restore the original template fields and document view" disabled>
@@ -593,6 +600,7 @@
         maxFieldNameLength: 500,
         recogniseUrl: @json(route('documents.recognise')),
         pagesUrl: @json(route('documents.pages.store')),
+        snapUrl: @json(route('documents.pages.snap')),
         lineUpdateUrl: @json(route('documents.pages.lines.update', ['page' => '__PAGE__', 'line' => '__LINE__'])),
         pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
         csrf: @json(csrf_token()),
@@ -788,6 +796,7 @@
         // The same pixels the outlines were found on, and that go on to TrOCR.
         await marker.loadFromUrl(page.imageUrl);
         updatePaperMatchWarning();
+        fetchSnapLines();
         const fitted = cloneBoxes(geometryMarkers(page.geometry, page));
         marker.setBoxes(fitted);
         window.requestAnimationFrame(() => marker.resetZoom());
@@ -1493,6 +1502,7 @@
             showStep('mark');
             resetFieldHistory();
             marker.setBoxes(cloneBoxes(templateBoxes));
+            fetchSnapLines();
 
             // The marking section was hidden while the file loaded, so fit only
             // after it becomes measurable in the layout.
@@ -1952,17 +1962,85 @@
      * Send the page exactly as rendered here, with the markers as they stand,
      * so every outline that comes back lines up with this canvas pixel for pixel.
      */
-    async function uploadPage({ detect }, signal) {
-        const aligned = marker.toJSON();
+    /** The markers as they stand, as the geometry the server works with. */
+    function currentGeometry() {
         // After Detect, small marker edits are measured from what Detect fitted
         // rather than from the template's own positions.
         const base = detection
             ? { columns: detection.columns, ruledYs: detection.page.geometry?.ruled_ys ?? config.ruledYs }
             : { columns: templateColumns, ruledYs: config.ruledYs };
+        return alignedGeometry(marker.toJSON(), base.columns, base.ruledYs);
+    }
 
+    // ------------------------------------------------------- snap to table
+    // The page's printed table lines, found in well under a second: "Snap to
+    // table" fits every column and row marker onto them, and while a marker
+    // is dragged its edges snap to them (Alt places it freely).
+
+    let snapToken = 0;
+
+    async function requestSnap() {
+        const form = new FormData();
+        form.set('geometry_json', JSON.stringify(currentGeometry()));
+        form.set('page', await canvasBlob(marker.canvas), 'page.png');
+        const response = await fetch(config.snapUrl, {
+            method: 'POST',
+            headers: { 'X-CSRF-TOKEN': config.csrf, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' },
+            credentials: 'same-origin',
+            body: form,
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.lines) throw new Error(responseErrorMessage(response, payload));
+        return payload;
+    }
+
+    /** In the background, so a dragged marker's edges snap from the start. */
+    async function fetchSnapLines() {
+        const token = ++snapToken;
+        marker.setSnapLines(null);
+        try {
+            const payload = await requestSnap();
+            if (token === snapToken) marker.setSnapLines(payload.lines);
+        } catch (error) {
+            console.warn('Printed lines for snapping could not be found:', error);
+        }
+    }
+
+    el('snapTableBtn').addEventListener('click', async () => {
+        if (scanInProgress) return;
+        const button = el('snapTableBtn');
+        const label = button.querySelector('span');
+        const token = ++snapToken;
+        button.disabled = true;
+        label.textContent = 'Snapping…';
+        clearOcrError();
+        try {
+            const payload = await requestSnap();
+            if (token !== snapToken) return;
+            marker.setSnapLines(payload.lines);
+            if (!payload.fitted) {
+                showOcrError(payload.reason || 'No printed table matching these markers was found on this page.');
+                label.textContent = 'Snap to table';
+                return;
+            }
+            // One undoable change (Ctrl+Z) like any marker edit.
+            marker.setBoxes(cloneBoxes(geometryMarkers(payload.geometry, null)));
+            label.textContent = 'Snapped';
+            window.setTimeout(() => { label.textContent = 'Snap to table'; }, 1600);
+        } catch (error) {
+            showOcrError(error.message || 'The page could not be snapped to its table.');
+            label.textContent = 'Snap to table';
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    async function uploadPage({ detect }, signal) {
         const form = new FormData();
         form.set('document_template_id', String(config.templateId));
-        form.set('geometry_json', JSON.stringify(alignedGeometry(aligned, base.columns, base.ruledYs)));
+        form.set('geometry_json', JSON.stringify(currentGeometry()));
         form.set('page', await canvasBlob(marker.canvas), 'page.png');
         // Absent unless Staff choice is enabled; the server falls back to the
         // promoted model and re-checks that the key is one it allows.

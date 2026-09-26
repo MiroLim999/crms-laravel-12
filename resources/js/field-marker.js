@@ -87,6 +87,24 @@ export function markerPivot(box, width, height) {
     return { x: (box.x + box.w / 2) * width, y: (box.y + box.h / 2) * height };
 }
 
+/**
+ * Magnetic edges: the shift that puts the nearest of some edges onto the
+ * nearest line, if any is within reach (all in the same units), else 0.
+ * Returns { shift, line } where line is the one snapped to (or null).
+ */
+export function magnetShift(edges, lines, reach) {
+    let best = null;
+    edges.forEach((edge) => {
+        (lines ?? []).forEach((line) => {
+            const shift = line - edge;
+            if (Math.abs(shift) <= reach && (best === null || Math.abs(shift) < Math.abs(best.shift))) {
+                best = { shift, line };
+            }
+        });
+    });
+    return best ?? { shift: 0, line: null };
+}
+
 /** (x, y) turned clockwise on screen by the given degrees (y points down). */
 export function turnPoint(x, y, degrees) {
     const radians = degrees * Math.PI / 180;
@@ -145,6 +163,9 @@ export class FieldMarker {
         /** @type {Array<{name: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number, el: HTMLElement|null}>} */
         this.boxes = [];
         this.selected = new Set();
+        // Printed lines on the page (fractions) that marker edges snap to.
+        this.snapLines = null;
+        this.guides = { v: null, h: null };
         this.pdfDoc = null;
         this.pageMeasurement = null;
         this.zoom = 1;
@@ -549,6 +570,42 @@ export class FieldMarker {
         this._emitSelection();
     }
 
+    // ----------------------------------------------------------- magnetic edges
+
+    /**
+     * The page's printed lines, as page fractions: { vertical: [x...],
+     * horizontal: [y...] }. While a marker is moved or resized, an edge
+     * within a few screen pixels of one snaps onto it (hold Alt to place
+     * freely). null turns snapping off.
+     */
+    setSnapLines(lines) {
+        this.snapLines = lines && (lines.vertical?.length || lines.horizontal?.length) ? lines : null;
+        this._showGuides(null, null);
+    }
+
+    /** Thin lines over the page showing what an edge snapped to. */
+    _showGuides(x, y) {
+        const width = this.canvas.clientWidth;
+        const height = this.canvas.clientHeight;
+        [['v', x], ['h', y]].forEach(([axis, at]) => {
+            let guide = this.guides[axis];
+            if (at === null || at === undefined) {
+                guide?.classList.add('d-none');
+                return;
+            }
+            if (!guide || !guide.isConnected) {
+                guide = document.createElement('div');
+                guide.className = `marker-snap-guide is-${axis === 'v' ? 'vertical' : 'horizontal'}`;
+                guide.setAttribute('aria-hidden', 'true');
+                this.overlay.appendChild(guide);
+                this.guides[axis] = guide;
+            }
+            guide.classList.remove('d-none');
+            if (axis === 'v') guide.style.left = `${at * width}px`;
+            else guide.style.top = `${at * height}px`;
+        });
+    }
+
     // ----------------------------------------------------------------- rotation
 
     /**
@@ -780,8 +837,23 @@ export class FieldMarker {
                 const maxDx = Math.min(...origins.map((origin) => 1 - origin.x - origin.w));
                 const minDy = Math.max(...origins.map((origin) => -origin.y));
                 const maxDy = Math.min(...origins.map((origin) => 1 - origin.y - origin.h));
-                const boundedX = clamp(dx, minDx, maxDx);
-                const boundedY = clamp(dy, minDy, maxDy);
+                let boundedX = clamp(dx, minDx, maxDx);
+                let boundedY = clamp(dy, minDy, maxDy);
+
+                const grabbed = origins.find((origin) => origin.box === box);
+                if (this.snapLines && grabbed && !event.altKey) {
+                    const snapX = magnetShift(
+                        [grabbed.x + boundedX, grabbed.x + grabbed.w + boundedX], this.snapLines.vertical, 8 / width,
+                    );
+                    const snapY = magnetShift(
+                        [grabbed.y + boundedY, grabbed.y + grabbed.h + boundedY], this.snapLines.horizontal, 8 / height,
+                    );
+                    boundedX = clamp(boundedX + snapX.shift, minDx, maxDx);
+                    boundedY = clamp(boundedY + snapY.shift, minDy, maxDy);
+                    this._showGuides(snapX.line, snapY.line);
+                } else {
+                    this._showGuides(null, null);
+                }
 
                 origins.forEach((origin) => {
                     origin.box.x = origin.x + boundedX;
@@ -792,8 +864,19 @@ export class FieldMarker {
                 const maxDw = Math.min(...origins.map((origin) => 1 - origin.x - origin.w));
                 const minDh = Math.max(...origins.map((origin) => MIN_FRACTION - origin.h));
                 const maxDh = Math.min(...origins.map((origin) => 1 - origin.y - origin.h));
-                const boundedW = clamp(dx, minDw, maxDw);
-                const boundedH = clamp(dy, minDh, maxDh);
+                let boundedW = clamp(dx, minDw, maxDw);
+                let boundedH = clamp(dy, minDh, maxDh);
+
+                const grabbed = origins.find((origin) => origin.box === box);
+                if (this.snapLines && grabbed && !event.altKey) {
+                    const snapW = magnetShift([grabbed.x + grabbed.w + boundedW], this.snapLines.vertical, 8 / width);
+                    const snapH = magnetShift([grabbed.y + grabbed.h + boundedH], this.snapLines.horizontal, 8 / height);
+                    boundedW = clamp(boundedW + snapW.shift, minDw, maxDw);
+                    boundedH = clamp(boundedH + snapH.shift, minDh, maxDh);
+                    this._showGuides(snapW.line, snapH.line);
+                } else {
+                    this._showGuides(null, null);
+                }
 
                 origins.forEach((origin) => {
                     origin.box.w = origin.w + boundedW;
@@ -809,6 +892,7 @@ export class FieldMarker {
             mode = null;
             if (captured.hasPointerCapture(event.pointerId)) captured.releasePointerCapture(event.pointerId);
             el.classList.remove('is-active');
+            this._showGuides(null, null);
             this._emit();
         };
 

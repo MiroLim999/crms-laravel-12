@@ -2091,6 +2091,29 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   pointer-events: none;
 }
 
+// The printed line a dragged marker's edge snapped to.
+.marker-snap-guide {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+
+  &.is-vertical {
+    top: 0;
+    bottom: 0;
+    width: 0;
+    border-left: 2px solid #ff3e1d;
+    margin-left: -1px;
+  }
+
+  &.is-horizontal {
+    left: 0;
+    right: 0;
+    height: 0;
+    border-top: 2px solid #ff3e1d;
+    margin-top: -1px;
+  }
+}
+
 .line-adjust-card {
   display: flex;
   flex-direction: column;

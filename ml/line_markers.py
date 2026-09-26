@@ -1951,7 +1951,7 @@ def _fit_1d(template, found, tolerance, prior=None, max_gap=None):
     return best
 
 
-def fit_geometry(image, geometry):
+def fit_geometry(image, geometry, found=None):
     """Place the template's columns, rows and fields on this page's own table.
 
     The template says what the table holds (column names, how many rows); the
@@ -1976,7 +1976,7 @@ def fit_geometry(image, geometry):
     if not columns or len(ruled) < 2:
         return geometry, {"fitted": False, "reason": "This template has no ledger grid to fit."}
 
-    found = detect_grid(image)
+    found = found or detect_grid(image)
     edges = []
     for column in sorted(columns, key=lambda c: c["box"][0]):
         for edge in (column["box"][0], column["box"][0] + column["box"][2]):
@@ -2080,6 +2080,61 @@ def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None)
     return result
 
 
+def _snap_to_lines(geometry, vertical, horizontal):
+    """Each column edge and row line onto its own printed rule, when one is near.
+
+    The fit moves and scales the whole grid at once; real pages are a little
+    uneven, so each edge still lands a few pixels off its rule. Edges with no
+    printed rule close by (a faded border, the estimated rows below the last
+    printed one) stay where the fit put them.
+    """
+    def nearest(value, lines, reach):
+        if not lines:
+            return value
+        best = min(lines, key=lambda line: abs(line - value))
+        return best if abs(best - value) <= reach else value
+
+    ruled = [float(y) for y in geometry.get("ruled_ys") or []]
+    spacing = float(np.median(np.diff(ruled))) if len(ruled) >= 2 else 0.02
+    ruled = [nearest(y, horizontal, 0.35 * spacing) for y in ruled]
+    # Rows stay in order even if two were drawn to one rule.
+    ruled = [y for k, y in enumerate(ruled) if k == 0 or y > ruled[k - 1] + 1e-4]
+
+    columns = []
+    top, bottom = (ruled[0], ruled[-1]) if ruled else (None, None)
+    for column in geometry.get("columns") or []:
+        x, y, w, h = [float(v) for v in column["box"]]
+        left, right = nearest(x, vertical, 0.015), nearest(x + w, vertical, 0.015)
+        if right - left < 0.005:
+            left, right = x, x + w
+        if top is not None:
+            y, h = top, bottom - top
+        columns.append({**column, "box": [round(left, 5), round(y, 5), round(right - left, 5), round(h, 5)]})
+
+    return {**geometry, "columns": columns, "ruled_ys": [round(y, 5) for y in ruled]}
+
+
+def snap_page(page_path, geometry):
+    """Snap to table: the markers fitted to this page's printed table, fast.
+
+    The column-and-row fit Detect makes, without straightening the page or
+    finding any handwriting, so it takes a moment rather than a Kraken pass.
+    Also returns every printed rule found (page fractions), for the markers'
+    magnetic edges while Staff drag them.
+    """
+    image = Image.open(page_path).convert("RGB")
+    found = detect_grid(image)
+    fitted, fit = fit_geometry(image, geometry, found=found)
+    if fit["fitted"]:
+        fitted = _snap_to_lines(fitted, found["vertical"], found["horizontal"])
+    return {
+        "size": list(image.size),
+        "fit": fit,
+        "geometry": fitted,
+        "lines": {"vertical": found["vertical"], "horizontal": found["horizontal"]},
+    }
+
+
 # ============================================================ CLI
 
 def _read_json_arg(value):
@@ -2115,6 +2170,10 @@ def main(argv=None):
     grid = commands.add_parser("grid", help="Detect printed rules on a template sample.")
     grid.add_argument("--page", required=True)
 
+    snap = commands.add_parser("snap", help="Fit the markers to the page's printed table (no line detection).")
+    snap.add_argument("--page", required=True)
+    snap.add_argument("--geometry", required=True, help="JSON file or string, page fractions.")
+
     args = parser.parse_args(argv)
 
     try:
@@ -2145,6 +2204,8 @@ def main(argv=None):
             lines_json = _read_json_arg(args.lines) if args.lines else None
             column, row, flags = place_outline(polygon, lines_json)
             summary = {"ok": True, "bbox": bbox, "column_index": column, "row": row, "flags": flags}
+        elif args.command == "snap":
+            summary = {"ok": True, **snap_page(args.page, _read_json_arg(args.geometry))}
         else:
             summary = {"ok": True, **detect_grid(args.page)}
     except Exception as error:  # reported to Laravel as a message, not a traceback
