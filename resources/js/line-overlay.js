@@ -137,13 +137,15 @@ export class LineOverlay {
      *        (final) when the drag, a grow/shrink or a drawing ends.
      * @param {(mode: string) => void} [options.onModeChange]  E.g. back to
      *        'box' once a drawn outline is closed.
+     * @param {boolean} [options.selectWhileEditing]  Clicking another outline
+     *        while stretching or moving points picks that line.
      * @param {(points: number) => void} [options.onDraftChange]  How many
      *        points the outline being drawn has; from three on, onEdit also
      *        gets the drawing (not final), for a live preview.
      */
     constructor({
         container, onSelect = null, preview = false, onBackground = null, onEdit = null, onModeChange = null,
-        onDraftChange = null,
+        onDraftChange = null, selectWhileEditing = false,
     }) {
         this.container = container;
         this.onSelect = onSelect;
@@ -151,6 +153,9 @@ export class LineOverlay {
         this.onEdit = onEdit;
         this.onModeChange = onModeChange;
         this.onDraftChange = onDraftChange;
+        // Align lets another line be picked mid-edit; Verify keeps the one
+        // being corrected until it is saved or cancelled.
+        this.selectWhileEditing = selectWhileEditing;
         this._justDragged = false;
         this.width = 1;
         this.height = 1;
@@ -177,7 +182,7 @@ export class LineOverlay {
             }
             // Stretching or moving points leaves the other outlines clickable,
             // to move on; drawing and the rectangle take every click.
-            if (this.editing && !['box', 'points'].includes(this.editing.mode)) return;
+            if (this.editing && !(this.selectWhileEditing && ['box', 'points'].includes(this.editing.mode))) return;
             const target = event.target instanceof Element ? event.target : null;
             if (target?.closest('.line-overlay__edit')) return;
             const group = target?.closest('.line-marker');

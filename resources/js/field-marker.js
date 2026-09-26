@@ -149,7 +149,9 @@ export class FieldMarker {
         this.pageMeasurement = null;
         this.zoom = 1;
         this.minZoom = 0.5;
-        this.maxZoom = 3;
+        // Up to 500%: small handwriting on low-resolution scans needs a close
+        // look when outlines are adjusted stroke by stroke.
+        this.maxZoom = 5;
 
         this._panning = false;
         this._panX = 0;

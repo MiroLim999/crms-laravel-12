@@ -229,12 +229,9 @@
                         <strong id="detectSummaryTitle"></strong>
                         <span id="detectSummaryText"></span>
                         <div class="form-check form-switch mb-0 mt-1">
-                            <input class="form-check-input" type="checkbox" id="detectPreviewToggle" checked>
-                            <label class="form-check-label" for="detectPreviewToggle">Show detected lines</label>
-                        </div>
-                        <div class="form-check form-switch mb-0">
                             <input class="form-check-input" type="checkbox" id="lineEditToggle">
-                            <label class="form-check-label" for="lineEditToggle">Edit lines</label>
+                            <label class="form-check-label" for="lineEditToggle"
+                                   title="Click a line on the page to fix its outline before it is read">Adjust line crops</label>
                         </div>
                     </div>
                 </div>
@@ -254,11 +251,11 @@
                         <canvas id="lineAdjustThumb" aria-label="What TrOCR will read for this line"></canvas>
                     </div>
                     <div class="btn-group btn-group-sm line-adjust-card__modes" role="radiogroup" aria-label="How to change the outline" id="lineModeGroup">
-                        <input type="radio" class="btn-check" name="lineEditMode" id="lineModeBox" value="box" autocomplete="off" checked>
+                        <input type="radio" class="btn-check" name="alignLineMode" id="lineModeBox" value="box" autocomplete="off" checked>
                         <label class="btn btn-outline-primary" for="lineModeBox" title="Stretch the outline by its handles">Stretch</label>
-                        <input type="radio" class="btn-check" name="lineEditMode" id="lineModePoints" value="points" autocomplete="off">
+                        <input type="radio" class="btn-check" name="alignLineMode" id="lineModePoints" value="points" autocomplete="off">
                         <label class="btn btn-outline-primary" for="lineModePoints" title="Drag the outline's own corners">Points</label>
-                        <input type="radio" class="btn-check" name="lineEditMode" id="lineModeDraw" value="draw" autocomplete="off">
+                        <input type="radio" class="btn-check" name="alignLineMode" id="lineModeDraw" value="draw" autocomplete="off">
                         <label class="btn btn-outline-primary" for="lineModeDraw" title="Draw a new outline round the writing">Draw</label>
                     </div>
                     <div class="line-adjust-card__draw d-none" id="lineDrawActions">
@@ -372,15 +369,27 @@
                                 <span id="lineEditName"></span>
                             </div>
                             <div class="btn-group btn-group-sm" role="group" aria-label="Outline tool">
-                                <input type="radio" class="btn-check" name="lineEditMode" id="lineEditPoints"
-                                       value="points" checked>
-                                <label class="btn btn-outline-secondary" for="lineEditPoints">
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditBox"
+                                       value="box" checked>
+                                <label class="btn btn-outline-secondary" for="lineEditBox" title="Stretch the outline by its handles">
+                                    <i class="icon-base bx bx-expand-alt icon-sm me-1" aria-hidden="true"></i>Stretch
+                                </label>
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditPoints"
+                                       value="points">
+                                <label class="btn btn-outline-secondary" for="lineEditPoints"
+                                       title="Drag corners; drag a dot between corners to add one; Delete removes one">
                                     <i class="icon-base bx bx-shape-polygon icon-sm me-1" aria-hidden="true"></i>Move points
                                 </label>
-                                <input type="radio" class="btn-check" name="lineEditMode" id="lineEditRectangle"
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditDraw"
+                                       value="draw">
+                                <label class="btn btn-outline-secondary" for="lineEditDraw"
+                                       title="Draw a new outline: click points or hold and trace; Enter or double-click closes it">
+                                    <i class="icon-base bx bx-pen icon-sm me-1" aria-hidden="true"></i>Draw
+                                </label>
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditRectangle"
                                        value="rectangle">
-                                <label class="btn btn-outline-secondary" for="lineEditRectangle">
-                                    <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>Draw rectangle
+                                <label class="btn btn-outline-secondary" for="lineEditRectangle" title="Drag a box over the writing">
+                                    <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>Rectangle
                                 </label>
                             </div>
                             <div class="line-edit-toolbar__actions">
@@ -519,7 +528,7 @@
          data-bs-keyboard="false" aria-hidden="true">
         <div class="modal-dialog modal-sm modal-dialog-centered">
             <div class="modal-content ocr-progress-modal text-center">
-                <div class="modal-body p-4 p-sm-5">
+                <div class="modal-body p-4 p-sm-5 pb-sm-4">
                     <div class="ocr-progress-ring mx-auto mb-4" id="ocrProgressRing"
                          role="progressbar" aria-label="OCR progress" aria-valuemin="0"
                          aria-valuemax="100" aria-valuenow="0">
@@ -538,6 +547,10 @@
                         <i class="icon-base bx bx-scan" aria-hidden="true"></i>
                         <span id="ocrProgressFields">Preparing marked fields</span>
                     </div>
+                </div>
+                {{-- Stops this run and returns to Align; the label names what is running. --}}
+                <div class="ocr-progress-actions">
+                    <button type="button" class="btn btn-outline-secondary w-100" id="ocrProgressCancel">Cancel</button>
                 </div>
             </div>
         </div>
@@ -581,6 +594,7 @@
         recogniseUrl: @json(route('documents.recognise')),
         pagesUrl: @json(route('documents.pages.store')),
         lineUpdateUrl: @json(route('documents.pages.lines.update', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
         csrf: @json(csrf_token()),
         paper: {!! Illuminate\Support\Js::encode([
             'sizeLabel' => $template->paper_size->label(),
@@ -667,6 +681,8 @@
     const lineOverlay = new LineOverlay({
         container: el('validationFieldOverlay'),
         onSelect: (index) => activateValidationField(index, 'marker'),
+        onModeChange: (mode) => showVerifyLineMode(mode),
+        onDraftChange: (points) => showVerifyDraft(points),
     });
 
     // Detect's preview in the Align step: outlines and fitted row lines over
@@ -679,6 +695,7 @@
         onEdit: (polygon, final) => lineEdited(polygon, final),
         onModeChange: (mode) => showLineMode(mode),
         onDraftChange: (points) => showDraft(points),
+        selectWhileEditing: true,
     });
 
     // What Detect found on this page and the markers it fitted. Scan with OCR
@@ -796,17 +813,12 @@
         } else {
             alignPreview.setGuides([]);
         }
-        alignPreview.setVisible(el('detectPreviewToggle').checked);
+        alignPreview.setVisible(true);
 
         el('detectSummary').classList.remove('d-none', 'is-stale');
         el('lineEditToggle').disabled = page.lines.length === 0;
         showDetectionSummary();
     }
-
-    el('detectPreviewToggle').addEventListener('change', (event) => {
-        alignPreview.setVisible(event.currentTarget.checked && detection !== null && !detection.stale);
-        if (!event.currentTarget.checked) setLineEditing(false);
-    });
 
     // ------------------------------------------------------- line editing
     // After Detect, each outline can be clicked, stretched by its handles,
@@ -961,11 +973,11 @@
         markerOverlay.classList.toggle('is-editing-lines', allowed);
         if (allowed) {
             // Editing needs the outlines on screen.
-            el('detectPreviewToggle').checked = true;
             alignPreview.setVisible(true);
             marker.clearSelection();
             el('lineAdjustCard').classList.remove('d-none');
             if (editedLineIndex === null) showLineCard(null);
+            revealLineCard();
         } else {
             el('lineAdjustCard').classList.add('d-none');
         }
@@ -994,6 +1006,29 @@
         showLineMode('box');
         // Bring it into view when Tab moved to a line off screen.
         alignPreview.groups[index]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+        revealLineCard();
+    }
+
+    /**
+     * Scroll the side panel down to the line tools: the Detect summary at the
+     * top of the view (or as near as the panel scrolls), then the line card
+     * and the Detect / Scan buttons below it.
+     */
+    function revealLineCard() {
+        const card = el('lineAdjustCard');
+        if (card.classList.contains('d-none')) return;
+        window.requestAnimationFrame(() => {
+            const panel = card.closest('.document-side-panel');
+            if (!panel || panel.scrollHeight <= panel.clientHeight + 1) {
+                // A stacked (narrow) layout scrolls the page instead.
+                card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                return;
+            }
+            const summary = el('detectSummary');
+            const summaryTop = summary.getBoundingClientRect().top - panel.getBoundingClientRect().top + panel.scrollTop;
+            const bottom = panel.scrollHeight - panel.clientHeight;
+            panel.scrollTo({ top: Math.max(0, Math.min(bottom, summaryTop - 12)), behavior: 'smooth' });
+        });
     }
 
     function showLineCard(index) {
@@ -1124,7 +1159,7 @@
     /**
      * A drawing of three points or more is applied, not lost, when the
      * reviewer moves on without closing it (another mode, another line,
-     * Edit lines off, Scan with OCR). Only Esc or Cancel throw it away.
+     * Adjust line crops off, Scan with OCR). Only Esc or Cancel throw it away.
      */
     function applyOpenDrawing() {
         return alignPreview.isDrawing() && alignPreview.finishDrawing();
@@ -1994,6 +2029,51 @@
         return payload?.message || payload?.error || `OCR failed with HTTP ${response.status}.`;
     }
 
+    // The run behind the progress window, so its × can stop it: the browser
+    // stops waiting at once, and the server is told to drop the page (or,
+    // for the read of a Detect result, to keep that result).
+    let activeRun = null;
+    const CANCEL_LABELS = { detect: 'Cancel detection', scan: 'Cancel scan', read: 'Cancel reading' };
+
+    function startRun(controller, kind, pageId = null) {
+        activeRun = { controller, kind, pageId, cancelled: false };
+        showRunKind(kind);
+        el('ocrProgressCancel').disabled = false;
+        return activeRun;
+    }
+
+    /** Name the cancel button after what is running. */
+    function showRunKind(kind) {
+        if (activeRun) activeRun.kind = kind;
+        el('ocrProgressCancel').textContent = CANCEL_LABELS[kind] ?? 'Cancel';
+    }
+
+    function cancelActiveRun() {
+        const run = activeRun;
+        if (!run || run.cancelled) return;
+        run.cancelled = true;
+        el('ocrProgressCancel').disabled = true;
+        el('ocrProgressCancel').textContent = 'Cancelling…';
+        setOcrProgress(ocrProgress, 'Cancelling', 'Stopping this run.');
+        run.controller.abort();
+        if (run.pageId !== null) {
+            fetch(config.pageCancelUrl.replace('__PAGE__', String(run.pageId)), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                keepalive: true,
+                body: JSON.stringify({ keep_detection: run.kind === 'read' }),
+            }).catch((error) => console.warn('Cancelling the page on the server failed:', error));
+        }
+    }
+
+    el('ocrProgressCancel').addEventListener('click', cancelActiveRun);
+
     el('scanNowBtn').addEventListener('click', async () => {
         if (scanInProgress) return;
 
@@ -2021,6 +2101,7 @@
         const button = el('scanNowBtn');
         const originalButtonContent = button.innerHTML;
         const controller = new AbortController();
+        const run = startRun(controller, 'scan');
         let modal = null;
         let timeoutId = null;
 
@@ -2053,6 +2134,8 @@
             let payload;
             const readingDetectedPage = detectionIsCurrent();
             if (readingDetectedPage) {
+                showRunKind('read');
+                run.pageId = detection.page.id;
                 // Saves still on their way are part of what is read.
                 await lineSaveQueue;
                 setLineEditing(false);
@@ -2063,6 +2146,7 @@
                 // Finishing Align hands the page to the background line detector.
                 setOcrProgress(Math.max(ocrProgress, 8), 'Sending the aligned page', 'Uploading the page securely for line detection.');
                 payload = await uploadPage({ detect: false }, controller.signal);
+                run.pageId = payload.id;
             }
 
             const page = await waitForPage(payload, controller.signal);
@@ -2101,15 +2185,22 @@
                 throw error;
             }
         } catch (error) {
-            const message = error.name === 'AbortError'
-                ? 'Line detection and reading timed out. Check the OCR service and the background worker, then try again.'
-                : (error.message || 'The document could not be scanned.');
-            console.error('Document OCR failed:', error);
-            // A failed read leaves the detected page unusable; the next scan
-            // outlines the page afresh from the markers.
-            if (detection) detection.stale = true;
-            showOcrError(message);
+            if (run.cancelled) {
+                // Cancelled from the progress window: back to Align. A Detect
+                // result that was being read is kept, ready to scan again.
+                if (run.kind !== 'read' && detection) detection.stale = true;
+            } else {
+                const message = error.name === 'AbortError'
+                    ? 'Line detection and reading timed out. Check the OCR service and the background worker, then try again.'
+                    : (error.message || 'The document could not be scanned.');
+                console.error('Document OCR failed:', error);
+                // A failed read leaves the detected page unusable; the next scan
+                // outlines the page afresh from the markers.
+                if (detection) detection.stale = true;
+                showOcrError(message);
+            }
         } finally {
+            if (activeRun === run) activeRun = null;
             if (timeoutId !== null) window.clearTimeout(timeoutId);
             stopOcrProgress();
             modal?.hide();
@@ -2134,6 +2225,7 @@
         const button = el('detectBtn');
         const originalButtonContent = button.innerHTML;
         const controller = new AbortController();
+        const run = startRun(controller, 'detect');
         const timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
         let modal = null;
 
@@ -2156,6 +2248,7 @@
 
             setOcrProgress(Math.max(ocrProgress, 8), 'Sending the page', 'Uploading the page securely for detection.');
             const payload = await uploadPage({ detect: true }, controller.signal);
+            run.pageId = payload.id;
             const page = await waitForPage(payload, controller.signal, 'detected', 'detect');
 
             if (!Array.isArray(page.lines) || page.lines.length === 0) {
@@ -2165,12 +2258,15 @@
             await applyDetection(page);
             await completeOcrProgress('Detection complete', 'Check the outlines, then Scan with OCR.');
         } catch (error) {
-            const message = error.name === 'AbortError'
-                ? 'Detection timed out. Check the background worker, then try again.'
-                : (error.message || 'The page could not be detected.');
-            console.error('Detection failed:', error);
-            showOcrError(message);
+            if (!run.cancelled) {
+                const message = error.name === 'AbortError'
+                    ? 'Detection timed out. Check the background worker, then try again.'
+                    : (error.message || 'The page could not be detected.');
+                console.error('Detection failed:', error);
+                showOcrError(message);
+            }
         } finally {
+            if (activeRun === run) activeRun = null;
             window.clearTimeout(timeoutId);
             stopOcrProgress();
             modal?.hide();
@@ -3046,8 +3142,32 @@
         el('lineEditName').textContent = cropped[index].name;
         el('lineEditToolbar').classList.remove('d-none');
         showLineEditStatus('');
-        const mode = document.querySelector('input[name="lineEditMode"]:checked')?.value ?? 'points';
+        const mode = document.querySelector('input[name="verifyLineMode"]:checked')?.value ?? 'box';
         lineOverlay.beginEdit(index, mode);
+        showVerifyLineMode(mode);
+    }
+
+    const VERIFY_MODE_HINTS = {
+        box: 'Drag the handles to stretch the outline.',
+        points: 'Drag a corner to move it. Drag a small dot between corners to add one; Delete removes the corner last touched.',
+        draw: 'Click round the writing, or hold and trace. Enter or double-click closes it; Ctrl+Z takes back the last point; Esc cancels the drawing.',
+        rectangle: 'Drag a box over the writing.',
+    };
+
+    /** Keep the Verify tool buttons and hint in step with the outline editor. */
+    function showVerifyLineMode(mode) {
+        const input = document.querySelector(`input[name="verifyLineMode"][value="${mode}"]`);
+        if (input) input.checked = true;
+        if (editingLineIndex !== null) showLineEditStatus(VERIFY_MODE_HINTS[mode] ?? '');
+    }
+
+    function showVerifyDraft(points) {
+        if (editingLineIndex === null || lineOverlay.editing?.mode !== 'draw') return;
+        showLineEditStatus(points === 0
+            ? VERIFY_MODE_HINTS.draw
+            : points < 3
+                ? `${points} point${points === 1 ? '' : 's'}. At least 3 to make an outline.`
+                : `${points} points. Enter or double-click closes it; Save and re-read uses it.`);
     }
 
     function cancelOutlineEdit() {
@@ -3065,8 +3185,13 @@
      */
     async function saveOutlineEdit() {
         const index = editingLineIndex;
+        if (index === null) return;
+        if (lineOverlay.isDrawing() && !lineOverlay.finishDrawing()) {
+            showLineEditStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+            return;
+        }
         const polygon = lineOverlay.editedPolygon();
-        if (index === null || !polygon) return;
+        if (!polygon) return;
 
         const item = cropped[index];
         const button = el('lineEditSave');
@@ -3148,15 +3273,43 @@
         if (index >= 0) activateValidationField(index, 'row');
     }
 
-    document.querySelectorAll('input[name="lineEditMode"]').forEach((input) => {
+    document.querySelectorAll('input[name="verifyLineMode"]').forEach((input) => {
         input.addEventListener('change', () => {
-            if (input instanceof HTMLInputElement && input.checked) lineOverlay.setEditMode(input.value);
+            if (!(input instanceof HTMLInputElement) || !input.checked) return;
+            // Leaving Draw keeps a drawing of three points or more.
+            if (input.value !== 'draw' && lineOverlay.isDrawing() && lineOverlay.finishDrawing()) {
+                if (input.value !== 'box') lineOverlay.setEditMode(input.value);
+            } else {
+                lineOverlay.setEditMode(input.value);
+            }
+            // Off the button, so Enter and Esc reach the drawing.
+            input.blur();
         });
     });
     el('lineEditCancel').addEventListener('click', cancelOutlineEdit);
     el('lineEditSave').addEventListener('click', saveOutlineEdit);
     document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && editingLineIndex !== null) cancelOutlineEdit();
+        if (editingLineIndex === null) return;
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.matches('input:not([type="radio"]), textarea, select') || target.isContentEditable)) return;
+        const command = event.ctrlKey || event.metaKey;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            // Esc first drops a drawing, then the whole edit.
+            if (lineOverlay.editing?.mode === 'draw' && lineOverlay.isDrawing()) lineOverlay.setEditMode('draw');
+            else cancelOutlineEdit();
+        } else if (event.key === 'Enter' && lineOverlay.isDrawing()) {
+            event.preventDefault();
+            if (!lineOverlay.finishDrawing()) {
+                showLineEditStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+            }
+        } else if (command && !event.shiftKey && event.key.toLowerCase() === 'z' && lineOverlay.isDrawing()) {
+            event.preventDefault();
+            lineOverlay.undoDrawStep();
+        } else if (['Delete', 'Backspace'].includes(event.key) && lineOverlay.editing?.mode === 'points') {
+            event.preventDefault();
+            lineOverlay.deleteActivePoint();
+        }
     });
 
     function submissionErrorMessage(response, payload) {

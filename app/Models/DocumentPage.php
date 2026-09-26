@@ -30,6 +30,9 @@ class DocumentPage extends Model
 
     public const STATUS_FAILED = 'failed';
 
+    /** Staff cancelled Detect or Scan: the worker discards the page at its next step. */
+    public const STATUS_CANCELLED = 'cancelled';
+
     protected $fillable = [
         'document_template_id', 'created_by', 'status', 'error',
         'image_path', 'width', 'height', 'deskew_degrees', 'geometry',

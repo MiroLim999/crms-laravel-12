@@ -126,6 +126,30 @@ class DocumentPageController extends Controller
     }
 
     /**
+     * Cancel Detect or Scan with OCR for this page (the × on the progress window).
+     *
+     * A page waiting for the worker, or being outlined, is marked cancelled
+     * and the worker discards it at its next step (it cannot stop Kraken in
+     * the middle of a page). Cancelling the read of a Detect result keeps that
+     * result: the page goes back to "detected", ready to be read again.
+     */
+    public function cancel(Request $request, DocumentPage $page): JsonResponse
+    {
+        $this->authorizePage($request, $page);
+
+        $validated = $request->validate(['keep_detection' => ['sometimes', 'boolean']]);
+
+        if (! $page->isFinished() && $page->status !== DocumentPage::STATUS_CANCELLED) {
+            $backToDetected = ($validated['keep_detection'] ?? false) && $page->status === DocumentPage::STATUS_READING;
+            $page->forceFill([
+                'status' => $backToDetected ? DocumentPage::STATUS_DETECTED : DocumentPage::STATUS_CANCELLED,
+            ])->save();
+        }
+
+        return response()->json(['id' => $page->getKey(), 'status' => $page->status]);
+    }
+
+    /**
      * The page as it is being processed - straightened, after Detect.
      */
     public function image(Request $request, DocumentPage $page): StreamedResponse
@@ -283,6 +307,7 @@ class DocumentPageController extends Controller
             'geometry' => $page->geometry,
             'statusUrl' => route('documents.pages.show', $page),
             'readUrl' => route('documents.pages.read', $page),
+            'cancelUrl' => route('documents.pages.cancel', $page),
             'imageUrl' => route('documents.pages.image', ['page' => $page, 'v' => $page->updated_at?->timestamp]),
             'model' => $page->ocr_model_label,
             'modelKey' => $page->ocr_model_key,

@@ -135,6 +135,51 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertSame([0.11, 0.21, 0.31, 0.41], $page->geometry['ruled_ys']);
     }
 
+    public function test_a_cancelled_page_is_dropped_by_the_worker_with_its_files(): void
+    {
+        $this->app->instance(LineMarkers::class, $this->stubMarkers());
+        $page = $this->storedPage();
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.cancel', $page))
+            ->assertOk()
+            ->assertJsonPath('status', DocumentPage::STATUS_CANCELLED);
+
+        ProcessDocumentPage::dispatchSync($page->getKey(), ProcessDocumentPage::MODE_DETECT);
+
+        $this->assertNull(DocumentPage::find($page->getKey()));
+        Storage::disk('local')->assertMissing($page->image_path);
+        $this->assertSame([], $this->ocrCalls);
+    }
+
+    public function test_cancelling_the_read_of_a_detect_result_keeps_the_result(): void
+    {
+        $page = $this->detectedPage();
+        $page->forceFill(['status' => DocumentPage::STATUS_READING])->save();
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.cancel', $page), ['keep_detection' => true])
+            ->assertOk()
+            ->assertJsonPath('status', DocumentPage::STATUS_DETECTED);
+
+        $this->assertSame(3, $page->lines()->count());
+        // Read again from there, as Scan with OCR would.
+        $this->actingAs($page->creator)->postJson(route('documents.pages.read', $page))->assertAccepted();
+    }
+
+    public function test_a_finished_page_or_someone_elses_cannot_be_cancelled(): void
+    {
+        $page = $this->processedPage();
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.cancel', $page))
+            ->assertOk()
+            ->assertJsonPath('status', DocumentPage::STATUS_READY);
+        $this->actingAs(User::factory()->staff()->create())
+            ->postJson(route('documents.pages.cancel', $page))
+            ->assertNotFound();
+    }
+
     public function test_detect_is_queued_as_detection_only(): void
     {
         Queue::fake();

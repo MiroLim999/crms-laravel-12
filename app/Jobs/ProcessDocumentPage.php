@@ -48,12 +48,16 @@ class ProcessDocumentPage implements ShouldQueue
     public function handle(LineMarkers $markers, PageLineReader $reader): void
     {
         $page = DocumentPage::find($this->pageId);
-        if ($page === null) {
-            return;  // Pruned or submitted while waiting in the queue.
+        if ($page === null || $this->stopIfCancelled($page)) {
+            return;  // Pruned, submitted or cancelled while waiting in the queue.
         }
 
         if ($this->mode !== self::MODE_READ) {
             $this->outline($page, $markers);
+            // Staff may have cancelled while the lines were being found.
+            if ($this->stopIfCancelled($page)) {
+                return;
+            }
         }
 
         if ($this->mode === self::MODE_DETECT) {
@@ -65,10 +69,32 @@ class ProcessDocumentPage implements ShouldQueue
         $page->forceFill(['status' => DocumentPage::STATUS_READING])->save();
         $reader->read($page, $page->lines()->get());
 
+        // A read cancelled from Detect's result is back to "detected" already;
+        // any other cancelled page is discarded.
+        $page->refresh();
+        if ($this->stopIfCancelled($page) || $page->status !== DocumentPage::STATUS_READING) {
+            return;
+        }
+
         $page->forceFill([
             'status' => DocumentPage::STATUS_READY,
             'processed_at' => now(),
         ])->save();
+    }
+
+    /**
+     * Discard a page Staff cancelled: its record, lines and files. Returns
+     * whether it was cancelled.
+     */
+    private function stopIfCancelled(DocumentPage $page): bool
+    {
+        if ($page->fresh()?->status !== DocumentPage::STATUS_CANCELLED) {
+            return false;
+        }
+        Storage::disk('local')->deleteDirectory($page->directory());
+        $page->delete();
+
+        return true;
     }
 
     public function failed(?Throwable $exception): void
