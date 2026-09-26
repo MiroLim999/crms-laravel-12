@@ -4,7 +4,9 @@
     Laravel, the queue worker that outlines and reads aligned pages, and the
     OCR service.
 
-        .\serve.ps1            start all three
+        .\serve.ps1            start all three: inside this terminal when run
+                               from Kiro / VS Code, else one window each
+        .\serve.ps1 -Windows   one window each, even from the editor
         .\serve.ps1 -Check     verify the environment and exit
         .\serve.ps1 -NoOcr     Laravel and the queue worker only
         .\serve.ps1 -Only web|worker|ocr
@@ -25,6 +27,7 @@
 param(
     [switch]$Check,
     [switch]$NoOcr,
+    [switch]$Windows,
     [ValidateSet('web', 'worker', 'ocr')]
     [string]$Only,
     [int]$AppPort = 8000,
@@ -195,14 +198,25 @@ Write-Host ''
 Write-Host 'Starting' -ForegroundColor White
 Write-Host ('-' * 40)
 
-# Each service gets its own window, running this script with -Only, so its log
-# stays readable and Ctrl+C in that window stops only that service. In Kiro,
-# .vscode	asks.json runs the same three commands as terminal tabs instead.
+# Run from Kiro's or VS Code's terminal, the services share that terminal:
+# their logs appear in it and Ctrl+C there stops all of them. Elsewhere (or
+# with -Windows) each gets its own window, where Ctrl+C stops only that one.
+# (.vscode\tasks.json can also run them as one editor tab each.)
+$inEditor = -not $Windows -and (
+    $env:TERM_PROGRAM -in @('vscode', 'kiro') -or $env:VSCODE_INJECTION -or $env:VSCODE_SHELL_INTEGRATION
+)
+$started = @()
+
 function Start-ServiceWindow([string]$Service) {
-    Start-Process powershell -ArgumentList @(
-        '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+    $arguments = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
         '-File', "`"$PSCommandPath`"", '-Only', $Service, '-AppPort', $AppPort, '-OcrPort', $OcrPort
     )
+    if ($inEditor) {
+        $script:started += Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
+    } else {
+        Start-Process powershell -ArgumentList (@('-NoExit') + $arguments)
+    }
 }
 
 if (Test-Port $AppPort) {
@@ -231,5 +245,12 @@ if (-not $NoOcr) {
 Write-Host ('-' * 40)
 Write-Host ''
 Write-Host "  Open  http://127.0.0.1:$AppPort" -ForegroundColor White
-Write-Host '  Stop  Ctrl+C in each window, or just close it.' -ForegroundColor Gray
-Write-Host ''
+if ($inEditor) {
+    Write-Host '  Stop  Ctrl+C in this terminal stops them all.' -ForegroundColor Gray
+    Write-Host ''
+    # Keep this terminal with the services; their output follows below.
+    if ($started.Count -gt 0) { $started | Wait-Process }
+} else {
+    Write-Host '  Stop  Ctrl+C in each window, or just close it.' -ForegroundColor Gray
+    Write-Host ''
+}
