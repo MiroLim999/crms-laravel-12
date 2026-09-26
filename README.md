@@ -334,23 +334,38 @@ CRMS needs **three processes** running, plus MySQL (start it in the XAMPP Contro
 `.vscode/tasks.json` starts all three as tabs in the editor's terminal panel whenever the project folder opens: **CRMS: website**, **CRMS: queue worker** and **CRMS: OCR service**. Closing the editor stops them. Each tab skips its process if it is already running, so nothing starts twice.
 
 - **First time only**: the editor asks whether to allow automatic tasks. Choose **Allow**. (Kiro ships with automatic tasks off; if you missed the prompt, run **Tasks: Manage Automatic Tasks → Allow Automatic Tasks** from the Command Palette.)
-- **Start them by hand**: Command Palette (**Ctrl+Shift+P**) → **Tasks: Run Task** → **CRMS: start services**.
+- **Start them by hand**: press **Ctrl+Shift+B** (it is the default build task), or Command Palette (**Ctrl+Shift+P**) → **Tasks: Run Task** → **CRMS: start services**. One tab per service: **CRMS: website**, **CRMS: queue worker**, **CRMS: OCR service**.
 - `.vscode/` is gitignored, so this file is local to each machine. To set it up on a new machine, create `.vscode/tasks.json` with one task per process that runs `powershell.exe -NoProfile -ExecutionPolicy Bypass -File serve.ps1 -Only web` (and `-Only worker`, `-Only ocr`), each with `"isBackground": true` and `"runOptions": { "runOn": "folderOpen" }`.
 
 ### Option B: The PowerShell Runner (Windows)
-From the repository root, `serve.ps1` checks the environment (PHP, MySQL, Python, CUDA, Kraken) and opens each process in its own window:
+From the repository root, `serve.ps1` checks the environment (PHP, MySQL, Python, CUDA, Kraken) and starts the three processes:
 
 ```powershell
-.\serve.ps1               # Web app, queue worker and OCR service, one window each
+.\serve.ps1               # All three. In a Kiro / VS Code terminal: inside that one terminal
+                          # (Ctrl+C there stops them all). Elsewhere: one window each.
+.\serve.ps1 -Windows      # One window each, even from the editor
 .\serve.ps1 -Check        # Check the environment and exit
 .\serve.ps1 -NoOcr        # Web app and queue worker only
 .\serve.ps1 -Only worker  # One process in the current terminal (web | worker | ocr)
 ```
 
-If PowerShell refuses to run scripts, use `powershell -ExecutionPolicy Bypass -File .\serve.ps1`.
+A script cannot open editor tabs: for one tab per service, use Option A (**Ctrl+Shift+B**). If PowerShell refuses to run scripts, use `powershell -ExecutionPolicy Bypass -File .\serve.ps1`.
 
 ### Option C: Manual Process Execution
 Open three terminals in the repository root and run one command from the table above in each. For the OCR service, activate `.venv` first.
+
+### If Something Stops
+Run **Ctrl+Shift+B** (or `.\serve.ps1`) again: it only starts what is not running and skips the rest, so nothing starts twice.
+
+| Symptom | What stopped |
+| :--- | :--- |
+| "This site can't be reached" at 127.0.0.1:8000 | web app |
+| Detect or Scan stays on "Waiting for the line detector" | queue worker |
+| Scan fails with an OCR / TrOCR connection error, or the OCR workspace shows the engine offline | OCR service |
+
+- **"Port 8000/8001 is already in use"**: that service is still running (perhaps in an old window); close that window or keep using it.
+- **"A queue worker is already running"** but nothing gets processed: a worker from a closed window may be left running without its window. Find it with `Get-CimInstance Win32_Process | Where-Object CommandLine -like '*queue:work*'`, stop it with `Stop-Process -Id <id>`, and start again.
+- **Database connection errors**: MySQL is not running. Start it in the XAMPP Control Panel; the queue worker reconnects by itself, the web app needs a restart.
 
 ### Notes on the Queue Worker
 - The worker started by Option A or B restarts itself: after a crash, after MySQL comes up late, and after `php artisan queue:restart`. Run `queue:restart` after changing job code (for example `app/Jobs/ProcessDocumentPage.php`), because a running worker keeps the old code loaded. A worker started by hand (Option C) does not come back; start it again.
