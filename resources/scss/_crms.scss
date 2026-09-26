@@ -652,6 +652,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   max-block-size: 70vh;
   overflow: auto;
   overscroll-behavior: contain;
+  // The page is fitted to the viewport's width; a vertical scrollbar that
+  // came and went would change that width and bring a horizontal one along.
+  scrollbar-gutter: stable;
   background: var(--bs-gray-100);
   border: 1px solid var(--bs-border-color);
   border-radius: var(--bs-border-radius);
@@ -749,12 +752,16 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 // Tilt knob: a round button with a turning arrow on a short stem below the
 // bottom edge (the name label sits above the top edge). Shown on the hovered
 // or selected marker only, so a full ledger does not bristle with knobs.
+// Hidden, not removed: a knob below the page bottom would otherwise make the
+// viewport scrollable only while it shows, and the scrollbars appearing under
+// the pointer take the hover away again - the knob flickers.
 .field-box-rotate {
   position: absolute;
   bottom: -32px;
   left: 50%;
   z-index: 2;
-  display: none;
+  display: flex;
+  visibility: hidden;
   align-items: center;
   justify-content: center;
   width: 22px;
@@ -815,7 +822,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .field-box:hover .field-box-rotate,
 .field-box.is-selected .field-box-rotate {
-  display: flex;
+  visibility: visible;
 }
 
 .field-box.is-column .field-box-rotate {
@@ -2111,6 +2118,34 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     height: 0;
     border-top: 2px solid #ff3e1d;
     margin-top: -1px;
+  }
+}
+
+// Snap to table while it works: the grid icon makes way for a spinner on the
+// right, in the same space (icon 1.125rem + .25rem gap), so the button keeps
+// its size; it keeps its colours too, rather than fading like a disabled one.
+.marker-snap-button {
+  .marker-snap-spinner {
+    display: none;
+    flex-shrink: 0;
+    inline-size: .875rem;
+    block-size: .875rem;
+    margin-inline: .375rem .125rem;
+    border-width: .125rem;
+  }
+
+  &.is-loading {
+    &:disabled {
+      opacity: 1;
+    }
+
+    .bx-grid-alt {
+      display: none;
+    }
+
+    .marker-snap-spinner {
+      display: inline-block;
+    }
   }
 }
 

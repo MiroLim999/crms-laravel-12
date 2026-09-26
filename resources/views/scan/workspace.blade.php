@@ -119,6 +119,7 @@
                                     title="Fit the column and row markers onto the page's printed table lines">
                                 <i class="icon-base bx bx-grid-alt icon-sm me-1" aria-hidden="true"></i>
                                 <span>Snap to table</span>
+                                <span class="spinner-border marker-snap-spinner" aria-hidden="true"></span>
                             </button>
 
                             <button type="button" class="btn btn-sm btn-outline-secondary marker-reset-button" id="resetFieldsBtn"
@@ -757,26 +758,57 @@
         currentFieldSnapshot = next;
         renderFieldList(boxes);
         updateResetUI();
-        markDetectionStale();
+        syncDetection();
     }
 
     // ------------------------------------------------------------- detection
+    // Detect's outlines were split at, and placed by, the markers as Detect
+    // left them. Moving a marker sets the result aside (Scan with OCR then
+    // outlines the page afresh); undoing back to those markers brings it back,
+    // line adjustments included. `stale` is for good: the detected page can no
+    // longer be read (a failed read, a cancelled run).
     function detectionIsCurrent() {
         return detection !== null && !detection.stale
             && JSON.stringify(marker.toJSON()) === detection.snapshot;
     }
 
-    function markDetectionStale() {
-        if (!detection || detection.stale || JSON.stringify(marker.toJSON()) === detection.snapshot) return;
-        const adjusted = adjustedLineCount();
+    function syncDetection() {
+        if (!detection || detection.stale) return;
+        const current = JSON.stringify(marker.toJSON()) === detection.snapshot;
+        if (!current && !detection.setAside) setDetectionAside();
+        else if (current && detection.setAside) restoreDetection();
+    }
+
+    function setDetectionAside() {
+        const changed = detection.page.lines.filter((line) => line.adjusted || isLineUnsaved(line)).length;
         setLineEditing(false);
-        detection.stale = true;
+        detection.setAside = true;
         alignPreview.setVisible(false);
         el('lineEditToggle').disabled = true;
         el('detectSummaryTitle').textContent = 'Markers moved after Detect';
-        el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers. Detect again to refit them.'
-            + (adjusted > 0 ? ` Your ${adjusted} line adjustment${adjusted === 1 ? ' is' : 's are'} no longer used.` : '');
+        el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers. '
+            + 'Undo (Ctrl+Z) to bring the Detect result back'
+            + (changed > 0 ? ` with your ${changed} line adjustment${changed === 1 ? '' : 's'}` : '')
+            + ', or Detect again to refit the markers.';
         el('detectSummary').classList.add('is-stale');
+    }
+
+    /** The detected page can no longer be read: undo cannot bring it back either. */
+    function retireDetection() {
+        if (!detection) return;
+        detection.stale = true;
+        if (detection.setAside) {
+            el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers. '
+                + 'Detect again to refit them.';
+        }
+    }
+
+    function restoreDetection() {
+        detection.setAside = false;
+        alignPreview.setVisible(true);
+        el('lineEditToggle').disabled = detection.page.lines.length === 0;
+        el('detectSummary').classList.remove('is-stale');
+        showDetectionSummary();
     }
 
     function clearDetection() {
@@ -806,6 +838,7 @@
             page,
             snapshot: JSON.stringify(marker.toJSON()),
             stale: false,
+            setAside: false,
             columns: fitted.filter((box) => box.kind === 'column'),
             // The detector's outlines, for Reset line.
             originalOutlines: new Map(page.lines.map((line) => [line.id, line.polygon.map((point) => [...point])])),
@@ -836,7 +869,8 @@
     // reviewer presses Save crop: only then is the line re-cropped on the
     // server (not read). Scan with OCR reads the saved crops, and offers to
     // save any line still unsaved. The field markers are locked meanwhile:
-    // moving one would mean Detect again and drop these adjustments.
+    // moving one sets Detect's result and these adjustments aside until the
+    // move is undone.
 
     const LINE_GROW_STEP = 2;
     const LINE_MODE_HINTS = {
@@ -969,7 +1003,8 @@
     }
 
     function setLineEditing(on) {
-        const allowed = on && detection !== null && !detection.stale && detection.page.lines.length > 0;
+        const allowed = on && detection !== null && !detection.stale && !detection.setAside
+            && detection.page.lines.length > 0;
         if (!allowed && lineEditing) applyOpenDrawing();
         if (!allowed) {
             editedLineIndex = null;
@@ -1868,6 +1903,33 @@
         }, 400);
     }
 
+    /**
+     * Show the progress window. `shown` settles once it has finished opening:
+     * Bootstrap ignores a hide() while the window is still fading in, which
+     * would leave it open over a run that ended at once.
+     */
+    function openProgressModal() {
+        const Modal = window.bootstrap?.Modal;
+        if (!Modal) {
+            throw new Error('The progress window did not finish loading. Refresh the page and try again.');
+        }
+        const element = el('scanningModal');
+        const modal = Modal.getOrCreateInstance(element);
+        const shown = new Promise((resolve) => {
+            element.addEventListener('shown.bs.modal', resolve, { once: true });
+            window.setTimeout(resolve, 1000);
+        });
+        modal.show();
+
+        return { modal, shown };
+    }
+
+    async function closeProgressModal(progress) {
+        if (!progress) return;
+        await progress.shown;
+        progress.modal.hide();
+    }
+
     function showPageStatus(page, waitedMs, mode = 'scan') {
         if (page.status === 'detecting' && mode === 'detect') {
             ocrProgressCeiling = 92;
@@ -1958,10 +2020,6 @@
         await new Promise((resolve) => window.setTimeout(resolve, 420));
     }
 
-    /**
-     * Send the page exactly as rendered here, with the markers as they stand,
-     * so every outline that comes back lines up with this canvas pixel for pixel.
-     */
     /** The markers as they stand, as the geometry the server works with. */
     function currentGeometry() {
         // After Detect, small marker edits are measured from what Detect fitted
@@ -1979,7 +2037,7 @@
 
     let snapToken = 0;
 
-    async function requestSnap() {
+    async function requestSnap(signal = null) {
         const form = new FormData();
         form.set('geometry_json', JSON.stringify(currentGeometry()));
         form.set('page', await canvasBlob(marker.canvas), 'page.png');
@@ -1987,6 +2045,7 @@
             method: 'POST',
             headers: { 'X-CSRF-TOKEN': config.csrf, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' },
             credentials: 'same-origin',
+            signal,
             body: form,
         });
         const payload = (response.headers.get('content-type') || '').includes('application/json')
@@ -2008,35 +2067,58 @@
         }
     }
 
+    // While it works, the button shows a spinner in place of its icon; its
+    // size is held so nothing around it shifts. Detect and Scan wait meanwhile.
+    function setSnapBusy(busy) {
+        const button = el('snapTableBtn');
+        const { width, height } = button.getBoundingClientRect();
+        button.style.inlineSize = busy ? `${width}px` : '';
+        button.style.blockSize = busy ? `${height}px` : '';
+        button.classList.toggle('is-loading', busy);
+        button.setAttribute('aria-busy', busy ? 'true' : 'false');
+        button.disabled = busy;
+    }
+
     el('snapTableBtn').addEventListener('click', async () => {
         if (scanInProgress) return;
-        const button = el('snapTableBtn');
-        const label = button.querySelector('span');
         const token = ++snapToken;
-        button.disabled = true;
-        label.textContent = 'Snapping…';
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 60 * 1000);
+
+        scanInProgress = true;
         clearOcrError();
+        setSnapBusy(true);
+        el('detectBtn').disabled = true;
+        el('scanNowBtn').disabled = true;
+
         try {
-            const payload = await requestSnap();
+            const payload = await requestSnap(controller.signal);
             if (token !== snapToken) return;
             marker.setSnapLines(payload.lines);
             if (!payload.fitted) {
                 showOcrError(payload.reason || 'No printed table matching these markers was found on this page.');
-                label.textContent = 'Snap to table';
                 return;
             }
             // One undoable change (Ctrl+Z) like any marker edit.
             marker.setBoxes(cloneBoxes(geometryMarkers(payload.geometry, null)));
-            label.textContent = 'Snapped';
-            window.setTimeout(() => { label.textContent = 'Snap to table'; }, 1600);
         } catch (error) {
-            showOcrError(error.message || 'The page could not be snapped to its table.');
-            label.textContent = 'Snap to table';
+            showOcrError(error.name === 'AbortError'
+                ? 'Snap to table timed out. Check that the web app is running, then try again.'
+                : (error.message || 'The page could not be snapped to its table.'));
         } finally {
-            button.disabled = false;
+            window.clearTimeout(timeoutId);
+            scanInProgress = false;
+            setSnapBusy(false);
+            const boxes = marker.toJSON();
+            el('scanNowBtn').disabled = boxes.length === 0 || markerSetValidationMessage(boxes) !== null;
+            el('detectBtn').disabled = el('scanNowBtn').disabled;
         }
     });
 
+    /**
+     * Send the page exactly as rendered here, with the markers as they stand,
+     * so every outline that comes back lines up with this canvas pixel for pixel.
+     */
     async function uploadPage({ detect }, signal) {
         const form = new FormData();
         form.set('document_template_id', String(config.templateId));
@@ -2180,7 +2262,7 @@
         const originalButtonContent = button.innerHTML;
         const controller = new AbortController();
         const run = startRun(controller, 'scan');
-        let modal = null;
+        let progress = null;
         let timeoutId = null;
 
         scanInProgress = true;
@@ -2192,15 +2274,9 @@
         try {
             // Cropping and modal creation used to happen outside the try block. A
             // browser-side failure there made the button appear to do nothing.
-            const Modal = window.bootstrap?.Modal;
-            if (!Modal) {
-                throw new Error('The OCR loading interface did not finish loading. Refresh the page and try again.');
-            }
-
             const aligned = marker.toJSON();
-            modal = Modal.getOrCreateInstance(el('scanningModal'));
+            progress = openProgressModal();
             beginOcrProgress(aligned.length);
-            modal.show();
 
             await new Promise((resolve) => window.requestAnimationFrame(resolve));
 
@@ -2266,7 +2342,7 @@
             if (run.cancelled) {
                 // Cancelled from the progress window: back to Align. A Detect
                 // result that was being read is kept, ready to scan again.
-                if (run.kind !== 'read' && detection) detection.stale = true;
+                if (run.kind !== 'read') retireDetection();
             } else {
                 const message = error.name === 'AbortError'
                     ? 'Line detection and reading timed out. Check the OCR service and the background worker, then try again.'
@@ -2274,14 +2350,14 @@
                 console.error('Document OCR failed:', error);
                 // A failed read leaves the detected page unusable; the next scan
                 // outlines the page afresh from the markers.
-                if (detection) detection.stale = true;
+                retireDetection();
                 showOcrError(message);
             }
         } finally {
             if (activeRun === run) activeRun = null;
             if (timeoutId !== null) window.clearTimeout(timeoutId);
             stopOcrProgress();
-            modal?.hide();
+            await closeProgressModal(progress);
             scanInProgress = false;
             button.innerHTML = originalButtonContent;
             button.disabled = marker.toJSON().length === 0;
@@ -2305,7 +2381,7 @@
         const controller = new AbortController();
         const run = startRun(controller, 'detect');
         const timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
-        let modal = null;
+        let progress = null;
 
         scanInProgress = true;
         clearOcrError();
@@ -2314,14 +2390,8 @@
         button.innerHTML = '<i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Detecting...';
 
         try {
-            const Modal = window.bootstrap?.Modal;
-            if (!Modal) {
-                throw new Error('The detection interface did not finish loading. Refresh the page and try again.');
-            }
-
-            modal = Modal.getOrCreateInstance(el('scanningModal'));
+            progress = openProgressModal();
             beginOcrProgress(marker.toJSON().length);
-            modal.show();
             await new Promise((resolve) => window.requestAnimationFrame(resolve));
 
             setOcrProgress(Math.max(ocrProgress, 8), 'Sending the page', 'Uploading the page securely for detection.');
@@ -2347,7 +2417,7 @@
             if (activeRun === run) activeRun = null;
             window.clearTimeout(timeoutId);
             stopOcrProgress();
-            modal?.hide();
+            await closeProgressModal(progress);
             scanInProgress = false;
             button.innerHTML = originalButtonContent;
             button.disabled = marker.toJSON().length === 0;

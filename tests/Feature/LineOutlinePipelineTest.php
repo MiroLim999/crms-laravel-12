@@ -11,7 +11,10 @@ use App\Models\OcrModel;
 use App\Models\PageLine;
 use App\Models\User;
 use App\Services\Lines\LineMarkers;
+use App\Services\Lines\LineMarkersCancelled;
 use App\Services\Lines\LineMarkersException;
+use App\Services\Lines\PageLineReader;
+use Closure;
 use Database\Seeders\DocumentTemplateSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
@@ -150,6 +153,72 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertNull(DocumentPage::find($page->getKey()));
         Storage::disk('local')->assertMissing($page->image_path);
         $this->assertSame([], $this->ocrCalls);
+    }
+
+    public function test_cancelling_while_the_lines_are_found_stops_the_detector_and_drops_the_page(): void
+    {
+        $markers = new class extends LineMarkers
+        {
+            public ?Closure $cancelled = null;
+
+            public function stoppingWhen(Closure $cancelled): static
+            {
+                $this->cancelled = $cancelled;
+
+                return $this;
+            }
+
+            public function detect(string $pagePath, array $geometry, string $outDirectory): array
+            {
+                // Staff press Cancel while the detector is running.
+                DocumentPage::query()->update(['status' => DocumentPage::STATUS_CANCELLED]);
+                if ($this->cancelled !== null && ($this->cancelled)()) {
+                    throw new LineMarkersCancelled('Line detection was stopped: the page was cancelled.');
+                }
+
+                throw new LineMarkersException('The detector was not told the page was cancelled.');
+            }
+        };
+        $this->app->instance(LineMarkers::class, $markers);
+        $page = $this->storedPage();
+
+        ProcessDocumentPage::dispatchSync($page->getKey(), ProcessDocumentPage::MODE_DETECT);
+
+        $this->assertNull(DocumentPage::find($page->getKey()));
+        Storage::disk('local')->assertMissing($page->image_path);
+    }
+
+    public function test_a_cancelled_detector_process_is_killed_rather_than_left_to_finish(): void
+    {
+        // A stand-in detector that takes 2 s and leaves a mark if it finishes.
+        $folder = Storage::disk('local')->path('slow');
+        File::ensureDirectoryExists($folder);
+        $finished = $folder.'/finished';
+        File::put($folder.'/slow.php', '<?php sleep(2); file_put_contents('.var_export($finished, true).', "yes");');
+        config(['services.line_markers.python' => PHP_BINARY, 'services.line_markers.script' => $folder.'/slow.php']);
+
+        $started = microtime(true);
+        try {
+            app(LineMarkers::class)
+                ->stoppingWhen(fn () => microtime(true) - $started > 0.3)
+                ->detect('page.png', $this->geometry(), $folder);
+            $this->fail('The run was not stopped.');
+        } catch (LineMarkersCancelled) {
+            $this->assertLessThan(1.5, microtime(true) - $started);
+        }
+
+        usleep(2_500_000);
+        $this->assertFileDoesNotExist($finished);
+    }
+
+    public function test_a_read_stops_at_the_next_batch_once_it_is_cancelled(): void
+    {
+        $page = $this->detectedPage();
+
+        app(PageLineReader::class)->read($page, $page->lines()->get(), fn () => true);
+
+        $this->assertSame([], $this->ocrCalls);
+        $this->assertSame(0, $page->lines()->whereNotNull('ocr_text')->count());
     }
 
     public function test_cancelling_the_read_of_a_detect_result_keeps_the_result(): void

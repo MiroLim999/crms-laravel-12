@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\DocumentPage;
 use App\Models\PageLine;
 use App\Services\Lines\LineMarkers;
+use App\Services\Lines\LineMarkersCancelled;
 use App\Services\Lines\PageLineReader;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -53,8 +54,15 @@ class ProcessDocumentPage implements ShouldQueue
         }
 
         if ($this->mode !== self::MODE_READ) {
-            $this->outline($page, $markers);
-            // Staff may have cancelled while the lines were being found.
+            // Cancelling while the lines are being found stops the detector
+            // there, so the next page in the queue does not wait for it.
+            try {
+                $this->outline($page, $markers->stoppingWhen(
+                    fn () => $this->currentStatus() === DocumentPage::STATUS_CANCELLED,
+                ));
+            } catch (LineMarkersCancelled) {
+                // Discarded just below.
+            }
             if ($this->stopIfCancelled($page)) {
                 return;
             }
@@ -67,7 +75,9 @@ class ProcessDocumentPage implements ShouldQueue
         }
 
         $page->forceFill(['status' => DocumentPage::STATUS_READING])->save();
-        $reader->read($page, $page->lines()->get());
+        // Either cancel (discard the page, or back to Detect's result) ends
+        // the read at the next batch.
+        $reader->read($page, $page->lines()->get(), fn () => $this->currentStatus() !== DocumentPage::STATUS_READING);
 
         // A read cancelled from Detect's result is back to "detected" already;
         // any other cancelled page is discarded.
@@ -80,6 +90,12 @@ class ProcessDocumentPage implements ShouldQueue
             'status' => DocumentPage::STATUS_READY,
             'processed_at' => now(),
         ])->save();
+    }
+
+    /** The page's status now, as Staff may have changed it meanwhile. */
+    private function currentStatus(): ?string
+    {
+        return DocumentPage::whereKey($this->pageId)->value('status');
     }
 
     /**

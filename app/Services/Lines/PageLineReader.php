@@ -5,6 +5,7 @@ namespace App\Services\Lines;
 use App\Models\DocumentPage;
 use App\Models\PageLine;
 use App\Services\Ocr\OcrClient;
+use Closure;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 
@@ -24,12 +25,17 @@ class PageLineReader
 
     /**
      * @param  Collection<int, PageLine>  $lines
+     * @param  (Closure(): bool)|null  $stop  Asked before each batch; true ends the read there.
      */
-    public function read(DocumentPage $page, Collection $lines): void
+    public function read(DocumentPage $page, Collection $lines, ?Closure $stop = null): void
     {
         $disk = Storage::disk('local');
 
         foreach ($lines->chunk(self::BATCH) as $batch) {
+            if ($stop !== null && $stop()) {
+                return;
+            }
+
             $fields = $batch->map(fn (PageLine $line) => [
                 'name' => 'line-'.$line->getKey(),
                 'image' => 'data:image/png;base64,'.base64_encode($disk->get($line->crop_path)),

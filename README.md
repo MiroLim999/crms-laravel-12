@@ -25,6 +25,7 @@ Everything runs locally. Page images and their text are never sent to an externa
 - [Prerequisites & Requirements](#prerequisites--requirements)
 - [Installation & Setup](#installation--setup)
 - [Running the Application](#running-the-application)
+- [Command Reference](#command-reference)
 - [The TrOCR Machine Learning Pipeline](#the-trocr-machine-learning-pipeline)
 - [OCR Microservice API Reference](#ocr-microservice-api-reference)
 - [Production Deployment](#production-deployment)
@@ -85,7 +86,7 @@ CRMS runs as **three local processes** from a single repository: the Laravel web
 ### 1. Document Digitisation & Verification Workspace
 - **Visual Bounding-Box Markup**: Interactive drag-and-drop marker tool with canvas zoom, pan, and marquee selection for setting field coordinates.
 - **Tiltable Markers**: In both the Staff workspace and the Template Builder, every marker, including each ledger column and any newly added field, can be tilted on its own: drag the rotate knob below it (<kbd>Shift</kbd> snaps to 5°), or use <kbd>[</kbd> / <kbd>]</kbd> in 0.5° steps (<kbd>Shift</kbd>: 5°); double-click the knob to straighten. A marker turns about its own centre, and a tilted field is cropped level for TrOCR. For a ledger, the columns' typical tilt is taken as the page's: the page is straightened by it before line detection, as Detect does, and each column is placed where its centre lands.
-- **Snap to Table**: In the Align step, **Snap to table** moves the template's ledger columns and ruled rows onto the lines this page actually printed, in under a second on the server, without outlining any handwriting. It fits position and scale, then pulls each column edge and row onto its nearest printed rule. It does not straighten a tilted page; use Detect for that. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes a snap.
+- **Snap to Table**: In the Align step, **Snap to table** moves the template's ledger columns and ruled rows onto the lines this page actually printed, in under a second on the server, without outlining any handwriting. It fits position and scale, then pulls each column edge and row onto its nearest printed rule. It does not straighten a tilted page; use Detect for that. While it works, the button shows a spinner. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes a snap.
 - **Magnetic Edges**: While you drag or resize a marker, an edge that comes within 8 screen pixels of a printed line snaps onto it, and a red guide shows the line it caught. Hold <kbd>Alt</kbd> while dragging to place the marker freely.
 - **Split-Screen Verification Viewer**: Dual-pane workspace with configurable horizontal/vertical split views, smooth keyboard-accelerated split-bar adjustments, and Ctrl-wheel zoom.
 - **Person Grouping**: Supports complex registry layouts grouping fields by role (e.g., Child, Mother, Father, Groom, Bride, Deceased, Informant) alongside general document details.
@@ -97,6 +98,8 @@ CRMS runs as **three local processes** from a single repository: the Laravel web
 - **Outlines, Not Rectangles**: Each line gets a polygon traced around its own strokes, so capitals and tails that cross a printed rule stay with their line and a neighbour's ink stays out. TrOCR reads a masked crop along that outline.
 - **Drawn Boxes Split into Lines**: A rectangle field drawn over a handwritten list is split into one outlined field per written line ("Diseases · line 1", "· line 2", ...). Scan with OCR without Detect keeps the rectangle as one field.
 - **Adjust Line Crops Before Reading**: After Detect, every outline shows on the page, and the **Adjust line crops** switch makes them clickable (the field markers lock meanwhile). Clicking a line brings its card into view in the side panel, showing a live preview of the crop TrOCR will read. Three ways to change it: **Stretch** by its eight handles (and grow or shrink with <kbd>+</kbd>/<kbd>−</kbd>), **Points** to drag the outline's own corners (drag the dot between two corners to add one, <kbd>Delete</kbd> or double-click to remove one), or **Draw** a new outline with as many clicked points as needed, or by tracing round the writing (close on the first point, by double-clicking, with <kbd>Enter</kbd>, or by tracing back to the start; <kbd>Esc</kbd> cancels). <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> undo and redo every outline change (while drawing, <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes back the last point). Step through lines with <kbd>Tab</kbd>, and **Reset line** goes back to Kraken's outline. Changes stay in the browser until **Save crop** (<kbd>Ctrl</kbd>+<kbd>S</kbd>) re-crops that line on the server (not read); **Discard** goes back to the last saved outline. Unsaved lines are outlined in orange dashes, saved adjustments are marked ✎, and Scan with OCR reads the saved crops, offering first to save any line still unsaved.
+- **Moving a Marker After Detect**: Detect's outlines belong to the markers as Detect placed them, so moving, resizing or snapping a marker sets the result aside: the outlines hide, and Scan with OCR outlines the page afresh from the new markers. <kbd>Ctrl</kbd>+<kbd>Z</kbd> back to Detect's markers brings the result back, line adjustments (saved or not) included. To keep the new markers instead, run Detect again.
+- **Cancel**: The progress window's **Cancel** stops a Detect or Scan at once: a running detector is stopped within half a second, and a read stops before its next batch of 40 lines, so the next page does not wait behind it. Cancelling the read of a Detect result keeps that result; any other cancelled page is discarded.
 - **Review Flags**: Lines between two ruled rows (`no_row`) or sharing a cell (`shared_cell`) are outlined in red and marked **Needs review** in Verify. A reviewer can redraw an outline; only that line is re-cropped and re-read.
 - **Training Export**: `php artisan crms:export-training` writes verified crops and their corrected text as a TrOCR training CSV (`file_name, text, doc_id, column, row`).
 
@@ -374,11 +377,124 @@ Run **Ctrl+Shift+B** (or `.\serve.ps1`) again: it only starts what is not runnin
 - While idle, the worker uses about 50 MB of memory and no noticeable CPU. Line detection uses the CPU for roughly 20–60 seconds per page when Detect or Scan runs; reading uses the GPU when CUDA is available.
 - The yellow `PHP_CLI_SERVER_WORKERS` warning from `php artisan serve` is harmless: PHP cannot run several server workers on Windows.
 
-### Housekeeping Commands
-```bash
-php artisan documents:prune-pages          # Remove unsubmitted pages older than LINE_MARKERS_KEEP_HOURS
-php artisan schedule:work                  # Runs prune-pages hourly while developing (use cron / Task Scheduler in production)
-php artisan crms:export-training           # Export verified line crops + corrected text as a TrOCR training CSV
+---
+
+## Command Reference
+
+Every command here runs from the repository root, in PowerShell (the editor's terminal is PowerShell). `ml\.venv-kraken\Scripts\python.exe` is the line-detection (Kraken) environment; plain `python` means the OCR environment, so activate it first with `.venv\Scripts\activate`.
+
+### Start the Services
+```powershell
+.\serve.ps1                        # Check the environment, then start all three services
+.\serve.ps1 -Only web              # Only the web app, in this terminal -> http://127.0.0.1:8000
+.\serve.ps1 -Only worker           # Only the queue worker, in this terminal (restarts itself)
+.\serve.ps1 -Only ocr              # Only the OCR service, in this terminal -> http://127.0.0.1:8001
+.\serve.ps1 -NoOcr                 # Web app and queue worker, without the OCR service
+.\serve.ps1 -Windows               # All three, one window each, even from the editor
+.\serve.ps1 -Check                 # Only check PHP, MySQL, Python, CUDA and Kraken; start nothing
+.\serve.ps1 -AppPort 8080          # Web app on another port
+.\serve.ps1 -OcrPort 8002          # OCR service on another port (also change OCR_API_URL and OCR_BROWSER_API_URL in .env)
+```
+
+In the editor:
+- **Ctrl+Shift+B**: start all three, one terminal tab each.
+- **Ctrl+Shift+P** → **Tasks: Run Task** → **CRMS: website**, **CRMS: queue worker** or **CRMS: OCR service**: start one of them.
+- To stop one, press **Ctrl+C** in its tab, or close the tab (trash-can icon).
+
+Without `serve.ps1`, one command per terminal:
+```powershell
+php artisan serve --port=8000
+php artisan queue:work --timeout=900 --tries=1
+python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001
+```
+
+### Queue Worker
+```powershell
+php artisan queue:restart          # Reload the worker after a PHP change; it starts again by itself within 5 s
+php artisan queue:failed           # List jobs that failed
+php artisan queue:flush            # Forget the failed jobs listed there
+
+# A worker left running without its window ("A queue worker is already running"):
+Get-CimInstance Win32_Process -Filter "Name='php.exe'" | Where-Object CommandLine -like '*queue:work*' | Select-Object ProcessId, CommandLine
+Stop-Process -Id <ProcessId>       # Stop it, then start the worker again
+```
+
+### Check What Is Running
+```powershell
+Get-NetTCPConnection -LocalPort 8000, 8001 -State Listen   # Web app (8000) and OCR service (8001) listening?
+Invoke-RestMethod http://127.0.0.1:8001/health             # OCR service status, device (cuda / cpu) and active model
+nvidia-smi                                                 # GPU memory in use
+ml\.venv-kraken\Scripts\python.exe -c "import torch; print(torch.cuda.is_available())"   # Can line detection use the GPU?
+```
+
+### After Editing `.env`
+```powershell
+php artisan config:clear           # Only needed if the configuration was cached (php artisan config:cache)
+php artisan queue:restart          # The worker reads .env when it starts (for example LINE_MARKERS_DEVICE)
+```
+Restart the web app too: **Ctrl+C** in its tab, then `.\serve.ps1 -Only web`.
+
+### Frontend
+```powershell
+npm install                        # Install JavaScript dependencies
+npm run build                      # Build the assets into public/build; needed after any change in resources/
+npm run dev                        # Rebuild on every save while editing (Ctrl+C to stop; run npm run build before using the app normally)
+npm run subset-icons               # Rebuild the Boxicons subset after using a new icon
+npm run check:icons                # Check that every icon used is in the subset
+```
+After `npm run build`, press **Ctrl+F5** in the browser.
+
+### Database
+```powershell
+php artisan migrate                              # Apply new migrations
+php artisan migrate:status                       # Which migrations have run
+php artisan migrate --seed                       # First setup: tables, roles, default templates, Super Admin
+php artisan db:seed --class=DemoUsersSeeder      # Demo Staff and Admin accounts
+```
+
+### Line Detection (Kraken)
+```powershell
+.\ml\setup_kraken.ps1              # Create ml\.venv-kraken with CPU PyTorch
+.\ml\setup_kraken.ps1 -Cuda        # The same with CUDA PyTorch, for an NVIDIA GPU
+```
+The detector can also be run on one page by hand, for example to look into a page that came out wrong. Each page Staff aligned is kept in `storage\app\private\pages\<id>\` (`page.png`, `geometry.json`) until it is submitted or pruned. `detect` overwrites `--page` with the straightened page, so work on a copy:
+```powershell
+ml\.venv-kraken\Scripts\python.exe ml\line_markers.py detect  --page page.png --geometry geometry.json --out out   # What Detect does
+ml\.venv-kraken\Scripts\python.exe ml\line_markers.py process --page page.png --geometry geometry.json --out out   # What Scan with OCR does, markers as placed
+ml\.venv-kraken\Scripts\python.exe ml\line_markers.py snap    --page page.png --geometry geometry.json             # What Snap to table does
+ml\.venv-kraken\Scripts\python.exe ml\line_markers.py grid    --page sample.png                                   # Printed rules on a template sample
+```
+`--out` gets `lines.json`, the crops, and `overlay.png` (every outline drawn on the page).
+
+### Housekeeping and Training Data
+```powershell
+php artisan documents:prune-pages                   # Delete unsubmitted pages older than LINE_MARKERS_KEEP_HOURS (default 24)
+php artisan documents:prune-pages --hours=2         # ... older than 2 hours
+php artisan schedule:work                           # Run prune-pages every hour while developing (use Task Scheduler in production)
+php artisan crms:export-training                    # Verified line crops and their corrected text, as a TrOCR training CSV
+php artisan crms:export-training --since=2026-09-01 --out=D:\exports\september   # Only records submitted since then, to that folder
+```
+
+### TrOCR Models
+With `.venv` activated. `<model>` is a folder under `ml\models\`, or `base` for the unmodified Microsoft model.
+```powershell
+python ml\download_trocr.py                                  # Download microsoft/trocr-base-handwritten
+python ml\train_trocr.py                                     # Fine-tune (settings: CONFIG in the script)
+python ml\test_trocr.py                                      # Evaluate the base model on the test split
+python ml\test_finetuned.py --model <model>                  # Evaluate a model and write its evaluation report
+python ml\test_finetuned.py --model <model> --limit 200      # ... on the first 200 samples only
+python ml\predict.py --model <model> --folder ml\new_images  # Read a folder of loose images
+```
+
+### Tests and Code Style
+```powershell
+php artisan test                                             # PHP tests
+php artisan test --filter=LineOutlinePipelineTest            # One test class
+npm run test:js                                              # JavaScript tests
+ml\.venv-kraken\Scripts\python.exe -m unittest tests.Python.test_line_markers   # Line detection tests
+python -m unittest discover tests/Python                     # All Python tests (line detection ones skip without Kraken's packages)
+vendor\bin\pint --test                                       # Check PHP code style
+vendor\bin\pint                                              # Fix PHP code style
 ```
 
 ---
@@ -422,7 +538,7 @@ Fine-tuning configuration parameters (learning rate, batch size, epochs, warmup 
 
 ### 4. Evaluating Models & Generating Provenance Reports
 ```bash
-python ml/test_finetuned.py --model-dir ml/models/trocr-v1
+python ml/test_finetuned.py --model trocr-v1   # a folder under ml/models/
 ```
 This generates evaluation charts under `ml/evaluation-metrics/` and produces a signed `evaluation-report.json` containing:
 - Sample count and dataset provenance
@@ -593,7 +709,7 @@ python -m unittest discover tests/Python
 ```
 The line-detection tests need scipy, scikit-image and shapely, which the Kraken environment has. Run them with it; under another interpreter the tests that need those packages are skipped:
 ```powershell
-ml.venv-krakenScriptspython.exe -m unittest tests.Python.test_line_markers
+ml\.venv-kraken\Scripts\python.exe -m unittest tests.Python.test_line_markers
 ```
 
 #### 4. Pre-Commit Validation Checklist

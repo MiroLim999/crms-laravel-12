@@ -2,6 +2,7 @@
 
 namespace App\Services\Lines;
 
+use Closure;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 
@@ -15,6 +16,23 @@ use Illuminate\Support\Facades\Process;
  */
 class LineMarkers
 {
+    /** Asked while a run is under way; true stops it. */
+    private ?Closure $cancelled = null;
+
+    /**
+     * The same bridge, but a run is stopped - the Python process and its
+     * children killed - as soon as $cancelled returns true (asked twice a
+     * second), throwing LineMarkersCancelled. Cancelling a page then frees the
+     * queue worker at once, instead of after the detector would have finished.
+     */
+    public function stoppingWhen(Closure $cancelled): static
+    {
+        $copy = clone $this;
+        $copy->cancelled = $cancelled;
+
+        return $copy;
+    }
+
     /**
      * Outline, flag and crop every line on an aligned page.
      *
@@ -157,14 +175,29 @@ class LineMarkers
      */
     private function run(array $arguments): array
     {
-        $result = Process::timeout((int) config('services.line_markers.timeout', 600))
+        $pending = Process::timeout((int) config('services.line_markers.timeout', 600))
             ->path(base_path())
             ->env([
                 'PYTHONIOENCODING' => 'utf-8',
                 'PYTHONWARNINGS' => 'ignore',
                 'LINE_MARKERS_DEVICE' => (string) config('services.line_markers.device', 'auto'),
-            ])
-            ->run([$this->python(), config('services.line_markers.script'), ...$arguments]);
+            ]);
+        $command = [$this->python(), config('services.line_markers.script'), ...$arguments];
+
+        if ($this->cancelled === null) {
+            $result = $pending->run($command);
+        } else {
+            $process = $pending->start($command);
+            while ($process->running()) {
+                if (($this->cancelled)()) {
+                    $process->stop(1);
+                    throw new LineMarkersCancelled('Line detection was stopped: the page was cancelled.');
+                }
+                $process->ensureNotTimedOut();
+                usleep(500_000);
+            }
+            $result = $process->wait();
+        }
 
         $summary = $this->lastJsonLine($result->output());
 
