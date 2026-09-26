@@ -550,7 +550,7 @@
                 </div>
                 {{-- Stops this run and returns to Align; the label names what is running. --}}
                 <div class="ocr-progress-actions">
-                    <button type="button" class="btn btn-outline-secondary w-100" id="ocrProgressCancel">Cancel</button>
+                    <button type="button" class="btn btn-danger w-100" id="ocrProgressCancel">Cancel</button>
                 </div>
             </div>
         </div>
