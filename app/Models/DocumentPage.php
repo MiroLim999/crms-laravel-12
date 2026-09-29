@@ -35,14 +35,18 @@ class DocumentPage extends Model
 
     protected $fillable = [
         'document_template_id', 'created_by', 'status', 'error',
-        'image_path', 'width', 'height', 'deskew_degrees', 'geometry',
+        'image_path', 'width', 'height', 'deskew_degrees', 'geometry', 'notes',
         'ocr_model_key', 'ocr_model_label', 'processed_at',
     ];
+
+    /** The grid notes the page job may report; anything else is dropped. */
+    public const NOTE_CODES = ['rows_uneven', 'lines_below_grid', 'lines_above_grid', 'grid_moved', 'rows_do_not_fit'];
 
     protected function casts(): array
     {
         return [
             'geometry' => 'array',
+            'notes' => 'array',
             'width' => 'integer',
             'height' => 'integer',
             'deskew_degrees' => 'float',
@@ -63,6 +67,40 @@ class DocumentPage extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * The grid notes as the page job reported them, kept to what the Verify
+     * step words: a known code, a count, and at most six row numbers.
+     *
+     * @param  mixed  $notes
+     * @return list<array{code: string, count?: int, rows?: int|list<int>}>
+     */
+    public static function cleanNotes(mixed $notes): array
+    {
+        if (! is_array($notes)) {
+            return [];
+        }
+
+        $clean = [];
+        foreach ($notes as $note) {
+            if (! is_array($note) || ! in_array($note['code'] ?? null, self::NOTE_CODES, true)) {
+                continue;
+            }
+
+            $entry = ['code' => $note['code']];
+            if (isset($note['count']) && is_numeric($note['count'])) {
+                $entry['count'] = max(0, (int) $note['count']);
+            }
+            if (isset($note['rows'])) {
+                $entry['rows'] = is_array($note['rows'])
+                    ? array_values(array_map('intval', array_slice(array_filter($note['rows'], 'is_numeric'), 0, 6)))
+                    : (int) $note['rows'];
+            }
+            $clean[] = $entry;
+        }
+
+        return array_slice($clean, 0, 10);
     }
 
     /** Folder on the local disk holding the image, crops, overlay and lines.json. */

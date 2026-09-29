@@ -144,6 +144,8 @@ class ProcessDocumentPage implements ShouldQueue
                 ])->save();
             }
 
+            $page->forceFill(['notes' => DocumentPage::cleanNotes($result['notes'] ?? [])])->save();
+
             $page->lines()->delete();
 
             foreach ($result['lines'] as $position => $line) {

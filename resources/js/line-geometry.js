@@ -71,11 +71,16 @@ export function alignedGeometry(aligned, templateColumns, ruledYs) {
     }
 
     return {
-        columns: columns.map((column) => ({
-            name: column.name,
-            box: [column.x, column.y, column.w, column.h],
-            ...angleOf(column),
-        })),
+        columns: columns.map((column) => {
+            // A column never runs past the page: the server refuses a marker
+            // that does, and rows the page does not have hold nothing.
+            const y = clamp01(column.y);
+            return {
+                name: column.name,
+                box: [column.x, y, column.w, Math.min(column.h, 1 - y)],
+                ...angleOf(column),
+            };
+        }),
         ruled_ys: ruled,
         fields: fields.map((field) => ({
             name: field.name,
@@ -223,6 +228,55 @@ function fieldBox(field, page) {
 }
 
 /**
+ * What Staff should check about the grid as a whole, as sentences.
+ *
+ * The page job reports these as codes with numbers (ml/line_markers.py,
+ * _grid_notes); they are worded here so the wording can be tested. A note is a
+ * question to Staff, never a verdict: the grid may be right.
+ *
+ * @param {Array<{code: string, count?: number, rows?: number|number[]}>|null|undefined} notes
+ * @returns {string[]}
+ */
+export function gridNotes(notes) {
+    const plural = (count, singular, many) => (count === 1 ? singular : many);
+    // "21", "20 and 21", "3, 4, 5, 6 and 7", "3, 4, 5, 6, 7 and 2 more".
+    const list = (numbers, total) => {
+        const shown = numbers.slice(0, 5);
+        if (total > shown.length) return `${shown.join(', ')} and ${total - shown.length} more`;
+        return shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}` : String(shown[0]);
+    };
+
+    return (Array.isArray(notes) ? notes : []).flatMap((note) => {
+        const count = Number(note?.count) || 0;
+        if (note?.code === 'rows_uneven' && Array.isArray(note.rows) && note.rows.length > 0) {
+            const total = Math.max(count, note.rows.length);
+            return [`${total > 1 ? 'Rows' : 'Row'} ${list(note.rows.map(Number), total)} ${total > 1 ? 'differ' : 'differs'} `
+                + 'a lot in height from the template’s. Check that the row lines sit on the printed lines.'];
+        }
+        if (note?.code === 'rows_do_not_fit' && count > 0) {
+            return [`This page does not look like the ledger the template was made for: the writing does not sit in the template's rows. `
+                + `${count === 1 ? 'The column was' : `${count} columns were`} read as free text, line by line, like an added field.`];
+        }
+        if (note?.code === 'grid_moved' && Number(note.rows) !== 0 && Number.isFinite(Number(note.rows))) {
+            const rows = Math.abs(Number(note.rows));
+            return [`Detect moved the grid ${Number(note.rows) > 0 ? 'down' : 'up'} ${rows} ${plural(rows, 'row', 'rows')} from where you placed it. `
+                + 'If your first row was already on the first entry, move the markers back and use Scan with OCR.'];
+        }
+        if (note?.code === 'lines_below_grid' && count > 0) {
+            const rows = Math.max(1, Number(note.rows) || 1);
+            return [`${count} written ${plural(count, 'line lies', 'lines lie')} below the last row and ${plural(count, 'is', 'are')} not read `
+                + `(about ${rows} more ${plural(rows, 'row', 'rows')}). This page may have more rows than the template.`];
+        }
+        if (note?.code === 'lines_above_grid' && count > 0) {
+            return [`${count} written ${plural(count, 'line sits', 'lines sit')} in the row directly above the first row. `
+                + 'If that row holds entries, move the grid up one row.'];
+        }
+
+        return [];
+    });
+}
+
+/**
  * One line of summary after Detect, e.g.
  * "11 columns · 20 rows · 219 handwritten lines · 2 need review" or
  * "1 field · 8 handwritten lines".
@@ -247,6 +301,7 @@ export function detectionSummary(page) {
         title: degrees >= 0.1 ? `Page straightened by ${degrees.toFixed(1)}°` : 'Page is straight',
         text: parts.join(' · '),
         flagged,
+        notes: gridNotes(page?.notes),
     };
 }
 

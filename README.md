@@ -101,6 +101,9 @@ CRMS runs as **three local processes** from a single repository: the Laravel web
 - **Moving a Marker After Detect**: Detect's outlines belong to the markers as Detect placed them, so moving, resizing or snapping a marker sets the result aside: the outlines hide, and Scan with OCR outlines the page afresh from the new markers. <kbd>Ctrl</kbd>+<kbd>Z</kbd> back to Detect's markers brings the result back, line adjustments (saved or not) included. To keep the new markers instead, run Detect again.
 - **Cancel**: The progress window's **Cancel** stops a Detect or Scan at once: a running detector is stopped within half a second, and a read stops before its next batch of 40 lines, so the next page does not wait behind it. Cancelling the read of a Detect result keeps that result; any other cancelled page is discarded.
 - **Review Flags**: Lines between two ruled rows (`no_row`) or sharing a cell (`shared_cell`) are outlined in red and marked **Needs review** in Verify. A reviewer can redraw an outline; only that line is re-cropped and re-read.
+- **Your Markers Decide the Rows**: Evenly ruled rows repeat, so a grid slid one row up or down matches the printed rules exactly as well as the right one. Scan with OCR therefore keeps the table's first row line within half a row of where you put it (and lets the row spacing stretch by up to 10% about that line, for a page scanned at another scale). It never jumps a whole row on its own. Detect and Snap to table can carry far-off markers onto the table, and Detect says how many rows it moved the grid.
+- **A Ledger Marker on Free Text**: If a ledger template's column is placed over writing that does not sit in its rows (a list of diseases under the register's 22-row template), Detect and Scan with OCR read that column as free text, line by line ("Remarks · line 1", "· line 2", ...), exactly as an added field is, instead of forcing every line into one of the template's rows. The test is scale-free: on every real ledger page the baselines sit at the same height within their rows and one row apart; on free text they do not. Staff are told in the Detect summary.
+- **Grid Notes**: When the grid may be wrong, the Detect summary and the top of Verify say so, in plain words, and change nothing: **rows that differ a lot in height** from the template's (a header taken for a row, a rule the page lacks), **written lines below the last row** (the page has more rows than the template, and those are not read), **written lines in a row-sized band above the first row** (a taller band is a header and stays quiet), and **Detect moved the grid N rows**. The page's row lines are also cut at the page's edge, so a template with more rows than the page never leaves a marker running past it.
 - **Training Export**: `php artisan crms:export-training` writes verified crops and their corrected text as a TrOCR training CSV (`file_name, text, doc_id, column, row`).
 
 ### 3. Dynamic Document Template Builder & Type Management
@@ -492,6 +495,7 @@ php artisan test                                             # PHP tests
 php artisan test --filter=LineOutlinePipelineTest            # One test class
 npm run test:js                                              # JavaScript tests
 ml\.venv-kraken\Scripts\python.exe -m unittest tests.Python.test_line_markers   # Line detection tests
+ml\.venv-kraken\Scripts\python.exe -m unittest tests.Python.test_grid_layouts   # Row grid on many ledger layouts (about a minute)
 python -m unittest discover tests/Python                     # All Python tests (line detection ones skip without Kraken's packages)
 vendor\bin\pint --test                                       # Check PHP code style
 vendor\bin\pint                                              # Fix PHP code style
@@ -685,7 +689,8 @@ tests/
 │   └── verification-groups.test.js
 └── Python/                     # Python unit tests
     ├── test_evaluation_report.py   # ML evaluation report verification
-    └── test_line_markers.py        # Line detection on synthetic pages (needs ml/.venv-kraken)
+    ├── test_line_markers.py        # Line detection on synthetic pages (needs ml/.venv-kraken)
+    └── test_grid_layouts.py        # Row grid on ledgers of many layouts, and the grid notes (needs ml/.venv-kraken)
 ```
 
 ### Running Test Suites
@@ -710,7 +715,9 @@ python -m unittest discover tests/Python
 The line-detection tests need scipy, scikit-image and shapely, which the Kraken environment has. Run them with it; under another interpreter the tests that need those packages are skipped:
 ```powershell
 ml\.venv-kraken\Scripts\python.exe -m unittest tests.Python.test_line_markers
+ml\.venv-kraken\Scripts\python.exe -m unittest tests.Python.test_grid_layouts
 ```
+`test_grid_layouts` draws ledgers with different numbers of columns and rows, row heights, headers, missing rules and template mismatches, and checks every line lands in its own row both by Scan with OCR and by Detect. Add a layout there when a real page goes wrong, so the fix cannot be tuned to that one page.
 
 #### 4. Pre-Commit Validation Checklist
 ```bash

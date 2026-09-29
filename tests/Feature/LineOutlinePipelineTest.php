@@ -406,6 +406,55 @@ class LineOutlinePipelineTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_the_grid_notes_are_saved_with_the_page_and_sent_to_the_workspace(): void
+    {
+        $page = $this->processedPage();
+
+        // A JSON column does not keep the order of an object's keys, so compare the values.
+        $this->assertEquals([
+            ['code' => 'lines_below_grid', 'count' => 8, 'rows' => 2],
+            ['code' => 'grid_moved', 'rows' => -1],
+        ], $page->notes);
+
+        $this->actingAs($page->creator)
+            ->getJson(route('documents.pages.show', $page))
+            ->assertOk()
+            ->assertJsonPath('notes.0.code', 'lines_below_grid')
+            ->assertJsonPath('notes.0.count', 8)
+            ->assertJsonPath('notes.1.rows', -1)
+            ->assertJsonCount(2, 'notes');
+    }
+
+    public function test_reading_a_detected_page_keeps_the_notes_detect_made(): void
+    {
+        $page = $this->detectedPage();
+        $this->assertCount(2, $page->notes);
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.read', $page), [])
+            ->assertStatus(202);
+        ProcessDocumentPage::dispatchSync($page->getKey(), ProcessDocumentPage::MODE_READ);
+
+        $this->assertCount(2, $page->fresh()->notes);
+    }
+
+    public function test_notes_are_cleaned_to_what_the_workspace_words(): void
+    {
+        $this->assertSame([], DocumentPage::cleanNotes(null));
+        $this->assertSame([], DocumentPage::cleanNotes('rows_uneven'));
+        $this->assertSame([
+            ['code' => 'rows_uneven', 'count' => 9, 'rows' => [1, 2, 3, 4, 5, 6]],
+            ['code' => 'grid_moved', 'rows' => -2],
+            ['code' => 'lines_above_grid', 'count' => 0],
+        ], DocumentPage::cleanNotes([
+            ['code' => 'rows_uneven', 'count' => '9', 'rows' => [1, 2, 3, 4, 5, 6, 7, 8], 'text' => '<script>'],
+            'nonsense',
+            ['code' => 'made_up', 'count' => 1],
+            ['code' => 'grid_moved', 'rows' => '-2'],
+            ['code' => 'lines_above_grid', 'count' => -4],
+        ]));
+    }
+
     public function test_the_job_saves_every_outline_and_reads_each_masked_crop(): void
     {
         $page = $this->processedPage();
@@ -558,6 +607,57 @@ class LineOutlinePipelineTest extends TestCase
             ->assertJsonPath('flags.'.$nameRowOne->getKey(), ['shared_cell']);
 
         $this->assertSame(['shared_cell'], $flagged->fresh()->flags);
+    }
+
+    public function test_an_outline_redrawn_over_another_persons_cell_is_not_saved_without_confirmation(): void
+    {
+        // The Name of row 1, redrawn over the Date of row 2 (someone else's cell).
+        $page = $this->processedPage();
+        $name = $page->lines->firstWhere('column_name', 'Name');
+        $before = $name->only(['column_index', 'column_name', 'row', 'polygon', 'crop_path', 'flags']);
+        $this->app->instance(LineMarkers::class, $this->stubMarkers(cropPlacement: ['column_index' => 1, 'row' => 2]));
+        $this->ocrCalls = [];
+
+        $this->actingAs($page->creator)
+            ->putJson(route('documents.pages.lines.update', ['page' => $page, 'line' => $name]), [
+                'polygon' => [[410, 120], [560, 120], [560, 150], [410, 150]],
+            ])
+            ->assertStatus(409)
+            ->assertJsonPath('move.from', ['column' => 'Name', 'row' => 1])
+            ->assertJsonPath('move.to', ['column' => 'Date', 'row' => 2]);
+
+        $this->assertSame($before, $name->fresh()->only(array_keys($before)));
+        $this->assertSame([], $this->ocrCalls, 'nothing is read again');
+        $edits = array_filter(
+            Storage::disk('local')->files($page->directory().'/crops'),
+            fn (string $path) => str_contains($path, '-edit'),
+        );
+        $this->assertSame([], array_values($edits), 'the refused crop is not left behind');
+
+        // Confirmed by the reviewer: the field moves.
+        $this->actingAs($page->creator)
+            ->putJson(route('documents.pages.lines.update', ['page' => $page, 'line' => $name]), [
+                'polygon' => [[410, 120], [560, 120], [560, 150], [410, 150]],
+                'allow_move' => true,
+            ])
+            ->assertOk()
+            ->assertJsonPath('line.column', 'Date')
+            ->assertJsonPath('line.row', 2);
+    }
+
+    public function test_an_outline_adjusted_within_its_own_cell_saves_without_asking(): void
+    {
+        $page = $this->processedPage();
+        $name = $page->lines->firstWhere('column_name', 'Name');
+        $this->app->instance(LineMarkers::class, $this->stubMarkers(cropPlacement: ['column_index' => 0, 'row' => 1]));
+
+        $this->actingAs($page->creator)
+            ->putJson(route('documents.pages.lines.update', ['page' => $page, 'line' => $name]), [
+                'polygon' => [[42, 58], [302, 58], [302, 112], [42, 112]],
+            ])
+            ->assertOk()
+            ->assertJsonPath('line.column', 'Name')
+            ->assertJsonPath('line.row', 1);
     }
 
     public function test_a_redrawn_line_of_a_detected_field_keeps_its_field_and_line_number(): void
@@ -852,7 +952,15 @@ class LineOutlinePipelineTest extends TestCase
                 }
                 File::put($outDirectory.'/lines.json', json_encode(['lines' => $lines]));
 
-                return ['lines' => $lines, 'size' => [800, 600]];
+                // What ml/line_markers.py reports about the grid as a whole; one code the app
+                // does not know, to be dropped.
+                $notes = [
+                    ['code' => 'lines_below_grid', 'count' => 8, 'rows' => 2],
+                    ['code' => 'grid_moved', 'rows' => -1],
+                    ['code' => 'something_new', 'count' => 3],
+                ];
+
+                return ['lines' => $lines, 'size' => [800, 600], 'notes' => $notes];
             }
 
             public function detect(string $pagePath, array $geometry, string $outDirectory): array

@@ -58,6 +58,13 @@ from PIL import Image, ImageDraw
 FLAG_NO_ROW = "no_row"
 FLAG_SHARED_CELL = "shared_cell"
 
+# Things about the grid as a whole that Staff should look at (result["notes"]).
+NOTE_ROWS_UNEVEN = "rows_uneven"
+NOTE_LINES_BELOW = "lines_below_grid"
+NOTE_LINES_ABOVE = "lines_above_grid"
+NOTE_GRID_MOVED = "grid_moved"
+NOTE_ROWS_DO_NOT_FIT = "rows_do_not_fit"
+
 SOURCE_DETECTED = "kraken"
 SOURCE_INK = "ink"
 SOURCE_TEMPLATE = "template"
@@ -73,6 +80,39 @@ SHARE_PENALTY = 0.35
 # is 0.5; on the sample registers 99% of lines sit within 0.1, so 0.35 leaves
 # room for real drift while still catching lines that straddle two rows.
 NO_ROW_DISTANCE = 0.35
+
+# How far the row fit may move the table's first row line from where Staff put
+# it, in row heights. Evenly ruled rows repeat, so a grid slid one row up or
+# down matches the printed rules exactly as well as the right one; rule
+# matching cannot tell them apart. Staff's placement is the only evidence, so
+# it is trusted to within half a row. (Detect, which fits the template to the
+# page itself, uses the smaller FITTED_ROW_REACH on top of that fit.)
+ROW_REACH = 0.5
+FITTED_ROW_REACH = 0.3
+
+# How much the row spacing may differ from the template's, either way. A page
+# scanned at another scale, or a template drawn on a slightly different sample,
+# is a few percent off; 10% covers that without inventing a row.
+ROW_STRETCH = 0.10
+
+# A ledger template over a page that is not that ledger (22 template rows over a
+# list of diseases): the writing does not sit in the rows. On every real ledger
+# page it does - the baselines keep the same height within their rows (circular
+# concentration 0.81 to 0.99) and follow one another a row apart (1.0 to 1.1
+# rows). Free text under the template scores 0.07 to 0.26, 2.2 to 2.7 rows apart.
+# Below these, the columns are read as free text, line by line, like a field.
+ROWS_MIN_LINES = 6
+ROWS_SCATTER = 0.5
+ROWS_SPARSE = 1.5
+
+# A band above the grid at most this many rows tall could be a row of entries.
+# Headers on the real pages measure 1.25 to 1.45 rows, so those stay quiet.
+ROW_SIZED_BAND = 1.12
+
+# A row band whose height, against the template's, differs from the typical
+# band by more than this share was distorted by the fit (a header taken for a
+# row, a rule missing from the page). Reported to Staff, not corrected.
+UNEVEN_BAND = 0.20
 
 # Masked crops are filled with the paper's own tone around the line, with a
 # margin. Measured with the project's fine-tuned TrOCR on two real register
@@ -374,7 +414,7 @@ def _rule_pixels(gray, length=60):
     return horizontal, vertical
 
 
-def _find_rules(evidence, axis, min_span, max_thickness=None):
+def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near=0.0):
     """Straight printed rules along one axis.
 
     Returns (rules, pixels). Rules are {"a", "b", "lo", "hi"} where the rule
@@ -388,6 +428,15 @@ def _find_rules(evidence, axis, min_span, max_thickness=None):
     and a written word passes for a rule. `max_thickness` rejects fragments
     thicker than that, unless they run across half the page, which only print
     does (page borders are thicker than the rules inside the table).
+
+    Thickness alone does not settle it: the low joins of a cursive word
+    ("itimate" in "Legitimate", 82 px long and 4 px thick on a real page) look
+    like a stretch of printed rule, and erasing them cut the word to "Leg t".
+    Such a stretch stands alone, inside a line of writing, away from every
+    rule. So when `writing` (a mask of the detected lines of writing) is
+    given, a fragment that joins no rule and lies mostly inside the writing
+    is kept as ink, unless it runs within `near` pixels of a rule: a piece of
+    a bent or broken rule stays with its rule and is erased.
     """
     from scipy import ndimage
 
@@ -410,9 +459,9 @@ def _find_rules(evidence, axis, min_span, max_thickness=None):
             across = np.bincount(u - u.min())
             if float(np.median(across[across > 0])) > max_thickness:
                 continue
-        pixels[window] |= mask
         a, b = _fit(u.astype(float), v.astype(float))
-        fragments.append({"a": a, "b": b, "lo": int(u.min()), "hi": int(u.max()), "u": u, "v": v})
+        fragments.append({"a": a, "b": b, "lo": int(u.min()), "hi": int(u.max()), "u": u, "v": v,
+                          "window": window, "mask": mask})
 
     # A rule broken by a crossing stroke, faded ink or a fold comes back as
     # several collinear fragments. Merge them and refit on all their pixels.
@@ -428,14 +477,31 @@ def _find_rules(evidence, axis, min_span, max_thickness=None):
                 last["a"], last["b"] = _fit(last["u"].astype(float), last["v"].astype(float))
                 last["lo"] = min(last["lo"], fragment["lo"])
                 last["hi"] = max(last["hi"], fragment["hi"])
+                last["members"].append(fragment)
                 continue
-        merged.append(dict(fragment))
+        merged.append(dict(fragment, members=[fragment]))
 
     rules = []
+    loose = []
     for rule in merged:
         covered = len(np.unique(rule["u"]))
         if covered >= min_span:
             rules.append({"a": rule["a"], "b": rule["b"], "lo": rule["lo"], "hi": rule["hi"]})
+            for member in rule["members"]:
+                pixels[member["window"]] |= member["mask"]
+        else:
+            loose.extend(rule["members"])
+
+    for fragment in loose:
+        if writing is not None:
+            inside = float(np.mean(writing[fragment["window"]][fragment["mask"]]))
+            u_mid = (fragment["lo"] + fragment["hi"]) / 2
+            v_mid = fragment["a"] + fragment["b"] * u_mid
+            by_a_rule = any(abs(rule["a"] + rule["b"] * u_mid - v_mid) <= near
+                            and rule["lo"] - near <= u_mid <= rule["hi"] + near for rule in rules)
+            if inside >= 0.5 and not by_a_rule:
+                continue  # the body of a written word, not print
+        pixels[fragment["window"]] |= fragment["mask"]
     return rules, pixels
 
 
@@ -497,20 +563,28 @@ class Rule:
         return {"a": round(self.a, 3), "b": round(self.b, 6), "matched": self.matched}
 
 
-def _global_fit(expected, detected, probe, reach, tolerance):
+def _global_fit(expected, detected, probe, reach, tolerance, stretch=0.04, pivot="mean"):
     """The shift and stretch that line the expected rules up with the printed ones.
 
-    Found before any rule is snapped on its own, so a template aligned half a
-    row off, or dragged a little too tall or short, still matches every rule
-    to its own printed line rather than to its neighbour.
+    Found before any rule is snapped on its own, so a template aligned a
+    little off, or dragged a little too tall or short, still matches every
+    rule to its own printed line rather than to its neighbour.
+
+    `stretch` is how far the spacing may change either way. `pivot` is the
+    line the stretch is about: "mean" (the middle), or "first" for rows. Rows
+    pivot on the first line because that is where Staff put the table's top:
+    stretching about the middle couples the scale to a shift, so a template
+    5% off in row height can only be matched by sliding a whole row, and a
+    limit on how far the top may move (`reach`) would then rule out the right
+    fit.
     """
     wanted = np.asarray(expected, float)
     if not detected or len(wanted) == 0:
         return wanted
     printed = np.array([rule["a"] + rule["b"] * probe for rule in detected])
-    anchor = float(wanted.mean())
+    anchor = float(wanted[0]) if pivot == "first" else float(wanted.mean())
     best, best_score = wanted, -1.0
-    for scale in np.arange(0.96, 1.0401, 0.0025):
+    for scale in np.arange(1.0 - stretch, 1.0 + stretch + 1e-6, 0.0025):
         scaled = anchor + (wanted - anchor) * scale
         for shift in np.arange(-reach, reach + 0.5, 1.0):
             moved = scaled + shift
@@ -523,14 +597,14 @@ def _global_fit(expected, detected, probe, reach, tolerance):
     return best
 
 
-def _snap(expected, detected, probe, tolerance, fallback_slope, reach=0.0):
+def _snap(expected, detected, probe, tolerance, fallback_slope, reach=0.0, stretch=0.04, pivot="mean"):
     """Match expected rule positions to detected rules, one to one and in order.
 
     Unmatched positions keep their expected place shifted by the offset of
     their matched neighbours, so a faded rule does not throw off its row.
     """
     if reach > 0:
-        expected = list(_global_fit(expected, detected, probe, reach, tolerance))
+        expected = list(_global_fit(expected, detected, probe, reach, tolerance, stretch, pivot))
     candidates = []
     for i, value in enumerate(expected):
         for j, rule in enumerate(detected):
@@ -854,6 +928,109 @@ def _nearest_row(y, x, rules, offset):
     return (None if distances[r] > NO_ROW_DISTANCE else r), float(distances[r])
 
 
+def _rows_do_not_fit(written, rules, row_height):
+    """True when written lines (page x, baseline y) do not sit in the grid's rows.
+
+    In a ledger every line is written at about the same height within its row,
+    and one row below the last. Both fail on a page that is not that ledger:
+    the baselines fall at any height within a row (low concentration of their
+    positions within it), and are several rows apart. Both must fail, and there
+    must be enough lines to tell.
+    """
+    phases = []
+    for x, y in written:
+        tops, heights = _row_frame(rules, x)
+        k = int(np.searchsorted(tops + heights, y))
+        if 0 <= k < len(tops) and heights[k] > 0:
+            phases.append(2 * math.pi * (y - tops[k]) / heights[k])
+    if len(phases) < ROWS_MIN_LINES or row_height <= 0:
+        return False
+    concentration = float(np.hypot(np.mean(np.sin(phases)), np.mean(np.cos(phases))))
+
+    centres = []
+    for y in sorted(y for _, y in written):
+        if centres and y - centres[-1][-1] <= 0.3 * row_height:
+            centres[-1].append(y)
+        else:
+            centres.append([y])
+    if len(centres) < 3:
+        return False
+    gap = float(np.median(np.diff([np.mean(group) for group in centres])))
+    return concentration < ROWS_SCATTER and gap >= ROWS_SPARSE * row_height
+
+
+def _grid_notes(rules, expected, h_rules, above, below, columns, row_height, centre_x, table_left, table_right, height,
+                written=()):
+    """What Staff should check about the grid as a whole: [{"code": ..., ...}].
+
+    A wrong grid cannot be told from a right one by looking at any single
+    line: every line still lands in some row. These are the tell-tale signs,
+    reported so nothing is silent, and never acted on:
+
+      rows_uneven       some row bands that hold writing came out much taller
+                        or shorter than the template's (a header taken for a
+                        row, a rule the page lacks). `rows` are the 1-based row
+                        numbers. Empty rows are left out: a template with more
+                        rows than the page squeezes its last rows into the
+                        margin, and there is nothing in them to read wrongly.
+                        `written` are the heights of the lines found in the grid.
+      lines_below_grid  written lines in several columns just below the last
+                        row: the page has more rows than the template, and
+                        they are not read. `rows` is how many rows they span.
+      rows_do_not_fit   the writing on this page does not sit in the template's rows
+                        (see _rows_do_not_fit), so `count` column(s) were read as
+                        free text. Reported by process_page itself.
+      grid_moved        (Detect only) the fit moved the first row line whole rows
+                        from where Staff put it; `rows` is how many, positive
+                        for down. A header as tall as a row is part of the
+                        page's evenly ruled run, so this can be the header.
+      lines_above_grid  written lines in several columns in a row-sized band
+                        directly above the first row. A taller band is a
+                        header (more than ROW_SIZED_BAND rows) stays quiet; a
+                        band as tall as a row could be either, so Staff are asked.
+    """
+    notes = []
+    at = [rule.at(centre_x) for rule in rules]
+    snapped = np.diff(at)
+    wanted = np.diff(np.asarray(expected, float))
+    if len(snapped) >= 3 and len(snapped) == len(wanted):
+        # Rows the template squeezed onto the page's edge, or past it, are not
+        # rows the page has; leave them out of the comparison.
+        real = (wanted > 0.3 * float(np.median(wanted))) & (np.asarray(at[:-1]) < height)
+        ratio = snapped[real] / wanted[real]
+        typical = float(np.median(ratio)) if len(ratio) >= 3 else 0.0
+        if typical > 0:
+            numbers = np.nonzero(real)[0] + 1
+            holds = {k + 1 for k in range(len(snapped))
+                     if any(at[k] <= y <= at[k + 1] + 0.1 * row_height for y in written)}
+            off = [int(n) for n, value in zip(numbers, ratio)
+                   if abs(value / typical - 1.0) > UNEVEN_BAND and int(n) in holds]
+            if off:
+                notes.append({"code": NOTE_ROWS_UNEVEN, "count": len(off), "rows": off[:6]})
+
+    def in_table(line):
+        return table_left <= line.cx <= table_right
+
+    def spread(lines):
+        return {_column_at(line.cx, line.y, columns) for line in lines} - {None}
+
+    lower = [line for line in below if in_table(line) and line.y <= rules[-1].at(line.cx) + 4 * row_height]
+    if len(spread(lower)) >= 2:
+        ys = sorted(line.y for line in lower)
+        rows = 1 + sum(1 for a, b in zip(ys, ys[1:]) if b - a > 0.5 * row_height)
+        notes.append({"code": NOTE_LINES_BELOW, "count": len(lower), "rows": rows})
+
+    top = at[0]
+    printed = [rule["a"] + rule["b"] * centre_x for rule in h_rules]
+    edges = [y for y in printed if y < top - 0.3 * row_height]
+    if edges and top - max(edges) <= ROW_SIZED_BAND * row_height:
+        edge = max(edges)
+        band = [line for line in above if in_table(line) and edge < line.y]
+        if len(spread(band)) >= 2:
+            notes.append({"code": NOTE_LINES_ABOVE, "count": len(band)})
+    return notes
+
+
 # ============================================================ strokes and outlines
 
 def _x_height(lines, ink, row_height):
@@ -1122,7 +1299,7 @@ def _ink_line(ys, xs):
 
 # ============================================================ page processing
 
-def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None, row_reach=1.5,
+def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None, row_reach=ROW_REACH,
                  detect_fields=False):
     """Outline, flag and crop every line on one aligned page.
 
@@ -1146,6 +1323,9 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
 
     lines = []
     ignored = []
+    # Handwriting the detector found just outside the grid, top and bottom.
+    above, below = [], []
+    notes = []
     grid = None
     detector_used = None
     has_table = bool(columns) and len(ruled) >= 2
@@ -1168,6 +1348,14 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
         detector_used = getattr(detector, "used_device", None)
         heights = [float(np.ptp(np.asarray(entry["boundary"], float)[:, 1])) for entry in raw]
         max_thickness = float(np.median(heights)) / 7 if heights else None
+        # Where the detector found writing: a stretch of a written word can pass
+        # for a piece of printed rule, and must not be erased (see _find_rules).
+        writing_canvas = Image.new("1", (width, height), 0)
+        writing_draw = ImageDraw.Draw(writing_canvas)
+        for entry in raw:
+            writing_draw.polygon([tuple(point) for point in entry["boundary"]], fill=1)
+        writing = np.asarray(writing_canvas, dtype=bool)
+        near = 0.25 * float(np.median(heights)) if heights else 0.0
 
         h_evidence, v_evidence = _rule_pixels(gray)
         if has_table:
@@ -1179,13 +1367,13 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
             centre_x = (table_left + table_right) / 2
             centre_y = (table_top + table_bottom) / 2
 
-            h_rules, h_pixels = _find_rules(h_evidence, "h", 0.2 * (table_right - table_left), max_thickness)
-            v_rules, v_pixels = _find_rules(v_evidence, "v", 0.2 * (table_bottom - table_top), max_thickness)
-            # Hand-aligned markers may be well off, so the row lines search up to
-            # 1.5 rows for their printed rules. After Detect they are already
-            # anchored to this page; a wide search there could only slide the
-            # whole grid one row onto the header's rules.
-            rules = _snap(ruled, h_rules, centre_x, 0.45 * row_height, 0.0, reach=row_reach * row_height)
+            h_rules, h_pixels = _find_rules(h_evidence, "h", 0.2 * (table_right - table_left), max_thickness, writing, near)
+            v_rules, v_pixels = _find_rules(v_evidence, "v", 0.2 * (table_bottom - table_top), max_thickness, writing, near)
+            # The first row line may move up to `row_reach` rows from where the
+            # markers put it, and the row spacing may stretch by ROW_STRETCH
+            # about that line. Never a whole row: see ROW_REACH.
+            rules = _snap(ruled, h_rules, centre_x, 0.45 * row_height, 0.0,
+                          reach=row_reach * row_height, stretch=ROW_STRETCH, pivot="first")
             _snap_columns(columns, v_rules, centre_y, row_height)
             # From here on the page's own rules define the table, not the template
             # boxes, which are only as exact as the alignment step left them.
@@ -1193,11 +1381,35 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
             table_right = max(c["right_rule"].at(centre_y) for c in columns)
             table_top = min(rules[0].at(table_left), rules[0].at(table_right))
             table_bottom = max(rules[-1].at(table_left), rules[-1].at(table_right))
-        else:
+
+            # A ledger column over writing that does not sit in its rows: read the
+            # columns as free text instead - the written lines inside each, top to
+            # bottom, exactly as a rectangle field is - and tell Staff. Forcing every
+            # line into one of the template's rows splits words apart and flags most
+            # of the page.
+            written = [(float(np.mean([p[0] for p in entry["baseline"]])),
+                        float(np.median([p[1] for p in entry["baseline"]]))) for entry in raw]
+            written = [(x, y) for x, y in written
+                       if table_left <= x <= table_right and rules[0].at(x) <= y <= rules[-1].at(x)]
+            if _rows_do_not_fit(written, rules, row_height):
+                for column in columns:
+                    fields.append({
+                        "index": len(fields),
+                        "name": column["name"],
+                        "polygon": _rect_polygon(column["left"], column["top"],
+                                                 column["right"] - column["left"], column["bottom"] - column["top"]),
+                        "turned": False,
+                        "person_group": None,
+                        "person_field_order": None,
+                    })
+                notes.append({"code": NOTE_ROWS_DO_NOT_FIT, "count": len(columns)})
+                columns, ruled, has_table, split_fields = [], [], False, True
+
+        if not has_table:
             # No table: any long printed line (a ruled notebook page, a form's
             # underlines) is still erased before strokes are read.
-            h_rules, h_pixels = _find_rules(h_evidence, "h", 0.2 * width, max_thickness)
-            v_rules, v_pixels = _find_rules(v_evidence, "v", 0.2 * height, max_thickness)
+            h_rules, h_pixels = _find_rules(h_evidence, "h", 0.2 * width, max_thickness, writing, near)
+            v_rules, v_pixels = _find_rules(v_evidence, "v", 0.2 * height, max_thickness, writing, near)
             rules = []
             row_height = 0.0
 
@@ -1229,6 +1441,7 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
             bottom = rules[-1].at(line.cx) + 0.5 * row_height
             if not (top <= line.y <= bottom):
                 ignored.append(line)
+                (above if line.y < top else below).append(line)
                 continue
             for piece in _split_at_columns(line, columns, clean, row_height):
                 piece.column = _column_for(piece, columns)
@@ -1236,6 +1449,10 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
                     ignored.append(piece)
                 else:
                     pieces.append(piece)
+
+        if has_table:
+            notes = _grid_notes(rules, ruled, h_rules, above, below, columns, row_height,
+                                centre_x, table_left, table_right, height, [piece.y for piece in pieces])
 
         offset = _writing_offset(pieces, rules) if has_table else 0.0
         by_column = {}
@@ -1477,6 +1694,8 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
         "lines": records,
         "grid": grid,
         "ignored": len(ignored),
+        # What Staff should check about the grid: see _grid_notes.
+        "notes": notes,
         "timings": {k: round(v, 2) for k, v in timings.items()},
         # "cuda", "cpu", or "cpu (GPU failed)"; None when no detector ran.
         "detector_device": detector_used,
@@ -1984,7 +2203,8 @@ def fit_geometry(image, geometry, found=None):
     ruled run (both come from the same detector), and the row spacing sets
     the scale. Counting matches would be fooled here - the header's own rules
     and the lines estimated below the last printed rule line up with each
-    other one row off.
+    other one row off. Markers that already sit on the printed rules as well
+    as the fit would put them are kept where Staff put them.
 
     Rectangle fields follow the same mapping. process_page then snaps every
     edge and row line to the printed rule it belongs to.
@@ -2025,14 +2245,20 @@ def fit_geometry(image, geometry, found=None):
         lines = shift + scale * np.asarray(ruled)
         return int(np.sum(np.abs(horizontal[None, :] - lines[:, None]).min(axis=1) <= reach))
 
-    if row_hits(1.0, 0.0) > row_hits(sy, ty):
+    # A tie goes to Staff: when the markers already sit on as many printed
+    # rules as the fit would put them on, they are left where Staff put them.
+    # A header band as tall as a row lies in the ruled run, and matching rules
+    # alone cannot tell it from the first row; Staff's placement can.
+    if row_hits(1.0, 0.0) >= row_hits(sy, ty):
         sy, ty = 1.0, 0.0
     y_hits = len(printed)
 
     def clamp(value):
         return float(min(1.0, max(0.0, value)))
 
-    new_ruled = [clamp(ty + sy * y) for y in ruled]
+    # Rows the template has and the page lacks fall past its edge. Clamping them
+    # would stack several rule lines on the edge, so the grid ends where the page does.
+    new_ruled = [clamp(y) for y in _within_page([ty + sy * y for y in ruled])]
     top, bottom = new_ruled[0], new_ruled[-1]
     fitted = {
         "columns": [
@@ -2058,6 +2284,42 @@ def fit_geometry(image, geometry, found=None):
     }
 
 
+def _rows_moved(before, after):
+    """Whole rows the first row line moved between two geometries (down is positive).
+
+    Zero when it moved less than three quarters of a row: that is a nudge onto
+    the printed rule, not a different row.
+    """
+    old = [float(y) for y in before.get("ruled_ys") or []]
+    new = [float(y) for y in after.get("ruled_ys") or []]
+    if len(old) < 2 or len(new) < 2 or np.median(np.diff(old)) <= 0:
+        return 0
+    rows = (new[0] - old[0]) / float(np.median(np.diff(old)))
+    return int(round(rows)) if abs(rows) >= 0.75 else 0
+
+
+def _within_page(ruled):
+    """Row lines (page fractions) cut to the page.
+
+    Rows wholly off the top or bottom edge hold nothing. The edge itself ends
+    the grid when at least half a row of page is left there. Fewer than two
+    rules on the page is left alone: there is nothing to cut down to.
+    """
+    ruled = [float(y) for y in ruled]
+    inside = []
+    for y in ruled:
+        if 0.0 <= y <= 1.0 and (not inside or y > inside[-1] + 1e-4):
+            inside.append(y)
+    if len(ruled) < 2 or len(inside) < 2:
+        return ruled
+    pitch = float(np.median(np.diff(ruled)))
+    if ruled[0] < 0.0 and inside[0] >= 0.5 * pitch:
+        inside.insert(0, 0.0)
+    if ruled[-1] > 1.0 and 1.0 - inside[-1] >= 0.5 * pitch:
+        inside.append(1.0)
+    return inside
+
+
 def _snapped_geometry(result, fitted):
     """The geometry process_page actually used, after snapping to printed rules."""
     grid = result.get("grid")
@@ -2068,6 +2330,12 @@ def _snapped_geometry(result, fitted):
     centre_x = (left + right) / 2
     centre_y = (top + bottom) / 2
     ruled = [(r["a"] + r["b"] * centre_x) / height for r in grid["rules"]]
+    # A page can have fewer rows than the template: the rules estimated below
+    # its last printed one then fall past the page's edge. Rows off the page
+    # hold nothing, and a marker that extends beyond the page is refused when
+    # the markers are sent back (Detect again, Scan, Snap), so the grid ends
+    # where the page does.
+    ruled = _within_page(ruled)
     columns = []
     for column in grid["columns"]:
         x0 = column["left"]["a"] + column["left"]["b"] * centre_y
@@ -2102,10 +2370,13 @@ def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None)
 
     fitted, fit = fit_geometry(image, geometry)
     result = process_page(page_path, fitted, out_dir, detector=detector, debug=debug,
-                          row_reach=0.3 if fit["fitted"] else 1.5, detect_fields=True)
+                          row_reach=FITTED_ROW_REACH if fit["fitted"] else ROW_REACH, detect_fields=True)
     result["deskew"] = round(degrees, 3)
     result["fit"] = fit
     result["geometry"] = _snapped_geometry(result, fitted)
+    moved = _rows_moved(geometry, fitted) if fit["fitted"] else 0
+    if moved:
+        result["notes"].insert(0, {"code": NOTE_GRID_MOVED, "rows": moved})
 
     with open(os.path.join(out_dir, "lines.json"), "w", encoding="utf-8") as handle:
         json.dump(result, handle)

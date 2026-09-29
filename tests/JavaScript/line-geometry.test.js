@@ -7,6 +7,7 @@ import {
     FLAG_SHARED_CELL,
     flagExplanation,
     geometryMarkers,
+    gridNotes,
     verificationItems,
 } from '../../resources/js/line-geometry.js';
 import {
@@ -186,6 +187,50 @@ test('a field the server moved onto a straightened page comes back as its own bo
     assert.equal(marker.angle, 10);
     assert.ok(Math.abs(marker.x - 0.4) < 1e-9 && Math.abs(marker.w - 0.2) < 1e-9);
     assert.ok(Math.abs(marker.y - 275 / 600) < 1e-9 && Math.abs(marker.h - 50 / 600) < 1e-9);
+});
+
+test('a column that runs past the page is cut at its edge before it is sent back', () => {
+    // Detect can end a grid below the page when the template has more rows than the page; the server refuses a
+    // marker that extends beyond the page, which would fail the next Detect, Scan or Snap.
+    const aligned = templateColumns.map((column) => ({ ...column, y: 0.3, h: 0.9 }));
+    const geometry = alignedGeometry(aligned, templateColumns, ruledYs);
+
+    geometry.columns.forEach((column) => assert.ok(column.box[1] + column.box[3] <= 1 + 1e-9));
+    assert.ok(Math.abs(geometry.columns[0].box[3] - 0.7) < 1e-9);
+});
+
+test('grid notes are worded as questions for Staff', () => {
+    assert.deepEqual(gridNotes(null), []);
+    assert.deepEqual(gridNotes([{ code: 'unknown', count: 3 }, { code: 'lines_below_grid', count: 0 }]), []);
+
+    assert.deepEqual(gridNotes([{ code: 'rows_uneven', count: 1, rows: [21] }]), [
+        'Row 21 differs a lot in height from the template’s. Check that the row lines sit on the printed lines.',
+    ]);
+    assert.match(gridNotes([{ code: 'rows_uneven', count: 2, rows: [20, 21] }])[0], /^Rows 20 and 21 differ /);
+    assert.match(gridNotes([{ code: 'rows_uneven', count: 8, rows: [3, 4, 5, 6, 7, 8] }])[0], /^Rows 3, 4, 5, 6, 7 and 3 more differ /);
+
+    assert.deepEqual(gridNotes([{ code: 'lines_below_grid', count: 22, rows: 2 }]), [
+        '22 written lines lie below the last row and are not read (about 2 more rows). '
+        + 'This page may have more rows than the template.',
+    ]);
+    assert.match(gridNotes([{ code: 'lines_below_grid', count: 1, rows: 1 }])[0], /^1 written line lies below .* and is not read \(about 1 more row\)/);
+    assert.match(gridNotes([{ code: 'rows_do_not_fit', count: 1 }])[0], /^This page does not look like the ledger .* The column was read as free text/);
+    assert.match(gridNotes([{ code: 'rows_do_not_fit', count: 3 }])[0], /3 columns were read as free text/);
+    assert.deepEqual(gridNotes([{ code: 'lines_above_grid', count: 11 }]), [
+        '11 written lines sit in the row directly above the first row. If that row holds entries, move the grid up one row.',
+    ]);
+});
+
+test('the Detect summary carries the grid notes', () => {
+    const summary = detectionSummary({
+        deskew: 0,
+        geometry: { columns: [{}] },
+        lines: [line({ row: 1 })],
+        notes: [{ code: 'lines_above_grid', count: 4 }],
+    });
+
+    assert.equal(summary.notes.length, 1);
+    assert.deepEqual(detectionSummary({ deskew: 0, geometry: {}, lines: [line({})] }).notes, []);
 });
 
 test('the Detect summary says what was found and what needs review', () => {

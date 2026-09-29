@@ -2268,7 +2268,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     border-color: rgba(255, 62, 29, .3);
   }
 
-  &.is-stale {
+  &.is-stale,
+  &.has-notes:not(.has-review) {
     color: #8a6500;
     background: rgba(255, 171, 0, .1);
     border-color: rgba(255, 171, 0, .35);
@@ -2277,6 +2278,36 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .form-check-label {
     color: var(--bs-body-color);
     font-size: .75rem;
+  }
+}
+
+// What Staff should check about the grid as a whole (Detect summary and Verify).
+.grid-notes {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  margin: .75rem 1rem 0;
+  padding: .65rem .75rem;
+  color: #8a6500;
+  background: rgba(255, 171, 0, .1);
+  border: 1px solid rgba(255, 171, 0, .35);
+  border-radius: .5rem;
+  font-size: .8125rem;
+
+  > .bx {
+    flex: 0 0 auto;
+    margin-block-start: .1rem;
+    font-size: 1.15rem;
+  }
+}
+
+.grid-notes__list {
+  margin: .15rem 0 0;
+  padding-inline-start: 1.1rem;
+  color: var(--bs-body-color);
+
+  li + li {
+    margin-block-start: .2rem;
   }
 }
 
@@ -2388,25 +2419,30 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   flex: 0 0 auto;
   flex-wrap: wrap;
   align-items: center;
-  gap: .5rem .75rem;
-  padding: .55rem .85rem;
+  gap: .35rem .6rem;
+  padding: .4rem .75rem .35rem;
   background: rgba(40, 199, 111, .08);
   border-block-end: 1px solid rgba(40, 199, 111, .35);
 
   .btn-group .btn {
+    padding-inline: .6rem;
     white-space: nowrap;
   }
 }
 
+// Title and the field being edited on one line: "Adjust outline  Child's Name · row 20".
 .line-edit-toolbar__copy {
   display: flex;
-  flex: 1 1 10rem;
-  flex-direction: column;
+  flex: 1 1 9rem;
+  align-items: baseline;
+  gap: .4rem;
   min-inline-size: 0;
   font-size: .75rem;
 
   strong {
+    flex: 0 0 auto;
     color: var(--bs-heading-color);
+    white-space: nowrap;
   }
 
   span {
@@ -2419,13 +2455,21 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .line-edit-toolbar__actions {
   display: flex;
-  gap: .4rem;
+  gap: .35rem;
 }
 
 .line-edit-toolbar__status {
   flex: 1 0 100%;
+  overflow: hidden;
   color: var(--bs-secondary-color);
   font-size: .75rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  // One line, always, empty or not. The hint changes as you draw ("3 points...",
+  // "Enter closes it"); a toolbar that grows and shrinks with it moves the page under
+  // the pointer in the middle of a stroke. The full text is in the tooltip.
+  min-block-size: 1.35em;
 
   &.is-error {
     color: var(--bs-danger);

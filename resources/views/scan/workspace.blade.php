@@ -236,6 +236,7 @@
                     <div class="detect-summary__copy">
                         <strong id="detectSummaryTitle"></strong>
                         <span id="detectSummaryText"></span>
+                        <ul class="grid-notes__list d-none" id="detectSummaryNotes"></ul>
                         <div class="form-check form-switch mb-0 mt-1">
                             <input class="form-check-input" type="checkbox" id="lineEditToggle">
                             <label class="form-check-label" for="lineEditToggle"
@@ -406,7 +407,7 @@
                                     <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>Save and re-read
                                 </button>
                             </div>
-                            <div class="line-edit-toolbar__status d-none" id="lineEditStatus" role="status" aria-live="polite"></div>
+                            <div class="line-edit-toolbar__status" id="lineEditStatus" role="status" aria-live="polite"></div>
                         </div>
 
                         <div class="doc-viewport validation-doc-viewport" id="validationDocViewport">
@@ -462,6 +463,15 @@
                             <input type="text" id="registry_number" name="registry_number"
                                    class="form-control" maxlength="64"
                                    placeholder="As written on the certificate">
+                        </div>
+
+                        {{-- Filled in when the page job has something to say about the grid as a whole. --}}
+                        <div class="grid-notes d-none" id="verifyNotes" role="status" aria-live="polite">
+                            <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
+                            <div>
+                                <strong>Check the grid before you verify</strong>
+                                <ul class="grid-notes__list" id="verifyNotesList"></ul>
+                            </div>
                         </div>
 
                         <div class="validation-record-list-heading">
@@ -583,6 +593,7 @@
         flagExplanation,
         FLAG_NO_ROW,
         geometryMarkers,
+        gridNotes,
         verificationItems,
     } from '{{ Vite::asset('resources/js/line-geometry.js') }}';
     import { LineOverlay, polygonBounds } from '{{ Vite::asset('resources/js/line-overlay.js') }}';
@@ -791,6 +802,8 @@
             + (changed > 0 ? ` with your ${changed} line adjustment${changed === 1 ? '' : 's'}` : '')
             + ', or Detect again to refit the markers.';
         el('detectSummary').classList.add('is-stale');
+        // The notes describe Detect's grid, which is set aside now.
+        fillGridNotes(el('detectSummaryNotes'), []);
     }
 
     /** The detected page can no longer be read: undo cannot bring it back either. */
@@ -817,7 +830,8 @@
         detection = null;
         alignPreview.clear();
         el('detectSummary').classList.add('d-none');
-        el('detectSummary').classList.remove('is-stale', 'has-review');
+        el('detectSummary').classList.remove('is-stale', 'has-review', 'has-notes');
+        fillGridNotes(el('detectSummaryNotes'), []);
     }
 
     /**
@@ -1000,6 +1014,25 @@
             + (adjusted > 0 ? ` · ${adjusted} line${adjusted === 1 ? '' : 's'} adjusted` : '')
             + (unsaved > 0 ? ` · ${unsaved} not saved` : '');
         el('detectSummary').classList.toggle('has-review', summary.flagged > 0);
+        el('detectSummary').classList.toggle('has-notes', summary.notes.length > 0);
+        fillGridNotes(el('detectSummaryNotes'), summary.notes);
+    }
+
+    /** One list item per note; the list hides itself when there is nothing to say. */
+    function fillGridNotes(list, notes) {
+        list.replaceChildren(...notes.map((text) => {
+            const item = document.createElement('li');
+            item.textContent = text;
+            return item;
+        }));
+        list.classList.toggle('d-none', notes.length === 0);
+    }
+
+    /** In Verify: the same notes, above the people, so they are read before anything is verified. */
+    function showGridNotes(page) {
+        const notes = gridNotes(page?.notes);
+        fillGridNotes(el('verifyNotesList'), notes);
+        el('verifyNotes').classList.toggle('d-none', notes.length === 0);
     }
 
     function setLineEditing(on) {
@@ -1254,6 +1287,48 @@
     el('lineUndoBtn').addEventListener('click', () => (alignPreview.isDrawing() ? alignPreview.undoDrawStep() : undoLineChange()));
     el('lineRedoBtn').addEventListener('click', redoLineChange);
 
+    /**
+     * PUT a line's new outline. When the outline sits in another cell than the
+     * line's own, the server saves nothing and says where; the reviewer then
+     * decides whether this field really belongs there (another person's row,
+     * or another column). Resolves to { response, payload }.
+     */
+    async function putLineOutline(url, body) {
+        const send = async (extra) => {
+            const response = await fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ ...body, ...extra }),
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            return { response, payload };
+        };
+
+        const first = await send({});
+        const move = first.payload?.move;
+        if (first.response.status !== 409 || !move) return first;
+
+        const confirmed = window.confirm(
+            `This outline covers writing in ${move.to.column}, row ${move.to.row}.\n`
+            + `The field you are adjusting is ${move.from.column}, row ${move.from.row}.\n\n`
+            + `OK: move this field to ${move.to.column}, row ${move.to.row}.\n`
+            + 'Cancel: keep it where it is (nothing is saved).',
+        );
+        if (!confirmed) {
+            throw new Error(`Not saved: the outline is over ${move.to.column}, row ${move.to.row}. `
+                + `Draw it over ${move.from.column}, row ${move.from.row}, or pick the right field first.`);
+        }
+        return send({ allow_move: true });
+    }
+
     /** Re-crop one line on the server from its new outline. Saves run one at a time. */
     function saveLine(index, polygon, { reset = false } = {}) {
         const page = detection?.page;
@@ -1265,22 +1340,9 @@
 
         lineSaveQueue = lineSaveQueue.then(async () => {
             if (detection?.page !== page) return;
-            const response = await fetch(config.lineUpdateUrl
+            const { response, payload } = await putLineOutline(config.lineUpdateUrl
                 .replace('__PAGE__', String(page.id))
-                .replace('__LINE__', String(line.id)), {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': config.csrf,
-                    'X-Requested-With': 'XMLHttpRequest',
-                    Accept: 'application/json',
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({ polygon, reset }),
-            });
-            const payload = (response.headers.get('content-type') || '').includes('application/json')
-                ? await response.json()
-                : null;
+                .replace('__LINE__', String(line.id)), { polygon, reset });
             if (!response.ok || !payload?.line) {
                 throw new Error(payload?.message || `The outline could not be saved (HTTP ${response.status}).`);
             }
@@ -2330,6 +2392,7 @@
 
             setOcrProgress(96, 'Preparing validation', 'The handwriting results are ready for your review.');
             renderVerifyRows();
+            showGridNotes(page);
             await completeOcrProgress();
             showStep('verify');
             try {
@@ -3277,7 +3340,8 @@
     function showLineEditStatus(message, isError = false) {
         const status = el('lineEditStatus');
         status.textContent = message;
-        status.classList.toggle('d-none', message === '');
+        status.title = message;
+        // Never hidden: its height is reserved so the toolbar does not resize (see the SCSS).
         status.classList.toggle('is-error', isError);
     }
 
@@ -3297,8 +3361,8 @@
 
     const VERIFY_MODE_HINTS = {
         box: 'Drag the handles to stretch the outline.',
-        points: 'Drag a corner to move it. Drag a small dot between corners to add one; Delete removes the corner last touched.',
-        draw: 'Click round the writing, or hold and trace. Enter or double-click closes it; Ctrl+Z takes back the last point; Esc cancels the drawing.',
+        points: 'Drag a corner to move it; drag a dot between corners to add one; Delete removes one.',
+        draw: 'Click round the writing or hold and trace. Enter closes it; Ctrl+Z undoes a point; Esc cancels.',
         rectangle: 'Drag a box over the writing.',
     };
 
@@ -3347,20 +3411,7 @@
         showLineEditStatus('Cropping along the new outline and reading it again…');
 
         try {
-            const response = await fetch(lineUpdateUrl(item.lineId), {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': config.csrf,
-                    'X-Requested-With': 'XMLHttpRequest',
-                    Accept: 'application/json',
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({ polygon }),
-            });
-            const payload = (response.headers.get('content-type') || '').includes('application/json')
-                ? await response.json()
-                : null;
+            const { response, payload } = await putLineOutline(lineUpdateUrl(item.lineId), { polygon });
 
             if (!payload?.line) {
                 throw new Error(responseErrorMessage(response, payload));

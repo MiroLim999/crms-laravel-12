@@ -235,6 +235,8 @@ class DocumentPageController extends Controller
             'polygon.*.*' => ['required', 'numeric'],
             // Back to the outline the detector drew: no longer counts as adjusted.
             'reset' => ['sometimes', 'boolean'],
+            // The reviewer confirmed that this line belongs in another cell.
+            'allow_move' => ['sometimes', 'boolean'],
         ]);
 
         $polygon = array_map(fn (array $point) => [
@@ -255,6 +257,22 @@ class DocumentPageController extends Controller
             );
         } catch (LineMarkersException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        // Adjusting an outline is meant to fix that field's crop. An outline
+        // drawn over another cell would quietly give this field to another
+        // person (and leave its own cell empty), so a line already placed in a
+        // row moves only when the reviewer confirms it. A line with no row is
+        // placed from its outline as before: that is how it gets a row.
+        $move = $this->cellChange($page, $line, $placed);
+        if ($move !== null && ! $request->boolean('allow_move') && ! $request->boolean('reset')) {
+            $disk->delete($cropPath);
+
+            return response()->json([
+                'message' => "This outline sits in {$move['to']['column']}, row {$move['to']['row']}, "
+                    ."not in {$move['from']['column']}, row {$move['from']['row']}. Nothing was saved.",
+                'move' => $move,
+            ], 409);
         }
 
         $previousCrop = $line->crop_path;
@@ -328,6 +346,8 @@ class DocumentPageController extends Controller
             'deskew' => $page->deskew_degrees ?? 0.0,
             // The markers as the page was outlined with them (fitted by Detect).
             'geometry' => $page->geometry,
+            // What Staff should check about the grid as a whole.
+            'notes' => $page->notes ?? [],
             'statusUrl' => route('documents.pages.show', $page),
             'readUrl' => route('documents.pages.read', $page),
             'cancelUrl' => route('documents.pages.cancel', $page),
@@ -336,6 +356,34 @@ class DocumentPageController extends Controller
             'modelKey' => $page->ocr_model_key,
             'threshold' => OcrSetting::threshold(),
             'lines' => $page->hasLines() ? $page->lines()->get()->map->toClient()->values() : [],
+        ];
+    }
+
+    /**
+     * The cell a redrawn ledger line would move to, when it is not its own.
+     *
+     * @param  array{column_index: int|null, row: int|null}  $placed
+     * @return array{from: array{column: string, row: int}, to: array{column: string, row: int|string}}|null
+     */
+    private function cellChange(DocumentPage $page, PageLine $line, array $placed): ?array
+    {
+        if ($line->belongsToField() || $line->row === null) {
+            return null;
+        }
+
+        $column = $placed['column_index'] ?? $line->column_index;
+        if ((int) $column === (int) $line->column_index && $placed['row'] === $line->row) {
+            return null;
+        }
+
+        $columns = $page->geometry['columns'] ?? [];
+
+        return [
+            'from' => ['column' => (string) $line->column_name, 'row' => (int) $line->row],
+            'to' => [
+                'column' => (string) ($columns[$column]['name'] ?? $line->column_name),
+                'row' => $placed['row'] ?? 'none (between rows)',
+            ],
         ];
     }
 
