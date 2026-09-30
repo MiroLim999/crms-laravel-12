@@ -103,6 +103,10 @@ Route::middleware('auth')->group(function () {
             ->name('documents.pages.image');
         Route::post('documents/pages/{page}/read', [DocumentPageController::class, 'read'])
             ->name('documents.pages.read');
+        // Markers moved after Detect: outline this page again from them and read
+        // it, reusing the lines Detect already found instead of detecting again.
+        Route::put('documents/pages/{page}/geometry', [DocumentPageController::class, 'reoutline'])
+            ->name('documents.pages.reoutline');
         Route::post('documents/pages/{page}/cancel', [DocumentPageController::class, 'cancel'])
             ->name('documents.pages.cancel');
         Route::get('documents/pages/{page}/lines/{line}/crop', [DocumentPageController::class, 'crop'])
@@ -111,6 +115,20 @@ Route::middleware('auth')->group(function () {
         Route::put('documents/pages/{page}/lines/{line}', [DocumentPageController::class, 'updateLine'])
             ->scopeBindings()
             ->name('documents.pages.lines.update');
+        // Draw a line by hand where the detector found none.
+        Route::post('documents/pages/{page}/lines', [DocumentPageController::class, 'storeLine'])
+            ->name('documents.pages.lines.store');
+        // Remove one line before it is read: a stray mark, a wrongly split
+        // word, or one that does not belong. Only while Detect's result stands.
+        // It is kept, with its crop, until the page is outlined again, so
+        // restore puts it back (Ctrl+Z in the Align step).
+        Route::delete('documents/pages/{page}/lines/{line}', [DocumentPageController::class, 'destroyLine'])
+            ->scopeBindings()
+            ->name('documents.pages.lines.destroy');
+        Route::post('documents/pages/{page}/lines/{line}/restore', [DocumentPageController::class, 'restoreLine'])
+            ->scopeBindings()
+            ->withTrashed()
+            ->name('documents.pages.lines.restore');
     });
 
     /*

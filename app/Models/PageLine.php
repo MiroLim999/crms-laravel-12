@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * One outlined line on a page: its polygon, the masked crop TrOCR read, and
@@ -14,6 +15,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class PageLine extends Model
 {
+    // A line a reviewer removed in Align is kept until the page is outlined
+    // again, so Ctrl+Z puts it back. Nothing reads or submits it meanwhile:
+    // every query through DocumentPage::lines() leaves it out.
+    use SoftDeletes;
+
     public const FLAG_NO_ROW = 'no_row';
 
     public const FLAG_SHARED_CELL = 'shared_cell';
@@ -22,6 +28,9 @@ class PageLine extends Model
 
     /** A written line Detect found inside a rectangle field. */
     public const SOURCE_FIELD = 'field';
+
+    /** An outline a reviewer drew by hand, where the detector found none. */
+    public const SOURCE_MANUAL = 'manual';
 
     protected $fillable = [
         'document_page_id', 'position', 'source', 'column_index', 'column_name', 'row',

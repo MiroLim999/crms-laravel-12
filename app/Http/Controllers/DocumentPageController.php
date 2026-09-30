@@ -129,6 +129,53 @@ class DocumentPageController extends Controller
         ]);
     }
 
+    /**
+     * Markers moved after Detect: outline this page again from where Staff
+     * have them now, then read it.
+     *
+     * The page itself is unchanged - already uploaded, and already
+     * straightened by Detect - so nothing is sent but the markers, and the
+     * lines Detect found are reused instead of detecting the page a second
+     * time (see LineMarkers::cachePath). That is the slow part of a scan: a
+     * register page takes about 25 seconds to detect and under five to
+     * outline again.
+     *
+     * Every line is worked out afresh from the new markers, so outlines a
+     * reviewer adjusted do not survive; the Align step warns before this.
+     */
+    public function reoutline(Request $request, DocumentPage $page): JsonResponse
+    {
+        $this->authorizePage($request, $page);
+        GeometryInput::hydrate($request);
+
+        if (! in_array($page->status, [DocumentPage::STATUS_DETECTED, DocumentPage::STATUS_READY], true)) {
+            return response()->json(['message' => 'This page is still being processed.'], 409);
+        }
+
+        $validated = $request->validate([
+            'model' => ['nullable', 'string', 'max:255'],
+            ...GeometryInput::rules(),
+        ]);
+        $geometry = GeometryInput::checked($validated['geometry']);
+
+        if (! Storage::disk('local')->exists($page->image_path)) {
+            return response()->json(['message' => 'This page is no longer on the server. Scan it again.'], 409);
+        }
+
+        $page->forceFill([
+            'status' => DocumentPage::STATUS_QUEUED,
+            'error' => null,
+            'geometry' => $geometry,
+            // Detect's notes describe the grid it fitted, which is gone now.
+            'notes' => [],
+            'ocr_model_key' => $this->modelChoice->resolve($validated['model'] ?? null),
+        ])->save();
+
+        ProcessDocumentPage::dispatch($page->getKey(), ProcessDocumentPage::MODE_FULL);
+
+        return response()->json($this->payload($page->fresh()), 202);
+    }
+
     public function read(Request $request, DocumentPage $page): JsonResponse
     {
         $this->authorizePage($request, $page);
@@ -325,7 +372,195 @@ class DocumentPageController extends Controller
         ], $status);
     }
 
+    /**
+     * Draw one line by hand, where the detector found none: writing it missed,
+     * or a line removed and wanted back in another shape. The outline is
+     * cropped and placed in the page's grid exactly as a redrawn one is.
+     */
+    public function storeLine(Request $request, DocumentPage $page): JsonResponse
+    {
+        $this->authorizePage($request, $page);
+
+        if ($page->status !== DocumentPage::STATUS_DETECTED) {
+            return response()->json(['message' => 'This page is still being processed.'], 409);
+        }
+
+        $validated = $request->validate([
+            'polygon' => ['required', 'array', 'min:3', 'max:2000'],
+            'polygon.*' => ['required', 'array', 'size:2'],
+            'polygon.*.*' => ['required', 'numeric'],
+        ]);
+
+        $polygon = array_map(fn (array $point) => [
+            round(min(max((float) $point[0], 0), $page->width), 1),
+            round(min(max((float) $point[1], 0), $page->height), 1),
+        ], $validated['polygon']);
+
+        $disk = Storage::disk('local');
+        // Past every position ever used on this page, removed lines included,
+        // so a crop can never land on another line's file.
+        $position = (int) $page->lines()->withTrashed()->max('position') + 1;
+        $cropPath = sprintf('%s/crops/%03d-drawn.png', $page->directory(), $position + 1);
+
+        try {
+            $placed = $this->markers->crop(
+                $disk->path($page->image_path),
+                $polygon,
+                $disk->path($cropPath),
+                $disk->path($page->directory().'/lines.json'),
+            );
+        } catch (LineMarkersException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $line = $page->lines()->create([
+            'position' => $position,
+            'polygon' => $polygon,
+            'bbox' => $placed['bbox'],
+            'crop_path' => $cropPath,
+            'adjusted_at' => now(),
+            ...$this->drawnLinePlacement($page, $placed, $polygon),
+        ]);
+        $this->refreshSharedCells($page);
+
+        return response()->json([
+            'line' => $line->fresh()->toClient(),
+            'flags' => $page->lines()->get()->mapWithKeys(fn (PageLine $l) => [$l->getKey() => $l->flags ?? []]),
+        ], 201);
+    }
+
+    /**
+     * Remove one outlined line before it is read: a stray mark the detector
+     * took for writing, a word wrongly split in two, or a line that simply
+     * does not belong. The line and its crop are kept until the page is
+     * outlined again, so it can be put back (Ctrl+Z); nothing reads or
+     * submits it meanwhile.
+     *
+     * Only while the page still holds Detect's result - once a page is read,
+     * Verify and submission work from its lines.
+     */
+    public function destroyLine(Request $request, DocumentPage $page, PageLine $line): JsonResponse
+    {
+        $this->authorizePage($request, $page);
+        abort_unless((int) $line->document_page_id === (int) $page->getKey(), 404);
+
+        if ($page->status !== DocumentPage::STATUS_DETECTED) {
+            return response()->json(['message' => 'This page is still being processed.'], 409);
+        }
+
+        $keptCell = ! $line->belongsToField();
+        $line->delete();
+
+        // Removing a line can resolve a shared cell elsewhere (the two lines
+        // that shared it are now one).
+        if ($keptCell) {
+            $this->refreshSharedCells($page);
+        }
+
+        return response()->json([
+            'flags' => $page->lines()->get()->mapWithKeys(fn (PageLine $l) => [$l->getKey() => $l->flags ?? []]),
+        ]);
+    }
+
+    /** Put back a line removed a moment ago (Ctrl+Z). */
+    public function restoreLine(Request $request, DocumentPage $page, PageLine $line): JsonResponse
+    {
+        $this->authorizePage($request, $page);
+        abort_unless((int) $line->document_page_id === (int) $page->getKey(), 404);
+
+        if ($page->status !== DocumentPage::STATUS_DETECTED) {
+            return response()->json(['message' => 'This page is still being processed.'], 409);
+        }
+
+        $line->restore();
+        if (! $line->belongsToField()) {
+            $this->refreshSharedCells($page);
+        }
+
+        return response()->json([
+            'line' => $line->fresh()->toClient(),
+            'flags' => $page->lines()->get()->mapWithKeys(fn (PageLine $l) => [$l->getKey() => $l->flags ?? []]),
+        ]);
+    }
+
     // ------------------------------------------------------------------ internals
+
+    /**
+     * Which cell or field a hand-drawn outline belongs to.
+     *
+     * A ledger page places it by its grid, as a redrawn outline is placed. On
+     * a page of drawn boxes there is no grid, so it belongs to the field it
+     * was drawn inside, as the last of that field's lines.
+     *
+     * @param  array{column_index: int|null, row: int|null, flags: list<string>}  $placed
+     * @param  list<list<float>>  $polygon
+     * @return array<string, mixed>
+     */
+    private function drawnLinePlacement(DocumentPage $page, array $placed, array $polygon): array
+    {
+        $columns = $page->geometry['columns'] ?? [];
+        $column = $placed['column_index'];
+
+        if ($column !== null && isset($columns[$column])) {
+            return [
+                'source' => PageLine::SOURCE_MANUAL,
+                'column_index' => $column,
+                'column_name' => mb_substr((string) $columns[$column]['name'], 0, 500),
+                'row' => $placed['row'],
+                'flags' => in_array(PageLine::FLAG_NO_ROW, $placed['flags'], true) ? [PageLine::FLAG_NO_ROW] : [],
+            ];
+        }
+
+        $field = $this->fieldAround($page, $polygon);
+        if ($field === null) {
+            return [
+                'source' => PageLine::SOURCE_MANUAL,
+                'column_name' => 'Drawn line',
+                'flags' => [PageLine::FLAG_NO_ROW],
+            ];
+        }
+
+        // Its line number within the field: after the lines already there, so
+        // no existing line is renumbered under the reviewer.
+        $name = mb_substr((string) $field['name'], 0, 500);
+        $last = (int) $page->lines()
+            ->where('source', PageLine::SOURCE_FIELD)
+            ->where('column_name', $name)
+            ->max('row');
+
+        return [
+            'source' => PageLine::SOURCE_FIELD,
+            'column_name' => $name,
+            'row' => $last + 1,
+            'person_group' => $field['person_group'] ?? null,
+            'person_field_order' => $field['person_field_order'] ?? null,
+            'flags' => [],
+        ];
+    }
+
+    /**
+     * The template field a drawn outline sits in, by its centre.
+     *
+     * @param  list<list<float>>  $polygon
+     * @return array<string, mixed>|null
+     */
+    private function fieldAround(DocumentPage $page, array $polygon): ?array
+    {
+        $xs = array_column($polygon, 0);
+        $ys = array_column($polygon, 1);
+        $cx = (min($xs) + max($xs)) / 2 / max(1, $page->width);
+        $cy = (min($ys) + max($ys)) / 2 / max(1, $page->height);
+
+        foreach ($page->geometry['fields'] ?? [] as $field) {
+            [$x, $y, $w, $h] = array_map('floatval', $field['box']);
+            if ($cx >= $x && $cx <= $x + $w && $cy >= $y && $cy <= $y + $h) {
+                return $field;
+            }
+        }
+
+        return null;
+    }
+
 
     private function authorizePage(Request $request, DocumentPage $page): void
     {

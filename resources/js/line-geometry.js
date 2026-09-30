@@ -128,11 +128,17 @@ export function verificationItems(lines, page) {
         const noRow = flags.includes(FLAG_NO_ROW);
 
         let name;
+        // What Verify shows above the value. A ledger line is headed by its
+        // column alone, because its person's row is the group it sits in; the
+        // written lines of one drawn box need their line number to tell them
+        // apart, since they all share the box's name.
+        let heading = line.column;
         let personGroup = null;
         let personFieldOrder = null;
         if (inField) {
             const numbered = line.source === SOURCE_FIELD && linesPerField.get(line.column) > 1;
-            name = uniqueName(numbered ? `${line.column} · line ${line.row}` : line.column);
+            if (numbered) heading = `${line.column} · line ${line.row}`;
+            name = uniqueName(numbered ? heading : line.column);
             personGroup = Number.isInteger(line.personGroup) ? line.personGroup : null;
             personFieldOrder = Number.isInteger(line.personFieldOrder) ? line.personFieldOrder : null;
         } else if (noRow) {
@@ -146,7 +152,10 @@ export function verificationItems(lines, page) {
         return {
             lineId: line.id,
             name,
+            // The template field or ledger column this line was read under:
+            // how its settings are looked up, so never numbered.
             label: line.column,
+            heading,
             x: clamp01(bx / width),
             y: clamp01(by / height),
             w: Math.max(0.00001, Math.min(1 - clamp01(bx / width), bw / width)),

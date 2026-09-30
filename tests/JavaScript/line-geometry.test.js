@@ -84,6 +84,8 @@ test('ledger lines become one person per row, ordered by column', () => {
     assert.equal(item.lineId, 1);
     assert.equal(item.name, 'Name · row 3');
     assert.equal(item.label, 'Name');
+    // A ledger line is headed by its column: the person's row is its group.
+    assert.equal(item.heading, 'Name');
     assert.equal(item.personGroup, 3);
     assert.equal(item.personFieldOrder, 0);
     assert.deepEqual([item.x, item.y, item.w, item.h], [0.1, 0.2, 0.2, 0.1]);
@@ -130,7 +132,10 @@ test('a box Detect split into written lines numbers them and keeps the field gro
     assert.deepEqual(items.map((item) => item.name), ['Diseases · line 1', 'Diseases · line 2', 'Remarks']);
     assert.deepEqual(items.slice(0, 2).map((item) => [item.personGroup, item.personFieldOrder]), [[2, 1], [2, 1]]);
     assert.equal(items[2].personGroup, undefined);
-    assert.equal(items[0].label, 'Diseases');
+    // Verify heads each line with its number, so they can be told apart; the
+    // label stays the field's own name, which its settings are looked up by.
+    assert.deepEqual(items.map((item) => item.heading), ['Diseases · line 1', 'Diseases · line 2', 'Remarks']);
+    assert.deepEqual(items.map((item) => item.label), ['Diseases', 'Diseases', 'Remarks']);
 
     const summary = detectionSummary({
         deskew: 0,

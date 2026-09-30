@@ -297,6 +297,16 @@
                             <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>Reset line
                         </button>
                     </div>
+                    <div class="line-adjust-card__structure">
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="lineAddBtn"
+                                title="Draw a line the detector missed">
+                            <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add line
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="lineDeleteBtn" disabled
+                                title="Remove this line (Delete). Ctrl+Z puts it back">
+                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>Delete line
+                        </button>
+                    </div>
                     <div class="line-adjust-card__save">
                         <button type="button" class="btn btn-sm btn-primary" id="lineSaveBtn" disabled
                                 title="Make this outline the line's crop (Ctrl+S)">
@@ -613,8 +623,12 @@
         maxFieldNameLength: 500,
         recogniseUrl: @json(route('documents.recognise')),
         pagesUrl: @json(route('documents.pages.store')),
+        pageGeometryUrl: @json(route('documents.pages.reoutline', ['page' => '__PAGE__'])),
         snapUrl: @json(route('documents.pages.snap')),
         lineUpdateUrl: @json(route('documents.pages.lines.update', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        lineDeleteUrl: @json(route('documents.pages.lines.destroy', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        lineRestoreUrl: @json(route('documents.pages.lines.restore', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        lineStoreUrl: @json(route('documents.pages.lines.store', ['page' => '__PAGE__'])),
         pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
         csrf: @json(csrf_token()),
         paper: {!! Illuminate\Support\Js::encode([
@@ -805,8 +819,10 @@
         alignPreview.setVisible(false);
         el('lineEditToggle').disabled = true;
         el('detectSummaryTitle').textContent = 'Markers moved after Detect';
-        el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers. '
-            + 'Undo (Ctrl+Z) to bring the Detect result back'
+        // Outlining again reuses the lines Detect found on this page, so it
+        // takes seconds; only the adjusted outlines cannot come with it.
+        el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers, '
+            + 'reusing the lines Detect found. Undo (Ctrl+Z) to bring the Detect result back'
             + (changed > 0 ? ` with your ${changed} line adjustment${changed === 1 ? '' : 's'}` : '')
             + ', or Detect again to refit the markers.';
         el('detectSummary').classList.add('is-stale');
@@ -906,9 +922,14 @@
     // Undo and redo of outline changes: each entry is one line before and
     // after one change. lineShown is each line as last changed here; a line
     // whose shown outline differs from its saved one is unsaved.
+    // Each entry is one undoable step: an outline change ({id, before, after}),
+    // or a line removed or drawn ({kind, id, position}), which are put back and
+    // taken away again on the server.
     let lineUndo = [];
     let lineRedo = [];
     let lineShown = new Map();
+    // True while a new outline is being drawn for a line that does not exist yet.
+    let addingLine = false;
 
     function resetLineHistory() {
         lineUndo = [];
@@ -979,22 +1000,38 @@
         lineChanged(index);
     }
 
-    function undoLineChange() {
-        const entry = lineUndo.pop();
+    /**
+     * One step back or forward. An outline change is undone here; a line
+     * removed or drawn is put back or taken away on the server, so undo means
+     * the same thing to Scan with OCR as it does on screen.
+     */
+    function stepLineHistory(from, to, forward) {
+        const entry = from.pop();
         if (!entry) return false;
-        lineRedo.push(entry);
-        applyLineState(entry.id, entry.before);
+        to.push(entry);
+        updateLineHistoryButtons();
+
+        // 'delete' undone puts the line back; 'add' undone takes it away.
+        const puttingBack = entry.kind === 'delete' ? !forward : forward;
+        if (entry.kind === 'delete' || entry.kind === 'add') {
+            runLineChange(
+                () => (puttingBack ? restoreLine(entry.id) : removeLine(entry.id)),
+                puttingBack ? 'The line could not be put back.' : 'The line could not be taken away.',
+            );
+            return true;
+        }
+
+        applyLineState(entry.id, forward ? entry.after : entry.before);
         updateLineHistoryButtons();
         return true;
     }
 
+    function undoLineChange() {
+        return stepLineHistory(lineUndo, lineRedo, false);
+    }
+
     function redoLineChange() {
-        const entry = lineRedo.pop();
-        if (!entry) return false;
-        lineUndo.push(entry);
-        applyLineState(entry.id, entry.after);
-        updateLineHistoryButtons();
-        return true;
+        return stepLineHistory(lineRedo, lineUndo, true);
     }
 
     function lineItems() {
@@ -1048,12 +1085,14 @@
             && detection.page.lines.length > 0;
         if (!allowed && lineEditing) applyOpenDrawing();
         if (!allowed) {
+            addingLine = false;
             editedLineIndex = null;
             alignPreview.cancelEdit();
             alignPreview.setSelection([]);
         }
         lineEditing = allowed;
         el('lineEditToggle').checked = allowed;
+        updateAddLineButton();
         alignPreview.setInteractive(allowed);
         markerOverlay.classList.toggle('is-editing-lines', allowed);
         if (allowed) {
@@ -1077,6 +1116,7 @@
     function selectLine(index) {
         if (!lineEditing) return;
         if (index !== editedLineIndex) applyOpenDrawing();
+        addingLine = false;
         if (index === null || !detection?.page.lines[index]) {
             editedLineIndex = null;
             alignPreview.cancelEdit();
@@ -1126,11 +1166,15 @@
         el('lineAdjustNote').textContent = note;
         el('lineAdjustNote').classList.toggle('d-none', note === '');
         el('lineAdjustActions').querySelectorAll('button').forEach((button) => { button.disabled = !item; });
+        el('lineDeleteBtn').disabled = !item;
+        updateAddLineButton();
         // Undo and redo follow the history, whichever line is selected.
         updateLineHistoryButtons();
         el('lineModeGroup').querySelectorAll('input').forEach((input) => { input.disabled = !item; });
         if (!item) el('lineDrawActions').classList.add('d-none');
-        el('lineAdjustHint').textContent = item ? LINE_MODE_HINTS.box : 'Click an outline on the page to adjust it.';
+        el('lineAdjustHint').textContent = item
+            ? LINE_MODE_HINTS.box
+            : 'Click an outline on the page to adjust it, or Add line to draw one the detector missed.';
         const unsaved = Boolean(line && isLineUnsaved(line));
         el('lineResetBtn').disabled = !(line && shownLine(index).adjusted);
         el('lineSaveBtn').disabled = !unsaved;
@@ -1172,7 +1216,15 @@
     }
 
     function lineEdited(polygon, final) {
-        if (!lineEditing || editedLineIndex === null) return;
+        if (!lineEditing) return;
+        // A line being drawn from nothing belongs to no line yet: closing it
+        // makes one, rather than changing an outline.
+        if (addingLine) {
+            drawLineThumbnail(polygon);
+            if (final) createDrawnLine(polygon);
+            return;
+        }
+        if (editedLineIndex === null) return;
         drawLineThumbnail(polygon);
         if (!final) return;
         // Pressing a corner without moving it (to pick it for Delete) changes nothing.
@@ -1212,8 +1264,214 @@
         return lineSaveQueue;
     }
 
+    /**
+     * Take a deleted line out of everything that remembers it: the page's own
+     * line list, its outline history, and what the overlay draws. Moves the
+     * card on to whichever line now sits where the deleted one was, so a run
+     * of stray lines can be cleared one after another.
+     */
+    function removeLineLocally(id, flagsById = {}) {
+        if (!detection) return null;
+        const removedIndex = detection.page.lines.findIndex((line) => line.id === id);
+        if (removedIndex === -1) return null;
+
+        detection.page.lines = detection.page.lines
+            .filter((line) => line.id !== id)
+            .map((line) => {
+                const flags = flagsById[line.id];
+                return Array.isArray(flags) ? { ...line, flags } : line;
+            });
+        // Its outline history is kept: a line put back is the same line, and
+        // the delete is always the newest step on it, so undo reaches it first.
+        lineShown.delete(id);
+
+        editedLineIndex = null;
+        alignPreview.setLines(detection.page, lineItems());
+        el('lineEditToggle').disabled = detection.page.lines.length === 0;
+        showDetectionSummary();
+
+        if (detection.page.lines.length === 0) {
+            setLineEditing(false);
+            return removedIndex;
+        }
+        selectLine(Math.min(removedIndex, detection.page.lines.length - 1));
+        return removedIndex;
+    }
+
+    /**
+     * Put a line into the page where the server has it: back after a delete,
+     * or newly drawn. Lines are held in the server's own order (position), so
+     * one that comes back lands where it was.
+     */
+    function insertLineLocally(line, flagsById = {}) {
+        if (!detection) return;
+        const lines = detection.page.lines
+            .filter((existing) => existing.id !== line.id)
+            .map((existing) => {
+                const flags = flagsById[existing.id];
+                return Array.isArray(flags) ? { ...existing, flags } : existing;
+            });
+        const at = lines.findIndex((existing) => Number(existing.position) > Number(line.position));
+        const index = at === -1 ? lines.length : at;
+        lines.splice(index, 0, line);
+        detection.page.lines = lines;
+        detection.originalOutlines.set(line.id, line.polygon.map((point) => [...point]));
+        lineShown.delete(line.id);
+
+        if (!lineEditing) setLineEditing(true);
+        alignPreview.setLines(detection.page, lineItems());
+        el('lineEditToggle').disabled = false;
+        showDetectionSummary();
+        selectLine(index);
+    }
+
+    /** One call to the server about a whole line, with the usual headers. */
+    async function lineRequest(url, method) {
+        const response = await fetch(url, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok) {
+            throw new Error(payload?.message || `The line could not be changed (HTTP ${response.status}).`);
+        }
+        return payload ?? {};
+    }
+
+    const lineUrl = (template, id) => template
+        .replace('__PAGE__', String(detection.page.id))
+        .replace('__LINE__', String(id));
+
+    /** Tell the reviewer what happened to a line, in the card's status line. */
+    function showLineStatus(message, isError = false) {
+        const status = el('lineAdjustStatus');
+        status.textContent = message;
+        status.classList.toggle('is-error', isError);
+    }
+
+    /**
+     * Delete: take the selected line out of the page. It is kept on the server
+     * until the page is outlined again, so Ctrl+Z puts it back; nothing reads
+     * or submits it meanwhile.
+     */
+    function deleteSelectedLine() {
+        if (!lineEditing || editedLineIndex === null) return Promise.resolve();
+        applyOpenDrawing();
+        const line = detection?.page.lines[editedLineIndex];
+        if (!line) return Promise.resolve();
+
+        const name = lineItems()[editedLineIndex]?.name ?? 'That line';
+        return runLineChange(async () => {
+            // A second press before the first was applied has nothing to do.
+            if (!detection?.page.lines.some((existing) => existing.id === line.id)) return;
+            const payload = await lineRequest(lineUrl(config.lineDeleteUrl, line.id), 'DELETE');
+            const at = removeLineLocally(line.id, payload.flags ?? {});
+            if (at === null) return;
+            lineUndo.push({ kind: 'delete', id: line.id });
+            lineRedo = [];
+            updateLineHistoryButtons();
+            showLineStatus(`${name} deleted. Ctrl+Z puts it back.`);
+        }, 'The line could not be deleted.');
+    }
+
+    /** Put a deleted line back where it was (undo), or take a drawn one away again. */
+    async function restoreLine(id) {
+        const payload = await lineRequest(lineUrl(config.lineRestoreUrl, id), 'POST');
+        if (payload.line) insertLineLocally(payload.line, payload.flags ?? {});
+    }
+
+    async function removeLine(id) {
+        const payload = await lineRequest(lineUrl(config.lineDeleteUrl, id), 'DELETE');
+        removeLineLocally(id, payload.flags ?? {});
+    }
+
+    /** Start drawing a line where the detector found none. */
+    function startAddingLine() {
+        if (!lineEditing) return;
+        applyOpenDrawing();
+        addingLine = true;
+        editedLineIndex = null;
+        alignPreview.setSelection([]);
+        alignPreview.beginDraw();
+        el('lineAdjustName').textContent = 'Drawing a new line';
+        el('lineAdjustPosition').textContent = '';
+        el('lineAdjustNote').classList.add('d-none');
+        el('lineAdjustActions').querySelectorAll('button').forEach((button) => { button.disabled = true; });
+        el('lineDeleteBtn').disabled = true;
+        el('lineModeGroup').querySelectorAll('input').forEach((input) => { input.disabled = true; });
+        el('lineAdjustHint').textContent = LINE_MODE_HINTS.draw;
+        updateAddLineButton();
+        revealLineCard();
+    }
+
+    function cancelAddingLine() {
+        if (!addingLine) return;
+        addingLine = false;
+        alignPreview.cancelEdit();
+        updateAddLineButton();
+        showLineCard(null);
+    }
+
+    function updateAddLineButton() {
+        const button = el('lineAddBtn');
+        button.disabled = !lineEditing;
+        button.classList.toggle('active', addingLine);
+    }
+
+    /** A drawn outline becomes a line of its own on the server. */
+    function createDrawnLine(polygon) {
+        addingLine = false;
+        updateAddLineButton();
+        if (!detection) return Promise.resolve();
+
+        showLineStatus('Adding the line…');
+        return runLineChange(async () => {
+            const response = await fetch(config.lineStoreUrl.replace('__PAGE__', String(detection.page.id)), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ polygon }),
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            if (!response.ok || !payload?.line) {
+                throw new Error(payload?.message || `The line could not be added (HTTP ${response.status}).`);
+            }
+            insertLineLocally(payload.line, payload.flags ?? {});
+            lineUndo.push({ kind: 'add', id: payload.line.id });
+            lineRedo = [];
+            updateLineHistoryButtons();
+            showLineStatus('Line added. Ctrl+Z takes it away again.');
+        }, 'The line could not be added.');
+    }
+
+    /** Run one whole-line change on the save queue, reporting failures in the card. */
+    function runLineChange(work, failure) {
+        lineSaveQueue = lineSaveQueue.then(work).catch((error) => {
+            console.error(failure, error);
+            showLineStatus(error.message || failure, true);
+        });
+        return lineSaveQueue;
+    }
+
     el('lineSaveBtn').addEventListener('click', saveSelectedLine);
     el('lineDiscardBtn').addEventListener('click', discardSelectedLine);
+    el('lineDeleteBtn').addEventListener('click', deleteSelectedLine);
+    el('lineAddBtn').addEventListener('click', () => (addingLine ? cancelAddingLine() : startAddingLine()));
 
     /** Keep the Stretch / Points / Draw switch and its hint in step with the overlay. */
     function showLineMode(mode) {
@@ -1426,7 +1684,8 @@
         if (event.key === 'Escape') {
             event.preventDefault();
             // Esc first leaves a drawing or point editing, then the line, then editing.
-            if (editedLineIndex !== null && alignPreview.editing && alignPreview.editing.mode !== 'box') alignPreview.setEditMode('box');
+            if (addingLine) cancelAddingLine();
+            else if (editedLineIndex !== null && alignPreview.editing && alignPreview.editing.mode !== 'box') alignPreview.setEditMode('box');
             else if (editedLineIndex !== null) selectLine(null);
             else setLineEditing(false);
             return true;
@@ -1451,7 +1710,8 @@
         }
         if (['Delete', 'Backspace'].includes(event.key)) {
             event.preventDefault();
-            alignPreview.deleteActivePoint();
+            // A corner of the outline first (Points mode), then the line itself.
+            if (!alignPreview.deleteActivePoint()) deleteSelectedLine();
             return true;
         }
         // The markers are locked while lines are edited: no marker shortcuts.
@@ -2219,6 +2479,47 @@
         return payload;
     }
 
+    /**
+     * Markers moved after Detect: outline that same page again from where they
+     * are now, and read it. The page is already on the server, straightened,
+     * so only the markers are sent - and the server reuses the lines Detect
+     * found instead of detecting the page again, which is nearly all of a
+     * scan's work.
+     */
+    async function reoutlineDetectedPage(signal) {
+        const response = await fetch(config.pageGeometryUrl.replace('__PAGE__', String(detection.page.id)), {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            signal,
+            body: JSON.stringify({
+                geometry_json: JSON.stringify(currentGeometry()),
+                model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null,
+            }),
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.statusUrl) {
+            throw new Error(responseErrorMessage(response, payload));
+        }
+        return payload;
+    }
+
+    /**
+     * Whether that page can be outlined again instead of sent afresh: Detect
+     * ran, its page is still usable, and Staff have only moved the markers on
+     * it (the page shown is the one the server holds).
+     */
+    function canReoutline() {
+        return detection !== null && !detection.stale && !detectionIsCurrent();
+    }
+
     /** Scan with OCR after Detect: read the crops Detect already made. */
     async function readDetectedPage(signal) {
         const response = await fetch(detection.page.readUrl, {
@@ -2322,6 +2623,21 @@
             }
         }
 
+        // Outlining the page again works every line out afresh from the moved
+        // markers, so outlines adjusted against Detect's result cannot be kept.
+        if (canReoutline()) {
+            const adjusted = detection.page.lines.filter((line) => line.adjusted || isLineUnsaved(line)).length;
+            const plural = adjusted === 1 ? 'adjustment' : 'adjustments';
+            if (adjusted > 0 && !window.confirm(
+                `You moved a marker after Detect, so every line is worked out again `
+                + `and your ${adjusted} outline ${plural} will be lost.\n\n`
+                + `OK: scan from the markers as they are.\n`
+                + `Cancel: go back (Ctrl+Z brings the Detect result back).`,
+            )) {
+                return;
+            }
+        }
+
         const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
         if (markerValidationMessage) {
             showOcrError(markerValidationMessage);
@@ -2366,6 +2682,15 @@
                 // The outlines Staff just checked are the ones read.
                 setOcrProgress(Math.max(ocrProgress, 60), 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
                 payload = await readDetectedPage(controller.signal);
+            } else if (canReoutline()) {
+                // The markers moved after Detect. That page is already here and
+                // already straightened, so only the markers go over, and its
+                // lines are reused rather than found again.
+                run.pageId = detection.page.id;
+                setLineEditing(false);
+                setOcrProgress(Math.max(ocrProgress, 30), 'Outlining from your markers',
+                    'Reusing the lines Detect found on this page.');
+                payload = await reoutlineDetectedPage(controller.signal);
             } else {
                 // Finishing Align hands the page to the background line detector.
                 setOcrProgress(Math.max(ocrProgress, 8), 'Sending the aligned page', 'Uploading the page securely for line detection.');
@@ -3140,7 +3465,7 @@
         const displayNumber = group.kind === 'person' ? columnIndex + 1 : index + 1;
         requiredPart(row, '.validation-field__number').textContent = String(displayNumber).padStart(2, '0');
         const item = cropped[index] ?? {};
-        const displayName = validationFieldLabel(group, columnIndex, item.label || reading.name);
+        const displayName = validationFieldLabel(group, columnIndex, item.heading || item.label || reading.name);
         requiredPart(row, '.validation-field__name').textContent = displayName;
         requiredPart(row, `label[for="${inputId}"]`).textContent = `Verified value for ${displayName}`;
 

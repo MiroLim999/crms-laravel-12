@@ -2131,6 +2131,26 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// Adding and removing whole lines, set apart from the outline controls above
+// (Reset line, size, undo), so a reviewer working through stray lines does not
+// delete one by a slip of the same row.
+.line-adjust-card__structure {
+  display: flex;
+  gap: .4rem;
+  padding-block-start: .45rem;
+  border-block-start: 1px dashed var(--bs-border-color);
+
+  .btn {
+    flex: 1 1 0;
+  }
+
+  // While a new outline is being drawn.
+  .btn-outline-primary.active {
+    color: #fff;
+    background: var(--bs-primary);
+  }
+}
+
 .line-adjusted-mark {
   fill: #7367f0;
   font-weight: 700;

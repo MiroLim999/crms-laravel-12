@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -856,6 +857,343 @@ class LineOutlinePipelineTest extends TestCase
     }
 
     // ------------------------------------------------------------------ helpers
+
+    public function test_moving_a_marker_after_detect_outlines_the_same_page_again(): void
+    {
+        $page = $this->detectedPage();
+        $this->assertNotSame([], $page->notes);
+        Storage::disk('local')->put($page->directory().'/crops/stale.png', 'left over');
+
+        $moved = $this->geometry();
+        $moved['columns'][0]['box'] = [0.07, 0.12, 0.45, 0.3];
+
+        $this->actingAs($page->creator)
+            ->withHeader('Accept', 'application/json')
+            ->putJson(route('documents.pages.reoutline', $page), [
+                'geometry_json' => json_encode($moved, JSON_THROW_ON_ERROR),
+            ])
+            ->assertAccepted()
+            ->assertJsonPath('id', $page->getKey())
+            ->assertJsonPath('status', DocumentPage::STATUS_READY);
+
+        // The same page, read with the markers as Staff left them.
+        $this->assertSame(1, DocumentPage::count());
+        $page->refresh();
+        $this->assertSame(0.07, $page->geometry['columns'][0]['box'][0]);
+        $this->assertSame(DocumentPage::STATUS_READY, $page->status);
+        // Worked out afresh for the markers as they are now.
+        $this->assertSame(['lines_below_grid', 'grid_moved'], array_column($page->notes, 'code'));
+        $this->assertSame(3, $page->lines()->count());
+        // Outlined again and read, not just re-cut.
+        $this->assertStringStartsWith('read ', (string) $page->lines()->first()->ocr_text);
+        // The previous run's crops do not pile up beside the new ones.
+        Storage::disk('local')->assertMissing($page->directory().'/crops/stale.png');
+    }
+
+    public function test_outlining_again_queues_the_page_without_detects_stale_notes(): void
+    {
+        $page = $this->detectedPage();
+        Queue::fake();
+
+        $this->actingAs($page->creator)
+            ->withHeader('Accept', 'application/json')
+            ->putJson(route('documents.pages.reoutline', $page), [
+                'geometry_json' => json_encode($this->geometry(), JSON_THROW_ON_ERROR),
+            ])
+            ->assertAccepted()
+            ->assertJsonPath('status', DocumentPage::STATUS_QUEUED)
+            ->assertJsonPath('notes', []);
+
+        // Scan with OCR: outline from the new markers, then read.
+        Queue::assertPushed(ProcessDocumentPage::class, fn ($job) => $job->pageId === $page->getKey()
+            && $job->mode === ProcessDocumentPage::MODE_FULL);
+        $this->assertSame([], $page->refresh()->notes);
+    }
+
+    public function test_a_page_being_processed_is_not_outlined_again(): void
+    {
+        $page = $this->detectedPage();
+        $page->forceFill(['status' => DocumentPage::STATUS_DETECTING])->save();
+
+        $this->actingAs($page->creator)
+            ->withHeader('Accept', 'application/json')
+            ->putJson(route('documents.pages.reoutline', $page), [
+                'geometry_json' => json_encode($this->geometry(), JSON_THROW_ON_ERROR),
+            ])
+            ->assertStatus(409);
+    }
+
+    public function test_outlining_again_checks_the_markers_and_the_owner(): void
+    {
+        $page = $this->detectedPage();
+        $broken = ['columns' => $this->geometry()['columns'], 'ruled_ys' => [], 'fields' => []];
+
+        $this->actingAs($page->creator)
+            ->putJson(route('documents.pages.reoutline', $page), [
+                'geometry_json' => json_encode($broken, JSON_THROW_ON_ERROR),
+            ])
+            ->assertJsonValidationErrors('geometry.ruled_ys');
+
+        // Another Staff member's unsubmitted page does not exist for them.
+        $this->actingAs(User::factory()->staff()->create())
+            ->withHeader('Accept', 'application/json')
+            ->putJson(route('documents.pages.reoutline', $page), [
+                'geometry_json' => json_encode($this->geometry(), JSON_THROW_ON_ERROR),
+            ])
+            ->assertNotFound();
+    }
+
+    public function test_the_detector_keeps_what_it_found_beside_the_page(): void
+    {
+        $markers = new class extends LineMarkers
+        {
+            /** @var list<string> */
+            public array $commands = [];
+
+            protected function runFor(array $arguments): void
+            {
+                $this->commands[] = implode(' ', $arguments);
+            }
+
+            public function process(string $pagePath, array $geometry, string $outDirectory): array
+            {
+                $this->runFor(['process', '--cache', $outDirectory.DIRECTORY_SEPARATOR.'detector.json']);
+
+                return ['lines' => [], 'size' => [800, 600]];
+            }
+        };
+
+        // The bridge asks the script to keep the detector's lines in the page's
+        // own directory, so outlining it again reuses them.
+        $page = $this->storedPage();
+        $markers->process('page.png', [], $page->directory());
+        $this->assertStringContainsString('detector.json', $markers->commands[0]);
+    }
+
+    public function test_deleting_a_line_takes_it_out_of_the_page_but_keeps_it_to_put_back(): void
+    {
+        $page = $this->detectedPage();
+        $line = $page->lines->firstWhere('column_name', 'Date');
+
+        $this->actingAs($page->creator)
+            ->deleteJson(route('documents.pages.lines.destroy', ['page' => $page, 'line' => $line]))
+            ->assertOk();
+
+        // Out of the page: nothing reads, shows or submits it.
+        $this->assertSame(2, $page->lines()->count());
+        $this->assertSoftDeleted('page_lines', ['id' => $line->getKey()]);
+        // Kept, with its crop, so Ctrl+Z can put it back.
+        Storage::disk('local')->assertExists($line->crop_path);
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.restore', ['page' => $page, 'line' => $line]))
+            ->assertOk()
+            ->assertJsonPath('line.id', $line->getKey())
+            ->assertJsonPath('line.column', 'Date');
+
+        $this->assertSame(3, $page->lines()->count());
+        $this->assertNull($line->fresh()->deleted_at);
+    }
+
+    public function test_outlining_the_page_again_clears_deleted_lines_for_good(): void
+    {
+        $page = $this->detectedPage();
+        $line = $page->lines->firstWhere('column_name', 'Date');
+        $this->actingAs($page->creator)
+            ->deleteJson(route('documents.pages.lines.destroy', ['page' => $page, 'line' => $line]))
+            ->assertOk();
+
+        ProcessDocumentPage::dispatchSync($page->getKey(), ProcessDocumentPage::MODE_DETECT);
+
+        // The removed row does not linger once its page is outlined afresh.
+        $this->assertDatabaseMissing('page_lines', ['id' => $line->getKey()]);
+        $this->assertSame(3, $page->fresh()->lines()->count());
+    }
+
+    public function test_deleting_a_line_clears_the_shared_cell_flag_it_leaves_behind(): void
+    {
+        [$page, $stray, $kept] = $this->pageWithTwoLinesInOneCell();
+
+        $this->actingAs($page->creator)
+            ->deleteJson(route('documents.pages.lines.destroy', ['page' => $page, 'line' => $stray]))
+            ->assertOk()
+            ->assertJsonPath('flags.'.$kept->getKey(), []);
+
+        $this->assertSame([], $kept->fresh()->flags);
+    }
+
+    public function test_deleting_a_rectangle_field_line_does_not_touch_ledger_cells(): void
+    {
+        $page = $this->storedPage();
+        $page->forceFill(['status' => DocumentPage::STATUS_DETECTED])->save();
+        $field = $this->makeLine($page, [
+            'source' => PageLine::SOURCE_FIELD, 'column_index' => null, 'column_name' => 'Remarks', 'row' => 1,
+        ]);
+
+        $this->actingAs($page->creator)
+            ->deleteJson(route('documents.pages.lines.destroy', ['page' => $page, 'line' => $field]))
+            ->assertOk();
+
+        $this->assertSoftDeleted('page_lines', ['id' => $field->getKey()]);
+        $this->assertSame(0, $page->lines()->count());
+    }
+
+    public function test_a_line_cannot_be_deleted_once_the_page_has_been_read(): void
+    {
+        $page = $this->processedPage();
+        $line = $page->lines->first();
+
+        $this->actingAs($page->creator)
+            ->deleteJson(route('documents.pages.lines.destroy', ['page' => $page, 'line' => $line]))
+            ->assertStatus(409);
+
+        $this->assertDatabaseHas('page_lines', ['id' => $line->getKey()]);
+        $this->assertNull($line->fresh()->deleted_at);
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.restore', ['page' => $page, 'line' => $line]))
+            ->assertStatus(409);
+    }
+
+    public function test_a_hand_drawn_line_is_cropped_and_placed_in_its_ledger_cell(): void
+    {
+        $page = $this->detectedPage();
+        $this->app->instance(LineMarkers::class, $this->stubMarkers(cropPlacement: ['column_index' => 1, 'row' => 3]));
+
+        $response = $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.store', $page), [
+                'polygon' => [[410, 180], [560, 180], [560, 210], [410, 210]],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('line.column', 'Date')
+            ->assertJsonPath('line.row', 3)
+            ->assertJsonPath('line.adjusted', true)
+            ->assertJsonPath('line.text', '');
+
+        $this->assertSame(4, $page->lines()->count());
+        $line = PageLine::findOrFail($response->json('line.id'));
+        $this->assertSame(PageLine::SOURCE_MANUAL, $line->source);
+        // Past every position used, so its crop cannot land on another's file.
+        $this->assertSame(3, $line->position);
+        Storage::disk('local')->assertExists($line->crop_path);
+        $this->assertSame([], $this->ocrCalls, 'a drawn line is not read until Scan with OCR');
+    }
+
+    public function test_a_line_drawn_inside_a_rectangle_field_joins_that_field(): void
+    {
+        $page = $this->storedPage();
+        $page->forceFill([
+            'status' => DocumentPage::STATUS_DETECTED,
+            'geometry' => [
+                'columns' => [], 'ruled_ys' => [],
+                'fields' => [['name' => 'Diseases', 'box' => [0.05, 0.1, 0.5, 0.6],
+                    'person_group' => 2, 'person_field_order' => 1]],
+            ],
+        ])->save();
+        $this->makeLine($page, ['source' => PageLine::SOURCE_FIELD, 'column_index' => null,
+            'column_name' => 'Diseases', 'row' => 1]);
+        // No ledger grid on this page, so the crop places it nowhere.
+        $this->app->instance(LineMarkers::class, $this->stubMarkers(cropPlacement: ['column_index' => null, 'row' => null]));
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.store', $page), [
+                'polygon' => [[60, 200], [300, 200], [300, 230], [60, 230]],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('line.source', PageLine::SOURCE_FIELD)
+            ->assertJsonPath('line.column', 'Diseases')
+            // After the line already there, so none of them is renumbered.
+            ->assertJsonPath('line.row', 2)
+            ->assertJsonPath('line.personGroup', 2)
+            ->assertJsonPath('line.flags', []);
+    }
+
+    public function test_a_line_drawn_outside_every_column_and_field_is_flagged_for_review(): void
+    {
+        $page = $this->storedPage();
+        $page->forceFill(['status' => DocumentPage::STATUS_DETECTED])->save();
+        $this->app->instance(LineMarkers::class, $this->stubMarkers(cropPlacement: ['column_index' => null, 'row' => null]));
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.store', $page), [
+                'polygon' => [[10, 560], [200, 560], [200, 590], [10, 590]],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('line.column', 'Drawn line')
+            ->assertJsonPath('line.flags', ['no_row']);
+    }
+
+    public function test_a_line_cannot_be_drawn_once_the_page_has_been_read(): void
+    {
+        $page = $this->processedPage();
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.store', $page), [
+                'polygon' => [[10, 10], [50, 10], [50, 30]],
+            ])
+            ->assertStatus(409);
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->postJson(route('documents.pages.lines.store', $page), [
+                'polygon' => [[10, 10], [50, 10], [50, 30]],
+            ])
+            ->assertNotFound();
+    }
+
+    public function test_deleting_a_line_is_scoped_to_its_own_page_and_owner(): void
+    {
+        $page = $this->detectedPage();
+        $line = $page->lines->first();
+        $otherPage = $this->storedPage();
+
+        // A line that belongs to a different page than the one named: 404.
+        $this->actingAs($page->creator)
+            ->deleteJson(route('documents.pages.lines.destroy', ['page' => $otherPage, 'line' => $line]))
+            ->assertNotFound();
+
+        // Another Staff member's unsubmitted page does not exist for them.
+        $this->actingAs(User::factory()->staff()->create())
+            ->deleteJson(route('documents.pages.lines.destroy', ['page' => $page, 'line' => $line]))
+            ->assertNotFound();
+
+        $this->assertDatabaseHas('page_lines', ['id' => $line->getKey()]);
+    }
+
+    /**
+     * A page holding two lines in the same ledger cell, both already flagged
+     * shared_cell, for testing that removing one clears the other's flag.
+     *
+     * @return array{0: DocumentPage, 1: PageLine, 2: PageLine}
+     */
+    private function pageWithTwoLinesInOneCell(): array
+    {
+        $page = $this->storedPage();
+        $page->forceFill(['status' => DocumentPage::STATUS_DETECTED])->save();
+        $shared = ['source' => 'kraken', 'column_index' => 0, 'column_name' => 'Name', 'row' => 1, 'flags' => ['shared_cell']];
+        $stray = $this->makeLine($page, $shared);
+        $kept = $this->makeLine($page, $shared);
+
+        return [$page, $stray, $kept];
+    }
+
+    /** @param array<string, mixed> $overrides */
+    private function makeLine(DocumentPage $page, array $overrides = []): PageLine
+    {
+        $line = $page->lines()->create(array_merge([
+            'position' => $page->lines()->count(),
+            'source' => 'kraken',
+            'column_index' => 0,
+            'column_name' => 'Name',
+            'row' => 1,
+            'polygon' => [[10, 10], [50, 10], [50, 30], [10, 30]],
+            'bbox' => [10, 10, 40, 20],
+            'crop_path' => $page->directory().'/crops/'.Str::random(8).'.png',
+            'flags' => [],
+        ], $overrides));
+        Storage::disk('local')->put($line->crop_path, 'crop');
+
+        return $line;
+    }
 
     private function ledgerTemplate(): DocumentTemplate
     {

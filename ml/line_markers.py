@@ -46,6 +46,7 @@ CLI (Laravel calls these):
 """
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -189,6 +190,50 @@ def kraken_lines(image, device=None):
         if len(baseline) >= 2 and len(boundary) >= 3:
             lines.append({"baseline": baseline, "boundary": boundary})
     return lines
+
+
+def _image_key(page_path):
+    """A short fingerprint of the page file, to tell one page from another."""
+    digest = hashlib.sha1()
+    with open(page_path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def detected_lines(image, page_path, detector=kraken_lines, cache_path=None):
+    """The detector's lines for this page, reusing an earlier run when it can.
+
+    Finding the lines is almost all of a page's work (about 17 s on a small
+    crop, 25 s on a register page), and it depends only on the pixels: moving
+    a column marker or redrawing a field does not move the handwriting. So the
+    result is kept beside the page, under a fingerprint of the page file, and
+    a second run with different markers reuses it - well under a second.
+
+    A page that was straightened, or replaced, has a different fingerprint and
+    is detected again.
+    """
+    key = _image_key(page_path) if cache_path else None
+    if key:
+        try:
+            with open(cache_path, encoding="utf-8") as handle:
+                cached = json.load(handle)
+            if cached.get("key") == key and isinstance(cached.get("lines"), list):
+                detected_lines.used_device = cached.get("device")
+                return cached["lines"], True
+        except (OSError, ValueError):
+            pass  # No cache yet, or an unreadable one: detect again.
+
+    lines = detector(image)
+    detected_lines.used_device = getattr(detector, "used_device", None)
+    if key:
+        try:
+            os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
+            with open(cache_path, "w", encoding="utf-8") as handle:
+                json.dump({"key": key, "device": detected_lines.used_device, "lines": lines}, handle)
+        except OSError:
+            pass  # A page that cannot cache still scans, only slower.
+    return lines, False
 
 
 # ============================================================ cropping
@@ -1300,7 +1345,7 @@ def _ink_line(ys, xs):
 # ============================================================ page processing
 
 def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None, row_reach=ROW_REACH,
-                 detect_fields=False):
+                 cache_path=None):
     """Outline, flag and crop every line on one aligned page.
 
     `geometry` is the template aligned to this page, in page fractions:
@@ -1312,6 +1357,9 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
     same data as lines.json. Pass a dict as `debug` to receive the stroke
     ownership map (tests use it to check that no outline cuts its own
     strokes or holds anyone else's).
+
+    `cache_path` keeps what the detector found beside the page, so scanning
+    the same page again with moved markers does not detect it again.
     """
     started = time.time()
     timings = {}
@@ -1329,9 +1377,11 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
     grid = None
     detector_used = None
     has_table = bool(columns) and len(ruled) >= 2
-    # In Detect, every rectangle field is split into the written lines inside
-    # it. Otherwise a rectangle stays one four-point polygon, as it always was.
-    split_fields = detect_fields and bool(fields)
+    # Every rectangle field is split into the written lines inside it, the same
+    # on both paths: a box drawn over a list of eight diseases is eight crops,
+    # and a box over one name is that one name, outlined tightly. A field the
+    # detector finds nothing in stays one four-point polygon (see below).
+    split_fields = bool(fields)
     detected_fields = set()
 
     if has_table or split_fields:
@@ -1343,9 +1393,10 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
 
         # Detection. It does not depend on the rules, and the size of the
         # writing it finds tells how thick a printed rule can be here.
-        raw = detector(image)
+        raw, reused = detected_lines(image, page_path, detector, cache_path)
         timings["detector"] = time.time() - started
-        detector_used = getattr(detector, "used_device", None)
+        timings["detector_reused"] = reused
+        detector_used = detected_lines.used_device
         heights = [float(np.ptp(np.asarray(entry["boundary"], float)[:, 1])) for entry in raw]
         max_thickness = float(np.median(heights)) / 7 if heights else None
         # Where the detector found writing: a stretch of a written word can pass
@@ -2131,7 +2182,7 @@ def _straighten_geometry(geometry, degrees, old_size, new_size, grid_frame):
     return moved
 
 
-def outline_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None):
+def outline_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None, cache_path=None):
     """Scan with OCR from Staff's markers, straightening a tilted page first.
 
     When Staff tilted the ledger columns to match the page, the page is
@@ -2141,14 +2192,17 @@ def outline_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
     """
     degrees = grid_tilt(geometry)
     if abs(degrees) < 0.05:
-        return process_page(page_path, geometry, out_dir, detector=detector, debug=debug)
+        return process_page(page_path, geometry, out_dir, detector=detector, debug=debug,
+                            cache_path=cache_path)
 
     image = Image.open(page_path).convert("RGB")
     straight = straighten_page(image, degrees)
     straight.save(page_path, "PNG")
     moved = _straighten_geometry(geometry, degrees, image.size, straight.size, grid_frame=True)
 
-    result = process_page(page_path, moved, out_dir, detector=detector, debug=debug)
+    # Straightening rewrites the page, so its lines are found afresh.
+    result = process_page(page_path, moved, out_dir, detector=detector, debug=debug,
+                          cache_path=cache_path)
     result["deskew"] = round(degrees, 3)
     result["geometry"] = _snapped_geometry(result, moved)
     with open(os.path.join(out_dir, "lines.json"), "w", encoding="utf-8") as handle:
@@ -2347,7 +2401,7 @@ def _snapped_geometry(result, fitted):
     return {"columns": columns, "ruled_ys": [round(y, 5) for y in ruled], "fields": fitted.get("fields") or []}
 
 
-def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None):
+def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None, cache_path=None):
     """Straighten a scanned page, fit the template to it, and outline every line.
 
     The straightened page replaces `page_path`, so everything downstream - the
@@ -2370,7 +2424,8 @@ def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None)
 
     fitted, fit = fit_geometry(image, geometry)
     result = process_page(page_path, fitted, out_dir, detector=detector, debug=debug,
-                          row_reach=FITTED_ROW_REACH if fit["fitted"] else ROW_REACH, detect_fields=True)
+                          row_reach=FITTED_ROW_REACH if fit["fitted"] else ROW_REACH,
+                          cache_path=cache_path)
     result["deskew"] = round(degrees, 3)
     result["fit"] = fit
     result["geometry"] = _snapped_geometry(result, fitted)
@@ -2458,11 +2513,13 @@ def main(argv=None):
     process.add_argument("--page", required=True)
     process.add_argument("--geometry", required=True, help="JSON file or string, page fractions.")
     process.add_argument("--out", required=True)
+    process.add_argument("--cache", help="Where the detector's lines are kept, to reuse them.")
 
     detect = commands.add_parser("detect", help="Straighten a page, fit the template to it, and outline every line.")
     detect.add_argument("--page", required=True, help="Replaced by the straightened page.")
     detect.add_argument("--geometry", required=True, help="JSON file or string, page fractions.")
     detect.add_argument("--out", required=True)
+    detect.add_argument("--cache", help="Where the detector's lines are kept, to reuse them.")
 
     crop = commands.add_parser("crop", help="Crop one outline (manual correction).")
     crop.add_argument("--page", required=True)
@@ -2481,7 +2538,8 @@ def main(argv=None):
 
     try:
         if args.command == "process":
-            result = outline_page(args.page, _read_json_arg(args.geometry), args.out)
+            result = outline_page(args.page, _read_json_arg(args.geometry), args.out,
+                                  cache_path=args.cache)
             summary = {
                 "ok": True,
                 "lines": len(result["lines"]),
@@ -2491,7 +2549,8 @@ def main(argv=None):
                 "timings": result["timings"],
             }
         elif args.command == "detect":
-            result = detect_page(args.page, _read_json_arg(args.geometry), args.out)
+            result = detect_page(args.page, _read_json_arg(args.geometry), args.out,
+                                 cache_path=args.cache)
             summary = {
                 "ok": True,
                 "lines": len(result["lines"]),

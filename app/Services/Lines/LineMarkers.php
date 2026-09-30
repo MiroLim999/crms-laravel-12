@@ -45,7 +45,8 @@ class LineMarkers
         $geometryPath = $outDirectory.DIRECTORY_SEPARATOR.'geometry.json';
         File::put($geometryPath, json_encode($geometry, JSON_THROW_ON_ERROR));
 
-        $this->run(['process', '--page', $pagePath, '--geometry', $geometryPath, '--out', $outDirectory]);
+        $this->run(['process', '--page', $pagePath, '--geometry', $geometryPath, '--out', $outDirectory,
+            '--cache', $this->cachePath($outDirectory)]);
 
         $linesPath = $outDirectory.DIRECTORY_SEPARATOR.'lines.json';
         if (! File::exists($linesPath)) {
@@ -71,7 +72,8 @@ class LineMarkers
         $geometryPath = $outDirectory.DIRECTORY_SEPARATOR.'geometry.json';
         File::put($geometryPath, json_encode($geometry, JSON_THROW_ON_ERROR));
 
-        $this->run(['detect', '--page', $pagePath, '--geometry', $geometryPath, '--out', $outDirectory]);
+        $this->run(['detect', '--page', $pagePath, '--geometry', $geometryPath, '--out', $outDirectory,
+            '--cache', $this->cachePath($outDirectory)]);
 
         $linesPath = $outDirectory.DIRECTORY_SEPARATOR.'lines.json';
         if (! File::exists($linesPath)) {
@@ -139,6 +141,17 @@ class LineMarkers
         } finally {
             File::delete($geometryPath);
         }
+    }
+
+    /**
+     * Where a page keeps what the detector found, so scanning it again with
+     * moved markers reuses that instead of detecting the page a second time.
+     * It is kept under a fingerprint of the page image, so a straightened or
+     * replaced page is detected afresh.
+     */
+    private function cachePath(string $outDirectory): string
+    {
+        return $outDirectory.DIRECTORY_SEPARATOR.'detector.json';
     }
 
     /**

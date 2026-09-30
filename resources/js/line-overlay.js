@@ -327,6 +327,36 @@ export class LineOverlay {
     }
 
     /**
+     * Start drawing an outline where there is no line yet, for writing the
+     * detector missed. It edits nothing: `editing.index` stays null, and the
+     * closed outline arrives through onEdit like any other, for the caller to
+     * make a line of.
+     */
+    beginDraw() {
+        this.cancelEdit();
+        this.editing = {
+            index: null,
+            mode: 'draw',
+            polygon: [],
+            drag: null,
+            draft: [],
+            strokes: [],
+            activePoint: null,
+            cursor: null,
+        };
+        this.root.classList.add('is-editing');
+        this._bindEditEvents();
+        this._drawEdit();
+        this.onModeChange?.('draw');
+        this._draftChanged();
+    }
+
+    /** Whether the outline being drawn belongs to no line yet (see beginDraw). */
+    isDrawingNew() {
+        return this.editing?.mode === 'draw' && this.editing.index === null;
+    }
+
+    /**
      * Switch how the edited outline is changed. 'draw' starts a new outline
      * from nothing; the old one stays until the new one is closed.
      */
@@ -362,6 +392,13 @@ export class LineOverlay {
         const bounds = polygonBounds(points);
         if (bounds.right - bounds.left < 4 || bounds.bottom - bounds.top < 4) return false;
         editing.polygon = points.slice(0, MAX_DRAWN_POINTS);
+        if (editing.index === null) {
+            // Nothing to stretch afterwards: the caller makes a line of it.
+            const drawn = this.editedPolygon();
+            this.cancelEdit();
+            this.onEdit?.(drawn, true);
+            return true;
+        }
         this.setEditMode('box');
         this.onEdit?.(this.editedPolygon(), true);
         return true;
@@ -708,7 +745,8 @@ export class LineOverlay {
             if (editing.drag.kind === 'rectangle') {
                 const bounds = polygonBounds(editing.polygon);
                 if (bounds.right - bounds.left < 3 || bounds.bottom - bounds.top < 3) {
-                    editing.polygon = this.lines[editing.index].polygon.map((point) => [...point]);
+                    editing.polygon = (this.lines[editing.index]?.polygon ?? editing.polygon)
+                        .map((point) => [...point]);
                 }
             }
             editing.drag = null;

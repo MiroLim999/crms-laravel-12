@@ -145,20 +145,17 @@ class CropLineTest(unittest.TestCase):
 
 
 class TemplateRectangleTest(unittest.TestCase):
-    """Older templates: rectangles become four-point polygons, no detector."""
+    """A rectangle field: its written lines, or the whole box when it holds none."""
 
-    def test_rectangles_are_cropped_as_four_point_polygons_without_the_detector(self):
+    def test_a_rectangle_holding_nothing_stays_one_four_point_polygon(self):
         folder = tempfile.mkdtemp()
         path = os.path.join(folder, "page.png")
         blank_page().save(path)
 
-        def detector(_image):
-            raise AssertionError("A rectangle-only template must not run line detection.")
-
         result = lm.process_page(path, {"fields": [
             {"name": "Registry number", "box": [0.1, 0.05, 0.3, 0.05], "person_group": None},
             {"name": "Child", "box": [0.5, 0.05, 0.2, 0.05], "person_group": 1, "person_field_order": 0},
-        ]}, os.path.join(folder, "out"), detector=detector)
+        ]}, os.path.join(folder, "out"), detector=lambda _image: [])
 
         self.assertEqual(["Registry number", "Child"], [line["column"] for line in result["lines"]])
         first = result["lines"][0]
@@ -170,6 +167,93 @@ class TemplateRectangleTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(folder, "out", "overlay.png")))
         with open(os.path.join(folder, "out", "lines.json"), encoding="utf-8") as handle:
             self.assertEqual(2, len(json.load(handle)["lines"]))
+
+    @unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
+    def test_a_rectangle_over_several_written_lines_becomes_one_crop_each(self):
+        """Scan with OCR splits a drawn box exactly as Detect does.
+
+        A box drawn over a list - a column of diseases, say - used to be read
+        as one crop of the whole box, which TrOCR (one line at a time) read as
+        nothing at all. Both paths now cut it into its written lines.
+        """
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "page.png")
+        page = Page()
+        for index, word in enumerate(("Tuberculosis", "Bronchitis", "Debility")):
+            page.word(word, 70, 300, 120 + 40 * index)
+        page.image.save(path)
+
+        # A drawn box only: no ledger columns, no ruled rows.
+        result = lm.process_page(path, {"fields": [
+            {"name": "Diseases", "box": [0.05, 0.15, 0.4, 0.28]},
+        ]}, os.path.join(folder, "out"), detector=page.detector)
+
+        self.assertEqual([lm.SOURCE_FIELD] * 3, [line["source"] for line in result["lines"]])
+        self.assertEqual(["Diseases"] * 3, [line["column"] for line in result["lines"]])
+        # Numbered top to bottom, so Verify can tell them apart.
+        self.assertEqual([1, 2, 3], [line["row"] for line in result["lines"]])
+        for line in result["lines"]:
+            self.assertGreater(len(line["polygon"]), 4, "a written line is outlined, not boxed")
+            self.assertTrue(os.path.isfile(os.path.join(folder, "out", line["crop"])))
+
+
+class DetectorCacheTest(unittest.TestCase):
+    """Scanning a page again with moved markers reuses what the detector found."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.path = os.path.join(self.folder, "page.png")
+        blank_page().save(self.path)
+        self.cache = os.path.join(self.folder, "detector.json")
+        self.runs = 0
+
+    def detector(self, _image):
+        self.runs += 1
+        return []
+
+    def scan(self, box=(0.1, 0.05, 0.3, 0.05)):
+        return lm.process_page(
+            self.path, {"fields": [{"name": "Remarks", "box": list(box)}]},
+            os.path.join(self.folder, "out"), detector=self.detector, cache_path=self.cache,
+        )
+
+    def test_the_second_scan_of_a_page_does_not_detect_it_again(self):
+        first = self.scan()
+        self.assertEqual(1, self.runs)
+        self.assertFalse(first["timings"]["detector_reused"])
+
+        # Staff moved the marker and scanned again: the page is unchanged.
+        again = self.scan(box=(0.2, 0.30, 0.3, 0.05))
+        self.assertEqual(1, self.runs, "the detector ran a second time")
+        self.assertTrue(again["timings"]["detector_reused"])
+
+    def test_a_page_that_changed_is_detected_again(self):
+        self.scan()
+        self.assertEqual(1, self.runs)
+
+        # Straightening rewrites the page, so its lines no longer apply.
+        page = blank_page()
+        page.paste((0, 0, 0), (5, 5, 40, 12))
+        page.save(self.path)
+
+        self.assertFalse(self.scan()["timings"]["detector_reused"])
+        self.assertEqual(2, self.runs)
+
+    def test_an_unreadable_cache_only_costs_a_detection(self):
+        with open(self.cache, "w", encoding="utf-8") as handle:
+            handle.write("not json at all")
+
+        self.assertFalse(self.scan()["timings"]["detector_reused"])
+        self.assertEqual(1, self.runs)
+        # It is replaced, so the next scan reuses it.
+        self.assertTrue(self.scan()["timings"]["detector_reused"])
+        self.assertEqual(1, self.runs)
+
+    def test_without_a_cache_path_nothing_is_kept(self):
+        lm.process_page(self.path, {"fields": [{"name": "Remarks", "box": [0.1, 0.05, 0.3, 0.05]}]},
+                        os.path.join(self.folder, "out"), detector=self.detector)
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertEqual(1, self.runs)
 
 
 @unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")

@@ -126,6 +126,11 @@ class ProcessDocumentPage implements ShouldQueue
         $disk = Storage::disk('local');
         $page->forceFill(['status' => DocumentPage::STATUS_DETECTING, 'error' => null])->save();
 
+        // Outlining a page again (markers moved after Detect) names its crops
+        // afresh, so the previous run's would otherwise be left behind. What
+        // the detector found is kept: it is beside the crops, not inside them.
+        $disk->deleteDirectory($page->directory().'/crops');
+
         $result = $this->mode === self::MODE_DETECT
             ? $markers->detect($disk->path($page->image_path), $page->geometry, $disk->path($page->directory()))
             : $markers->process($disk->path($page->image_path), $page->geometry, $disk->path($page->directory()));
@@ -146,7 +151,9 @@ class ProcessDocumentPage implements ShouldQueue
 
             $page->forceFill(['notes' => DocumentPage::cleanNotes($result['notes'] ?? [])])->save();
 
-            $page->lines()->delete();
+            // forceDelete, not delete: lines a reviewer removed are kept only
+            // until the page is outlined again, and these rows are replaced now.
+            $page->lines()->withTrashed()->forceDelete();
 
             foreach ($result['lines'] as $position => $line) {
                 $page->lines()->create([
