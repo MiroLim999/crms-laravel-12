@@ -791,14 +791,14 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 // Tilt knob: a round button with a turning arrow on a short stem below the
-// bottom edge (the name label sits above the top edge). Shown on the hovered
+// bottom edge, clear of the bottom resize handle (the name label sits above the top edge). Shown on the hovered
 // or selected marker only, so a full ledger does not bristle with knobs.
 // Hidden, not removed: a knob below the page bottom would otherwise make the
 // viewport scrollable only while it shows, and the scrollbars appearing under
 // the pointer take the hover away again - the knob flickers.
 .field-box-rotate {
   position: absolute;
-  bottom: -32px;
+  bottom: -46px;
   left: 50%;
   z-index: 2;
   display: flex;
@@ -822,7 +822,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     bottom: 100%;
     left: 50%;
     width: 2px;
-    height: 10px;
+    height: 20px;
     margin-left: -1px;
     content: "";
     background-color: currentColor;
@@ -836,7 +836,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     right: -4px;
     bottom: 100%;
     left: -4px;
-    height: 12px;
+    height: 22px;
     content: "";
   }
 
