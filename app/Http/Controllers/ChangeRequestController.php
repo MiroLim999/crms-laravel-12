@@ -44,7 +44,7 @@ class ChangeRequestController extends Controller
             ->map(fn ($count) => (int) $count);
 
         $requests = (clone $visibleRequests)
-            ->with(['record.documentTypeDefinition', 'record.fields', 'requester', 'reviewer', 'items'])
+            ->with(['record.documentTypeDefinition', 'record.fields', 'record.template', 'requester', 'reviewer', 'items'])
             ->when($search !== '', function ($query) use ($search, $user): void {
                 $term = "%{$search}%";
 
@@ -83,7 +83,7 @@ class ChangeRequestController extends Controller
             ->filter()
             ->unique('id')
             ->mapWithKeys(function (CivilRecord $record): array {
-                $groups = $this->fieldGrouper->groups($record->fields);
+                $groups = $this->fieldGrouper->groups($record->fields, $record->template);
 
                 return [$record->getKey() => $this->fieldGrouper->heading($record, $groups)];
             });
@@ -128,7 +128,7 @@ class ChangeRequestController extends Controller
                 ->with('info', 'This record already has a change request waiting for review.');
         }
 
-        $fieldGroups = $this->fieldGrouper->groups($record->fields);
+        $fieldGroups = $this->fieldGrouper->groups($record->fields, $record->template);
 
         return view('change-requests.create', [
             'record' => $record,
@@ -180,10 +180,10 @@ class ChangeRequestController extends Controller
         );
 
         $changeRequest->load([
-            'record.fields', 'record.documentTypeDefinition', 'requester', 'reviewer', 'items.field',
+            'record.fields', 'record.template', 'record.documentTypeDefinition', 'requester', 'reviewer', 'items.field',
         ]);
         $record = $changeRequest->record;
-        $recordGroups = $this->fieldGrouper->groups($record->fields);
+        $recordGroups = $this->fieldGrouper->groups($record->fields, $record->template);
         $itemsByField = $changeRequest->items
             ->filter(fn ($item) => $item->field !== null)
             ->keyBy('record_field_id');

@@ -790,12 +790,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// Tilt knob: a round button with a turning arrow on a short stem below the
-// bottom edge, clear of the bottom resize handle (the name label sits above the top edge). Shown on the hovered
-// or selected marker only, so a full ledger does not bristle with knobs.
-// Hidden, not removed: a knob below the page bottom would otherwise make the
-// viewport scrollable only while it shows, and the scrollbars appearing under
-// the pointer take the hover away again - the knob flickers.
+// Tilt knob: a round button with a turning arrow on a stem below the bottom
+// edge, clear of the bottom resize handle (the name label sits above the top
+// edge). Shown on the clicked marker only, like the resize handles: on hover,
+// knobs popped up under the pointer as it crossed a ledger and covered the
+// neighbouring columns. Hidden, not removed: a knob below the page bottom
+// would otherwise make the viewport scrollable only while it shows.
 .field-box-rotate {
   position: absolute;
   bottom: -46px;
@@ -829,8 +829,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     pointer-events: none;
   }
 
-  // An invisible bridge over the stem, so the pointer can travel from the
-  // marker to the knob without leaving the marker's hover.
+  // A wider grip over the stem, so the knob is easy to catch from the marker.
   &::after {
     position: absolute;
     right: -4px;
@@ -861,7 +860,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.field-box:hover .field-box-rotate,
 .field-box.is-selected .field-box-rotate {
   visibility: visible;
 }
@@ -2547,6 +2545,18 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     pointer-events: stroke;
   }
 
+  // Detect's estimate below the last printed rule: amber until checked.
+  &.is-estimated .ledger-rule__line {
+    stroke: #e59500;
+    stroke-dasharray: 3 3;
+  }
+
+  &.is-selected .ledger-rule__line {
+    stroke: var(--bs-primary);
+    stroke-width: 2.5px;
+    stroke-dasharray: none;
+  }
+
   &:hover .ledger-rule__line,
   &.is-dragging .ledger-rule__line {
     stroke: var(--bs-danger);
@@ -2578,8 +2588,40 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   gap: .4rem;
 }
 
+// Row line tools: add, remove, and space N rows evenly.
+.template-ledger-rows {
+  margin-block-start: .75rem;
+}
+
+.template-ledger-rows__heading {
+  margin-block-end: .35rem;
+  color: var(--bs-secondary-color);
+  font-size: .6875rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.template-ledger-rows__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+}
+
+.template-ledger-rows__even {
+  flex: 1 1 9.5rem;
+  inline-size: auto;
+  min-inline-size: 9.5rem;
+
+  .form-control {
+    max-inline-size: 4.25rem;
+  }
+}
+
 .template-ledger-card__covered {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: .5rem;
@@ -2593,6 +2635,49 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .btn {
     flex: 0 0 auto;
     white-space: nowrap;
+  }
+}
+
+.template-ledger-card__covered-actions {
+  display: inline-flex;
+  gap: .35rem;
+}
+
+// What is wrong with the grid; a blocking problem stops the save.
+.template-ledger-card__problems {
+  display: flex;
+  gap: .45rem;
+  margin-block-start: .6rem;
+  padding: .5rem .6rem;
+  color: #8a6500;
+  background: rgba(255, 171, 0, .12);
+  border-radius: .4rem;
+  font-size: .75rem;
+  line-height: 1.4;
+
+  ul {
+    padding-inline-start: 0;
+    list-style: none;
+  }
+
+  li + li {
+    margin-block-start: .25rem;
+  }
+
+  li.is-blocking {
+    color: var(--bs-danger);
+    font-weight: 500;
+  }
+}
+
+.template-ledger-card__footer {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+  margin-block-start: .75rem;
+
+  .btn {
+    align-self: flex-start;
   }
 }
 
@@ -2680,6 +2765,34 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .validation-field.has-line-flag {
   border-inline-start: 3px solid var(--bs-danger);
+}
+
+// The template's hint for this value, and a value that does not fit its field
+// (a date, a number, one of a list): pointed out, never blocking.
+.validation-field__hint {
+  margin-block-start: .25rem;
+  color: var(--bs-secondary-color);
+  font-size: .6875rem;
+  line-height: 1.35;
+}
+
+.validation-field__type {
+  margin-block-start: .25rem;
+  color: #a86b00;
+  font-size: .6875rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+// Required fields nothing was read for, in this person's row.
+.validation-record-group__missing {
+  margin-block-end: .5rem;
+  padding: .45rem .6rem;
+  color: #8a6500;
+  background: rgba(255, 171, 0, .12);
+  border-radius: .4rem;
+  font-size: .75rem;
+  line-height: 1.4;
 }
 
 .validation-pane__hint {
@@ -6011,7 +6124,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .template-builder-field-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: .45rem;
   min-block-size: 2.8rem;
@@ -6041,6 +6154,16 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   font-size: .5625rem;
   font-weight: 700;
   letter-spacing: .025em;
+}
+
+// What a field holds, in a few words: "Name · Date · optional".
+.template-builder-field-tags {
+  max-inline-size: 6.5rem;
+  overflow: hidden;
+  color: var(--bs-secondary-color);
+  font-size: .625rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .template-builder-field-number {
@@ -6092,6 +6215,120 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border: 1px solid var(--bs-border-color);
   border-radius: var(--bs-border-radius);
   box-shadow: 0 .15rem .65rem rgba(67, 89, 113, .07);
+}
+
+// Test on sample: what Detect makes of the sample with the layout.
+.layout-test__status {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: 1.25rem .5rem;
+  color: var(--bs-secondary-color);
+
+  &.is-error {
+    color: var(--bs-danger);
+  }
+}
+
+.layout-test__summary {
+  margin-block-end: .5rem;
+  font-weight: 600;
+}
+
+.layout-test__findings {
+  margin-block-end: .75rem;
+  padding-inline-start: 1.1rem;
+  font-size: .8125rem;
+  line-height: 1.45;
+
+  li + li {
+    margin-block-start: .2rem;
+  }
+
+  .is-warning {
+    color: #a86b00;
+  }
+
+  .is-ok {
+    color: #0b7e88;
+  }
+}
+
+.layout-test__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem 1rem;
+  margin-block-end: .6rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+
+  span::before {
+    display: inline-block;
+    inline-size: .75rem;
+    block-size: .75rem;
+    margin-inline-end: .35rem;
+    vertical-align: -.1rem;
+    content: "";
+    border: 2px solid currentColor;
+    border-radius: .15rem;
+  }
+
+  .is-placed::before { color: #0e9aa7; background: rgba(14, 154, 167, .16); }
+  .is-field::before { color: #696cff; background: rgba(105, 108, 255, .16); }
+  .is-shared::before { color: #e59500; background: rgba(255, 171, 0, .22); }
+  .is-no-row::before { color: #ff3e1d; background: rgba(255, 62, 29, .2); }
+  .is-rule::before { block-size: 0; color: #0e9aa7; border-width: 2px 0 0; border-style: dashed; }
+}
+
+.layout-test__page {
+  overflow: auto;
+  background: var(--bs-gray-100);
+  border: 1px solid var(--bs-border-color);
+  border-radius: .4rem;
+
+  canvas {
+    display: block;
+    inline-size: 100%;
+    block-size: auto;
+  }
+}
+
+// A layout in use: saving new markers makes a new version instead.
+.template-builder-in-use {
+  display: flex;
+  align-items: flex-start;
+  gap: .55rem;
+  margin-block-end: .75rem;
+  padding: .6rem .8rem;
+  background: rgba(3, 195, 236, .07);
+  border: 1px solid rgba(3, 195, 236, .25);
+  border-radius: .5rem;
+  font-size: .8125rem;
+  line-height: 1.45;
+
+  i {
+    flex: 0 0 auto;
+    margin-block-start: .15rem;
+    color: var(--bs-info);
+  }
+}
+
+.template-builder-page__parent {
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  text-decoration: underline dotted;
+}
+
+.template-field-settings-card {
+  .form-label {
+    margin-block-end: .2rem;
+    font-size: .75rem;
+  }
+
+  .form-text,
+  .form-check-label {
+    font-size: .6875rem;
+  }
 }
 
 .template-builder-live-note {

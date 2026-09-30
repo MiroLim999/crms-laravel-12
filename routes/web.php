@@ -213,6 +213,9 @@ Route::middleware('auth')->group(function () {
         // Suggests a ledger grid from the printed rules on a sample page.
         Route::post('templates/detect-grid', [DocumentTemplateController::class, 'detectGrid'])
             ->name('templates.detect-grid');
+        // Outlines the sample with the layout being built, as Detect would for Staff.
+        Route::post('templates/test-layout', [DocumentTemplateController::class, 'testLayout'])
+            ->name('templates.test-layout');
         Route::post('templates', [DocumentTemplateController::class, 'store'])->name('templates.store');
         Route::get('templates/{template}/edit', [DocumentTemplateController::class, 'edit'])
             ->name('templates.edit');
@@ -224,6 +227,8 @@ Route::middleware('auth')->group(function () {
             ->name('templates.update');
         Route::post('templates/{template}/activate', [DocumentTemplateController::class, 'activate'])
             ->name('templates.activate');
+        Route::post('templates/{template}/duplicate', [DocumentTemplateController::class, 'duplicate'])
+            ->name('templates.duplicate');
         Route::delete('templates/{template}', [DocumentTemplateController::class, 'destroy'])
             ->name('templates.destroy');
     });

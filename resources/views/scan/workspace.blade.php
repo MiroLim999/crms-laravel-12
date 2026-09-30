@@ -597,6 +597,7 @@
         verificationItems,
     } from '{{ Vite::asset('resources/js/line-geometry.js') }}';
     import { LineOverlay, polygonBounds } from '{{ Vite::asset('resources/js/line-overlay.js') }}';
+    import { valueProblem } from '{{ Vite::asset('resources/js/value-types.js') }}';
 
     const config = {
         boxes: @json($boxes),
@@ -746,6 +747,13 @@
         ...markerAngleMetadata(box),
     }));
     const templateColumns = templateBoxes.filter((box) => box.kind === 'column');
+
+    // What each template field and ledger column holds and how its value is
+    // checked (Template Builder settings), by name: a line is read under its
+    // field's or column's name.
+    const nameKey = (name) => String(name ?? '').trim().toLowerCase();
+    const templateSettings = new Map(config.boxes.map((box) => [nameKey(box.name), box]));
+    const settingsFor = (index) => templateSettings.get(nameKey(cropped[index]?.label)) ?? null;
 
     function fieldsMatchTemplate() {
         return JSON.stringify(marker.toJSON()) === JSON.stringify(templateBoxes);
@@ -2766,10 +2774,11 @@
     function groupIdentity(group) {
         if (group.kind !== 'person') return `${group.indexes.length} document field${group.indexes.length === 1 ? '' : 's'}`;
 
-        if (group.mode === 'auto' && group.indexes.length === 11) {
-            const childName = String(readings[group.indexes[2]]?.text ?? '').trim();
-            if (childName) return childName;
-        }
+        // The field the layout says holds the person's name.
+        const named = group.indexes.find((index) => (
+            settingsFor(index)?.role === 'name' && String(readings[index]?.text ?? '').trim() !== ''
+        ));
+        if (named !== undefined) return String(readings[named].text).trim();
 
         const candidates = group.indexes
             .map((index) => ({
@@ -2783,27 +2792,28 @@
         return candidates[0]?.text || `${group.indexes.length} fields`;
     }
 
+    // A line is labelled with its template field's or column's own name.
     function validationFieldLabel(group, columnIndex, fallback) {
-        const birthRegistryColumns = [
-            'Entry no.',
-            'Date registered',
-            "Child's name",
-            'Sex',
-            'Date of birth',
-            'Place of birth',
-            "Father's name",
-            "Mother's name",
-            'Nationality',
-            'Informant',
-            'Remarks',
-        ];
-
-        if (group.kind === 'person' && group.mode === 'auto'
-            && group.indexes.length === birthRegistryColumns.length) {
-            return birthRegistryColumns[columnIndex];
-        }
-
         return String(fallback || `Field ${columnIndex + 1}`);
+    }
+
+    /**
+     * Required fields of this person that nothing was read for: the ledger
+     * columns missing from a row, or a person's template fields.
+     */
+    function missingRequired(group) {
+        if (group.kind !== 'person' || group.indexes.length === 0) return [];
+
+        const present = new Set(group.indexes.map((index) => nameKey(cropped[index]?.label)));
+        const ledgerRow = group.indexes.some((index) => settingsFor(index)?.kind === 'column');
+        const personGroup = Number(cropped[group.indexes[0]]?.personGroup);
+        const expected = ledgerRow
+            ? config.boxes.filter((box) => box.kind === 'column')
+            : config.boxes.filter((box) => box.kind !== 'column' && Number(box.personGroup) === personGroup);
+
+        return expected
+            .filter((box) => box.required !== false && !present.has(nameKey(box.name)))
+            .map((box) => box.name);
     }
 
     function prepareValidationComparison() {
@@ -3111,6 +3121,8 @@
                         <i class="icon-base bx bx-shape-polygon" aria-hidden="true"></i>Adjust outline
                     </button>
                 </div>
+                <div class="validation-field__hint d-none"></div>
+                <div class="validation-field__type d-none"></div>
                 <div class="validation-field__flag d-none"></div>
                 <div class="validation-field__ocr-error d-none">
                     TrOCR could not read this marker. Enter the value manually.
@@ -3168,6 +3180,24 @@
         const checkbox = requiredInput(row, '.validation-verified');
         input.value = readingText;
         if (flagged) row.classList.add('needs-review');
+
+        // The template's hint, and whether the value fits its field (a date,
+        // a number, one of a list). Pointed out, never blocking.
+        const settings = settingsFor(index);
+        const hint = requiredPart(row, '.validation-field__hint');
+        if (settings?.hint) {
+            hint.textContent = settings.hint;
+            hint.classList.remove('d-none');
+        }
+        const typeNote = requiredPart(row, '.validation-field__type');
+        const checkValue = () => {
+            const problem = valueProblem(input.value, settings ?? {});
+            typeNote.textContent = problem ?? '';
+            typeNote.classList.toggle('d-none', !problem);
+            row.classList.toggle('has-value-problem', Boolean(problem));
+        };
+        checkValue();
+        input.addEventListener('input', checkValue);
         if (reading.error) {
             row.classList.add('has-ocr-error');
             requiredPart(row, '.validation-field__ocr-error').classList.remove('d-none');
@@ -3241,11 +3271,22 @@
         const reviewCount = group.indexes.filter((index) => (
             normaliseConfidence(readings[index]) < config.threshold || cropped[index]?.needsReview
         )).length;
+        const missing = missingRequired(group);
         const review = requiredPart(section, '.validation-record-group__review');
-        review.textContent = reviewCount > 0 ? `${reviewCount} to review` : 'Ready to review';
-        review.classList.toggle('has-review', reviewCount > 0);
+        review.textContent = [
+            reviewCount > 0 ? `${reviewCount} to review` : null,
+            missing.length > 0 ? `${missing.length} missing` : null,
+        ].filter(Boolean).join(' · ') || 'Ready to review';
+        review.classList.toggle('has-review', reviewCount > 0 || missing.length > 0);
 
         const body = requiredPart(section, '.validation-record-group__body');
+        if (missing.length > 0) {
+            const note = document.createElement('div');
+            note.className = 'validation-record-group__missing';
+            note.textContent = `Nothing was read for ${missing.join(', ')}. If the page has ${missing.length === 1 ? 'it' : 'them'}, `
+                + 'go back to Align and check the outlines; if the register leaves it blank, carry on.';
+            body.appendChild(note);
+        }
         if (group.kind === 'person') {
             const bulk = document.createElement('div');
             const checkboxId = `verifyGroup-${group.id}`;

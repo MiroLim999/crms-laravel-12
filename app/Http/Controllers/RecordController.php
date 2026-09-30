@@ -63,7 +63,7 @@ class RecordController extends Controller
             'changeRequests.items.field',
         ]);
 
-        $fieldGroups = $this->fieldGrouper->groups($record->fields);
+        $fieldGroups = $this->fieldGrouper->groups($record->fields, $record->template);
         $approvedRequests = $record->changeRequests
             ->filter(fn ($changeRequest) => $changeRequest->status === ChangeRequestStatus::Approved);
         $fieldChanges = $approvedRequests

@@ -13,9 +13,16 @@ class DocumentTemplateField extends Model
 {
     use HasFactory;
 
+    /** What a field can hold for its person: their name, or the entry number. */
+    public const ROLES = ['name', 'entry'];
+
+    /** How Staff check a value in Verify. */
+    public const VALUE_TYPES = ['text', 'date', 'number', 'choice'];
+
     protected $fillable = [
         'document_template_id', 'name', 'x', 'y', 'width', 'height', 'angle',
         'sort_order', 'is_required', 'person_group', 'person_field_order',
+        'role', 'value_type', 'options', 'hint',
     ];
 
     protected function casts(): array
@@ -29,6 +36,24 @@ class DocumentTemplateField extends Model
             'is_required' => 'boolean',
             'person_group' => 'integer',
             'person_field_order' => 'integer',
+            'options' => 'array',
+        ];
+    }
+
+    /**
+     * What the field holds and how Staff check it, in the shape the builder
+     * and the workspace use (ledger columns carry the same keys).
+     *
+     * @return array{role: string|null, required: bool, type: string, options: list<string>|null, hint: string|null}
+     */
+    public function settings(): array
+    {
+        return [
+            'role' => $this->role,
+            'required' => (bool) $this->is_required,
+            'type' => $this->value_type ?: 'text',
+            'options' => $this->options ?: null,
+            'hint' => $this->hint,
         ];
     }
 
@@ -51,9 +76,9 @@ class DocumentTemplateField extends Model
             'w' => $this->width,
             'h' => $this->height,
             'angle' => (float) ($this->angle ?? 0),
-            'required' => $this->is_required,
             'personGroup' => $this->person_group,
             'personFieldOrder' => $this->person_field_order,
+            ...$this->settings(),
         ];
     }
 }

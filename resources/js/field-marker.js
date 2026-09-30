@@ -43,7 +43,7 @@ const ROTATE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="fals
  * a document. Keeping it beside the coordinates lets a template's explicit
  * validation groups survive moves, renames, undo, and cropping.
  */
-function serialiseBox(box) {
+function serialiseBox(box, withSettings = false) {
     return {
         name: box.name,
         x: box.x,
@@ -53,7 +53,31 @@ function serialiseBox(box) {
         ...markerPersonMetadata(box),
         ...markerColumnMetadata(box),
         ...markerAngleMetadata(box),
+        ...(withSettings ? markerFieldSettings(box) : {}),
     };
+}
+
+const FIELD_ROLES = ['name', 'entry'];
+const VALUE_TYPES = ['date', 'number', 'choice'];
+
+/**
+ * What a Template Builder field holds and how Staff check its value, present
+ * only where it differs from the defaults (any value, text, required, no hint):
+ * role 'name' or 'entry', type 'date', 'number' or 'choice' with its options,
+ * a hint, and required: false.
+ */
+export function markerFieldSettings(box) {
+    const settings = {};
+    if (FIELD_ROLES.includes(box?.role)) settings.role = box.role;
+    if (box?.required === false) settings.required = false;
+    if (VALUE_TYPES.includes(box?.type)) settings.type = box.type;
+    if (settings.type === 'choice' && Array.isArray(box.options)) {
+        const options = box.options.map((option) => String(option).trim()).filter(Boolean);
+        if (options.length > 0) settings.options = options;
+    }
+    const hint = typeof box?.hint === 'string' ? box.hint.trim() : '';
+    if (hint) settings.hint = hint;
+    return settings;
 }
 
 /**
@@ -136,6 +160,30 @@ export function turnPoint(x, y, degrees) {
     return { x: x * cos - y * sin, y: x * sin + y * cos };
 }
 
+/** A marker's four corners on a page of the given size, after its tilt. */
+export function markerCorners(box, width, height) {
+    const pivot = markerPivot(box, width, height);
+    const halfWidth = box.w * width / 2;
+    const halfHeight = box.h * height / 2;
+    const angle = normaliseAngle(box.angle);
+    return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
+        const turned = turnPoint(sx * halfWidth, sy * halfHeight, angle);
+        return { x: pivot.x + turned.x, y: pivot.y + turned.y };
+    });
+}
+
+/**
+ * Whether a marker, tilt included, stays on the page. A turned marker's
+ * corners reach past its upright box, so the box alone can be on the page
+ * while a corner is off it. `tolerance` is a fraction of each side.
+ */
+export function markerInsidePage(box, width, height, tolerance = 0.005) {
+    return markerCorners(box, width, height).every(({ x, y }) => (
+        x >= -tolerance * width && x <= width * (1 + tolerance)
+        && y >= -tolerance * height && y <= height * (1 + tolerance)
+    ));
+}
+
 /**
  * A ledger column marker: aligned like any field, but read line by line inside
  * the template's ruled rows instead of cropped as one rectangle.
@@ -165,6 +213,8 @@ export class FieldMarker {
      * @param {(boxes: Array) => void} [options.onChange]
      * @param {(indexes: number[], context: {source: string, activeIndex: number|null}) => void} [options.onSelectionChange]
      * @param {(zoom: number) => void} [options.onZoomChange]
+     * @param {(boxes: Array) => void} [options.onDrag]  While markers are dragged, before onChange.
+     * @param {boolean} [options.fieldSettings]  Keep markerFieldSettings() in toJSON() (Template Builder).
      */
     constructor({
         canvas,
@@ -174,6 +224,8 @@ export class FieldMarker {
         onChange = null,
         onSelectionChange = null,
         onZoomChange = null,
+        onDrag = null,
+        fieldSettings = false,
     }) {
         this.canvas = canvas;
         this.overlay = overlay;
@@ -182,6 +234,8 @@ export class FieldMarker {
         this.onChange = onChange;
         this.onSelectionChange = onSelectionChange;
         this.onZoomChange = onZoomChange;
+        this.onDrag = onDrag;
+        this.fieldSettings = fieldSettings;
 
         /** @type {Array<{name: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number, el: HTMLElement|null}>} */
         this.boxes = [];
@@ -527,7 +581,23 @@ export class FieldMarker {
      * Fractional coordinates, ready to persist or submit.
      */
     toJSON() {
-        return this.boxes.map(serialiseBox);
+        return this.boxes.map((box) => serialiseBox(box, this.fieldSettings));
+    }
+
+    /**
+     * Change some markers' properties in place, as one change: `update` gets
+     * each marker as toJSON() has it and returns the properties to set. Their
+     * elements stay, so a field being typed into keeps its focus.
+     */
+    updateBoxes(indexes, update) {
+        let changed = false;
+        indexes.forEach((index) => {
+            const box = this.boxes[index];
+            if (!box) return;
+            Object.assign(box, update(serialiseBox(box, this.fieldSettings), index));
+            changed = true;
+        });
+        if (changed) this._emit();
     }
 
     selectedIndexes() {
@@ -591,6 +661,30 @@ export class FieldMarker {
         this.layout();
         this._emit();
         this._emitSelection();
+    }
+
+    /**
+     * Move the selected markers by (dx, dy) screen pixels, as the arrow keys
+     * do, stopped at the page edges.
+     */
+    nudgeSelected(dx, dy) {
+        const width = this.canvas.clientWidth;
+        const height = this.canvas.clientHeight;
+        if (this.selected.size === 0 || !width || !height) return;
+
+        const boxes = [...this.selected];
+        const fx = clamp(dx / width,
+            Math.max(...boxes.map((box) => -box.x)), Math.min(...boxes.map((box) => 1 - box.x - box.w)));
+        const fy = clamp(dy / height,
+            Math.max(...boxes.map((box) => -box.y)), Math.min(...boxes.map((box) => 1 - box.y - box.h)));
+        if (fx === 0 && fy === 0) return;
+
+        boxes.forEach((box) => {
+            box.x += fx;
+            box.y += fy;
+        });
+        this.layout();
+        this._emit();
     }
 
     // ----------------------------------------------------------- magnetic edges
@@ -930,6 +1024,7 @@ export class FieldMarker {
             }
 
             this.layout();
+            this.onDrag?.(this.toJSON());
         };
 
         const end = (event) => {

@@ -178,9 +178,10 @@ class DocumentScanController extends Controller
             ]);
         }
 
-        $requiredByName = $template->fields->mapWithKeys(
-            fn ($field) => [mb_strtolower(trim($field->name)) => $field->is_required],
-        );
+        // What each field holds and whether it is required, by its template
+        // field's name (a ledger line: its column's). A field Staff added
+        // themselves has no template settings.
+        $settingsByName = $template->settingsByName();
 
         $coordinateErrors = [];
         foreach ($validated['fields'] as $index => $field) {
@@ -214,7 +215,7 @@ class DocumentScanController extends Controller
         $copiedCrops = [];
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $requiredByName, $page, $linesById, &$copiedCrops) {
+            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, &$copiedCrops) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -235,16 +236,17 @@ class DocumentScanController extends Controller
 
                 foreach (array_values($validated['fields']) as $index => $field) {
                     $line = isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null;
+                    $settings = $settingsByName[mb_strtolower(trim($line?->column_name ?? $field['name']))] ?? null;
 
                     $record->fields()->create([
                         'name' => $field['name'],
                         'ocr_text' => $field['ocr_text'] ?? null,
                         'ocr_confidence' => $field['ocr_confidence'] ?? null,
                         'verified_value' => $field['verified_value'],
-                        'is_required' => $requiredByName->get(
-                            mb_strtolower(trim($field['name'])),
-                            true,
-                        ),
+                        'is_required' => $settings['required'] ?? true,
+                        // Kept with the record, so it keeps its person's name
+                        // whatever later happens to the layout.
+                        'role' => $settings['role'] ?? null,
                         'person_group' => $field['person_group'] ?? null,
                         'person_field_order' => $field['person_field_order'] ?? null,
                         'x' => $field['x'],

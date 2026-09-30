@@ -86,12 +86,13 @@ CRMS runs as **three local processes** from a single repository: the Laravel web
 ### 1. Document Digitisation & Verification Workspace
 - **Visual Bounding-Box Markup**: Interactive drag-and-drop marker tool with canvas zoom, pan, and marquee selection for setting field coordinates.
 - **Tiltable Markers**: In both the Staff workspace and the Template Builder, every marker, including each ledger column and any newly added field, can be tilted on its own: drag the rotate knob below it (<kbd>Shift</kbd> snaps to 5°), or use <kbd>[</kbd> / <kbd>]</kbd> in 0.5° steps (<kbd>Shift</kbd>: 5°); double-click the knob to straighten. A marker turns about its own centre, and a tilted field is cropped level for TrOCR. For a ledger, the columns' typical tilt is taken as the page's: the page is straightened by it before line detection, as Detect does, and each column is placed where its centre lands.
-- **Resize from Any Side**: Every marker has handles on all four corners and all four sides, so one side can be fixed without moving the others. They appear only on the marker you click (never on hover), so neighbouring columns do not pile handles on each other. The dragged side snaps to the nearest printed line (hold <kbd>Alt</kbd> to place it freely), and a tilted marker resizes along its own sides.
+- **Resize from Any Side**: Every marker has handles on all four corners and all four sides, so one side can be fixed without moving the others. They appear, with the rotate knob, only on the marker you click (never on hover), so neighbouring columns do not pile handles on each other. The dragged side snaps to the nearest printed line (hold <kbd>Alt</kbd> to place it freely), and a tilted marker resizes along its own sides.
 - **Snap to Table**: In the Align step, **Snap to table** moves the template's ledger columns and ruled rows onto the lines this page actually printed, in under a second on the server, without outlining any handwriting. It fits position and scale, then pulls each column edge and row onto its nearest printed rule. It does not straighten a tilted page; use Detect for that. While it works, the button shows a spinner. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes a snap.
 - **Magnetic Edges**: While you drag or resize a marker, an edge that comes within 8 screen pixels of a printed line snaps onto it, and a red guide shows the line it caught. Hold <kbd>Alt</kbd> while dragging to place the marker freely.
 - **Split-Screen Verification Viewer**: Dual-pane workspace with configurable horizontal/vertical split views, smooth keyboard-accelerated split-bar adjustments, and Ctrl-wheel zoom.
 - **Person Grouping**: Supports complex registry layouts grouping fields by role (e.g., Child, Mother, Father, Groom, Bride, Deceased, Informant) alongside general document details.
 - **Confidence Scoring & Review Warnings**: Computes token-level geometric mean confidence scores (0–100%). Fields falling below the configured threshold are visually flagged for manual operator review.
+- **Checked Values**: Verify uses each template field's settings (see the Template Builder). A person is titled by the field that holds their name. Under a value it shows the template's hint, and it points out a value that does not fit its field ("This does not look like a date", "Expected one of: M, F"). A person whose required columns had nothing read is marked "N missing", with the columns named. None of these blocks a submission: registers hold odd values.
 - **Human-in-the-Loop Enforcement**: Only explicitly verified fields are committed to the permanent record upon submission.
 
 ### 2. Handwritten Line Detection (Detect)
@@ -112,6 +113,12 @@ CRMS runs as **three local processes** from a single repository: the Laravel web
 - **Paper Specification Support**: Supports standard paper dimensions (A4, Letter, Legal, Folio) as well as arbitrary custom millimeter dimensions in Portrait or Landscape orientations.
 - **Sample Document Upload**: Direct upload of PDF or image samples rendered with PDF.js for canvas alignment.
 - **Custom Document Types**: Super Admins can define custom certificate classifications with distinct icons, validation rules, and active states.
+- **Field Settings**: Select a field or ledger column to set what it **holds** (the person's name or the entry number, one of each per person), its **value** (text, a date, a number, or one of a list of choices), a **hint** for Staff, and whether it is **required**. Verify and the records archive use these. They replace the one layout the code used to know by heart (an 11-column birth register whose third column was the child's name). The existing birth ledger's entry-number and child's-name columns were marked when the settings came in.
+- **Layouts in Use Keep Their Versions**: A layout that is published, or that records or unsubmitted pages were read with, is never changed in place. Saving changed markers, row lines or field settings makes a **new version**, so every record keeps the layout it was read with. **Save as new draft** leaves the published one live; **Save & publish new version** swaps it in. Its name, notes and sample only describe it and are saved in place. The editor says when a layout is in use. A save made from an older copy of the editor (another admin saved in between) is refused rather than overwriting the newer version. **Duplicate** in the template library makes a draft copy, sample included.
+- **Ledger Grid Tools**: Moving or stretching the columns as a table carries their row lines along, exactly as the Align step does, and columns sitting on the first and last row line follow those lines. Click a row line to select it, then drag it or nudge it with the arrow keys (<kbd>Shift</kbd>: 10 px) or press <kbd>Delete</kbd>. <kbd>Shift</kbd>+drag moves every line. **Add** puts a line under the selected one, and **N rows, evenly** spaces the rows between the first and last line. Once a sample is open, row lines and marker edges snap to its printed rules (<kbd>Alt</kbd>: place freely). Lines Detect estimated below the last printed rule are drawn amber until checked. **Make selected fields** turns a column back into a field. Undo (<kbd>Ctrl</kbd>+<kbd>Z</kbd>) covers row lines as well as markers. Arrow keys also nudge selected markers.
+- **Grid Checks**: The ledger card lists what is wrong while you work. Row lines outside the columns, or almost on top of each other, stop the save, and the server refuses them too. A column that spans other rows than the rest is a warning. A field that covers the middle of ledger cells is reported (**Select them** / **Remove them**), because line detection would read that handwriting as the field and the rows would lose those cells; saving asks first. A tilted marker whose corner leaves the page is refused, and publishing a ledger without a sample asks first.
+- **Test on Sample**: Runs Detect on the sample with the layout as it stands, saved or not (about half a minute). It shows every outlined line on the page and the fitted row lines, with the lines that fall between rows, lines sharing a cell, rows missing required cells, written lines outside every marker, and the grid notes. Nothing is read or stored.
+- **Unsaved Changes**: Leaving the builder with unsaved changes (closing the tab, going back, following a link) asks first.
 
 ### 4. Immutable Record Archival & Change Request Governance
 - **Permanent Record Locking**: Once verified and submitted by Staff, records are sealed against direct in-place modification.
@@ -172,9 +179,9 @@ crms-laravel-12/
 │   ├── Models/                         # Eloquent models (CivilRecord, RecordField, DocumentPage, PageLine, AuditLog, etc.)
 │   ├── Providers/                      # AuthServiceProvider (Capability Matrix Gate definitions)
 │   ├── Services/                       # Business logic (AuditLogger, ChangeRequestService, etc.)
-│   │   ├── Lines/                      # LineMarkers (runs ml/line_markers.py), PageLineReader
+│   │   ├── Lines/                      # LineMarkers (runs ml/line_markers.py), PageLineReader, GeometryInput
 │   │   └── Ocr/                        # OcrClient, OcrModelManager, OcrUploadAuthorizer, EngineStatus
-│   └── Support/                        # Navigation and UI support utilities
+│   └── Support/                        # Navigation, MarkerBounds (a tilted marker stays on the page)
 ├── bootstrap/                          # Application bootstrap and middleware pipeline configuration
 ├── config/                             # Configuration files (crms.php, services.php, database.php)
 ├── database/
@@ -672,6 +679,9 @@ tests/
 │   ├── DocumentTemplateBuilderTest.php
 │   ├── DocumentUploadWorkflowTest.php
 │   ├── LedgerTemplateAndExportTest.php      # Ledger grids, training CSV export
+│   ├── TemplateBuilderGridChecksTest.php    # Grid checks, tilted markers, printed rules, test on sample
+│   ├── TemplateFieldSettingsTest.php        # Roles, value types, required fields, record identity
+│   ├── TemplateVersioningTest.php           # New versions of layouts in use, stale saves, duplicates
 │   ├── LineOutlinePipelineTest.php          # Page job, Detect, outlines, manual fixes
 │   ├── OcrModelPerformanceTest.php
 │   ├── OcrWorkspaceTest.php
@@ -682,11 +692,15 @@ tests/
 │   ├── change-request.test.js
 │   ├── field-marker.test.js
 │   ├── icon-coverage.test.js
+│   ├── layout-test.test.js                  # Test-on-sample summary
+│   ├── ledger-grid.test.js                  # Row lines following the table, row tools, grid checks
 │   ├── line-geometry.test.js
 │   ├── person-grouping.test.js
 │   ├── record-detail.test.js
 │   ├── sneat-controls.test.js
 │   ├── template-builder-shortcuts.test.js
+│   ├── template-history.test.js             # Undo covering row lines
+│   ├── value-types.test.js                  # Date, number and choice checks in Verify
 │   └── verification-groups.test.js
 └── Python/                     # Python unit tests
     ├── test_evaluation_report.py   # ML evaluation report verification

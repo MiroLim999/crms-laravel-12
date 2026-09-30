@@ -7,6 +7,7 @@ use App\Models\DocumentPage;
 use App\Models\DocumentTemplate;
 use App\Models\OcrSetting;
 use App\Models\PageLine;
+use App\Services\Lines\GeometryInput;
 use App\Services\Lines\LineMarkers;
 use App\Services\Lines\LineMarkersException;
 use App\Services\Lines\PageLineReader;
@@ -43,7 +44,7 @@ class DocumentPageController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $this->hydrateGeometry($request);
+        GeometryInput::hydrate($request);
 
         $validated = $request->validate([
             'document_template_id' => ['required', 'integer', 'exists:document_templates,id'],
@@ -54,10 +55,10 @@ class DocumentPageController extends Controller
             // Detect: straighten the page and fit the template to it, outline
             // every line, and stop before reading so Staff can check first.
             'detect' => ['sometimes', 'boolean'],
-            ...$this->geometryRules(),
+            ...GeometryInput::rules(),
         ]);
 
-        $geometry = $this->checkedGeometry($validated['geometry']);
+        $geometry = GeometryInput::checked($validated['geometry']);
 
         $image = $request->file('page');
         if (! $image instanceof UploadedFile || ($size = @getimagesize($image->getRealPath())) === false) {
@@ -101,14 +102,14 @@ class DocumentPageController extends Controller
      */
     public function snap(Request $request): JsonResponse
     {
-        $this->hydrateGeometry($request);
+        GeometryInput::hydrate($request);
 
         $validated = $request->validate([
             'page' => ['required', 'file', 'mimes:png', 'max:40960'],
-            ...$this->geometryRules(),
+            ...GeometryInput::rules(),
         ]);
 
-        $geometry = $this->checkedGeometry($validated['geometry']);
+        $geometry = GeometryInput::checked($validated['geometry']);
         $image = $request->file('page');
         if (! $image instanceof UploadedFile || @getimagesize($image->getRealPath()) === false) {
             throw ValidationException::withMessages(['page' => 'The page could not be read as an image.']);
@@ -406,108 +407,5 @@ class DocumentPageController extends Controller
                 $line->forceFill(['flags' => $flags])->save();
             }
         }
-    }
-
-    /**
-     * Validation for aligned markers (page fractions), shared by the page
-     * upload and Snap to table.
-     *
-     * @return array<string, list<mixed>>
-     */
-    private function geometryRules(): array
-    {
-        return [
-            'geometry' => ['required', 'array'],
-            'geometry.columns' => ['present', 'array', 'max:60'],
-            'geometry.columns.*.name' => ['required', 'string', 'max:500'],
-            'geometry.columns.*.box' => ['required', 'array', 'size:4'],
-            'geometry.columns.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],
-            'geometry.columns.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
-            'geometry.ruled_ys' => ['present', 'array', 'max:400'],
-            'geometry.ruled_ys.*' => ['required', 'numeric', 'min:0', 'max:1'],
-            'geometry.fields' => ['present', 'array', 'max:450'],
-            'geometry.fields.*.name' => ['required', 'string', 'max:500'],
-            'geometry.fields.*.box' => ['required', 'array', 'size:4'],
-            'geometry.fields.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],
-            'geometry.fields.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
-            'geometry.fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:65535'],
-            'geometry.fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:65535'],
-        ];
-    }
-
-    private function hydrateGeometry(Request $request): void
-    {
-        if (! $request->filled('geometry_json')) {
-            return;
-        }
-
-        try {
-            $geometry = json_decode((string) $request->input('geometry_json'), true, 64, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            throw ValidationException::withMessages(['geometry' => 'The aligned markers could not be read. Try again.']);
-        }
-
-        if (is_array($geometry)) {
-            $request->merge(['geometry' => [
-                'columns' => $geometry['columns'] ?? [],
-                'ruled_ys' => $geometry['ruled_ys'] ?? [],
-                'fields' => $geometry['fields'] ?? [],
-            ]]);
-        }
-    }
-
-    /**
-     * @param  array<string, mixed>  $geometry
-     * @return array<string, mixed>
-     */
-    private function checkedGeometry(array $geometry): array
-    {
-        $columns = array_values($geometry['columns'] ?? []);
-        $ruled = array_values(array_map('floatval', $geometry['ruled_ys'] ?? []));
-        $fields = array_values($geometry['fields'] ?? []);
-
-        $errors = [];
-        if ($columns === [] && $fields === []) {
-            $errors['geometry'] = 'There are no markers to read. Reset the layout and try again.';
-        }
-        if ($columns !== [] && count($ruled) < 2) {
-            $errors['geometry.ruled_ys'] = 'This layout has columns but no ruled row lines.';
-        }
-        for ($i = 1; $i < count($ruled); $i++) {
-            if ($ruled[$i] <= $ruled[$i - 1]) {
-                $errors['geometry.ruled_ys'] = 'Ruled row lines must run from top to bottom.';
-                break;
-            }
-        }
-        foreach (['columns' => $columns, 'fields' => $fields] as $key => $items) {
-            foreach ($items as $index => $item) {
-                [$x, $y, $w, $h] = array_map('floatval', $item['box']);
-                if ($w <= 0 || $h <= 0 || $x + $w > 1.00001 || $y + $h > 1.00001) {
-                    $errors["geometry.{$key}.{$index}.box"] = 'A marker extends beyond the page.';
-                }
-            }
-        }
-        if ($errors !== []) {
-            throw ValidationException::withMessages($errors);
-        }
-
-        // Every marker has its own tilt; only a turned one carries an angle.
-        $angle = fn (array $marker) => round((float) ($marker['angle'] ?? 0), 1);
-
-        return [
-            'columns' => array_map(fn (array $c) => [
-                'name' => (string) $c['name'],
-                'box' => array_map('floatval', $c['box']),
-                ...($angle($c) != 0.0 ? ['angle' => $angle($c)] : []),
-            ], $columns),
-            'ruled_ys' => $ruled,
-            'fields' => array_map(fn (array $f) => [
-                'name' => (string) $f['name'],
-                'box' => array_map('floatval', $f['box']),
-                'person_group' => isset($f['person_group']) ? (int) $f['person_group'] : null,
-                'person_field_order' => isset($f['person_field_order']) ? (int) $f['person_field_order'] : null,
-                ...($angle($f) != 0.0 ? ['angle' => $angle($f)] : []),
-            ], $fields),
-        ];
     }
 }

@@ -1,4 +1,24 @@
-import { FieldMarker, markerAngleMetadata, normaliseAngle } from './field-marker';
+import {
+    FieldMarker,
+    markerAngleMetadata,
+    markerFieldSettings,
+    markerInsidePage,
+    normaliseAngle,
+} from './field-marker';
+import {
+    clampRuledY,
+    columnBand,
+    distributeRuledYs,
+    fieldsOverLedger,
+    followFirstAndLastLine,
+    insertRuledY,
+    isColumn,
+    ledgerGridProblems,
+    nearestLine,
+    remapRuledYs,
+    sameBand,
+    shiftRuledYs,
+} from './ledger-grid';
 import { attachMarqueeSelection } from './marquee-selection';
 import {
     nonNegativeInteger,
@@ -9,6 +29,9 @@ import {
     builderShortcutIsBlocked,
     handleSelectedFieldDeletion,
 } from './template-builder-shortcuts';
+import { LayoutHistory } from './template-history';
+import { summariseTest, testFindings, testLineStatus } from './layout-test';
+import { gridNotes } from './line-geometry';
 
 const configNode = document.getElementById('templateBuilderConfig');
 
@@ -55,7 +78,7 @@ const baselineGroupingMode = config.baselineGroupingMode === 'custom' ? 'custom'
 const initialGroupingMode = config.initialGroupingMode === 'custom' ? 'custom' : 'auto';
 
 const cloneBoxes = (boxes) => boxes.map(({
-    name, x, y, w, h, personGroup = null, personFieldOrder = null, kind = null, angle = 0,
+    name, x, y, w, h, personGroup = null, personFieldOrder = null, kind = null, angle = 0, ...settings
 }) => ({
     name,
     x,
@@ -66,7 +89,17 @@ const cloneBoxes = (boxes) => boxes.map(({
     personFieldOrder,
     ...(kind === 'column' ? { kind } : {}),
     ...markerAngleMetadata({ angle }),
+    ...markerFieldSettings(settings),
 }));
+
+/** A saved field's or column's settings, as the server sends them. */
+const savedSettings = (item) => markerFieldSettings({
+    role: item.role,
+    required: item.required ?? item.is_required,
+    type: item.type ?? item.value_type,
+    options: item.options,
+    hint: item.hint,
+});
 const snapshot = (boxes) => JSON.stringify(cloneBoxes(boxes));
 
 function finiteNumber(value, fallback) {
@@ -95,6 +128,7 @@ function normaliseBoxes(fields) {
                 ? null
                 : nonNegativeInteger(field.personFieldOrder ?? field.person_field_order),
             ...markerAngleMetadata(field),
+            ...savedSettings(field),
         };
     });
 }
@@ -117,6 +151,7 @@ function normaliseColumns(columns) {
             personFieldOrder: null,
             kind: 'column',
             ...markerAngleMetadata(column),
+            ...savedSettings(column),
         };
     });
 }
@@ -142,10 +177,17 @@ const baselineRuledYs = normaliseRuledYs(config.baselineRuledYs);
 let ruledYs = normaliseRuledYs(config.initialRuledYs);
 groupingModeInput.value = initialGroupingMode;
 
-let fieldHistory = [];
-let currentSnapshot = null;
-let currentGroupingModeSnapshot = null;
+// Markers, person-row mode and row lines, undone together (Ctrl+Z).
+const history = new LayoutHistory();
 let restoringHistory = false;
+// Ledger grid state (see "ledger grid" below).
+let coveredFieldIndexes = [];
+let tableBand = null;
+let tableColumnCount = 0;
+let selectedRule = null;
+let printedLines = null;
+let estimatedYs = new Set();
+let sampleGrid = null;
 let clipboard = [];
 let pasteSequence = 0;
 let invalidFieldIndexes = new Set();
@@ -285,6 +327,8 @@ const marker = new FieldMarker({
     onChange: handleMarkerChange,
     onSelectionChange: updateSelectionUI,
     onZoomChange: updateZoomUI,
+    onDrag: (boxes) => previewTableFollow(boxes),
+    fieldSettings: true,
 });
 attachMarqueeSelection({
     marker,
@@ -310,25 +354,22 @@ function updateResetUI() {
     element('resetFieldsBtn', HTMLButtonElement).disabled = !changed;
 }
 
+/** Everything one undo step restores. */
+function layoutState(boxes = marker.toJSON()) {
+    return {
+        boxes: cloneBoxes(boxes),
+        groupingMode: groupingModeInput.value === 'custom' ? 'custom' : 'auto',
+        ruledYs: [...ruledYs],
+    };
+}
+
 function handleMarkerChange(boxes) {
-    const next = cloneBoxes(boxes);
-    const nextSnapshot = snapshot(next);
-    const nextGroupingMode = groupingModeInput.value === 'custom' ? 'custom' : 'auto';
-
-    if (!restoringHistory && currentSnapshot !== null
-        && (nextSnapshot !== snapshot(currentSnapshot)
-            || nextGroupingMode !== currentGroupingModeSnapshot)) {
-        fieldHistory.push({
-            boxes: cloneBoxes(currentSnapshot),
-            groupingMode: currentGroupingModeSnapshot,
-        });
-        if (fieldHistory.length > 100) fieldHistory.shift();
-    }
-
-    currentSnapshot = next;
-    currentGroupingModeSnapshot = nextGroupingMode;
+    // Before recording: carrying the row lines along is part of this change.
+    followTable(boxes);
+    if (!restoringHistory) history.record(layoutState(boxes));
     renderFieldList(boxes);
     renderLedgerGrid();
+    updateLedgerChecks(boxes);
     updateResetUI();
 }
 
@@ -476,6 +517,10 @@ function createFieldRow(index) {
     input.setAttribute('aria-label', `Field ${index + 1} name`);
     item.appendChild(input);
 
+    const tags = document.createElement('span');
+    tags.className = 'template-builder-field-tags d-none';
+    item.appendChild(tags);
+
     const groupBadge = document.createElement('span');
     groupBadge.className = 'template-builder-field-group d-none';
     item.appendChild(groupBadge);
@@ -584,6 +629,13 @@ function renderFieldList(boxes) {
                 groupBadge.title = group === null ? '' : `Person ${String(group).padStart(2, '0')}`;
             }
         }
+        const tags = item.querySelector('.template-builder-field-tags');
+        if (tags instanceof HTMLElement) {
+            const text = settingsTags(box);
+            tags.textContent = text;
+            tags.title = text ? `${box.name}: ${text}` : '';
+            tags.classList.toggle('d-none', text === '');
+        }
         removeButton?.setAttribute('aria-label', `Remove field ${index + 1}`);
     });
 
@@ -591,6 +643,19 @@ function renderFieldList(boxes) {
     selectAllInput.disabled = boxes.length === 0;
     renderPersonGroups(boxes);
     updateSelectionUI(marker.selectedIndexes());
+}
+
+const ROLE_LABELS = { name: 'Name', entry: 'Entry no.' };
+const TYPE_LABELS = { date: 'Date', number: 'Number', choice: 'List' };
+
+/** A marker's settings in a few words for the field list: "Name · Date · optional". */
+function settingsTags(box) {
+    const settings = markerFieldSettings(box);
+    return [
+        ROLE_LABELS[settings.role],
+        TYPE_LABELS[settings.type],
+        settings.required === false ? 'optional' : null,
+    ].filter(Boolean).join(' · ');
 }
 
 function centerFieldListRow(index, { centerPanel = true } = {}) {
@@ -633,7 +698,12 @@ function centerFieldListRow(index, { centerPanel = true } = {}) {
 
 function updateSelectionUI(indexes, context = {}) {
     const selected = new Set(indexes);
+    if (indexes.length > 0 && selectedRule !== null) {
+        selectedRule = null;
+        renderLedgerGrid();
+    }
     updateLedgerButtons(indexes);
+    renderFieldSettings(indexes);
 
     document.querySelectorAll('#fieldList .template-builder-field-item').forEach((item) => {
         item.classList.toggle('is-selected', selected.has(Number(item.dataset.fieldIndex)));
@@ -715,6 +785,74 @@ function useAutomaticPersonDetection() {
     clearBuilderError();
 }
 
+// ------------------------------------------------------------- field settings
+//
+// What the selected fields hold and how Staff check their values in Verify.
+// With several selected, a change applies to all of them (the role only fits
+// one field per person, so it is set one field at a time).
+
+const fieldRole = element('fieldRole', HTMLSelectElement);
+const fieldType = element('fieldType', HTMLSelectElement);
+const fieldOptions = element('fieldOptions', HTMLInputElement);
+const fieldHint = element('fieldHint', HTMLInputElement);
+const fieldRequired = element('fieldRequired', HTMLInputElement);
+
+function renderFieldSettings(indexes = marker.selectedIndexes()) {
+    const boxes = marker.toJSON();
+    const selected = indexes.map((index) => boxes[index]).filter(Boolean);
+    element('fieldSettingsCard').classList.toggle('d-none', selected.length === 0);
+    if (selected.length === 0) return;
+
+    const [first] = selected;
+    const settings = markerFieldSettings(first);
+    element('fieldSettingsName').textContent = selected.length === 1
+        ? `${first.name}${isColumn(first) ? ' · ledger column' : ''}`
+        : `${selected.length} selected: changes apply to all of them`;
+
+    fieldRole.disabled = selected.length !== 1;
+    fieldRole.value = selected.length === 1 ? (settings.role ?? '') : '';
+    fieldType.value = settings.type ?? 'text';
+    if (document.activeElement !== fieldOptions) fieldOptions.value = (settings.options ?? []).join(', ');
+    if (document.activeElement !== fieldHint) fieldHint.value = settings.hint ?? '';
+    fieldRequired.checked = settings.required !== false;
+    element('fieldOptionsGroup').classList.toggle('d-none', fieldType.value !== 'choice');
+}
+
+/** Whether two markers are in the same person row: one name and one entry number each. */
+function sameRow(a, b) {
+    if (isColumn(a) || isColumn(b)) return isColumn(a) && isColumn(b);
+    return groupingModeInput.value === 'custom'
+        && (positiveInteger(a.personGroup) ?? null) === (positiveInteger(b.personGroup) ?? null);
+}
+
+function applyFieldSettings(patch) {
+    const indexes = marker.selectedIndexes();
+    if (indexes.length === 0) return;
+
+    const boxes = marker.toJSON();
+    const chosen = new Set(indexes);
+    // Giving a field a role takes it from the field in the same row that had it.
+    const holder = patch.role ? boxes[indexes[0]] : null;
+    const affected = boxes
+        .map((box, index) => index)
+        .filter((index) => chosen.has(index)
+            || (holder && boxes[index].role === patch.role && sameRow(boxes[index], holder)));
+
+    marker.updateBoxes(affected, (box, index) => (chosen.has(index) ? patch : { role: null }));
+    clearBuilderError();
+}
+
+const choiceList = (text) => text.split(',').map((option) => option.trim()).filter(Boolean);
+
+fieldRole.addEventListener('change', () => applyFieldSettings({ role: fieldRole.value || null }));
+fieldType.addEventListener('change', () => {
+    element('fieldOptionsGroup').classList.toggle('d-none', fieldType.value !== 'choice');
+    applyFieldSettings({ type: fieldType.value, options: choiceList(fieldOptions.value) });
+});
+fieldOptions.addEventListener('input', () => applyFieldSettings({ options: choiceList(fieldOptions.value) }));
+fieldHint.addEventListener('input', () => applyFieldSettings({ hint: fieldHint.value }));
+fieldRequired.addEventListener('change', () => applyFieldSettings({ required: fieldRequired.checked }));
+
 function updateZoomUI(zoom) {
     element('zoomResetBtn', HTMLButtonElement).textContent = `${Math.round(zoom * 100)}%`;
     updateResetUI();
@@ -786,14 +924,18 @@ function handlePaperSettingChange() {
     updateResetUI();
 }
 
-function undoFieldChange() {
-    const previous = fieldHistory.pop();
+function undoLayoutChange() {
+    const previous = history.undo();
     if (!previous) return;
 
     restoringHistory = true;
     groupingModeInput.value = previous.groupingMode;
+    // Row lines first: restoring the markers redraws the grid from them.
+    ruledYs = normaliseRuledYs(previous.ruledYs);
+    selectedRule = null;
     marker.setBoxes(cloneBoxes(previous.boxes));
     restoringHistory = false;
+    history.sync(layoutState());
     clearBuilderError();
 }
 
@@ -842,7 +984,7 @@ function pasteCopiedFields() {
     const dy = maxY + distance <= 1 ? distance : (minY - distance >= 0 ? -distance : 0);
     const takenNames = new Set(existing.map((box) => box.name.trim().toLocaleLowerCase()));
     // A pasted copy is an ordinary field, never a second ledger column.
-    const copies = clipboard.map(({ kind, columnIndex, ...box }) => ({
+    const copies = clipboard.map(({ kind, columnIndex, role, ...box }) => ({
         ...box,
         name: nextCopyName(box.name, takenNames),
         x: box.x + dx,
@@ -920,7 +1062,8 @@ function validateFields() {
         }
 
         if (box.x < 0 || box.y < 0 || box.w < 0.01 || box.h < 0.01
-            || box.x + box.w > 1.00001 || box.y + box.h > 1.00001) {
+            || box.x + box.w > 1.00001 || box.y + box.h > 1.00001
+            || (normaliseAngle(box.angle) !== 0 && !markerInsidePage(box, canvas.width, canvas.height))) {
             invalidFieldIndexes.add(index);
         }
     });
@@ -928,7 +1071,7 @@ function validateFields() {
     renderFieldList(boxes);
 
     if (invalidFieldIndexes.size > 0) {
-        showBuilderError('Every field needs a unique name and a marker fully inside the document.');
+        showBuilderError('Every field needs a unique name and a marker fully inside the document (a tilted marker\'s corners too).');
         const firstInvalid = element('fieldList').querySelector('.template-builder-field-name.is-invalid');
         firstInvalid?.focus();
         return false;
@@ -943,7 +1086,7 @@ function serialiseFields() {
     container.replaceChildren();
 
     const boxes = marker.toJSON();
-    const fields = boxes.filter((box) => box.kind !== 'column').map((box) => ({
+    const fields = boxes.filter((box) => !isColumn(box)).map((box) => ({
             name: box.name.trim(),
             x: box.x.toFixed(5),
             y: box.y.toFixed(5),
@@ -951,15 +1094,17 @@ function serialiseFields() {
             height: box.h.toFixed(5),
             angle: normaliseAngle(box.angle),
             ...templatePersonPayload(box, groupingModeInput.value === 'custom'),
+            ...settingsPayload(box),
     }));
     // Left to right: a ledger row is read in column order.
     const columns = boxes
-        .filter((box) => box.kind === 'column')
+        .filter(isColumn)
         .sort((a, b) => a.x - b.x)
         .map((box) => ({
             name: box.name.trim(),
             box: [box.x, box.y, box.w, box.h].map((value) => Number(value.toFixed(5))),
             ...markerAngleMetadata(box),
+            ...settingsPayload(box),
         }));
 
     // One JSON input each avoids PHP's max_input_vars truncating large layouts.
@@ -974,6 +1119,18 @@ function serialiseFields() {
         input.value = JSON.stringify(value);
         container.appendChild(input);
     });
+}
+
+/** A marker's settings as the server takes them, defaults spelled out. */
+function settingsPayload(box) {
+    const settings = markerFieldSettings(box);
+    return {
+        role: settings.role ?? null,
+        required: settings.required !== false,
+        type: settings.type ?? 'text',
+        options: settings.options ?? null,
+        hint: settings.hint ?? null,
+    };
 }
 
 async function openSample(file, { pendingUpload = true } = {}) {
@@ -993,6 +1150,8 @@ async function openSample(file, { pendingUpload = true } = {}) {
     try {
         const measurement = await marker.load(file);
         sampleLoaded = true;
+        forgetSampleGrid();
+        loadPrintedLines();
         if (pendingUpload) pendingSampleFile = file;
         element('sampleFileName').textContent = file.name;
         element('sampleHint').classList.add('d-none');
@@ -1128,7 +1287,9 @@ function restoreBaseline() {
     }
 
     ruledYs = [...baselineRuledYs];
-    marker.setBoxes(cloneBoxes(baselineBoxes));
+    selectedRule = null;
+    estimatedYs = new Set();
+    replaceBoxes(baselineBoxes);
     marker.resetZoom();
     viewport.scrollTo({ top: 0, left: 0 });
     updatePaperPreview();
@@ -1177,9 +1338,36 @@ document.addEventListener('keydown', (event) => {
         return;
     }
 
-    if (commandPressed && !event.shiftKey && key === 'z' && fieldHistory.length > 0) {
+    if (commandPressed && !event.shiftKey && key === 'z' && history.canUndo) {
         event.preventDefault();
-        undoFieldChange();
+        undoLayoutChange();
+        return;
+    }
+
+    // A selected row line: arrow keys move it (Shift: 10 px), Delete removes it.
+    if (!commandPressed && !event.altKey && selectedRule !== null) {
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            event.preventDefault();
+            nudgeRule((event.key === 'ArrowUp' ? -1 : 1) * (event.shiftKey ? 10 : 1));
+            return;
+        }
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+            event.preventDefault();
+            removeRule(selectedRule);
+            return;
+        }
+        if (event.key === 'Escape') {
+            selectRule(null);
+            return;
+        }
+    }
+
+    // Arrow keys move the selected markers one screen pixel (Shift: 10).
+    const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+    if (!commandPressed && !event.altKey && arrow && marker.selectedIndexes().length > 0) {
+        event.preventDefault();
+        const step = event.shiftKey ? 10 : 1;
+        marker.nudgeSelected(arrow[0] * step, arrow[1] * step);
         return;
     }
 
@@ -1199,6 +1387,27 @@ form.querySelectorAll('button[type="submit"][data-publish]').forEach((button) =>
     });
 });
 
+// ------------------------------------------------------------ leaving the page
+//
+// Closing the tab, going back or following a link with unsaved changes asks
+// first. Saving the layout never does.
+
+const initialText = new Map(['name', 'description'].map((id) => [id, element(id).value]));
+let leavingBySave = false;
+
+function hasUnsavedChanges() {
+    return !layoutMatchesBaseline()
+        || pendingSampleFile !== null
+        || [...initialText].some(([id, value]) => element(id).value !== value);
+}
+
+window.addEventListener('beforeunload', (event) => {
+    if (leavingBySave || !hasUnsavedChanges()) return;
+    event.preventDefault();
+    // Some browsers still ask only when returnValue is set.
+    event.returnValue = '';
+});
+
 form.addEventListener('submit', (event) => {
     if (!addPendingField() || !validateFields()) {
         event.preventDefault();
@@ -1212,6 +1421,31 @@ form.addEventListener('submit', (event) => {
         return;
     }
 
+    const blocking = updateLedgerChecks().find((problem) => problem.blocking);
+    if (blocking) {
+        event.preventDefault();
+        showBuilderError(blocking.message);
+        return;
+    }
+
+    if (coveredFieldIndexes.length > 0 && !window.confirm(
+        `${coveredFieldIndexes.length === 1 ? '1 field covers' : `${coveredFieldIndexes.length} fields cover`} ledger cells. `
+        + 'Staff scans would read the handwriting under them as those fields, and those rows would lose their cells.\n\n'
+        + 'OK: save anyway.\nCancel: go back and move or remove them.',
+    )) {
+        event.preventDefault();
+        return;
+    }
+
+    if (publishIntent.value === '1' && ledgerColumns().length > 0 && !sampleLoaded && !window.confirm(
+        'This ledger has no sample page, so its row lines have not been checked against a real page.\n\n'
+        + 'OK: publish anyway.\nCancel: go back and add a sample.',
+    )) {
+        event.preventDefault();
+        return;
+    }
+
+    leavingBySave = true;
     serialiseFields();
     form.setAttribute('aria-busy', 'true');
     form.querySelectorAll('button[type="submit"]').forEach((button) => {
@@ -1234,6 +1468,11 @@ form.addEventListener('formdata', (event) => {
 // columns) and the y of every printed row line. Row lines are drawn in one
 // SVG over the page whose viewBox is 0-1000 in both directions, so they follow
 // every zoom without re-layout.
+//
+// The Align step places the row lines relative to the columns' band (their
+// median top and bottom), so the builder keeps the two together: moving or
+// stretching the table carries its row lines along, and columns sitting on
+// the first and last line follow those lines when they move.
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ledgerLayer = document.createElementNS(SVG_NS, 'svg');
@@ -1243,26 +1482,31 @@ ledgerLayer.setAttribute('preserveAspectRatio', 'none');
 ledgerLayer.setAttribute('aria-hidden', 'true');
 overlay.appendChild(ledgerLayer);
 
-let coveredFieldIndexes = [];
+// A row line dragged within this many screen pixels of a printed rule snaps onto it.
+const RULE_SNAP_PIXELS = 8;
+
+const ruleKey = (y) => Number(y).toFixed(5);
 
 function ledgerColumns(boxes = marker.toJSON()) {
-    return boxes.filter((box) => box.kind === 'column');
+    return boxes.filter(isColumn);
 }
 
-function medianGap(values) {
-    const gaps = values.slice(1).map((value, index) => value - values[index]).sort((a, b) => a - b);
-    return gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0.03;
-}
-
-function renderLedgerGrid() {
-    const columns = ledgerColumns();
+/**
+ * Draw row lines. While a line is dragged they are drawn where the pointer
+ * has them, before anything is committed; `dragging` marks the moving ones.
+ */
+function drawRules(ys = ruledYs, columns = ledgerColumns(), dragging = null) {
     const left = columns.length ? Math.min(...columns.map((c) => c.x)) : 0.02;
     const right = columns.length ? Math.max(...columns.map((c) => c.x + c.w)) : 0.98;
 
     ledgerLayer.replaceChildren();
-    ruledYs.forEach((y, index) => {
+    ys.forEach((y, index) => {
+        const estimated = estimatedYs.has(ruleKey(y));
         const group = document.createElementNS(SVG_NS, 'g');
         group.setAttribute('class', 'ledger-rule');
+        group.classList.toggle('is-selected', index === selectedRule);
+        group.classList.toggle('is-estimated', estimated);
+        group.classList.toggle('is-dragging', Boolean(dragging?.has(index)));
         group.dataset.index = String(index);
         const line = document.createElementNS(SVG_NS, 'line');
         const hit = document.createElementNS(SVG_NS, 'line');
@@ -1275,12 +1519,20 @@ function renderLedgerGrid() {
         line.setAttribute('class', 'ledger-rule__line');
         hit.setAttribute('class', 'ledger-rule__hit');
         const title = document.createElementNS(SVG_NS, 'title');
-        title.textContent = `Row line ${index + 1}: drag to move, double-click to remove`;
+        title.textContent = estimated
+            ? `Row line ${index + 1} was estimated: no printed rule was found here. Check it against the page.`
+            : `Row line ${index + 1}: click to select, drag to move, double-click to remove`;
         group.append(line, hit, title);
         ledgerLayer.appendChild(group);
     });
+}
+
+function renderLedgerGrid() {
+    const columns = ledgerColumns();
+    drawRules(ruledYs, columns);
 
     const rows = Math.max(0, ruledYs.length - 1);
+    const estimated = ruledYs.filter((y) => estimatedYs.has(ruleKey(y))).length;
     const badge = element('ledgerGridBadge');
     const ready = columns.length > 0 && ruledYs.length >= 2;
     badge.textContent = ready ? 'Ledger' : 'None';
@@ -1288,40 +1540,185 @@ function renderLedgerGrid() {
     element('ledgerGridSummary').textContent = columns.length === 0 && ruledYs.length === 0
         ? 'No ledger grid. This layout reads each field as a rectangle.'
         : `${columns.length} column${columns.length === 1 ? '' : 's'} · ${ruledYs.length} row line${ruledYs.length === 1 ? '' : 's'} (${rows} row${rows === 1 ? '' : 's'})`
-            + (columns.length > 0 && ruledYs.length < 2 ? ' — add the row lines before saving.' : '');
+            + (estimated > 0
+                ? ` · ${estimated} estimated below the last printed rule (amber): check ${estimated === 1 ? 'it' : 'them'} against the page.`
+                : '');
+
+    const rowsInput = element('evenRowsInput', HTMLInputElement);
+    if (document.activeElement !== rowsInput) rowsInput.value = rows > 0 ? String(rows) : '';
+    element('evenRowsBtn', HTMLButtonElement).disabled = ruledYs.length < 2;
+    element('removeRuledLineBtn', HTMLButtonElement).disabled = selectedRule === null;
     element('clearGridBtn', HTMLButtonElement).disabled = columns.length === 0 && ruledYs.length === 0;
 }
 
-function setRuledYs(next) {
-    ruledYs = normaliseRuledYs(next).filter((y, index, all) => index === 0 || y - all[index - 1] > 0.001);
+/**
+ * Fields covering ledger cells, and what is wrong with the grid, shown in the
+ * ledger card while the layout changes. Returns the grid's problems.
+ */
+function updateLedgerChecks(boxes = marker.toJSON()) {
+    coveredFieldIndexes = fieldsOverLedger(boxes, ruledYs);
+    element('ledgerCoveredNotice').classList.toggle('d-none', coveredFieldIndexes.length === 0);
+    element('ledgerCoveredMessage').textContent = coveredFieldIndexes.length === 1
+        ? '1 field covers ledger cells. The handwriting under it is read as that field, so those rows lose their cells.'
+        : `${coveredFieldIndexes.length} fields cover ledger cells. The handwriting under them is read as those fields, so those rows lose their cells.`;
+
+    const problems = ledgerGridProblems(ledgerColumns(boxes), ruledYs);
+    element('ledgerProblemList').replaceChildren(...problems.map((problem) => {
+        const item = document.createElement('li');
+        item.textContent = problem.message;
+        item.classList.toggle('is-blocking', problem.blocking);
+        return item;
+    }));
+    element('ledgerProblems').classList.toggle('d-none', problems.length === 0);
+
+    return problems;
+}
+
+/**
+ * The columns were moved or stretched as a table (their band changed): carry
+ * the row lines along, as the Align step would. A column added, removed or
+ * converted only resets the band.
+ */
+function followTable(boxes) {
+    const columns = boxes.filter(isColumn);
+    const band = columnBand(columns);
+
+    if (!restoringHistory && tableBand && band && columns.length === tableColumnCount
+        && ruledYs.length >= 2 && !sameBand(band, tableBand)) {
+        const from = tableBand;
+        ruledYs = remapRuledYs(ruledYs, from, band);
+        estimatedYs = new Set([...estimatedYs].map((key) => ruleKey(remapRuledYs([Number(key)], from, band)[0])));
+    }
+
+    tableBand = band;
+    tableColumnCount = columns.length;
+}
+
+/** While columns are dragged, their row lines move with them. */
+function previewTableFollow(boxes) {
+    const columns = boxes.filter(isColumn);
+    const band = columnBand(columns);
+    if (!tableBand || !band || columns.length !== tableColumnCount || ruledYs.length < 2) return;
+
+    drawRules(sameBand(band, tableBand) ? ruledYs : remapRuledYs(ruledYs, tableBand, band), columns);
+}
+
+/** Markers set by the builder itself, with the row lines already where they belong. */
+function replaceBoxes(boxes, { keepSelection = false } = {}) {
+    const selection = keepSelection ? marker.selectedIndexes() : [];
+    const columns = boxes.filter(isColumn);
+    tableBand = columnBand(columns);
+    tableColumnCount = columns.length;
+    marker.setBoxes(cloneBoxes(boxes));
+    if (selection.length > 0) marker.selectIndexes(selection);
+}
+
+/**
+ * New row lines, as one undoable change. Columns sitting on the first or the
+ * last line follow it, so the table's top and bottom stay on its lines.
+ */
+function applyGrid(nextYs, boxes = marker.toJSON()) {
+    const next = normaliseRuledYs(nextYs).filter((y, index, all) => index === 0 || y - all[index - 1] > 0.0005);
+    const followed = followFirstAndLastLine(boxes, ruledYs, next);
+    ruledYs = next;
+    if (selectedRule !== null && selectedRule >= ruledYs.length) selectedRule = null;
+
+    if (followed !== boxes) {
+        replaceBoxes(followed, { keepSelection: true });
+        return;
+    }
+
+    history.record(layoutState());
     renderLedgerGrid();
+    updateLedgerChecks();
     updateResetUI();
 }
 
-// Drag a row line vertically; double-click removes it.
+/**
+ * The row line the arrow keys and Delete act on (null: none). A row line and
+ * markers are never selected together.
+ */
+function selectRule(index) {
+    selectedRule = Number.isInteger(index) && index >= 0 && index < ruledYs.length ? index : null;
+    if (selectedRule !== null) marker.clearSelection();
+    renderLedgerGrid();
+}
+
+function removeRule(index) {
+    if (!Number.isInteger(index) || index < 0 || index >= ruledYs.length) return;
+    selectedRule = null;
+    applyGrid(ruledYs.filter((_, candidate) => candidate !== index));
+}
+
+/** Move the selected row line by some screen pixels (arrow keys). */
+function nudgeRule(pixels) {
+    if (selectedRule === null) return;
+    const height = Math.max(1, overlay.getBoundingClientRect().height);
+    const from = ruledYs[selectedRule];
+    const y = clampRuledY(ruledYs, selectedRule, from + pixels / height);
+    if (Math.abs(y - from) < 1e-9) return;
+
+    // Placed by hand: no longer an estimate.
+    estimatedYs.delete(ruleKey(from));
+    applyGrid(ruledYs.map((value, index) => (index === selectedRule ? y : value)));
+}
+
+// Click a row line to select it, drag it to move it (Shift: every line
+// together), double-click it to remove it. Near a printed rule it snaps on
+// (Alt: place freely).
 ledgerLayer.addEventListener('pointerdown', (event) => {
     const group = event.target instanceof Element ? event.target.closest('.ledger-rule') : null;
     if (!group || event.button !== 0 || event.ctrlKey) return;
     event.preventDefault();
     event.stopPropagation();
 
+    // Take focus off a name box, where the arrow keys would only move the caret.
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused.matches('input, textarea, select')) focused.blur();
+
     const index = Number(group.dataset.index);
-    group.classList.add('is-dragging');
-    const move = (moveEvent) => {
+    const together = event.shiftKey;
+    const origin = [...ruledYs];
+    const pageY = (clientY) => {
         const bounds = overlay.getBoundingClientRect();
-        const y = Math.min(1, Math.max(0, (moveEvent.clientY - bounds.top) / Math.max(1, bounds.height)));
-        ruledYs[index] = y;
-        group.querySelectorAll('line').forEach((line) => {
-            line.setAttribute('y1', String(y * 1000));
-            line.setAttribute('y2', String(y * 1000));
-        });
+        return { y: (clientY - bounds.top) / Math.max(1, bounds.height), height: Math.max(1, bounds.height) };
     };
+    const startY = pageY(event.clientY).y;
+    const moving = new Set(together ? origin.map((_, i) => i) : [index]);
+    let current = origin;
+    selectRule(index);
+
+    const move = (moveEvent) => {
+        const { y, height } = pageY(moveEvent.clientY);
+        const snap = (value) => (printedLines && !moveEvent.altKey
+            ? nearestLine(value, printedLines.horizontal, RULE_SNAP_PIXELS / height) ?? value
+            : value);
+
+        current = together
+            ? shiftRuledYs(origin, snap(origin[index] + y - startY) - origin[index])
+            : origin.map((value, i) => (i === index ? clampRuledY(origin, index, snap(y)) : value));
+        drawRules(current, ledgerColumns(), moving);
+    };
+
     const end = () => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', end);
         window.removeEventListener('pointercancel', end);
-        setRuledYs(ruledYs);
+
+        if (current.every((y, i) => Math.abs(y - origin[i]) < 1e-9)) {
+            renderLedgerGrid();
+            return;
+        }
+
+        if (together) {
+            const dy = current[0] - origin[0];
+            estimatedYs = new Set([...estimatedYs].map((key) => ruleKey(Number(key) + dy)));
+        } else {
+            estimatedYs.delete(ruleKey(origin[index]));
+        }
+        applyGrid(current);
     };
+
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', end);
     window.addEventListener('pointercancel', end);
@@ -1331,8 +1728,12 @@ ledgerLayer.addEventListener('dblclick', (event) => {
     const group = event.target instanceof Element ? event.target.closest('.ledger-rule') : null;
     if (!group) return;
     event.preventDefault();
-    const index = Number(group.dataset.index);
-    setRuledYs(ruledYs.filter((_, candidate) => candidate !== index));
+    removeRule(Number(group.dataset.index));
+});
+
+// A click on the page around the markers lets go of the row line.
+overlay.addEventListener('pointerdown', (event) => {
+    if (event.target === overlay && selectedRule !== null) selectRule(null);
 });
 
 function uniqueName(base, taken) {
@@ -1347,46 +1748,13 @@ function uniqueName(base, taken) {
 }
 
 /**
- * Fields sitting inside the ruled table: after switching to a ledger grid they
- * would still be cropped as rectangles, so the admin is offered to remove them.
+ * The sample's printed rules and suggested grid, asked once per sample: for
+ * magnetic snapping as soon as the sample opens, and for "Detect from sample".
  */
-function updateCoveredFields() {
-    const boxes = marker.toJSON();
-    const columns = ledgerColumns(boxes);
-    coveredFieldIndexes = [];
+function requestSampleGrid() {
+    if (sampleGrid) return sampleGrid;
 
-    if (columns.length > 0 && ruledYs.length >= 2) {
-        const left = Math.min(...columns.map((c) => c.x));
-        const right = Math.max(...columns.map((c) => c.x + c.w));
-        const top = ruledYs[0];
-        const bottom = ruledYs[ruledYs.length - 1];
-        coveredFieldIndexes = boxes.flatMap((box, index) => {
-            if (box.kind === 'column') return [];
-            const cx = box.x + box.w / 2;
-            const cy = box.y + box.h / 2;
-            return cx >= left && cx <= right && cy >= top && cy <= bottom ? [index] : [];
-        });
-    }
-
-    const notice = element('ledgerCoveredNotice');
-    notice.classList.toggle('d-none', coveredFieldIndexes.length === 0);
-    element('ledgerCoveredMessage').textContent = coveredFieldIndexes.length === 1
-        ? '1 field sits inside the ruled table and would still be read as a rectangle.'
-        : `${coveredFieldIndexes.length} fields sit inside the ruled table and would still be read as rectangles.`;
-}
-
-async function detectLedgerGrid() {
-    if (!sampleLoaded) {
-        showBuilderError('Choose a sample page first: the grid is found from its printed rules.');
-        return;
-    }
-
-    const button = element('detectGridBtn', HTMLButtonElement);
-    button.disabled = true;
-    button.setAttribute('aria-busy', 'true');
-    clearBuilderError();
-
-    try {
+    const request = (async () => {
         const blob = await new Promise((resolve, reject) => {
             canvas.toBlob((result) => (result ? resolve(result) : reject(new Error('The sample could not be prepared.'))), 'image/png');
         });
@@ -1407,18 +1775,68 @@ async function detectLedgerGrid() {
         if (!response.ok) {
             throw new Error(payload?.message || `Grid detection failed with HTTP ${response.status}.`);
         }
+        return payload ?? {};
+    })();
+
+    sampleGrid = request;
+    // A failed request is asked again next time.
+    request.catch(() => {
+        if (sampleGrid === request) sampleGrid = null;
+    });
+    return request;
+}
+
+function forgetSampleGrid() {
+    sampleGrid = null;
+    printedLines = null;
+    marker.setSnapLines(null);
+}
+
+function usePrintedLines(lines) {
+    printedLines = lines && Array.isArray(lines.horizontal)
+        ? { horizontal: lines.horizontal, vertical: Array.isArray(lines.vertical) ? lines.vertical : [] }
+        : null;
+    marker.setSnapLines(printedLines);
+}
+
+/** In the background, so markers and row lines snap from the start. */
+async function loadPrintedLines() {
+    const request = requestSampleGrid();
+    try {
+        const payload = await request;
+        if (request === sampleGrid) usePrintedLines(payload?.lines);
+    } catch (error) {
+        console.warn('Printed lines for snapping could not be found:', error);
+    }
+}
+
+async function detectLedgerGrid() {
+    if (!sampleLoaded) {
+        showBuilderError('Choose a sample page first: the grid is found from its printed rules.');
+        return;
+    }
+
+    const button = element('detectGridBtn', HTMLButtonElement);
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    clearBuilderError();
+
+    try {
+        const payload = await requestSampleGrid();
         if (!Array.isArray(payload?.ruled_ys) || payload.ruled_ys.length < 2) {
             throw new Error('No evenly ruled rows were found on this sample. Add the row lines by hand.');
         }
+        if (!printedLines) usePrintedLines(payload.lines);
 
         const boxes = marker.toJSON();
-        const top = payload.ruled_ys[0];
-        const bottom = payload.ruled_ys[payload.ruled_ys.length - 1];
+        const detected = normaliseRuledYs(payload.ruled_ys);
+        const top = detected[0];
+        const bottom = detected[detected.length - 1];
         let next = boxes;
 
         if (ledgerColumns(boxes).length === 0 && Array.isArray(payload.columns) && payload.columns.length > 0) {
             // Name each column after the topmost field already sitting in it.
-            const fields = boxes.filter((box) => box.kind !== 'column');
+            const fields = boxes.filter((box) => !isColumn(box));
             const taken = new Set(boxes.map((box) => box.name.trim().toLocaleLowerCase()));
             const columns = payload.columns.map((column, index) => {
                 const [x, , w] = column.box;
@@ -1440,17 +1858,16 @@ async function detectLedgerGrid() {
             next = [...boxes, ...columns];
         } else {
             // Keep the admin's columns; stretch them over the detected rows.
-            next = boxes.map((box) => (box.kind === 'column' ? { ...box, y: top, h: bottom - top } : box));
+            next = boxes.map((box) => (isColumn(box) ? { ...box, y: top, h: bottom - top } : box));
         }
 
-        ruledYs = normaliseRuledYs(payload.ruled_ys);
-        marker.setBoxes(cloneBoxes(next));
-        updateCoveredFields();
-
-        const estimated = Number(payload.estimated_ys) || 0;
-        element('ledgerGridSummary').textContent += estimated > 0
-            ? ` — ${estimated} line${estimated === 1 ? '' : 's'} below the last printed rule were estimated; check them against the page.`
-            : ' — check every line against the page.';
+        // Lines below the last printed rule are Detect's estimate: shown
+        // amber until each is checked (moved or nudged) against the page.
+        const estimated = Math.max(0, Math.min(detected.length, Number(payload.estimated_ys) || 0));
+        estimatedYs = new Set(detected.slice(detected.length - estimated).map(ruleKey));
+        selectedRule = null;
+        ruledYs = detected;
+        replaceBoxes(next);
     } catch (error) {
         showBuilderError(error instanceof Error ? error.message : 'The grid could not be detected.');
     } finally {
@@ -1462,7 +1879,8 @@ async function detectLedgerGrid() {
 function updateLedgerButtons(indexes = marker.selectedIndexes()) {
     const boxes = marker.toJSON();
     element('makeColumnsBtn', HTMLButtonElement).disabled = indexes.length === 0
-        || indexes.every((index) => boxes[index]?.kind === 'column');
+        || indexes.every((index) => isColumn(boxes[index]));
+    element('makeFieldsBtn', HTMLButtonElement).disabled = !indexes.some((index) => isColumn(boxes[index]));
 }
 
 element('detectGridBtn', HTMLButtonElement).addEventListener('click', detectLedgerGrid);
@@ -1483,29 +1901,244 @@ element('makeColumnsBtn', HTMLButtonElement).addEventListener('click', () => {
             ...(top !== null ? { y: top, h: bottom - top } : {}),
         };
     })));
-    updateCoveredFields();
+});
+
+// Back from a column to a field, read as one rectangle (Detect splits it
+// into its written lines). The row lines stay for the columns that remain.
+element('makeFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
+    const selected = marker.selectedIndexes();
+    const boxes = marker.toJSON();
+    if (!selected.some((index) => isColumn(boxes[index]))) return;
+
+    const chosen = new Set(selected);
+    marker.setBoxes(cloneBoxes(boxes.map((box, index) => (
+        chosen.has(index) && isColumn(box) ? { ...box, kind: null } : box
+    ))));
+    marker.selectIndexes(selected);
 });
 
 element('addRuledLineBtn', HTMLButtonElement).addEventListener('click', () => {
-    if (ruledYs.length === 0) {
-        setRuledYs([0.2, 0.25]);
+    const inserted = insertRuledY(ruledYs, selectedRule);
+    if (!inserted) {
+        showBuilderError('There is no room for another row line there. Select a taller row, or move the lines apart first.');
         return;
     }
-    const last = ruledYs[ruledYs.length - 1];
-    setRuledYs([...ruledYs, Math.min(1, last + medianGap(ruledYs))]);
+    clearBuilderError();
+    applyGrid(inserted.ys);
+    selectRule(inserted.index);
+});
+
+element('removeRuledLineBtn', HTMLButtonElement).addEventListener('click', () => removeRule(selectedRule));
+
+element('evenRowsBtn', HTMLButtonElement).addEventListener('click', () => {
+    const spaced = distributeRuledYs(ruledYs, element('evenRowsInput', HTMLInputElement).value);
+    if (!spaced) {
+        showBuilderError(ruledYs.length < 2
+            ? 'Place the first and the last row line first.'
+            : 'Choose a whole number of rows; a row cannot be thinner than a few pixels.');
+        return;
+    }
+    clearBuilderError();
+    // Placed by the admin now, not estimated.
+    estimatedYs = new Set();
+    selectedRule = null;
+    applyGrid(spaced);
+});
+
+element('evenRowsInput', HTMLInputElement).addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    element('evenRowsBtn', HTMLButtonElement).click();
 });
 
 element('clearGridBtn', HTMLButtonElement).addEventListener('click', () => {
     ruledYs = [];
-    marker.setBoxes(cloneBoxes(marker.toJSON().filter((box) => box.kind !== 'column')));
-    updateCoveredFields();
+    selectedRule = null;
+    estimatedYs = new Set();
+    replaceBoxes(marker.toJSON().filter((box) => !isColumn(box)));
+});
+
+element('selectCoveredFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
+    if (coveredFieldIndexes.length > 0) marker.selectIndexes(coveredFieldIndexes, { source: 'group' });
 });
 
 element('removeCoveredFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
     const covered = new Set(coveredFieldIndexes);
-    marker.setBoxes(cloneBoxes(marker.toJSON().filter((_, index) => !covered.has(index))));
-    updateCoveredFields();
+    replaceBoxes(marker.toJSON().filter((_, index) => !covered.has(index)));
 });
+
+// ------------------------------------------------------------ test on sample
+//
+// Outline the sample with the layout as it stands, saved or not, exactly as
+// Detect does it for Staff: the page straightened, the markers fitted to its
+// table, every line cut and put in a row. Nothing is read or stored.
+
+const TEST_COLOURS = {
+    placed: ['rgba(14, 154, 167, .16)', '#0e9aa7'],
+    field: ['rgba(105, 108, 255, .16)', '#696cff'],
+    shared: ['rgba(255, 171, 0, .22)', '#e59500'],
+    'no-row': ['rgba(255, 62, 29, .2)', '#ff3e1d'],
+};
+
+/** The markers as the server's line detection takes them (page fractions). */
+function testGeometry() {
+    const boxes = marker.toJSON();
+    const columns = boxes.filter(isColumn);
+    return {
+        columns: columns.map((box) => ({ name: box.name.trim(), box: [box.x, box.y, box.w, box.h], ...markerAngleMetadata(box) })),
+        ruled_ys: columns.length > 0 ? ruledYs : [],
+        fields: boxes.filter((box) => !isColumn(box)).map((box) => ({
+            name: box.name.trim(),
+            box: [box.x, box.y, box.w, box.h],
+            ...(groupingModeInput.value === 'custom' && positiveInteger(box.personGroup) !== null
+                ? { person_group: positiveInteger(box.personGroup), person_field_order: nonNegativeInteger(box.personFieldOrder) ?? 0 }
+                : {}),
+            ...markerAngleMetadata(box),
+        })),
+    };
+}
+
+function loadImage(source) {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('The tested page could not be shown.'));
+        image.src = source;
+    });
+}
+
+/** The page with every outline over it, and the row lines the test fitted. */
+async function drawTest(result) {
+    const target = element('layoutTestCanvas', HTMLCanvasElement);
+    const page = result.image ? await loadImage(result.image) : canvas;
+    const [width, height] = Array.isArray(result.size) ? result.size : [page.width, page.height];
+    target.width = width;
+    target.height = height;
+    const context = target.getContext('2d');
+    context.drawImage(page, 0, 0, width, height);
+
+    const fitted = result.geometry ?? {};
+    const columns = Array.isArray(fitted.columns) ? fitted.columns : [];
+    if (columns.length > 0) {
+        const left = Math.min(...columns.map((column) => column.box[0])) * width;
+        const right = Math.max(...columns.map((column) => column.box[0] + column.box[2])) * width;
+        context.save();
+        context.strokeStyle = 'rgba(14, 154, 167, .7)';
+        context.setLineDash([8, 5]);
+        context.lineWidth = 1.5;
+        (fitted.ruled_ys ?? []).forEach((y) => {
+            context.beginPath();
+            context.moveTo(left, y * height);
+            context.lineTo(right, y * height);
+            context.stroke();
+        });
+        context.restore();
+    }
+
+    context.lineWidth = 2;
+    result.lines.forEach((line) => {
+        if (!Array.isArray(line.polygon) || line.polygon.length < 3) return;
+        const [fill, stroke] = TEST_COLOURS[testLineStatus(line)];
+        context.beginPath();
+        line.polygon.forEach(([x, y], index) => (index === 0 ? context.moveTo(x, y) : context.lineTo(x, y)));
+        context.closePath();
+        context.fillStyle = fill;
+        context.fill();
+        context.strokeStyle = stroke;
+        context.stroke();
+    });
+}
+
+function showTestResult(result) {
+    const requiredColumns = ledgerColumns()
+        .filter((box) => markerFieldSettings(box).required !== false)
+        .map((box) => box.name);
+    const summary = summariseTest(result, requiredColumns);
+    const columns = new Set(result.lines.map((line) => line.column).filter(Boolean)).size;
+
+    element('layoutTestSummary').textContent = [
+        `${summary.lines} ${summary.lines === 1 ? 'line' : 'lines'}`,
+        summary.rows > 0 ? `${summary.rows} ${summary.rows === 1 ? 'row' : 'rows'}` : null,
+        `${columns} ${columns === 1 ? 'column or field' : 'columns and fields'}`,
+        summary.noRow + summary.shared > 0 ? `${summary.noRow + summary.shared} to review` : 'none to review',
+    ].filter(Boolean).join(' · ');
+
+    const findings = [
+        ...testFindings(summary),
+        ...gridNotes(result.notes).map((text) => ({ level: 'warning', text })),
+    ];
+    element('layoutTestFindings').replaceChildren(...(findings.length > 0 ? findings : [{
+        level: 'ok',
+        text: 'Every line landed in a row and a column. Check the outlines below against the page.',
+    }]).map((finding) => {
+        const item = document.createElement('li');
+        item.className = `is-${finding.level}`;
+        item.textContent = finding.text;
+        return item;
+    }));
+}
+
+async function testLayout() {
+    if (!sampleLoaded) {
+        showBuilderError('Choose a sample page first: the layout is tested on it.');
+        return;
+    }
+    const blocking = updateLedgerChecks().find((problem) => problem.blocking);
+    if (blocking) {
+        showBuilderError(blocking.message);
+        return;
+    }
+    if (marker.toJSON().length === 0) {
+        showBuilderError('Add a field or a ledger column to test.');
+        return;
+    }
+
+    const button = element('testLayoutBtn', HTMLButtonElement);
+    const status = element('layoutTestStatus');
+    const statusText = element('layoutTestStatusText');
+    button.disabled = true;
+    clearBuilderError();
+    status.classList.remove('d-none', 'is-error');
+    status.querySelector('.spinner-border')?.classList.remove('d-none');
+    statusText.textContent = 'Outlining every line on the sample. This takes about half a minute.';
+    element('layoutTestResult').classList.add('d-none');
+    window.bootstrap.Modal.getOrCreateInstance(element('layoutTestModal')).show();
+
+    try {
+        const blob = await new Promise((resolve, reject) => {
+            canvas.toBlob((result) => (result ? resolve(result) : reject(new Error('The sample could not be prepared.'))), 'image/png');
+        });
+        const data = new FormData();
+        data.set('page', blob, 'sample.png');
+        data.set('geometry_json', JSON.stringify(testGeometry()));
+
+        const response = await window.fetch(config.testLayoutUrl, {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': config.csrf, 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+            body: data,
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !Array.isArray(payload?.lines)) {
+            const firstError = payload?.errors ? Object.values(payload.errors).flat()[0] : null;
+            throw new Error(firstError || payload?.message
+                || (response.ok ? 'The test finished without a result. Try again.' : `The test failed with HTTP ${response.status}.`));
+        }
+
+        await drawTest(payload);
+        showTestResult(payload);
+        status.classList.add('d-none');
+        element('layoutTestResult').classList.remove('d-none');
+    } catch (error) {
+        status.classList.add('is-error');
+        status.querySelector('.spinner-border')?.classList.add('d-none');
+        statusText.textContent = error instanceof Error ? error.message : 'The layout could not be tested.';
+    } finally {
+        button.disabled = false;
+    }
+}
+
+element('testLayoutBtn', HTMLButtonElement).addEventListener('click', testLayout);
 
 marker.setBoxes(cloneBoxes(initialBoxes));
 renderLedgerGrid();

@@ -143,6 +143,9 @@
                                                     {{ $layout->creator?->name ?? 'System' }}
                                                     &middot; Updated {{ $layout->updated_at->diffForHumans() }}
                                                 </small>
+                                                @if ($layout->parent)
+                                                    <small class="d-block text-muted mt-1">Based on “{{ $layout->parent->name }}”</small>
+                                                @endif
                                                 <small class="d-block text-muted mt-1">
                                                     {{ $layout->paper_size->label() }}
                                                     ({{ $layout->paperDimensionsLabel() }})
@@ -159,7 +162,16 @@
                                                     <small class="d-block text-muted mt-1">No sample stored</small>
                                                 @endif
                                             </td>
-                                            <td>{{ $layout->fields_count }}</td>
+                                            <td>
+                                                @if ($layout->isLedger())
+                                                    {{ count($layout->columns) }} {{ Str::plural('column', count($layout->columns)) }}
+                                                    @if ($layout->fields_count > 0)
+                                                        <small class="d-block text-muted">+ {{ $layout->fields_count }} {{ Str::plural('field', $layout->fields_count) }}</small>
+                                                    @endif
+                                                @else
+                                                    {{ $layout->fields_count }}
+                                                @endif
+                                            </td>
                                             <td>{{ $layout->records_count }}</td>
                                             <td>
                                                 @if ($layout->is_active)
@@ -170,12 +182,28 @@
                                                 @else
                                                     <span class="badge bg-label-secondary">Draft</span>
                                                 @endif
+                                                @if ($layout->is_active || $layout->records_count > 0 || $layout->pages_count > 0)
+                                                    <small class="d-block text-muted mt-1" title="Saving changed markers makes a new version, so records keep this one">
+                                                        <i class="icon-base bx bx-lock-alt icon-xs" aria-hidden="true"></i>
+                                                        Edits make a new version
+                                                    </small>
+                                                @endif
                                             </td>
                                             <td class="text-end text-nowrap">
                                                 <a href="{{ route('templates.edit', $layout) }}"
                                                    class="btn btn-sm btn-label-primary template-library-edit-btn">
                                                     Edit layout
                                                 </a>
+
+                                                <form method="POST" action="{{ route('templates.duplicate', $layout) }}"
+                                                      class="d-inline">
+                                                    @csrf
+                                                    <button class="btn btn-sm btn-label-secondary" type="submit"
+                                                            title="Make a draft copy of this layout">
+                                                        <i class="icon-base bx bx-copy icon-sm me-1" aria-hidden="true"></i>
+                                                        Duplicate
+                                                    </button>
+                                                </form>
 
                                                 @unless ($layout->is_active)
                                                     <form method="POST" action="{{ route('templates.activate', $layout) }}"
