@@ -736,17 +736,58 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   transition: opacity .12s ease, transform .12s ease, visibility .12s ease;
 }
 
+// Resize handles on every corner and side, shown on the selected marker only, so a
+// full ledger of columns does not bristle with handles.
 .field-box-handle {
   position: absolute;
-  right: -6px;
-  bottom: -6px;
   width: 12px;
   height: 12px;
   background-color: #fff;
   border: 2px solid var(--bs-primary);
   border-radius: 50%;
-  cursor: nwse-resize;
   touch-action: none;
+  z-index: 1;
+
+  &.is-nw { top: -6px; left: -6px; cursor: nwse-resize; }
+  &.is-ne { top: -6px; right: -6px; cursor: nesw-resize; }
+  &.is-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+  &.is-sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+
+  // Sides: short bars at the midpoints.
+  &.is-n,
+  &.is-s {
+    left: 50%;
+    width: 18px;
+    height: 8px;
+    margin-left: -9px;
+    border-radius: 4px;
+    cursor: ns-resize;
+  }
+  &.is-n { top: -4px; }
+  &.is-s { bottom: -4px; }
+
+  &.is-e,
+  &.is-w {
+    top: 50%;
+    width: 8px;
+    height: 18px;
+    margin-top: -9px;
+    border-radius: 4px;
+    cursor: ew-resize;
+  }
+  &.is-e { right: -4px; }
+  &.is-w { left: -4px; }
+
+  visibility: hidden;
+}
+
+// Only on a clicked marker, never on hover: neighbouring columns share edges, and
+// handles popping up under the pointer as it passes over them pile up on each other.
+.field-box.is-selected,
+.field-box.is-active {
+  > .field-box-handle {
+    visibility: visible;
+  }
 }
 
 // Tilt knob: a round button with a turning arrow on a short stem below the

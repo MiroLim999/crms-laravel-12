@@ -97,3 +97,45 @@ test('a dragged edge snaps to the nearest printed line within reach, and only th
     assert.deepEqual(magnetShift([0.2, 0.4], [0.3], 0.01), { shift: 0, line: null });
     assert.deepEqual(magnetShift([0.2], null, 0.01), { shift: 0, line: null });
 });
+
+import { RESIZE_HANDLES, resizeRect } from '../../resources/js/field-marker.js';
+
+test('every corner and side has a resize handle', () => {
+    assert.deepEqual([...RESIZE_HANDLES].sort(), ['e', 'n', 'ne', 'nw', 's', 'se', 'sw', 'w']);
+});
+
+test('a handle moves only the sides it touches; the opposite sides stay put', () => {
+    // A 100 x 40 box dragged by 10 right and 6 down.
+    assert.deepEqual(resizeRect(100, 40, 'se', 10, 6, 5, 5), { left: 0, top: 0, right: 110, bottom: 46 });
+    assert.deepEqual(resizeRect(100, 40, 'nw', 10, 6, 5, 5), { left: 10, top: 6, right: 100, bottom: 40 });
+    assert.deepEqual(resizeRect(100, 40, 'e', 10, 6, 5, 5), { left: 0, top: 0, right: 110, bottom: 40 });
+    assert.deepEqual(resizeRect(100, 40, 'w', -10, 6, 5, 5), { left: -10, top: 0, right: 100, bottom: 40 });
+    assert.deepEqual(resizeRect(100, 40, 'n', 10, -6, 5, 5), { left: 0, top: -6, right: 100, bottom: 40 });
+    assert.deepEqual(resizeRect(100, 40, 's', 10, 6, 5, 5), { left: 0, top: 0, right: 100, bottom: 46 });
+});
+
+test('a side cannot be dragged past the opposite one', () => {
+    assert.deepEqual(resizeRect(100, 40, 'w', 500, 0, 5, 5), { left: 95, top: 0, right: 100, bottom: 40 });
+    assert.deepEqual(resizeRect(100, 40, 'se', -500, -500, 5, 5), { left: 0, top: 0, right: 5, bottom: 5 });
+});
+
+test('resizing a turned field by its left side keeps its right side where it was', () => {
+    const width = 1000;
+    const height = 600;
+    const box = { name: 'Remarks', x: 0.3, y: 0.3, w: 0.2, h: 0.1, angle: 30 };
+    const rightMiddle = (b) => {
+        const centre = { x: (b.x + b.w / 2) * width, y: (b.y + b.h / 2) * height };
+        const offset = turnPoint(b.w * width / 2, 0, b.angle);
+        return { x: centre.x + offset.x, y: centre.y + offset.y };
+    };
+    const before = rightMiddle(box);
+
+    // Drag the left side 40 px outward, along the field's own width.
+    const along = turnPoint(-40, 0, 30);
+    FieldMarker.prototype._dragTurned.call({}, [{ box, ...box }], 'w', along.x, along.y, width, height);
+
+    assert.ok(Math.abs(box.w * width - 240) < 1e-6);
+    assert.ok(Math.abs(box.h * height - 60) < 1e-6);
+    const after = rightMiddle(box);
+    assert.ok(Math.hypot(after.x - before.x, after.y - before.y) < 1e-6);
+});

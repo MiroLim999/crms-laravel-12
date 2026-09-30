@@ -105,6 +105,29 @@ export function magnetShift(edges, lines, reach) {
     return best ?? { shift: 0, line: null };
 }
 
+/** Resize handles: four corners and four edge midpoints, by compass direction. */
+export const RESIZE_HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+
+/**
+ * A box of size w x h resized by dragging one handle by (dx, dy), all in the
+ * box's own upright frame. Only the sides the handle touches move ("n" the top,
+ * "se" the right and bottom); the opposite sides stay put. A side is never
+ * dragged past the point where the box would be smaller than the minimum.
+ *
+ * @returns {{left: number, top: number, right: number, bottom: number}} relative to the old top-left
+ */
+export function resizeRect(w, h, handle, dx, dy, minW, minH) {
+    let left = 0;
+    let top = 0;
+    let right = w;
+    let bottom = h;
+    if (handle.includes('w')) left = Math.min(dx, w - minW);
+    if (handle.includes('e')) right = Math.max(w + dx, minW);
+    if (handle.includes('n')) top = Math.min(dy, h - minH);
+    if (handle.includes('s')) bottom = Math.max(h + dy, minH);
+    return { left, top, right, bottom };
+}
+
 /** (x, y) turned clockwise on screen by the given degrees (y points down). */
 export function turnPoint(x, y, degrees) {
     const radians = degrees * Math.PI / 180;
@@ -730,9 +753,15 @@ export class FieldMarker {
         el.appendChild(label);
 
         if (!this.readOnly) {
-            const handle = document.createElement('span');
-            handle.className = 'field-box-handle';
-            el.appendChild(handle);
+            // Every corner and every side can be dragged, so one side is fixed
+            // without moving the others.
+            const handles = RESIZE_HANDLES.map((direction) => {
+                const handle = document.createElement('span');
+                handle.className = `field-box-handle is-${direction}`;
+                handle.dataset.handle = direction;
+                el.appendChild(handle);
+                return handle;
+            });
 
             // Below the bottom edge, where the label above does not cover it.
             const rotator = document.createElement('span');
@@ -742,18 +771,20 @@ export class FieldMarker {
             rotator.innerHTML = ROTATE_ICON;
             el.appendChild(rotator);
 
-            this._makeInteractive(el, handle, box, rotator);
+            this._makeInteractive(el, handles, box, rotator);
         }
 
         return el;
     }
 
     /**
-     * Drag to move, corner handle to resize. Pointer events so it works with
-     * touch and pen as well as mouse.
+     * Drag to move, a corner or side handle to resize. Pointer events so it
+     * works with touch and pen as well as mouse.
      */
-    _makeInteractive(el, handle, box, rotator = null) {
+    _makeInteractive(el, handles, box, rotator = null) {
         let mode = null;
+        // Which handle a resize is using ('se' for the bottom-right corner).
+        let direction = 'se';
         let startX = 0;
         let startY = 0;
         let origins = [];
@@ -831,7 +862,8 @@ export class FieldMarker {
                 }
                 this._turnBoxes(origins, degrees);
             } else if (origins.some((origin) => normaliseAngle(origin.angle) !== 0)) {
-                this._dragTurned(origins, mode, event.clientX - startX, event.clientY - startY, width, height);
+                this._dragTurned(origins, mode === 'resize' ? direction : mode,
+                    event.clientX - startX, event.clientY - startY, width, height);
             } else if (mode === 'move') {
                 const minDx = Math.max(...origins.map((origin) => -origin.x));
                 const maxDx = Math.min(...origins.map((origin) => 1 - origin.x - origin.w));
@@ -860,27 +892,40 @@ export class FieldMarker {
                     origin.box.y = origin.y + boundedY;
                 });
             } else {
-                const minDw = Math.max(...origins.map((origin) => MIN_FRACTION - origin.w));
-                const maxDw = Math.min(...origins.map((origin) => 1 - origin.x - origin.w));
-                const minDh = Math.max(...origins.map((origin) => MIN_FRACTION - origin.h));
-                const maxDh = Math.min(...origins.map((origin) => 1 - origin.y - origin.h));
-                let boundedW = clamp(dx, minDw, maxDw);
-                let boundedH = clamp(dy, minDh, maxDh);
+                const west = direction.includes('w');
+                const east = direction.includes('e');
+                const north = direction.includes('n');
+                const south = direction.includes('s');
+                let sx = east || west ? dx : 0;
+                let sy = north || south ? dy : 0;
 
+                // The dragged side of the grabbed marker snaps to a printed line.
                 const grabbed = origins.find((origin) => origin.box === box);
                 if (this.snapLines && grabbed && !event.altKey) {
-                    const snapW = magnetShift([grabbed.x + grabbed.w + boundedW], this.snapLines.vertical, 8 / width);
-                    const snapH = magnetShift([grabbed.y + grabbed.h + boundedH], this.snapLines.horizontal, 8 / height);
-                    boundedW = clamp(boundedW + snapW.shift, minDw, maxDw);
-                    boundedH = clamp(boundedH + snapH.shift, minDh, maxDh);
-                    this._showGuides(snapW.line, snapH.line);
+                    const snapX = east || west
+                        ? magnetShift([west ? grabbed.x + sx : grabbed.x + grabbed.w + sx], this.snapLines.vertical, 8 / width)
+                        : { shift: 0, line: null };
+                    const snapY = north || south
+                        ? magnetShift([north ? grabbed.y + sy : grabbed.y + grabbed.h + sy], this.snapLines.horizontal, 8 / height)
+                        : { shift: 0, line: null };
+                    sx += snapX.shift;
+                    sy += snapY.shift;
+                    this._showGuides(snapX.line, snapY.line);
                 } else {
                     this._showGuides(null, null);
                 }
 
                 origins.forEach((origin) => {
-                    origin.box.w = origin.w + boundedW;
-                    origin.box.h = origin.h + boundedH;
+                    const rect = resizeRect(origin.w, origin.h, direction, sx, sy, MIN_FRACTION, MIN_FRACTION);
+                    // The page's edges stop a side; the opposite side stays where it was.
+                    const left = Math.max(0, origin.x + rect.left);
+                    const top = Math.max(0, origin.y + rect.top);
+                    const right = Math.min(1, origin.x + rect.right);
+                    const bottom = Math.min(1, origin.y + rect.bottom);
+                    origin.box.x = left;
+                    origin.box.y = top;
+                    origin.box.w = Math.max(MIN_FRACTION, right - left);
+                    origin.box.h = Math.max(MIN_FRACTION, bottom - top);
                 });
             }
 
@@ -898,12 +943,15 @@ export class FieldMarker {
 
         el.addEventListener('pointerdown', (e) => {
             if (e.ctrlKey) return;
-            if (e.target === handle || e.target === rotator) return;
+            if (handles.includes(e.target) || e.target === rotator) return;
             begin(e, 'move');
         });
-        handle.addEventListener('pointerdown', (e) => {
-            if (e.ctrlKey) return;
-            begin(e, 'resize');
+        handles.forEach((handle) => {
+            handle.addEventListener('pointerdown', (e) => {
+                if (e.ctrlKey) return;
+                direction = handle.dataset.handle || 'se';
+                begin(e, 'resize');
+            });
         });
         rotator?.addEventListener('pointerdown', (e) => {
             if (e.ctrlKey) return;
@@ -924,10 +972,12 @@ export class FieldMarker {
      * screen space; each marker's box is kept in its own upright frame.
      *
      * A marker turns about its centre, so a move is the same on screen and in
-     * its box, and a resize grows it along its own sides while its turned top
-     * left corner stays put.
+     * its box, and a resize grows it along its own sides while the sides the
+     * handle does not touch stay put. `mode` is 'move' or a handle ('se', 'n',
+     * ...); 'resize' means the bottom-right corner.
      */
     _dragTurned(origins, mode, pixelDx, pixelDy, width, height) {
+        const handle = mode === 'resize' ? 'se' : mode;
         origins.forEach((origin) => {
             const angle = normaliseAngle(origin.angle);
             const target = origin.box;
@@ -938,14 +988,18 @@ export class FieldMarker {
                 return;
             }
 
+            // The drag in the marker's own upright frame, in pixels.
             const local = turnPoint(pixelDx, pixelDy, -angle);
-            const w = clamp(origin.w + local.x / width, MIN_FRACTION, 1);
-            const h = clamp(origin.h + local.y / height, MIN_FRACTION, 1);
-            // Keep the turned top-left corner where it is: the centre moves by
-            // half the growth, turned into the page's frame.
-            const grow = turnPoint((w - origin.w) * width / 2, (h - origin.h) * height / 2, angle);
-            const cx = (origin.x + origin.w / 2) * width + grow.x;
-            const cy = (origin.y + origin.h / 2) * height + grow.y;
+            const ow = origin.w * width;
+            const oh = origin.h * height;
+            const rect = resizeRect(ow, oh, handle, local.x, local.y, MIN_FRACTION * width, MIN_FRACTION * height);
+            const w = clamp((rect.right - rect.left) / width, MIN_FRACTION, 1);
+            const h = clamp((rect.bottom - rect.top) / height, MIN_FRACTION, 1);
+            // The untouched sides stay put: the centre moves by how far the new
+            // box's centre is from the old one, turned into the page's frame.
+            const shift = turnPoint((rect.left + rect.right - ow) / 2, (rect.top + rect.bottom - oh) / 2, angle);
+            const cx = (origin.x + origin.w / 2) * width + shift.x;
+            const cy = (origin.y + origin.h / 2) * height + shift.y;
             target.w = w;
             target.h = h;
             target.x = clamp(cx / width - w / 2, 0, 1 - w);
