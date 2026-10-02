@@ -4,9 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
 use App\Models\User;
+use App\Support\LocalTime;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\View\View;
 
@@ -38,12 +38,12 @@ class AuditLogController extends Controller
             ->when($filters['from'] ?? null, fn (Builder $q, $from) => $q->where(
                 'created_at',
                 '>=',
-                Carbon::parse($from)->startOfDay(),
+                LocalTime::dayStart($from),
             ))
             ->when($filters['to'] ?? null, fn (Builder $q, $to) => $q->where(
                 'created_at',
                 '<=',
-                Carbon::parse($to)->endOfDay(),
+                LocalTime::dayEnd($to),
             ))
             ->when($filters['q'] ?? null, function (Builder $q, string $term) {
                 $like = '%'.$term.'%';

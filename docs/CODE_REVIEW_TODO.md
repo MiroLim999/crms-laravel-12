@@ -28,12 +28,12 @@ A panel member could trigger any of these during a live demo.
 
 **Effort:** Small
 
-- [ ] Create a **new** migration that changes `audit_logs.description` to `text`. Don't edit the old migration, because existing databases won't run it again.
-- [ ] In `reject()`, keep the description short and store the note in `new_values` instead (e.g. `['decision_note' => $note]`).
-- [ ] Wrap `reject()` and `withdraw()` in `DB::transaction(...)`, as `approve()` already is, so the status change and the audit entry succeed or fail together.
-- [ ] Create `App\Exceptions\ChangeRequestException` and use it for every `throw new RuntimeException` in `ChangeRequestService`.
-- [ ] In `ChangeRequestController`, catch `ChangeRequestException` instead of `RuntimeException` (4 places), so database errors stop appearing in the banner.
-- [ ] **Test:** reject with a 400-character note. The status should be `rejected` **and** one `change_request.rejected` audit row should exist.
+- [x] Create a **new** migration that changes `audit_logs.description` to `text`. Don't edit the old migration, because existing databases won't run it again.
+- [x] In `reject()`, keep the description short and store the note in `new_values` instead (e.g. `['decision_note' => $note]`).
+- [x] Wrap `reject()` and `withdraw()` in `DB::transaction(...)`, as `approve()` already is, so the status change and the audit entry succeed or fail together.
+- [x] Create `App\Exceptions\ChangeRequestException` and use it for every `throw new RuntimeException` in `ChangeRequestService`.
+- [x] In `ChangeRequestController`, catch `ChangeRequestException` instead of `RuntimeException` (4 places), so database errors stop appearing in the banner.
+- [x] **Test:** reject with a 400-character note. The status should be `rejected` **and** one `change_request.rejected` audit row should exist.
 
 
 
@@ -45,14 +45,14 @@ A panel member could trigger any of these during a live demo.
 
 **Effort:** Small
 
-- [ ] At the start of `index()`, validate the filters:
+- [x] At the start of `index()`, validate the filters:
   - `from` and `to` → `nullable|date`, with `to` also `after_or_equal:from`
   - `status` → one of the record statuses
   - `type` → `exists:document_types,key`
 
   Copy the style of `ReportController::filters()`.
-- [ ] Use the validated values in the query instead of `$request->date(...)`.
-- [ ] **Test:** `/records?from=abc` returns a validation error, not a 500.
+- [x] Use the validated values in the query instead of `$request->date(...)`.
+- [x] **Test:** `/records?from=abc` returns a validation error, not a 500.
 
 ### 4. The CSV export can run formulas in Excel (Tested)
 
@@ -62,10 +62,10 @@ A panel member could trigger any of these during a live demo.
 
 **Effort:** Small
 
-- [ ] Add a helper, e.g. `private function safeCell(mixed $value): mixed`, that puts `'` in front of any **text** starting with `=`, `+`, `-`, `@`, a tab or a carriage return.
-- [ ] Run every text cell in `row()` through it: registry number, primary value, people's names and model key.
-- [ ] Leave the number cells (record ID, field count, average confidence) as they are.
-- [ ] **Test:** a record whose value is `=1+1` is exported as `'=1+1`.
+- [x] Add a helper, e.g. `private function safeCell(mixed $value): mixed`, that puts `'` in front of any **text** starting with `=`, `+`, `-`, `@`, a tab or a carriage return.
+- [x] Run every text cell in `row()` through it: registry number, primary value, people's names and model key.
+- [x] Leave the number cells (record ID, field count, average confidence) as they are.
+- [x] **Test:** a record whose value is `=1+1` is exported as `'=1+1`.
 
 ### 5. Two clicks at the same moment can cause conflicts
 
@@ -75,13 +75,13 @@ A panel member could trigger any of these during a live demo.
 
 **Effort:** Medium
 
-- [ ] In `approve()`, `reject()` and `withdraw()`, work inside `DB::transaction`:
+- [x] In `approve()`, `reject()` and `withdraw()`, work inside `DB::transaction`:
   - reload the request with `ChangeRequest::whereKey($request->getKey())->lockForUpdate()->firstOrFail()`
   - run `guardOpen()` on that fresh copy
   - use the fresh copy for the rest of the method
-- [ ] In `open()`, lock the record row inside the transaction (`CivilRecord::whereKey(...)->lockForUpdate()->first()`), then check again for a pending request before creating a new one.
-- [ ] Disable the submit, Approve and Reject buttons after the first click (a small `submit` listener on those forms).
-- [ ] **Test:** deciding a request that was already decided is refused. Truly simultaneous clicks are hard to test; the lock is the real fix.
+- [x] In `open()`, lock the record row inside the transaction (`CivilRecord::whereKey(...)->lockForUpdate()->first()`), then check again for a pending request before creating a new one.
+- [x] Disable the submit, Approve and Reject buttons after the first click (a small `submit` listener on those forms).
+- [x] **Test:** deciding a request that was already decided is refused. Truly simultaneous clicks are hard to test; the lock is the real fix.
 
 ### 6. All times are shown 8 hours behind
 
@@ -91,12 +91,12 @@ A panel member could trigger any of these during a live demo.
 
 **Effort:** Medium
 
-- [ ] Keep **storing** UTC and don't change `config/app.php`. Existing rows are in UTC, and the dashboard and reports already convert from UTC.
-- [ ] Add one display helper (e.g. a `localTime($date, $format)` function or a Blade directive) that converts to `config('crms.reporting_timezone')` (Asia/Manila) before formatting.
-- [ ] Replace every timestamp `->format(...)` in `resources/views` with the helper (search for `->format(`).
-- [ ] Convert the times in the CSV export too: `row()` currently uses `toDateTimeString()`, which is UTC.
-- [ ] Make the Records and Audit Log date filters use Philippine days, like Reports: `Carbon::parse($from, $tz)->startOfDay()->utc()`. Put this in one shared helper used by all three pages.
-- [ ] **Test:** a record created at `2026-10-01 23:30 UTC` shows as `2 Oct 2026 07:30` and is found by `from=2026-10-02`.
+- [x] Keep **storing** UTC and don't change `config/app.php`. Existing rows are in UTC, and the dashboard and reports already convert from UTC.
+- [x] Add one display helper (e.g. a `localTime($date, $format)` function or a Blade directive) that converts to `config('crms.reporting_timezone')` (Asia/Manila) before formatting.
+- [x] Replace every timestamp `->format(...)` in `resources/views` with the helper (search for `->format(`).
+- [x] Convert the times in the CSV export too: `row()` currently uses `toDateTimeString()`, which is UTC.
+- [x] Make the Records and Audit Log date filters use Philippine days, like Reports: `Carbon::parse($from, $tz)->startOfDay()->utc()`. Put this in one shared helper used by all three pages.
+- [x] **Test:** a record created at `2026-10-01 23:30 UTC` shows as `2 Oct 2026 07:30` and is found by `from=2026-10-02`.
 
 
 ## Priority 2: Questions the panel will probably ask

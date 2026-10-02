@@ -72,7 +72,9 @@ class DocumentScanController extends Controller
      */
     public function workspace(Request $request): View|RedirectResponse
     {
-        $type = DocumentTypeDefinition::where('key', (string) $request->query('type'))->first();
+        // An edited URL can send ?type[]=x, an array. Treat it as an unknown type.
+        $key = $request->query('type');
+        $type = is_string($key) ? DocumentTypeDefinition::where('key', $key)->first() : null;
 
         if ($type === null) {
             return redirect()->route('documents.create');

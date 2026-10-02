@@ -7,9 +7,12 @@ use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
 use App\Services\RecordFieldGrouper;
+use App\Support\LocalTime;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\ViewErrorBag;
 use Illuminate\View\View;
 
 /**
@@ -25,22 +28,40 @@ class RecordController extends Controller
 
     public function index(Request $request): View
     {
+        $validator = Validator::make($request->all(), [
+            'q' => ['nullable', 'string', 'max:255'],
+            'type' => ['nullable', 'string', 'exists:document_types,key'],
+            'status' => ['nullable', 'string', 'in:'.implode(',', array_column(RecordStatus::cases(), 'value'))],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date', 'after_or_equal:from'],
+        ], [], ['q' => 'search', 'from' => 'from date', 'to' => 'to date']);
+
+        // The filters come from the query string, so an edited URL can carry a
+        // bad one. Its message is shown on this page and the filter left out,
+        // instead of the usual redirect back: a typed URL has no referrer, so
+        // "back" could be another page, where the message would never show.
+        if ($validator->fails()) {
+            view()->share('errors', (new ViewErrorBag)->put('default', $validator->errors()));
+        }
+
+        $filters = $validator->valid();
+
         $records = CivilRecord::query()
             ->with(['fields', 'submitter', 'documentTypeDefinition'])
-            ->when($request->filled('q'), function ($query) use ($request) {
-                $term = '%'.$request->string('q').'%';
+            ->when(filled($filters['q'] ?? null), function ($query) use ($filters) {
+                $term = '%'.$filters['q'].'%';
                 $query->where(function ($q) use ($term) {
                     $q->where('registry_number', 'like', $term)
                         ->orWhereHas('fields', fn ($f) => $f->where('verified_value', 'like', $term));
                 });
             })
-            ->when($request->filled('type'), fn ($q) => $q->whereHas(
+            ->when($filters['type'] ?? null, fn ($q, $type) => $q->whereHas(
                 'documentTypeDefinition',
-                fn ($typeQuery) => $typeQuery->where('key', $request->string('type')),
+                fn ($typeQuery) => $typeQuery->where('key', $type),
             ))
-            ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
-            ->when($request->filled('from'), fn ($q) => $q->whereDate('submitted_at', '>=', $request->date('from')))
-            ->when($request->filled('to'), fn ($q) => $q->whereDate('submitted_at', '<=', $request->date('to')))
+            ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+            ->when($filters['from'] ?? null, fn ($q, $from) => $q->where('submitted_at', '>=', LocalTime::dayStart($from)))
+            ->when($filters['to'] ?? null, fn ($q, $to) => $q->where('submitted_at', '<=', LocalTime::dayEnd($to)))
             ->orderByDesc('submitted_at')
             ->orderByDesc('id')
             ->paginate(15)
@@ -48,6 +69,7 @@ class RecordController extends Controller
 
         return view('records.index', [
             'records' => $records,
+            'filters' => $filters,
             'documentTypes' => DocumentTypeDefinition::ordered(),
             'statuses' => RecordStatus::cases(),
         ]);

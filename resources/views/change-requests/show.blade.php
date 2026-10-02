@@ -37,12 +37,12 @@
             <div class="record-summary-item">
                 <span>Requested by</span>
                 <strong>{{ $changeRequest->requester?->name ?? 'Unknown' }}</strong>
-                <small>{{ $changeRequest->created_at->format('j M Y, H:i') }}</small>
+                <small>{{ \App\Support\LocalTime::format($changeRequest->created_at, 'j M Y, H:i') }}</small>
             </div>
             <div class="record-summary-item">
                 <span>{{ $changeRequest->reviewed_at ? 'Reviewed by' : 'Review ownership' }}</span>
                 <strong>{{ $changeRequest->reviewer?->name ?? ($canModerate ? 'Available to review' : 'Admin review') }}</strong>
-                <small>{{ $changeRequest->reviewed_at?->format('j M Y, H:i') ?? 'No decision yet' }}</small>
+                <small>{{ \App\Support\LocalTime::format($changeRequest->reviewed_at, 'j M Y, H:i') ?: 'No decision yet' }}</small>
             </div>
         </section>
 
@@ -238,7 +238,7 @@
                         </div>
                         <div>
                             <dt>Submitted</dt>
-                            <dd>{{ $changeRequest->created_at->format('j M Y, H:i') }}</dd>
+                            <dd>{{ \App\Support\LocalTime::format($changeRequest->created_at, 'j M Y, H:i') }}</dd>
                         </div>
                         <div>
                             <dt>Record</dt>
@@ -251,7 +251,7 @@
                             </div>
                             <div>
                                 <dt>Reviewed</dt>
-                                <dd>{{ $changeRequest->reviewed_at->format('j M Y, H:i') }}</dd>
+                                <dd>{{ \App\Support\LocalTime::format($changeRequest->reviewed_at, 'j M Y, H:i') }}</dd>
                             </div>
                         @endif
                     </dl>
@@ -263,7 +263,7 @@
                     <x-card class="change-request-decision-card" title="Review decision"
                             subtitle="Approve to apply every proposed value, or reject without changing the record.">
                         <form method="POST" action="{{ route('change-requests.approve', $changeRequest) }}"
-                              class="change-request-decision-form is-approve">
+                              class="change-request-decision-form is-approve" data-submit-once>
                             @csrf
                             <label for="approve-note" class="form-label">Approval note <span class="text-muted">(optional)</span></label>
                             <textarea id="approve-note" name="decision_note" rows="3" maxlength="2000"
@@ -276,7 +276,7 @@
                         <div class="change-request-decision-divider"><span>or</span></div>
 
                         <form method="POST" action="{{ route('change-requests.reject', $changeRequest) }}"
-                              class="change-request-decision-form is-reject">
+                              class="change-request-decision-form is-reject" data-submit-once>
                             @csrf
                             <label for="reject-note" class="form-label">Reason for rejection</label>
                             <textarea id="reject-note" name="decision_note" rows="3" maxlength="2000"
@@ -293,7 +293,7 @@
                         <p class="small text-muted">
                             You may withdraw it while it is still pending. This closes the request without changing the record.
                         </p>
-                        <form method="POST" action="{{ route('change-requests.withdraw', $changeRequest) }}">
+                        <form method="POST" action="{{ route('change-requests.withdraw', $changeRequest) }}" data-submit-once>
                             @csrf
                             <button type="submit" class="btn btn-outline-danger w-100">Withdraw request</button>
                         </form>
@@ -319,5 +319,5 @@
 @endsection
 
 @push('scripts')
-    @vite('resources/js/record-detail.js')
+    @vite(['resources/js/record-detail.js', 'resources/js/change-request.js'])
 @endpush

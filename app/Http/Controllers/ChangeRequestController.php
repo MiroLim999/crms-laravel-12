@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ChangeRequestStatus;
+use App\Exceptions\ChangeRequestException;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
 use App\Services\ChangeRequestService;
@@ -10,7 +11,6 @@ use App\Services\RecordFieldGrouper;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
-use RuntimeException;
 
 /**
  * Corrections to locked records.
@@ -28,6 +28,13 @@ class ChangeRequestController extends Controller
 
     public function index(Request $request): View
     {
+        // Strings only. An edited URL can send ?q[]=x, an array, which would
+        // crash the string reads below.
+        $request->validate([
+            'q' => ['nullable', 'string'],
+            'status' => ['nullable', 'string'],
+        ], [], ['q' => 'search']);
+
         $user = $request->user();
         $search = trim($request->string('q')->toString());
         $selectedStatus = ChangeRequestStatus::tryFrom($request->string('status')->toString());
@@ -161,7 +168,7 @@ class ChangeRequestController extends Controller
                     ? ['registry_number' => $validated['registry_number']]
                     : [],
             );
-        } catch (RuntimeException $e) {
+        } catch (ChangeRequestException $e) {
             return back()->withInput()->with('error', $e->getMessage());
         }
 
@@ -219,7 +226,7 @@ class ChangeRequestController extends Controller
 
         try {
             $this->service->approve($changeRequest, $request->user(), $validated['decision_note'] ?? null);
-        } catch (RuntimeException $e) {
+        } catch (ChangeRequestException $e) {
             return back()->with('error', $e->getMessage());
         }
 
@@ -238,7 +245,7 @@ class ChangeRequestController extends Controller
 
         try {
             $this->service->reject($changeRequest, $request->user(), $validated['decision_note']);
-        } catch (RuntimeException $e) {
+        } catch (ChangeRequestException $e) {
             return back()->with('error', $e->getMessage());
         }
 
@@ -251,7 +258,7 @@ class ChangeRequestController extends Controller
 
         try {
             $this->service->withdraw($changeRequest, $request->user());
-        } catch (RuntimeException $e) {
+        } catch (ChangeRequestException $e) {
             return back()->with('error', $e->getMessage());
         }
 

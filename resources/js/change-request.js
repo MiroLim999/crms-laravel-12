@@ -19,6 +19,28 @@ export function countChangedProposals(proposals) {
     );
 }
 
+/**
+ * Lets the page send one of these forms, once. A double-click would otherwise
+ * post twice, and the page would show the server refusing the second copy
+ * instead of the result of the first. Approve and Reject share the lock, so a
+ * reviewer can't send both.
+ */
+export function submitOnce(forms) {
+    let submitted = false;
+
+    forms.forEach((form) => form.addEventListener('submit', (event) => {
+        if (submitted) {
+            event.preventDefault();
+            return;
+        }
+
+        submitted = true;
+        forms.forEach((each) => each.querySelectorAll('button[type="submit"]').forEach((button) => {
+            button.disabled = true;
+        }));
+    }));
+}
+
 function initChangeRequestForm(root) {
     const inputs = [...root.querySelectorAll('[data-change-input]')]
         .filter((input) => input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement);
@@ -101,4 +123,5 @@ function initChangeRequestForm(root) {
 
 if (typeof document !== 'undefined') {
     document.querySelectorAll('[data-change-request-form]').forEach(initChangeRequestForm);
+    submitOnce([...document.querySelectorAll('form[data-submit-once]')]);
 }

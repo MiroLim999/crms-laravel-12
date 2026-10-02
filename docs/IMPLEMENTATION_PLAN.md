@@ -132,16 +132,17 @@ Done: 2026-10-02 · PHP 262 · JS 85 · Python 62 passed (262 + 85 + 62 = 409)
 **Why first:** it creates `ChangeRequestException` and the transactions that Task 1.2 builds on.
 **Touches:** `app/Services/ChangeRequestService.php`, `app/Http/Controllers/ChangeRequestController.php`, new `app/Exceptions/ChangeRequestException.php`, a new migration, `tests/Feature/ChangeRequestWorkflowTest.php`
 
-- [ ] New migration: change `audit_logs.description` to `text`, keeping `->nullable()`. In Laravel 12, `->change()` must repeat every modifier.
-- [ ] Create `App\Exceptions\ChangeRequestException` (extending `RuntimeException`) and throw it instead of `RuntimeException` everywhere in `ChangeRequestService`.
-- [ ] In `ChangeRequestController`, catch `ChangeRequestException` instead of `RuntimeException` in `store`, `approve`, `reject` and `withdraw`.
-- [ ] In `reject()`, set the description to `"Rejected change request #N."` and pass the note as `new: ['decision_note' => $note]`. The Audit Log page already displays `new_values`, so the note stays visible.
-- [ ] Wrap `reject()` and `withdraw()` in `DB::transaction(...)`.
-- [ ] Test: rejecting with a 400-character note sets the status to `rejected` and writes exactly one `change_request.rejected` audit row that holds the note.
-- [ ] Run `php artisan migrate`.
+- [x] New migration: change `audit_logs.description` to `text`, keeping `->nullable()`. In Laravel 12, `->change()` must repeat every modifier.
+- [x] Create `App\Exceptions\ChangeRequestException` (extending `RuntimeException`) and throw it instead of `RuntimeException` everywhere in `ChangeRequestService`.
+- [x] In `ChangeRequestController`, catch `ChangeRequestException` instead of `RuntimeException` in `store`, `approve`, `reject` and `withdraw`.
+- [x] In `reject()`, set the description to `"Rejected change request #N."` and pass the note as `new: ['decision_note' => $note]`. The Audit Log page already displays `new_values`, so the note stays visible.
+- [x] Wrap `reject()` and `withdraw()` in `DB::transaction(...)`.
+- [x] Test: rejecting with a 400-character note sets the status to `rejected` and writes exactly one `change_request.rejected` audit row that holds the note.
+- [x] Run `php artisan migrate`.
 
 **Verify:** `php artisan test --filter=ChangeRequestWorkflowTest`, then all tests.
 **Done when:** the new test passes and `ChangeRequestController` no longer catches `RuntimeException`.
+Done: 2026-10-02 · PHP 263 · JS 85 · Python 62 passed
 
 ### Task 1.2: #5 Double-click conflicts (Medium)
 
@@ -149,36 +150,38 @@ Done: 2026-10-02 · PHP 262 · JS 85 · Python 62 passed (262 + 85 + 62 = 409)
 **Why here:** it adds locks inside the transactions from Task 1.1, in the same four methods.
 **Touches:** `app/Services/ChangeRequestService.php`, `resources/views/change-requests/show.blade.php`, `resources/views/change-requests/create.blade.php`, `resources/js/change-request.js`, `tests/Feature/ChangeRequestWorkflowTest.php`
 
-- [ ] In `approve()`, `reject()` and `withdraw()`:
+- [x] In `approve()`, `reject()` and `withdraw()`:
   - inside the transaction, reload the request with `ChangeRequest::whereKey($request->getKey())->lockForUpdate()->firstOrFail()`
   - run `guardOpen()` on that fresh copy
   - use the fresh copy for the rest of the method, and return it
-- [ ] In `open()`, move the "already has a pending request" check inside the transaction, right after locking the record row with `CivilRecord::whereKey($record->getKey())->lockForUpdate()->first()`.
-- [ ] Disable the submit, Approve and Reject buttons on the first submit. If the code goes in `resources/js/change-request.js`, run `npm run build`.
-- [ ] Test: load a pending request, change its status to `rejected` directly in the database, then call `approve()` with the old copy. It must be refused with the "already rejected" message, and the status must stay `rejected`.
+- [x] In `open()`, move the "already has a pending request" check inside the transaction, right after locking the record row with `CivilRecord::whereKey($record->getKey())->lockForUpdate()->first()`.
+- [x] Disable the submit, Approve and Reject buttons on the first submit. If the code goes in `resources/js/change-request.js`, run `npm run build`.
+- [x] Test: load a pending request, change its status to `rejected` directly in the database, then call `approve()` with the old copy. It must be refused with the "already rejected" message, and the status must stay `rejected`.
 
 **Verify:** `php artisan test --filter=ChangeRequestWorkflowTest`, then all tests.
 **Done when:** every decision and every new request re-checks the state under a row lock.
+Done: 2026-10-02 · PHP 264 · JS 86 · Python 62 passed
 
 ### Task 1.3: #3 A bad date crashes the Records page (Small)
 
 **Depends on:** nothing
 **Touches:** `app/Http/Controllers/RecordController.php`, `resources/views/records/index.blade.php`, new `tests/Feature/RecordArchiveFilterTest.php`
 
-- [ ] In `index()`, validate the filters, following the style of `ReportController::filters()`:
+- [x] In `index()`, validate the filters, following the style of `ReportController::filters()`:
   - `q`: nullable string, max 255
   - `type`: nullable, `exists:document_types,key`
   - `status`: nullable, one of the `RecordStatus` values
   - `from`: nullable date
   - `to`: nullable date, `after_or_equal:from`
-- [ ] Use the validated values in the query, instead of `$request->date(...)`.
-- [ ] The Records page doesn't show validation errors yet (checked 2026-10-02), so add `@error` messages under the filter inputs.
-- [ ] Tests:
+- [x] Use the validated values in the query, instead of `$request->date(...)`.
+- [x] The Records page doesn't show validation errors yet (checked 2026-10-02), so add `@error` messages under the filter inputs.
+- [x] Tests:
   - `/records?from=abc` gives a validation error for `from`, not a 500
   - a valid date range still filters correctly
 
 **Verify:** `php artisan test --filter=RecordArchiveFilterTest`, then all tests.
 **Done when:** a bad filter shows a message instead of an error page.
+Done: 2026-10-02 · PHP 266 · JS 86 · Python 62 passed
 
 ### Task 1.4: #4 CSV formula injection (Small)
 
@@ -186,12 +189,13 @@ Done: 2026-10-02 · PHP 262 · JS 85 · Python 62 passed (262 + 85 + 62 = 409)
 **Why before 1.5:** Task 1.5 also edits `row()`.
 **Touches:** `app/Http/Controllers/ReportController.php`, `tests/Feature/ReportExportTest.php`
 
-- [ ] Add `private function safeCell(mixed $value): mixed`. It returns non-strings unchanged, and puts `'` in front of strings that start with `=`, `+`, `-`, `@`, a tab or a carriage return.
-- [ ] Run every text cell in `row()` through it.
-- [ ] Test: a record with registry number `=HYPERLINK("x","y")` and a field value of `=1+1` exports both with a leading `'`, while the number columns are unchanged.
+- [x] Add `private function safeCell(mixed $value): mixed`. It returns non-strings unchanged, and puts `'` in front of strings that start with `=`, `+`, `-`, `@`, a tab or a carriage return.
+- [x] Run every text cell in `row()` through it.
+- [x] Test: a record with registry number `=HYPERLINK("x","y")` and a field value of `=1+1` exports both with a leading `'`, while the number columns are unchanged.
 
 **Verify:** `php artisan test --filter=ReportExportTest`, then all tests.
 **Done when:** no exported text cell can start with a formula character.
+Done: 2026-10-02 · PHP 267 · JS 86 · Python 62 passed
 
 ### Task 1.5: #6 Times shown 8 hours behind (Medium)
 
@@ -199,28 +203,47 @@ Done: 2026-10-02 · PHP 262 · JS 85 · Python 62 passed (262 + 85 + 62 = 409)
 **Why last in this phase:** it touches the most files, including the ones Tasks 1.2–1.4 just changed.
 **Touches:** new `app/Support/LocalTime.php`, the views found by `grep -rn -- "->format(" resources/views`, `app/Http/Controllers/RecordController.php`, `app/Http/Controllers/AuditLogController.php`, `app/Http/Controllers/ReportController.php`, tests
 
-- [ ] Keep **storing** UTC. Don't change `config/app.php`.
-- [ ] Create `App\Support\LocalTime` with three methods:
+- [x] Keep **storing** UTC. Don't change `config/app.php`.
+- [x] Create `App\Support\LocalTime` with three methods:
   - `format(?CarbonInterface $date, string $format): string` converts to `config('crms.reporting_timezone')` and returns `''` for null
   - `dayStart(string $date)` returns the UTC moment when that Philippine day begins
   - `dayEnd(string $date)` returns the UTC moment when that Philippine day ends
-- [ ] Replace every timestamp `->format(...)` in `resources/views` with `LocalTime::format(...)`. Leave `diffForHumans()` alone.
-- [ ] Convert the times in the CSV export (`row()`) with the same helper.
-- [ ] Use `dayStart()` and `dayEnd()` for the date filters in `RecordController`, `AuditLogController` and `ReportController`, replacing the inline `Carbon::parse(...)` calls.
-- [ ] Tests:
+- [x] Replace every timestamp `->format(...)` in `resources/views` with `LocalTime::format(...)`. Leave `diffForHumans()` alone.
+- [x] Convert the times in the CSV export (`row()`) with the same helper.
+- [x] Use `dayStart()` and `dayEnd()` for the date filters in `RecordController`, `AuditLogController` and `ReportController`, replacing the inline `Carbon::parse(...)` calls.
+- [x] Tests:
   - a `2026-10-01 23:30 UTC` timestamp shows as `07:30` on the Audit Log
   - `from=2026-10-02` finds that record on the Records page and in Reports
   - the CSV shows Philippine time
 
 **Verify:** `php artisan test --filter="AuditLogViewerTest|ReportExportTest|RecordArchiveFilterTest"`, then all tests.
 **Done when:** no view formats a timestamp without the helper, and the tests pass.
+Done: 2026-10-02 · PHP 270 · JS 86 · Python 62 passed
+
+### Task 1.6: An array in the URL crashes a page (Small, found during Phase 1)
+
+**Depends on:** 1.1, 1.3
+**Why here:** it's the same kind of bug as #3: an edited URL gives an error page instead of an answer. It was found during Task 1.3, so it isn't in `CODE_REVIEW_TODO.md`.
+**Touches:** `resources/views/layouts/partials/navbar.blade.php`, `app/Http/Controllers/ChangeRequestController.php` (`index()`), `app/Http/Controllers/UserController.php` (`index()`), `app/Http/Controllers/DocumentTemplateController.php` (`create()`), `app/Http/Controllers/DocumentScanController.php` (`workspace()`), new `tests/Feature/ArrayQueryParameterTest.php`
+
+PHP reads `?q[]=x` as an array. Printing an array, or passing it to `$request->string()` or a `(string)` cast, throws an error, so 16 page-and-parameter pairs gave a 500 (checked 2026-10-02).
+
+- [x] Navbar search box: print `request('q')` only when it's a string. The navbar is on every page, so this one line crashed most of them.
+- [x] Change Requests and Users lists: validate their filters as strings before reading them, as `AuditLogController` does. That's `q` and `status` on Change Requests, and `q`, `role` and `status` on Users.
+- [x] Template builder (`create()`) and scan workspace (`workspace()`): treat an array `type` like an unknown type. That means a 404, or a redirect back to the type picker.
+- [x] Test: each of those pages answers an array parameter without a server error.
+
+**Verify:** `php artisan test --filter=ArrayQueryParameterTest`, then all tests.
+**Done when:** no GET page gives a 500 for an array in the query string.
+Done: 2026-10-02 · PHP 280 · JS 86 · Python 62 passed
 
 ### Phase 1 checkpoint
 
-- [ ] All tests pass.
+- [x] All tests pass. (2026-10-02, after Task 1.6: PHP 280 · JS 86 · Python 62)
 - [ ] **[You]** In the browser:
   - Reject a change request with a long note. There should be no error, and the Audit Log should show the note.
   - Open `/records?from=abc`. You should see a friendly message.
+  - Open `/dashboard?q[]=x`. The dashboard should load normally.
   - Export a CSV and open it in Excel. Values starting with `=` should show as plain text.
   - Check that times on the Audit Log are Philippine time.
 
@@ -749,14 +772,14 @@ Never work on two tasks from the same row at the same time. Do them in the order
 | File | Tasks, in order |
 |---|---|
 | `app/Services/ChangeRequestService.php` | 1.1 → 1.2 → 3.9 |
-| `app/Http/Controllers/ChangeRequestController.php` | 1.1 → 3.9 → 4.2 |
+| `app/Http/Controllers/ChangeRequestController.php` | 1.1 → 1.6 → 3.9 → 4.2 |
 | `tests/Feature/ChangeRequestWorkflowTest.php` | 1.1 → 1.2 → 3.9 |
 | `resources/views/change-requests/*`, `resources/js/change-request.js` | 1.2 → 1.5 |
 | `app/Http/Controllers/RecordController.php`, `resources/views/records/*` | 1.3 → 1.5 → 2.3 → 4.2 |
 | `app/Http/Controllers/ReportController.php`, `resources/views/reports/index.blade.php` | 1.4 → 1.5 → 3.9 → 4.2 |
-| `app/Http/Controllers/DocumentScanController.php` | 2.1 → 2.2 → 2.3 → 3.1 → 3.5 → 3.6 → 3.10 |
+| `app/Http/Controllers/DocumentScanController.php` | 1.6 → 2.1 → 2.2 → 2.3 → 3.1 → 3.5 → 3.6 → 3.10 |
 | `resources/views/scan/workspace.blade.php` | 2.1 → 2.2 → 3.1 → 5.3 |
-| `app/Http/Controllers/DocumentTemplateController.php` | 2.1 → 2.4 → 3.5 → 3.6 → 3.10 → 4.4 → 5.2 |
+| `app/Http/Controllers/DocumentTemplateController.php` | 1.6 → 2.1 → 2.4 → 3.5 → 3.6 → 3.10 → 4.4 → 5.2 |
 | `tests/Feature/DocumentUploadWorkflowTest.php` | 2.1 → 2.2 → 3.1 → 3.6 |
 | `tests/Feature/DocumentTemplateBuilderTest.php` | 2.1 → 2.4 → 3.6 |
 | `tests/Feature/OcrWorkspaceTest.php` | 2.8 → 3.1 |

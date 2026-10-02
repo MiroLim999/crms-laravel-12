@@ -13,7 +13,8 @@
                 <form action="{{ route('records.index') }}" method="GET"
                       class="nav-item d-flex align-items-center" role="search">
                     <i class="icon-base bx bx-search icon-md"></i>
-                    <input type="search" name="q" value="{{ request('q') }}"
+                    {{-- An edited URL can send ?q[]=x, an array, which can't be printed. --}}
+                    <input type="search" name="q" value="{{ is_string(request('q')) ? request('q') : '' }}"
                            class="form-control border-0 shadow-none ps-1 ps-sm-2"
                            placeholder="Search records..." aria-label="Search records">
                 </form>

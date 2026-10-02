@@ -62,7 +62,9 @@ class DocumentTemplateController extends Controller
 
     public function create(Request $request): View
     {
-        $requestedKey = (string) $request->query('type', DocumentType::Birth->value);
+        $requestedKey = $request->query('type', DocumentType::Birth->value);
+        // An edited URL can send ?type[]=x, an array. Treat it as an unknown type.
+        abort_unless(is_string($requestedKey), 404);
         $type = DocumentTypeDefinition::where('key', $requestedKey)->firstOrFail();
 
         return view('templates.edit', [

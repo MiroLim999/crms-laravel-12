@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Services\AuditLogger;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
@@ -102,6 +103,28 @@ class AuditLogViewerTest extends TestCase
             ->assertOk()
             ->assertSee('Before Name')
             ->assertSee('After Name');
+    }
+
+    public function test_times_are_shown_and_filtered_in_philippine_time(): void
+    {
+        // 07:30 on 2 October in the Philippines, but still 1 October in UTC.
+        $this->travelTo(Carbon::parse('2026-10-01 23:30:00', 'UTC'));
+        app(AuditLogger::class)->log('record.submitted', description: 'Submitted overnight.');
+        $this->travelBack();
+
+        $admin = User::factory()->admin()->create();
+        $listed = fn ($entries) => $entries->pluck('description')->contains('Submitted overnight.');
+
+        $this->actingAs($admin)
+            ->get(route('audit.index', ['from' => '2026-10-02']))
+            ->assertOk()
+            ->assertSee('2 Oct 2026 07:30')
+            ->assertViewHas('entries', $listed);
+
+        $this->actingAs($admin)
+            ->get(route('audit.index', ['to' => '2026-10-01']))
+            ->assertOk()
+            ->assertViewHas('entries', fn ($entries) => ! $listed($entries));
     }
 
     /**

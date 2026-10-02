@@ -107,7 +107,7 @@
                                     </td>
                                     <td>
                                         <span>{{ $changeRequest->requester?->name ?? 'Unknown' }}</span>
-                                        <small class="d-block text-muted" title="{{ $changeRequest->created_at->format('j M Y, H:i') }}">
+                                        <small class="d-block text-muted" title="{{ \App\Support\LocalTime::format($changeRequest->created_at, 'j M Y, H:i') }}">
                                             {{ $changeRequest->created_at->diffForHumans() }}
                                         </small>
                                     </td>

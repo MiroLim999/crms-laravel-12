@@ -129,11 +129,11 @@
                                     </span>
                                 </td>
                                 <td class="text-muted">
-                                    {{ $record->created_at?->format('j M Y') }}
+                                    {{ \App\Support\LocalTime::format($record->created_at, 'j M Y') }}
                                     <div><small>{{ $record->creator?->name }}</small></div>
                                 </td>
                                 <td class="text-muted">
-                                    {{ $record->submitted_at?->format('j M Y') ?? '—' }}
+                                    {{ \App\Support\LocalTime::format($record->submitted_at, 'j M Y') ?: '—' }}
                                     @if ($record->submitter)
                                         <div><small>{{ $record->submitter->name }}</small></div>
                                     @endif

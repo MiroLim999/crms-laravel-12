@@ -8,6 +8,7 @@ use App\Models\AuditLog;
 use App\Models\CivilRecord;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 /**
@@ -75,6 +76,58 @@ class ReportExportTest extends TestCase
         $this->assertStringNotContainsString('Pedro Cruz', $csv);
     }
 
+    public function test_the_export_keeps_excel_from_running_values_as_formulas(): void
+    {
+        $staff = User::factory()->staff()->create();
+        $record = $this->record($staff, DocumentType::Birth, RecordStatus::Submitted);
+        $record->update(['registry_number' => '=HYPERLINK("x","y")']);
+        $record->fields()->create([
+            'name' => 'Child Full Name',
+            'ocr_text' => '=1+1',
+            'verified_value' => '=1+1',
+            'ocr_confidence' => 87.5,
+        ]);
+
+        $csv = $this->actingAs(User::factory()->admin()->create())
+            ->get(route('reports.export'))
+            ->assertOk()
+            ->streamedContent();
+        $row = $this->csvRows($csv)[0];
+
+        $this->assertSame('\'=HYPERLINK("x","y")', $row['Registry number']);
+        $this->assertSame("'=1+1", $row['Primary value']);
+
+        // Number columns are written as they were.
+        $this->assertSame((string) $record->getKey(), $row['Record ID']);
+        $this->assertSame('1', $row['Fields']);
+        $this->assertSame('87.5', $row['Average confidence']);
+    }
+
+    public function test_report_days_and_export_times_are_philippine_time(): void
+    {
+        // 07:30 on 2 October in the Philippines, but still 1 October in UTC.
+        $this->travelTo(Carbon::parse('2026-10-01 23:30:00', 'UTC'));
+        $record = $this->record(User::factory()->staff()->create(), DocumentType::Birth, RecordStatus::Submitted);
+        $this->travelBack();
+
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)
+            ->get(route('reports.index', ['from' => '2026-10-02']))
+            ->assertOk()
+            ->assertSee('2 Oct 2026')
+            ->assertViewHas('records', fn ($records) => $records->pluck('id')->all() === [$record->getKey()]);
+
+        $csv = $this->actingAs($admin)
+            ->get(route('reports.export', ['from' => '2026-10-02']))
+            ->assertOk()
+            ->streamedContent();
+        $row = $this->csvRows($csv)[0];
+
+        $this->assertSame('2026-10-02 07:30:00', $row['Created at']);
+        $this->assertSame('2026-10-02 07:30:00', $row['Submitted at']);
+    }
+
     public function test_the_export_is_audit_logged_with_the_filters_used(): void
     {
         $admin = User::factory()->admin()->create();
@@ -105,6 +158,19 @@ class ReportExportTest extends TestCase
         $this->actingAs(User::factory()->admin()->create())
             ->get(route('reports.index', ['from' => '2026-06-01', 'to' => '2026-01-01']))
             ->assertSessionHasErrors('to');
+    }
+
+    /**
+     * The data rows of an exported CSV, each keyed by the header row.
+     *
+     * @return list<array<string, string>>
+     */
+    private function csvRows(string $csv): array
+    {
+        $lines = array_values(array_filter(explode("\n", str_replace("\r", '', $csv))));
+        $header = str_getcsv(array_shift($lines));
+
+        return array_map(fn (string $line) => array_combine($header, str_getcsv($line)), $lines);
     }
 
     private function record(User $staff, DocumentType $type, RecordStatus $status): CivilRecord

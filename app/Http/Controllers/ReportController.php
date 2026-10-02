@@ -9,9 +9,9 @@ use App\Models\DocumentTypeDefinition;
 use App\Models\RecordField;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Support\LocalTime;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -70,7 +70,7 @@ class ReportController extends Controller
             actor: $request->user(),
         );
 
-        $filename = 'crms-records-'.Carbon::now()->format('Ymd-His').'.csv';
+        $filename = 'crms-records-'.LocalTime::format(now(), 'Ymd-His').'.csv';
 
         return response()->streamDownload(function () use ($filters) {
             $handle = fopen('php://output', 'w');
@@ -107,20 +107,36 @@ class ReportController extends Controller
             ->pluck('ocr_confidence')
             ->filter(fn ($value) => $value !== null);
 
-        return [
+        return array_map($this->safeCell(...), [
             $record->getKey(),
             $record->registry_number,
             $record->typeLabel(),
             $record->status->label(),
             $record->title(),
-            $record->created_at?->toDateTimeString(),
+            LocalTime::format($record->created_at, 'Y-m-d H:i:s'),
             $record->creator?->name,
-            $record->submitted_at?->toDateTimeString(),
+            LocalTime::format($record->submitted_at, 'Y-m-d H:i:s'),
             $record->submitter?->name,
             $record->ocr_model_key,
             $record->fields->count(),
             $confidences->isEmpty() ? null : round($confidences->avg(), 1),
-        ];
+        ]);
+    }
+
+    /**
+     * Keep Excel from running a cell as a formula ("CSV injection").
+     *
+     * Most text here was typed by someone, so a value such as =HYPERLINK(...)
+     * would otherwise run when the file is opened. A leading apostrophe makes
+     * Excel show it as plain text. Numbers are not strings, so they pass through.
+     */
+    private function safeCell(mixed $value): mixed
+    {
+        if (! is_string($value) || $value === '') {
+            return $value;
+        }
+
+        return in_array($value[0], ['=', '+', '-', '@', "\t", "\r"], true) ? "'".$value : $value;
     }
 
     /**
@@ -157,12 +173,12 @@ class ReportController extends Controller
             ->when($filters['from'], fn (Builder $q, $from) => $q->where(
                 'records.created_at',
                 '>=',
-                Carbon::parse($from, config('crms.reporting_timezone', 'Asia/Manila'))->startOfDay()->utc(),
+                LocalTime::dayStart($from),
             ))
             ->when($filters['to'], fn (Builder $q, $to) => $q->where(
                 'records.created_at',
                 '<=',
-                Carbon::parse($to, config('crms.reporting_timezone', 'Asia/Manila'))->endOfDay()->utc(),
+                LocalTime::dayEnd($to),
             ))
             ->when($filters['doc_type'], fn (Builder $q, $type) => $q->whereHas(
                 'documentTypeDefinition',
