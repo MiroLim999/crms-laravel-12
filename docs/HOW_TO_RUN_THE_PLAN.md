@@ -14,7 +14,53 @@ You only need to run `.\serve.ps1` when a step asks you to check something in th
 
 ---
 
+## Which model to use
+
+Use **Sonnet 5.5 for most tasks** and switch to **Opus 5.5 for the hard ones**. Sonnet handles small, well-described changes well and is faster and cheaper. Opus is stronger when a task spans many files, involves tricky logic, or is easy to get subtly wrong.
+
+**How to switch:** type `/model` in the Claude panel **before** you send the phase prompt. If your version also shows an effort setting there, choose it at the same time.
+
+### By phase (simplest)
+
+Each step below starts with a **Model:** line that follows this table.
+
+| Phase | Model | Effort |
+|---|---|---|
+| Phase 0 | Sonnet 5.5 | Medium |
+| Phase 1 | **Opus 5.5** (because of Tasks 1.2 and 1.5) | High |
+| Phase 2 | **Opus 5.5** (because of Tasks 2.2, 2.3 and 2.8) | High |
+| Phase 3 | Sonnet 5.5. Use Opus 5.5 only if you do Task 3.10 now. | High |
+| Phase 4 | **Opus 5.5** | High |
+| Phase 5 | **Opus 5.5** | Highest available |
+| Phase 6 | Sonnet 5.5 | Medium |
+
+### By task (if you run tasks one at a time)
+
+| Model | Effort | Tasks |
+|---|---|---|
+| Sonnet 5.5 | Medium | 0.1, 0.2, 1.3, 1.4, 2.1, 2.4, 2.5, 2.7, 2.9, 3.2, 3.4, 3.5, 3.6, 3.8, 4.1, 6.1, 6.2 |
+| Sonnet 5.5 | High | 1.1, 2.6, 3.1, 3.7, 3.9 |
+| **Opus 5.5** | High | 1.2, 1.5, 2.2, 2.3, 2.8, 3.3, 4.2, 4.3, 4.4 |
+| **Opus 5.5** | Highest available | 3.10, 5.1, 5.2, 5.3 |
+
+**Why those tasks need Opus**
+- **1.2:** database locking and race conditions.
+- **1.5:** touches many views and three date filters; it's easy to miss one.
+- **2.2:** changes both the browser and the server inside a 4,000-line script.
+- **2.3:** image coordinates and straightened pages.
+- **2.8:** has to be rolled out in the right order, or scanning breaks.
+- **3.3:** merges slightly different copies of the AI code.
+- **4.2 and 4.3:** speed changes that must not change any results.
+- **4.4:** a new background job plus browser polling.
+- **3.10 and Phase 5:** large refactors where behaviour must not change.
+
+**When in doubt, use Opus.** A cheaper model that gets the locking or the timezone change slightly wrong costs more in debugging than it saves. The tests catch most mistakes either way.
+
+---
+
 ## Step 1: Set up (Phase 0)
+
+**Model:** Sonnet 5.5, medium effort.
 
 **Prompt:**
 
@@ -30,6 +76,8 @@ Execute Phase 0 of @docs/IMPLEMENTATION_PLAN.md one task at a time and tick the 
 ---
 
 ## Step 2: Priority 1 fixes (Phase 1)
+
+**Model:** Opus 5.5, high effort.
 
 **Start a new conversation**, then send:
 
@@ -59,6 +107,8 @@ Execute Phase 1 of @docs/IMPLEMENTATION_PLAN.md one task at a time and tick the 
 
 ## Step 3: Priority 2 fixes (Phase 2)
 
+**Model:** Opus 5.5, high effort.
+
 **Start a new conversation**, then send:
 
 ```
@@ -86,6 +136,8 @@ Execute Phase 2 of @docs/IMPLEMENTATION_PLAN.md one task at a time and tick the 
 
 ## Step 4: Cleanup (Phase 3)
 
+**Model:** Sonnet 5.5, high effort. If you choose to do Task 3.10 now instead of postponing it, use Opus 5.5.
+
 **Start a new conversation**, then send:
 
 ```
@@ -110,6 +162,8 @@ Execute Phase 3 of @docs/IMPLEMENTATION_PLAN.md one task at a time and tick the 
 
 ## Step 5: Speed (Phase 4)
 
+**Model:** Opus 5.5, high effort.
+
 **Start a new conversation**, then send:
 
 ```
@@ -133,7 +187,7 @@ Execute Phase 4 of @docs/IMPLEMENTATION_PLAN.md one task at a time and tick the 
 
 ## Step 6: After the defense
 
-**Phase 5** holds the big refactors, so leave it until after the defense. Claude asks before starting each task. For each one, start a new conversation and send:
+**Phase 5** (**Model:** Opus 5.5, highest effort available) holds the big refactors, so leave it until after the defense. Claude asks before starting each task. For each one, start a new conversation and send:
 
 ```
 Execute Task 5.1 from @docs/IMPLEMENTATION_PLAN.md and tick the checklist.
@@ -141,7 +195,7 @@ Execute Task 5.1 from @docs/IMPLEMENTATION_PLAN.md and tick the checklist.
 
 Do the same for Task 5.2 and Task 5.3.
 
-**Phase 6** is the wrap-up. Start a new conversation and send:
+**Phase 6** (**Model:** Sonnet 5.5, medium effort) is the wrap-up. Start a new conversation and send:
 
 ```
 Execute Phase 6 of @docs/IMPLEMENTATION_PLAN.md and tick the checklist. Task 6.1 = A.
