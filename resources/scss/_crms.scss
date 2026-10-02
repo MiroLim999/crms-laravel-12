@@ -2862,23 +2862,31 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// The picture and the value box each get a fixed share of the row, so every
+// value box starts and ends in the same place whatever shape its picture is.
 .validation-field__entry {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 9fr) minmax(0, 11fr);
   align-items: center;
-  gap: .5rem;
+  gap: .6rem;
   min-inline-size: 0;
 
+  // A line with no picture gives its whole width to the value.
+  &:not(:has(.validation-field__crop)) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .form-control {
-    flex: 1 1 auto;
-    min-inline-size: 6rem;
+    min-inline-size: 0;
   }
 }
 
-// The exact crop TrOCR read, beside the value it produced.
+// The exact crop TrOCR read, beside the value it produced. Crops are about
+// 45-65 px tall, so this shows them at close to their real size.
 .validation-field__crop {
-  flex: 0 1 auto;
-  max-inline-size: 45%;
-  max-block-size: 2.35rem;
+  justify-self: start;
+  max-inline-size: 100%;
+  max-block-size: 3.5rem;
   object-fit: contain;
   background: #fff;
   border: 1px solid var(--bs-border-color);
@@ -2893,6 +2901,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .validation-field__reading .validation-field__reading-text {
   overflow: hidden;
+  // Room for the italic reading's last letter, which overhangs the box and
+  // would be cut off ("Abad" read as "Abaa").
+  padding-inline-end: .25em;
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3062,7 +3073,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .validation-list-heading,
 .validation-field {
   display: grid;
-  grid-template-columns: minmax(9rem, .68fr) minmax(13rem, 1.32fr) 5.75rem;
+  grid-template-columns: minmax(8rem, .55fr) minmax(13rem, 1.6fr) 5.75rem;
   gap: .8rem;
 }
 
@@ -3330,17 +3341,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     box-shadow: inset 0 0 0 2px rgba(105, 108, 255, .25);
   }
 
-  &.is-active {
-    background: rgba(40, 199, 111, .07);
-    box-shadow: inset .16rem 0 0 var(--bs-success);
-  }
-
-  &.is-verified {
-    background: rgba(40, 199, 111, .045);
-  }
-
+  // Only the row you are on is tinted. A verified row stays plain, with its
+  // green number and tick, so the active row stands out in a long list.
+  &.is-active,
   &.is-active.is-verified {
-    background: rgba(40, 199, 111, .1);
+    background: rgba(40, 199, 111, .09);
+    box-shadow: inset .2rem 0 0 var(--bs-success);
   }
 
   &.is-invalid {
