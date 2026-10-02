@@ -123,4 +123,22 @@ class RecordController extends Controller
             ['Content-Type' => $record->scan_mime ?? 'application/octet-stream'],
         );
     }
+
+    /**
+     * Stream the page image the record's field outlines were measured on.
+     *
+     * Detect may straighten a tilted page, so this can differ from the upload
+     * that scan() serves; the scan card draws its boxes over this one. The same
+     * access rule as the scan.
+     */
+    public function pageImage(CivilRecord $record)
+    {
+        abort_if($record->page_image_path === null, 404);
+        abort_unless(Storage::disk('local')->exists($record->page_image_path), 404);
+
+        return Response::file(
+            Storage::disk('local')->path($record->page_image_path),
+            ['Content-Type' => 'image/png', 'X-Content-Type-Options' => 'nosniff'],
+        );
+    }
 }

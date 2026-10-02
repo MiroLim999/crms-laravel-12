@@ -301,13 +301,14 @@ The decision is already made: ask for confirmation with a **Submit anyway** butt
   - the same submission is saved with `allow_missing=1`
   - the audit entry lists the missing names
   - a complete submission is unaffected
-- [ ] **[You]** In the browser:
+- [x] **[You]** In the browser:
   1. Leave a required field unchecked and submit. The modal should appear.
   2. Click **Go back**. Nothing should be sent.
   3. Submit again and click **Submit anyway**. The record should be saved.
 
 **Verify:** `php artisan test --filter=DocumentUploadWorkflowTest`, then all tests.
 **Done when:** missing required fields always need a confirmation, and an accepted omission is recorded in the audit log.
+Done: 2026-10-03 · PHP 289 · JS 86 · Python 62 passed
 
 ### Task 2.3: #12 Highlight boxes on tilted pages (check first)
 
@@ -315,14 +316,17 @@ The decision is already made: ask for confirmation with a **Submit anyway** butt
 **Why here:** the fix also edits `store()`, so it comes after 2.2 to keep the two `store()` changes apart.
 **Touches (only if a fix is needed):** `app/Http/Controllers/DocumentScanController.php`, a new migration, `app/Http/Controllers/RecordController.php`, `routes/web.php`, `resources/views/records/partials/scan-card.blade.php`, `tests/Feature/RecordDetailPresentationTest.php`
 
-- [ ] **[You]** Scan a visibly tilted page, press Detect, submit, and open the record. Tell Claude whether the highlight boxes sit on the right words.
-- [ ] If they do, tick the remaining steps as `(not needed: boxes line up)`.
-- [ ] **[Decision]** If they're off, pick a fix:
+- [x] **[You]** Scan a visibly tilted page, press Detect, submit, and open the record. Tell Claude whether the highlight boxes sit on the right words.
+  Checked by measurement instead of by eye, at the user's request ("fix the task 2.3 if there's any issues"), 2026-10-03: none of the 33 records had a rotation saved, so no Detect-straightened page had ever been submitted. The real Detect on a copy of the user's sample tilted by 3° straightened it by 3.269° and kept a 1568×1246 page, while the upload is 1504×1162. Boxes drawn from the saved fractions over the upload landed a median 37 px (about one line) from their handwriting, up to 74 px; 86% missed their own line by more than half a line. The untilted sample, as a control, was off by a median 3 px.
+- [x] If they do, tick the remaining steps as `(not needed: boxes line up)`. (not needed: the boxes were off, so the fix below was made)
+- [x] **[Decision]** If they're off, pick a fix:
   - A) Keep the straightened page with the record (recommended: an exact match). In `store()`, copy `pages/{id}/page.png` to `records/{id}/page.png` **before** the page folder is deleted. Save the path in a new nullable `records.page_image_path` column. Show that image in `scan-card.blade.php`, served by a new route with the same access rule as `records.scan`.
   - B) Rotate the displayed scan by `scan_rotation` with CSS.
-- [ ] Make the chosen fix. For A, run `php artisan migrate`.
-- [ ] Test: for A, a submitted record keeps its page image and the record page uses it. For B, the record page renders the rotation.
-- [ ] **[You]** Check the tilted page again by eye.
+  Decision: A, an exact match, chosen in advance by the user for the case that the boxes are off (2026-10-03)
+- [x] Make the chosen fix. For A, run `php artisan migrate`.
+  Also touched, beyond **Touches**: `app/Models/CivilRecord.php` (the new column is fillable) and `tests/Feature/LineOutlinePipelineTest.php` (the submit-side tests live beside the page helpers). The migration ran on the user's database on 2026-10-03; the 33 older records keep showing their upload. "Open full size" on the scan card still opens the original upload.
+- [x] Test: for A, a submitted record keeps its page image and the record page uses it. For B, the record page renders the rotation.
+- [ ] **[You]** Check the tilted page again by eye. A copy of the user's sample tilted by 3° is at `<scratchpad>\tilt\sample-v3-tilted.png`: upload it, press **Detect**, scan, tick a few fields, submit, open the record, click **Compare original** and a few values.
 
 **Verify:** `php artisan test --filter=RecordDetailPresentationTest`, then all tests.
 **Done when:** the boxes line up on a tilted page.

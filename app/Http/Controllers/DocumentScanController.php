@@ -230,10 +230,10 @@ class DocumentScanController extends Controller
         }
 
         $path = $scan->store('scans', 'local');
-        $copiedCrops = [];
+        $copiedFiles = [];
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, &$copiedCrops) {
+            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, &$copiedFiles) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -251,6 +251,13 @@ class DocumentScanController extends Controller
                     'submitted_by' => $request->user()->getKey(),
                     'submitted_at' => now(),
                 ]);
+
+                // Every outline below is a fraction of the page as Detect left
+                // it, which may be straightened and larger than the upload, so
+                // the record page draws its boxes over this image instead.
+                if ($page !== null) {
+                    $record->update(['page_image_path' => $this->keepPageImage($record, $page, $copiedFiles)]);
+                }
 
                 foreach (array_values($validated['fields']) as $index => $field) {
                     $line = isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null;
@@ -272,7 +279,7 @@ class DocumentScanController extends Controller
                         'width' => $field['width'],
                         'height' => $field['height'],
                         'sort_order' => $index,
-                        ...($line ? $this->lineAttributes($record, $page, $line, $index, $copiedCrops) : []),
+                        ...($line ? $this->lineAttributes($record, $page, $line, $index, $copiedFiles) : []),
                     ]);
                 }
 
@@ -299,12 +306,13 @@ class DocumentScanController extends Controller
                 return $record;
             });
         } catch (Throwable $exception) {
-            Storage::disk('local')->delete([$path, ...$copiedCrops]);
+            Storage::disk('local')->delete([$path, ...$copiedFiles]);
             throw $exception;
         }
 
-        // The record now holds its own copies of every crop it kept. The page's
-        // working files (image, remaining crops, overlay) are no longer needed.
+        // The record now holds its own copies of every crop it kept, and of the
+        // page image. The page's working files (image, remaining crops,
+        // overlay) are no longer needed.
         if ($page !== null) {
             Storage::disk('local')->deleteDirectory($page->directory());
             $page->delete();
@@ -543,20 +551,42 @@ class DocumentScanController extends Controller
     }
 
     /**
+     * Keep the page as it was outlined, next to the crops.
+     *
+     * Returns its path, or null when the page's file is gone: the record page
+     * then shows the upload, as it did before records kept a page image.
+     *
+     * @param  list<string>  $copiedFiles
+     */
+    private function keepPageImage(CivilRecord $record, DocumentPage $page, array &$copiedFiles): ?string
+    {
+        $disk = Storage::disk('local');
+        $path = sprintf('records/%d/page.png', $record->getKey());
+
+        if (! $disk->exists($page->image_path) || ! $disk->copy($page->image_path, $path)) {
+            return null;
+        }
+
+        $copiedFiles[] = $path;
+
+        return $path;
+    }
+
+    /**
      * Keep the exact crop TrOCR read and the outline it was read from.
      *
      * The crop is copied, not re-made, so the archive and the training export
      * always hold the very image the model saw.
      *
-     * @param  list<string>  $copiedCrops
+     * @param  list<string>  $copiedFiles
      * @return array<string, mixed>
      */
-    private function lineAttributes(CivilRecord $record, DocumentPage $page, PageLine $line, int $index, array &$copiedCrops): array
+    private function lineAttributes(CivilRecord $record, DocumentPage $page, PageLine $line, int $index, array &$copiedFiles): array
     {
         $disk = Storage::disk('local');
         $cropPath = sprintf('records/%d/crops/%03d.png', $record->getKey(), $index + 1);
         $disk->copy($line->crop_path, $cropPath);
-        $copiedCrops[] = $cropPath;
+        $copiedFiles[] = $cropPath;
 
         $width = max(1, $page->width);
         $height = max(1, $page->height);

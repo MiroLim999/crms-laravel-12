@@ -141,6 +141,7 @@ Route::middleware('auth')->group(function () {
         Route::get('records', [RecordController::class, 'index'])->name('records.index');
         Route::get('records/{record}', [RecordController::class, 'show'])->name('records.show');
         Route::get('records/{record}/scan', [RecordController::class, 'scan'])->name('records.scan');
+        Route::get('records/{record}/page', [RecordController::class, 'pageImage'])->name('records.page-image');
     });
 
     /*

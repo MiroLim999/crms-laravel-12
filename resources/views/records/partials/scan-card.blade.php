@@ -1,4 +1,7 @@
 @php($markerFields = $markerFields ?? $record->fields)
+{{-- The boxes are fractions of the page as it was outlined, which Detect may have
+     straightened: draw them over that image when the record kept it, else the upload. --}}
+@php($scanImageUrl = $record->page_image_path ? route('records.page-image', $record) : route('records.scan', $record))
 
 <x-card class="record-scan-card" bodyClass="p-0" title="Original scan"
         subtitle="Select a value to locate its source.">
@@ -13,7 +16,7 @@
 
         <div class="record-scan-viewport" data-scan-viewport>
             <div class="record-scan-stage" data-scan-stage>
-                <img src="{{ route('records.scan', $record) }}"
+                <img src="{{ $scanImageUrl }}"
                      alt="Original scanned certificate" data-scan-image>
                 <div class="record-scan-overlay" aria-label="Captured field positions">
                     @foreach ($markerFields as $field)

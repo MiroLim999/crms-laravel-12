@@ -692,6 +692,7 @@ class LineOutlinePipelineTest extends TestCase
         $page = $this->processedPage();
         $line = $page->lines->firstWhere('column_name', 'Name');
         $cropBytes = Storage::disk('local')->get($line->crop_path);
+        $pageBytes = Storage::disk('local')->get($page->image_path);
 
         $this->actingAs($page->creator)
             ->withHeader('Accept', 'application/json')
@@ -717,16 +718,49 @@ class LineOutlinePipelineTest extends TestCase
             ])
             ->assertCreated();
 
-        $field = CivilRecord::firstOrFail()->fields->first();
+        $record = CivilRecord::firstOrFail();
+        $field = $record->fields->first();
         $this->assertSame('Name', $field->line_column);
         $this->assertSame(1, $field->line_row);
         $this->assertSame([], $field->line_flags);
         $this->assertEqualsWithDelta(0.05, $field->polygon[0][0], 0.00001);
         $this->assertSame($cropBytes, Storage::disk('local')->get($field->crop_path));
 
+        // The outlines are fractions of this page, which Detect may have
+        // straightened, so the record keeps it, byte for byte.
+        $this->assertSame('records/'.$record->getKey().'/page.png', $record->page_image_path);
+        $this->assertSame($pageBytes, Storage::disk('local')->get($record->page_image_path));
+
         $this->assertDatabaseCount('document_pages', 0);
         $this->assertDatabaseCount('page_lines', 0);
         Storage::disk('local')->assertMissing($page->image_path);
+    }
+
+    public function test_a_submission_still_saves_when_the_page_image_is_gone(): void
+    {
+        $page = $this->processedPage();
+        $line = $page->lines->firstWhere('column_name', 'Name');
+        Storage::disk('local')->delete($page->image_path);
+
+        $this->actingAs($page->creator)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                'doc_type' => DocumentType::Birth->value,
+                'document_template_id' => $page->document_template_id,
+                'document_page_id' => $page->getKey(),
+                'ocr_model_key' => 'test-model',
+                'scan' => UploadedFile::fake()->image('certificate.png', 800, 600),
+                'fields' => [[
+                    'verified' => '1', 'name' => 'Name · row 1', 'verified_value' => 'Juan',
+                    'x' => 0.05, 'y' => 0.1, 'width' => 0.2, 'height' => 0.05,
+                    'line_id' => $line->getKey(),
+                ]],
+                'allow_missing' => '1',
+            ])
+            ->assertCreated();
+
+        // The record page then shows the upload, as before pages were kept.
+        $this->assertNull(CivilRecord::firstOrFail()->page_image_path);
     }
 
     public function test_a_line_from_someone_elses_page_cannot_be_submitted(): void
