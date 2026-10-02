@@ -3,10 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\DocumentType;
+use App\Models\AuditLog;
 use App\Models\CivilRecord;
+use App\Models\DocumentPage;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTypeDefinition;
 use App\Models\OcrModel;
+use App\Models\PageLine;
 use App\Models\User;
 use Database\Seeders\DocumentTemplateSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -17,6 +20,9 @@ use Tests\TestCase;
 class DocumentUploadWorkflowTest extends TestCase
 {
     use RefreshDatabase;
+
+    /** The seeded Birth layout's required fields after "Child Full Name", in order. */
+    private const OTHER_BIRTH_FIELDS = ['Date of Birth', 'Sex', 'Place of Birth', 'Father Full Name', 'Mother Full Name'];
 
     public function test_staff_and_super_admin_receive_the_interactive_marker_workspace(): void
     {
@@ -159,9 +165,12 @@ class DocumentUploadWorkflowTest extends TestCase
 
         $response = $this->actingAs($user)
             ->withHeader('Accept', 'application/json')
-            ->post(route('documents.store'), $this->submissionPayload($template, [
-                $this->verifiedField('Child Full Name', 'Maria Santos'),
-            ]));
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, [
+                    $this->verifiedField('Child Full Name', 'Maria Santos'),
+                ]),
+                'allow_missing' => '1',
+            ]);
 
         $response
             ->assertCreated()
@@ -192,7 +201,10 @@ class DocumentUploadWorkflowTest extends TestCase
 
         $this->actingAs(User::factory()->staff()->create())
             ->withHeader('Accept', 'application/json')
-            ->post(route('documents.store'), $this->submissionPayload($template, [$field]))
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, [$field]),
+                'allow_missing' => '1',
+            ])
             ->assertCreated();
 
         $this->assertDatabaseHas('record_fields', [
@@ -213,6 +225,7 @@ class DocumentUploadWorkflowTest extends TestCase
             $this->verifiedField('Child Full Name', 'Maria Santos'),
         ]);
         $payload['fields_json'] = json_encode($payload['fields'], JSON_THROW_ON_ERROR);
+        $payload['allow_missing'] = '1';
         unset($payload['fields']);
 
         $this->actingAs(User::factory()->staff()->create())
@@ -324,6 +337,183 @@ class DocumentUploadWorkflowTest extends TestCase
         $this->assertSame([], Storage::disk('local')->allFiles('scans'));
     }
 
+    public function test_missing_required_fields_need_confirmation_before_saving(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTemplateSeeder::class);
+        $this->registerTestModel();
+
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), $this->submissionPayload($template, [
+                $this->verifiedField('Child Full Name', 'Maria Santos'),
+            ]))
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.missing_required', self::OTHER_BIRTH_FIELDS);
+
+        $this->assertDatabaseCount('records', 0);
+        $this->assertSame([], Storage::disk('local')->allFiles('scans'));
+    }
+
+    public function test_confirmed_missing_fields_are_saved_and_listed_in_the_audit_log(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTemplateSeeder::class);
+        $this->registerTestModel();
+
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, [
+                    $this->verifiedField('Child Full Name', 'Maria Santos'),
+                ]),
+                'allow_missing' => '1',
+            ])
+            ->assertCreated();
+
+        $this->assertDatabaseCount('records', 1);
+        $audit = AuditLog::where('action', 'record.submitted')->sole();
+        $this->assertSame(self::OTHER_BIRTH_FIELDS, $audit->new_values['missing_required_fields']);
+    }
+
+    public function test_a_complete_submission_is_not_asked_to_confirm(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTemplateSeeder::class);
+        $this->registerTestModel();
+
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+        $fields = array_map(
+            fn (string $name) => $this->verifiedField($name, 'Recorded value'),
+            ['Child Full Name', ...self::OTHER_BIRTH_FIELDS],
+        );
+        // Names are compared ignoring case.
+        $fields[2]['name'] = 'SEX';
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), $this->submissionPayload($template, $fields))
+            ->assertCreated();
+
+        $audit = AuditLog::where('action', 'record.submitted')->sole();
+        $this->assertArrayNotHasKey('missing_required_fields', $audit->new_values);
+    }
+
+    public function test_a_required_field_read_as_several_lines_is_not_missing(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTemplateSeeder::class);
+        $this->registerTestModel();
+
+        $staff = User::factory()->staff()->create();
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+        $page = $this->readPage($template, $staff);
+        // Detect split the child's name into two written lines, which Verify
+        // lists as "Child Full Name · line 1" and "· line 2".
+        $lineFields = [];
+        foreach ([1, 2] as $row) {
+            $line = $this->pageLine($page, [
+                'source' => PageLine::SOURCE_FIELD,
+                'column_name' => 'Child Full Name',
+                'row' => $row,
+            ]);
+            $lineFields[] = [
+                ...$this->verifiedField("Child Full Name · line {$row}", 'Maria Santos'),
+                'line_id' => $line->getKey(),
+            ];
+        }
+        $otherFields = array_map(
+            fn (string $name) => $this->verifiedField($name, 'Recorded value'),
+            self::OTHER_BIRTH_FIELDS,
+        );
+
+        $this->actingAs($staff)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, [...$lineFields, ...$otherFields]),
+                'document_page_id' => $page->getKey(),
+            ])
+            ->assertCreated();
+    }
+
+    public function test_register_rows_left_incomplete_or_unticked_need_confirmation(): void
+    {
+        Storage::fake('local');
+        [$template, $page, $staff] = $this->registerPage();
+
+        // Row 1 without its Date, row 4 complete, rows 2, 3 and 5 untouched.
+        $this->actingAs($staff)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, [
+                    $this->cellField($page, 1, 'Name'),
+                    $this->cellField($page, 4, 'Name'),
+                    $this->cellField($page, 4, 'Date'),
+                ]),
+                'document_page_id' => $page->getKey(),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.missing_required', [
+                'Person 01: Date',
+                'Nothing ticked in Person 02 – Person 03, Person 05 (these rows are not saved)',
+            ]);
+
+        $this->assertDatabaseCount('records', 0);
+    }
+
+    public function test_confirmed_register_rows_are_listed_in_the_audit_log(): void
+    {
+        Storage::fake('local');
+        [$template, $page, $staff] = $this->registerPage();
+
+        // Rows 1, 3 and 4 complete, row 2 without its Date, row 5 untouched.
+        $fields = [];
+        foreach ([1, 3, 4] as $row) {
+            $fields[] = $this->cellField($page, $row, 'Name');
+            $fields[] = $this->cellField($page, $row, 'Date');
+        }
+        $fields[] = $this->cellField($page, 2, 'Name');
+
+        $this->actingAs($staff)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, $fields),
+                'document_page_id' => $page->getKey(),
+                'allow_missing' => '1',
+            ])
+            ->assertCreated();
+
+        $audit = AuditLog::where('action', 'record.submitted')->sole();
+        $this->assertSame([
+            'Person 02: Date',
+            'Nothing ticked in Person 05 (this row is not saved)',
+        ], $audit->new_values['missing_required_fields']);
+    }
+
+    public function test_a_complete_register_page_is_not_asked_to_confirm(): void
+    {
+        Storage::fake('local');
+        [$template, $page, $staff] = $this->registerPage();
+
+        $fields = [];
+        foreach (range(1, 5) as $row) {
+            $fields[] = $this->cellField($page, $row, 'Name');
+            $fields[] = $this->cellField($page, $row, 'Date');
+        }
+
+        $this->actingAs($staff)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, $fields),
+                'document_page_id' => $page->getKey(),
+            ])
+            ->assertCreated();
+    }
+
     public function test_custom_document_type_can_complete_the_staff_submission_flow(): void
     {
         Storage::fake('local');
@@ -372,6 +562,86 @@ class DocumentUploadWorkflowTest extends TestCase
 
         $type->update(['name' => 'Renamed Local Form', 'short_name' => 'Renamed Local Form']);
         $this->assertSame('Renamed Local Form', $record->refresh()->typeLabel());
+    }
+
+    /**
+     * A register layout with two required columns, Name and Date, and a read
+     * page with a Name and a Date cell in each of its five rows.
+     *
+     * @return array{0: DocumentTemplate, 1: DocumentPage, 2: User}
+     */
+    private function registerPage(): array
+    {
+        $this->seed(DocumentTemplateSeeder::class);
+        $this->registerTestModel();
+        $staff = User::factory()->staff()->create();
+
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+        $template->fields()->delete();
+        $template->update([
+            'columns' => [
+                ['name' => 'Name', 'box' => [0.05, 0.1, 0.45, 0.8]],
+                ['name' => 'Date', 'box' => [0.5, 0.1, 0.3, 0.8]],
+            ],
+            'ruled_ys' => [0.1, 0.26, 0.42, 0.58, 0.74, 0.9],
+        ]);
+
+        $page = $this->readPage($template, $staff);
+        foreach (range(1, 5) as $row) {
+            foreach (['Name', 'Date'] as $columnIndex => $column) {
+                $this->pageLine($page, ['column_index' => $columnIndex, 'column_name' => $column, 'row' => $row]);
+            }
+        }
+
+        return [$template->fresh(['fields', 'documentTypeDefinition']), $page->fresh('lines'), $staff];
+    }
+
+    /** A page Staff scanned and the worker has read, ready to verify. */
+    private function readPage(DocumentTemplate $template, User $staff): DocumentPage
+    {
+        return DocumentPage::create([
+            'document_template_id' => $template->getKey(),
+            'created_by' => $staff->getKey(),
+            'status' => DocumentPage::STATUS_READY,
+            'image_path' => '',
+            'width' => 800,
+            'height' => 600,
+            'geometry' => ['columns' => [], 'ruled_ys' => [], 'fields' => []],
+            'ocr_model_key' => 'test-model',
+        ]);
+    }
+
+    /** @param array<string, mixed> $attributes */
+    private function pageLine(DocumentPage $page, array $attributes): PageLine
+    {
+        $position = $page->lines()->count();
+        $line = $page->lines()->create([
+            'position' => $position,
+            'source' => 'kraken',
+            'polygon' => [[10, 10], [50, 10], [50, 30], [10, 30]],
+            'bbox' => [10, 10, 40, 20],
+            'crop_path' => sprintf('%s/crops/%03d.png', $page->directory(), $position + 1),
+            'flags' => [],
+            ...$attributes,
+        ]);
+        Storage::disk('local')->put($line->crop_path, 'crop');
+
+        return $line;
+    }
+
+    /**
+     * A verified register cell, named as Verify names it.
+     *
+     * @return array<string, mixed>
+     */
+    private function cellField(DocumentPage $page, int $row, string $column): array
+    {
+        $line = $page->lines->first(fn (PageLine $line) => $line->row === $row && $line->column_name === $column);
+
+        return [
+            ...$this->verifiedField("{$column} · row {$row}", 'Recorded value'),
+            'line_id' => $line->getKey(),
+        ];
     }
 
     /** @param array<int, array<string, mixed>> $fields */

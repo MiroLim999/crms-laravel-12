@@ -18,6 +18,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -168,6 +169,8 @@ class DocumentScanController extends Controller
             // The processed page whose outlined lines these fields were read from.
             'document_page_id' => ['nullable', 'integer'],
             'fields.*.line_id' => ['nullable', 'integer', 'distinct'],
+            // Staff chose "Submit anyway" when asked about missing required fields.
+            'allow_missing' => ['sometimes', 'boolean'],
         ], [
             'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
         ]);
@@ -208,6 +211,17 @@ class DocumentScanController extends Controller
 
         [$page, $linesById] = $this->pageLinesFor($request, $validated, $templateId);
 
+        // Some certificates do leave a required field blank, so a missing one
+        // is not refused outright: Staff must confirm it first.
+        $missingRequired = [
+            ...$this->missingRequiredFields($template, $validated['fields'], $linesById),
+            ...$this->missingRegisterRows($template, $page, $validated['fields'], $linesById),
+        ];
+        if ($missingRequired !== [] && ! $request->boolean('allow_missing')) {
+            // One message per field, so the workspace can list them when it asks.
+            throw ValidationException::withMessages(['missing_required' => $missingRequired]);
+        }
+
         $scan = $request->file('scan');
         if (! $scan instanceof UploadedFile) {
             throw ValidationException::withMessages([
@@ -219,7 +233,7 @@ class DocumentScanController extends Controller
         $copiedCrops = [];
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, &$copiedCrops) {
+            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, &$copiedCrops) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -240,7 +254,7 @@ class DocumentScanController extends Controller
 
                 foreach (array_values($validated['fields']) as $index => $field) {
                     $line = isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null;
-                    $settings = $settingsByName[mb_strtolower(trim($line?->column_name ?? $field['name']))] ?? null;
+                    $settings = $settingsByName[$this->templateNameKey($field, $line)] ?? null;
 
                     $record->fields()->create([
                         'name' => $field['name'],
@@ -276,6 +290,8 @@ class DocumentScanController extends Controller
                         'corrected_fields' => $corrected,
                         'outlined_fields' => $record->fields->whereNotNull('polygon')->count(),
                         'ocr_model' => $validated['ocr_model_key'],
+                        // Left out on purpose: Staff confirmed with "Submit anyway".
+                        ...($missingRequired !== [] ? ['missing_required_fields' => $missingRequired] : []),
                     ],
                     description: "Submitted and locked a {$record->typeShortLabel()} record.",
                 );
@@ -379,6 +395,151 @@ class DocumentScanController extends Controller
         }
 
         return [$page, $lines];
+    }
+
+    /**
+     * The layout's required fields (not a register's columns) that nothing
+     * was submitted for.
+     *
+     * A field counts under the template field it was read under, so one that
+     * Detect split into written lines ("Diseases · line 2") is not missing.
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @param  Collection<int, PageLine>  $linesById
+     * @return list<string>
+     */
+    private function missingRequiredFields(DocumentTemplate $template, array $fields, Collection $linesById): array
+    {
+        $submitted = collect($fields)
+            ->map(fn (array $field) => $this->templateNameKey(
+                $field,
+                isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null,
+            ))
+            ->flip();
+
+        return $template->fields
+            ->filter(fn ($field) => $field->is_required && ! $submitted->has(mb_strtolower(trim($field->name))))
+            ->pluck('name')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The name a submitted field's template settings are found under: its
+     * line's field or column, else its own name (see settingsByName()).
+     *
+     * @param  array<string, mixed>  $field
+     */
+    private function templateNameKey(array $field, ?PageLine $line): string
+    {
+        return mb_strtolower(trim($line?->column_name ?? $field['name']));
+    }
+
+    /**
+     * In a register, the required columns missing from each row that has
+     * something submitted ("Person 01: Date of Birth"), then the rows with
+     * nothing submitted at all. The page is removed once the record is saved,
+     * so those rows would have to be scanned again.
+     *
+     * Rows are named as Verify names its people; the workspace makes the
+     * same list before sending.
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @param  Collection<int, PageLine>  $linesById
+     * @return list<string>
+     */
+    private function missingRegisterRows(DocumentTemplate $template, ?DocumentPage $page, array $fields, Collection $linesById): array
+    {
+        if ($page === null || ! $template->isLedger()) {
+            return [];
+        }
+
+        $columns = [];
+        $required = [];
+        foreach ($template->columns as $column) {
+            $key = mb_strtolower(trim((string) $column['name']));
+            $columns[$key] = true;
+            if (DocumentTemplate::columnSettings($column)['required']) {
+                $required[$key] = (string) $column['name'];
+            }
+        }
+
+        // A cell of a ledger row: what Verify groups into a person.
+        $isCell = fn (PageLine $line) => ! $line->belongsToField()
+            && $line->row !== null && $line->column_index !== null
+            && ! in_array(PageLine::FLAG_NO_ROW, $line->flags ?? [], true);
+        $columnOf = fn (PageLine $line) => mb_strtolower(trim((string) $line->column_name));
+
+        $rows = $page->lines
+            ->filter(fn (PageLine $line) => $isCell($line) && isset($columns[$columnOf($line)]))
+            ->pluck('row')
+            ->unique()
+            ->sort()
+            ->values();
+
+        $submitted = [];
+        foreach ($fields as $field) {
+            $line = isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null;
+            if ($line !== null && $isCell($line)) {
+                $submitted[$line->row][$columnOf($line)] = true;
+            }
+        }
+
+        $missing = [];
+        $untouched = [];
+        foreach ($rows as $row) {
+            if (! isset($submitted[$row])) {
+                $untouched[] = $row;
+
+                continue;
+            }
+
+            $left = array_values(array_diff_key($required, $submitted[$row]));
+            if ($left !== []) {
+                $missing[] = $this->personLabel($row).': '.implode(', ', $left);
+            }
+        }
+
+        if ($untouched !== []) {
+            $missing[] = sprintf(
+                'Nothing ticked in %s (%s not saved)',
+                $this->rowRanges($untouched),
+                count($untouched) === 1 ? 'this row is' : 'these rows are',
+            );
+        }
+
+        return $missing;
+    }
+
+    /** A ledger row as Verify names it: one person per row. */
+    private function personLabel(int $row): string
+    {
+        return sprintf('Person %02d', $row);
+    }
+
+    /**
+     * "Person 02 – Person 05, Person 07" for rows 2 to 5 and 7.
+     *
+     * @param  list<int>  $rows  in order
+     */
+    private function rowRanges(array $rows): string
+    {
+        $runs = [];
+        foreach ($rows as $row) {
+            $last = array_key_last($runs);
+            if ($last !== null && $runs[$last][1] === $row - 1) {
+                $runs[$last][1] = $row;
+            } else {
+                $runs[] = [$row, $row];
+            }
+        }
+
+        return implode(', ', array_map(
+            fn (array $run) => $run[0] === $run[1]
+                ? $this->personLabel($run[0])
+                : $this->personLabel($run[0]).' – '.$this->personLabel($run[1]),
+            $runs,
+        ));
     }
 
     /**

@@ -551,6 +551,50 @@
         </div>
     </div>
 
+    {{-- Confirm submitting a record that leaves required fields out --}}
+    <div class="modal fade" id="missingRequiredModal" tabindex="-1"
+         aria-labelledby="missingRequiredModalTitle" aria-describedby="missingRequiredModalDescription"
+         aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable missing-required-dialog">
+            <div class="modal-content missing-required-modal">
+                <div class="modal-header">
+                    <div class="missing-required-modal__heading">
+                        <span class="missing-required-modal__icon bg-label-warning" aria-hidden="true">
+                            <i class="icon-base bx bx-error"></i>
+                        </span>
+                        <div>
+                            <h5 class="modal-title" id="missingRequiredModalTitle">Submit without required fields?</h5>
+                            <p class="missing-required-modal__summary" id="missingRequiredModalDescription">
+                                The record would be saved without the following.
+                            </p>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                            aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body">
+                    <ul class="missing-required-list" id="missingRequiredList"></ul>
+                    <p class="missing-required-modal__note">
+                        <i class="icon-base bx bx-history" aria-hidden="true"></i>
+                        <span>Submit anyway only if the page really leaves them blank. The audit log records what was left out.</span>
+                    </p>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal"
+                            id="missingRequiredBackBtn">
+                        <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>
+                        Go back
+                    </button>
+                    <button type="button" class="btn btn-warning" id="confirmMissingRequiredBtn">
+                        Submit anyway
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- OCR progress while the model runs --}}
     <div class="modal fade" id="scanningModal" tabindex="-1" data-bs-backdrop="static"
          data-bs-keyboard="false" aria-hidden="true">
@@ -3904,8 +3948,184 @@
         if (firstInvalidRow) requiredInput(firstInvalidRow, '.verified').focus();
     }
 
-    el('submitForm').addEventListener('submit', async (event) => {
+    /**
+     * What this submission leaves out that the layout requires: its own fields
+     * that no checked line was read under; in a register, the required columns
+     * missing from each row with something checked, then the rows with nothing
+     * checked (the page is removed after submitting, so they would have to be
+     * scanned again). The server makes the same list.
+     */
+    function requiredNotSubmitted(verifiedIndexes) {
+        const checkedIndexes = new Set(verifiedIndexes);
+        const checkedNames = new Set(verifiedIndexes.map((index) => nameKey(cropped[index]?.label)));
+        const missing = config.boxes
+            .filter((box) => box.kind !== 'column' && box.required !== false && !checkedNames.has(nameKey(box.name)))
+            .map((box) => box.name);
+
+        const requiredColumns = config.boxes.filter((box) => box.kind === 'column' && box.required !== false);
+        const untouchedRows = [];
+        validationGroups.forEach((group) => {
+            const ledgerRow = group.kind === 'person'
+                && group.indexes.some((index) => settingsFor(index)?.kind === 'column');
+            if (!ledgerRow) return;
+
+            const checkedHere = group.indexes.filter((index) => checkedIndexes.has(index));
+            if (checkedHere.length === 0) {
+                untouchedRows.push(Number(cropped[group.indexes[0]]?.personGroup));
+                return;
+            }
+
+            const columnsHere = new Set(checkedHere.map((index) => nameKey(cropped[index]?.label)));
+            const left = requiredColumns
+                .filter((box) => !columnsHere.has(nameKey(box.name)))
+                .map((box) => box.name);
+            if (left.length > 0) missing.push(`${group.label}: ${left.join(', ')}`);
+        });
+
+        if (untouchedRows.length > 0) {
+            missing.push(`Nothing ticked in ${rowRanges(untouchedRows)} `
+                + `(${untouchedRows.length === 1 ? 'this row is' : 'these rows are'} not saved)`);
+        }
+
+        return missing;
+    }
+
+    // "Person 02 – Person 05, Person 07" for rows 2 to 5 and 7, in order.
+    function rowRanges(rows) {
+        const label = (row) => `Person ${String(row).padStart(2, '0')}`;
+        const runs = [];
+        rows.forEach((row) => {
+            const run = runs[runs.length - 1];
+            if (run && run[1] === row - 1) run[1] = row;
+            else runs.push([row, row]);
+        });
+
+        return runs
+            .map(([first, last]) => (first === last ? label(first) : `${label(first)} – ${label(last)}`))
+            .join(', ');
+    }
+
+    function askToSubmitWithoutRequired(entries) {
+        el('missingRequiredList').replaceChildren(...missingRequiredItems(entries));
+        window.bootstrap.Modal.getOrCreateInstance(el('missingRequiredModal')).show();
+    }
+
+    /**
+     * The list's own wording (requiredNotSubmitted() here, the same list from
+     * the server) laid out as cards: the layout's fields together, then each
+     * person missing something, then the rows with nothing ticked.
+     */
+    function missingRequiredItems(entries) {
+        const fields = [];
+        const people = [];
+        let untouched = null;
+        entries.forEach((entry) => {
+            const rows = entry.match(/^Nothing ticked in (.+) \((this row is|these rows are) not saved\)$/);
+            const person = entry.match(/^Person (\d+): (.+)$/);
+            if (rows) {
+                untouched = missingRequiredItem({
+                    icon: 'bx-user-x',
+                    // One part per range, so "Person 02 – Person 05" never breaks.
+                    title: rows[1].split(', '),
+                    detail: `Nothing ticked, so ${rows[2]} not saved`,
+                    muted: true,
+                });
+            } else if (person) {
+                // The name Verify shows for this person, when one was read.
+                const group = validationGroups.find((candidate) => candidate.label === `Person ${person[1]}`);
+                const identity = group ? groupIdentity(group) : '';
+                people.push(missingRequiredItem({
+                    badge: person[1],
+                    title: `Person ${person[1]}`,
+                    subtitle: group && identity !== `${group.indexes.length} fields` ? identity : null,
+                    detail: `Missing: ${person[2]}`,
+                }));
+            } else {
+                fields.push(entry);
+            }
+        });
+
+        return [
+            ...(fields.length > 0 ? [missingRequiredItem({
+                icon: 'bx-file',
+                title: `${fields.length} required field${fields.length === 1 ? '' : 's'} not ticked`,
+                names: fields,
+            })] : []),
+            ...people,
+            ...(untouched ? [untouched] : []),
+        ];
+    }
+
+    function missingRequiredItem({ badge = '', icon = null, title, subtitle = null, detail = null, names = [], muted = false }) {
+        const item = document.createElement('li');
+        item.className = muted ? 'missing-required-item is-muted' : 'missing-required-item';
+
+        const marker = document.createElement('span');
+        marker.className = 'missing-required-item__badge';
+        marker.setAttribute('aria-hidden', 'true');
+        if (icon) {
+            const glyph = document.createElement('i');
+            glyph.className = `icon-base bx ${icon}`;
+            marker.append(glyph);
+        } else {
+            marker.textContent = badge;
+        }
+
+        const copy = document.createElement('div');
+        copy.className = 'missing-required-item__copy';
+        const heading = document.createElement('strong');
+        if (Array.isArray(title)) {
+            title.forEach((part, index) => {
+                const span = document.createElement('span');
+                span.className = 'text-nowrap';
+                span.textContent = part;
+                heading.append(...(index > 0 ? [', ', span] : [span]));
+            });
+        } else {
+            heading.textContent = title;
+        }
+        if (subtitle) {
+            const who = document.createElement('span');
+            who.className = 'missing-required-item__who';
+            who.textContent = ` · ${subtitle}`;
+            heading.append(who);
+        }
+        copy.append(heading);
+        if (detail) {
+            const text = document.createElement('small');
+            text.textContent = detail;
+            copy.append(text);
+        }
+        if (names.length > 0) {
+            const list = document.createElement('ul');
+            list.className = 'missing-required-item__names';
+            list.append(...names.map((name) => {
+                const chip = document.createElement('li');
+                chip.textContent = name;
+                return chip;
+            }));
+            copy.append(list);
+        }
+
+        item.append(marker, copy);
+        return item;
+    }
+
+    // The safe choice has the focus, so Enter never submits by accident.
+    el('missingRequiredModal').addEventListener('shown.bs.modal', () => el('missingRequiredBackBtn').focus());
+
+    el('confirmMissingRequiredBtn').addEventListener('click', () => {
+        window.bootstrap.Modal.getInstance(el('missingRequiredModal'))?.hide();
+        submitRecord({ allowMissing: true });
+    });
+
+    el('submitForm').addEventListener('submit', (event) => {
         event.preventDefault();
+        submitRecord();
+    });
+
+    // Only "Submit anyway" passes allowMissing, after the same checks again.
+    async function submitRecord({ allowMissing = false } = {}) {
         if (recordSubmitting) return;
 
         clearValidationSubmitError();
@@ -3947,9 +4167,18 @@
             return;
         }
 
+        if (!allowMissing) {
+            const missing = requiredNotSubmitted(verifiedIndexes);
+            if (missing.length > 0) {
+                askToSubmitWithoutRequired(missing);
+                return;
+            }
+        }
+
         const form = el('submitForm');
         const data = new FormData(form);
         data.set('scan', scanFile, scanFile.name);
+        if (allowMissing) data.set('allow_missing', '1');
 
         const personGroups = validationGroups.filter((candidate) => candidate.kind === 'person');
         const submittedFields = verifiedIndexes.map((sourceIndex) => {
@@ -4008,6 +4237,12 @@
             const payload = contentType.includes('application/json') ? await response.json() : null;
 
             if (!response.ok) {
+                // The server found required fields missing that this page did
+                // not: nothing was saved, so ask the same question.
+                if (response.status === 422 && Array.isArray(payload?.errors?.missing_required)) {
+                    askToSubmitWithoutRequired(payload.errors.missing_required);
+                    return;
+                }
                 applyServerFieldErrors(payload?.errors, verifiedIndexes);
                 throw new Error(submissionErrorMessage(response, payload));
             }
@@ -4035,6 +4270,6 @@
                 updateVerificationSummary();
             }
         }
-    });
+    }
 </script>
 @endpush

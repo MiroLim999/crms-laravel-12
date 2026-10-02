@@ -282,19 +282,21 @@ Done: 2026-10-03 · PHP 282 · JS 86 · Python 62 passed
 
 The decision is already made: ask for confirmation with a **Submit anyway** button.
 
-- [ ] In the browser, before sending, build one list without duplicates of what won't be submitted:
+- [x] In the browser, before sending, build one list without duplicates of what won't be submitted:
   - required template fields (not ledger columns) whose names aren't among the checked fields
   - plus whatever `missingRequired()` returns for each person or row group
-- [ ] If the list isn't empty, show a Bootstrap modal that lists the fields, with **Go back** and **Submit anyway** buttons. Only **Submit anyway** continues, and it adds `allow_missing=1` to the form data.
-- [ ] On the server, in `store()`, for templates that aren't ledgers:
+- [x] If the list isn't empty, show a Bootstrap modal that lists the fields, with **Go back** and **Submit anyway** buttons. Only **Submit anyway** continues, and it adds `allow_missing=1` to the form data.
+- [x] On the server, in `store()`, for templates that aren't ledgers:
   - find the required template fields missing from the submitted names (compare trimmed and case-insensitive)
   - without `allow_missing`, throw a validation error under the key `missing_required` that lists them
   - validate `allow_missing` as `sometimes|boolean`
 
-  Ledger rows are only checked in the browser.
-- [ ] When missing fields are accepted, add `missing_required_fields` (the list) to the new values of the `record.submitted` audit entry.
-- [ ] In the browser, when the server answers 422 with `missing_required`, show the same modal.
-- [ ] Tests:
+  Ledger rows are only checked in the browser. (Changed: see the Decision below.)
+
+  Decision: registers are checked too, in the browser and on the server, because the first browser check showed that unticking a register cell didn't ask. Each row with something ticked must have every required column ticked ("Person 01: Column 2"). Rows with nothing ticked are named in one line ("Nothing ticked in Person 02 – Person 22 (these rows are not saved)"), because the page is removed after submitting. The audit entry lists both. `LineOutlinePipelineTest`'s two register submissions now send `allow_missing=1`. (2026-10-03)
+- [x] When missing fields are accepted, add `missing_required_fields` (the list) to the new values of the `record.submitted` audit entry.
+- [x] In the browser, when the server answers 422 with `missing_required`, show the same modal.
+- [x] Tests:
   - a missing required field gives a 422 `missing_required` without the flag
   - the same submission is saved with `allow_missing=1`
   - the audit entry lists the missing names

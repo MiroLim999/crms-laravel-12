@@ -381,6 +381,8 @@ class LineOutlinePipelineTest extends TestCase
                     'x' => 0.05, 'y' => 0.1, 'width' => 0.2, 'height' => 0.05,
                     'line_id' => $line->getKey(),
                 ]],
+                // One cell of the register: Staff confirmed leaving out the rest.
+                'allow_missing' => '1',
             ])
             ->assertCreated();
 
@@ -710,6 +712,8 @@ class LineOutlinePipelineTest extends TestCase
                     'x' => 0.05, 'y' => 0.1, 'width' => 0.2, 'height' => 0.05,
                     'line_id' => $line->getKey(),
                 ]],
+                // One cell of the register: Staff confirmed leaving out the rest.
+                'allow_missing' => '1',
             ])
             ->assertCreated();
 

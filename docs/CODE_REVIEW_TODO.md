@@ -112,11 +112,11 @@ These don't crash anything, but they're weak spots a panelist could point out.
 **Effort:** Medium
 
 - [x] **Decision made: ask for confirmation** ("These required fields are empty: … Submit anyway?"), because some real certificates leave a field blank. Submission is not hard-blocked.
-- [ ] In the submit handler, run `missingRequired()` for every person or row group. If anything is missing, show a confirmation dialog that lists the missing field names, with "Go back" and "Submit anyway" buttons.
-- [ ] Only when Staff choose "Submit anyway", add `allow_missing=1` to the form data.
-- [ ] On the server, in `store()`, check that every required template field (for normal, non-ledger templates) is among the submitted fields. If some are missing and `allow_missing` is not set, return a validation error that names them (Staff then see the same confirmation).
-- [ ] When the flag is set, save the names of the missing fields in the `record.submitted` audit entry (e.g. `missing_required_fields`), so the omission is on record.
-- [ ] **Test:** submitting without a required field is refused without the flag, succeeds with it, and the audit entry lists the missing fields.
+- [x] In the submit handler, run `missingRequired()` for every person or row group. If anything is missing, show a confirmation dialog that lists the missing field names, with "Go back" and "Submit anyway" buttons.
+- [x] Only when Staff choose "Submit anyway", add `allow_missing=1` to the form data.
+- [x] On the server, in `store()`, check that every required template field (for normal, non-ledger templates) is among the submitted fields. If some are missing and `allow_missing` is not set, return a validation error that names them (Staff then see the same confirmation).
+- [x] When the flag is set, save the names of the missing fields in the `record.submitted` audit entry (e.g. `missing_required_fields`), so the omission is on record.
+- [x] **Test:** submitting without a required field is refused without the flag, succeeds with it, and the audit entry lists the missing fields.
 
 ### 9. The AI service has no password
 

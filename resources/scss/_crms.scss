@@ -1663,6 +1663,151 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-radius: var(--bs-border-radius-lg);
 }
 
+// Verify: asks before a record is submitted without required fields.
+.missing-required-dialog {
+  max-inline-size: 32rem;
+}
+
+.missing-required-modal {
+  border-radius: var(--bs-border-radius-lg);
+
+  .modal-header {
+    align-items: flex-start;
+  }
+}
+
+.missing-required-modal__heading {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  min-inline-size: 0;
+}
+
+.missing-required-modal__icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  place-items: center;
+  border-radius: .625rem;
+
+  > .bx {
+    font-size: 1.35rem;
+  }
+}
+
+.missing-required-modal__summary {
+  margin: .2rem 0 0;
+  color: var(--bs-secondary-color);
+  font-size: .8125rem;
+}
+
+.missing-required-list {
+  display: grid;
+  gap: .5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.missing-required-item {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  padding: .7rem .8rem;
+  background: rgba(255, 171, 0, .06);
+  border: 1px solid rgba(255, 171, 0, .32);
+  border-radius: .5rem;
+
+  &.is-muted {
+    background: rgba(67, 89, 113, .03);
+    border-color: var(--bs-border-color);
+  }
+}
+
+// Shaped like the person numbers in the Verify list.
+.missing-required-item__badge {
+  display: inline-grid;
+  flex: 0 0 auto;
+  inline-size: 2rem;
+  block-size: 2rem;
+  place-items: center;
+  color: #8a6500;
+  background: rgba(255, 171, 0, .16);
+  border-radius: .4rem;
+  font-size: .6875rem;
+  font-weight: 700;
+
+  > .bx {
+    font-size: 1.1rem;
+  }
+
+  .is-muted > & {
+    color: var(--bs-secondary-color);
+    background: rgba(67, 89, 113, .08);
+  }
+}
+
+.missing-required-item__copy {
+  min-inline-size: 0;
+  padding-block-start: .1rem;
+
+  strong {
+    display: block;
+    color: var(--bs-heading-color);
+    font-size: .875rem;
+    font-weight: 600;
+  }
+
+  small {
+    display: block;
+    margin-block-start: .1rem;
+    color: var(--bs-secondary-color);
+    font-size: .75rem;
+    line-height: 1.4;
+  }
+}
+
+.missing-required-item__who {
+  color: var(--bs-secondary-color);
+  font-weight: 400;
+}
+
+.missing-required-item__names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin: .45rem 0 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    padding: .15rem .55rem;
+    color: #8a6500;
+    background: #fff;
+    border: 1px solid rgba(255, 171, 0, .45);
+    border-radius: 50rem;
+    font-size: .75rem;
+    font-weight: 500;
+  }
+}
+
+.missing-required-modal__note {
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  margin: .9rem 0 0;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  line-height: 1.45;
+
+  > .bx {
+    flex: 0 0 auto;
+    margin-block-start: .05rem;
+    font-size: 1rem;
+  }
+}
+
 @property --ocr-progress {
   syntax: '<number>';
   inherits: false;
