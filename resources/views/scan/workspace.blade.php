@@ -44,11 +44,11 @@
                     <span class="document-dropzone__text">or choose a file from your computer</span>
                     <span class="btn btn-primary document-dropzone__button">Choose document</span>
                     <span class="document-dropzone__formats">
-                        <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>TIFF</span>
+                        <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>BMP</span>
                     </span>
                 </label>
                 <input type="file" id="scanFile" class="visually-hidden"
-                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp,image/tiff">
+                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp">
 
                 <div class="document-upload-note">
                     <span><i class="icon-base bx bx-file me-1"></i> Maximum file size: 20 MB</span>

@@ -152,7 +152,7 @@ class DocumentScanController extends Controller
                 'max:255',
                 Rule::exists(OcrModel::class, 'key')->whereNull('disk_deleted_at'),
             ],
-            'scan' => ['required', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp,tiff', 'max:20480'],
+            'scan' => ['required', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
             'fields' => ['required', 'array', 'min:1', 'max:450'],
             'fields.*.verified' => ['required', 'accepted'],
             'fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
@@ -168,6 +168,8 @@ class DocumentScanController extends Controller
             // The processed page whose outlined lines these fields were read from.
             'document_page_id' => ['nullable', 'integer'],
             'fields.*.line_id' => ['nullable', 'integer', 'distinct'],
+        ], [
+            'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
         ]);
 
         $templateId = (int) $validated['document_template_id'];

@@ -299,6 +299,31 @@ class DocumentUploadWorkflowTest extends TestCase
         $this->assertDatabaseCount('records', 0);
     }
 
+    public function test_a_tiff_scan_is_refused_with_a_clear_message(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTemplateSeeder::class);
+        $this->registerTestModel();
+
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, [
+                    $this->verifiedField('Child Full Name', 'Maria Santos'),
+                ]),
+                'scan' => UploadedFile::fake()->create('scan.tiff', 10, 'image/tiff'),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors([
+                'scan' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
+            ]);
+
+        $this->assertDatabaseCount('records', 0);
+        $this->assertSame([], Storage::disk('local')->allFiles('scans'));
+    }
+
     public function test_custom_document_type_can_complete_the_staff_submission_flow(): void
     {
         Storage::fake('local');

@@ -262,15 +262,17 @@ Done: 2026-10-02 · PHP 280 · JS 86 · Python 62 passed
 - `app/Http/Controllers/DocumentTemplateController.php` (the `sample_document` rule)
 - `tests/Feature/DocumentUploadWorkflowTest.php`, `tests/Feature/DocumentTemplateBuilderTest.php`
 
-- [ ] **[Decision]** A) Remove TIFF support (recommended: simplest, and browsers can't display TIFF anyway). B) Keep TIFF: convert it to PNG in the browser with a TIFF library, and add `tif` to the submit rule.
-- [ ] For A:
+- [x] **[Decision]** A) Remove TIFF support (recommended: simplest, and browsers can't display TIFF anyway). B) Keep TIFF: convert it to PNG in the browser with a TIFF library, and add `tif` to the submit rule.
+  Decision: A, simplest, and Chrome and Edge can't display TIFF anyway (2026-10-03)
+- [x] For A:
   - remove `image/tiff` from both `accept` lists
   - remove `tif` and `tiff` from both rules
   - make any on-screen text that lists formats say "PDF, PNG, JPG, WEBP or BMP"
-- [ ] Tests: a TIFF upload is refused with a clear message, both at submit and as a template sample. `UploadedFile::fake()->create('scan.tiff', 10, 'image/tiff')` is enough for this.
+- [x] Tests: a TIFF upload is refused with a clear message, both at submit and as a template sample. `UploadedFile::fake()->create('scan.tiff', 10, 'image/tiff')` is enough for this.
 
 **Verify:** `php artisan test --filter="DocumentUploadWorkflowTest|DocumentTemplateBuilderTest"`, then all tests.
 **Done when:** TIFF is either refused clearly or works end to end.
+Done: 2026-10-03 · PHP 282 · JS 86 · Python 62 passed
 
 ### Task 2.2: #8 Required fields: ask for confirmation (Medium)
 

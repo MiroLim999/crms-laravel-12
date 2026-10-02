@@ -505,7 +505,7 @@ class DocumentTemplateController extends Controller
             'description' => ['nullable', 'string', 'max:1000'],
             'sample_document' => [
                 'nullable',
-                File::types(['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tif', 'tiff'])
+                File::types(['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp'])
                     ->max(20 * 1024),
             ],
             'paper_size' => ['required', Rule::enum(PaperSize::class)],
@@ -550,6 +550,8 @@ class DocumentTemplateController extends Controller
             ],
             ...$this->settingsRules('fields.*'),
             ...$this->settingsRules('columns.*'),
+        ], [
+            'sample_document.mimes' => 'The sample must be a PDF, PNG, JPG, WEBP or BMP file.',
         ]);
 
         $validated['custom_width_mm'] ??= null;

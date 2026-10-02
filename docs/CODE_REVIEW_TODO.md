@@ -213,9 +213,9 @@ These don't crash anything, but they're weak spots a panelist could point out.
 
 **Effort:** Small
 
-- [ ] Simplest fix: remove TIFF from both file pickers (`accept=...`) and from the upload rules, and tell users to scan as PDF, PNG or JPG.
-- [ ] Or, to keep TIFF support: convert TIFF to PNG in the browser with a TIFF library (e.g. `utif`), and add `tif` to the submit rule.
-- [ ] **Test:** a real `.tiff` file is either refused with a clear message at upload, or makes it all the way to a saved record.
+- [x] Simplest fix: remove TIFF from both file pickers (`accept=...`) and from the upload rules, and tell users to scan as PDF, PNG or JPG.
+- [x] Or, to keep TIFF support: convert TIFF to PNG in the browser with a TIFF library (e.g. `utif`), and add `tif` to the submit rule. (not needed: chose the simplest fix)
+- [x] **Test:** a real `.tiff` file is either refused with a clear message at upload, or makes it all the way to a saved record.
 
 ---
 

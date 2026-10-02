@@ -130,7 +130,7 @@
                                 </label>
                                 <input type="file" id="sampleScan" name="sample_document" form="templateBuilderForm"
                                        class="visually-hidden"
-                                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp,image/tiff">
+                                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp">
 
                                 @if ($template?->sample_path)
                                     <button type="button" class="btn btn-sm btn-outline-danger template-sample-delete-button"

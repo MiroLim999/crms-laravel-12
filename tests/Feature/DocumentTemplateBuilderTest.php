@@ -471,6 +471,25 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertSame([], Storage::disk('local')->allFiles(TemplateSampleStorage::ROOT));
     }
 
+    public function test_a_tiff_sample_is_refused_with_a_clear_message(): void
+    {
+        Storage::fake('local');
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'TIFF sample',
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'sample_document' => UploadedFile::fake()->create('register.tiff', 10, 'image/tiff'),
+            'fields' => [$this->field('Child Full Name')],
+        ])->assertSessionHasErrors([
+            'sample_document' => 'The sample must be a PDF, PNG, JPG, WEBP or BMP file.',
+        ]);
+
+        $this->assertDatabaseMissing('document_templates', ['name' => 'TIFF sample']);
+        $this->assertSame([], Storage::disk('local')->allFiles(TemplateSampleStorage::ROOT));
+    }
+
     public function test_validation_redirect_restores_the_working_field_layout(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
