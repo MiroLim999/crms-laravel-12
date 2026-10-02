@@ -472,11 +472,11 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small
 
-- [ ] Add `tools/test-all.ps1` that runs these in order:
+- [x] Add `tools/test-all.ps1` that runs these in order:
   - `php artisan test`
   - `npm run test:js`
   - `ml\.venv-kraken\Scripts\python.exe -m unittest tests.Python.test_line_markers tests.Python.test_grid_layouts`
   - `.venv\Scripts\python.exe -m unittest tests.Python.test_evaluation_report`
-- [ ] Make it stop with a clear message as soon as one suite fails.
-- [ ] Add it to the README ("Before you commit, run `.\tools\test-all.ps1`").
-- [ ] Baseline to keep: PHP 262, JavaScript 85, Python 62 (60 + 2). All passed on 2026-10-02.
+- [x] Make it stop with a clear message as soon as one suite fails.
+- [x] Add it to the README ("Before you commit, run `.\tools\test-all.ps1`").
+- [x] Baseline to keep: PHP 262, JavaScript 85, Python 62 (60 + 2). All passed on 2026-10-02.

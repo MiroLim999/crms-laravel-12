@@ -99,12 +99,15 @@ After Task 0.2, `.\tools\test-all.ps1` runs all four. The baseline on 2026-10-02
 **Depends on:** nothing
 **Touches:** Git only
 
-- [ ] **[Decision]** What should the branch for this work be called? A) `review-fixes`, created from `fieldmarker-experimental-v2` (recommended) B) another name. Record it here as `Branch: …`. Always type it in full, because `fieldmarker-experimental-2` and `fieldmarker-experimental-v2` are easy to mix up.
-- [ ] Create the branch from `fieldmarker-experimental-v2` with `git switch -c <name>`. Apart from `docs/`, there must be no uncommitted changes.
-- [ ] **[Ask first]** Commit the `docs/` folder on the new branch.
-- [ ] Run the four test commands. If the numbers differ from the baseline, record the new numbers here and tell the user.
+- [x] **[Decision]** What should the branch for this work be called? A) `review-fixes`, created from `fieldmarker-experimental-v2` (recommended) B) another name. Record it here as `Branch: …`. Always type it in full, because `fieldmarker-experimental-2` and `fieldmarker-experimental-v2` are easy to mix up.
+  Decision: A, `review-fixes` from `fieldmarker-experimental-v2` (2026-10-02)
+  Branch: review-fixes
+- [x] Create the branch from `fieldmarker-experimental-v2` with `git switch -c <name>`. Apart from `docs/`, there must be no uncommitted changes.
+- [x] **[Ask first]** Commit the `docs/` folder on the new branch. (not needed: `docs/` was already committed on `fieldmarker-experimental-v2`, so the new branch started with it and the tree was clean)
+- [x] Run the four test commands. If the numbers differ from the baseline, record the new numbers here and tell the user.
 
 **Done when:** you're on the new branch and the baseline is confirmed.
+Done: 2026-10-02 · PHP 262 · JS 85 · Python 62 passed (same as baseline)
 
 ### Task 0.2: #37 One command to run all tests (Small)
 
@@ -112,11 +115,12 @@ After Task 0.2, `.\tools\test-all.ps1` runs all four. The baseline on 2026-10-02
 **Why first:** every later task ends with "run all tests".
 **Touches:** new `tools/test-all.ps1`, `README.md`
 
-- [ ] Create `tools/test-all.ps1`. It should run the four test commands in order from the project root, check `$LASTEXITCODE` after each one, and stop with a clear message and exit code 1 at the first failure. Keep it compatible with Windows PowerShell 5.1, so don't use `&&`.
-- [ ] Add a short "Running the tests" note to the README.
-- [ ] Run `.\tools\test-all.ps1`.
+- [x] Create `tools/test-all.ps1`. It should run the four test commands in order from the project root, check `$LASTEXITCODE` after each one, and stop with a clear message and exit code 1 at the first failure. Keep it compatible with Windows PowerShell 5.1, so don't use `&&`.
+- [x] Add a short "Running the tests" note to the README.
+- [x] Run `.\tools\test-all.ps1`.
 
 **Done when:** one command runs all four suites and reports 409 passing tests.
+Done: 2026-10-02 · PHP 262 · JS 85 · Python 62 passed (262 + 85 + 62 = 409)
 
 ---
 

@@ -499,7 +499,11 @@ python ml\predict.py --model <model> --folder ml\new_images  # Read a folder of 
 ```
 
 ### Tests and Code Style
+
+**Before you commit, run `.\tools\test-all.ps1`.** It runs the PHP, JavaScript and both Python suites in order and stops with a clear message at the first failure. MySQL (XAMPP) must be running, because the PHP tests use the `crms_test` database.
+
 ```powershell
+.\tools\test-all.ps1                                         # All four test suites
 php artisan test                                             # PHP tests
 php artisan test --filter=LineOutlinePipelineTest            # One test class
 npm run test:js                                              # JavaScript tests
