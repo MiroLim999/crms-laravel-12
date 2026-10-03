@@ -393,17 +393,21 @@ Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 **Why here:** it takes about 10 minutes, and Tasks 2.8 and 2.9 add new messages that should use the logger, not `print()`.
 **Touches:** `ml/api/main.py`
 
-- [ ] Create `logger = logging.getLogger("ocr-api")` and set it up:
+- [x] Create `logger = logging.getLogger("ocr-api")` and set it up:
   - give it its own `StreamHandler` with the format `[ocr-api] %(message)s`
   - set its level to `INFO`
   - set `logger.propagate = False`
 
   Uvicorn only configures its own loggers, so without a handler `INFO` messages would silently disappear. Don't call `logging.basicConfig()`, because it would make other libraries noisy (see `ml/hf_quiet.py`).
-- [ ] Replace each `print(...)` (there are 7) with `logger.info(...)`, or `logger.warning(...)` for problems.
-- [ ] **[You]** Restart the AI service window and check that the start-up messages still appear.
+  The handler is added only if the logger has none yet, so importing the module under two names (`ml.api.main` and `main`) doesn't print every line twice.
+- [x] Replace each `print(...)` (there are 7) with `logger.info(...)`, or `logger.warning(...)` for problems.
+  All 7 were progress messages, so all are `logger.info`. Their own "[ocr-api] " prefix was dropped, because the format adds it. Rehearsed 2026-10-03 by starting the app with its lifespan through FastAPI's TestClient: both start-up lines appeared once, as "[ocr-api] Models directory: …" and "[ocr-api] Discovered models: …".
+- [x] **[You]** Restart the AI service window and check that the start-up messages still appear.
+  Confirmed 2026-10-03: the user saw the messages, and the running service had the new code (it refused a call without the key).
 
 **Verify:** `.venv\Scripts\python.exe -m unittest tests.Python.test_evaluation_report`, then all tests.
 **Done when:** there's no `print(` left in `ml/api/main.py`, and the messages still show.
+Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 
 ### Task 2.8: #9 A shared key for the AI service (Medium)
 

@@ -463,8 +463,8 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small
 
-- [ ] Add `logger = logging.getLogger("ocr-api")` and replace each `print(...)` with `logger.info(...)` or `logger.warning(...)`.
-- [ ] Optional: also write the log to a file, for troubleshooting.
+- [x] Add `logger = logging.getLogger("ocr-api")` and replace each `print(...)` with `logger.info(...)` or `logger.warning(...)`.
+- [x] Optional: also write the log to a file, for troubleshooting. (not needed: optional, and the plan leaves it out)
 
 ### 37. One command to run all the tests
 

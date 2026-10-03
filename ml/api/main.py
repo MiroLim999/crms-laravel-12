@@ -36,6 +36,7 @@ import hmac
 import hashlib
 import shutil
 import base64
+import logging
 import tempfile
 import threading
 import zipfile
@@ -71,6 +72,19 @@ from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 # Only `sanitise_name` is used, so model and dataset names fold to a safe path
 # segment by exactly one rule rather than two copies of it.
 import dataset_registry as ds
+
+# The service's own messages (models loading, added, deleted, renamed). Uvicorn
+# configures only its own loggers, so without a handler of its own INFO would
+# vanish. Not logging.basicConfig(): that turns on the root logger and makes
+# every library chatty again (see hf_quiet.py). The guard keeps one handler
+# when this module is imported under two names (ml.api.main and main).
+logger = logging.getLogger("ocr-api")
+if not logger.handlers:
+    _log_handler = logging.StreamHandler()
+    _log_handler.setFormatter(logging.Formatter("[ocr-api] %(message)s"))
+    logger.addHandler(_log_handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 # ============================================================
 # CONFIG
@@ -262,7 +276,7 @@ def _load_model(key):
         if entry is not None:
             return entry
 
-        print(f"[ocr-api] Loading model: {label}  ({model_src})  on  {device}")
+        logger.info(f"Loading model: {label}  ({model_src})  on  {device}")
         processor = TrOCRProcessor.from_pretrained(model_src)
         model = VisionEncoderDecoderModel.from_pretrained(model_src)
         model.to(device)
@@ -277,7 +291,7 @@ def _load_model(key):
 
         entry = {"model": model, "processor": processor, "eos_id": eos_id, "label": label}
         _models[cache_key] = entry
-        print(f"[ocr-api] Model ready: {label}")
+        logger.info(f"Model ready: {label}")
         return entry
 
 
@@ -504,8 +518,8 @@ async def lifespan(app: FastAPI):
     # Nothing heavy here on purpose: models stay lazy so the service answers
     # /health immediately after start, and the device is only probed on the
     # first real inference.
-    print(f"[ocr-api] Models directory:   {MODELS_DIR}")
-    print(f"[ocr-api] Discovered models: {sorted(_discover_models()) or '(none)'}")
+    logger.info(f"Models directory:   {MODELS_DIR}")
+    logger.info(f"Discovered models: {sorted(_discover_models()) or '(none)'}")
     yield
     _models.clear()
 
@@ -986,7 +1000,7 @@ def add_model(
         shutil.rmtree(target, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"Failed to save files: {e}")
 
-    print(f"[ocr-api] Added model '{safe_name}' with {len(saved)} files.")
+    logger.info(f"Added model '{safe_name}' with {len(saved)} files.")
     return {"ok": True, "name": safe_name, "saved": saved}
 
 
@@ -1023,7 +1037,7 @@ def delete_model(payload: DeleteModelRequest) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not delete: {e}")
 
-    print(f"[ocr-api] Deleted model '{key}'.")
+    logger.info(f"Deleted model '{key}'.")
     return {"ok": True, "deleted": key}
 
 
@@ -1072,7 +1086,7 @@ def rename_model(payload: RenameModelRequest) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not rename: {e}")
 
-    print(f"[ocr-api] Renamed model '{key}' -> '{new_name}'.")
+    logger.info(f"Renamed model '{key}' -> '{new_name}'.")
     return {"ok": True, "name": new_name}
 
 
