@@ -523,16 +523,22 @@ Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 **Why before 4.3:** batching (Task 4.3) rewrites the confidence function. Moving it into the shared module first means it only gets rewritten once.
 **Touches:** new `ml/trocr_common.py`, `ml/predict.py`, `ml/test_finetuned.py`, `ml/api/main.py`
 
-- [ ] Compare the copies and list any differences in the report:
+- [x] Compare the copies and list any differences in the report:
   - in `predict.py`: `resolve_model`, `_load`, `eos_token_id` and `sequence_confidence`
   - in `test_finetuned.py`: `resolve_model` and `_load`
   - in `main.py`: `_sequence_confidence`, and the EOS lookup in `_load_model()`
-- [ ] Create `ml/trocr_common.py` with one version of each function. Import `hf_quiet` before `torch`, like the other scripts do.
-- [ ] Import it in the three files and delete the copies. `main.py` already puts `ml/` on `sys.path`, so `import trocr_common` works there.
-- [ ] **[You]** Restart the AI service and read one page through the app.
+
+  Compared 2026-10-03. The confidence function and the EOS lookup were the same line for line in `predict.py` and `main.py`. `_load` was the same two `from_pretrained` calls in both scripts and in `main.py`'s `_load_model()`. `resolve_model` had the same logic in both scripts, and only the error differed: `PredictionError` "Model 'X' was not found under ml/models/." against `EvaluationError` with "Add it, or pick another." added. Left alone because they differ on purpose: `main.py` picks its model from the folders it found (`_resolve_key`) and loads "base" from a local `ml/models/base` folder when there is one (there isn't on this machine); `train_trocr.py` has its own `load_base()`, which tries the local cache first so training works offline, and `resolve_base_model()`.
+- [x] Create `ml/trocr_common.py` with one version of each function. Import `hf_quiet` before `torch`, like the other scripts do.
+  It holds `resolve_model`, `load_model`, `eos_token_id` and `sequence_confidence`, plus `MODELS_DIR`, `BASE_MODEL_KEY` and `BASE_MODEL_NAME`. An unknown model raises `ModelNotFoundError` with the longer message, and each script turns it into its own `PredictionError` or `EvaluationError`, as before.
+- [x] Import it in the three files and delete the copies. `main.py` already puts `ml/` on `sys.path`, so `import trocr_common` works there.
+  `main.py` also loads through the shared `load_model()`, so it no longer imports `transformers` itself. `test_finetuned.py` still offers `BASE_MODEL_KEY`, because `test_trocr.py` imports it from there. Rehearsed 2026-10-03 on the CPU, with 10 real crops from saved records and the active model (`TrOcr-50k-broken-samples`): `predict.py` and the service's `/ocr` (through FastAPI's `TestClient`) gave the same texts and the same confidence numbers before and after the change. An unknown model still stops both scripts with a clear message, and `--help` works for all four scripts.
+- [x] **[You]** Restart the AI service and read one page through the app.
+  Confirmed 2026-10-03: the user restarted the service at 10:54, after the change (10:46), and their next scan (page 108, the register sample) was read through the shared code: 220 of 220 lines, no errors, average confidence 93.5%.
 
 **Verify:** the Python tests, plus `--help` runs of `predict.py` and `test_finetuned.py`.
 **Done when:** each function exists only once.
+Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 
 ### Task 3.4: #23 Repeated code in DocumentPageController (Small)
 

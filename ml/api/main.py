@@ -69,12 +69,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 # Import-cheap sibling: no torch, so /health stays responsive while the GPU is busy.
 # Only `sanitise_name` is used, so model and dataset names fold to a safe path
 # segment by exactly one rule rather than two copies of it.
 import dataset_registry as ds
+# Shared with predict.py and test_finetuned.py, so a reading is loaded and
+# scored the same way everywhere.
+from trocr_common import eos_token_id, load_model, sequence_confidence
 
 # The service's own messages (models loading, added, deleted, renamed). Uvicorn
 # configures only its own loggers, so without a handler of its own INFO would
@@ -280,19 +282,13 @@ def _load_model(key):
             return entry
 
         logger.info(f"Loading model: {label}  ({model_src})  on  {device}")
-        processor = TrOCRProcessor.from_pretrained(model_src)
-        model = VisionEncoderDecoderModel.from_pretrained(model_src)
+        processor, model = load_model(model_src)
         model.to(device)
         model.eval()
 
-        eos_id = (
-            getattr(model.generation_config, "eos_token_id", None)
-            or getattr(model.config, "eos_token_id", None)
-            or getattr(model.config.decoder, "eos_token_id", None)
-            or processor.tokenizer.sep_token_id
-        )
+        eos_id = eos_token_id(model, processor)
 
-        entry = {"model": model, "processor": processor, "eos_id": eos_id, "label": label}
+        entry ={"model": model, "processor": processor, "eos_id": eos_id, "label": label}
         _models[cache_key] = entry
         logger.info(f"Model ready: {label}")
         return entry
@@ -412,27 +408,6 @@ def _authorize_model_upload(token, requested_name):
 
     if expires_at < int(time.time()):
         raise HTTPException(status_code=401, detail="Model-upload authorization has expired.")
-
-
-def _sequence_confidence(model, gen_output, eos_id):
-    """Geometric mean of per-token probabilities up to the first EOS, as a %."""
-    try:
-        scores = model.compute_transition_scores(
-            gen_output.sequences, gen_output.scores, normalize_logits=True
-        )[0]
-        gen_tokens = gen_output.sequences[0][1:1 + len(scores)]
-        log_probs = []
-        for tok, lp in zip(gen_tokens, scores):
-            if not torch.isfinite(lp):
-                continue
-            log_probs.append(lp.item())
-            if tok.item() == eos_id:
-                break
-        if not log_probs:
-            return 0.0
-        return round(math.exp(sum(log_probs) / len(log_probs)) * 100.0, 1)
-    except Exception:
-        return 0.0
 
 
 def _decode_data_url(data_url):
@@ -643,7 +618,7 @@ def ocr(payload: OcrRequest) -> dict:
             text = processor.batch_decode(
                 gen_output.sequences, skip_special_tokens=True
             )[0].strip()
-            conf = _sequence_confidence(model, gen_output, eos_id)
+            conf = sequence_confidence(model, gen_output, eos_id)
             results.append({"name": name, "text": text, "confidence": conf})
         except Exception as e:
             # One bad crop must not fail the whole batch.

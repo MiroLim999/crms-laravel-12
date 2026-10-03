@@ -299,9 +299,9 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Medium
 
-- [ ] Create one shared module, e.g. `ml/trocr_common.py`, containing `resolve_model`, `load_model`, `eos_token_id` and `sequence_confidence`. Compare the copies first and keep the most careful version.
-- [ ] Import it in `predict.py`, `test_finetuned.py` and `api/main.py`, and delete the copies.
-- [ ] Run the Python tests, do one `predict.py` run, and do one OCR read through the app.
+- [x] Create one shared module, e.g. `ml/trocr_common.py`, containing `resolve_model`, `load_model`, `eos_token_id` and `sequence_confidence`. Compare the copies first and keep the most careful version.
+- [x] Import it in `predict.py`, `test_finetuned.py` and `api/main.py`, and delete the copies.
+- [x] Run the Python tests, do one `predict.py` run, and do one OCR read through the app.
 
 ### 23. Repeated code in DocumentPageController
 
