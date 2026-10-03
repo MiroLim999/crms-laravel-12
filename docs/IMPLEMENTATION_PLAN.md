@@ -501,15 +501,21 @@ Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 **Depends on:** nothing
 **Touches:** `ml/dataset_registry.py`
 
-- [ ] Confirm nothing uses them: search `ml/` and `tests/Python/` for `list_datasets`, `create_from_zip`, `create_from_directory` and `delete_dataset`.
-- [ ] Delete those four functions, plus:
+- [x] Confirm nothing uses them: search `ml/` and `tests/Python/` for `list_datasets`, `create_from_zip`, `create_from_directory` and `delete_dataset`.
+  Checked 2026-10-03: only their own definitions. The scripts use `sanitise_name`, `resolve_paths`, `is_usable`, `DatasetError` and the constants `DEFAULT_DATASET`, `SPLITS`, `IMAGE_EXTENSIONS` and `UNREADABLE`.
+- [x] Delete those four functions, plus:
   - the helpers only they use: `_safe_extract`, `_find_manifest_root`, `_remove_install_artifact`, `_installation_paths`, `_commit_install` and `_assert_regular_directory_tree`
   - the `shutil` and `zipfile` imports
   - any constants only they used
-- [ ] Fix the module docstring, which still mentions a `/datasets` API. This also covers the `dataset_registry.py` line of #24.
+
+  Also removed, because the deleted functions were their only callers: `describe()` and `validate()`, their helpers `_read_manifest`, `_images_in`, `_directory_size` and `_label_of`, the `MAX_REPORTED` constant and the `csv` import. The module went from 530 lines to about 100. `git show b192654:ml/dataset_registry.py` still has `validate()`, if a pre-training check is wanted later.
+- [x] Fix the module docstring, which still mentions a `/datasets` API. This also covers the `dataset_registry.py` line of #24.
+  The `DatasetError` docstring no longer says "malformed", because nothing left raises that. Also touched, beyond **Touches**: the two `README.md` lines that described the module as "manifest validation".
 
 **Verify:** the Python tests, plus `--help` runs of `ml\train_trocr.py`, `ml\predict.py` and `ml\test_finetuned.py` with `.venv\Scripts\python.exe`. All three import this module.
+  Checked 2026-10-03: all three exit 0, and so does `ml\test_trocr.py`, which imports it too.
 **Done when:** the module only contains what training and evaluation still use.
+Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 
 ### Task 3.3: #22 One shared Python module (Medium)
 

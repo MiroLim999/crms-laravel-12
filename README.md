@@ -196,7 +196,7 @@ crms-laravel-12/
 │   ├── dataset/                        # Training/validation/test images & manifest CSV (gitignored)
 │   ├── models/                         # Fine-tuned model checkpoints (gitignored)
 │   ├── evaluation-metrics/             # Timestamped evaluation metric charts
-│   ├── dataset_registry.py             # Dataset manifest validation and normalization
+│   ├── dataset_registry.py             # Dataset names, folders and label rules
 │   ├── download_trocr.py               # Downloads Hugging Face base TrOCR weights
 │   ├── hf_quiet.py                     # Hugging Face environment logging silencer
 │   ├── line_markers.py                 # Deskew, template fit, line outlines and masked crops (Kraken)
@@ -534,7 +534,7 @@ ml/
 ├── test_finetuned.py     # Evaluates fine-tuned model checkpoints & exports metrics
 ├── predict.py            # CLI batch inference on directory of image crops
 ├── metrics.py            # CER, WER, and exact-match computation logic
-├── dataset_registry.py   # Dataset manifest validation and path resolution
+├── dataset_registry.py   # Dataset names and path resolution
 └── download_trocr.py     # Fetches microsoft/trocr-base-handwritten weights
 ```
 

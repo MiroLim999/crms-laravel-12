@@ -285,11 +285,11 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small
 
-- [ ] Confirm nothing uses them: search `ml/` and `tests/Python/` for `list_datasets`, `create_from_zip`, `create_from_directory` and `delete_dataset`.
-- [ ] Delete those four functions, plus the helpers that only they use: `_safe_extract`, `_find_manifest_root`, `_remove_install_artifact`, `_installation_paths`, `_commit_install` and `_assert_regular_directory_tree`.
-- [ ] Remove the imports that become unused (`shutil` and `zipfile`).
-- [ ] Fix the docstring at the top, which mentions an API `/datasets` call that no longer exists.
-- [ ] Run the Python tests.
+- [x] Confirm nothing uses them: search `ml/` and `tests/Python/` for `list_datasets`, `create_from_zip`, `create_from_directory` and `delete_dataset`.
+- [x] Delete those four functions, plus the helpers that only they use: `_safe_extract`, `_find_manifest_root`, `_remove_install_artifact`, `_installation_paths`, `_commit_install` and `_assert_regular_directory_tree`.
+- [x] Remove the imports that become unused (`shutil` and `zipfile`).
+- [x] Fix the docstring at the top, which mentions an API `/datasets` call that no longer exists.
+- [x] Run the Python tests.
 
 ### 22. Copy-pasted Python functions
 
