@@ -859,10 +859,17 @@ Postponed: 2026-10-03 (the user's answer to **[Ask first]**); not done. `scan/wo
 **Depends on:** every task that adds a migration (1.1, 2.3, 3.7, 3.9, 3.10, 4.1), finished or marked not needed
 **Why last:** a schema dump has to include every migration this plan adds.
 
-- [ ] **[Decision]** A) Leave the old migrations as they are (recommended). B) Run `php artisan schema:dump --prune`, but only if every teammate will rebuild their database afterwards.
-- [ ] Write the one-sentence explanation here for the defense, e.g. "The ml_jobs and ml_datasets tables came from an early feature that moved to command-line scripts."
+- [x] **[Decision]** A) Leave the old migrations as they are (recommended). B) Run `php artisan schema:dump --prune`, but only if every teammate will rebuild their database afterwards.
+  Decision: A, leave them as they are, so no teammate has to rebuild their database, given by the user with the Phase 6 prompt (2026-10-03)
+  On **Depends on**: Task 2.3's last by-eye check is still open, but its migration (`2026_10_03_000100`) is committed and has run, and A makes no schema dump, so nothing here waits on that check. Task 3.10 was postponed, so its migration was never written.
+- [x] Write the one-sentence explanation here for the defense, e.g. "The ml_jobs and ml_datasets tables came from an early feature that moved to command-line scripts."
+  > "The `ml_jobs` and `ml_datasets` tables came from an early design that ran model training and dataset preparation from the website; that work moved to command-line scripts in `ml/`, so a later migration (`2026_01_01_000900`) drops them."
+
+  If asked why the old migrations are still there: a migration that has already run is never edited or deleted, because every database that ran it still records it, and rollbacks would break. The drop migration's own comment says this.
+  If asked about the other two removals: Laravel's default `password_reset_tokens` table was dropped (2026-08-09) because an administrator resets a password in User Accounts by issuing a temporary one, not by an emailed link. `users.email_verified_at` was dropped in Task 3.7 because nothing used it.
 
 **Done when:** the decision is recorded, and the explanation is written.
+Done: 2026-10-03 · PHP 300 · JS 86 · Python 69 passed
 
 ### Task 6.2: Final regression
 

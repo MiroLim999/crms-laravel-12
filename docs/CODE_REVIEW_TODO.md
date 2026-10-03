@@ -275,9 +275,9 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small
 
-- [ ] Don't edit or delete the old migrations, because they've already run on existing databases.
-- [ ] Optional: `php artisan schema:dump --prune` replaces the history with one schema file. Only do this if every teammate will rebuild their database afterwards.
-- [ ] Prepare a one-sentence explanation, e.g. "the training and dataset features moved to command-line scripts."
+- [x] Don't edit or delete the old migrations, because they've already run on existing databases. (Decision A in IMPLEMENTATION_PLAN.md Task 6.1, 2026-10-03.)
+- [x] Optional: `php artisan schema:dump --prune` replaces the history with one schema file. Only do this if every teammate will rebuild their database afterwards. (not needed: decision A, see Task 6.1)
+- [x] Prepare a one-sentence explanation, e.g. "the training and dataset features moved to command-line scripts." (Written in IMPLEMENTATION_PLAN.md Task 6.1.)
 
 ### 21. Dead Python code in dataset_registry.py
 
