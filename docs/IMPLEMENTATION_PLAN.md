@@ -448,19 +448,21 @@ Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 **Why here:** it's the last change to `main.py` in this phase.
 **Touches (only if needed):** `ml/api/main.py`, a new Python test
 
-- [ ] Check: list `ml/models/*/evaluation-report.json`. On 2026-10-02 there were none, so a slow first health check can't happen yet. If there are still none, tick the remaining steps as `(not needed: no model has an evaluation report)`.
-- [ ] If a report exists: **[You]** restart the AI service and open the OCR page right away. Tell Claude whether it shows "unreachable".
-- [ ] If it does:
+- [x] Check: list `ml/models/*/evaluation-report.json`. On 2026-10-02 there were none, so a slow first health check can't happen yet. If there are still none, tick the remaining steps as `(not needed: no model has an evaluation report)`.
+  Checked 2026-10-03: still none (the only model folder is `TrOcr-50k-broken-samples`). In the code, `_read_evaluation_report()` returns before hashing anything when the report file is missing, and `_sha256_file()` is only reached through a report.
+- [x] If a report exists: **[You]** restart the AI service and open the OCR page right away. Tell Claude whether it shows "unreachable". (not needed: no model has an evaluation report)
+- [x] If it does: (not needed: no model has an evaluation report)
   - compute the fingerprints in a background thread started in `lifespan`, logging through the logger from Task 2.7
   - make `/health` leave out a model's evaluation until its fingerprint is ready
-- [ ] Test: `/health` answers quickly while the fingerprints are still being computed. Patch `_sha256_file` to make it slow.
+- [x] Test: `/health` answers quickly while the fingerprints are still being computed. Patch `_sha256_file` to make it slow. (not needed: no model has an evaluation report)
 
 **Verify:** the Python tests.
 **Done when:** the service shows as online right after start-up, or the check proves this can't happen yet.
+Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 
 ### Phase 2 checkpoint
 
-- [ ] All tests pass.
+- [x] All tests pass. (2026-10-03, after Task 2.9: PHP 295 · JS 86 · Python 67)
 - [ ] **[You]** In the browser:
   - Do a full scan → Detect → verify. Leave a required field unchecked; you should see the confirmation. Then submit.
   - Open the new record.

@@ -199,9 +199,9 @@ These don't crash anything, but they're weak spots a panelist could point out.
 
 **Effort:** Small to check, Medium to fix
 
-- [ ] **Check first:** restart the AI service and open the OCR page right away. Does it say "unreachable" for a few seconds?
-- [ ] If yes, compute the fingerprints in a background thread at start-up (in `lifespan`), and let `/health` skip a model's evaluation until its fingerprint is ready.
-- [ ] **Test:** the OCR page shows the service as online right after start-up.
+- [x] **Check first:** restart the AI service and open the OCR page right away. Does it say "unreachable" for a few seconds? (checked the plan's way on 2026-10-03: no model has an `evaluation-report.json`, and without one nothing is hashed, so it can't happen yet)
+- [x] If yes, compute the fingerprints in a background thread at start-up (in `lifespan`), and let `/health` skip a model's evaluation until its fingerprint is ready. (not needed: no model has an evaluation report)
+- [x] **Test:** the OCR page shows the service as online right after start-up. (not needed: no model has an evaluation report)
 
 ### 16. TIFF scans are offered but don't work (Tested)
 
