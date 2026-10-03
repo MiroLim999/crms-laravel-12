@@ -230,8 +230,12 @@ Route::middleware('auth')->group(function () {
         Route::post('templates/detect-grid', [DocumentTemplateController::class, 'detectGrid'])
             ->name('templates.detect-grid');
         // Outlines the sample with the layout being built, as Detect would for Staff.
+        // It runs in the queue (about half a minute); the builder polls the status.
         Route::post('templates/test-layout', [DocumentTemplateController::class, 'testLayout'])
             ->name('templates.test-layout');
+        Route::get('templates/test-layout/{test}', [DocumentTemplateController::class, 'testLayoutStatus'])
+            ->whereUuid('test')
+            ->name('templates.test-layout.status');
         Route::post('templates', [DocumentTemplateController::class, 'store'])->name('templates.store');
         Route::get('templates/{template}/edit', [DocumentTemplateController::class, 'edit'])
             ->name('templates.edit');

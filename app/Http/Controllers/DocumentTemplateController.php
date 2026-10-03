@@ -5,11 +5,10 @@ namespace App\Http\Controllers;
 use App\Enums\DocumentType;
 use App\Enums\PageOrientation;
 use App\Enums\PaperSize;
-use App\Models\DocumentPage;
+use App\Jobs\TestTemplateLayout;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTemplateField;
 use App\Models\DocumentTypeDefinition;
-use App\Models\PageLine;
 use App\Services\AuditLogger;
 use App\Services\Lines\GeometryInput;
 use App\Services\Lines\LineMarkers;
@@ -119,8 +118,11 @@ class DocumentTemplateController extends Controller
      * straightened, the markers fitted to its table and every line outlined,
      * exactly as Detect does it for Staff. Nothing is read or kept; the
      * builder shows where each line would be cut and which row it lands in.
+     *
+     * That takes about half a minute, so it runs in the queue (see
+     * TestTemplateLayout) and the builder polls testLayoutStatus() for it.
      */
-    public function testLayout(Request $request, LineMarkers $markers): JsonResponse
+    public function testLayout(Request $request): JsonResponse
     {
         GeometryInput::hydrate($request);
         $validated = $request->validate([
@@ -129,43 +131,41 @@ class DocumentTemplateController extends Controller
         ]);
         $geometry = GeometryInput::checked($validated['geometry']);
 
-        // Line detection takes about half a minute a page.
-        @set_time_limit(600);
+        $id = (string) Str::uuid();
+        $request->file('page')->storeAs(TestTemplateLayout::directory($id), 'page.png', 'local');
+        TestTemplateLayout::dispatch($id, $geometry);
+
+        return response()->json([
+            'id' => $id,
+            'status' => 'queued',
+            'statusUrl' => route('templates.test-layout.status', $id),
+        ], 202);
+    }
+
+    /**
+     * Where a layout test is: queued, running, or finished with the outlines
+     * (or a 422 with the reason it failed). A finished test is deleted once
+     * its result is returned, as the sample is a real register page.
+     */
+    public function testLayoutStatus(string $test): JsonResponse
+    {
         $disk = Storage::disk('local');
-        $directory = 'template-tests/'.Str::uuid();
-        $stored = $request->file('page')->storeAs($directory, 'page.png', 'local');
+        $directory = TestTemplateLayout::directory($test);
 
-        try {
-            $result = $markers->detect($disk->path($stored), $geometry, $disk->path($directory));
-            // A straightened page no longer matches the builder's own picture of it.
-            $straightened = abs((float) ($result['deskew'] ?? 0)) >= 0.05;
+        foreach (['result.json' => 200, 'error.json' => 422] as $file => $status) {
+            if ($disk->exists($directory.'/'.$file)) {
+                $payload = json_decode((string) $disk->get($directory.'/'.$file), true);
+                $disk->deleteDirectory($directory);
 
-            return response()->json([
-                'size' => $result['size'] ?? null,
-                'deskew' => (float) ($result['deskew'] ?? 0),
-                'image' => $straightened ? 'data:image/png;base64,'.base64_encode($disk->get($stored)) : null,
-                'fit' => $result['fit'] ?? null,
-                'geometry' => $result['geometry'] ?? $geometry,
-                'notes' => DocumentPage::cleanNotes($result['notes'] ?? []),
-                // Written lines outside every marker, which nothing would read.
-                'ignored' => is_array($result['ignored'] ?? null) ? count($result['ignored']) : (int) ($result['ignored'] ?? 0),
-                'lines' => array_map(fn (array $line) => [
-                    'source' => $line['source'] ?? null,
-                    'column' => (string) ($line['column'] ?? ''),
-                    'column_index' => $line['column_index'] ?? null,
-                    'row' => $line['row'] ?? null,
-                    'polygon' => $line['polygon'] ?? [],
-                    'flags' => array_values(array_intersect(
-                        $line['flags'] ?? [],
-                        [PageLine::FLAG_NO_ROW, PageLine::FLAG_SHARED_CELL],
-                    )),
-                ], $result['lines'] ?? []),
-            ]);
-        } catch (LineMarkersException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        } finally {
-            $disk->deleteDirectory($directory);
+                return response()->json($payload, $status);
+            }
         }
+
+        abort_unless($disk->exists($directory), 404, 'This test is no longer available. Run it again.');
+
+        return response()->json([
+            'status' => $disk->exists($directory.'/started') ? 'running' : 'queued',
+        ]);
     }
 
     public function store(Request $request): RedirectResponse

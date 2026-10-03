@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\TestTemplateLayout;
 use App\Models\DocumentPage;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
@@ -12,12 +13,15 @@ use Illuminate\Support\Facades\Storage;
  * A page is uploaded when Staff finish the Align step, before they decide to
  * submit. Abandoned pages are unsubmitted civil registry scans, so they are not
  * kept past `services.line_markers.keep_hours`. Scheduled hourly.
+ *
+ * Template Builder tests whose result was never fetched (the builder closed
+ * while one ran) are register pages too, and go after the same time.
  */
 class PruneDocumentPages extends Command
 {
     protected $signature = 'documents:prune-pages {--hours= : Remove pages untouched for this many hours}';
 
-    protected $description = 'Delete aligned pages (and their crops) that were never submitted.';
+    protected $description = 'Delete aligned pages (and their crops) that were never submitted, and abandoned layout tests.';
 
     public function handle(): int
     {
@@ -37,6 +41,18 @@ class PruneDocumentPages extends Command
             });
 
         $this->info("Removed {$removed} unsubmitted page(s) older than {$hours} hour(s).");
+
+        $tests = 0;
+        foreach ($disk->directories(TestTemplateLayout::ROOT) as $directory) {
+            // A folder's time changes whenever a file is added to it or removed.
+            if (filemtime($disk->path($directory)) < $cutoff->getTimestamp()) {
+                $disk->deleteDirectory($directory);
+                $tests++;
+            }
+        }
+        if ($tests > 0) {
+            $this->info("Removed {$tests} abandoned layout test(s).");
+        }
 
         return self::SUCCESS;
     }

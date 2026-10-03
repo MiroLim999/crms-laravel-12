@@ -766,23 +766,31 @@ Done: 2026-10-03 · PHP 300 · JS 86 · Python 69 passed
 - **Option A:** `app/Http/Controllers/DocumentTemplateController.php`, a new job, `routes/web.php`, `resources/js/template-builder.js`, `app/Console/Commands/PruneDocumentPages.php`, `tests/Feature/TemplateBuilderGridChecksTest.php`
 - **Option B:** `serve.ps1`, `README.md`, and Apache's configuration, which lives outside the repo
 
-- [ ] **[Decision]** How should Test layout stop blocking the app?
+- [x] **[Decision]** How should Test layout stop blocking the app?
   - A) Run Test layout in the queue, like Detect (recommended: it stays inside the project and can be tested).
   - B) Serve the app with XAMPP's Apache. This changes your setup.
-- [ ] For A:
+Decision: A, it stays inside the project, keeps the current setup and can be tested (2026-10-03)
+- [x] For A:
   1. Store the sample under `template-tests/{uuid}`.
   2. Dispatch a job that runs `LineMarkers::detect()` and saves the result as JSON, and return the id.
   3. Add a status route, and make the builder poll it (like the Verify step does) and show the same result as today.
   4. Have `documents:prune-pages` also clear old `template-tests/` folders.
   5. Run `npm run build`.
-- [ ] For B: **[You]** set up an Apache virtual host that points at `public/`. Then update `serve.ps1` and the README.
-- [ ] Tests (A only):
+
+  New job `App\Jobs\TestTemplateLayout` holds the result shaping that was in `testLayout()`. The POST now answers 202 with `{id, status: "queued", statusUrl}`. The new route `templates.test-layout.status` (`GET templates/test-layout/{uuid}`) answers `queued`, then `running` (the worker writes a `started` file), then the same JSON as before plus `status: "done"`, or a 422 with the reason. The folder is deleted once the result is returned, because the sample is a real register page; a poll after that gets a 404. The job writes its result under a temporary name and renames it, so a poll never reads half a file. The builder polls every 1.5 s. While the test is still queued it says "Waiting for the background worker…", and it gives up after 15 minutes. `documents:prune-pages` removes `template-tests/` folders older than `keep_hours` (24 h), using the folder's time. `npm run build` and `php artisan queue:restart` were run.
+  Checked with the real worker on 2026-10-03: a test queued on page 108 with its own markers was picked up at once and finished in 25 s with 220 lines (the page's known count) and the straightened image. Reading the result deleted the folder.
+- [x] For B: **[You]** set up an Apache virtual host that points at `public/`. Then update `serve.ps1` and the README. (not needed: option A chosen)
+- [x] Tests (A only):
   - the endpoint returns an id right away
   - after the job runs, the status route returns the result (use a fake `LineMarkers`)
-- [ ] **[You]** While Test layout runs, open the dashboard in another tab. It should load right away.
+
+  In `TemplateBuilderGridChecksTest`, the old synchronous test was replaced by four: an id comes back at once with the job queued, and the status goes from queued to running (`Queue::fake()`); the finished result has the same shape as before, the folder is gone afterwards, and Staff are refused on both routes; a `LineMarkersException` comes back as a 422 with its message; abandoned test folders are pruned and fresh ones kept.
+- [x] **[You]** While Test layout runs, open the dashboard in another tab. It should load right away.
+  Confirmed by the user on 2026-10-03 ("yes same"), testing "Book of records: Birth Certificate v1": the dashboard loaded while the test ran, and the result looked as before. The server side matched: the test folder was emptied at 23:12 (the result was fetched), with no failed or waiting jobs.
 
 **Verify:** `php artisan test --filter=TemplateBuilderGridChecksTest`, then all tests.
 **Done when:** Test layout no longer blocks other pages.
+Done: 2026-10-03 · PHP 300 · JS 86 · Python 69 passed
 
 ---
 

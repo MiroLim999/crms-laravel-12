@@ -418,9 +418,9 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Medium
 
-- [ ] **Option A:** move Test layout to the queue, like Detect. Save the sample, dispatch a job, return an ID, and let the builder poll for the result.
-- [ ] **Option B:** serve the app through XAMPP's Apache instead of `php artisan serve`. Apache handles requests in parallel.
-- [ ] **Check:** while Test layout is running, can another browser tab open the dashboard?
+- [x] **Option A:** move Test layout to the queue, like Detect. Save the sample, dispatch a job, return an ID, and let the builder poll for the result.
+- [x] **Option B:** serve the app through XAMPP's Apache instead of `php artisan serve`. Apache handles requests in parallel. (not needed: option A chosen, see Task 4.4)
+- [x] **Check:** while Test layout is running, can another browser tab open the dashboard? (Yes, confirmed 2026-10-03; see Task 4.4.)
 
 ---
 

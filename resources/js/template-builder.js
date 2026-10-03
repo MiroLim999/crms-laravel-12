@@ -1971,7 +1971,8 @@ element('removeCoveredFieldsBtn', HTMLButtonElement).addEventListener('click', (
 //
 // Outline the sample with the layout as it stands, saved or not, exactly as
 // Detect does it for Staff: the page straightened, the markers fitted to its
-// table, every line cut and put in a row. Nothing is read or stored.
+// table, every line cut and put in a row. Nothing is read, and the server
+// deletes its copy of the sample once the result is shown.
 
 const TEST_COLOURS = {
     placed: ['rgba(14, 154, 167, .16)', '#0e9aa7'],
@@ -1979,6 +1980,10 @@ const TEST_COLOURS = {
     shared: ['rgba(255, 171, 0, .22)', '#e59500'],
     'no-row': ['rgba(255, 62, 29, .2)', '#ff3e1d'],
 };
+
+// How often the builder asks whether the test has finished, and when it stops.
+const TEST_POLL_MS = 1500;
+const TEST_GIVE_UP_MS = 15 * 60 * 1000;
 
 /** The markers as the server's line detection takes them (page fractions). */
 function testGeometry() {
@@ -2078,6 +2083,42 @@ function showTestResult(result) {
     }));
 }
 
+/** The JSON of a Test layout reply, or an error saying why it failed. */
+async function testReply(response) {
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload) {
+        const firstError = payload?.errors ? Object.values(payload.errors).flat()[0] : null;
+        throw new Error(firstError || payload?.message || `The test failed with HTTP ${response.status}.`);
+    }
+    return payload;
+}
+
+/**
+ * Test layout runs in the background queue, so the app stays usable while
+ * it does. Poll until its result is ready, as the Verify step does.
+ */
+async function waitForTest(started, statusText) {
+    const begun = Date.now();
+    let payload = started;
+    while (payload.status !== 'done') {
+        if (Date.now() - begun > TEST_GIVE_UP_MS) {
+            throw new Error('The test took too long. Check that the queue worker is running, then try again.');
+        }
+        statusText.textContent = payload.status === 'queued'
+            ? 'Waiting for the background worker. If this stays, check that the queue worker is running.'
+            : 'Outlining every line on the sample. This takes about half a minute.';
+        await new Promise((resolve) => window.setTimeout(resolve, TEST_POLL_MS));
+        payload = await testReply(await window.fetch(started.statusUrl, {
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        }));
+    }
+    if (!Array.isArray(payload.lines)) {
+        throw new Error('The test finished without a result. Try again.');
+    }
+    return payload;
+}
+
 async function testLayout() {
     if (!sampleLoaded) {
         showBuilderError('Choose a sample page first: the layout is tested on it.');
@@ -2112,18 +2153,13 @@ async function testLayout() {
         data.set('page', blob, 'sample.png');
         data.set('geometry_json', JSON.stringify(testGeometry()));
 
-        const response = await window.fetch(config.testLayoutUrl, {
+        const started = await testReply(await window.fetch(config.testLayoutUrl, {
             method: 'POST',
             headers: { Accept: 'application/json', 'X-CSRF-TOKEN': config.csrf, 'X-Requested-With': 'XMLHttpRequest' },
             credentials: 'same-origin',
             body: data,
-        });
-        const payload = await response.json().catch(() => null);
-        if (!response.ok || !Array.isArray(payload?.lines)) {
-            const firstError = payload?.errors ? Object.values(payload.errors).flat()[0] : null;
-            throw new Error(firstError || payload?.message
-                || (response.ok ? 'The test finished without a result. Try again.' : `The test failed with HTTP ${response.status}.`));
-        }
+        }));
+        const payload = await waitForTest(started, statusText);
 
         await drawTest(payload);
         showTestResult(payload);
