@@ -479,16 +479,22 @@ Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 **Why first here:** it deletes code that Task 3.5 (comments) and Task 5.3 (moving the JavaScript) would otherwise have to deal with.
 **Touches:** `routes/web.php`, `app/Http/Controllers/DocumentScanController.php`, `resources/views/scan/workspace.blade.php`, `tests/Feature/OcrWorkspaceTest.php`, `tests/Feature/DocumentUploadWorkflowTest.php`
 
-- [ ] Confirm nothing calls it: search `resources/` and `app/` for `recogniseUrl`, `documents.recognise` and `documents/recognise`.
-- [ ] Remove the route, `recognise()`, `resolveModelKey()` and the `recogniseUrl` config line. Keep `selectableModels()`, because the workspace still uses it.
-- [ ] Move these tests to `documents.pages.store`, where the chosen model ends up in the page's `ocr_model_key`. Use `Queue::fake()` and the stub `LineMarkers`, the same way `LineOutlinePipelineTest` does, so Kraken doesn't run:
+- [x] Confirm nothing calls it: search `resources/` and `app/` for `recogniseUrl`, `documents.recognise` and `documents/recognise`.
+  Checked 2026-10-03: only the route itself, the workspace's `recogniseUrl` config line (which the script never read) and four tests. The README also named the route.
+- [x] Remove the route, `recognise()`, `resolveModelKey()` and the `recogniseUrl` config line. Keep `selectableModels()`, because the workspace still uses it.
+  The `OcrServiceException` import in `DocumentScanController` became unused and was removed. Also touched, beyond **Touches**: `README.md`, whose "Server-Side AI Proxying" line named the removed route; it now says the queue worker sends the crops.
+- [x] Move these tests to `documents.pages.store`, where the chosen model ends up in the page's `ocr_model_key`. Use `Queue::fake()` and the stub `LineMarkers`, the same way `LineOutlinePipelineTest` does, so Kraken doesn't run:
   - `test_staff_cannot_choose_a_model_unless_the_setting_allows_it`
   - `test_staff_may_pick_an_installed_model_when_the_setting_allows_it`
   - `test_an_unknown_model_key_falls_back_to_the_selected_model`
-- [ ] Replace `test_ocr_request_rejects_more_than_four_hundred_fifty_fields` with the same check on `documents.store` (submitting a record), which has the same 450-field limit.
+
+  `Queue::fake()` alone keeps Kraken from running: the job is only queued, so no stub `LineMarkers` is needed. `Storage::fake('local')` keeps the test page off the real disk. The first test is now stricter: the key it posts (`base`) is one the service could serve. `test_the_removed_features_have_no_routes` now also checks that `documents.recognise` stays gone.
+- [x] Replace `test_ocr_request_rejects_more_than_four_hundred_fifty_fields` with the same check on `documents.store` (submitting a record), which has the same 450-field limit.
+  Now `test_submission_rejects_more_than_four_hundred_fifty_fields`: 451 distinct, verified fields get the 450-item message, and no record is saved.
 
 **Verify:** all tests.
 **Done when:** `php artisan route:list` no longer shows `documents.recognise`, and the model-choice rules are still tested.
+Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 
 ### Task 3.2: #21 Dead Python code (Small)
 

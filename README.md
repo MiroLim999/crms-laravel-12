@@ -75,7 +75,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 ### Architectural Highlights
 
 1. **Zero-PHP Large Model Uploads**: Uploading gigabyte-scale model checkpoints (`safetensors`/`bin` archives) never passes through PHP or consumes web worker memory. Laravel generates a short-lived, HMAC-SHA256 signed ticket (`OCR_UPLOAD_SECRET`); the browser uploads directly to FastAPI's `/add_model` endpoint. Once written to disk, the client posts the model key to Laravel, which verifies the inventory and registers the model in a database transaction.
-2. **Server-Side AI Proxying**: Operational document recognition (`/documents/recognise`) is called server-to-server from Laravel to FastAPI. The FastAPI instance remains bound to loopback (`127.0.0.1`) without direct public access.
+2. **Server-Side AI Proxying**: Operational document recognition is called server-to-server: the queue worker sends each page's line crops from Laravel to FastAPI, and the browser never calls the OCR service. The FastAPI instance remains bound to loopback (`127.0.0.1`) without direct public access.
 3. **Decoupled Process Lifecycles**: Laravel never spawns, restarts, or terminates the Python OCR daemon. The OCR workspace actively monitors reachability via asynchronous health polling.
 4. **Separate Python Environment for Line Detection**: Kraken needs a newer PyTorch than the TrOCR service, so `ml/line_markers.py` runs in its own environment (`ml/.venv-kraken`, CPU). The queue worker calls it as a local subprocess; Kraken's model ships inside its package, so nothing is downloaded at run time.
 

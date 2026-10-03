@@ -665,7 +665,6 @@
         threshold: @json($threshold),
         maxFields: 450,
         maxFieldNameLength: 500,
-        recogniseUrl: @json(route('documents.recognise')),
         pagesUrl: @json(route('documents.pages.store')),
         pageGeometryUrl: @json(route('documents.pages.reoutline', ['page' => '__PAGE__'])),
         snapUrl: @json(route('documents.pages.snap')),

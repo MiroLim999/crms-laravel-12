@@ -363,10 +363,10 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small to Medium
 
-- [ ] Double-check that nothing calls it: search `resources/` for `recogniseUrl` and `documents/recognise`.
-- [ ] Remove the route, `recognise()`, `resolveModelKey()` and the `recogniseUrl` config line.
-- [ ] The tests that call it check the model-choice rules. Move those checks to the endpoint used today (`documents.pages.store`) instead of just deleting them.
-- [ ] Run the full test suite.
+- [x] Double-check that nothing calls it: search `resources/` for `recogniseUrl` and `documents/recognise`.
+- [x] Remove the route, `recognise()`, `resolveModelKey()` and the `recogniseUrl` config line.
+- [x] The tests that call it check the model-choice rules. Move those checks to the endpoint used today (`documents.pages.store`) instead of just deleting them.
+- [x] Run the full test suite.
 
 ---
 

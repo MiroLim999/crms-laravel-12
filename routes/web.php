@@ -84,9 +84,6 @@ Route::middleware('auth')->group(function () {
         Route::get('documents/new', [DocumentScanController::class, 'create'])->name('documents.create');
         Route::get('documents/workspace', [DocumentScanController::class, 'workspace'])
             ->name('documents.workspace');
-        // Proxies the FastAPI service; never called from the browser directly.
-        Route::post('documents/recognise', [DocumentScanController::class, 'recognise'])
-            ->name('documents.recognise');
         Route::post('documents', [DocumentScanController::class, 'store'])->name('documents.store');
 
         // Finishing Align uploads the page and starts line detection in the

@@ -12,7 +12,6 @@ use App\Models\OcrSetting;
 use App\Models\PageLine;
 use App\Services\AuditLogger;
 use App\Services\Ocr\OcrClient;
-use App\Services\Ocr\OcrServiceException;
 use App\Services\Ocr\ScanModelChoice;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -100,38 +99,6 @@ class DocumentScanController extends Controller
             // Empty unless a Super Admin has allowed it, in which case the reading
             // step offers a picker instead of silently using the promoted model.
             'selectableModels' => $this->selectableModels(),
-            'threshold' => OcrSetting::threshold(),
-        ]);
-    }
-
-    /**
-     * Run OCR over the cropped fields.
-     *
-     * Proxied rather than called from the browser: the OCR service has no auth of
-     * its own, so the capability check has to happen here.
-     */
-    public function recognise(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'fields' => ['required', 'array', 'min:1', 'max:450'],
-            'fields.*.name' => ['required', 'string', 'max:500'],
-            'fields.*.image' => ['required', 'string'],
-            'model' => ['nullable', 'string', 'max:255'],
-        ]);
-
-        $key = $this->resolveModelKey($validated['model'] ?? null);
-
-        try {
-            $result = $this->ocr->recognise($validated['fields'], $key);
-        } catch (OcrServiceException $e) {
-            // A clear failure, not a stack trace, and nothing persisted.
-            return response()->json(['message' => $e->getMessage()], 503);
-        }
-
-        return response()->json([
-            'results' => $result['results'],
-            'model' => $result['model'],
-            'modelKey' => $result['modelKey'],
             'threshold' => OcrSetting::threshold(),
         ]);
     }
@@ -609,10 +576,5 @@ class DocumentScanController extends Controller
     private function selectableModels(): array
     {
         return $this->modelChoice->selectable();
-    }
-
-    private function resolveModelKey(?string $requested): ?string
-    {
-        return $this->modelChoice->resolve($requested);
     }
 }

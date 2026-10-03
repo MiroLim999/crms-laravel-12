@@ -2,13 +2,21 @@
 
 namespace Tests\Feature;
 
+use App\Enums\DocumentType;
+use App\Jobs\ProcessDocumentPage;
 use App\Models\AuditLog;
+use App\Models\DocumentPage;
+use App\Models\DocumentTemplate;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\User;
 use Database\Seeders\DocumentTemplateSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
@@ -92,7 +100,8 @@ class OcrWorkspaceTest extends TestCase
     /**
      * The removed surface stays removed. A named route that no longer exists throws,
      * which is the assertion: nothing in the app can still link to fine-tuning,
-     * datasets, evaluation, prediction, or engine process control.
+     * datasets, evaluation, prediction, engine process control, or the old
+     * reading of crops cut in the browser (the queue job reads pages now).
      */
     public function test_the_removed_features_have_no_routes(): void
     {
@@ -102,6 +111,7 @@ class OcrWorkspaceTest extends TestCase
             'ocr.predict', 'ocr.chart', 'ocr.evaluation', 'ocr.activate',
             'ocr.engine.start', 'ocr.engine.stop',
             'ocr.uploads.chunk', 'ocr.uploads.discard', 'ocr.store',
+            'documents.recognise',
         ] as $name) {
             $this->assertFalse(
                 app('router')->has($name),
@@ -492,41 +502,18 @@ class OcrWorkspaceTest extends TestCase
             ->assertOk()
             ->assertDontSee('id="modelSelect"', escape: false);
 
-        // A key posted anyway is ignored, and the promoted model is used instead.
-        Http::fake([
-            '*/health' => Http::response([
-                'status' => 'ok', 'model_loaded' => false, 'device' => 'cuda',
-                'default' => 'trocr-v1', 'models' => [],
-            ]),
-            '*/ocr' => Http::response([
-                'results' => [['name' => 'Name', 'text' => 'Maria', 'confidence' => 91.0]],
-                'model' => 'TrOCR v1',
-                'modelKey' => 'trocr-v1',
-            ]),
-        ]);
+        // A key posted anyway is ignored, even one the service could serve, and
+        // the page is read with the promoted model instead.
+        $this->alignPage($staff, 'base')
+            ->assertAccepted()
+            ->assertJsonPath('modelKey', 'trocr-v1');
 
-        $this->actingAs($staff)
-            ->postJson(route('documents.recognise'), [
-                'fields' => [['name' => 'Name', 'image' => 'data:image/png;base64,AA==']],
-                'model' => 'base',
-            ])
-            ->assertOk();
-
-        Http::assertSent(function ($request) {
-            return ! str_ends_with($request->url(), '/ocr')
-                || $request->data()['model'] === 'trocr-v1';
-        });
+        $this->assertSame('trocr-v1', DocumentPage::firstOrFail()->ocr_model_key);
     }
 
     public function test_staff_may_pick_an_installed_model_when_the_setting_allows_it(): void
     {
-        $this->fakeHealthyService([
-            '*/ocr' => Http::response([
-                'results' => [['name' => 'Name', 'text' => 'Maria', 'confidence' => 91.0]],
-                'model' => 'TrOCR base',
-                'modelKey' => 'base',
-            ]),
-        ]);
+        $this->fakeHealthyService();
 
         OcrModel::create(['key' => 'trocr-v1', 'label' => 'TrOCR v1', 'is_active' => true]);
         OcrSetting::create(['allow_staff_model_choice' => true]);
@@ -540,18 +527,11 @@ class OcrWorkspaceTest extends TestCase
             ->assertOk()
             ->assertSee('id="modelSelect"', escape: false);
 
-        $this->actingAs($staff)
-            ->postJson(route('documents.recognise'), [
-                'fields' => [['name' => 'Name', 'image' => 'data:image/png;base64,AA==']],
-                'model' => 'base',
-            ])
-            ->assertOk()
+        $this->alignPage($staff, 'base')
+            ->assertAccepted()
             ->assertJsonPath('modelKey', 'base');
 
-        Http::assertSent(function ($request) {
-            return ! str_ends_with($request->url(), '/ocr')
-                || $request->data()['model'] === 'base';
-        });
+        $this->assertSame('base', DocumentPage::firstOrFail()->ocr_model_key);
     }
 
     /**
@@ -560,29 +540,18 @@ class OcrWorkspaceTest extends TestCase
      */
     public function test_an_unknown_model_key_falls_back_to_the_selected_model(): void
     {
-        $this->fakeHealthyService([
-            '*/ocr' => Http::response([
-                'results' => [['name' => 'Name', 'text' => 'Maria', 'confidence' => 91.0]],
-                'model' => 'TrOCR v1',
-                'modelKey' => 'trocr-v1',
-            ]),
-        ]);
+        $this->fakeHealthyService();
 
         OcrModel::create(['key' => 'trocr-v1', 'label' => 'TrOCR v1', 'is_active' => true]);
         OcrSetting::create(['allow_staff_model_choice' => true]);
         OcrSetting::forgetCached();
+        $this->seedTemplate();
 
-        $this->actingAs(User::factory()->staff()->create())
-            ->postJson(route('documents.recognise'), [
-                'fields' => [['name' => 'Name', 'image' => 'data:image/png;base64,AA==']],
-                'model' => 'ghost-model',
-            ])
-            ->assertOk();
+        $this->alignPage(User::factory()->staff()->create(), 'ghost-model')
+            ->assertAccepted()
+            ->assertJsonPath('modelKey', 'trocr-v1');
 
-        Http::assertSent(function ($request) {
-            return ! str_ends_with($request->url(), '/ocr')
-                || $request->data()['model'] === 'trocr-v1';
-        });
+        $this->assertSame('trocr-v1', DocumentPage::firstOrFail()->ocr_model_key);
     }
 
     /**
@@ -591,5 +560,33 @@ class OcrWorkspaceTest extends TestCase
     private function seedTemplate(): void
     {
         $this->seed(DocumentTemplateSeeder::class);
+    }
+
+    /**
+     * Finish the Align step with a model chosen, as the workspace does. The page
+     * is stored with the model it will be read with; the job that would outline
+     * and read it is only queued, so Kraken never runs here.
+     */
+    private function alignPage(User $staff, string $model): TestResponse
+    {
+        Storage::fake('local');
+        Queue::fake();
+
+        $response = $this->actingAs($staff)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.store'), [
+                'document_template_id' => DocumentTemplate::activeFor(DocumentType::Birth)->getKey(),
+                'page' => UploadedFile::fake()->image('page.png', 800, 600),
+                'geometry_json' => json_encode([
+                    'columns' => [],
+                    'ruled_ys' => [],
+                    'fields' => [['name' => 'Child Full Name', 'box' => [0.1, 0.1, 0.3, 0.05]]],
+                ], JSON_THROW_ON_ERROR),
+                'model' => $model,
+            ]);
+
+        Queue::assertPushed(ProcessDocumentPage::class);
+
+        return $response;
     }
 }

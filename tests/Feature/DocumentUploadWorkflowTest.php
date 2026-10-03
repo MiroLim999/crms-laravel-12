@@ -142,16 +142,28 @@ class DocumentUploadWorkflowTest extends TestCase
             ->assertSee('"personFieldOrder":null', escape: false);
     }
 
-    public function test_ocr_request_rejects_more_than_four_hundred_fifty_fields(): void
+    public function test_submission_rejects_more_than_four_hundred_fifty_fields(): void
     {
-        $field = ['name' => 'Registry field', 'image' => 'data:image/png;base64,AA=='];
+        Storage::fake('local');
+        $this->seed(DocumentTemplateSeeder::class);
+        $this->registerTestModel();
+
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+        $fields = array_map(
+            fn (int $number) => $this->verifiedField("Registry field {$number}", 'Value'),
+            range(1, 451),
+        );
 
         $this->actingAs(User::factory()->staff()->create())
-            ->postJson(route('documents.recognise'), [
-                'fields' => array_fill(0, 451, $field),
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, $fields),
+                'allow_missing' => '1',
             ])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('fields');
+            ->assertJsonValidationErrors(['fields' => 'must not have more than 450 items']);
+
+        $this->assertDatabaseCount('records', 0);
     }
 
     public function test_only_explicitly_verified_fields_are_saved(): void
