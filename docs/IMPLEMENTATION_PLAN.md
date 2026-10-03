@@ -247,6 +247,8 @@ Done: 2026-10-02 · PHP 280 · JS 86 · Python 62 passed
   - Export a CSV and open it in Excel. Values starting with `=` should show as plain text.
   - Check that times on the Audit Log are Philippine time.
 
+  Partly done on 2026-10-03, in Task 6.2's browser session: the bad date, the array in the URL, the CSV in Excel and the Audit Log times were fine (the user's report; nothing was written to the error log). Still open: rejecting a change request with a long note. No request has ever been rejected in this database; change request #3 was approved without a rejection first.
+
 ---
 
 ## Phase 2: Priority 2
@@ -465,11 +467,13 @@ Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 ### Phase 2 checkpoint
 
 - [x] All tests pass. (2026-10-03, after Task 2.9: PHP 295 · JS 86 · Python 67)
-- [ ] **[You]** In the browser:
+- [x] **[You]** In the browser:
   - Do a full scan → Detect → verify. Leave a required field unchecked; you should see the confirmation. Then submit.
   - Open the new record.
   - With the internet off, open a PDF.
   - Restart `serve.ps1` and check that four services start: website, worker, AI service and scheduler.
+
+  Done on 2026-10-03, in Task 6.2's browser session ("all goods"). The database agrees: record #34 went through **Submit anyway** (its `record.submitted` audit entry lists the missing fields), and the website, queue worker, AI service and scheduler were all running afterwards. The PDF opening with the internet off is the user's report; nothing on the server records it.
 
 ---
 
@@ -692,7 +696,8 @@ Postponed: 2026-10-03 (decision A); not done. `doc_type` still exists in both th
 ### Phase 3 checkpoint
 
 - [x] All tests pass. (2026-10-03, after Task 3.9: PHP 297 · JS 86 · Python 67)
-- [ ] **[You]** Click through these: scan and submit a record, request and approve a change, then open Reports and the Template Builder.
+- [x] **[You]** Click through these: scan and submit a record, request and approve a change, then open Reports and the Template Builder.
+  Done on 2026-10-03, in Task 6.2's browser session: record #34 was scanned and submitted, change request #3 was opened and approved (its registry number `=1+1` became `TEST-001`), the CSV was exported from Reports, and the Template Builder opened.
 
 ---
 
@@ -877,9 +882,24 @@ Done: 2026-10-03 · PHP 300 · JS 86 · Python 69 passed
 
 **Depends on:** every other task, finished or marked not needed
 
-- [ ] `.\tools\test-all.ps1` passes. Write the final counts here.
-- [ ] Run `npm run build`.
+- [x] `.\tools\test-all.ps1` passes. Write the final counts here.
+  2026-10-03, after Phase 4 and the Phase 5 postponement: PHP 300 · JS 86 · Python 69 (60 + 9), all passing. That is 455 tests, up from the baseline of 409 (262 + 85 + 62).
+- [x] Run `npm run build`.
+  Built on 2026-10-03 with no errors.
 - [ ] **[You]** Restart all services (website, queue worker, AI service and scheduler), then repeat the by-hand checks from the Phase 1 and Phase 2 checkpoints.
+  Also still open, and this task waits on them: Task 2.3's by-eye check, and the **[You]** boxes at the Phase 1, 2 and 3 checkpoints. One browser session covers all of them:
+  1. Restart all four services. The website, queue worker, AI service and scheduler should all start. (Phase 2)
+  2. Scan the tilted sample from Task 2.3: **Detect**, scan, type `=1+1` as the registry number, untick one required cell and submit. The confirmation should appear; click **Submit anyway**. (2.3, Phases 2 and 3)
+  3. Open the new record, click **Compare original** and a few values. The boxes should sit on their handwriting. (2.3, Phase 2)
+  4. In Reports, export the CSV and open it in Excel. The registry number should show `=1+1` as text, not `2`. (Phases 1 and 3)
+  5. On that record, request a change to the registry number, then reject it with a note longer than 255 characters. There should be no error, and the Audit Log should show the note in Philippine time. Request it again and approve it. (Phases 1 and 3)
+  6. Open `/records?from=abc` (a friendly message) and `/dashboard?q[]=x` (it loads normally). (Phase 1)
+  7. With the internet off, open a PDF in New Document. (Phase 2)
+  8. Open the Template Builder. (Phase 3)
+
+  If step 3 shows the boxes off, Task 2.3 needs another fix, and this task's tests must run again after it.
+
+  2026-10-03: the user did the session and reported "all goods". Steps 1–4 and 6–8 check out, and so does step 5's approval. Its rejection with a long note wasn't done (no request has ever been rejected), so this box and the Phase 1 checkpoint wait for it.
 
 **Done when:** everything passes, by test and by hand.
 
