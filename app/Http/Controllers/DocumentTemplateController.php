@@ -116,7 +116,7 @@ class DocumentTemplateController extends Controller
     /**
      * Test the layout being built on its sample, saved or not: the page is
      * straightened, the markers fitted to its table and every line outlined,
-     * exactly as Detect does it for Staff. Nothing is read or stored; the
+     * exactly as Detect does it for Staff. Nothing is read or kept; the
      * builder shows where each line would be cut and which row it lands in.
      */
     public function testLayout(Request $request, LineMarkers $markers): JsonResponse
@@ -314,8 +314,8 @@ class DocumentTemplateController extends Controller
     }
 
     /**
-     * Backwards-compatible publishing endpoint used by the template library.
-     * Only one template per certificate type is published for Staff.
+     * The Publish button in the template library. Only one template per
+     * certificate type is published for Staff.
      */
     public function activate(DocumentTemplate $template): RedirectResponse
     {
@@ -526,7 +526,7 @@ class DocumentTemplateController extends Controller
             'fields' => ['nullable', 'array', 'max:450'],
             'columns' => ['nullable', 'array', 'max:60'],
             // One limit for columns and fields: a ledger line is named after its
-            // column plus " · row N", and both are stored in 255 characters.
+            // column plus " · row N", and both are stored in 500 characters.
             'columns.*.name' => ['required', 'string', 'max:120', 'distinct:ignore_case'],
             'columns.*.box' => ['required', 'array', 'size:4'],
             'columns.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],

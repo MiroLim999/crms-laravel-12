@@ -562,13 +562,17 @@ Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 **Why here:** after Task 3.1, because the `DocumentScanController` comment describes the flow that 3.1 removed. Before Task 5.2, which moves the template controller code.
 **Touches:** `app/Http/Controllers/DocumentScanController.php`, `app/Http/Controllers/DocumentTemplateController.php`
 
-- [ ] Rewrite the class docblock in `DocumentScanController` ("Cropping happens in the browser…") to describe how it works now: Align uploads the page, the queue job outlines, crops and reads it, Verify reviews it, and submitting copies the crops to the record.
-- [ ] Rewrite the `workspace()` docblock: the page is uploaded at Align and pruned after `LINE_MARKERS_KEEP_HOURS` if it's never submitted.
-- [ ] In `DocumentTemplateController::validatePayload()`, change "stored in 255 characters" to 500.
-- [ ] Fix other outdated comments in these two files, or list them in the report.
+- [x] Rewrite the class docblock in `DocumentScanController` ("Cropping happens in the browser…") to describe how it works now: Align uploads the page, the queue job outlines, crops and reads it, Verify reviews it, and submitting copies the crops to the record.
+- [x] Rewrite the `workspace()` docblock: the page is uploaded at Align and pruned after `LINE_MARKERS_KEEP_HOURS` if it's never submitted.
+- [x] In `DocumentTemplateController::validatePayload()`, change "stored in 255 characters" to 500.
+  Checked 2026-10-03: the migration `2026_08_09_130500_expand_field_name_columns` widened the names to 500, and the workspace still names a register line "<column> · row N".
+- [x] Fix other outdated comments in these two files, or list them in the report.
+  Fixed three more: `create()` said Step 1 also uploads the scan, but the workspace does that now; `activate()` called itself a "backwards-compatible" endpoint, but it is the template list's **Publish** button; `testLayout()` said nothing is "stored", but the sample is stored for the test and deleted after it ("kept" now). Checked and still true: the "overlay" in `store()` (Detect writes `overlay.png`) and the "training export" in `lineAttributes()` (`crms:export-training`).
+  Noticed in other files and not changed: `ml/predict.py`'s docstring, its `MAX_IMAGES` comment and its `loader` note still say the API calls it, but the service has had no `/predict` since batch prediction moved to the command line; `ml/api/main.py`'s `_safe_model_name()` says names are folded by `[^A-Za-z0-9._-]+ -> '-'`, but `sanitise_name()` drops those characters instead.
 
 **Verify:** all tests.
 **Done when:** the comments describe the current behaviour.
+Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 
 ### Task 3.6: #26 One limit for person groups (Small)
 

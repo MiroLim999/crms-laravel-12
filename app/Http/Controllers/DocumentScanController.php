@@ -26,14 +26,19 @@ use Illuminate\View\View;
 use Throwable;
 
 /**
- * The digitisation flow: upload a scan, mark the fields, run OCR, verify, submit.
+ * The digitisation flow: pick a certificate type, then upload, align, verify
+ * and submit in the workspace.
  *
  * Staff and Super Admin only. Admin has no route into this controller at all -
  * data entry is not an oversight function.
  *
- * Cropping happens in the browser, matching the prototype, because the crops come
- * straight off the rendered canvas at full resolution. The server never needs the
- * image library that would otherwise be required.
+ * The page itself is handled by DocumentPageController: finishing Align uploads
+ * the aligned page, and a queue job (ProcessDocumentPage) outlines every
+ * handwritten line, crops along the outlines and reads each crop with TrOCR
+ * (Detect stops before the reading, so Staff can check the outlines first).
+ * Verify reviews those readings. Submitting (store) saves the checked values and
+ * copies the page image and the crops into the record, so the archive keeps the
+ * very images the model read.
  */
 class DocumentScanController extends Controller
 {
@@ -44,7 +49,7 @@ class DocumentScanController extends Controller
     ) {}
 
     /**
-     * Step 1: pick a certificate type and upload a scan.
+     * Step 1: pick a certificate type. The scan itself is chosen in the workspace.
      */
     public function create(): View
     {
@@ -65,10 +70,13 @@ class DocumentScanController extends Controller
     }
 
     /**
-     * Step 2: the marking and verification workspace.
+     * Step 2: the workspace, where Staff upload the scan, align the markers and
+     * verify what was read.
      *
-     * The scan itself stays in the browser until submission, so an abandoned
-     * session leaves nothing behind on disk.
+     * The aligned page is uploaded as soon as Staff finish Align, before they
+     * decide to submit; the original file follows only with the submission. A
+     * page nobody submits is deleted by documents:prune-pages (hourly) once it
+     * has gone untouched for LINE_MARKERS_KEEP_HOURS, 24 by default.
      */
     public function workspace(Request $request): View|RedirectResponse
     {

@@ -319,11 +319,11 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small
 
-- [ ] [DocumentScanController.php:34](../app/Http/Controllers/DocumentScanController.php#L34) says cropping happens in the browser. The server crops now.
-- [ ] [DocumentScanController.php:70](../app/Http/Controllers/DocumentScanController.php#L70) says the scan stays in the browser until submission. Pages are uploaded at the Align step and pruned later.
-- [ ] [DocumentTemplateController.php:519](../app/Http/Controllers/DocumentTemplateController.php#L519) says names are stored in 255 characters. The columns are 500 characters now.
-- [ ] The `dataset_registry.py` docstring (see item 21).
-- [ ] While you're editing, watch for other comments that describe old behaviour.
+- [x] [DocumentScanController.php:34](../app/Http/Controllers/DocumentScanController.php#L34) says cropping happens in the browser. The server crops now.
+- [x] [DocumentScanController.php:70](../app/Http/Controllers/DocumentScanController.php#L70) says the scan stays in the browser until submission. Pages are uploaded at the Align step and pruned later.
+- [x] [DocumentTemplateController.php:519](../app/Http/Controllers/DocumentTemplateController.php#L519) says names are stored in 255 characters. The columns are 500 characters now.
+- [x] The `dataset_registry.py` docstring (see item 21).
+- [x] While you're editing, watch for other comments that describe old behaviour.
 
 ### 25. A link to a file that isn't in the repo
 
