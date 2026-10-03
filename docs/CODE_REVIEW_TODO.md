@@ -444,10 +444,10 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Large
 
-- [ ] Move `validatePayload()` and its helpers into Form Request classes (e.g. `StoreTemplateRequest` and `UpdateTemplateRequest`).
-- [ ] Move versioning and saving (`createLayout`, `saveAsNewVersion`, `layoutChanged`, `layoutSignature`, `syncFields`, `publishTemplate`) into a `TemplateLayoutService`.
-- [ ] Keep each controller method short: validate → call the service → redirect.
-- [ ] Run `DocumentTemplateBuilderTest`, `TemplateVersioningTest`, `TemplateFieldSettingsTest` and `TemplateBuilderGridChecksTest`.
+- [x] Move `validatePayload()` and its helpers into Form Request classes (e.g. `StoreTemplateRequest` and `UpdateTemplateRequest`). (not needed: postponed to after the defense, see IMPLEMENTATION_PLAN.md Task 5.2, 2026-10-03)
+- [x] Move versioning and saving (`createLayout`, `saveAsNewVersion`, `layoutChanged`, `layoutSignature`, `syncFields`, `publishTemplate`) into a `TemplateLayoutService`. (not needed: postponed, see above)
+- [x] Keep each controller method short: validate → call the service → redirect. (not needed: postponed, see above)
+- [x] Run `DocumentTemplateBuilderTest`, `TemplateVersioningTest`, `TemplateFieldSettingsTest` and `TemplateBuilderGridChecksTest`. (not needed: postponed, see above)
 
 ### 35. Split line_markers.py
 

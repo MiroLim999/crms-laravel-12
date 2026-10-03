@@ -822,13 +822,15 @@ Postponed: 2026-10-03 (the user's answer to **[Ask first]**); not done. `ml/line
 **Why here:** it comes after every task that edits this controller.
 **Touches:** `app/Http/Controllers/DocumentTemplateController.php`, new `app/Http/Requests/StoreTemplateRequest.php` and `UpdateTemplateRequest.php`, new `app/Services/TemplateLayoutService.php`
 
-- [ ] **[Ask first]** Confirm that you want to do this now.
-- [ ] Move `validatePayload()` and its helpers into the two Form Requests.
-- [ ] Move these methods, and their helpers, into `TemplateLayoutService`: `createLayout`, `saveAsNewVersion`, `layoutChanged`, `layoutSignature`, `syncFields` and `publishTemplate`.
-- [ ] Each controller method should now just validate, call the service and redirect. Behaviour must not change.
+- [x] **[Ask first]** Confirm that you want to do this now.
+  Answer: not now. Postpone until after the defense, given by the user (2026-10-03)
+- [x] Move `validatePayload()` and its helpers into the two Form Requests. (not needed: postponed)
+- [x] Move these methods, and their helpers, into `TemplateLayoutService`: `createLayout`, `saveAsNewVersion`, `layoutChanged`, `layoutSignature`, `syncFields` and `publishTemplate`. (not needed: postponed)
+- [x] Each controller method should now just validate, call the service and redirect. Behaviour must not change. (not needed: postponed)
 
 **Verify:** `php artisan test --filter="DocumentTemplateBuilderTest|TemplateVersioningTest|TemplateFieldSettingsTest|TemplateBuilderGridChecksTest|LedgerTemplateAndExportTest"`, then all tests.
 **Done when:** the controller is short, and all the template tests pass unchanged.
+Postponed: 2026-10-03 (the user's answer to **[Ask first]**); not done. `DocumentTemplateController.php` is still 1,245 lines.
 
 ### Task 5.3: #33 Move the scanning page's JavaScript out of the template (Large)
 
