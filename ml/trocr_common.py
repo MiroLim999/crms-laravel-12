@@ -68,16 +68,22 @@ def eos_token_id(net, processor):
     )
 
 
-def sequence_confidence(net, gen_output, eos_id):
+def sequence_confidence(net, gen_output, eos_id, row=0):
     """Geometric mean of per-token probabilities up to the first EOS, as a %.
 
     `gen_output` is what generate() returns with output_scores=True and
-    return_dict_in_generate=True, for one image."""
+    return_dict_in_generate=True. `row` picks one image of a batch; a reading
+    of a single image is row 0. Only that row is scored, so scoring every row
+    of a batch costs no more than scoring each image read alone. This assumes
+    greedy decoding (one beam), which every CRMS model uses."""
     try:
+        sequences = gen_output.sequences[row:row + 1]
         scores = net.compute_transition_scores(
-            gen_output.sequences, gen_output.scores, normalize_logits=True
+            sequences,
+            tuple(step[row:row + 1] for step in gen_output.scores),
+            normalize_logits=True,
         )[0]
-        gen_tokens = gen_output.sequences[0][1:1 + len(scores)]
+        gen_tokens = sequences[0][1:1 + len(scores)]
         log_probs = []
         for tok, lp in zip(gen_tokens, scores):
             if not torch.isfinite(lp):

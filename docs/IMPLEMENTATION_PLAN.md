@@ -737,19 +737,26 @@ Done: 2026-10-03 · PHP 297 · JS 86 · Python 67 passed
 **Why here:** after Task 3.3 (the shared confidence function) and Task 2.8 (`/ocr` now checks the key).
 **Touches:** `ml/api/main.py`, `ml/trocr_common.py`, a new Python test
 
-- [ ] Measure first. Time one `/ocr` call with 40 real crops from `storage/app/private/records/*/crops/`, using a throwaway script (don't commit it) that sends the `X-CRMS-Service-Key` header. Write the time here.
-- [ ] Rewrite the `/ocr` loop:
+- [x] Measure first. Time one `/ocr` call with 40 real crops from `storage/app/private/records/*/crops/`, using a throwaway script (don't commit it) that sends the `X-CRMS-Service-Key` header. Write the time here.
+  Before: **6.14 s** for 40 crops (runs of 6.12, 6.23 and 6.14 s after a warm-up call), on the GPU, model `TrOcr-50k-broken-samples`. The script is in the scratchpad, not the repo.
+- [x] Rewrite the `/ocr` loop:
   - decode every image first; a broken image becomes an error row
   - generate in chunks of 8–16, with `output_scores=True` and `return_dict_in_generate=True`
 
   The `_predict_batch()` function in `ml/test_finetuned.py` shows the batching pattern.
-- [ ] Make the confidence function in `trocr_common.py` work per row by passing the row index. Keep `predict.py` working by passing row 0.
-- [ ] Python test: a batch containing one broken image returns an error row for it, and results for the others, in order.
-- [ ] Check that the batched texts match the one-by-one texts for the same 40 crops, and report any differences.
-- [ ] **[You]** Restart the AI service. Claude then times the same call again and writes the number here.
+  Chunks of 16 (`OCR_BATCH_SIZE`), read by a new `_read_crops()`. If a whole chunk fails (for example out of GPU memory), it is logged and that chunk is read one crop at a time, so only a crop that also fails alone gets an error row.
+- [x] Make the confidence function in `trocr_common.py` work per row by passing the row index. Keep `predict.py` working by passing row 0.
+  `sequence_confidence(..., row=0)` scores only that row, so a batch costs no more to score than single reads. `row` defaults to 0, so `predict.py` and `test_finetuned.py` needed no change. Assumes one beam, which both installed models use (`num_beams` 1).
+- [x] Python test: a batch containing one broken image returns an error row for it, and results for the others, in order.
+  New `tests/Python/test_ocr_batch.py` (2 tests, with a fake model): the broken crop's row, the order across chunks, each row's own confidence (it fails if every row is scored as row 0), and the one-at-a-time retry. Added to `tools/test-all.ps1` (outside **Touches**), which names each Python test module, or it would never run.
+- [x] Check that the batched texts match the one-by-one texts for the same 40 crops, and report any differences.
+  No differences. On the CPU (a second copy beside the running service), chunks of 16 and chunks of 1 gave the same 40 texts and the same 40 confidences, and both match the old code's GPU run exactly. On the CPU batching does not save time (52 s vs 48 s for 40 crops); the gain is expected on the GPU.
+- [x] **[You]** Restart the AI service. Claude then times the same call again and writes the number here.
+  The user restarted it on 2026-10-03. After: **2.99 s** for the same 40 crops (runs of 3.01, 2.96 and 2.99 s after a warm-up call), down from 6.14 s, so about 2× faster on the GPU. The 40 texts and confidences are identical to the before run, with no error rows.
 
 **Verify:** the Python tests and the timing script.
 **Done when:** the page reads faster, and the results are unchanged.
+Done: 2026-10-03 · PHP 300 · JS 86 · Python 69 passed
 
 ### Task 4.4: #32 Slow "Test layout" (Medium)
 

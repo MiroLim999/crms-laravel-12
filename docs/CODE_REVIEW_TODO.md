@@ -382,12 +382,12 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Medium
 
-- [ ] Time one full page now and write the number down.
-- [ ] Decode all the images first. Any that fail become error rows, so one bad crop doesn't fail the whole batch.
-- [ ] Run the processor and `model.generate(...)` once for the whole list (or in chunks of 8–16 if GPU memory is tight).
-- [ ] Work out each crop's confidence from its own row of the scores. The current function only reads row `[0]`.
-- [ ] Check that the batched texts match the one-by-one texts on the same crops.
-- [ ] Time the same page again, and keep both numbers for the defense.
+- [x] Time one full page now and write the number down.
+- [x] Decode all the images first. Any that fail become error rows, so one bad crop doesn't fail the whole batch.
+- [x] Run the processor and `model.generate(...)` once for the whole list (or in chunks of 8–16 if GPU memory is tight).
+- [x] Work out each crop's confidence from its own row of the scores. The current function only reads row `[0]`.
+- [x] Check that the batched texts match the one-by-one texts on the same crops.
+- [x] Time the same page again, and keep both numbers for the defense. (40 crops: 6.14 s before, 2.99 s after; see Task 4.3.)
 
 ### 30. List pages load more data than they show
 

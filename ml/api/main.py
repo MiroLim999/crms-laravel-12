@@ -111,6 +111,11 @@ BASE_MODEL_DIR = os.path.join(MODELS_DIR, BASE_MODEL_KEY)
 
 MAX_NEW_TOKENS = 32
 
+# /ocr reads this many crops in one generate() call. A GPU reads a batch in
+# about the time it takes to read one crop; a smaller number uses less GPU
+# memory.
+OCR_BATCH_SIZE = 16
+
 # Uploaded weights are ~1.3 GB, so they are copied to disk in chunks rather
 # than read into memory.
 UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
@@ -586,6 +591,28 @@ def models() -> dict:
     }
 
 
+def _read_crops(model, processor, device, eos_id, images):
+    """(text, confidence) for each image, in order, from one generate() call."""
+    pixel_values = processor(images=images, return_tensors="pt").pixel_values.to(device)
+    with torch.no_grad():
+        gen_output = model.generate(
+            pixel_values,
+            max_new_tokens=MAX_NEW_TOKENS,
+            output_scores=True,
+            return_dict_in_generate=True,
+        )
+    texts = processor.batch_decode(gen_output.sequences, skip_special_tokens=True)
+    return [
+        (text.strip(), sequence_confidence(model, gen_output, eos_id, row))
+        for row, text in enumerate(texts)
+    ]
+
+
+def _ocr_error(name, error):
+    """The result row for a crop that could not be read."""
+    return {"name": name, "text": "", "confidence": 0.0, "error": str(error)}
+
+
 # Plain `def`, not `async def`: generate() is blocking and CPU/GPU-bound, so
 # FastAPI runs it in a worker thread and /health and uploads stay responsive
 # while an OCR job is running.
@@ -602,27 +629,38 @@ def ocr(payload: OcrRequest) -> dict:
     device = _get_device()
     eos_id = entry["eos_id"]
 
-    results = []
-    for field in payload.fields:
-        name = field.name
+    # Decode every crop first. A broken one becomes an error row, so it can't
+    # fail the batch it would have been read in.
+    results = [None] * len(payload.fields)
+    images = []  # (position in the request, image)
+    for index, field in enumerate(payload.fields):
         try:
-            image = _decode_data_url(field.image)
-            pixel_values = processor(images=image, return_tensors="pt").pixel_values.to(device)
-            with torch.no_grad():
-                gen_output = model.generate(
-                    pixel_values,
-                    max_new_tokens=MAX_NEW_TOKENS,
-                    output_scores=True,
-                    return_dict_in_generate=True,
-                )
-            text = processor.batch_decode(
-                gen_output.sequences, skip_special_tokens=True
-            )[0].strip()
-            conf = sequence_confidence(model, gen_output, eos_id)
-            results.append({"name": name, "text": text, "confidence": conf})
+            images.append((index, _decode_data_url(field.image)))
         except Exception as e:
-            # One bad crop must not fail the whole batch.
-            results.append({"name": name, "text": "", "confidence": 0.0, "error": str(e)})
+            results[index] = _ocr_error(field.name, e)
+
+    for start in range(0, len(images), OCR_BATCH_SIZE):
+        chunk = images[start:start + OCR_BATCH_SIZE]
+        try:
+            readings = _read_crops(model, processor, device, eos_id, [image for _, image in chunk])
+        except Exception as e:
+            # For example out of GPU memory. Read this chunk one crop at a time,
+            # so only a crop that also fails on its own gets an error row.
+            logger.warning("Reading %d crops together failed (%s); reading them one at a time.", len(chunk), e)
+            readings = []
+            for _, image in chunk:
+                try:
+                    readings.append(_read_crops(model, processor, device, eos_id, [image])[0])
+                except Exception as single:
+                    readings.append(single)
+
+        for (index, _), reading in zip(chunk, readings):
+            name = payload.fields[index].name
+            if isinstance(reading, Exception):
+                results[index] = _ocr_error(name, reading)
+            else:
+                text, conf = reading
+                results[index] = {"name": name, "text": text, "confidence": conf}
 
     return {"results": results, "model": entry["label"], "modelKey": key}
 
