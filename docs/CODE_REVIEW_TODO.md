@@ -141,11 +141,11 @@ These don't crash anything, but they're weak spots a panelist could point out.
 
 **Effort:** Small
 
-- [ ] Add `'scheduler'` to the `-Only` options (the `ValidateSet` at line 31), with a branch that runs `php artisan schedule:work`.
-- [ ] Start it along with the other services (a 4th `Start-ServiceWindow 'scheduler'`), and also in `.vscode/tasks.json` if you use that.
-- [ ] Check that `php artisan schedule:list` shows `documents:prune-pages` running every hour.
-- [ ] Try `php artisan documents:prune-pages --hours=1` on some test pages.
-- [ ] Mention the scheduler in the README's start-up instructions.
+- [x] Add `'scheduler'` to the `-Only` options (the `ValidateSet` at line 31), with a branch that runs `php artisan schedule:work`.
+- [x] Start it along with the other services (a 4th `Start-ServiceWindow 'scheduler'`), and also in `.vscode/tasks.json` if you use that.
+- [x] Check that `php artisan schedule:list` shows `documents:prune-pages` running every hour.
+- [x] Try `php artisan documents:prune-pages --hours=1` on some test pages. (not needed: not part of the plan, and on this machine it would delete real unsubmitted pages; `LedgerTemplateAndExportTest` already runs the command)
+- [x] Mention the scheduler in the README's start-up instructions.
 
 ### 11. PDF scanning needs internet
 

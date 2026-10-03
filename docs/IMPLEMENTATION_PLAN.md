@@ -354,14 +354,17 @@ Done: 2026-10-03 · PHP 294 · JS 86 · Python 62 passed
 **Why here:** it's independent, but it must come before Task 4.4 Option B, which also changes `serve.ps1`.
 **Touches:** `serve.ps1`, `.vscode/tasks.json` (if it exists), `README.md`
 
-- [ ] Add `'scheduler'` to the `-Only` `ValidateSet`, with a branch that runs `php artisan schedule:work` in a loop (like the worker), and a check so it isn't started twice.
-- [ ] Start it along with the other services (`Start-ServiceWindow 'scheduler'`), including with `-NoOcr`.
-- [ ] If `.vscode/tasks.json` exists, add a scheduler task like the others.
-- [ ] Mention the fourth service in the README's start-up steps.
-- [ ] **[You]** Restart `serve.ps1` and confirm the scheduler is running.
+- [x] Add `'scheduler'` to the `-Only` `ValidateSet`, with a branch that runs `php artisan schedule:work` in a loop (like the worker), and a check so it isn't started twice.
+- [x] Start it along with the other services (`Start-ServiceWindow 'scheduler'`), including with `-NoOcr`.
+- [x] If `.vscode/tasks.json` exists, add a scheduler task like the others. (It exists but is gitignored, so this change stays on this machine.)
+- [x] Mention the fourth service in the README's start-up steps.
+  Checked 2026-10-03: `schedule:list` shows `documents:prune-pages` at `0 * * * *`, and `serve.ps1 -Check` says Ready. Not started by Claude: its first run deletes the 87 unsubmitted pages already older than 24 hours (88 pages in all; about 270 MB in `storage/app/private/pages`).
+- [x] **[You]** Restart `serve.ps1` and confirm the scheduler is running.
+  Confirmed 2026-10-03: the user restarted it, and the website, queue worker, scheduler and AI service were all running.
 
 **Verify:** `php artisan schedule:list` shows `documents:prune-pages` every hour, and `powershell -NoProfile -File serve.ps1 -Check` still passes.
 **Done when:** `serve.ps1` starts four services.
+Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 
 ### Task 2.6: #11 Serve the PDF worker locally (Small–Medium)
 

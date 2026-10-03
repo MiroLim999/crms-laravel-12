@@ -1,15 +1,15 @@
 <#
     serve.ps1
     Starts the processes CRMS needs, each in its own window, from the repo root:
-    Laravel, the queue worker that outlines and reads aligned pages, and the
-    OCR service.
+    Laravel, the queue worker that outlines and reads aligned pages, the
+    scheduler that deletes pages nobody submitted, and the OCR service.
 
-        .\serve.ps1            start all three: inside this terminal when run
+        .\serve.ps1            start all four: inside this terminal when run
                                from Kiro / VS Code, else one window each
         .\serve.ps1 -Windows   one window each, even from the editor
         .\serve.ps1 -Check     verify the environment and exit
-        .\serve.ps1 -NoOcr     Laravel and the queue worker only
-        .\serve.ps1 -Only web|worker|ocr
+        .\serve.ps1 -NoOcr     everything but the OCR service
+        .\serve.ps1 -Only web|worker|scheduler|ocr
                                run one of them in this terminal (Kiro's tasks
                                in .vscode\tasks.json do this, one tab each)
 
@@ -28,7 +28,7 @@ param(
     [switch]$Check,
     [switch]$NoOcr,
     [switch]$Windows,
-    [ValidateSet('web', 'worker', 'ocr')]
+    [ValidateSet('web', 'worker', 'scheduler', 'ocr')]
     [string]$Only,
     [int]$AppPort = 8000,
     [int]$OcrPort = 8001
@@ -51,6 +51,12 @@ function Test-Port([int]$Port) {
 function Test-QueueWorker {
     $null -ne (Get-CimInstance Win32_Process -Filter "Name='php.exe' OR Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
         Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -like '*artisan queue:work*' -or $_.CommandLine -like '*serve.ps1*-Only worker*') })
+}
+
+# The scheduler, or the loop that keeps it running, other than this script itself.
+function Test-Scheduler {
+    $null -ne (Get-CimInstance Win32_Process -Filter "Name='php.exe' OR Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -like '*artisan schedule:work*' -or $_.CommandLine -like '*serve.ps1*-Only scheduler*') })
 }
 
 # --- One service in this terminal ----------------------------------------
@@ -78,6 +84,20 @@ if ($Only) {
             while ($true) {
                 php artisan queue:work --timeout=900 --tries=1
                 Write-Host 'Worker stopped. Starting again in 5 s - close this terminal to stop it.' -ForegroundColor Yellow
+                Start-Sleep -Seconds 5
+            }
+        }
+        'scheduler' {
+            if (Test-Scheduler) { Write-Warn 'The scheduler is already running - not starting another.'; exit 0 }
+            # Runs what routes\console.php schedules: every hour,
+            # documents:prune-pages deletes aligned pages nobody submitted
+            # (unsubmitted civil registry scans) once they are
+            # LINE_MARKERS_KEEP_HOURS old. Each run is a fresh PHP process, so a
+            # code change needs no restart. The loop brings it back after a crash.
+            $host.UI.RawUI.WindowTitle = 'CRMS scheduler'
+            while ($true) {
+                php artisan schedule:work
+                Write-Host 'Scheduler stopped. Starting again in 5 s - close this terminal to stop it.' -ForegroundColor Yellow
                 Start-Sleep -Seconds 5
             }
         }
@@ -231,6 +251,13 @@ if (Test-QueueWorker) {
 } else {
     Write-Step 'Queue worker   -> line detection and reading (restarts itself)'
     Start-ServiceWindow 'worker'
+}
+
+if (Test-Scheduler) {
+    Write-Warn 'The scheduler is already running - not starting another.'
+} else {
+    Write-Step 'Scheduler      -> deletes unsubmitted pages every hour'
+    Start-ServiceWindow 'scheduler'
 }
 
 if (-not $NoOcr) {

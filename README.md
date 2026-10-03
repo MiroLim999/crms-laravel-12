@@ -38,7 +38,7 @@ Everything runs locally. Page images and their text are never sent to an externa
 
 ## System Architecture
 
-CRMS runs as **three local processes** from a single repository: the Laravel web app, a Laravel **queue worker** that detects and outlines handwritten lines in the background, and the FastAPI OCR service. The diagram shows the web app and the OCR service; the queue worker is described below it.
+CRMS runs as **four local processes** from a single repository: the Laravel web app, a Laravel **queue worker** that detects and outlines handwritten lines in the background, the Laravel **scheduler** that deletes unsubmitted pages every hour, and the FastAPI OCR service. The diagram shows the web app and the OCR service; the queue worker is described below it.
 
 ```
                       +-------------------------------------------------------------+
@@ -168,7 +168,7 @@ CRMS enforces a strict separation of duties verified end-to-end in the test suit
 
 ```
 crms-laravel-12/
-├── .vscode/tasks.json                  # (local, gitignored) Kiro / VS Code tasks that start the three processes
+├── .vscode/tasks.json                  # (local, gitignored) Kiro / VS Code tasks that start the four processes
 ├── app/                                # Core Laravel application logic
 │   ├── Console/Commands/               # crms:export-training, documents:prune-pages
 │   ├── Enums/                          # RoleSlug, DocumentType, RecordStatus, PaperSize, etc.
@@ -221,7 +221,7 @@ crms-laravel-12/
 │   ├── JavaScript/                     # Node.js test runner unit tests (controls, markers, SNEAT)
 │   └── Python/                         # Python unit tests for ML evaluation report normalization
 ├── tools/                              # Development utility scripts (subset-icons.mjs)
-├── serve.ps1                           # Starts the web app, queue worker and OCR service (see Running)
+├── serve.ps1                           # Starts the web app, queue worker, scheduler and OCR service (see Running)
 ├── trocr-finetuning-code.ipynb         # Kaggle / Colab fine-tuning and evaluation notebook
 ├── vite.config.js                      # Vite asset bundler configuration
 ├── composer.json                       # PHP dependencies
@@ -337,39 +337,42 @@ php artisan db:seed --class=DemoUsersSeeder
 
 ## Running the Application
 
-CRMS needs **three processes** running, plus MySQL (start it in the XAMPP Control Panel; Apache is not used):
+CRMS needs **four processes** running, plus MySQL (start it in the XAMPP Control Panel; Apache is not used):
 
 | Process | Command | Port |
 | :--- | :--- | :--- |
 | Web app | `php artisan serve` | [8000](http://127.0.0.1:8000) |
 | Queue worker | `php artisan queue:work --timeout=900 --tries=1` | – |
+| Scheduler | `php artisan schedule:work` | – |
 | OCR service | `python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001` | [8001](http://127.0.0.1:8001) |
 
 > **Do not skip the queue worker.** `php artisan serve` starts the website only. Detect and Scan with OCR queue a background job, and without a worker the page stays on **"Waiting for the line detector"**.
+>
+> **The scheduler** deletes, every hour, the aligned pages nobody submitted once they are older than `LINE_MARKERS_KEEP_HOURS` (default 24). They are unsubmitted civil registry scans, so without it they stay on disk.
 
 ### Option A: Automatically When the Project Opens (Kiro / VS Code)
-`.vscode/tasks.json` starts all three as tabs in the editor's terminal panel whenever the project folder opens: **CRMS: website**, **CRMS: queue worker** and **CRMS: OCR service**. Closing the editor stops them. Each tab skips its process if it is already running, so nothing starts twice.
+`.vscode/tasks.json` starts all four as tabs in the editor's terminal panel whenever the project folder opens: **CRMS: website**, **CRMS: queue worker**, **CRMS: scheduler** and **CRMS: OCR service**. Closing the editor stops them. Each tab skips its process if it is already running, so nothing starts twice.
 
 - **First time only**: the editor asks whether to allow automatic tasks. Choose **Allow**. (Kiro ships with automatic tasks off; if you missed the prompt, run **Tasks: Manage Automatic Tasks → Allow Automatic Tasks** from the Command Palette.)
-- **Start them by hand**: press **Ctrl+Shift+B** (it is the default build task), or Command Palette (**Ctrl+Shift+P**) → **Tasks: Run Task** → **CRMS: start services**. One tab per service: **CRMS: website**, **CRMS: queue worker**, **CRMS: OCR service**.
-- `.vscode/` is gitignored, so this file is local to each machine. To set it up on a new machine, create `.vscode/tasks.json` with one task per process that runs `powershell.exe -NoProfile -ExecutionPolicy Bypass -File serve.ps1 -Only web` (and `-Only worker`, `-Only ocr`), each with `"isBackground": true` and `"runOptions": { "runOn": "folderOpen" }`.
+- **Start them by hand**: press **Ctrl+Shift+B** (it is the default build task), or Command Palette (**Ctrl+Shift+P**) → **Tasks: Run Task** → **CRMS: start services**. One tab per service: **CRMS: website**, **CRMS: queue worker**, **CRMS: scheduler**, **CRMS: OCR service**.
+- `.vscode/` is gitignored, so this file is local to each machine. To set it up on a new machine, create `.vscode/tasks.json` with one task per process that runs `powershell.exe -NoProfile -ExecutionPolicy Bypass -File serve.ps1 -Only web` (and `-Only worker`, `-Only scheduler`, `-Only ocr`), each with `"isBackground": true` and `"runOptions": { "runOn": "folderOpen" }`.
 
 ### Option B: The PowerShell Runner (Windows)
-From the repository root, `serve.ps1` checks the environment (PHP, MySQL, Python, CUDA, Kraken) and starts the three processes:
+From the repository root, `serve.ps1` checks the environment (PHP, MySQL, Python, CUDA, Kraken) and starts the four processes:
 
 ```powershell
-.\serve.ps1               # All three. In a Kiro / VS Code terminal: inside that one terminal
+.\serve.ps1               # All four. In a Kiro / VS Code terminal: inside that one terminal
                           # (Ctrl+C there stops them all). Elsewhere: one window each.
 .\serve.ps1 -Windows      # One window each, even from the editor
 .\serve.ps1 -Check        # Check the environment and exit
-.\serve.ps1 -NoOcr        # Web app and queue worker only
-.\serve.ps1 -Only worker  # One process in the current terminal (web | worker | ocr)
+.\serve.ps1 -NoOcr        # Everything but the OCR service
+.\serve.ps1 -Only worker  # One process in the current terminal (web | worker | scheduler | ocr)
 ```
 
 A script cannot open editor tabs: for one tab per service, use Option A (**Ctrl+Shift+B**). If PowerShell refuses to run scripts, use `powershell -ExecutionPolicy Bypass -File .\serve.ps1`.
 
 ### Option C: Manual Process Execution
-Open three terminals in the repository root and run one command from the table above in each. For the OCR service, activate `.venv` first.
+Open four terminals in the repository root and run one command from the table above in each. For the OCR service, activate `.venv` first.
 
 ### If Something Stops
 Run **Ctrl+Shift+B** (or `.\serve.ps1`) again: it only starts what is not running and skips the rest, so nothing starts twice.
@@ -378,6 +381,7 @@ Run **Ctrl+Shift+B** (or `.\serve.ps1`) again: it only starts what is not runnin
 | :--- | :--- |
 | "This site can't be reached" at 127.0.0.1:8000 | web app |
 | Detect or Scan stays on "Waiting for the line detector" | queue worker |
+| Unsubmitted pages pile up in `storage\app\private\pages` | scheduler |
 | Scan fails with an OCR / TrOCR connection error, or the OCR workspace shows the engine offline | OCR service |
 
 - **"Port 8000/8001 is already in use"**: that service is still running (perhaps in an old window); close that window or keep using it.
@@ -397,26 +401,28 @@ Every command here runs from the repository root, in PowerShell (the editor's te
 
 ### Start the Services
 ```powershell
-.\serve.ps1                        # Check the environment, then start all three services
+.\serve.ps1                        # Check the environment, then start all four services
 .\serve.ps1 -Only web              # Only the web app, in this terminal -> http://127.0.0.1:8000
 .\serve.ps1 -Only worker           # Only the queue worker, in this terminal (restarts itself)
+.\serve.ps1 -Only scheduler        # Only the scheduler, in this terminal (restarts itself)
 .\serve.ps1 -Only ocr              # Only the OCR service, in this terminal -> http://127.0.0.1:8001
-.\serve.ps1 -NoOcr                 # Web app and queue worker, without the OCR service
-.\serve.ps1 -Windows               # All three, one window each, even from the editor
+.\serve.ps1 -NoOcr                 # Everything but the OCR service
+.\serve.ps1 -Windows               # All four, one window each, even from the editor
 .\serve.ps1 -Check                 # Only check PHP, MySQL, Python, CUDA and Kraken; start nothing
 .\serve.ps1 -AppPort 8080          # Web app on another port
 .\serve.ps1 -OcrPort 8002          # OCR service on another port (also change OCR_API_URL and OCR_BROWSER_API_URL in .env)
 ```
 
 In the editor:
-- **Ctrl+Shift+B**: start all three, one terminal tab each.
-- **Ctrl+Shift+P** → **Tasks: Run Task** → **CRMS: website**, **CRMS: queue worker** or **CRMS: OCR service**: start one of them.
+- **Ctrl+Shift+B**: start all four, one terminal tab each.
+- **Ctrl+Shift+P** → **Tasks: Run Task** → **CRMS: website**, **CRMS: queue worker**, **CRMS: scheduler** or **CRMS: OCR service**: start one of them.
 - To stop one, press **Ctrl+C** in its tab, or close the tab (trash-can icon).
 
 Without `serve.ps1`, one command per terminal:
 ```powershell
 php artisan serve --port=8000
 php artisan queue:work --timeout=900 --tries=1
+php artisan schedule:work
 python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001
 ```
 
@@ -482,7 +488,8 @@ ml\.venv-kraken\Scripts\python.exe ml\line_markers.py grid    --page sample.png 
 ```powershell
 php artisan documents:prune-pages                   # Delete unsubmitted pages older than LINE_MARKERS_KEEP_HOURS (default 24)
 php artisan documents:prune-pages --hours=2         # ... older than 2 hours
-php artisan schedule:work                           # Run prune-pages every hour while developing (use Task Scheduler in production)
+php artisan schedule:list                           # What the scheduler runs, and when (prune-pages: every hour)
+php artisan schedule:work                           # Run prune-pages every hour; serve.ps1 starts it (use Task Scheduler in production)
 php artisan crms:export-training                    # Verified line crops and their corrected text, as a TrOCR training CSV
 php artisan crms:export-training --since=2026-09-01 --out=D:\exports\september   # Only records submitted since then, to that folder
 ```
