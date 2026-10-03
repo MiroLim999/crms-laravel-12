@@ -245,13 +245,13 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Medium
 
-- [ ] Decide whether to remove it, or keep it as a planned feature (and say so in the defense).
-- [ ] If removing:
+- [x] Decide whether to remove it, or keep it as a planned feature (and say so in the defense).
+- [x] If removing:
   - delete `RecordStatus::Draft`, `isDraft()`, the "Drafts" summary and the draft message in `ChangeRequestService::open()`
   - remove the "not locked" checks that can no longer happen
-- [ ] Change the factory's default status to `Submitted`. Tests create draft records today, so fix the tests that rely on them.
-- [ ] In a new migration, change the default of `records.status` to `'submitted'`.
-- [ ] Run the full test suite.
+- [x] Change the factory's default status to `Submitted`. Tests create draft records today, so fix the tests that rely on them.
+- [x] In a new migration, change the default of `records.status` to `'submitted'`.
+- [x] Run the full test suite.
 
 ### 19. An unused permission and an unused column
 

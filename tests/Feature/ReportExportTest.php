@@ -31,7 +31,7 @@ class ReportExportTest extends TestCase
     {
         $staff = User::factory()->staff()->create();
         $this->record($staff, DocumentType::Birth, RecordStatus::Submitted);
-        $this->record($staff, DocumentType::Death, RecordStatus::Draft);
+        $this->record($staff, DocumentType::Death, RecordStatus::Submitted);
 
         $summary = $this->actingAs(User::factory()->admin()->create())
             ->get(route('reports.index', ['doc_type' => DocumentType::Birth->value]))
@@ -40,7 +40,6 @@ class ReportExportTest extends TestCase
 
         $this->assertSame(1, $summary['total']);
         $this->assertSame(1, $summary['submitted']);
-        $this->assertSame(0, $summary['drafts']);
     }
 
     public function test_the_export_streams_csv_of_the_filtered_records(): void

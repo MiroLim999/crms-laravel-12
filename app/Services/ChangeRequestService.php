@@ -37,10 +37,6 @@ class ChangeRequestService
         User $requester,
         array $recordProposals = [],
     ): ChangeRequest {
-        if (! $record->isLocked()) {
-            throw new ChangeRequestException('This record is still a draft and does not need a change request.');
-        }
-
         $fields = $record->fields->keyBy('id');
 
         // Only keep fields whose value actually differs, so a reviewer is not

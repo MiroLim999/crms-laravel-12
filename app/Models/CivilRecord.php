@@ -81,11 +81,6 @@ class CivilRecord extends Model
         return $this->status->isLocked();
     }
 
-    public function isDraft(): bool
-    {
-        return $this->status === RecordStatus::Draft;
-    }
-
     public function hasPendingChangeRequest(): bool
     {
         return $this->changeRequests()

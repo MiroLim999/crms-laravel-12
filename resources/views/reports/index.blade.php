@@ -67,7 +67,6 @@
             $tiles = [
                 ['Matching records', number_format($summary['total'])],
                 ['Submitted', number_format($summary['submitted'])],
-                ['Drafts', number_format($summary['drafts'])],
                 ['Average OCR confidence',
                     $summary['average_confidence'] === null ? '—' : $summary['average_confidence'].'%'],
             ];

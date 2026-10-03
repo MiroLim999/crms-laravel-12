@@ -113,11 +113,6 @@ class ChangeRequestController extends Controller
     {
         $this->authorize('change-requests.create');
 
-        if (! $record->isLocked()) {
-            return redirect()->route('records.show', $record)
-                ->with('error', 'This record is not locked, so it needs no change request.');
-        }
-
         $record->load(['fields', 'documentTypeDefinition']);
 
         if ($pendingRequest = $record->changeRequests()

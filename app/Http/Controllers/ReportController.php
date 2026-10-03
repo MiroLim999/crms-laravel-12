@@ -199,7 +199,6 @@ class ReportController extends Controller
         return [
             'total' => $matching->clone()->count(),
             'submitted' => $matching->clone()->where('status', RecordStatus::Submitted->value)->count(),
-            'drafts' => $matching->clone()->where('status', RecordStatus::Draft->value)->count(),
             'average_confidence' => $this->averageConfidence($filters),
         ];
     }

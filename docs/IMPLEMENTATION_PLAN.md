@@ -645,18 +645,25 @@ Done: 2026-10-03 · PHP 297 · JS 86 · Python 67 passed
 - `app/Services/ChangeRequestService.php`, `app/Http/Controllers/ChangeRequestController.php`
 - `database/factories/CivilRecordFactory.php`, a new migration, tests
 
-- [ ] **[Decision]** A) Remove Draft (recommended: no code path creates drafts). B) Keep it as a planned feature, and tick the remaining steps as `(not needed: kept by decision)`.
-- [ ] For A: first check that no record in the database has status `draft`. If any do, stop and report, because removing the enum case would break loading them.
-- [ ] For A, remove:
+- [x] **[Decision]** A) Remove Draft (recommended: no code path creates drafts). B) Keep it as a planned feature, and tick the remaining steps as `(not needed: kept by decision)`.
+  Decision: A, no code path creates drafts, given by the user with the Phase 3 prompt (2026-10-03)
+- [x] For A: first check that no record in the database has status `draft`. If any do, stop and report, because removing the enum case would break loading them.
+  Checked 2026-10-03: 0 of 33 records are `draft`; the only status in the table is `submitted`.
+- [x] For A, remove:
   - `RecordStatus::Draft` and `CivilRecord::isDraft()`
   - the "Drafts" summary, in both the controller and the view
   - the "still a draft" check in `ChangeRequestService::open()`
   - the "not locked" redirect in `ChangeRequestController::create()`
-- [ ] Change the factory's default status to `Submitted`, and update the tests that create drafts on purpose.
-- [ ] New migration: set the default of `records.status` to `'submitted'`. Then run `php artisan migrate`.
+
+  `RecordStatus` is now a single-case enum (`Submitted`), with a comment saying so. `isLocked()` stays (always true now) because `ChangeRequestController`, `records/index.blade.php` and others still call it to decide whether a change request makes sense; nothing calls `isDraft()` anymore. No test asserted the "still a draft" or "not locked" messages, so removing both was safe.
+- [x] Change the factory's default status to `Submitted`, and update the tests that create drafts on purpose.
+  Only `status` changed in the base `definition()`; `submitted_by`/`submitted_at` stay unset by default as before (set by the `->submitted()` state), to avoid a factory closure reading a sibling attribute that may not be resolved yet. Two tests created a Draft record to prove it was excluded from a count: `AnalyticsDashboardTest::test_it_counts_digitized_records_and_ocr_quality_signals` now creates only the one Submitted record (the assertion value is unchanged, since excluding nothing from one record is still one record). `ReportExportTest::test_the_page_summarises_matching_records` swapped its Draft record for a second Submitted one of a different document type, so the test still proves the `doc_type` filter works; its `drafts` assertion is gone.
+- [x] New migration: set the default of `records.status` to `'submitted'`. Then run `php artisan migrate`.
+  `2026_10_03_000300_change_records_status_default_to_submitted`. Not destructive (changes a default, not a column), so run directly, as Task 1.1's migration was. Ran on `crms_test` (via the suites) and on the user's own database.
 
 **Verify:** all tests. Expect several tests to need updating.
 **Done when:** Draft is either gone everywhere or deliberately kept.
+Done: 2026-10-03 · PHP 297 · JS 86 · Python 67 passed
 
 ### Task 3.10: #17 The document type stored in two places (Large)
 
