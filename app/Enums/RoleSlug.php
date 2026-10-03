@@ -36,7 +36,7 @@ enum RoleSlug: string
      * Roles that may perform data entry (upload, verify, submit records).
      *
      * Admin is deliberately excluded: data entry belongs to Staff and corrections
-     * go through the change-request flow. See .kiro/steering/product.md.
+     * go through the change-request flow. See docs/roles.md.
      */
     public function canEnterData(): bool
     {

@@ -149,7 +149,7 @@ CRMS enforces a strict separation of duties verified end-to-end in the test suit
 | Capability / Resource | Staff | Admin | Super Admin | Route / Gate |
 | :--- | :---: | :---: | :---: | :--- |
 | **Upload & Process Documents** | **Yes** | No | **Yes** | `documents.create`, `can:documents.process` |
-| **Verify & Submit Records** | **Yes** | No | **Yes** | `documents.store`, `can:records.submit` |
+| **Verify & Submit Records** | **Yes** | No | **Yes** | `documents.store`, `can:documents.process` |
 | **Search & View Record Archive** | **Yes** | **Yes** | **Yes** | `records.index`, `can:records.view` |
 | **Propose Change Requests** | **Yes** | No | **Yes** | `records.change-requests.create`, `can:change-requests.create` |
 | **Approve / Reject Change Requests** | No | **Yes** | **Yes** | `change-requests.approve`, `can:change-requests.moderate` |
@@ -161,6 +161,8 @@ CRMS enforces a strict separation of duties verified end-to-end in the test suit
 | **OCR Model & Engine Workspace** | No | No | **Yes** | `ocr.index`, `can:ocr.manage` |
 
 > **Note on Separation of Duties**: Administrators perform supervisory and oversight functions and cannot perform primary data entry or directly edit civil records. Record corrections must strictly traverse the authenticated change request moderation pipeline.
+
+The full rules, including who may create, edit and deactivate which accounts, are in [docs/roles.md](docs/roles.md).
 
 ---
 

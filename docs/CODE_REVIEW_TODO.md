@@ -259,11 +259,13 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small
 
-- [ ] Remove the `records.submit` permission (only a test uses it) and its rows in `CapabilityMatrixTest`.
-- [ ] Decide about `users.email_verified_at`:
+- [x] Remove the `records.submit` permission (only a test uses it) and its rows in `CapabilityMatrixTest`.
+- [x] Decide about `users.email_verified_at`:
   - drop it in a new migration and remove it from `User.php`'s casts and from `UserFactory`, or
   - keep it if you plan to add email verification.
-- [ ] Run the tests.
+
+  (dropped on 2026-10-03, after a database backup)
+- [x] Run the tests.
 
 ### 20. Tables created and then deleted (old migrations)
 
@@ -333,8 +335,8 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small
 
-- [ ] Copy the role and capability table from `.kiro/steering/product.md` into the README (or into `docs/roles.md`).
-- [ ] Point both comments to the new location.
+- [x] Copy the role and capability table from `.kiro/steering/product.md` into the README (or into `docs/roles.md`).
+- [x] Point both comments to the new location.
 
 ### 26. Different limits for the same value
 

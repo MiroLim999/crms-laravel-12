@@ -601,16 +601,23 @@ Done: 2026-10-03 · PHP 298 · JS 86 · Python 67 passed
 - new `docs/roles.md`
 - if dropping the column: `app/Models/User.php`, `database/factories/UserFactory.php`, a new migration
 
-- [ ] Remove the `records.submit` gate and its rows in `CapabilityMatrixTest`.
-- [ ] **[Decision]** What should happen to `users.email_verified_at`?
+- [x] Remove the `records.submit` gate and its rows in `CapabilityMatrixTest`.
+  It guarded nothing: `documents.store` sits in the `can:documents.process` group. The README's role table named it for "Verify & Submit Records", so that row now says `can:documents.process`.
+- [x] **[Decision]** What should happen to `users.email_verified_at`?
   - A) Drop it (recommended: nothing uses it). That means a new migration, removing the cast in `User.php`, and removing it from `UserFactory`, including the `unverified()` state.
   - B) Keep it.
-- [ ] For A: **[You]** back up the database, then **[Ask first]** run `php artisan migrate`.
-- [ ] Write `docs/roles.md` with the capability table, built from the gates in `AuthServiceProvider` and the role descriptions in `RoleSlug`. `.kiro/steering/product.md` doesn't exist on this machine either (checked 2026-10-02), so it can't be copied.
-- [ ] Point the comments in `AuthServiceProvider.php` and `RoleSlug.php` to `docs/roles.md`.
+
+  Decision: A, nothing uses it, given by the user with the Phase 3 prompt (2026-10-03)
+- [x] For A: **[You]** back up the database, then **[Ask first]** run `php artisan migrate`.
+  The code side is done (2026-10-03): the cast in `User.php`, the factory's value and its `unverified()` state are gone. The user asked Claude to make the backup: `mysqldump` (from MySQL Workbench 8.0, no XAMPP mysqldump on this machine) wrote `crms-20261003-112242.sql` (911 KB) to `Documents\crms-backups\`, confirmed to hold the `users` table's structure and all 5 rows. `php artisan migrate --force` then ran `2026_10_03_000200_drop_email_verified_at_from_users_table`; the column is gone and all 5 accounts are intact.
+- [x] Write `docs/roles.md` with the capability table, built from the gates in `AuthServiceProvider` and the role descriptions in `RoleSlug`. `.kiro/steering/product.md` doesn't exist on this machine either (checked 2026-10-02), so it can't be copied.
+  Built from `AuthServiceProvider`, `RoleSlug`, `routes/web.php` and the account and change-request checks in `UserController` and `ChangeRequestController`. Also touched, beyond **Touches**: `README.md`, which now links to it.
+- [x] Point the comments in `AuthServiceProvider.php` and `RoleSlug.php` to `docs/roles.md`.
+  `CapabilityMatrixTest`'s class comment pointed to the same missing file, and now points here too.
 
 **Verify:** `php artisan test --filter="CapabilityMatrixTest|UserManagementTest|AuthenticationTest"`, then all tests.
 **Done when:** no unused gate is left, and the comments point to a file that exists.
+Done: 2026-10-03 · PHP 297 · JS 86 · Python 67 passed
 
 ### Task 3.8: #27 Clutter in the main folder (Small)
 
