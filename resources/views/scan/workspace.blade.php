@@ -663,7 +663,7 @@
                 : ($template->grouping_mode ?? 'auto')
         ),
         threshold: @json($threshold),
-        maxFields: 450,
+        maxFields: @json(App\Support\Limits::MAX_FIELDS),
         maxFieldNameLength: 500,
         pagesUrl: @json(route('documents.pages.store')),
         pageGeometryUrl: @json(route('documents.pages.reoutline', ['page' => '__PAGE__'])),

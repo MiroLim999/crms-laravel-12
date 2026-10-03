@@ -2,6 +2,7 @@
 
 namespace App\Services\Lines;
 
+use App\Support\Limits;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
@@ -49,13 +50,13 @@ final class GeometryInput
             'geometry.columns.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
             'geometry.ruled_ys' => ['present', 'array', 'max:400'],
             'geometry.ruled_ys.*' => ['required', 'numeric', 'min:0', 'max:1'],
-            'geometry.fields' => ['present', 'array', 'max:450'],
+            'geometry.fields' => ['present', 'array', 'max:'.Limits::MAX_FIELDS],
             'geometry.fields.*.name' => ['required', 'string', 'max:500'],
             'geometry.fields.*.box' => ['required', 'array', 'size:4'],
             'geometry.fields.*.box.*' => ['required', 'numeric', 'min:0', 'max:1'],
             'geometry.fields.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
-            'geometry.fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:65535'],
-            'geometry.fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:65535'],
+            'geometry.fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:'.Limits::MAX_FIELDS],
+            'geometry.fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:'.(Limits::MAX_FIELDS - 1)],
         ];
     }
 

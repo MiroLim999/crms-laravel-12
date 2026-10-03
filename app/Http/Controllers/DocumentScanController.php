@@ -13,6 +13,7 @@ use App\Models\PageLine;
 use App\Services\AuditLogger;
 use App\Services\Ocr\OcrClient;
 use App\Services\Ocr\ScanModelChoice;
+use App\Support\Limits;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -129,14 +130,14 @@ class DocumentScanController extends Controller
                 Rule::exists(OcrModel::class, 'key')->whereNull('disk_deleted_at'),
             ],
             'scan' => ['required', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
-            'fields' => ['required', 'array', 'min:1', 'max:450'],
+            'fields' => ['required', 'array', 'min:1', 'max:'.Limits::MAX_FIELDS],
             'fields.*.verified' => ['required', 'accepted'],
             'fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
             'fields.*.ocr_text' => ['nullable', 'string', 'max:2000'],
             'fields.*.ocr_confidence' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'fields.*.verified_value' => ['required', 'string', 'max:2000'],
-            'fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:450'],
-            'fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:449'],
+            'fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:'.Limits::MAX_FIELDS],
+            'fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:'.(Limits::MAX_FIELDS - 1)],
             'fields.*.x' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.y' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.width' => ['required', 'numeric', 'min:0.00001', 'max:1'],

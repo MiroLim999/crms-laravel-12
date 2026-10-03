@@ -580,13 +580,17 @@ Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 **Why before 5.2:** the template rules move into Form Requests there.
 **Touches:** new `app/Support/Limits.php`, `app/Http/Controllers/DocumentScanController.php`, `app/Http/Controllers/DocumentTemplateController.php`, `app/Services/Lines/GeometryInput.php`, tests
 
-- [ ] Check the existing data first, read-only: the highest `person_group` in `document_template_fields` and in `record_fields` must be 450 or less. Report the numbers.
-- [ ] Add `App\Support\Limits` with `MAX_FIELDS = 450`.
-- [ ] In all three places, use it for the field-count limits, for `person_group` (`max:` MAX_FIELDS) and for `person_field_order` (`max:` MAX_FIELDS − 1). This is safe because templates renumber person groups from 1, so a group number can never exceed the number of fields.
-- [ ] Test: a person group of 451 is refused when saving a template and when submitting a record.
+- [x] Check the existing data first, read-only: the highest `person_group` in `document_template_fields` and in `record_fields` must be 450 or less. Report the numbers.
+  Checked 2026-10-03: `record_fields` peaks at person group 4 (field order 10). `document_template_fields` has no person groups at all, because every layout on this machine is a register. The largest record has 44 fields.
+- [x] Add `App\Support\Limits` with `MAX_FIELDS = 450`.
+- [x] In all three places, use it for the field-count limits, for `person_group` (`max:` MAX_FIELDS) and for `person_field_order` (`max:` MAX_FIELDS − 1). This is safe because templates renumber person groups from 1, so a group number can never exceed the number of fields.
+  The renumbering holds once a layout is saved. In the builder, a new person takes the highest number + 1, so only 450+ group-and-ungroup steps in one session without saving could pass 450; the old limit had the same edge at 65,535. Also touched, beyond **Touches**: `resources/views/templates/edit.blade.php` and `resources/views/scan/workspace.blade.php`, which gave the page scripts their own `450` (`maxFields`). They now print the constant, so the pages are unchanged. `php artisan queue:restart` was run because `GeometryInput` sits in `app/Services/Lines`, though only controllers use it.
+- [x] Test: a person group of 451 is refused when saving a template and when submitting a record.
+  Template: a group of 451 and a field order of 450 are refused, while 450 and 449 still save (renumbered to 1 and 0). Record: 451 is refused. Also added: the markers sent for line detection refuse 451 (`LineOutlinePipelineTest`).
 
 **Verify:** `php artisan test --filter="DocumentTemplateBuilderTest|DocumentUploadWorkflowTest|LineOutlinePipelineTest"`, then all tests.
 **Done when:** the limit is defined once and used in all three places.
+Done: 2026-10-03 · PHP 298 · JS 86 · Python 67 passed
 
 ### Task 3.7: #19 + #25 Tidy the permissions file (Small, two items together)
 

@@ -114,6 +114,28 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertArrayNotHasKey('angle', $stored['fields'][1]);
     }
 
+    public function test_a_marker_person_group_past_the_field_limit_is_refused(): void
+    {
+        Queue::fake();
+        $geometry = $this->geometry();
+        $geometry['fields'] = [
+            ['name' => 'Remarks', 'box' => [0.1, 0.8, 0.3, 0.05], 'person_group' => 451, 'person_field_order' => 0],
+        ];
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.store'), [
+                'document_template_id' => $this->ledgerTemplate()->getKey(),
+                'page' => UploadedFile::fake()->image('page.png', 800, 600),
+                'geometry_json' => json_encode($geometry, JSON_THROW_ON_ERROR),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('geometry.fields.0.person_group');
+
+        $this->assertDatabaseCount('document_pages', 0);
+        Queue::assertNothingPushed();
+    }
+
     public function test_a_scan_the_detector_straightened_keeps_the_straightened_page(): void
     {
         $inner = $this->stubMarkers();

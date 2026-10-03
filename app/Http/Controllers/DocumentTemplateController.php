@@ -15,6 +15,7 @@ use App\Services\Lines\GeometryInput;
 use App\Services\Lines\LineMarkers;
 use App\Services\Lines\LineMarkersException;
 use App\Services\TemplateSampleStorage;
+use App\Support\Limits;
 use App\Support\MarkerBounds;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -523,7 +524,7 @@ class DocumentTemplateController extends Controller
             'grouping_mode' => ['required', Rule::in(['auto', 'custom'])],
             'publish' => ['sometimes', 'boolean'],
             // A ruled register may be described entirely by its ledger grid.
-            'fields' => ['nullable', 'array', 'max:450'],
+            'fields' => ['nullable', 'array', 'max:'.Limits::MAX_FIELDS],
             'columns' => ['nullable', 'array', 'max:60'],
             // One limit for columns and fields: a ledger line is named after its
             // column plus " · row N", and both are stored in 500 characters.
@@ -547,14 +548,14 @@ class DocumentTemplateController extends Controller
                 'nullable',
                 'integer',
                 'min:1',
-                'max:65535',
+                'max:'.Limits::MAX_FIELDS,
             ],
             'fields.*.person_field_order' => [
                 Rule::excludeIf(fn () => $request->input('grouping_mode') !== 'custom'),
                 'nullable',
                 'integer',
                 'min:0',
-                'max:65535',
+                'max:'.(Limits::MAX_FIELDS - 1),
             ],
             ...$this->settingsRules('fields.*'),
             ...$this->settingsRules('columns.*'),

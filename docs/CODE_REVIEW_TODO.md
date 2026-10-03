@@ -344,8 +344,8 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small
 
-- [ ] Pick one limit and use it everywhere, through a shared constant.
-- [ ] Run the tests.
+- [x] Pick one limit and use it everywhere, through a shared constant.
+- [x] Run the tests.
 
 ### 27. Clutter in the main folder
 

@@ -312,6 +312,47 @@ class DocumentTemplateBuilderTest extends TestCase
         ]);
     }
 
+    /**
+     * The same limit as a submitted record's: a page holds at most 450 fields,
+     * so at most 450 people.
+     */
+    public function test_person_numbers_past_the_field_limit_are_rejected(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $base = [
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'grouping_mode' => 'custom',
+        ];
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            ...$base,
+            'name' => 'Person group past the limit',
+            'fields' => [$this->personField('Person Name', 451, 0)],
+        ])->assertSessionHasErrors('fields.0.person_group');
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            ...$base,
+            'name' => 'Field order past the limit',
+            'fields' => [$this->personField('Person Name', 1, 450)],
+        ])->assertSessionHasErrors('fields.0.person_field_order');
+
+        $this->assertDatabaseCount('document_templates', 0);
+
+        // The highest numbers allowed are saved, renumbered from 1.
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            ...$base,
+            'name' => 'Highest person numbers',
+            'fields' => [$this->personField('Person Name', 450, 449)],
+        ])->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('document_template_fields', [
+            'name' => 'Person Name',
+            'person_group' => 1,
+            'person_field_order' => 0,
+        ]);
+    }
+
     public function test_layout_sample_is_privately_stored_previewed_and_deleted(): void
     {
         Storage::fake('local');

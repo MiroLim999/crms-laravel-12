@@ -36,7 +36,7 @@
             'csrf' => csrf_token(),
             'initialGroupingMode' => $currentGroupingMode,
             'baselineGroupingMode' => $template?->grouping_mode ?? 'auto',
-            'maxFields' => 450,
+            'maxFields' => App\Support\Limits::MAX_FIELDS,
             'maxFieldNameLength' => 120,
             'paperSizes' => collect($paperSizes)->map(fn ($size) => [
                 'value' => $size->value,

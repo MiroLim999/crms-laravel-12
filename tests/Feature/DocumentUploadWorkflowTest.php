@@ -226,6 +226,29 @@ class DocumentUploadWorkflowTest extends TestCase
         ]);
     }
 
+    public function test_submission_rejects_a_person_group_past_the_field_limit(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTemplateSeeder::class);
+        $this->registerTestModel();
+
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+        $field = $this->verifiedField('Child Full Name', 'Maria Santos');
+        $field['person_group'] = 451;
+        $field['person_field_order'] = 0;
+
+        $this->actingAs(User::factory()->staff()->create())
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, [$field]),
+                'allow_missing' => '1',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('fields.0.person_group');
+
+        $this->assertDatabaseCount('records', 0);
+    }
+
     public function test_verified_fields_can_be_submitted_as_one_json_input(): void
     {
         Storage::fake('local');
