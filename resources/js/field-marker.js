@@ -20,11 +20,12 @@ import {
     verificationGroupState,
 } from './verification-groups.js';
 
-// Use the CDN-hosted worker instead of bundling the 2.2 MB parser file.
-// The version must stay in sync with pdfjs-dist in package.json (currently 4.10.38).
-// If you upgrade pdfjs-dist, update this URL too.
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+// The worker that parses PDFs is served by this app, not a CDN, so PDFs open
+// without internet. tools/copy-pdf-worker.mjs copies it from pdfjs-dist into
+// public/vendor/pdfjs before every build, so it always matches the installed
+// version. It is copied rather than bundled, keeping the 2.2 MB file out of
+// Vite's build.
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
 
 const HANDLE_SIZE = 10;
 const MIN_FRACTION = 0.01;

@@ -374,15 +374,18 @@ Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 
 **Important:** `tests/JavaScript/field-marker.test.js` imports `field-marker.js` directly in Node. So `field-marker.js` must **not** use Vite-only imports such as `?url`, or `npm run test:js` breaks. This replaces the `?url` suggestion in the to-do list.
 
-- [ ] Add `tools/copy-pdf-worker.mjs`, which copies `node_modules/pdfjs-dist/build/pdf.worker.min.mjs` to `public/vendor/pdfjs/pdf.worker.min.mjs`. Run it from `prebuild` and `predev` scripts in `package.json`, so it always matches the installed version.
-- [ ] Add `/public/vendor/pdfjs` to `.gitignore`.
-- [ ] In `field-marker.js`, set `workerSrc` to `/vendor/pdfjs/pdf.worker.min.mjs` instead of the CDN URL, and update the comment above it. The old comment's reason (not bundling the 2.2 MB worker) still holds, because a copied file isn't bundled.
-- [ ] Update the NOTE in `vite.config.js` to match.
-- [ ] Run `npm run build`, then check the worker file exists in `public/vendor/pdfjs/`.
-- [ ] **[You]** With the internet off, open a PDF in the scanning workspace and in the Template Builder.
+- [x] Add `tools/copy-pdf-worker.mjs`, which copies `node_modules/pdfjs-dist/build/pdf.worker.min.mjs` to `public/vendor/pdfjs/pdf.worker.min.mjs`. Run it from `prebuild` and `predev` scripts in `package.json`, so it always matches the installed version.
+- [x] Add `/public/vendor/pdfjs` to `.gitignore`.
+- [x] In `field-marker.js`, set `workerSrc` to `/vendor/pdfjs/pdf.worker.min.mjs` instead of the CDN URL, and update the comment above it. The old comment's reason (not bundling the 2.2 MB worker) still holds, because a copied file isn't bundled.
+- [x] Update the NOTE in `vite.config.js` to match.
+- [x] Run `npm run build`, then check the worker file exists in `public/vendor/pdfjs/`.
+  Checked 2026-10-03: the copy is byte-identical to pdfjs-dist 4.10.38's worker, git ignores it, and the built bundle no longer names the CDN. Rehearsed in headless Chrome with every non-local request blocked: the built `FieldMarker` opened a one-page PDF ("PDF OK: pdf, 1 page, 210 mm wide"), while the CDN address was unreachable. The CDN link dated from the first commit (`da10de4`); its only reason was not bundling the worker.
+- [x] **[You]** With the internet off, open a PDF in the scanning workspace and in the Template Builder.
+  Confirmed by the user 2026-10-03.
 
 **Verify:** `npm run build`, then `npm run test:js`.
 **Done when:** PDFs open without internet, and the JavaScript tests still pass.
+Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 
 ### Task 2.7: #36 Logging in the AI service (Small, moved up from Priority 5)
 

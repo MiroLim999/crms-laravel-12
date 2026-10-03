@@ -24,8 +24,10 @@ export default defineConfig({
                 'resources/js/dashboard-analytics.js',
                 // Own entry: pulls in the PDF.js module tree. Only the scanning
                 // workspace and the template builder use it.
-                // NOTE: pdf.worker.mjs is now served from the CDN (see field-marker.js).
-                //       Do not add `pdfjs-dist/build/pdf.worker.mjs?url` back here.
+                // NOTE: the PDF.js worker is not bundled. tools/copy-pdf-worker.mjs
+                //       copies it to public/vendor/pdfjs before every build (see
+                //       field-marker.js). Do not add `pdfjs-dist/build/pdf.worker.mjs?url`
+                //       here: the Node tests import field-marker.js directly.
                 'resources/js/field-marker.js',
                 // Shared Windows-style drag selection used by both marker editors.
                 'resources/js/marquee-selection.js',

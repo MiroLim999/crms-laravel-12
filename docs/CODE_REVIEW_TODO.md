@@ -155,11 +155,11 @@ These don't crash anything, but they're weak spots a panelist could point out.
 
 **Effort:** Small to Medium
 
-- [ ] First find out **why** it was moved to the CDN: read the NOTE in `vite.config.js` and run `git log -S "pdf.worker" --oneline`.
-- [ ] Load the worker from your own build instead, e.g. `import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'` in `field-marker.js`, followed by `GlobalWorkerOptions.workerSrc = workerUrl`.
-- [ ] Run `npm run build`.
-- [ ] **Test:** turn off the internet, then open a PDF in the scanning workspace and in the Template Builder.
-- [ ] Optional: self-host the Public Sans font as well. Offline, the browser just uses a fallback font, which isn't a failure.
+- [x] First find out **why** it was moved to the CDN: read the NOTE in `vite.config.js` and run `git log -S "pdf.worker" --oneline`. (it was there from the first commit, `da10de4`, only to avoid bundling the 2.2 MB worker)
+- [x] Load the worker from your own build instead, e.g. `import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'` in `field-marker.js`, followed by `GlobalWorkerOptions.workerSrc = workerUrl`. (done the plan's way: `tools/copy-pdf-worker.mjs` copies it to `public/vendor/pdfjs` before every build, because a `?url` import would break the Node tests)
+- [x] Run `npm run build`.
+- [x] **Test:** turn off the internet, then open a PDF in the scanning workspace and in the Template Builder. (rehearsed in headless Chrome with outside requests blocked, then confirmed by hand by the user on 2026-10-03)
+- [x] Optional: self-host the Public Sans font as well. Offline, the browser just uses a fallback font, which isn't a failure. (not needed: optional, and the plan leaves it out)
 
 ### 12. Highlight boxes on saved records might be in the wrong place
 
