@@ -231,11 +231,11 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Large. It's fine to leave this until after the defense.
 
-- [ ] Find every use: search for `doc_type` in `app/` and `resources/views`.
-- [ ] Switch each read to `document_type_id` / `documentTypeDefinition`.
-- [ ] Keep only what's still needed from the enum (the starter boxes in `defaultFields()` for new templates), or move them to a seeder or config file.
-- [ ] In a new migration, drop the `doc_type` columns and their indexes, then remove the enum casts.
-- [ ] Run the full test suite.
+- [x] Find every use: search for `doc_type` in `app/` and `resources/views`. (not needed: postponed to after the defense, decision A in IMPLEMENTATION_PLAN.md Task 3.10, 2026-10-03)
+- [x] Switch each read to `document_type_id` / `documentTypeDefinition`. (not needed: postponed, see above)
+- [x] Keep only what's still needed from the enum (the starter boxes in `defaultFields()` for new templates), or move them to a seeder or config file. (not needed: postponed, see above)
+- [x] In a new migration, drop the `doc_type` columns and their indexes, then remove the enum casts. (not needed: postponed, see above)
+- [x] Run the full test suite. (not needed: postponed, see above)
 
 ### 18. The "Draft" status is never used
 

@@ -676,18 +676,20 @@ Done: 2026-10-03 · PHP 297 · JS 86 · Python 67 passed
 - `app/Services/TemplateSampleStorage.php`
 - factories and seeders, a new migration, tests
 
-- [ ] **[Decision]** A) Do it after the defense (recommended: it's the biggest cleanup and nothing visible changes). If so, tick the remaining steps as `(not needed: postponed)`. B) Do it now.
-- [ ] Search for `doc_type` in `app/`, `database/`, `resources/views` and `tests/`, and switch every read to `document_type_id` / `documentTypeDefinition`.
-- [ ] Keep `DocumentType::defaultFields()` for the starter boxes, or move them to a seeder or config file. Remove the label and icon fallbacks that the table already covers.
-- [ ] Write a new migration that drops `doc_type` from `records` and `document_templates`, together with the indexes `records(doc_type, status)` and `document_templates(doc_type, is_active)`.
-- [ ] **[You]** Back up the database, then **[Ask first]** run the migration.
+- [x] **[Decision]** A) Do it after the defense (recommended: it's the biggest cleanup and nothing visible changes). If so, tick the remaining steps as `(not needed: postponed)`. B) Do it now.
+  Decision: A, postpone until after the defense, given by the user with the Phase 3 prompt (2026-10-03)
+- [x] Search for `doc_type` in `app/`, `database/`, `resources/views` and `tests/`, and switch every read to `document_type_id` / `documentTypeDefinition`. (not needed: postponed)
+- [x] Keep `DocumentType::defaultFields()` for the starter boxes, or move them to a seeder or config file. Remove the label and icon fallbacks that the table already covers. (not needed: postponed)
+- [x] Write a new migration that drops `doc_type` from `records` and `document_templates`, together with the indexes `records(doc_type, status)` and `document_templates(doc_type, is_active)`. (not needed: postponed)
+- [x] **[You]** Back up the database, then **[Ask first]** run the migration. (not needed: postponed)
 
 **Verify:** all tests.
 **Done when:** `doc_type` no longer appears in the code or the database.
+Postponed: 2026-10-03 (decision A); not done. `doc_type` still exists in both the database and the code.
 
 ### Phase 3 checkpoint
 
-- [ ] All tests pass.
+- [x] All tests pass. (2026-10-03, after Task 3.9: PHP 297 · JS 86 · Python 67)
 - [ ] **[You]** Click through these: scan and submit a record, request and approve a change, then open Reports and the Template Builder.
 
 ---
