@@ -173,7 +173,7 @@ These don't crash anything, but they're weak spots a panelist could point out.
 - [x] If they're off, pick one fix:
   - [x] Keep the straightened page image with the record and show that image on the record page. Copy `pages/{id}/page.png` before line 289 deletes the folder, and store its path in a new column. This matches exactly, but adds one more file per record.
   - [x] Or rotate the displayed scan by `scan_rotation` with CSS. It's less work, but may be slightly off if straightening changed the page size. (not needed: chose the first fix)
-- [ ] **Test:** the record page uses the right image or rotation (feature test), then check it by eye. (feature tests pass; the by-eye check is still open)
+- [x] **Test:** the record page uses the right image or rotation (feature test), then check it by eye. (feature tests pass; checked by eye on 2026-10-03 with record #34, see Task 2.3)
 
 ### 13. A template that records use can be deleted
 

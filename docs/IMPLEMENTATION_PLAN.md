@@ -326,10 +326,12 @@ Done: 2026-10-03 · PHP 289 · JS 86 · Python 62 passed
 - [x] Make the chosen fix. For A, run `php artisan migrate`.
   Also touched, beyond **Touches**: `app/Models/CivilRecord.php` (the new column is fillable) and `tests/Feature/LineOutlinePipelineTest.php` (the submit-side tests live beside the page helpers). The migration ran on the user's database on 2026-10-03; the 33 older records keep showing their upload. "Open full size" on the scan card still opens the original upload.
 - [x] Test: for A, a submitted record keeps its page image and the record page uses it. For B, the record page renders the rotation.
-- [ ] **[You]** Check the tilted page again by eye. A copy of the user's sample tilted by 3° is at `<scratchpad>\tilt\sample-v3-tilted.png`: upload it, press **Detect**, scan, tick a few fields, submit, open the record, click **Compare original** and a few values.
+- [x] **[You]** Check the tilted page again by eye. A copy of the user's sample tilted by 3° is at `<scratchpad>\tilt\sample-v3-tilted.png`: upload it, press **Detect**, scan, tick a few fields, submit, open the record, click **Compare original** and a few values.
+  Checked on 2026-10-03, in Task 6.2's browser session: record #34 was scanned from the tilted sample. Detect straightened it by 3.269° (as in the earlier measurement), and the record keeps that page as `records/34/page.png`, so its boxes are drawn on the page they were measured on. Only one cell was ticked, so the record holds one field and the by-eye check covered that one box; the user reported it in place.
 
 **Verify:** `php artisan test --filter=RecordDetailPresentationTest`, then all tests.
 **Done when:** the boxes line up on a tilted page.
+Done: 2026-10-03 · PHP 300 · JS 86 · Python 69 passed
 
 ### Task 2.4: #13 Protect templates that records use (Small)
 
