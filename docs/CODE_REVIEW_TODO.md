@@ -126,12 +126,12 @@ These don't crash anything, but they're weak spots a panelist could point out.
 
 **Effort:** Medium
 
-- [ ] Reuse the existing shared secret (`OCR_UPLOAD_SECRET`, which falls back to `APP_KEY`). Laravel and FastAPI both read it already.
-- [ ] In `OcrClient::request()`, send the secret in a header on every call (e.g. `X-CRMS-Service-Key`).
-- [ ] In FastAPI, add a dependency that rejects requests without the right key (compare with `hmac.compare_digest`) on `/ocr`, `/models`, `/delete_model` and `/rename_model`. `/add_model` keeps its signed ticket, and `/health` can stay open.
-- [ ] Keep the service on `127.0.0.1`, never `0.0.0.0`.
-- [ ] **Test (Python):** `/delete_model` without the key returns 401.
-- [ ] **Test (PHP):** with `Http::fake()`, check that `OcrClient` sends the header.
+- [x] Reuse the existing shared secret (`OCR_UPLOAD_SECRET`, which falls back to `APP_KEY`). Laravel and FastAPI both read it already.
+- [x] In `OcrClient::request()`, send the secret in a header on every call (e.g. `X-CRMS-Service-Key`).
+- [x] In FastAPI, add a dependency that rejects requests without the right key (compare with `hmac.compare_digest`) on `/ocr`, `/models`, `/delete_model` and `/rename_model`. `/add_model` keeps its signed ticket, and `/health` can stay open.
+- [x] Keep the service on `127.0.0.1`, never `0.0.0.0`. (unchanged: `serve.ps1` still starts it with `--host 127.0.0.1`)
+- [x] **Test (Python):** `/delete_model` without the key returns 401.
+- [x] **Test (PHP):** with `Http::fake()`, check that `OcrClient` sends the header.
 
 ### 10. The auto-delete of abandoned scans never runs
 

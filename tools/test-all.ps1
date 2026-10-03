@@ -9,7 +9,7 @@ $suites = @(
     @{ Name = 'PHP';                 Command = { php artisan test } },
     @{ Name = 'JavaScript';          Command = { npm run test:js } },
     @{ Name = 'Python (line detection)'; Command = { & 'ml\.venv-kraken\Scripts\python.exe' -m unittest tests.Python.test_line_markers tests.Python.test_grid_layouts } },
-    @{ Name = 'Python (evaluation)'; Command = { & '.venv\Scripts\python.exe' -m unittest tests.Python.test_evaluation_report } }
+    @{ Name = 'Python (OCR service)'; Command = { & '.venv\Scripts\python.exe' -m unittest tests.Python.test_evaluation_report tests.Python.test_service_key } }
 )
 
 foreach ($suite in $suites) {

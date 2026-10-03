@@ -415,26 +415,32 @@ Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 **Why here:** it comes after 2.7, which changes the same file. **Follow the steps in order**, or scanning breaks partway through.
 **Touches:** `app/Services/Ocr/OcrClient.php`, `app/Providers/AppServiceProvider.php`, `ml/api/main.py`, `tests/Feature/OcrWorkspaceTest.php` (or a new `tests/Feature/OcrClientTest.php`), new `tests/Python/test_service_key.py`, `tools/test-all.ps1`
 
-- [ ] **Laravel first:**
+- [x] **Laravel first:**
   - make `OcrClient::request()` send `X-CRMS-Service-Key: <config('services.ocr.upload_secret')>` on every call
   - pass the key in through the constructor in `AppServiceProvider`
 
   The current AI service ignores an extra header, so nothing breaks yet.
-- [ ] PHP test with `Http::fake()`: every request from `OcrClient` carries the header. Call `OcrClient` directly, **not** through `documents.recognise`, because Task 3.1 deletes that route.
-- [ ] Run `php artisan queue:restart`. The worker reads crops through `OcrClient`, so an old worker would keep sending requests without the key.
-- [ ] **Then FastAPI:**
+  Also touched, beyond **Touches**: the comment on `upload_secret` in `config/services.php`, which now says the secret is also the service key.
+- [x] PHP test with `Http::fake()`: every request from `OcrClient` carries the header. Call `OcrClient` directly, **not** through `documents.recognise`, because Task 3.1 deletes that route.
+  New `tests/Feature/OcrClientTest.php`. It resolves `OcrClient` from the container, so the `AppServiceProvider` wiring is tested too, and it checks all five calls: health, models, ocr, rename and delete.
+- [x] Run `php artisan queue:restart`. The worker reads crops through `OcrClient`, so an old worker would keep sending requests without the key.
+- [x] **Then FastAPI:**
   - add a dependency that compares the header with `_upload_secret()` using `hmac.compare_digest`, and returns 401 when the key is missing or wrong
   - apply it to `/ocr`, `/models`, `/delete_model` and `/rename_model`
   - leave `/health` open, and leave `/add_model` on its signed ticket
-- [ ] Python test `tests/Python/test_service_key.py`, using FastAPI's `TestClient` (`httpx` is installed in `.venv`):
+- [x] Python test `tests/Python/test_service_key.py`, using FastAPI's `TestClient` (`httpx` is installed in `.venv`):
   - `/delete_model` without the key returns 401
   - with the right key (from `main._upload_secret()`), the request gets past the check (e.g. a 404 for an unknown model, not 401)
 
   Add this test file to `tools/test-all.ps1`.
-- [ ] **[You]** Restart the AI service, then scan one page from start to finish.
+  Also checks a wrong key, all four protected calls, and that `/health` stays open. The test sets its own `OCR_UPLOAD_SECRET`, so it doesn't depend on the machine's `.env`. In `tools/test-all.ps1` the last suite is now called "Python (OCR service)".
+  Rehearsed 2026-10-03 with the real pieces: the updated service on a spare port refused `/models` without the key (401) and kept `/health` open, while Laravel's own `OcrClient`, with the key from `.env`, read its health and model list. So both sides read the same secret.
+- [x] **[You]** Restart the AI service, then scan one page from start to finish.
+  Confirmed 2026-10-03: after the restart, the service refused `/models` without the key (401). The user's next scan (page 107) was outlined and then read by the queue worker through the protected `/ocr`: 220 of 220 lines, with no errors.
 
 **Verify:** `php artisan test --filter=Ocr`, then `.venv\Scripts\python.exe -m unittest tests.Python.test_service_key tests.Python.test_evaluation_report`, then all tests.
 **Done when:** the AI service refuses requests without the key, and scanning still works.
+Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 
 ### Task 2.9: #15 The AI service looks offline after start-up (check first)
 

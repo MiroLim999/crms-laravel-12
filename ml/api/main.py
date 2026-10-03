@@ -20,6 +20,9 @@ Endpoints:
   POST /delete_model -> { "model": "<key>" } removes that folder from ml/models/
   POST /rename_model -> { "model": "<key>", "newName": "<name>" } renames the folder
 
+Every endpoint but /health and /add_model needs the X-CRMS-Service-Key header:
+the secret Laravel shares with this service (OCR_UPLOAD_SECRET, else APP_KEY).
+
 Training, evaluation, dataset preparation, and batch prediction are deliberately
 NOT here. They are long-running command-line work - see ml/train_trocr.py,
 ml/test_finetuned.py, ml/predict.py - and a request handler is the wrong place to
@@ -61,7 +64,7 @@ import hf_quiet  # noqa: E402,F401
 
 import torch
 from PIL import Image
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -364,6 +367,16 @@ def _upload_secret():
     return secret.encode("utf-8")
 
 
+def require_service_key(supplied: str = Header("", alias="X-CRMS-Service-Key")) -> None:
+    """Only Laravel may call the service: it sends the secret both sides share.
+
+    Binding to 127.0.0.1 keeps other machines out, but not other programs on this
+    one, such as a page in the browser. /health stays open for "is it up?", and
+    /add_model has its own short-lived signed ticket instead."""
+    if not hmac.compare_digest(supplied.encode("utf-8"), _upload_secret()):
+        raise HTTPException(status_code=401, detail="This call needs the CRMS service key.")
+
+
 def _base64_url_decode(value):
     padding = "=" * (-len(value) % 4)
     return base64.urlsafe_b64decode(value + padding)
@@ -589,7 +602,7 @@ def health() -> dict:
     }
 
 
-@app.get("/models", response_model=ModelsResponse)
+@app.get("/models", response_model=ModelsResponse, dependencies=[Depends(require_service_key)])
 def models() -> dict:
     """List selectable models so the frontend can build its dropdown."""
     return {
@@ -601,7 +614,8 @@ def models() -> dict:
 # Plain `def`, not `async def`: generate() is blocking and CPU/GPU-bound, so
 # FastAPI runs it in a worker thread and /health and uploads stay responsive
 # while an OCR job is running.
-@app.post("/ocr", response_model=OcrResponse, response_model_exclude_none=True)
+@app.post("/ocr", response_model=OcrResponse, response_model_exclude_none=True,
+          dependencies=[Depends(require_service_key)])
 def ocr(payload: OcrRequest) -> dict:
     if not payload.fields:
         raise HTTPException(status_code=400, detail="Send a non-empty 'fields' list.")
@@ -1004,7 +1018,7 @@ def add_model(
     return {"ok": True, "name": safe_name, "saved": saved}
 
 
-@app.post("/delete_model", response_model=DeleteModelResponse)
+@app.post("/delete_model", response_model=DeleteModelResponse, dependencies=[Depends(require_service_key)])
 def delete_model(payload: DeleteModelRequest) -> dict:
     """Delete a model folder from Models/. Body: { "model": "<key>" }.
 
@@ -1041,7 +1055,7 @@ def delete_model(payload: DeleteModelRequest) -> dict:
     return {"ok": True, "deleted": key}
 
 
-@app.post("/rename_model", response_model=RenameModelResponse)
+@app.post("/rename_model", response_model=RenameModelResponse, dependencies=[Depends(require_service_key)])
 def rename_model(payload: RenameModelRequest) -> dict:
     """Rename a model folder in Models/. Body: { "model": "<key>", "newName": "<name>" }.
 

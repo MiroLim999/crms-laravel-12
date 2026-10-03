@@ -58,9 +58,11 @@ return [
         // this is the same loopback service; deployments may reverse-proxy it.
         'browser_url' => env('OCR_BROWSER_API_URL', env('OCR_API_URL', 'http://127.0.0.1:8001')),
         'timeout' => env('OCR_API_TIMEOUT', 120),
-        // FastAPI reads the same value. APP_KEY is a safe zero-configuration
+        // FastAPI reads the same value. It signs model-upload tickets, and
+        // OcrClient sends it as X-CRMS-Service-Key on every call, which the
+        // service requires on all but /health. APP_KEY is a safe zero-configuration
         // fallback for this two-process repository; a dedicated secret can rotate
-        // upload tickets independently in deployment.
+        // independently in deployment.
         'upload_secret' => env('OCR_UPLOAD_SECRET') ?: env('APP_KEY'),
         'upload_ticket_ttl' => env('OCR_UPLOAD_TICKET_TTL', 900),
     ],
