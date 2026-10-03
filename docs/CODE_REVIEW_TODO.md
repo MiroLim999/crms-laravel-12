@@ -353,9 +353,9 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small
 
-- [ ] Move `CIVIC_PALETTE_EXECUTION_PLAN.md` into `docs/`, or delete it if that work is finished.
-- [ ] Move `trocr-finetuning-code.ipynb` into `ml/notebooks/`, and update any README link to it.
-- [ ] Delete the empty `test-results/` folder, and add it to `.gitignore` if a tool keeps recreating it.
+- [x] Move `CIVIC_PALETTE_EXECUTION_PLAN.md` into `docs/`, or delete it if that work is finished.
+- [x] Move `trocr-finetuning-code.ipynb` into `ml/notebooks/`, and update any README link to it.
+- [x] Delete the empty `test-results/` folder, and add it to `.gitignore` if a tool keeps recreating it.
 
 ### 28. An unused route: documents.recognise
 

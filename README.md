@@ -202,6 +202,8 @@ crms-laravel-12/
 │   ├── download_trocr.py               # Downloads Hugging Face base TrOCR weights
 │   ├── hf_quiet.py                     # Hugging Face environment logging silencer
 │   ├── line_markers.py                 # Deskew, template fit, line outlines and masked crops (Kraken)
+│   ├── notebooks/
+│   │   └── trocr-finetuning-code.ipynb # Kaggle / Colab fine-tuning and evaluation notebook
 │   ├── requirements-kraken.txt         # Line-detection environment (ml/.venv-kraken)
 │   ├── setup_kraken.ps1                # Builds ml/.venv-kraken
 │   ├── metrics.py                      # CER / WER / Exact-Match computation and plot generators
@@ -209,7 +211,8 @@ crms-laravel-12/
 │   ├── requirements.txt                # ML pipeline dependencies (PyTorch, Transformers, Pandas)
 │   ├── test_finetuned.py               # CLI benchmark evaluator for fine-tuned models
 │   ├── test_trocr.py                   # CLI benchmark evaluator for base model
-│   └── train_trocr.py                  # PyTorch TrOCR fine-tuning script
+│   ├── train_trocr.py                  # PyTorch TrOCR fine-tuning script
+│   └── trocr_common.py                 # Shared model loading and confidence scoring (predict.py, test_finetuned.py, api/main.py)
 ├── public/                             # Publicly accessible web root
 ├── resources/
 │   ├── css/ & scss/                    # SNEAT theme & custom CRMS stylesheet rules
@@ -224,7 +227,6 @@ crms-laravel-12/
 │   └── Python/                         # Python unit tests for ML evaluation report normalization
 ├── tools/                              # Development utility scripts (subset-icons.mjs)
 ├── serve.ps1                           # Starts the web app, queue worker, scheduler and OCR service (see Running)
-├── trocr-finetuning-code.ipynb         # Kaggle / Colab fine-tuning and evaluation notebook
 ├── vite.config.js                      # Vite asset bundler configuration
 ├── composer.json                       # PHP dependencies
 └── package.json                        # Node.js frontend dependencies

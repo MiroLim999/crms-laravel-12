@@ -69,3 +69,6 @@ web/saved_docs/
 
 # Laravel VS Code extension temp helpers
 storage/framework/lsp-*.php
+
+# A PHPUnit test-runner extension writes its output here
+/test-results

@@ -624,12 +624,16 @@ Done: 2026-10-03 · PHP 297 · JS 86 · Python 67 passed
 **Depends on:** nothing
 **Touches:** `CIVIC_PALETTE_EXECUTION_PLAN.md`, `trocr-finetuning-code.ipynb`, `README.md`, `test-results/`, `.gitignore`
 
-- [ ] **[Decision]** What should happen to `CIVIC_PALETTE_EXECUTION_PLAN.md`? A) Move it to `docs/` with `git mv` (recommended). B) Delete it.
-- [ ] Run `git mv trocr-finetuning-code.ipynb ml/notebooks/`, and update any README link to it.
-- [ ] Delete the empty `test-results/` folder (it isn't tracked). If a tool keeps recreating it, add it to `.gitignore`.
+- [x] **[Decision]** What should happen to `CIVIC_PALETTE_EXECUTION_PLAN.md`? A) Move it to `docs/` with `git mv` (recommended). B) Delete it.
+  Decision: A, given by the user with the Phase 3 prompt (2026-10-03)
+- [x] Run `git mv trocr-finetuning-code.ipynb ml/notebooks/`, and update any README link to it.
+  The README's directory tree moved the notebook into the `ml/` block under a new `notebooks/` line, and dropped the stale root-level line. While there, added the missing `ml/trocr_common.py` line from Task 3.3 to the same tree (not previously listed). A second, shorter `ml/` file listing further down (in "Model Training Pipeline") doesn't list every file even today (no `api/`, `hf_quiet.py`, `trocr_common.py`), so it was left alone.
+- [x] Delete the empty `test-results/` folder (it isn't tracked). If a tool keeps recreating it, add it to `.gitignore`.
+  `.vscode/settings.json` (gitignored, so local-only) excludes `test-results` from the editor's file explorer and search, which is evidence a local PHPUnit test-runner extension writes there; nothing in the committed config (`phpunit.xml`, `package.json`) does. Added `/test-results` to `.gitignore` so it can't be committed by accident, whichever tool makes it.
 
 **Verify:** `git status` shows the moves, and the README links work.
 **Done when:** only project files are left in the root folder.
+Done: 2026-10-03 · PHP 297 · JS 86 · Python 67 passed
 
 ### Task 3.9: #18 The "Draft" status (Medium)
 
