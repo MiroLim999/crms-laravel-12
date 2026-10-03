@@ -47,7 +47,8 @@ class RecordController extends Controller
         $filters = $validator->valid();
 
         $records = CivilRecord::query()
-            ->with(['fields', 'submitter', 'documentTypeDefinition'])
+            ->withTitleField()
+            ->with(['submitter', 'documentTypeDefinition'])
             ->when(filled($filters['q'] ?? null), function ($query) use ($filters) {
                 $term = '%'.$filters['q'].'%';
                 $query->where(function ($q) use ($term) {

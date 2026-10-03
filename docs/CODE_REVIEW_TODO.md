@@ -397,10 +397,10 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Medium
 
-- [ ] Check what each list view actually shows. The records list only uses `title()`; the reports page also shows the average confidence.
-- [ ] Load only that. For example, use `withAvg('fields', 'ocr_confidence')` for the average and a limited eager load for the title (Laravel 11+ supports `->limit()` inside `with()`). Update the views to match.
-- [ ] The change-request list needs the field groups for its headings, so measure it first and only change it if it's slow.
-- [ ] Measure the number of queries and rows before and after (e.g. with `DB::enableQueryLog()` or Laravel Debugbar), using a big ledger record.
+- [x] Check what each list view actually shows. The records list only uses `title()`; the reports page also shows the average confidence.
+- [x] Load only that. For example, use `withAvg('fields', 'ocr_confidence')` for the average and a limited eager load for the title (Laravel 11+ supports `->limit()` inside `with()`). Update the views to match.
+- [x] The change-request list needs the field groups for its headings, so measure it first and only change it if it's slow. (Measured at 190 ms for 15 large ledgers, so left alone; see Task 4.2.)
+- [x] Measure the number of queries and rows before and after (e.g. with `DB::enableQueryLog()` or Laravel Debugbar), using a big ledger record.
 
 ### 31. Missing database indexes
 

@@ -31,8 +31,7 @@ class ReportController extends Controller
     {
         $filters = $this->filters($request);
 
-        $records = $this->query($filters)
-            ->with(['fields', 'submitter', 'creator', 'documentTypeDefinition'])
+        $records = $this->listQuery($filters)
             ->orderByDesc('created_at')
             ->paginate(25)
             ->withQueryString();
@@ -81,8 +80,7 @@ class ReportController extends Controller
                 'OCR model', 'Fields', 'Average confidence',
             ]);
 
-            $this->query($filters)
-                ->with(['fields', 'submitter', 'creator', 'documentTypeDefinition'])
+            $this->listQuery($filters)
                 ->chunkById(200, function (Collection $chunk) use ($handle) {
                     foreach ($chunk as $record) {
                         fputcsv($handle, $this->row($record));
@@ -103,10 +101,6 @@ class ReportController extends Controller
      */
     private function row(CivilRecord $record): array
     {
-        $confidences = $record->fields
-            ->pluck('ocr_confidence')
-            ->filter(fn ($value) => $value !== null);
-
         return array_map($this->safeCell(...), [
             $record->getKey(),
             $record->registry_number,
@@ -118,8 +112,8 @@ class ReportController extends Controller
             LocalTime::format($record->submitted_at, 'Y-m-d H:i:s'),
             $record->submitter?->name,
             $record->ocr_model_key,
-            $record->fields->count(),
-            $confidences->isEmpty() ? null : round($confidences->avg(), 1),
+            $record->fields_count,
+            $record->fields_avg_ocr_confidence === null ? null : round((float) $record->fields_avg_ocr_confidence, 1),
         ]);
     }
 
@@ -162,6 +156,23 @@ class ReportController extends Controller
             'status' => $validated['status'] ?? null,
             'submitted_by' => isset($validated['submitted_by']) ? (int) $validated['submitted_by'] : null,
         ];
+    }
+
+    /**
+     * The matching records with what the table and the CSV show. The field
+     * count and average confidence are worked out by the database, and only
+     * the title's field is loaded, because a ledger record has hundreds of
+     * fields.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function listQuery(array $filters): Builder
+    {
+        return $this->query($filters)
+            ->withTitleField()
+            ->withCount('fields')
+            ->withAvg('fields', 'ocr_confidence')
+            ->with(['submitter', 'creator', 'documentTypeDefinition']);
     }
 
     /**

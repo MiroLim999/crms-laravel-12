@@ -716,14 +716,20 @@ Done: 2026-10-03 · PHP 297 · JS 86 · Python 67 passed
 **Why here:** Tasks 1.4, 1.5 and 3.9 changed the same report code.
 **Touches:** `app/Http/Controllers/RecordController.php`, `app/Http/Controllers/ReportController.php`, `app/Http/Controllers/ChangeRequestController.php` and their list views
 
-- [ ] Measure first. Count the queries and rows for `/records`, `/reports` and `/change-requests` with a large ledger record, using `DB::enableQueryLog()` in a throwaway test. Write the numbers here.
-- [ ] Records list: load only what `title()` needs. Laravel 12 supports `->limit()` inside `with()`.
-- [ ] Reports: use `withAvg('fields', 'ocr_confidence')` and `withCount('fields')` instead of loading every field, and update `row()` and the view to match. The CSV columns must stay identical.
-- [ ] Change requests: leave this list alone unless the measurement shows it's slow.
-- [ ] Measure again, and write the before and after numbers here.
+- [x] Measure first. Count the queries and rows for `/records`, `/reports` and `/change-requests` with a large ledger record, using `DB::enableQueryLog()` in a throwaway test. Write the numbers here.
+  Throwaway test (deleted): 15 ledger records of 22 × 11 = 242 fields each, one change request per record, viewed as Super Admin. "Rows" counts the Eloquent models loaded. Before: `/records` 8 queries, 3,651 rows, 130 ms · `/reports` 12 queries, 3,653 rows, 75 ms · `/change-requests` 9 queries, 3,677 rows, 190 ms · CSV export 6 queries, 3,648 rows, 74 ms (one run each).
+- [x] Records list: load only what `title()` needs. Laravel 12 supports `->limit()` inside `with()`.
+  New `CivilRecord::scopeWithTitleField()`, next to `title()`, loads only the first field with a non-empty verified value (MySQL 9.3 runs the window function `limit()` needs). It lives on the model, outside **Touches**, so the records list, the Reports table and the CSV export share one definition.
+- [x] Reports: use `withAvg('fields', 'ocr_confidence')` and `withCount('fields')` instead of loading every field, and update `row()` and the view to match. The CSV columns must stay identical.
+  A `listQuery()` helper is shared by the table and the export.
+- [x] Change requests: leave this list alone unless the measurement shows it's slow.
+  (not needed: 190 ms for 15 large ledgers is not slow. It still loads every field, because the headings ("Birth · Entries 1–2") need the person groups.)
+- [x] Measure again, and write the before and after numbers here.
+  After: `/records` 8 queries, 36 rows, ~57 ms · `/reports` 12 queries, 38 rows, ~31 ms · `/change-requests` unchanged (9 queries, 3,677 rows, ~190 ms) · CSV export 6 queries, 33 rows, ~27 ms (three runs each). The `/records` and `/change-requests` HTML and the CSV were byte-identical before and after; `/reports` differed only in indentation where the removed `@php` block was. The data included a record whose first person was blank (so the title skips ahead) and one with no confidence values (shown as "—").
 
 **Verify:** `php artisan test --filter="ReportExportTest|RecordDetailPresentationTest|ChangeRequestPresentationTest|RecordArchiveFilterTest"`, then all tests.
 **Done when:** the list pages load far fewer rows, and every output is unchanged.
+Done: 2026-10-03 · PHP 297 · JS 86 · Python 67 passed
 
 ### Task 4.3: #29 Read AI crops in batches (Medium)
 

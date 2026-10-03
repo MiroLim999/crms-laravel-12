@@ -104,11 +104,6 @@
                     </thead>
                     <tbody>
                         @foreach ($records as $record)
-                            @php
-                                $confidences = $record->fields
-                                    ->pluck('ocr_confidence')
-                                    ->filter(fn ($value) => $value !== null);
-                            @endphp
                             <tr>
                                 <td>
                                     <div class="fw-medium">{{ $record->title() }}</div>
@@ -138,7 +133,7 @@
                                     @endif
                                 </td>
                                 <td class="text-end">
-                                    {{ $confidences->isEmpty() ? '—' : round($confidences->avg(), 1).'%' }}
+                                    {{ $record->fields_avg_ocr_confidence === null ? '—' : round((float) $record->fields_avg_ocr_confidence, 1).'%' }}
                                 </td>
                             </tr>
                         @endforeach
