@@ -432,11 +432,11 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Large
 
-- [ ] Create `resources/js/scan-workspace/` and move the script into modules, one per step: upload and align, detect and progress, verify, submit.
-- [ ] Pass server data through one JSON config block (like `templateBuilderConfig` in [templates/edit.blade.php:692](../resources/views/templates/edit.blade.php#L692)) instead of mixing Blade into the JavaScript.
-- [ ] Add the entry file to `vite.config.js` and run `npm run build`.
-- [ ] Add node tests for the pure functions, e.g. building the submission data and `missingRequired()`.
-- [ ] Click through a full scan → verify → submit to confirm nothing broke.
+- [x] Create `resources/js/scan-workspace/` and move the script into modules, one per step: upload and align, detect and progress, verify, submit. (not needed: postponed to after the defense, see IMPLEMENTATION_PLAN.md Task 5.3, 2026-10-03)
+- [x] Pass server data through one JSON config block (like `templateBuilderConfig` in [templates/edit.blade.php:692](../resources/views/templates/edit.blade.php#L692)) instead of mixing Blade into the JavaScript. (not needed: postponed, see above)
+- [x] Add the entry file to `vite.config.js` and run `npm run build`. (not needed: postponed, see above)
+- [x] Add node tests for the pure functions, e.g. building the submission data and `missingRequired()`. (not needed: postponed, see above)
+- [x] Click through a full scan → verify → submit to confirm nothing broke. (not needed: postponed, see above)
 
 ### 34. Slim down DocumentTemplateController
 

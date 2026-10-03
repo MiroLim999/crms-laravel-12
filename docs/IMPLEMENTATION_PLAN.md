@@ -838,15 +838,17 @@ Postponed: 2026-10-03 (the user's answer to **[Ask first]**); not done. `Documen
 **Why last:** it's the largest change to the most-used screen, and it comes after every task that edits that script.
 **Touches:** `resources/views/scan/workspace.blade.php`, new `resources/js/scan-workspace/` modules, `vite.config.js`, new `tests/JavaScript/*.test.js`
 
-- [ ] **[Ask first]** Confirm that you want to do this now.
-- [ ] Move the inline `<script type="module">` into modules under `resources/js/scan-workspace/` (upload & align, detect & progress, verify, submit), with one entry file.
-- [ ] Pass server data through one JSON block (`<script type="application/json" id="scanWorkspaceConfig">`, like `templateBuilderConfig` in `templates/edit.blade.php`), with no Blade inside the JavaScript.
-- [ ] Add the entry file to `vite.config.js`, then run `npm run build`.
-- [ ] Add Node tests for the pure functions (building the submission data, `missingRequired()`). Keep Vite-only imports out of anything the Node tests import.
-- [ ] **[You]** In the browser, do a full scan → Detect → verify → submit, including the missing-fields confirmation.
+- [x] **[Ask first]** Confirm that you want to do this now.
+  Answer: not now. Postpone until after the defense, given by the user (2026-10-03)
+- [x] Move the inline `<script type="module">` into modules under `resources/js/scan-workspace/` (upload & align, detect & progress, verify, submit), with one entry file. (not needed: postponed)
+- [x] Pass server data through one JSON block (`<script type="application/json" id="scanWorkspaceConfig">`, like `templateBuilderConfig` in `templates/edit.blade.php`), with no Blade inside the JavaScript. (not needed: postponed)
+- [x] Add the entry file to `vite.config.js`, then run `npm run build`. (not needed: postponed)
+- [x] Add Node tests for the pure functions (building the submission data, `missingRequired()`). Keep Vite-only imports out of anything the Node tests import. (not needed: postponed)
+- [x] **[You]** In the browser, do a full scan → Detect → verify → submit, including the missing-fields confirmation. (not needed: postponed)
 
 **Verify:** `npm run test:js`, `npm run build`, then all tests.
 **Done when:** the view holds no inline script, and the full flow works.
+Postponed: 2026-10-03 (the user's answer to **[Ask first]**); not done. `scan/workspace.blade.php` is still 4,274 lines, with its script inline.
 
 ---
 
