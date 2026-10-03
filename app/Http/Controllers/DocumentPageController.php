@@ -16,6 +16,7 @@ use App\Services\Ocr\ScanModelChoice;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -89,9 +90,6 @@ class DocumentPageController extends Controller
         return response()->json($this->payload($page->fresh()), 202);
     }
 
-    /**
-     * Scan with OCR after Detect: read the crops Detect made, as they are.
-     */
     /**
      * Snap to table: fit the markers Staff are aligning onto this page's
      * printed table, and return the printed rules for magnetic edges.
@@ -176,6 +174,9 @@ class DocumentPageController extends Controller
         return response()->json($this->payload($page->fresh()), 202);
     }
 
+    /**
+     * Scan with OCR after Detect: read the crops Detect made, as they are.
+     */
     public function read(Request $request, DocumentPage $page): JsonResponse
     {
         $this->authorizePage($request, $page);
@@ -251,6 +252,7 @@ class DocumentPageController extends Controller
     public function crop(Request $request, DocumentPage $page, PageLine $line): StreamedResponse
     {
         $this->authorizePage($request, $page);
+        // The route's scopeBindings() already ensures this; checked again on purpose.
         abort_unless((int) $line->document_page_id === (int) $page->getKey(), 404);
         abort_unless(Storage::disk('local')->exists($line->crop_path), 404);
 
@@ -267,6 +269,7 @@ class DocumentPageController extends Controller
     public function updateLine(Request $request, DocumentPage $page, PageLine $line): JsonResponse
     {
         $this->authorizePage($request, $page);
+        // The route's scopeBindings() already ensures this; checked again on purpose.
         abort_unless((int) $line->document_page_id === (int) $page->getKey(), 404);
 
         // A read page (Verify) or a detected one (the Align step, after Detect
@@ -287,10 +290,7 @@ class DocumentPageController extends Controller
             'allow_move' => ['sometimes', 'boolean'],
         ]);
 
-        $polygon = array_map(fn (array $point) => [
-            round(min(max((float) $point[0], 0), $page->width), 1),
-            round(min(max((float) $point[1], 0), $page->height), 1),
-        ], $validated['polygon']);
+        $polygon = $this->clampPolygon($validated['polygon'], $page);
 
         $disk = Storage::disk('local');
         $version = $line->crop_version + 1;
@@ -368,7 +368,7 @@ class DocumentPageController extends Controller
             'message' => $message,
             'line' => $line->fresh()->toClient(),
             // Moving one line can create or resolve a shared cell elsewhere.
-            'flags' => $page->lines()->get()->mapWithKeys(fn (PageLine $l) => [$l->getKey() => $l->flags ?? []]),
+            'flags' => $this->lineFlags($page),
         ], $status);
     }
 
@@ -391,10 +391,7 @@ class DocumentPageController extends Controller
             'polygon.*.*' => ['required', 'numeric'],
         ]);
 
-        $polygon = array_map(fn (array $point) => [
-            round(min(max((float) $point[0], 0), $page->width), 1),
-            round(min(max((float) $point[1], 0), $page->height), 1),
-        ], $validated['polygon']);
+        $polygon = $this->clampPolygon($validated['polygon'], $page);
 
         $disk = Storage::disk('local');
         // Past every position ever used on this page, removed lines included,
@@ -425,7 +422,7 @@ class DocumentPageController extends Controller
 
         return response()->json([
             'line' => $line->fresh()->toClient(),
-            'flags' => $page->lines()->get()->mapWithKeys(fn (PageLine $l) => [$l->getKey() => $l->flags ?? []]),
+            'flags' => $this->lineFlags($page),
         ], 201);
     }
 
@@ -442,6 +439,7 @@ class DocumentPageController extends Controller
     public function destroyLine(Request $request, DocumentPage $page, PageLine $line): JsonResponse
     {
         $this->authorizePage($request, $page);
+        // The route's scopeBindings() already ensures this; checked again on purpose.
         abort_unless((int) $line->document_page_id === (int) $page->getKey(), 404);
 
         if ($page->status !== DocumentPage::STATUS_DETECTED) {
@@ -458,7 +456,7 @@ class DocumentPageController extends Controller
         }
 
         return response()->json([
-            'flags' => $page->lines()->get()->mapWithKeys(fn (PageLine $l) => [$l->getKey() => $l->flags ?? []]),
+            'flags' => $this->lineFlags($page),
         ]);
     }
 
@@ -466,6 +464,7 @@ class DocumentPageController extends Controller
     public function restoreLine(Request $request, DocumentPage $page, PageLine $line): JsonResponse
     {
         $this->authorizePage($request, $page);
+        // The route's scopeBindings() already ensures this; checked again on purpose.
         abort_unless((int) $line->document_page_id === (int) $page->getKey(), 404);
 
         if ($page->status !== DocumentPage::STATUS_DETECTED) {
@@ -479,11 +478,38 @@ class DocumentPageController extends Controller
 
         return response()->json([
             'line' => $line->fresh()->toClient(),
-            'flags' => $page->lines()->get()->mapWithKeys(fn (PageLine $l) => [$l->getKey() => $l->flags ?? []]),
+            'flags' => $this->lineFlags($page),
         ]);
     }
 
     // ------------------------------------------------------------------ internals
+
+    /**
+     * An outline drawn or redrawn by hand, kept on the page and rounded to a
+     * tenth of a pixel.
+     *
+     * @param  array<int, array<int, mixed>>  $points
+     * @return array<int, array{0: float, 1: float}>
+     */
+    private function clampPolygon(array $points, DocumentPage $page): array
+    {
+        return array_map(fn (array $point) => [
+            round(min(max((float) $point[0], 0), $page->width), 1),
+            round(min(max((float) $point[1], 0), $page->height), 1),
+        ], $points);
+    }
+
+    /**
+     * Every line's flags, by line id. A line that is moved, drawn, removed or
+     * restored can create or resolve a shared cell elsewhere, so the Align step
+     * takes them all again.
+     *
+     * @return Collection<int, list<string>>
+     */
+    private function lineFlags(DocumentPage $page): Collection
+    {
+        return $page->lines()->get()->mapWithKeys(fn (PageLine $l) => [$l->getKey() => $l->flags ?? []]);
+    }
 
     /**
      * Which cell or field a hand-drawn outline belongs to.

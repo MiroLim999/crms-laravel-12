@@ -545,13 +545,16 @@ Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 **Depends on:** nothing
 **Touches:** `app/Http/Controllers/DocumentPageController.php`
 
-- [ ] Add `private function lineFlags(DocumentPage $page)` and use it in place of the four copies of `$page->lines()->get()->mapWithKeys(...)`.
-- [ ] Add `private function clampPolygon(array $points, DocumentPage $page): array` and use it in `updateLine()` and `storeLine()`.
-- [ ] Move the stray "Scan with OCR after Detect…" docblock, which sits above `snap()`, to `read()`.
-- [ ] Keep the `abort_unless(... document_page_id ...)` checks, and add a one-line comment saying they double-check `scopeBindings()`.
+- [x] Add `private function lineFlags(DocumentPage $page)` and use it in place of the four copies of `$page->lines()->get()->mapWithKeys(...)`.
+- [x] Add `private function clampPolygon(array $points, DocumentPage $page): array` and use it in `updateLine()` and `storeLine()`.
+  No test drew an outline past the page edge, so a throwaway test (deleted afterwards) sent one to each endpoint on 2026-10-03: both stored it cut at the page edge and rounded to 0.1 px, as before.
+- [x] Move the stray "Scan with OCR after Detect…" docblock, which sits above `snap()`, to `read()`.
+- [x] Keep the `abort_unless(... document_page_id ...)` checks, and add a one-line comment saying they double-check `scopeBindings()`.
+  All four: in `crop()`, `updateLine()`, `destroyLine()` and `restoreLine()`.
 
 **Verify:** `php artisan test --filter=LineOutlinePipelineTest`, then all tests.
 **Done when:** each repeated block exists once, and behaviour is unchanged.
+Done: 2026-10-03 · PHP 295 · JS 86 · Python 67 passed
 
 ### Task 3.5: #24 Comments that are no longer true (Small)
 

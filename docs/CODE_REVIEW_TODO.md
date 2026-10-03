@@ -309,11 +309,11 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small
 
-- [ ] Add `private function lineFlags(DocumentPage $page)` for the `$page->lines()->get()->mapWithKeys(...)` code that appears 4 times (lines 371, 428, 461, 482).
-- [ ] Add `private function clampPolygon(array $points, DocumentPage $page)` for the clamping code in `updateLine()` (line 291) and `storeLine()` (line 395).
-- [ ] Move the stray comment at [line 93](../app/Http/Controllers/DocumentPageController.php#L93) ("Scan with OCR after Detect…") to the `read()` method.
-- [ ] The `abort_unless(... document_page_id ...)` checks repeat what `->scopeBindings()` already guarantees. Either remove them, or keep them with a comment saying they're a deliberate double check.
-- [ ] Run `php artisan test --filter=LineOutlinePipelineTest`.
+- [x] Add `private function lineFlags(DocumentPage $page)` for the `$page->lines()->get()->mapWithKeys(...)` code that appears 4 times (lines 371, 428, 461, 482).
+- [x] Add `private function clampPolygon(array $points, DocumentPage $page)` for the clamping code in `updateLine()` (line 291) and `storeLine()` (line 395).
+- [x] Move the stray comment at [line 93](../app/Http/Controllers/DocumentPageController.php#L93) ("Scan with OCR after Detect…") to the `read()` method.
+- [x] The `abort_unless(... document_page_id ...)` checks repeat what `->scopeBindings()` already guarantees. Either remove them, or keep them with a comment saying they're a deliberate double check.
+- [x] Run `php artisan test --filter=LineOutlinePipelineTest`.
 
 ### 24. Comments that are no longer true
 
