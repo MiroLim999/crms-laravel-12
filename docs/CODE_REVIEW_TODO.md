@@ -455,9 +455,9 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Large
 
-- [ ] Split it into a package (e.g. `ml/line_markers_lib/` with `detect.py`, `grid.py` and `crop.py`). Keep `ml/line_markers.py` as the entry point, because Laravel runs that exact file (see `config/services.php`).
-- [ ] Keep the names the tests import (`import line_markers as lm`) working, e.g. by re-exporting them from `line_markers.py`.
-- [ ] Run the Python tests.
+- [x] Split it into a package (e.g. `ml/line_markers_lib/` with `detect.py`, `grid.py` and `crop.py`). Keep `ml/line_markers.py` as the entry point, because Laravel runs that exact file (see `config/services.php`). (not needed: postponed to after the defense, see IMPLEMENTATION_PLAN.md Task 5.1, 2026-10-03)
+- [x] Keep the names the tests import (`import line_markers as lm`) working, e.g. by re-exporting them from `line_markers.py`. (not needed: postponed, see above)
+- [x] Run the Python tests. (not needed: postponed, see above)
 
 ### 36. Use logging instead of print() in the AI service
 

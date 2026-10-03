@@ -798,19 +798,23 @@ Done: 2026-10-03 · PHP 300 · JS 86 · Python 69 passed
 
 Do these after the defense, or only if there's time left. They're ordered so the riskiest one comes last. Claude asks before starting each one.
 
+**Postponed until after the defense**, at the user's request (2026-10-03). Nothing in this phase was done; its steps are ticked `(not needed: postponed)` so Phase 6 can go ahead. To pick a task up later, untick its boxes and start from **[Ask first]**.
+
 ### Task 5.1: #35 Split line_markers.py (Large)
 
 **Depends on:** nothing
 **Why first here:** no other task touches this file, and 60 Python tests protect it.
 **Touches:** `ml/line_markers.py`, new package `ml/line_markers_lib/`
 
-- [ ] **[Ask first]** Confirm that you want to do this now.
-- [ ] Split the code by job (e.g. `detect.py`, `grid.py`, `crop.py` and `geometry.py`) inside `ml/line_markers_lib/`.
-- [ ] Keep `ml/line_markers.py` as the command-line entry point that Laravel runs, and have it re-export every name the tests use (`import line_markers as lm`).
-- [ ] **[You]** Detect one real page in the app.
+- [x] **[Ask first]** Confirm that you want to do this now.
+  Answer: not now. Postpone until after the defense, given by the user (2026-10-03)
+- [x] Split the code by job (e.g. `detect.py`, `grid.py`, `crop.py` and `geometry.py`) inside `ml/line_markers_lib/`. (not needed: postponed)
+- [x] Keep `ml/line_markers.py` as the command-line entry point that Laravel runs, and have it re-export every name the tests use (`import line_markers as lm`). (not needed: postponed)
+- [x] **[You]** Detect one real page in the app. (not needed: postponed)
 
 **Verify:** `ml\.venv-kraken\Scripts\python.exe -m unittest tests.Python.test_line_markers tests.Python.test_grid_layouts`
 **Done when:** the 60 tests pass unchanged, and detection works in the app.
+Postponed: 2026-10-03 (the user's answer to **[Ask first]**); not done. `ml/line_markers.py` is still one 2,582-line file.
 
 ### Task 5.2: #34 Slim down DocumentTemplateController (Large)
 
