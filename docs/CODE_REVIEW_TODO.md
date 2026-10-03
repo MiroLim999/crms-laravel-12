@@ -406,9 +406,9 @@ None of these break anything. They make the code confusing to read and harder to
 
 **Effort:** Small
 
-- [ ] In a new migration, add an index on `records.created_at` (Reports filters on it).
-- [ ] Optional, once there's a lot of data: add a FULLTEXT index on `record_fields.verified_value` and switch the archive search to `whereFullText(...)`. Note that full-text search matches whole words, so results change slightly.
-- [ ] Run the tests.
+- [x] In a new migration, add an index on `records.created_at` (Reports filters on it).
+- [ ] Optional, once there's a lot of data: add a FULLTEXT index on `record_fields.verified_value` and switch the archive search to `whereFullText(...)`. Note that full-text search matches whole words, so results change slightly. (Left for later, per Task 4.1.)
+- [x] Run the tests.
 
 ### 32. Slow AI work inside normal page requests
 

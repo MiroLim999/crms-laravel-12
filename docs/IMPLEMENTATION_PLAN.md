@@ -701,11 +701,14 @@ Postponed: 2026-10-03 (decision A); not done. `doc_type` still exists in both th
 **Depends on:** nothing
 **Touches:** a new migration
 
-- [ ] Write a new migration that adds an index on `records.created_at`, then run `php artisan migrate`.
-- [ ] Leave the optional FULLTEXT index for later, and mention it in the report.
+- [x] Write a new migration that adds an index on `records.created_at`, then run `php artisan migrate`.
+  `2026_10_03_000400_add_created_at_index_to_records_table`. Not destructive (adds an index), so run directly. Ran on `crms_test` (via the suites) and on the user's own database, where `SHOW INDEX FROM records` now lists `records_created_at_index`.
+- [x] Leave the optional FULLTEXT index for later, and mention it in the report.
+  Left for later: with two users and a few hundred records, the `LIKE` search is fast enough, and full-text search would change results (it matches whole words only).
 
 **Verify:** all tests.
 **Done when:** the index exists.
+Done: 2026-10-03 · PHP 297 · JS 86 · Python 67 passed
 
 ### Task 4.2: #30 List pages load less data (Medium)
 
