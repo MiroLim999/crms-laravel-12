@@ -183,11 +183,11 @@ These don't crash anything, but they're weak spots a panelist could point out.
 
 **Effort:** Small
 
-- [ ] In `destroy()`, refuse when `$template->records()->exists()`, with a message such as "This layout was used by N records and can't be deleted."
-- [ ] Consider also refusing when unsubmitted pages use the template (`$template->pages()->exists()`).
-- [ ] In the template list, hide or disable "Delete layout" for layouts in use, and show why.
-- [ ] **Test:** deleting a template that has records is refused, and the template still exists.
-- [ ] Update any existing test that expects a template with records to be deletable.
+- [x] In `destroy()`, refuse when `$template->records()->exists()`, with a message such as "This layout was used by N records and can't be deleted."
+- [x] Consider also refusing when unsubmitted pages use the template (`$template->pages()->exists()`). (not needed: the plan decided pages in progress don't block the delete; they are only unlinked and then pruned)
+- [x] In the template list, hide or disable "Delete layout" for layouts in use, and show why.
+- [x] **Test:** deleting a template that has records is refused, and the template still exists.
+- [x] Update any existing test that expects a template with records to be deletable.
 
 
 

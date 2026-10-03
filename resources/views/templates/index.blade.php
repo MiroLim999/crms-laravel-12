@@ -240,42 +240,55 @@
                                     <div>
                                         <div class="text-uppercase text-danger small fw-semibold mb-1">Template Builder</div>
                                         <h2 class="modal-title h5" id="deleteLayoutLabel{{ $layout->getKey() }}">
-                                            Delete {{ $layout->name }}?
+                                            @if ($layout->records_count > 0)
+                                                {{ $layout->name }} can't be deleted
+                                            @else
+                                                Delete {{ $layout->name }}?
+                                            @endif
                                         </h2>
                                     </div>
                                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                                 </div>
-                                <div class="modal-body">
-                                    @if ($layout->is_active)
-                                        <div class="alert alert-warning py-2 px-3 small mb-3">
-                                            This is the published Staff layout. Staff cannot start new scans for this document type until another layout is published.
-                                        </div>
-                                    @endif
-
-                                    @if ($layout->records_count > 0)
+                                {{-- A record keeps the layout it was read with, so a layout that has records is never deleted. --}}
+                                @if ($layout->records_count > 0)
+                                    <div class="modal-body">
                                         <p class="mb-2">
-                                            {{ $layout->records_count }} existing {{ Str::plural('record', $layout->records_count) }} will remain saved, but will no longer link back to this layout.
+                                            This layout was used by {{ $layout->records_count }} saved {{ Str::plural('record', $layout->records_count) }}, so it can't be deleted.
                                         </p>
-                                    @else
-                                        <p class="mb-2">This layout has not been used by any saved records.</p>
-                                    @endif
+                                        <p class="mb-0 text-muted small">
+                                            Records keep the layout they were read with. To stop Staff using it, publish another layout.
+                                        </p>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Close</button>
+                                    </div>
+                                @else
+                                    <div class="modal-body">
+                                        @if ($layout->is_active)
+                                            <div class="alert alert-warning py-2 px-3 small mb-3">
+                                                This is the published Staff layout. Staff cannot start new scans for this document type until another layout is published.
+                                            </div>
+                                        @endif
 
-                                    @if ($layout->sample_path)
-                                        <p class="mb-2">Its stored sample document will also be deleted.</p>
-                                    @endif
-                                    <p class="mb-0 text-muted small">This action cannot be undone.</p>
-                                </div>
-                                <div class="modal-footer">
-                                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
-                                    <form method="POST" action="{{ route('templates.destroy', $layout) }}">
-                                        @csrf
-                                        @method('DELETE')
-                                        <button type="submit" class="btn btn-danger">
-                                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
-                                            Delete layout
-                                        </button>
-                                    </form>
-                                </div>
+                                        <p class="mb-2">This layout has not been used by any saved records.</p>
+
+                                        @if ($layout->sample_path)
+                                            <p class="mb-2">Its stored sample document will also be deleted.</p>
+                                        @endif
+                                        <p class="mb-0 text-muted small">This action cannot be undone.</p>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
+                                        <form method="POST" action="{{ route('templates.destroy', $layout) }}">
+                                            @csrf
+                                            @method('DELETE')
+                                            <button type="submit" class="btn btn-danger">
+                                                <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
+                                                Delete layout
+                                            </button>
+                                        </form>
+                                    </div>
+                                @endif
                             </div>
                         </div>
                     </div>

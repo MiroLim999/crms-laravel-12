@@ -429,12 +429,23 @@ class DocumentTemplateController extends Controller
 
     public function destroy(DocumentTemplate $template): RedirectResponse
     {
+        // A record keeps the layout it was read with, so a layout that has
+        // records is never deleted: they would be left pointing at nothing.
+        // Pages still in progress do not count. Deleting the layout only clears
+        // their link to it (nullOnDelete), and the hourly prune removes them.
+        $recordCount = $template->records()->count();
+        if ($recordCount > 0) {
+            return back()->with(
+                'error',
+                "'{$template->name}' was used by {$recordCount} ".Str::plural('record', $recordCount)." and can't be deleted.",
+            );
+        }
+
         $template->loadMissing('documentTypeDefinition');
         $samplePath = $template->sample_path;
         $wasPublished = $template->is_active;
-        $recordCount = $template->records()->count();
 
-        DB::transaction(function () use ($template, $wasPublished, $recordCount) {
+        DB::transaction(function () use ($template, $wasPublished) {
             $this->audit->log(
                 'template.deleted',
                 $template,
@@ -444,14 +455,11 @@ class DocumentTemplateController extends Controller
                     'paper_size' => $template->paper_size->value,
                     'orientation' => $template->orientation->value,
                     'was_published' => $wasPublished,
-                    'linked_record_count' => $recordCount,
                     'sample_document' => $template->sample_original_name,
                 ],
-                description: "Deleted template '{$template->name}'. Existing records retained their captured data.",
+                description: "Deleted template '{$template->name}'.",
             );
 
-            // records.document_template_id uses nullOnDelete. Existing records,
-            // scans, and copied field values remain intact after the layout goes.
             $template->delete();
         });
 

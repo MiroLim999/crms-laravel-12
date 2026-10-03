@@ -6,6 +6,7 @@ use App\Enums\DocumentType;
 use App\Enums\PageOrientation;
 use App\Enums\PaperSize;
 use App\Models\CivilRecord;
+use App\Models\DocumentPage;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTypeDefinition;
 use App\Models\User;
@@ -676,7 +677,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'template.deleted']);
     }
 
-    public function test_deleting_a_used_template_keeps_its_existing_records(): void
+    public function test_a_template_that_records_use_cannot_be_deleted(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
         $staff = User::factory()->staff()->create();
@@ -689,13 +690,58 @@ class DocumentTemplateBuilderTest extends TestCase
         ]);
 
         $this->actingAs($superAdmin)
+            ->from(route('templates.index'))
+            ->delete(route('templates.destroy', $template))
+            ->assertRedirect(route('templates.index'))
+            ->assertSessionHas('error', "'Used layout' was used by 1 record and can't be deleted.");
+
+        // Nothing changed: the layout is still there, and the record still points at it.
+        $this->assertDatabaseHas('document_templates', ['id' => $template->getKey()]);
+        $this->assertSame($template->getKey(), $record->refresh()->document_template_id);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'template.deleted']);
+
+        // The library says why, and offers no way to delete it.
+        $this->get(route('templates.index'))
+            ->assertOk()
+            ->assertSee("so it can't be deleted.", escape: false)
+            ->assertDontSee('action="'.route('templates.destroy', $template).'"', escape: false);
+    }
+
+    public function test_a_layout_no_record_used_still_offers_delete(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $template = $this->template($superAdmin, DocumentType::Birth, 'Unused layout');
+
+        $this->actingAs($superAdmin)->get(route('templates.index'))
+            ->assertOk()
+            ->assertSee('This layout has not been used by any saved records.')
+            ->assertSee('action="'.route('templates.destroy', $template).'"', escape: false);
+    }
+
+    public function test_pages_still_in_progress_do_not_stop_a_template_being_deleted(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $template = $this->template($superAdmin, DocumentType::Birth, 'Layout with a page in progress');
+        $page = DocumentPage::create([
+            'document_template_id' => $template->getKey(),
+            'created_by' => $superAdmin->getKey(),
+            'status' => DocumentPage::STATUS_QUEUED,
+            'image_path' => '',
+            'width' => 800,
+            'height' => 600,
+            'geometry' => ['columns' => [], 'ruled_ys' => [], 'fields' => []],
+            'ocr_model_key' => 'test-model',
+        ]);
+
+        $this->actingAs($superAdmin)
             ->delete(route('templates.destroy', $template))
             ->assertRedirect(route('templates.index'))
             ->assertSessionHas('success');
 
+        // The page is only unlinked from the layout; the hourly prune removes it.
         $this->assertDatabaseMissing('document_templates', ['id' => $template->getKey()]);
-        $this->assertDatabaseHas('records', ['id' => $record->getKey()]);
-        $this->assertNull($record->refresh()->document_template_id);
+        $this->assertDatabaseHas('document_pages', ['id' => $page->getKey()]);
+        $this->assertNull($page->refresh()->document_template_id);
     }
 
     public function test_unknown_paper_settings_are_rejected(): void

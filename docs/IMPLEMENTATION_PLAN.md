@@ -337,12 +337,16 @@ Done: 2026-10-03 · PHP 289 · JS 86 · Python 62 passed
 **Why here:** before Tasks 3.10 and 5.2, which rewrite the same controller.
 **Touches:** `app/Http/Controllers/DocumentTemplateController.php` (`destroy()`), `resources/views/templates/index.blade.php`, `tests/Feature/DocumentTemplateBuilderTest.php`
 
-- [ ] In `destroy()`, refuse when `$template->records()->exists()`, and redirect back with an error such as "This layout was used by N records and can't be deleted." Pages still in progress don't block the delete; they're pruned within 24 hours once Task 2.5 is done.
-- [ ] In the template list, disable "Delete layout" for layouts that have records, and say why. The list already loads `records_count`.
-- [ ] Rewrite `test_deleting_a_used_template_keeps_its_existing_records`, which currently expects the delete to succeed, so that it expects the refusal. Keep a test showing an unused template can still be deleted.
+- [x] In `destroy()`, refuse when `$template->records()->exists()`, and redirect back with an error such as "This layout was used by N records and can't be deleted." Pages still in progress don't block the delete; they're pruned within 24 hours once Task 2.5 is done.
+  The audit entry for a delete no longer carries `linked_record_count` (it would always be 0) or the "records retained their captured data" wording. Confirmed in the schema: `document_pages.document_template_id` is `nullOnDelete`, so a page in progress is only unlinked, and the prune command removes pages by age.
+- [x] In the template list, disable "Delete layout" for layouts that have records, and say why. The list already loads `records_count`.
+  Done the way the document-type dialog on the same page already does it: for a layout with records, the dialog explains why and offers only **Close**, with no delete form.
+- [x] Rewrite `test_deleting_a_used_template_keeps_its_existing_records`, which currently expects the delete to succeed, so that it expects the refusal. Keep a test showing an unused template can still be deleted.
+  `test_super_admin_can_delete_a_published_template` already shows an unused layout can be deleted. Also added: the list offers delete only for layouts no record used, and pages in progress don't block a delete.
 
 **Verify:** `php artisan test --filter=DocumentTemplateBuilderTest`, then all tests.
 **Done when:** a layout with records can't be deleted, and the screen says why.
+Done: 2026-10-03 · PHP 294 · JS 86 · Python 62 passed
 
 ### Task 2.5: #10 Start the scheduler (Small)
 
