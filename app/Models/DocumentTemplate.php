@@ -23,6 +23,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $sample_original_name
  * @property string|null $sample_mime
  * @property int|null $sample_size
+ * @property list<array{name: string, box: list<float>}>|null $columns
+ * @property list<float>|null $ruled_ys
+ * @property int|null $parent_id
+ * @property int $revision
  */
 class DocumentTemplate extends Model
 {
@@ -34,9 +38,9 @@ class DocumentTemplate extends Model
 
     protected $fillable = [
         'name', 'doc_type', 'document_type_id', 'paper_size', 'orientation', 'custom_width_mm', 'custom_height_mm', 'description',
-        'grouping_mode',
+        'grouping_mode', 'columns', 'ruled_ys',
         'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
-        'is_active', 'created_by',
+        'is_active', 'created_by', 'parent_id',
     ];
 
     protected function casts(): array
@@ -48,8 +52,110 @@ class DocumentTemplate extends Model
             'custom_width_mm' => 'float',
             'custom_height_mm' => 'float',
             'grouping_mode' => 'string',
+            'columns' => 'array',
+            'ruled_ys' => 'array',
             'is_active' => 'boolean',
             'sample_size' => 'integer',
+            'revision' => 'integer',
+        ];
+    }
+
+    /**
+     * Whether Staff use this layout: it is published, or records or pages in
+     * progress were read with it. A layout in use is never changed in place:
+     * saving new markers makes a new version, so records keep theirs.
+     */
+    public function isInUse(): bool
+    {
+        return $this->is_active || $this->records()->exists() || $this->pages()->exists();
+    }
+
+    /**
+     * Whether this is a ruled register template: columns plus printed row lines,
+     * read line by line instead of one rectangle per field.
+     */
+    public function isLedger(): bool
+    {
+        return count($this->columns ?? []) > 0 && count($this->ruled_ys ?? []) >= 2;
+    }
+
+    /**
+     * Column markers in the shape the field-marking UI consumes.
+     *
+     * Staff align these like any other marker; the row lines are then placed
+     * inside them and snapped to each page's own printed rules.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function columnBoxes(): array
+    {
+        if (! $this->isLedger()) {
+            return [];
+        }
+
+        return collect($this->columns)
+            ->values()
+            ->map(fn (array $column, int $index) => [
+                'name' => (string) $column['name'],
+                'x' => (float) $column['box'][0],
+                'y' => (float) $column['box'][1],
+                'w' => (float) $column['box'][2],
+                'h' => (float) $column['box'][3],
+                'angle' => (float) ($column['angle'] ?? 0),
+                'kind' => 'column',
+                'columnIndex' => $index,
+                ...self::columnSettings($column),
+            ])
+            ->all();
+    }
+
+    /**
+     * A ledger column's settings, with the defaults its JSON leaves out.
+     *
+     * @param  array<string, mixed>  $column
+     * @return array{role: string|null, required: bool, type: string, options: list<string>|null, hint: string|null}
+     */
+    public static function columnSettings(array $column): array
+    {
+        return [
+            'role' => $column['role'] ?? null,
+            'required' => (bool) ($column['required'] ?? true),
+            'type' => $column['type'] ?? 'text',
+            'options' => $column['options'] ?? null,
+            'hint' => $column['hint'] ?? null,
+        ];
+    }
+
+    /**
+     * Every field's and column's settings by lower-cased name: a submitted
+     * value is matched to its template field by the field's name, or for a
+     * ledger line by its column's.
+     *
+     * @return array<string, array{role: string|null, required: bool, type: string, options: list<string>|null, hint: string|null}>
+     */
+    public function settingsByName(): array
+    {
+        $settings = [];
+        foreach ($this->fields as $field) {
+            $settings[mb_strtolower(trim($field->name))] = $field->settings();
+        }
+        foreach ($this->isLedger() ? $this->columns : [] as $column) {
+            $settings[mb_strtolower(trim((string) $column['name']))] = self::columnSettings($column);
+        }
+
+        return $settings;
+    }
+
+    /**
+     * Every marker Staff align: rectangle fields, then ledger columns.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function markerBoxes(): array
+    {
+        return [
+            ...$this->fields->map->toBox()->values()->all(),
+            ...$this->columnBoxes(),
         ];
     }
 
@@ -66,6 +172,18 @@ class DocumentTemplate extends Model
     public function records(): HasMany
     {
         return $this->hasMany(CivilRecord::class);
+    }
+
+    /** Pages read with this layout and not yet submitted. */
+    public function pages(): HasMany
+    {
+        return $this->hasMany(DocumentPage::class);
+    }
+
+    /** The layout this one was copied from, as a new version or a duplicate. */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_id');
     }
 
     public function creator(): BelongsTo

@@ -33,7 +33,6 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'must_change_password' => 'boolean',
             'is_active' => 'boolean',

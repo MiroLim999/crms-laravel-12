@@ -4,6 +4,8 @@
 /public/build
 /public/hot
 /public/storage
+# Copied from node_modules on every build (tools/copy-pdf-worker.mjs)
+/public/vendor/pdfjs
 /storage/*.key
 /storage/pail
 /vendor
@@ -32,6 +34,7 @@ __pycache__/
 # Virtual environments
 venv/
 .venv/
+.venv-*/
 env/
 
 # ============ ML artifacts ============
@@ -63,3 +66,9 @@ web/saved_docs/
 /.kiro
 
 /sneat-reference
+
+# Laravel VS Code extension temp helpers
+storage/framework/lsp-*.php
+
+# A PHPUnit test-runner extension writes its output here
+/test-results

@@ -42,7 +42,7 @@
             </div>
         </section>
 
-        <form method="POST" action="{{ route('records.change-requests.store', $record) }}">
+        <form method="POST" action="{{ route('records.change-requests.store', $record) }}" data-submit-once>
             @csrf
 
             <div class="change-request-create-grid">

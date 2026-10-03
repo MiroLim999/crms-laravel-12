@@ -8,6 +8,7 @@ use App\Models\RecordField;
 use App\Models\User;
 use App\Services\RecordFieldGrouper;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class RecordDetailPresentationTest extends TestCase
@@ -55,6 +56,54 @@ class RecordDetailPresentationTest extends TestCase
             ->assertSee('aria-controls="recordScanPane recordDataPane"', escape: false)
             ->assertSee('data-group-id="person-1"', escape: false)
             ->assertSee('data-scan-marker="'.$record->fields()->firstOrFail()->getKey().'"', escape: false);
+    }
+
+    public function test_the_scan_card_draws_its_boxes_over_the_page_the_record_kept(): void
+    {
+        $staff = User::factory()->staff()->create();
+        $kept = CivilRecord::factory()->ofType(DocumentType::Birth)->submitted($staff)->create([
+            'scan_path' => 'scans/tilted.png',
+            'scan_mime' => 'image/png',
+            'scan_rotation' => 3.269,
+            'page_image_path' => 'records/1/page.png',
+        ]);
+        $this->createPerson($kept, 1, 0.20, '1', 'Juan Miguel D. Abad');
+        // A record from before pages were kept shows the upload, as it did.
+        $older = CivilRecord::factory()->ofType(DocumentType::Birth)->submitted($staff)->create([
+            'scan_path' => 'scans/older.png',
+            'scan_mime' => 'image/png',
+        ]);
+        $this->createPerson($older, 1, 0.20, '1', 'Maria Beatriz R. Solis');
+
+        $this->actingAs($staff)->get(route('records.show', $kept))
+            ->assertOk()
+            ->assertSee('<img src="'.route('records.page-image', $kept).'"', escape: false)
+            ->assertDontSee('<img src="'.route('records.scan', $kept).'"', escape: false);
+
+        $this->actingAs($staff)->get(route('records.show', $older))
+            ->assertOk()
+            ->assertSee('<img src="'.route('records.scan', $older).'"', escape: false)
+            ->assertDontSee(route('records.page-image', $older), escape: false);
+    }
+
+    public function test_the_page_image_is_served_like_the_scan(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('records/7/page.png', 'straightened page');
+        $staff = User::factory()->staff()->create();
+        $kept = CivilRecord::factory()->submitted($staff)->create(['page_image_path' => 'records/7/page.png']);
+
+        $this->get(route('records.page-image', $kept))->assertRedirect(route('login'));
+
+        $this->actingAs($staff)->get(route('records.page-image', $kept))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+
+        // A record without one, and one whose file has gone, are not found.
+        $older = CivilRecord::factory()->submitted($staff)->create();
+        $lost = CivilRecord::factory()->submitted($staff)->create(['page_image_path' => 'records/8/page.png']);
+        $this->actingAs($staff)->get(route('records.page-image', $older))->assertNotFound();
+        $this->actingAs($staff)->get(route('records.page-image', $lost))->assertNotFound();
     }
 
     public function test_legacy_coordinate_rows_are_inferred_as_people(): void

@@ -7,18 +7,37 @@
     @php
         $workingFields = old('fields', $fields);
         $published = (bool) $template?->is_active;
+        $usage ??= ['published' => false, 'records' => 0, 'pages' => 0];
+        $parent ??= null;
+        // Published, or read by records or pages in progress: saving new markers
+        // makes a new version, so what was read with this one stays as it was.
+        $inUse = $template !== null && ($usage['published'] || $usage['records'] > 0 || $usage['pages'] > 0);
+        $usageParts = array_filter([
+            $usage['published'] ? 'published for Staff' : null,
+            $usage['records'] > 0 ? $usage['records'].' '.Str::plural('record', $usage['records']).' read with it' : null,
+            $usage['pages'] > 0 ? $usage['pages'].' unsubmitted '.Str::plural('page', $usage['pages']) : null,
+        ]);
         $currentPaperSize = old('paper_size', $template?->paper_size?->value ?? App\Enums\PaperSize::Letter->value);
         $currentOrientation = old('orientation', $template?->orientation?->value ?? App\Enums\PageOrientation::Portrait->value);
         $currentCustomWidth = old('custom_width_mm', $template?->custom_width_mm ?? 210);
         $currentCustomHeight = old('custom_height_mm', $template?->custom_height_mm ?? 297);
         $currentGroupingMode = old('grouping_mode', $template?->grouping_mode ?? 'auto');
+        $workingColumns = old('columns_json') ? json_decode(old('columns_json'), true) : $columns;
+        $workingRuledYs = old('ruled_ys_json') ? json_decode(old('ruled_ys_json'), true) : $ruledYs;
         $builderConfig = [
             'initialFields' => $workingFields,
             'baselineFields' => $fields,
+            'initialColumns' => is_array($workingColumns) ? $workingColumns : [],
+            'baselineColumns' => $columns,
+            'initialRuledYs' => is_array($workingRuledYs) ? $workingRuledYs : [],
+            'baselineRuledYs' => $ruledYs,
+            'detectGridUrl' => route('templates.detect-grid'),
+            'testLayoutUrl' => route('templates.test-layout'),
+            'csrf' => csrf_token(),
             'initialGroupingMode' => $currentGroupingMode,
             'baselineGroupingMode' => $template?->grouping_mode ?? 'auto',
-            'maxFields' => 450,
-            'maxFieldNameLength' => 500,
+            'maxFields' => App\Support\Limits::MAX_FIELDS,
+            'maxFieldNameLength' => 120,
             'paperSizes' => collect($paperSizes)->map(fn ($size) => [
                 'value' => $size->value,
                 'label' => $size->label(),
@@ -51,6 +70,11 @@
                     @else
                         <span class="badge bg-label-secondary">Draft</span>
                     @endif
+                    @if ($parent)
+                        <a href="{{ route('templates.edit', $parent) }}" class="template-builder-page__parent">
+                            Based on “{{ $parent->name }}”
+                        </a>
+                    @endif
                 </div>
                 <p class="mb-0 text-muted">
                     Place each marker over the value Staff should extract. Coordinates are saved independently of scan resolution.
@@ -73,9 +97,24 @@
 
             <input type="hidden" name="doc_type" value="{{ $docType->value }}">
             <input type="hidden" name="document_type_id" value="{{ $docType->getKey() }}">
-            <input type="hidden" name="publish" value="{{ $published ? 1 : 0 }}" id="publishIntent">
+            <input type="hidden" name="publish" value="0" id="publishIntent">
+            @if ($template)
+                {{-- The revision this editor opened: an older copy cannot overwrite a newer save. --}}
+                <input type="hidden" name="revision" value="{{ old('revision', $template->revision) }}">
+            @endif
             <input type="hidden" name="grouping_mode" value="{{ $currentGroupingMode }}" id="groupingMode">
             <div id="fieldInputs"></div>
+
+            @if ($inUse)
+                <div class="template-builder-in-use" role="note">
+                    <i class="icon-base bx bx-lock-alt" aria-hidden="true"></i>
+                    <div>
+                        <strong>This layout is in use:</strong> {{ implode(', ', $usageParts) }}.
+                        Saving changed markers, row lines or field settings makes a new version, so everything
+                        read with this one keeps it. Its name, notes and sample are saved here.
+                    </div>
+                </div>
+            @endif
 
             <div class="row g-3 template-builder-grid">
                 <div class="col-xl-9 col-lg-8">
@@ -91,7 +130,7 @@
                                 </label>
                                 <input type="file" id="sampleScan" name="sample_document" form="templateBuilderForm"
                                        class="visually-hidden"
-                                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp,image/tiff">
+                                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp">
 
                                 @if ($template?->sample_path)
                                     <button type="button" class="btn btn-sm btn-outline-danger template-sample-delete-button"
@@ -101,6 +140,12 @@
                                         <span>Delete sample</span>
                                     </button>
                                 @endif
+
+                                <button type="button" class="btn btn-sm btn-outline-primary template-test-button" id="testLayoutBtn"
+                                        title="Outline the sample with this layout, as Detect does for Staff (nothing is saved)">
+                                    <i class="icon-base bx bx-radar icon-sm" aria-hidden="true"></i>
+                                    <span>Test on sample</span>
+                                </button>
 
                                 <span class="marker-toolbar__divider" aria-hidden="true"></span>
                                 <div class="btn-group marker-zoom-controls" role="group" aria-label="Document zoom controls">
@@ -133,10 +178,17 @@
                                         <div><span><kbd>Shift</kbd> + click</span><small>Select multiple</small></div>
                                         <div><span>Drag selection</span><small>Move selected fields</small></div>
                                         <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
+                                        <div><span>Arrow keys</span><small>Move selected 1 px (<kbd>Shift</kbd>: 10 px)</small></div>
+                                        <div><span><kbd>Alt</kbd> + drag</span><small>Place without snapping to printed lines</small></div>
+                                        <div><span>Drag the rotate knob below a field</span><small>Tilt that field (<kbd>Shift</kbd>: 5° steps)</small></div>
+                                        <div><span><kbd>[</kbd> or <kbd>]</kbd></span><small>Tilt selected 0.5° (<kbd>Shift</kbd>: 5°)</small></div>
+                                        <div><span>Double-click the knob</span><small>Straighten</small></div>
                                         <div><span><kbd>Ctrl</kbd> + <kbd>C</kbd></span><small>Copy selected</small></div>
                                         <div><span><kbd>Ctrl</kbd> + <kbd>V</kbd></span><small>Paste fields</small></div>
                                         <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Delete selected</small></div>
-                                        <div><span><kbd>Ctrl</kbd> + <kbd>Z</kbd></span><small>Undo last change</small></div>
+                                        <div><span><kbd>Ctrl</kbd> + <kbd>Z</kbd></span><small>Undo last change (row lines too)</small></div>
+                                        <div><span>Click a row line</span><small>Select it: <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>Del</kbd> removes</small></div>
+                                        <div><span><kbd>Shift</kbd> + drag a row line</span><small>Move every row line</small></div>
                                     </div>
                                 </div>
 
@@ -369,7 +421,7 @@
                                 <label class="form-label small fw-medium" for="newFieldName">Add another field</label>
                                 <div class="input-group">
                                     <input type="text" id="newFieldName" class="form-control"
-                                           maxlength="500" placeholder="Field name">
+                                           maxlength="120" placeholder="Field name">
                                     <button class="btn btn-outline-primary" type="button" id="addFieldBtn">
                                         <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add
                                     </button>
@@ -382,28 +434,165 @@
                             </div>
                         </section>
 
+                        <section class="card template-field-settings-card mb-3 d-none" id="fieldSettingsCard"
+                                 aria-labelledby="fieldSettingsHeading">
+                            <div class="card-header">
+                                <h2 class="card-title h5 mb-0" id="fieldSettingsHeading">Field settings</h2>
+                                <small class="text-muted d-block text-truncate" id="fieldSettingsName"></small>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-2">
+                                    <label class="form-label" for="fieldRole">Holds</label>
+                                    <select class="form-select form-select-sm" id="fieldRole">
+                                        <option value="">Any value</option>
+                                        <option value="name">The person's name</option>
+                                        <option value="entry">The entry number</option>
+                                    </select>
+                                    <div class="form-text">The name titles each person in Verify and the records archive.</div>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label" for="fieldType">Value</label>
+                                    <select class="form-select form-select-sm" id="fieldType">
+                                        <option value="text">Text</option>
+                                        <option value="date">A date</option>
+                                        <option value="number">A number</option>
+                                        <option value="choice">One of a list</option>
+                                    </select>
+                                </div>
+                                <div class="mb-2 d-none" id="fieldOptionsGroup">
+                                    <label class="form-label" for="fieldOptions">Choices</label>
+                                    <input type="text" class="form-control form-control-sm" id="fieldOptions"
+                                           maxlength="1900" placeholder="Male, Female">
+                                    <div class="form-text">Separate them with commas. Verify points out any other value.</div>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label" for="fieldHint">Hint for Staff</label>
+                                    <input type="text" class="form-control form-control-sm" id="fieldHint"
+                                           maxlength="200" placeholder="e.g. Month day, year">
+                                </div>
+                                <div class="form-check mb-0">
+                                    <input class="form-check-input" type="checkbox" id="fieldRequired">
+                                    <label class="form-check-label" for="fieldRequired">
+                                        Required: point out a person without it
+                                    </label>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="card template-ledger-card mb-3" aria-labelledby="ledgerGridHeading">
+                            <div class="card-header d-flex align-items-center justify-content-between gap-2">
+                                <div>
+                                    <h2 class="card-title h5 mb-0" id="ledgerGridHeading">Ledger grid</h2>
+                                    <small class="text-muted">For ruled register books.</small>
+                                </div>
+                                <span class="badge bg-label-secondary" id="ledgerGridBadge">None</span>
+                            </div>
+                            <div class="card-body">
+                                <p class="template-ledger-card__intro">
+                                    Name each column and record every printed row line. Staff scans are then
+                                    outlined line by line, so handwriting that drifts across a rule, or a capital
+                                    that reaches into the next row, is read whole.
+                                </p>
+
+                                <div class="template-ledger-card__actions">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="detectGridBtn">
+                                        <i class="icon-base bx bx-grid-alt icon-sm me-1" aria-hidden="true"></i>
+                                        Detect from sample
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="makeColumnsBtn" disabled>
+                                        <i class="icon-base bx bx-columns icon-sm me-1" aria-hidden="true"></i>
+                                        Make selected columns
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="makeFieldsBtn" disabled
+                                            title="Turn the selected columns back into fields read as one rectangle">
+                                        <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>
+                                        Make selected fields
+                                    </button>
+                                </div>
+
+                                <div class="template-ledger-rows" role="group" aria-labelledby="ledgerRowsHeading">
+                                    <h3 class="template-ledger-rows__heading" id="ledgerRowsHeading">Row lines</h3>
+                                    <div class="template-ledger-rows__tools">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="addRuledLineBtn"
+                                                title="Add a line under the selected one, or at the bottom">
+                                            <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>
+                                            Add
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="removeRuledLineBtn" disabled
+                                                title="Remove the selected row line">
+                                            <i class="icon-base bx bx-minus icon-sm me-1" aria-hidden="true"></i>
+                                            Remove
+                                        </button>
+                                        <div class="input-group input-group-sm template-ledger-rows__even">
+                                            <input type="number" class="form-control" id="evenRowsInput" min="1" max="399" step="1"
+                                                   inputmode="numeric" aria-label="Number of rows">
+                                            <button type="button" class="btn btn-outline-secondary" id="evenRowsBtn" disabled
+                                                    title="Space this many rows evenly between the first and the last line">
+                                                rows, evenly
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <p class="template-ledger-card__summary" id="ledgerGridSummary" aria-live="polite"></p>
+
+                                <div class="template-ledger-card__problems d-none" id="ledgerProblems" role="status">
+                                    <i class="icon-base bx bx-error icon-sm" aria-hidden="true"></i>
+                                    <ul class="mb-0" id="ledgerProblemList"></ul>
+                                </div>
+
+                                <div class="template-ledger-card__covered d-none" id="ledgerCoveredNotice">
+                                    <span id="ledgerCoveredMessage"></span>
+                                    <span class="template-ledger-card__covered-actions">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="selectCoveredFieldsBtn">
+                                            Select them
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" id="removeCoveredFieldsBtn">
+                                            Remove them
+                                        </button>
+                                    </span>
+                                </div>
+
+                                <div class="template-ledger-card__footer">
+                                    <p class="document-tip mb-0">
+                                        <i class="icon-base bx bx-info-circle icon-xs" aria-hidden="true"></i>
+                                        <span>Click a row line to select it, then drag it or press the arrow keys.
+                                            <kbd>Shift</kbd> + drag moves every line; lines snap to the sample's printed
+                                            rules (<kbd>Alt</kbd>: place freely). Moving all the columns moves their rows.</span>
+                                    </p>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" id="clearGridBtn" disabled>
+                                        <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
+                                        Remove grid
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+
                         <div class="template-builder-error d-none" id="builderError" role="alert" aria-live="assertive">
                             <i class="icon-base bx bx-error" aria-hidden="true"></i>
                             <span id="builderErrorMessage"></span>
                         </div>
 
                         <div class="template-builder-save-panel">
-                            @if (! $published)
+                            @if ($inUse)
+                                <p class="template-builder-live-note">
+                                    <i class="icon-base bx bx-info-circle icon-xs" aria-hidden="true"></i>
+                                    Changed markers are saved as a new version; this one stays as it is.
+                                </p>
+                                <button type="submit" class="btn btn-outline-secondary" data-publish="0">
+                                    Save as new draft
+                                </button>
+                                <button type="submit" class="btn btn-primary" data-publish="1">
+                                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
+                                    Save &amp; publish new version
+                                </button>
+                            @else
                                 <button type="submit" class="btn btn-outline-secondary" data-publish="0">
                                     Save draft
                                 </button>
                                 <button type="submit" class="btn btn-primary" data-publish="1">
                                     <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
                                     Save &amp; publish for Staff
-                                </button>
-                            @else
-                                <p class="template-builder-live-note">
-                                    <i class="icon-base bx bx-info-circle icon-xs" aria-hidden="true"></i>
-                                    Saved changes become the Staff default immediately.
-                                </p>
-                                <button type="submit" class="btn btn-primary" data-publish="1">
-                                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
-                                    Save published layout
                                 </button>
                             @endif
                         </div>
@@ -441,6 +630,40 @@
             </div>
         </div>
     @endif
+
+    <div class="modal fade" id="layoutTestModal" tabindex="-1" aria-labelledby="layoutTestTitle" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h2 class="modal-title h5" id="layoutTestTitle">Test on the sample</h2>
+                        <small class="text-muted">What Detect makes of the sample with this layout, saved or not. Nothing is read or stored.</small>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="layout-test__status" id="layoutTestStatus" role="status" aria-live="polite">
+                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                        <span id="layoutTestStatusText">Outlining every line on the sample. This takes about half a minute.</span>
+                    </div>
+                    <div class="layout-test d-none" id="layoutTestResult">
+                        <p class="layout-test__summary" id="layoutTestSummary"></p>
+                        <ul class="layout-test__findings" id="layoutTestFindings"></ul>
+                        <div class="layout-test__legend" aria-hidden="true">
+                            <span class="is-placed">In a row</span>
+                            <span class="is-field">Field</span>
+                            <span class="is-shared">Shares a cell</span>
+                            <span class="is-no-row">Between rows</span>
+                            <span class="is-rule">Row line, fitted</span>
+                        </div>
+                        <div class="layout-test__page">
+                            <canvas id="layoutTestCanvas" role="img" aria-label="The sample with every outlined line"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div class="modal fade" id="resetFieldsModal" tabindex="-1"
          aria-labelledby="resetFieldsModalTitle" aria-describedby="resetFieldsModalDescription"

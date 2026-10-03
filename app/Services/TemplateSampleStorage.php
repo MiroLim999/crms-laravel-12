@@ -71,6 +71,35 @@ class TemplateSampleStorage
         return $destination;
     }
 
+    /**
+     * A copy of one layout's sample for another (a new version or a duplicate).
+     *
+     * @return array{sample_path: string, sample_original_name: string|null, sample_mime: string|null, sample_size: int|null}|null
+     */
+    public function copy(DocumentTemplate $from, DocumentTemplate $to): ?array
+    {
+        $disk = Storage::disk('local');
+        if (! $from->sample_path || ! $disk->exists($from->sample_path)) {
+            return null;
+        }
+
+        $to->loadMissing('documentTypeDefinition');
+        $extension = strtolower(pathinfo($from->sample_path, PATHINFO_EXTENSION)) ?: 'png';
+        $destination = $this->pathFor($to, $extension);
+        $disk->delete($destination);
+
+        if (! $disk->copy($from->sample_path, $destination)) {
+            throw new RuntimeException('The sample document could not be copied to the new layout.');
+        }
+
+        return [
+            'sample_path' => $destination,
+            'sample_original_name' => $from->sample_original_name,
+            'sample_mime' => $from->sample_mime,
+            'sample_size' => $from->sample_size,
+        ];
+    }
+
     public function delete(DocumentTemplate $template): void
     {
         $this->deletePath($template->sample_path);

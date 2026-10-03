@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\ChangeRequestStatus;
 use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -25,7 +26,7 @@ class CivilRecord extends Model
 
     protected $fillable = [
         'doc_type', 'document_type_id', 'document_template_id', 'registry_number', 'status',
-        'scan_path', 'scan_mime', 'ocr_model_key', 'created_by',
+        'scan_path', 'scan_mime', 'scan_rotation', 'page_image_path', 'ocr_model_key', 'created_by',
         'submitted_by', 'submitted_at',
     ];
 
@@ -81,11 +82,6 @@ class CivilRecord extends Model
         return $this->status->isLocked();
     }
 
-    public function isDraft(): bool
-    {
-        return $this->status === RecordStatus::Draft;
-    }
-
     public function hasPendingChangeRequest(): bool
     {
         return $this->changeRequests()
@@ -104,6 +100,21 @@ class CivilRecord extends Model
         $first = $this->fields->first(fn (RecordField $f) => filled($f->verified_value));
 
         return $first?->verified_value ?? 'Untitled record';
+    }
+
+    /**
+     * Eager-load only the field title() reads, for list pages. A ledger record
+     * has hundreds of fields, and a list shows just this one, so `fields` on
+     * these records holds at most one field.
+     *
+     * @param  Builder<self>  $query
+     */
+    public function scopeWithTitleField(Builder $query): void
+    {
+        $query->with(['fields' => fn ($fields) => $fields
+            ->whereNotNull('verified_value')
+            ->where('verified_value', '!=', '')
+            ->limit(1)]);
     }
 
     public function typeLabel(): string

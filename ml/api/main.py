@@ -20,6 +20,9 @@ Endpoints:
   POST /delete_model -> { "model": "<key>" } removes that folder from ml/models/
   POST /rename_model -> { "model": "<key>", "newName": "<name>" } renames the folder
 
+Every endpoint but /health and /add_model needs the X-CRMS-Service-Key header:
+the secret Laravel shares with this service (OCR_UPLOAD_SECRET, else APP_KEY).
+
 Training, evaluation, dataset preparation, and batch prediction are deliberately
 NOT here. They are long-running command-line work - see ml/train_trocr.py,
 ml/test_finetuned.py, ml/predict.py - and a request handler is the wrong place to
@@ -36,6 +39,7 @@ import hmac
 import hashlib
 import shutil
 import base64
+import logging
 import tempfile
 import threading
 import zipfile
@@ -60,17 +64,32 @@ import hf_quiet  # noqa: E402,F401
 
 import torch
 from PIL import Image
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 # Import-cheap sibling: no torch, so /health stays responsive while the GPU is busy.
 # Only `sanitise_name` is used, so model and dataset names fold to a safe path
 # segment by exactly one rule rather than two copies of it.
 import dataset_registry as ds
+# Shared with predict.py and test_finetuned.py, so a reading is loaded and
+# scored the same way everywhere.
+from trocr_common import eos_token_id, load_model, sequence_confidence
+
+# The service's own messages (models loading, added, deleted, renamed). Uvicorn
+# configures only its own loggers, so without a handler of its own INFO would
+# vanish. Not logging.basicConfig(): that turns on the root logger and makes
+# every library chatty again (see hf_quiet.py). The guard keeps one handler
+# when this module is imported under two names (ml.api.main and main).
+logger = logging.getLogger("ocr-api")
+if not logger.handlers:
+    _log_handler = logging.StreamHandler()
+    _log_handler.setFormatter(logging.Formatter("[ocr-api] %(message)s"))
+    logger.addHandler(_log_handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 # ============================================================
 # CONFIG
@@ -91,6 +110,11 @@ BASE_MODEL_LABEL = "TrOCR base (not fine-tuned)"
 BASE_MODEL_DIR = os.path.join(MODELS_DIR, BASE_MODEL_KEY)
 
 MAX_NEW_TOKENS = 32
+
+# /ocr reads this many crops in one generate() call. A GPU reads a batch in
+# about the time it takes to read one crop; a smaller number uses less GPU
+# memory.
+OCR_BATCH_SIZE = 16
 
 # Uploaded weights are ~1.3 GB, so they are copied to disk in chunks rather
 # than read into memory.
@@ -262,22 +286,16 @@ def _load_model(key):
         if entry is not None:
             return entry
 
-        print(f"[ocr-api] Loading model: {label}  ({model_src})  on  {device}")
-        processor = TrOCRProcessor.from_pretrained(model_src)
-        model = VisionEncoderDecoderModel.from_pretrained(model_src)
+        logger.info(f"Loading model: {label}  ({model_src})  on  {device}")
+        processor, model = load_model(model_src)
         model.to(device)
         model.eval()
 
-        eos_id = (
-            getattr(model.generation_config, "eos_token_id", None)
-            or getattr(model.config, "eos_token_id", None)
-            or getattr(model.config.decoder, "eos_token_id", None)
-            or processor.tokenizer.sep_token_id
-        )
+        eos_id = eos_token_id(model, processor)
 
-        entry = {"model": model, "processor": processor, "eos_id": eos_id, "label": label}
+        entry ={"model": model, "processor": processor, "eos_id": eos_id, "label": label}
         _models[cache_key] = entry
-        print(f"[ocr-api] Model ready: {label}")
+        logger.info(f"Model ready: {label}")
         return entry
 
 
@@ -350,6 +368,16 @@ def _upload_secret():
     return secret.encode("utf-8")
 
 
+def require_service_key(supplied: str = Header("", alias="X-CRMS-Service-Key")) -> None:
+    """Only Laravel may call the service: it sends the secret both sides share.
+
+    Binding to 127.0.0.1 keeps other machines out, but not other programs on this
+    one, such as a page in the browser. /health stays open for "is it up?", and
+    /add_model has its own short-lived signed ticket instead."""
+    if not hmac.compare_digest(supplied.encode("utf-8"), _upload_secret()):
+        raise HTTPException(status_code=401, detail="This call needs the CRMS service key.")
+
+
 def _base64_url_decode(value):
     padding = "=" * (-len(value) % 4)
     return base64.urlsafe_b64decode(value + padding)
@@ -385,27 +413,6 @@ def _authorize_model_upload(token, requested_name):
 
     if expires_at < int(time.time()):
         raise HTTPException(status_code=401, detail="Model-upload authorization has expired.")
-
-
-def _sequence_confidence(model, gen_output, eos_id):
-    """Geometric mean of per-token probabilities up to the first EOS, as a %."""
-    try:
-        scores = model.compute_transition_scores(
-            gen_output.sequences, gen_output.scores, normalize_logits=True
-        )[0]
-        gen_tokens = gen_output.sequences[0][1:1 + len(scores)]
-        log_probs = []
-        for tok, lp in zip(gen_tokens, scores):
-            if not torch.isfinite(lp):
-                continue
-            log_probs.append(lp.item())
-            if tok.item() == eos_id:
-                break
-        if not log_probs:
-            return 0.0
-        return round(math.exp(sum(log_probs) / len(log_probs)) * 100.0, 1)
-    except Exception:
-        return 0.0
 
 
 def _decode_data_url(data_url):
@@ -504,8 +511,8 @@ async def lifespan(app: FastAPI):
     # Nothing heavy here on purpose: models stay lazy so the service answers
     # /health immediately after start, and the device is only probed on the
     # first real inference.
-    print(f"[ocr-api] Models directory:   {MODELS_DIR}")
-    print(f"[ocr-api] Discovered models: {sorted(_discover_models()) or '(none)'}")
+    logger.info(f"Models directory:   {MODELS_DIR}")
+    logger.info(f"Discovered models: {sorted(_discover_models()) or '(none)'}")
     yield
     _models.clear()
 
@@ -575,7 +582,7 @@ def health() -> dict:
     }
 
 
-@app.get("/models", response_model=ModelsResponse)
+@app.get("/models", response_model=ModelsResponse, dependencies=[Depends(require_service_key)])
 def models() -> dict:
     """List selectable models so the frontend can build its dropdown."""
     return {
@@ -584,10 +591,33 @@ def models() -> dict:
     }
 
 
+def _read_crops(model, processor, device, eos_id, images):
+    """(text, confidence) for each image, in order, from one generate() call."""
+    pixel_values = processor(images=images, return_tensors="pt").pixel_values.to(device)
+    with torch.no_grad():
+        gen_output = model.generate(
+            pixel_values,
+            max_new_tokens=MAX_NEW_TOKENS,
+            output_scores=True,
+            return_dict_in_generate=True,
+        )
+    texts = processor.batch_decode(gen_output.sequences, skip_special_tokens=True)
+    return [
+        (text.strip(), sequence_confidence(model, gen_output, eos_id, row))
+        for row, text in enumerate(texts)
+    ]
+
+
+def _ocr_error(name, error):
+    """The result row for a crop that could not be read."""
+    return {"name": name, "text": "", "confidence": 0.0, "error": str(error)}
+
+
 # Plain `def`, not `async def`: generate() is blocking and CPU/GPU-bound, so
 # FastAPI runs it in a worker thread and /health and uploads stay responsive
 # while an OCR job is running.
-@app.post("/ocr", response_model=OcrResponse, response_model_exclude_none=True)
+@app.post("/ocr", response_model=OcrResponse, response_model_exclude_none=True,
+          dependencies=[Depends(require_service_key)])
 def ocr(payload: OcrRequest) -> dict:
     if not payload.fields:
         raise HTTPException(status_code=400, detail="Send a non-empty 'fields' list.")
@@ -599,27 +629,38 @@ def ocr(payload: OcrRequest) -> dict:
     device = _get_device()
     eos_id = entry["eos_id"]
 
-    results = []
-    for field in payload.fields:
-        name = field.name
+    # Decode every crop first. A broken one becomes an error row, so it can't
+    # fail the batch it would have been read in.
+    results = [None] * len(payload.fields)
+    images = []  # (position in the request, image)
+    for index, field in enumerate(payload.fields):
         try:
-            image = _decode_data_url(field.image)
-            pixel_values = processor(images=image, return_tensors="pt").pixel_values.to(device)
-            with torch.no_grad():
-                gen_output = model.generate(
-                    pixel_values,
-                    max_new_tokens=MAX_NEW_TOKENS,
-                    output_scores=True,
-                    return_dict_in_generate=True,
-                )
-            text = processor.batch_decode(
-                gen_output.sequences, skip_special_tokens=True
-            )[0].strip()
-            conf = _sequence_confidence(model, gen_output, eos_id)
-            results.append({"name": name, "text": text, "confidence": conf})
+            images.append((index, _decode_data_url(field.image)))
         except Exception as e:
-            # One bad crop must not fail the whole batch.
-            results.append({"name": name, "text": "", "confidence": 0.0, "error": str(e)})
+            results[index] = _ocr_error(field.name, e)
+
+    for start in range(0, len(images), OCR_BATCH_SIZE):
+        chunk = images[start:start + OCR_BATCH_SIZE]
+        try:
+            readings = _read_crops(model, processor, device, eos_id, [image for _, image in chunk])
+        except Exception as e:
+            # For example out of GPU memory. Read this chunk one crop at a time,
+            # so only a crop that also fails on its own gets an error row.
+            logger.warning("Reading %d crops together failed (%s); reading them one at a time.", len(chunk), e)
+            readings = []
+            for _, image in chunk:
+                try:
+                    readings.append(_read_crops(model, processor, device, eos_id, [image])[0])
+                except Exception as single:
+                    readings.append(single)
+
+        for (index, _), reading in zip(chunk, readings):
+            name = payload.fields[index].name
+            if isinstance(reading, Exception):
+                results[index] = _ocr_error(name, reading)
+            else:
+                text, conf = reading
+                results[index] = {"name": name, "text": text, "confidence": conf}
 
     return {"results": results, "model": entry["label"], "modelKey": key}
 
@@ -986,11 +1027,11 @@ def add_model(
         shutil.rmtree(target, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"Failed to save files: {e}")
 
-    print(f"[ocr-api] Added model '{safe_name}' with {len(saved)} files.")
+    logger.info(f"Added model '{safe_name}' with {len(saved)} files.")
     return {"ok": True, "name": safe_name, "saved": saved}
 
 
-@app.post("/delete_model", response_model=DeleteModelResponse)
+@app.post("/delete_model", response_model=DeleteModelResponse, dependencies=[Depends(require_service_key)])
 def delete_model(payload: DeleteModelRequest) -> dict:
     """Delete a model folder from Models/. Body: { "model": "<key>" }.
 
@@ -1023,11 +1064,11 @@ def delete_model(payload: DeleteModelRequest) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not delete: {e}")
 
-    print(f"[ocr-api] Deleted model '{key}'.")
+    logger.info(f"Deleted model '{key}'.")
     return {"ok": True, "deleted": key}
 
 
-@app.post("/rename_model", response_model=RenameModelResponse)
+@app.post("/rename_model", response_model=RenameModelResponse, dependencies=[Depends(require_service_key)])
 def rename_model(payload: RenameModelRequest) -> dict:
     """Rename a model folder in Models/. Body: { "model": "<key>", "newName": "<name>" }.
 
@@ -1072,7 +1113,7 @@ def rename_model(payload: RenameModelRequest) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not rename: {e}")
 
-    print(f"[ocr-api] Renamed model '{key}' -> '{new_name}'.")
+    logger.info(f"Renamed model '{key}' -> '{new_name}'.")
     return {"ok": True, "name": new_name}
 
 

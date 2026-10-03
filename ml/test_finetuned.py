@@ -23,20 +23,15 @@ import hf_quiet  # noqa: F401
 import pandas as pd
 import torch
 from PIL import Image
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 import dataset_registry as ds
 from metrics import compute_metrics, print_metrics, save_metrics_png
+# BASE_MODEL_KEY is imported from here by test_trocr.py.
+from trocr_common import BASE_MODEL_KEY, ModelNotFoundError, load_model, resolve_model
 
 # ============================================================
 # CONFIG - defaults only.
 # ============================================================
-ML_ROOT = os.path.dirname(os.path.abspath(__file__))
-MODELS_DIR = os.path.join(ML_ROOT, "models")
-
-BASE_MODEL_KEY = "base"
-BASE_MODEL_NAME = "microsoft/trocr-base-handwritten"
-
 DEFAULT_MODEL = "TrOCR-fine-tune-10k-samples"
 DEFAULT_DATASET = ds.DEFAULT_DATASET
 DEFAULT_SPLIT = "test"
@@ -66,29 +61,6 @@ class EvaluationError(Exception):
 
 def _noop(*_args, **_kwargs):
     pass
-
-
-def resolve_model(model):
-    """Turn a model key from the UI into something from_pretrained accepts."""
-    if not model or model == BASE_MODEL_KEY:
-        return BASE_MODEL_NAME, BASE_MODEL_KEY
-
-    if os.path.isdir(model):
-        return model, os.path.basename(os.path.normpath(model))
-
-    candidate = os.path.join(MODELS_DIR, model)
-    if os.path.isdir(candidate):
-        return candidate, model
-
-    raise EvaluationError(
-        f"Model '{model}' was not found under ml/models/. Add it, or pick another."
-    )
-
-
-def _load(source):
-    processor = TrOCRProcessor.from_pretrained(source)
-    model = VisionEncoderDecoderModel.from_pretrained(source)
-    return processor, model
 
 
 def _predict_batch(processor, net, device, paths, max_new_tokens):
@@ -133,12 +105,15 @@ def run_evaluation(
     progress = progress or _noop
     log = log or _noop
     should_cancel = should_cancel or (lambda: False)
-    loader = loader or _load
+    loader = loader or load_model
 
     if split not in ds.SPLITS:
         raise EvaluationError(f"Unknown split '{split}'. Expected one of {', '.join(ds.SPLITS)}.")
 
-    source, model_key = resolve_model(model)
+    try:
+        source, model_key = resolve_model(model)
+    except ModelNotFoundError as e:
+        raise EvaluationError(str(e)) from e
 
     # ---------------------------------------------------------------- dataset paths
     if manifest_csv is None or image_dir is None:

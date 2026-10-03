@@ -44,11 +44,11 @@
                     <span class="document-dropzone__text">or choose a file from your computer</span>
                     <span class="btn btn-primary document-dropzone__button">Choose document</span>
                     <span class="document-dropzone__formats">
-                        <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>TIFF</span>
+                        <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>BMP</span>
                     </span>
                 </label>
                 <input type="file" id="scanFile" class="visually-hidden"
-                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp,image/tiff">
+                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp">
 
                 <div class="document-upload-note">
                     <span><i class="icon-base bx bx-file me-1"></i> Maximum file size: 20 MB</span>
@@ -104,12 +104,23 @@
                                     <div><span><kbd>Shift</kbd> + drag</span><small>Add fields to selection</small></div>
                                     <div><span>Drag selection</span><small>Move selected fields</small></div>
                                     <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
+                                    <div><span><kbd>Alt</kbd> + drag</span><small>Place without snapping to printed lines</small></div>
+                                    <div><span>Drag the rotate knob below a field</span><small>Tilt that field (<kbd>Shift</kbd>: 5° steps)</small></div>
+                                    <div><span><kbd>[</kbd> or <kbd>]</kbd></span><small>Tilt selected 0.5° (<kbd>Shift</kbd>: 5°)</small></div>
+                                    <div><span>Double-click the knob</span><small>Straighten</small></div>
                                     <div><span><kbd>Ctrl</kbd> + <kbd>C</kbd></span><small>Copy selected</small></div>
                                     <div><span><kbd>Ctrl</kbd> + <kbd>V</kbd></span><small>Paste fields</small></div>
                                     <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Delete selected</small></div>
                                     <div><span><kbd>Ctrl</kbd> + <kbd>Z</kbd></span><small>Undo last change</small></div>
                                 </div>
                             </div>
+
+                            <button type="button" class="btn btn-sm btn-outline-primary marker-snap-button" id="snapTableBtn"
+                                    title="Fit the column and row markers onto the page's printed table lines">
+                                <i class="icon-base bx bx-grid-alt icon-sm me-1" aria-hidden="true"></i>
+                                <span>Snap to table</span>
+                                <span class="spinner-border marker-snap-spinner" aria-hidden="true"></span>
+                            </button>
 
                             <button type="button" class="btn btn-sm btn-outline-secondary marker-reset-button" id="resetFieldsBtn"
                                     title="Restore the original template fields and document view" disabled>
@@ -219,7 +230,100 @@
                     <span id="ocrActionMessage"></span>
                 </div>
 
+                {{-- Filled in after Detect: what was found on this page. --}}
+                <div class="detect-summary d-none" id="detectSummary" role="status" aria-live="polite">
+                    <i class="icon-base bx bx-radar" aria-hidden="true"></i>
+                    <div class="detect-summary__copy">
+                        <strong id="detectSummaryTitle"></strong>
+                        <span id="detectSummaryText"></span>
+                        <ul class="grid-notes__list d-none" id="detectSummaryNotes"></ul>
+                        <div class="form-check form-switch mb-0 mt-1">
+                            <input class="form-check-input" type="checkbox" id="lineEditToggle">
+                            <label class="form-check-label" for="lineEditToggle"
+                                   title="Click a line on the page to fix its outline before it is read">Adjust line crops</label>
+                        </div>
+                    </div>
+                </div>
+
+                {{--
+                    Line editing after Detect: click an outline on the page, stretch it
+                    by its handles or grow/shrink it, and see the crop TrOCR will read.
+                    Saved as you go; nothing is read until Scan with OCR.
+                --}}
+                <div class="line-adjust-card d-none" id="lineAdjustCard" aria-live="polite">
+                    <div class="line-adjust-card__head">
+                        <strong id="lineAdjustName">Click a line on the page</strong>
+                        <span class="line-adjust-card__position" id="lineAdjustPosition"></span>
+                    </div>
+                    <p class="line-adjust-card__note d-none" id="lineAdjustNote"></p>
+                    <div class="line-adjust-card__crop">
+                        <canvas id="lineAdjustThumb" aria-label="What TrOCR will read for this line"></canvas>
+                    </div>
+                    <div class="btn-group btn-group-sm line-adjust-card__modes" role="radiogroup" aria-label="How to change the outline" id="lineModeGroup">
+                        <input type="radio" class="btn-check" name="alignLineMode" id="lineModeBox" value="box" autocomplete="off" checked>
+                        <label class="btn btn-outline-primary" for="lineModeBox" title="Stretch the outline by its handles">Stretch</label>
+                        <input type="radio" class="btn-check" name="alignLineMode" id="lineModePoints" value="points" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="lineModePoints" title="Drag the outline's own corners">Points</label>
+                        <input type="radio" class="btn-check" name="alignLineMode" id="lineModeDraw" value="draw" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="lineModeDraw" title="Draw a new outline round the writing">Draw</label>
+                    </div>
+                    <div class="line-adjust-card__draw d-none" id="lineDrawActions">
+                        <button type="button" class="btn btn-sm btn-success" id="lineDrawUseBtn" disabled
+                                title="Make this drawing the line's outline and crop (Enter)">
+                            <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>Use this outline
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="lineDrawCancelBtn"
+                                title="Throw the drawing away (Esc)">Cancel</button>
+                    </div>
+                    <div class="line-adjust-card__actions" id="lineAdjustActions">
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Outline size">
+                            <button type="button" class="btn btn-outline-secondary" id="lineShrinkBtn" title="Shrink the outline (−)">
+                                <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i><span class="visually-hidden">Shrink</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="lineGrowBtn" title="Grow the outline (+)">
+                                <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i><span class="visually-hidden">Grow</span>
+                            </button>
+                        </div>
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Undo outline changes">
+                            <button type="button" class="btn btn-outline-secondary" id="lineUndoBtn" title="Undo (Ctrl+Z)" disabled>
+                                <i class="icon-base bx bx-undo icon-sm" aria-hidden="true"></i><span class="visually-hidden">Undo</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="lineRedoBtn" title="Redo (Ctrl+Y)" disabled>
+                                <i class="icon-base bx bx-redo icon-sm" aria-hidden="true"></i><span class="visually-hidden">Redo</span>
+                            </button>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="lineResetBtn" disabled
+                                title="Back to the outline Detect drew">
+                            <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>Reset line
+                        </button>
+                    </div>
+                    <div class="line-adjust-card__structure">
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="lineAddBtn"
+                                title="Draw a line the detector missed">
+                            <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add line
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="lineDeleteBtn" disabled
+                                title="Remove this line (Delete). Ctrl+Z puts it back">
+                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>Delete line
+                        </button>
+                    </div>
+                    <div class="line-adjust-card__save">
+                        <button type="button" class="btn btn-sm btn-primary" id="lineSaveBtn" disabled
+                                title="Make this outline the line's crop (Ctrl+S)">
+                            <i class="icon-base bx bx-save icon-sm me-1" aria-hidden="true"></i>Save crop
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="lineDiscardBtn" disabled
+                                title="Back to the last saved outline">Discard</button>
+                    </div>
+                    <span class="line-adjust-card__status" id="lineAdjustStatus"></span>
+                    <small class="line-adjust-card__hint" id="lineAdjustHint"></small>
+                </div>
+
                 <div class="d-grid gap-2 field-marker-actions">
+                    <button class="btn btn-outline-primary" type="button" id="detectBtn"
+                            title="Straighten this page, find its table, and outline every handwritten line before reading">
+                        <i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Detect fields and ink
+                    </button>
                     <button class="btn btn-primary btn-lg" type="button" id="scanNowBtn">
                         <i class="icon-base bx bx-scan icon-sm me-1"></i> Scan with OCR
                     </button>
@@ -239,6 +343,7 @@
             <input type="hidden" name="doc_type" value="{{ $docType->value }}">
             <input type="hidden" name="document_template_id" value="{{ $template->getKey() }}">
             <input type="hidden" name="ocr_model_key" id="ocrModelKey">
+            <input type="hidden" name="document_page_id" id="documentPageId">
 
             <div class="validation-workspace">
                 <div class="validation-submit-error d-none" id="validationSubmitError"
@@ -275,6 +380,46 @@
                             </div>
                         </header>
 
+                        {{-- Shown while a reviewer redraws one line's outline. --}}
+                        <div class="line-edit-toolbar d-none" id="lineEditToolbar" role="toolbar"
+                             aria-label="Adjust outline">
+                            <div class="line-edit-toolbar__copy">
+                                <strong>Adjust outline</strong>
+                                <span id="lineEditName"></span>
+                            </div>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="Outline tool">
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditBox"
+                                       value="box" checked>
+                                <label class="btn btn-outline-secondary" for="lineEditBox" title="Stretch the outline by its handles">
+                                    <i class="icon-base bx bx-expand-alt icon-sm me-1" aria-hidden="true"></i>Stretch
+                                </label>
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditPoints"
+                                       value="points">
+                                <label class="btn btn-outline-secondary" for="lineEditPoints"
+                                       title="Drag corners; drag a dot between corners to add one; Delete removes one">
+                                    <i class="icon-base bx bx-shape-polygon icon-sm me-1" aria-hidden="true"></i>Move points
+                                </label>
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditDraw"
+                                       value="draw">
+                                <label class="btn btn-outline-secondary" for="lineEditDraw"
+                                       title="Draw a new outline: click points or hold and trace; Enter or double-click closes it">
+                                    <i class="icon-base bx bx-pen icon-sm me-1" aria-hidden="true"></i>Draw
+                                </label>
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditRectangle"
+                                       value="rectangle">
+                                <label class="btn btn-outline-secondary" for="lineEditRectangle" title="Drag a box over the writing">
+                                    <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>Rectangle
+                                </label>
+                            </div>
+                            <div class="line-edit-toolbar__actions">
+                                <button type="button" class="btn btn-sm btn-label-secondary" id="lineEditCancel">Cancel</button>
+                                <button type="button" class="btn btn-sm btn-primary" id="lineEditSave">
+                                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>Save and re-read
+                                </button>
+                            </div>
+                            <div class="line-edit-toolbar__status" id="lineEditStatus" role="status" aria-live="polite"></div>
+                        </div>
+
                         <div class="doc-viewport validation-doc-viewport" id="validationDocViewport">
                             <div class="doc-stage" id="validationDocStage">
                                 <canvas id="validationPageCanvas"></canvas>
@@ -285,7 +430,8 @@
 
                         <footer class="validation-pane__hint">
                             <i class="icon-base bx bx-scan" aria-hidden="true"></i>
-                            Orange shows the complete person row; green identifies the exact field.
+                            Orange shows the complete person row; green identifies the exact field;
+                            red outlines need review.
                             Hold <kbd>Ctrl</kbd> and scroll to zoom or drag to move.
                         </footer>
                     </section>
@@ -329,6 +475,15 @@
                                    placeholder="As written on the certificate">
                         </div>
 
+                        {{-- Filled in when the page job has something to say about the grid as a whole. --}}
+                        <div class="grid-notes d-none" id="verifyNotes" role="status" aria-live="polite">
+                            <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
+                            <div>
+                                <strong>Check the grid before you verify</strong>
+                                <ul class="grid-notes__list" id="verifyNotesList"></ul>
+                            </div>
+                        </div>
+
                         <div class="validation-record-list-heading">
                             <div>
                                 <i class="icon-base bx bx-list-check" aria-hidden="true"></i>
@@ -350,7 +505,9 @@
                                 </button>
                                 <button class="btn btn-primary" type="submit" id="submitBtn" disabled>
                                     <i class="icon-base bx bx-check-shield icon-sm me-1"></i>
-                                    Submit <span id="submitVerifiedCount">0</span> verified
+                                    {{-- One inline span: .btn is a flex container, which drops the
+                                         spaces between separate text and element children. --}}
+                                    <span>Submit <span id="submitVerifiedCount">0</span> verified</span>
                                 </button>
                             </div>
                         </footer>
@@ -394,12 +551,56 @@
         </div>
     </div>
 
+    {{-- Confirm submitting a record that leaves required fields out --}}
+    <div class="modal fade" id="missingRequiredModal" tabindex="-1"
+         aria-labelledby="missingRequiredModalTitle" aria-describedby="missingRequiredModalDescription"
+         aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable missing-required-dialog">
+            <div class="modal-content missing-required-modal">
+                <div class="modal-header">
+                    <div class="missing-required-modal__heading">
+                        <span class="missing-required-modal__icon bg-label-warning" aria-hidden="true">
+                            <i class="icon-base bx bx-error"></i>
+                        </span>
+                        <div>
+                            <h5 class="modal-title" id="missingRequiredModalTitle">Submit without required fields?</h5>
+                            <p class="missing-required-modal__summary" id="missingRequiredModalDescription">
+                                The record would be saved without the following.
+                            </p>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                            aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body">
+                    <ul class="missing-required-list" id="missingRequiredList"></ul>
+                    <p class="missing-required-modal__note">
+                        <i class="icon-base bx bx-history" aria-hidden="true"></i>
+                        <span>Submit anyway only if the page really leaves them blank. The audit log records what was left out.</span>
+                    </p>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal"
+                            id="missingRequiredBackBtn">
+                        <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>
+                        Go back
+                    </button>
+                    <button type="button" class="btn btn-warning" id="confirmMissingRequiredBtn">
+                        Submit anyway
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- OCR progress while the model runs --}}
     <div class="modal fade" id="scanningModal" tabindex="-1" data-bs-backdrop="static"
          data-bs-keyboard="false" aria-hidden="true">
         <div class="modal-dialog modal-sm modal-dialog-centered">
             <div class="modal-content ocr-progress-modal text-center">
-                <div class="modal-body p-4 p-sm-5">
+                <div class="modal-body p-4 p-sm-5 pb-sm-4">
                     <div class="ocr-progress-ring mx-auto mb-4" id="ocrProgressRing"
                          role="progressbar" aria-label="OCR progress" aria-valuemin="0"
                          aria-valuemax="100" aria-valuenow="0">
@@ -419,6 +620,10 @@
                         <span id="ocrProgressFields">Preparing marked fields</span>
                     </div>
                 </div>
+                {{-- Stops this run and returns to Align; the label names what is running. --}}
+                <div class="ocr-progress-actions">
+                    <button type="button" class="btn btn-danger w-100" id="ocrProgressCancel">Cancel</button>
+                </div>
             </div>
         </div>
     </div>
@@ -429,23 +634,45 @@
     import {
         canVerifyValue,
         FieldMarker,
+        markerAngleMetadata,
+        markerColumnMetadata,
         markerPersonMetadata,
         verificationGroupState,
     } from '{{ Vite::asset('resources/js/field-marker.js') }}';
     import { attachMarqueeSelection } from '{{ Vite::asset('resources/js/marquee-selection.js') }}';
     import { setDisclosureExpanded } from '{{ Vite::asset('resources/js/disclosure-motion.js') }}';
+    import {
+        alignedGeometry,
+        detectionSummary,
+        flagExplanation,
+        FLAG_NO_ROW,
+        geometryMarkers,
+        gridNotes,
+        verificationItems,
+    } from '{{ Vite::asset('resources/js/line-geometry.js') }}';
+    import { LineOverlay, polygonBounds } from '{{ Vite::asset('resources/js/line-overlay.js') }}';
+    import { valueProblem } from '{{ Vite::asset('resources/js/value-types.js') }}';
 
     const config = {
         boxes: @json($boxes),
+        ruledYs: @json($ruledYs),
+        templateId: @json($template->getKey()),
         groupingMode: @json(
             $template->grouping_mode instanceof \BackedEnum
                 ? $template->grouping_mode->value
                 : ($template->grouping_mode ?? 'auto')
         ),
         threshold: @json($threshold),
-        maxFields: 450,
+        maxFields: @json(App\Support\Limits::MAX_FIELDS),
         maxFieldNameLength: 500,
-        recogniseUrl: @json(route('documents.recognise')),
+        pagesUrl: @json(route('documents.pages.store')),
+        pageGeometryUrl: @json(route('documents.pages.reoutline', ['page' => '__PAGE__'])),
+        snapUrl: @json(route('documents.pages.snap')),
+        lineUpdateUrl: @json(route('documents.pages.lines.update', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        lineDeleteUrl: @json(route('documents.pages.lines.destroy', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        lineRestoreUrl: @json(route('documents.pages.lines.restore', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        lineStoreUrl: @json(route('documents.pages.lines.store', ['page' => '__PAGE__'])),
+        pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
         csrf: @json(csrf_token()),
         paper: {!! Illuminate\Support\Js::encode([
             'sizeLabel' => $template->paper_size->label(),
@@ -483,8 +710,11 @@
     const selectAllFieldsInput = requiredInput(document, '#selectAllFields');
 
     let scanFile = null;
+    // One entry per outlined line of the processed page (see verificationItems).
     let cropped = [];
     let readings = [];
+    let processedPage = null;
+    let editingLineIndex = null;
     let fieldHistory = [];
     let currentFieldSnapshot = null;
     let restoringFieldHistory = false;
@@ -515,6 +745,8 @@
         marquee: el('staffFieldSelectionMarquee'),
     });
 
+    // Zoom and pan for the Verify page. It holds no boxes: the outlines are
+    // drawn by lineOverlay, one SVG stretched over the same canvas.
     const validationMarker = new FieldMarker({
         canvas: el('validationPageCanvas'),
         overlay: el('validationFieldOverlay'),
@@ -524,8 +756,33 @@
         onZoomChange: updateValidationZoomUI,
     });
 
+    const lineOverlay = new LineOverlay({
+        container: el('validationFieldOverlay'),
+        onSelect: (index) => activateValidationField(index, 'marker'),
+        onModeChange: (mode) => showVerifyLineMode(mode),
+        onDraftChange: (points) => showVerifyDraft(points),
+    });
+
+    // Detect's preview in the Align step: outlines and fitted row lines over
+    // the page, read-only so the markers underneath stay draggable.
+    const alignPreview = new LineOverlay({
+        container: markerOverlay,
+        preview: true,
+        onSelect: (index) => selectLine(index),
+        onBackground: () => selectLine(null),
+        onEdit: (polygon, final) => lineEdited(polygon, final),
+        onModeChange: (mode) => showLineMode(mode),
+        onDraftChange: (points) => showDraft(points),
+        selectWhileEditing: true,
+    });
+
+    // What Detect found on this page and the markers it fitted. Scan with OCR
+    // reads Detect's crops only while the markers are still exactly these;
+    // once Staff move one, the page is outlined again from their markers.
+    let detection = null;
+
     const cloneBoxes = (boxes) => boxes.map(({
-        name, x, y, w, h, personGroup, personFieldOrder,
+        name, x, y, w, h, personGroup, personFieldOrder, kind, columnIndex, angle,
     }) => ({
         name,
         x,
@@ -533,6 +790,8 @@
         w,
         h,
         ...markerPersonMetadata({ personGroup, personFieldOrder }),
+        ...markerColumnMetadata({ kind, columnIndex }),
+        ...markerAngleMetadata({ angle }),
     }));
     const templateBoxes = config.boxes.map((box) => ({
         name: box.name,
@@ -541,7 +800,17 @@
         w: +box.w,
         h: +box.h,
         ...markerPersonMetadata(box),
+        ...markerColumnMetadata(box),
+        ...markerAngleMetadata(box),
     }));
+    const templateColumns = templateBoxes.filter((box) => box.kind === 'column');
+
+    // What each template field and ledger column holds and how its value is
+    // checked (Template Builder settings), by name: a line is read under its
+    // field's or column's name.
+    const nameKey = (name) => String(name ?? '').trim().toLowerCase();
+    const templateSettings = new Map(config.boxes.map((box) => [nameKey(box.name), box]));
+    const settingsFor = (index) => templateSettings.get(nameKey(cropped[index]?.label)) ?? null;
 
     function fieldsMatchTemplate() {
         return JSON.stringify(marker.toJSON()) === JSON.stringify(templateBoxes);
@@ -565,6 +834,931 @@
         currentFieldSnapshot = next;
         renderFieldList(boxes);
         updateResetUI();
+        syncDetection();
+    }
+
+    // ------------------------------------------------------------- detection
+    // Detect's outlines were split at, and placed by, the markers as Detect
+    // left them. Moving a marker sets the result aside (Scan with OCR then
+    // outlines the page afresh); undoing back to those markers brings it back,
+    // line adjustments included. `stale` is for good: the detected page can no
+    // longer be read (a failed read, a cancelled run).
+    function detectionIsCurrent() {
+        return detection !== null && !detection.stale
+            && JSON.stringify(marker.toJSON()) === detection.snapshot;
+    }
+
+    function syncDetection() {
+        if (!detection || detection.stale) return;
+        const current = JSON.stringify(marker.toJSON()) === detection.snapshot;
+        if (!current && !detection.setAside) setDetectionAside();
+        else if (current && detection.setAside) restoreDetection();
+    }
+
+    function setDetectionAside() {
+        const changed = detection.page.lines.filter((line) => line.adjusted || isLineUnsaved(line)).length;
+        setLineEditing(false);
+        detection.setAside = true;
+        alignPreview.setVisible(false);
+        el('lineEditToggle').disabled = true;
+        el('detectSummaryTitle').textContent = 'Markers moved after Detect';
+        // Outlining again reuses the lines Detect found on this page, so it
+        // takes seconds; only the adjusted outlines cannot come with it.
+        el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers, '
+            + 'reusing the lines Detect found. Undo (Ctrl+Z) to bring the Detect result back'
+            + (changed > 0 ? ` with your ${changed} line adjustment${changed === 1 ? '' : 's'}` : '')
+            + ', or Detect again to refit the markers.';
+        el('detectSummary').classList.add('is-stale');
+        // The notes describe Detect's grid, which is set aside now.
+        fillGridNotes(el('detectSummaryNotes'), []);
+    }
+
+    /** The detected page can no longer be read: undo cannot bring it back either. */
+    function retireDetection() {
+        if (!detection) return;
+        detection.stale = true;
+        if (detection.setAside) {
+            el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers. '
+                + 'Detect again to refit them.';
+        }
+    }
+
+    function restoreDetection() {
+        detection.setAside = false;
+        alignPreview.setVisible(true);
+        el('lineEditToggle').disabled = detection.page.lines.length === 0;
+        el('detectSummary').classList.remove('is-stale');
+        showDetectionSummary();
+    }
+
+    function clearDetection() {
+        setLineEditing(false);
+        resetLineHistory();
+        detection = null;
+        alignPreview.clear();
+        el('detectSummary').classList.add('d-none');
+        el('detectSummary').classList.remove('is-stale', 'has-review', 'has-notes');
+        fillGridNotes(el('detectSummaryNotes'), []);
+    }
+
+    /**
+     * Show what Detect found: the page as it was straightened, the markers
+     * fitted to this page's own table, and every outline it will read.
+     */
+    async function applyDetection(page) {
+        // The same pixels the outlines were found on, and that go on to TrOCR.
+        await marker.loadFromUrl(page.imageUrl);
+        updatePaperMatchWarning();
+        fetchSnapLines();
+        const fitted = cloneBoxes(geometryMarkers(page.geometry, page));
+        marker.setBoxes(fitted);
+        window.requestAnimationFrame(() => marker.resetZoom());
+
+        setLineEditing(false);
+        detection = {
+            page,
+            snapshot: JSON.stringify(marker.toJSON()),
+            stale: false,
+            setAside: false,
+            columns: fitted.filter((box) => box.kind === 'column'),
+            // The detector's outlines, for Reset line.
+            originalOutlines: new Map(page.lines.map((line) => [line.id, line.polygon.map((point) => [...point])])),
+        };
+        resetLineHistory();
+
+        alignPreview.setLines(page, verificationItems(page.lines, page));
+        const columns = page.geometry?.columns ?? [];
+        if (columns.length > 0) {
+            const left = Math.min(...columns.map((column) => column.box[0])) * page.width;
+            const right = Math.max(...columns.map((column) => column.box[0] + column.box[2])) * page.width;
+            alignPreview.setGuides((page.geometry?.ruled_ys ?? [])
+                .map((y) => [left, y * page.height, right, y * page.height]));
+        } else {
+            alignPreview.setGuides([]);
+        }
+        alignPreview.setVisible(true);
+
+        el('detectSummary').classList.remove('d-none', 'is-stale');
+        el('lineEditToggle').disabled = page.lines.length === 0;
+        showDetectionSummary();
+    }
+
+    // ------------------------------------------------------- line editing
+    // After Detect, each outline can be clicked, stretched by its handles,
+    // grown/shrunk, have its corners moved, or be drawn anew, with a live
+    // preview of the crop TrOCR will read. Changes stay here until the
+    // reviewer presses Save crop: only then is the line re-cropped on the
+    // server (not read). Scan with OCR reads the saved crops, and offers to
+    // save any line still unsaved. The field markers are locked meanwhile:
+    // moving one sets Detect's result and these adjustments aside until the
+    // move is undone.
+
+    const LINE_GROW_STEP = 2;
+    const LINE_MODE_HINTS = {
+        box: 'Drag the handles to stretch. + / − grow or shrink. Save crop (Ctrl+S) keeps the change. Ctrl+Z undo, Ctrl+Y redo. Tab: next line. Esc: done.',
+        points: 'Drag a corner to move it. Drag a small dot between corners to add one. Delete (or double-click) removes the corner last touched. Ctrl+Z undo.',
+        draw: 'Click to place as many points as you like, or hold and trace. Then press Use this outline, Enter, or double-click, or click the first point. Ctrl+Z takes back the last point. Esc cancels.',
+    };
+    let lineEditing = false;
+    let editedLineIndex = null;
+    let lineSaveQueue = Promise.resolve();
+    // Undo and redo of outline changes: each entry is one line before and
+    // after one change. lineShown is each line as last changed here; a line
+    // whose shown outline differs from its saved one is unsaved.
+    // Each entry is one undoable step: an outline change ({id, before, after}),
+    // or a line removed or drawn ({kind, id, position}), which are put back and
+    // taken away again on the server.
+    let lineUndo = [];
+    let lineRedo = [];
+    let lineShown = new Map();
+    // True while a new outline is being drawn for a line that does not exist yet.
+    let addingLine = false;
+
+    function resetLineHistory() {
+        lineUndo = [];
+        lineRedo = [];
+        lineShown = new Map();
+        updateLineHistoryButtons();
+    }
+
+    function updateLineHistoryButtons() {
+        el('lineUndoBtn').disabled = lineUndo.length === 0;
+        el('lineRedoBtn').disabled = lineRedo.length === 0;
+    }
+
+    function shownLine(index) {
+        const line = detection.page.lines[index];
+        return lineShown.get(line.id) ?? { polygon: line.polygon.map((point) => [...point]), adjusted: Boolean(line.adjusted) };
+    }
+
+    /** Remember one change to a line, so it can be undone. */
+    function recordLineChange(index, polygon, adjusted) {
+        const id = detection.page.lines[index].id;
+        const after = { polygon: polygon.map((point) => [...point]), adjusted };
+        lineUndo.push({ id, before: shownLine(index), after });
+        if (lineUndo.length > 200) lineUndo.shift();
+        lineRedo = [];
+        lineShown.set(id, after);
+        updateLineHistoryButtons();
+        lineChanged(index);
+    }
+
+    /** Is this line's outline here different from the one saved on the server? */
+    function isLineUnsaved(line) {
+        const shown = lineShown.get(line.id);
+        if (!shown) return false;
+        return shown.adjusted !== Boolean(line.adjusted)
+            || JSON.stringify(shown.polygon) !== JSON.stringify(line.polygon);
+    }
+
+    function unsavedLineCount() {
+        return detection ? detection.page.lines.filter(isLineUnsaved).length : 0;
+    }
+
+    /** Redraw a changed line and the save state everywhere it shows. */
+    function lineChanged(index) {
+        alignPreview.updateLine(index, lineItems()[index]);
+        showDetectionSummary();
+        if (editedLineIndex !== index) return;
+        const unsaved = isLineUnsaved(detection.page.lines[index]);
+        el('lineSaveBtn').disabled = !unsaved;
+        el('lineDiscardBtn').disabled = !unsaved;
+        el('lineResetBtn').disabled = !shownLine(index).adjusted;
+        const status = el('lineAdjustStatus');
+        status.classList.remove('is-error');
+        status.textContent = unsaved
+            ? 'Not saved yet. Press Save crop (Ctrl+S) to make this the crop.'
+            : 'Same as the saved crop.';
+    }
+
+    /** Put a line back to a remembered outline (undo, redo, reset, discard). */
+    function applyLineState(id, state) {
+        const index = detection?.page.lines.findIndex((line) => line.id === id) ?? -1;
+        if (index < 0) return;
+        if (editedLineIndex !== index) selectLine(index);
+        if (alignPreview.editing?.mode !== 'box') alignPreview.setEditMode('box');
+        alignPreview.setEditedPolygon(state.polygon, { notify: false });
+        drawLineThumbnail(state.polygon);
+        lineShown.set(id, { polygon: state.polygon.map((point) => [...point]), adjusted: state.adjusted });
+        lineChanged(index);
+    }
+
+    /**
+     * One step back or forward. An outline change is undone here; a line
+     * removed or drawn is put back or taken away on the server, so undo means
+     * the same thing to Scan with OCR as it does on screen.
+     */
+    function stepLineHistory(from, to, forward) {
+        const entry = from.pop();
+        if (!entry) return false;
+        to.push(entry);
+        updateLineHistoryButtons();
+
+        // 'delete' undone puts the line back; 'add' undone takes it away.
+        const puttingBack = entry.kind === 'delete' ? !forward : forward;
+        if (entry.kind === 'delete' || entry.kind === 'add') {
+            runLineChange(
+                () => (puttingBack ? restoreLine(entry.id) : removeLine(entry.id)),
+                puttingBack ? 'The line could not be put back.' : 'The line could not be taken away.',
+            );
+            return true;
+        }
+
+        applyLineState(entry.id, forward ? entry.after : entry.before);
+        updateLineHistoryButtons();
+        return true;
+    }
+
+    function undoLineChange() {
+        return stepLineHistory(lineUndo, lineRedo, false);
+    }
+
+    function redoLineChange() {
+        return stepLineHistory(lineRedo, lineUndo, true);
+    }
+
+    function lineItems() {
+        if (!detection) return [];
+        const lines = detection.page.lines.map((line) => {
+            const shown = lineShown.get(line.id);
+            return shown ? { ...line, polygon: shown.polygon, adjusted: shown.adjusted } : line;
+        });
+        return verificationItems(lines, detection.page).map((item, index) => ({
+            ...item,
+            unsaved: isLineUnsaved(detection.page.lines[index]),
+        }));
+    }
+
+    function adjustedLineCount() {
+        return detection ? detection.page.lines.filter((line) => line.adjusted).length : 0;
+    }
+
+    function showDetectionSummary() {
+        const summary = detectionSummary(detection.page);
+        const adjusted = adjustedLineCount();
+        const unsaved = unsavedLineCount();
+        el('detectSummaryTitle').textContent = summary.title;
+        el('detectSummaryText').textContent = summary.text
+            + (adjusted > 0 ? ` · ${adjusted} line${adjusted === 1 ? '' : 's'} adjusted` : '')
+            + (unsaved > 0 ? ` · ${unsaved} not saved` : '');
+        el('detectSummary').classList.toggle('has-review', summary.flagged > 0);
+        el('detectSummary').classList.toggle('has-notes', summary.notes.length > 0);
+        fillGridNotes(el('detectSummaryNotes'), summary.notes);
+    }
+
+    /** One list item per note; the list hides itself when there is nothing to say. */
+    function fillGridNotes(list, notes) {
+        list.replaceChildren(...notes.map((text) => {
+            const item = document.createElement('li');
+            item.textContent = text;
+            return item;
+        }));
+        list.classList.toggle('d-none', notes.length === 0);
+    }
+
+    /** In Verify: the same notes, above the people, so they are read before anything is verified. */
+    function showGridNotes(page) {
+        const notes = gridNotes(page?.notes);
+        fillGridNotes(el('verifyNotesList'), notes);
+        el('verifyNotes').classList.toggle('d-none', notes.length === 0);
+    }
+
+    function setLineEditing(on) {
+        const allowed = on && detection !== null && !detection.stale && !detection.setAside
+            && detection.page.lines.length > 0;
+        if (!allowed && lineEditing) applyOpenDrawing();
+        if (!allowed) {
+            addingLine = false;
+            editedLineIndex = null;
+            alignPreview.cancelEdit();
+            alignPreview.setSelection([]);
+        }
+        lineEditing = allowed;
+        el('lineEditToggle').checked = allowed;
+        updateAddLineButton();
+        alignPreview.setInteractive(allowed);
+        markerOverlay.classList.toggle('is-editing-lines', allowed);
+        if (allowed) {
+            // Editing needs the outlines on screen.
+            alignPreview.setVisible(true);
+            marker.clearSelection();
+            el('lineAdjustCard').classList.remove('d-none');
+            if (editedLineIndex === null) showLineCard(null);
+            revealLineCard();
+        } else {
+            el('lineAdjustCard').classList.add('d-none');
+        }
+    }
+
+    el('lineEditToggle').addEventListener('change', (event) => {
+        setLineEditing(event.currentTarget.checked);
+        // Off the switch, so the line keys (Tab, +, -, Esc) work at once.
+        event.currentTarget.blur();
+    });
+
+    function selectLine(index) {
+        if (!lineEditing) return;
+        if (index !== editedLineIndex) applyOpenDrawing();
+        addingLine = false;
+        if (index === null || !detection?.page.lines[index]) {
+            editedLineIndex = null;
+            alignPreview.cancelEdit();
+            alignPreview.setSelection([]);
+            showLineCard(null);
+            return;
+        }
+        editedLineIndex = index;
+        alignPreview.setSelection([index], index);
+        alignPreview.beginEdit(index, 'box');
+        showLineCard(index);
+        showLineMode('box');
+        // Bring it into view when Tab moved to a line off screen.
+        alignPreview.groups[index]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+        revealLineCard();
+    }
+
+    /**
+     * Scroll the side panel down to the line tools: the Detect summary at the
+     * top of the view (or as near as the panel scrolls), then the line card
+     * and the Detect / Scan buttons below it.
+     */
+    function revealLineCard() {
+        const card = el('lineAdjustCard');
+        if (card.classList.contains('d-none')) return;
+        window.requestAnimationFrame(() => {
+            const panel = card.closest('.document-side-panel');
+            if (!panel || panel.scrollHeight <= panel.clientHeight + 1) {
+                // A stacked (narrow) layout scrolls the page instead.
+                card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                return;
+            }
+            const summary = el('detectSummary');
+            const summaryTop = summary.getBoundingClientRect().top - panel.getBoundingClientRect().top + panel.scrollTop;
+            const bottom = panel.scrollHeight - panel.clientHeight;
+            panel.scrollTo({ top: Math.max(0, Math.min(bottom, summaryTop - 12)), behavior: 'smooth' });
+        });
+    }
+
+    function showLineCard(index) {
+        const items = lineItems();
+        const item = index === null ? null : items[index];
+        const line = index === null ? null : detection.page.lines[index];
+        el('lineAdjustName').textContent = item ? item.name : 'Click a line on the page';
+        el('lineAdjustPosition').textContent = item ? `${index + 1} of ${items.length}` : '';
+        const note = item ? flagExplanation(item.flags) : '';
+        el('lineAdjustNote').textContent = note;
+        el('lineAdjustNote').classList.toggle('d-none', note === '');
+        el('lineAdjustActions').querySelectorAll('button').forEach((button) => { button.disabled = !item; });
+        el('lineDeleteBtn').disabled = !item;
+        updateAddLineButton();
+        // Undo and redo follow the history, whichever line is selected.
+        updateLineHistoryButtons();
+        el('lineModeGroup').querySelectorAll('input').forEach((input) => { input.disabled = !item; });
+        if (!item) el('lineDrawActions').classList.add('d-none');
+        el('lineAdjustHint').textContent = item
+            ? LINE_MODE_HINTS.box
+            : 'Click an outline on the page to adjust it, or Add line to draw one the detector missed.';
+        const unsaved = Boolean(line && isLineUnsaved(line));
+        el('lineResetBtn').disabled = !(line && shownLine(index).adjusted);
+        el('lineSaveBtn').disabled = !unsaved;
+        el('lineDiscardBtn').disabled = !unsaved;
+        el('lineAdjustStatus').textContent = unsaved ? 'Not saved yet. Press Save crop (Ctrl+S) to make this the crop.' : '';
+        el('lineAdjustStatus').classList.remove('is-error');
+        drawLineThumbnail(item ? item.polygon : null);
+    }
+
+    /** The crop TrOCR will read: the page inside the outline, with a margin. */
+    function drawLineThumbnail(polygon) {
+        const canvas = el('lineAdjustThumb');
+        const source = marker.canvas;
+        if (!polygon || polygon.length < 3 || !source.width) {
+            canvas.width = 1;
+            canvas.height = 1;
+            canvas.classList.add('is-empty');
+            return;
+        }
+        const pad = 8;
+        const bounds = polygonBounds(polygon);
+        const left = Math.max(0, Math.floor(bounds.left - pad));
+        const top = Math.max(0, Math.floor(bounds.top - pad));
+        const right = Math.min(source.width, Math.ceil(bounds.right + pad));
+        const bottom = Math.min(source.height, Math.ceil(bounds.bottom + pad));
+        canvas.width = Math.max(1, right - left);
+        canvas.height = Math.max(1, bottom - top);
+        canvas.classList.remove('is-empty');
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.save();
+        context.beginPath();
+        polygon.forEach(([x, y], i) => (i === 0 ? context.moveTo(x - left, y - top) : context.lineTo(x - left, y - top)));
+        context.closePath();
+        context.clip();
+        context.drawImage(source, -left, -top);
+        context.restore();
+    }
+
+    function lineEdited(polygon, final) {
+        if (!lineEditing) return;
+        // A line being drawn from nothing belongs to no line yet: closing it
+        // makes one, rather than changing an outline.
+        if (addingLine) {
+            drawLineThumbnail(polygon);
+            if (final) createDrawnLine(polygon);
+            return;
+        }
+        if (editedLineIndex === null) return;
+        drawLineThumbnail(polygon);
+        if (!final) return;
+        // Pressing a corner without moving it (to pick it for Delete) changes nothing.
+        if (JSON.stringify(polygon) === JSON.stringify(shownLine(editedLineIndex).polygon)) return;
+        recordLineChange(editedLineIndex, polygon, true);
+    }
+
+    /** Save crop: the selected line's outline becomes its crop. */
+    function saveSelectedLine() {
+        if (!lineEditing || editedLineIndex === null) return;
+        applyOpenDrawing();
+        const index = editedLineIndex;
+        if (!isLineUnsaved(detection.page.lines[index])) return;
+        const shown = shownLine(index);
+        // Back to the detector's own outline counts as not adjusted.
+        saveLine(index, shown.polygon, { reset: !shown.adjusted });
+    }
+
+    /** Discard: back to the last saved outline (undoable). */
+    function discardSelectedLine() {
+        if (!lineEditing || editedLineIndex === null) return;
+        if (alignPreview.editing?.mode === 'draw') alignPreview.setEditMode('box');
+        const line = detection.page.lines[editedLineIndex];
+        if (!isLineUnsaved(line)) return;
+        const saved = { polygon: line.polygon.map((point) => [...point]), adjusted: Boolean(line.adjusted) };
+        recordLineChange(editedLineIndex, saved.polygon, saved.adjusted);
+        applyLineState(line.id, saved);
+    }
+
+    /** Save every unsaved line, and wait for all saves to finish. */
+    function saveAllUnsavedLines() {
+        detection?.page.lines.forEach((line, index) => {
+            if (!isLineUnsaved(line)) return;
+            const shown = shownLine(index);
+            saveLine(index, shown.polygon, { reset: !shown.adjusted });
+        });
+        return lineSaveQueue;
+    }
+
+    /**
+     * Take a deleted line out of everything that remembers it: the page's own
+     * line list, its outline history, and what the overlay draws. Moves the
+     * card on to whichever line now sits where the deleted one was, so a run
+     * of stray lines can be cleared one after another.
+     */
+    function removeLineLocally(id, flagsById = {}) {
+        if (!detection) return null;
+        const removedIndex = detection.page.lines.findIndex((line) => line.id === id);
+        if (removedIndex === -1) return null;
+
+        detection.page.lines = detection.page.lines
+            .filter((line) => line.id !== id)
+            .map((line) => {
+                const flags = flagsById[line.id];
+                return Array.isArray(flags) ? { ...line, flags } : line;
+            });
+        // Its outline history is kept: a line put back is the same line, and
+        // the delete is always the newest step on it, so undo reaches it first.
+        lineShown.delete(id);
+
+        editedLineIndex = null;
+        alignPreview.setLines(detection.page, lineItems());
+        el('lineEditToggle').disabled = detection.page.lines.length === 0;
+        showDetectionSummary();
+
+        if (detection.page.lines.length === 0) {
+            setLineEditing(false);
+            return removedIndex;
+        }
+        selectLine(Math.min(removedIndex, detection.page.lines.length - 1));
+        return removedIndex;
+    }
+
+    /**
+     * Put a line into the page where the server has it: back after a delete,
+     * or newly drawn. Lines are held in the server's own order (position), so
+     * one that comes back lands where it was.
+     */
+    function insertLineLocally(line, flagsById = {}) {
+        if (!detection) return;
+        const lines = detection.page.lines
+            .filter((existing) => existing.id !== line.id)
+            .map((existing) => {
+                const flags = flagsById[existing.id];
+                return Array.isArray(flags) ? { ...existing, flags } : existing;
+            });
+        const at = lines.findIndex((existing) => Number(existing.position) > Number(line.position));
+        const index = at === -1 ? lines.length : at;
+        lines.splice(index, 0, line);
+        detection.page.lines = lines;
+        detection.originalOutlines.set(line.id, line.polygon.map((point) => [...point]));
+        lineShown.delete(line.id);
+
+        if (!lineEditing) setLineEditing(true);
+        alignPreview.setLines(detection.page, lineItems());
+        el('lineEditToggle').disabled = false;
+        showDetectionSummary();
+        selectLine(index);
+    }
+
+    /** One call to the server about a whole line, with the usual headers. */
+    async function lineRequest(url, method) {
+        const response = await fetch(url, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok) {
+            throw new Error(payload?.message || `The line could not be changed (HTTP ${response.status}).`);
+        }
+        return payload ?? {};
+    }
+
+    const lineUrl = (template, id) => template
+        .replace('__PAGE__', String(detection.page.id))
+        .replace('__LINE__', String(id));
+
+    /** Tell the reviewer what happened to a line, in the card's status line. */
+    function showLineStatus(message, isError = false) {
+        const status = el('lineAdjustStatus');
+        status.textContent = message;
+        status.classList.toggle('is-error', isError);
+    }
+
+    /**
+     * Delete: take the selected line out of the page. It is kept on the server
+     * until the page is outlined again, so Ctrl+Z puts it back; nothing reads
+     * or submits it meanwhile.
+     */
+    function deleteSelectedLine() {
+        if (!lineEditing || editedLineIndex === null) return Promise.resolve();
+        applyOpenDrawing();
+        const line = detection?.page.lines[editedLineIndex];
+        if (!line) return Promise.resolve();
+
+        const name = lineItems()[editedLineIndex]?.name ?? 'That line';
+        return runLineChange(async () => {
+            // A second press before the first was applied has nothing to do.
+            if (!detection?.page.lines.some((existing) => existing.id === line.id)) return;
+            const payload = await lineRequest(lineUrl(config.lineDeleteUrl, line.id), 'DELETE');
+            const at = removeLineLocally(line.id, payload.flags ?? {});
+            if (at === null) return;
+            lineUndo.push({ kind: 'delete', id: line.id });
+            lineRedo = [];
+            updateLineHistoryButtons();
+            showLineStatus(`${name} deleted. Ctrl+Z puts it back.`);
+        }, 'The line could not be deleted.');
+    }
+
+    /** Put a deleted line back where it was (undo), or take a drawn one away again. */
+    async function restoreLine(id) {
+        const payload = await lineRequest(lineUrl(config.lineRestoreUrl, id), 'POST');
+        if (payload.line) insertLineLocally(payload.line, payload.flags ?? {});
+    }
+
+    async function removeLine(id) {
+        const payload = await lineRequest(lineUrl(config.lineDeleteUrl, id), 'DELETE');
+        removeLineLocally(id, payload.flags ?? {});
+    }
+
+    /** Start drawing a line where the detector found none. */
+    function startAddingLine() {
+        if (!lineEditing) return;
+        applyOpenDrawing();
+        addingLine = true;
+        editedLineIndex = null;
+        alignPreview.setSelection([]);
+        alignPreview.beginDraw();
+        el('lineAdjustName').textContent = 'Drawing a new line';
+        el('lineAdjustPosition').textContent = '';
+        el('lineAdjustNote').classList.add('d-none');
+        el('lineAdjustActions').querySelectorAll('button').forEach((button) => { button.disabled = true; });
+        el('lineDeleteBtn').disabled = true;
+        el('lineModeGroup').querySelectorAll('input').forEach((input) => { input.disabled = true; });
+        el('lineAdjustHint').textContent = LINE_MODE_HINTS.draw;
+        updateAddLineButton();
+        revealLineCard();
+    }
+
+    function cancelAddingLine() {
+        if (!addingLine) return;
+        addingLine = false;
+        alignPreview.cancelEdit();
+        updateAddLineButton();
+        showLineCard(null);
+    }
+
+    function updateAddLineButton() {
+        const button = el('lineAddBtn');
+        button.disabled = !lineEditing;
+        button.classList.toggle('active', addingLine);
+    }
+
+    /** A drawn outline becomes a line of its own on the server. */
+    function createDrawnLine(polygon) {
+        addingLine = false;
+        updateAddLineButton();
+        if (!detection) return Promise.resolve();
+
+        showLineStatus('Adding the line…');
+        return runLineChange(async () => {
+            const response = await fetch(config.lineStoreUrl.replace('__PAGE__', String(detection.page.id)), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ polygon }),
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            if (!response.ok || !payload?.line) {
+                throw new Error(payload?.message || `The line could not be added (HTTP ${response.status}).`);
+            }
+            insertLineLocally(payload.line, payload.flags ?? {});
+            lineUndo.push({ kind: 'add', id: payload.line.id });
+            lineRedo = [];
+            updateLineHistoryButtons();
+            showLineStatus('Line added. Ctrl+Z takes it away again.');
+        }, 'The line could not be added.');
+    }
+
+    /** Run one whole-line change on the save queue, reporting failures in the card. */
+    function runLineChange(work, failure) {
+        lineSaveQueue = lineSaveQueue.then(work).catch((error) => {
+            console.error(failure, error);
+            showLineStatus(error.message || failure, true);
+        });
+        return lineSaveQueue;
+    }
+
+    el('lineSaveBtn').addEventListener('click', saveSelectedLine);
+    el('lineDiscardBtn').addEventListener('click', discardSelectedLine);
+    el('lineDeleteBtn').addEventListener('click', deleteSelectedLine);
+    el('lineAddBtn').addEventListener('click', () => (addingLine ? cancelAddingLine() : startAddingLine()));
+
+    /** Keep the Stretch / Points / Draw switch and its hint in step with the overlay. */
+    function showLineMode(mode) {
+        const input = el('lineModeGroup').querySelector(`input[value="${mode}"]`);
+        if (input) input.checked = true;
+        el('lineDrawActions').classList.toggle('d-none', mode !== 'draw' || editedLineIndex === null);
+        if (editedLineIndex !== null) {
+            el('lineAdjustHint').textContent = LINE_MODE_HINTS[mode] ?? '';
+            // The preview shows the outline in force until a drawing has three points.
+            const polygon = alignPreview.editedPolygon();
+            if (polygon) drawLineThumbnail(polygon);
+        }
+    }
+
+    function showDraft(points) {
+        el('lineDrawUseBtn').disabled = points < 3;
+        if (editedLineIndex === null || alignPreview.editing?.mode !== 'draw') return;
+        const status = el('lineAdjustStatus');
+        status.classList.remove('is-error');
+        status.textContent = points === 0
+            ? 'Click round the writing, or hold and trace.'
+            : points < 3
+                ? `${points} point${points === 1 ? '' : 's'}. At least 3 to make an outline.`
+                : `${points} points. The preview shows the new crop: press Use this outline (or Enter) to keep it.`;
+        if (points < 3) drawLineThumbnail(alignPreview.editedPolygon());
+    }
+
+    /**
+     * A drawing of three points or more is applied, not lost, when the
+     * reviewer moves on without closing it (another mode, another line,
+     * Adjust line crops off, Scan with OCR). Only Esc or Cancel throw it away.
+     */
+    function applyOpenDrawing() {
+        return alignPreview.isDrawing() && alignPreview.finishDrawing();
+    }
+
+    /** Close the drawing, or say why it cannot be an outline yet. */
+    function useDrawing() {
+        if (alignPreview.finishDrawing()) return;
+        const status = el('lineAdjustStatus');
+        status.textContent = 'This drawing has no height or width to crop. Add points round the writing.';
+        status.classList.add('is-error');
+    }
+
+    el('lineDrawUseBtn').addEventListener('click', useDrawing);
+    el('lineDrawCancelBtn').addEventListener('click', () => alignPreview.setEditMode('box'));
+
+    el('lineModeGroup').addEventListener('change', (event) => {
+        if (!(event.target instanceof HTMLInputElement) || editedLineIndex === null) return;
+        const target = event.target.value;
+        if (target !== 'draw' && applyOpenDrawing()) {
+            // The drawing is the outline now (and the mode is Stretch).
+            if (target !== 'box') alignPreview.setEditMode(target);
+        } else {
+            alignPreview.setEditMode(target);
+        }
+        // Off the switch, so Enter and Esc reach the drawing.
+        event.target.blur();
+    });
+
+    function growLine(distance) {
+        if (!lineEditing || editedLineIndex === null || alignPreview.editing?.mode === 'draw') return;
+        alignPreview.growEdit(distance);
+    }
+
+    function resetLine() {
+        if (!lineEditing || editedLineIndex === null) return;
+        const line = detection.page.lines[editedLineIndex];
+        const original = detection.originalOutlines.get(line.id);
+        if (!original) return;
+        // A reset is a change like any other: Ctrl+Z brings the adjustment back.
+        recordLineChange(editedLineIndex, original, false);
+        applyLineState(line.id, { polygon: original, adjusted: false });
+    }
+
+    el('lineShrinkBtn').addEventListener('click', () => growLine(-LINE_GROW_STEP));
+    el('lineGrowBtn').addEventListener('click', () => growLine(LINE_GROW_STEP));
+    el('lineResetBtn').addEventListener('click', resetLine);
+    el('lineUndoBtn').addEventListener('click', () => (alignPreview.isDrawing() ? alignPreview.undoDrawStep() : undoLineChange()));
+    el('lineRedoBtn').addEventListener('click', redoLineChange);
+
+    /**
+     * PUT a line's new outline. When the outline sits in another cell than the
+     * line's own, the server saves nothing and says where; the reviewer then
+     * decides whether this field really belongs there (another person's row,
+     * or another column). Resolves to { response, payload }.
+     */
+    async function putLineOutline(url, body) {
+        const send = async (extra) => {
+            const response = await fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ ...body, ...extra }),
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            return { response, payload };
+        };
+
+        const first = await send({});
+        const move = first.payload?.move;
+        if (first.response.status !== 409 || !move) return first;
+
+        const confirmed = window.confirm(
+            `This outline covers writing in ${move.to.column}, row ${move.to.row}.\n`
+            + `The field you are adjusting is ${move.from.column}, row ${move.from.row}.\n\n`
+            + `OK: move this field to ${move.to.column}, row ${move.to.row}.\n`
+            + 'Cancel: keep it where it is (nothing is saved).',
+        );
+        if (!confirmed) {
+            throw new Error(`Not saved: the outline is over ${move.to.column}, row ${move.to.row}. `
+                + `Draw it over ${move.from.column}, row ${move.from.row}, or pick the right field first.`);
+        }
+        return send({ allow_move: true });
+    }
+
+    /** Re-crop one line on the server from its new outline. Saves run one at a time. */
+    function saveLine(index, polygon, { reset = false } = {}) {
+        const page = detection?.page;
+        const line = page?.lines[index];
+        if (!line) return Promise.resolve();
+        const status = el('lineAdjustStatus');
+        status.textContent = 'Saving…';
+        status.classList.remove('is-error');
+
+        lineSaveQueue = lineSaveQueue.then(async () => {
+            if (detection?.page !== page) return;
+            const { response, payload } = await putLineOutline(config.lineUpdateUrl
+                .replace('__PAGE__', String(page.id))
+                .replace('__LINE__', String(line.id)), { polygon, reset });
+            if (!response.ok || !payload?.line) {
+                throw new Error(payload?.message || `The outline could not be saved (HTTP ${response.status}).`);
+            }
+            if (detection?.page !== page) return;
+
+            // One line moved can make or clear a shared cell elsewhere.
+            page.lines = page.lines.map((existing) => {
+                if (existing.id === payload.line.id) return payload.line;
+                const flags = payload.flags?.[existing.id];
+                return Array.isArray(flags) ? { ...existing, flags } : existing;
+            });
+            // Unless it was changed again meanwhile, what is shown is now the
+            // saved outline (the server rounds it to a tenth of a pixel).
+            const shownNow = lineShown.get(line.id);
+            if (!shownNow || JSON.stringify(shownNow.polygon) === JSON.stringify(polygon)) {
+                lineShown.set(line.id, { polygon: payload.line.polygon, adjusted: Boolean(payload.line.adjusted) });
+            }
+            const items = lineItems();
+            items.forEach((item, i) => alignPreview.updateLine(i, item));
+            showDetectionSummary();
+            if (editedLineIndex === index) {
+                const unsaved = isLineUnsaved(page.lines[index]);
+                el('lineSaveBtn').disabled = !unsaved;
+                el('lineDiscardBtn').disabled = !unsaved;
+                el('lineResetBtn').disabled = !shownLine(index).adjusted;
+                const note = flagExplanation(items[index].flags);
+                el('lineAdjustNote').textContent = note;
+                el('lineAdjustNote').classList.toggle('d-none', note === '');
+                status.textContent = unsaved
+                    ? 'Saved an earlier version. Press Save crop again for the latest.'
+                    : reset ? 'Saved: back to the detected outline.' : 'Saved. Scan with OCR reads this crop.';
+            }
+        }).catch((error) => {
+            console.error('Saving the line outline failed:', error);
+            if (editedLineIndex === index) {
+                status.textContent = error.message || 'The outline could not be saved.';
+                status.classList.add('is-error');
+            }
+        });
+        return lineSaveQueue;
+    }
+
+    /** Line editing keys, handled before the marker shortcuts. Returns true when used. */
+    function handleLineEditKey(event) {
+        if (!lineEditing) return false;
+        const items = detection?.page.lines ?? [];
+        // Tab steps through lines while working on the page; in the side
+        // panel it keeps moving focus as usual.
+        const onPage = document.activeElement === document.body
+            || el('docViewport').contains(document.activeElement);
+        if (event.key === 'Tab' && items.length > 0 && onPage) {
+            event.preventDefault();
+            const step = event.shiftKey ? -1 : 1;
+            const from = editedLineIndex ?? (step > 0 ? -1 : 0);
+            selectLine((from + step + items.length) % items.length);
+            return true;
+        }
+        if (['+', '=', 'Add'].includes(event.key) || event.code === 'NumpadAdd') {
+            event.preventDefault();
+            growLine(event.shiftKey && event.key !== '+' ? LINE_GROW_STEP * 3 : LINE_GROW_STEP);
+            return true;
+        }
+        if (['-', '_', 'Subtract'].includes(event.key) || event.code === 'NumpadSubtract') {
+            event.preventDefault();
+            growLine(event.shiftKey ? -LINE_GROW_STEP * 3 : -LINE_GROW_STEP);
+            return true;
+        }
+        if (event.key === 'Enter' && alignPreview.isDrawing()) {
+            event.preventDefault();
+            useDrawing();
+            return true;
+        }
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            // Esc first leaves a drawing or point editing, then the line, then editing.
+            if (addingLine) cancelAddingLine();
+            else if (editedLineIndex !== null && alignPreview.editing && alignPreview.editing.mode !== 'box') alignPreview.setEditMode('box');
+            else if (editedLineIndex !== null) selectLine(null);
+            else setLineEditing(false);
+            return true;
+        }
+        const command = event.ctrlKey || event.metaKey;
+        const key = event.key.toLowerCase();
+        if (command && key === 's') {
+            event.preventDefault();
+            saveSelectedLine();
+            return true;
+        }
+        // Ctrl+Z: the last point while drawing, else the last outline change.
+        if (command && !event.shiftKey && key === 'z') {
+            event.preventDefault();
+            if (!alignPreview.undoDrawStep()) undoLineChange();
+            return true;
+        }
+        if (command && (key === 'y' || (event.shiftKey && key === 'z'))) {
+            event.preventDefault();
+            redoLineChange();
+            return true;
+        }
+        if (['Delete', 'Backspace'].includes(event.key)) {
+            event.preventDefault();
+            // A corner of the outline first (Points mode), then the line itself.
+            if (!alignPreview.deleteActivePoint()) deleteSelectedLine();
+            return true;
+        }
+        // The markers are locked while lines are edited: no marker shortcuts.
+        return ['BracketLeft', 'BracketRight'].includes(event.code) || (command && ['c', 'v'].includes(key));
     }
 
     function resetFieldHistory() {
@@ -629,8 +1823,9 @@
         const takenNames = new Set(existing.map((box) => box.name.toLocaleLowerCase()));
         const copies = markerClipboard.map((box) => {
             // A pasted marker is a new, ad-hoc field. It must not silently join
-            // the original template person's validation group.
-            const { personGroup, personFieldOrder, ...ungroupedBox } = box;
+            // the original template person's validation group, nor become a
+            // second copy of a ledger column.
+            const { personGroup, personFieldOrder, kind, columnIndex, ...ungroupedBox } = box;
 
             return {
                 ...ungroupedBox,
@@ -708,12 +1903,14 @@
 
         try {
             scanFile = file;
+            clearDetection();
             await marker.load(file);
             updatePaperMatchWarning();
             el('selectedFileName').textContent = file.name;
             showStep('mark');
             resetFieldHistory();
             marker.setBoxes(cloneBoxes(templateBoxes));
+            fetchSnapLines();
 
             // The marking section was hidden while the file loaded, so fit only
             // after it becomes measurable in the layout.
@@ -792,6 +1989,7 @@
         selectAllFieldsInput.disabled = boxes.length === 0;
         const constraintMessage = markerSetValidationMessage(boxes);
         el('scanNowBtn').disabled = boxes.length === 0 || constraintMessage !== null;
+        el('detectBtn').disabled = el('scanNowBtn').disabled || scanInProgress;
         el('addFieldBtn').disabled = boxes.length >= config.maxFields;
         el('newFieldName').disabled = boxes.length >= config.maxFields;
         if (constraintMessage) {
@@ -890,10 +2088,14 @@
     function updateZoomUI(zoom) {
         el('zoomResetBtn').textContent = `${Math.round(zoom * 100)}%`;
         updateResetUI();
+        // Line edit handles are sized in page pixels; keep them a constant size on screen.
+        alignPreview?.refresh();
     }
 
     function updateValidationZoomUI(zoom) {
         el('validationZoomResetBtn').textContent = `${Math.round(zoom * 100)}%`;
+        // Edit handles are sized in page pixels; keep them a constant size on screen.
+        lineOverlay?.refresh();
     }
 
     el('zoomOutBtn').addEventListener('click', () => marker.zoomBy(-0.1));
@@ -950,6 +2152,8 @@
             return;
         }
 
+        if (handleLineEditKey(event)) return;
+
         const commandPressed = event.ctrlKey || event.metaKey;
         const key = event.key.toLowerCase();
 
@@ -972,6 +2176,13 @@
         if (undoPressed && fieldHistory.length > 0) {
             event.preventDefault();
             undoFieldChange();
+            return;
+        }
+
+        // [ and ] tilt the selection half a degree; with Shift, five degrees.
+        if (!commandPressed && ['BracketLeft', 'BracketRight'].includes(event.code) && marker.selectedIndexes().length > 0) {
+            event.preventDefault();
+            marker.rotateSelected((event.code === 'BracketLeft' ? -1 : 1) * (event.shiftKey ? 5 : 0.5));
             return;
         }
 
@@ -1016,6 +2227,7 @@
         showStep('upload');
     });
     el('backToMark').addEventListener('click', () => {
+        cancelOutlineEdit();
         clearValidationSubmitError();
         showStep('mark');
     });
@@ -1047,28 +2259,125 @@
         if (note) el('scanningNote').textContent = note;
     }
 
-    function beginOcrProgress(fieldCount) {
+    // The ring creeps toward the current phase's ceiling, then waits for the
+    // page's real status to open the next phase.
+    let ocrProgressCeiling = 12;
+
+    function beginOcrProgress(markerCount) {
         if (ocrProgressTimer !== null) window.clearInterval(ocrProgressTimer);
 
-        el('ocrProgressFields').textContent = `${fieldCount} marked field${fieldCount === 1 ? '' : 's'}`;
-        setOcrProgress(4, 'Preparing document', 'Creating clear image crops for each marked field.');
+        el('ocrProgressFields').textContent = `${markerCount} marker${markerCount === 1 ? '' : 's'} aligned`;
+        ocrProgressCeiling = 12;
+        setOcrProgress(4, 'Preparing document', 'Saving the aligned page for line detection.');
 
         ocrProgressTimer = window.setInterval(() => {
-            if (ocrProgress >= 92) return;
+            if (ocrProgress >= ocrProgressCeiling) return;
+            setOcrProgress(Math.min(ocrProgressCeiling, ocrProgress + 0.6));
+        }, 400);
+    }
 
-            const increment = ocrProgress < 30 ? 4 : (ocrProgress < 70 ? 2 : 1);
-            const next = Math.min(92, ocrProgress + increment);
+    /**
+     * Show the progress window. `shown` settles once it has finished opening:
+     * Bootstrap ignores a hide() while the window is still fading in, which
+     * would leave it open over a run that ended at once.
+     */
+    function openProgressModal() {
+        const Modal = window.bootstrap?.Modal;
+        if (!Modal) {
+            throw new Error('The progress window did not finish loading. Refresh the page and try again.');
+        }
+        const element = el('scanningModal');
+        const modal = Modal.getOrCreateInstance(element);
+        const shown = new Promise((resolve) => {
+            element.addEventListener('shown.bs.modal', resolve, { once: true });
+            window.setTimeout(resolve, 1000);
+        });
+        modal.show();
 
-            if (next < 18) {
-                setOcrProgress(next, 'Preparing document', 'Creating clear image crops for each marked field.');
-            } else if (next < 30) {
-                setOcrProgress(next, 'Sending marked fields', 'Uploading the field crops securely to the OCR service.');
-            } else if (next < 78) {
-                setOcrProgress(next, 'Reading handwriting', 'The selected TrOCR model is reading the marked areas.');
-            } else {
-                setOcrProgress(next, 'Finalizing results', 'Checking the OCR response before validation.');
+        return { modal, shown };
+    }
+
+    async function closeProgressModal(progress) {
+        if (!progress) return;
+        await progress.shown;
+        progress.modal.hide();
+    }
+
+    function showPageStatus(page, waitedMs, mode = 'scan') {
+        if (page.status === 'detecting' && mode === 'detect') {
+            ocrProgressCeiling = 92;
+            setOcrProgress(Math.max(ocrProgress, 18), 'Detecting fields and ink',
+                'Straightening the page, fitting the columns and rows to its table, and outlining every handwritten line.');
+            return;
+        }
+        if (page.status === 'queued') {
+            ocrProgressCeiling = 18;
+            setOcrProgress(
+                Math.max(ocrProgress, 12),
+                'Waiting for the line detector',
+                waitedMs > 20000
+                    ? 'No background worker has picked this page up. Start one with: php artisan queue:work (serve.ps1 starts it for you).'
+                    : 'The page is queued for line detection.',
+            );
+        } else if (page.status === 'detecting') {
+            ocrProgressCeiling = 60;
+            setOcrProgress(Math.max(ocrProgress, 18), 'Finding handwritten lines',
+                'Outlining every handwritten line, including capitals and tails that cross the ruled lines.');
+        } else if (page.status === 'reading') {
+            ocrProgressCeiling = 92;
+            setOcrProgress(Math.max(ocrProgress, 60), 'Reading handwriting',
+                'The selected TrOCR model is reading each outlined line.');
+        }
+    }
+
+    function canvasBlob(canvas) {
+        return new Promise((resolve, reject) => {
+            canvas.toBlob(
+                (blob) => (blob ? resolve(blob) : reject(new Error('The aligned page could not be prepared. Please try again.'))),
+                'image/png',
+            );
+        });
+    }
+
+    function wait(ms, signal) {
+        return new Promise((resolve, reject) => {
+            const timer = window.setTimeout(resolve, ms);
+            signal?.addEventListener('abort', () => {
+                window.clearTimeout(timer);
+                reject(new DOMException('Aborted', 'AbortError'));
+            }, { once: true });
+        });
+    }
+
+    /**
+     * Poll the page until line detection and reading are finished. The results
+     * are stored server-side, so this only ever loads them.
+     */
+    async function waitForPage(initial, signal, done = 'ready', mode = 'scan') {
+        const started = Date.now();
+        let page = initial;
+
+        for (;;) {
+            showPageStatus(page, Date.now() - started, mode);
+            if (page.status === done) return page;
+            if (page.status === 'failed') {
+                throw new Error(page.error || 'The page could not be processed. Please scan again.');
             }
-        }, 350);
+
+            await wait(1500, signal);
+            const response = await fetch(page.statusUrl, {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+                signal,
+            });
+            const next = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            if (!response.ok || !next) {
+                throw new Error(responseErrorMessage(response, next));
+            }
+            page = next;
+        }
     }
 
     function stopOcrProgress() {
@@ -1077,11 +2386,204 @@
         ocrProgressTimer = null;
     }
 
-    async function completeOcrProgress() {
+    async function completeOcrProgress(title = 'Scan complete', note = 'Opening the validation results.') {
         stopOcrProgress();
         await new Promise((resolve) => window.setTimeout(resolve, 180));
-        setOcrProgress(100, 'Scan complete', 'Opening the validation results.');
+        setOcrProgress(100, title, note);
         await new Promise((resolve) => window.setTimeout(resolve, 420));
+    }
+
+    /** The markers as they stand, as the geometry the server works with. */
+    function currentGeometry() {
+        // After Detect, small marker edits are measured from what Detect fitted
+        // rather than from the template's own positions.
+        const base = detection
+            ? { columns: detection.columns, ruledYs: detection.page.geometry?.ruled_ys ?? config.ruledYs }
+            : { columns: templateColumns, ruledYs: config.ruledYs };
+        return alignedGeometry(marker.toJSON(), base.columns, base.ruledYs);
+    }
+
+    // ------------------------------------------------------- snap to table
+    // The page's printed table lines, found in well under a second: "Snap to
+    // table" fits every column and row marker onto them, and while a marker
+    // is dragged its edges snap to them (Alt places it freely).
+
+    let snapToken = 0;
+
+    async function requestSnap(signal = null) {
+        const form = new FormData();
+        form.set('geometry_json', JSON.stringify(currentGeometry()));
+        form.set('page', await canvasBlob(marker.canvas), 'page.png');
+        const response = await fetch(config.snapUrl, {
+            method: 'POST',
+            headers: { 'X-CSRF-TOKEN': config.csrf, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+            body: form,
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.lines) throw new Error(responseErrorMessage(response, payload));
+        return payload;
+    }
+
+    /** In the background, so a dragged marker's edges snap from the start. */
+    async function fetchSnapLines() {
+        const token = ++snapToken;
+        marker.setSnapLines(null);
+        try {
+            const payload = await requestSnap();
+            if (token === snapToken) marker.setSnapLines(payload.lines);
+        } catch (error) {
+            console.warn('Printed lines for snapping could not be found:', error);
+        }
+    }
+
+    // While it works, the button shows a spinner in place of its icon; its
+    // size is held so nothing around it shifts. Detect and Scan wait meanwhile.
+    function setSnapBusy(busy) {
+        const button = el('snapTableBtn');
+        const { width, height } = button.getBoundingClientRect();
+        button.style.inlineSize = busy ? `${width}px` : '';
+        button.style.blockSize = busy ? `${height}px` : '';
+        button.classList.toggle('is-loading', busy);
+        button.setAttribute('aria-busy', busy ? 'true' : 'false');
+        button.disabled = busy;
+    }
+
+    el('snapTableBtn').addEventListener('click', async () => {
+        if (scanInProgress) return;
+        const token = ++snapToken;
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 60 * 1000);
+
+        scanInProgress = true;
+        clearOcrError();
+        setSnapBusy(true);
+        el('detectBtn').disabled = true;
+        el('scanNowBtn').disabled = true;
+
+        try {
+            const payload = await requestSnap(controller.signal);
+            if (token !== snapToken) return;
+            marker.setSnapLines(payload.lines);
+            if (!payload.fitted) {
+                showOcrError(payload.reason || 'No printed table matching these markers was found on this page.');
+                return;
+            }
+            // One undoable change (Ctrl+Z) like any marker edit.
+            marker.setBoxes(cloneBoxes(geometryMarkers(payload.geometry, null)));
+        } catch (error) {
+            showOcrError(error.name === 'AbortError'
+                ? 'Snap to table timed out. Check that the web app is running, then try again.'
+                : (error.message || 'The page could not be snapped to its table.'));
+        } finally {
+            window.clearTimeout(timeoutId);
+            scanInProgress = false;
+            setSnapBusy(false);
+            const boxes = marker.toJSON();
+            el('scanNowBtn').disabled = boxes.length === 0 || markerSetValidationMessage(boxes) !== null;
+            el('detectBtn').disabled = el('scanNowBtn').disabled;
+        }
+    });
+
+    /**
+     * Send the page exactly as rendered here, with the markers as they stand,
+     * so every outline that comes back lines up with this canvas pixel for pixel.
+     */
+    async function uploadPage({ detect }, signal) {
+        const form = new FormData();
+        form.set('document_template_id', String(config.templateId));
+        form.set('geometry_json', JSON.stringify(currentGeometry()));
+        form.set('page', await canvasBlob(marker.canvas), 'page.png');
+        // Absent unless Staff choice is enabled; the server falls back to the
+        // promoted model and re-checks that the key is one it allows.
+        if (modelSelect instanceof HTMLSelectElement) form.set('model', modelSelect.value);
+        if (detect) form.set('detect', '1');
+
+        const response = await fetch(config.pagesUrl, {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            signal,
+            body: form,
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.statusUrl) {
+            throw new Error(responseErrorMessage(response, payload));
+        }
+        return payload;
+    }
+
+    /**
+     * Markers moved after Detect: outline that same page again from where they
+     * are now, and read it. The page is already on the server, straightened,
+     * so only the markers are sent - and the server reuses the lines Detect
+     * found instead of detecting the page again, which is nearly all of a
+     * scan's work.
+     */
+    async function reoutlineDetectedPage(signal) {
+        const response = await fetch(config.pageGeometryUrl.replace('__PAGE__', String(detection.page.id)), {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            signal,
+            body: JSON.stringify({
+                geometry_json: JSON.stringify(currentGeometry()),
+                model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null,
+            }),
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.statusUrl) {
+            throw new Error(responseErrorMessage(response, payload));
+        }
+        return payload;
+    }
+
+    /**
+     * Whether that page can be outlined again instead of sent afresh: Detect
+     * ran, its page is still usable, and Staff have only moved the markers on
+     * it (the page shown is the one the server holds).
+     */
+    function canReoutline() {
+        return detection !== null && !detection.stale && !detectionIsCurrent();
+    }
+
+    /** Scan with OCR after Detect: read the crops Detect already made. */
+    async function readDetectedPage(signal) {
+        const response = await fetch(detection.page.readUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            signal,
+            body: JSON.stringify({ model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null }),
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.statusUrl) {
+            throw new Error(responseErrorMessage(response, payload));
+        }
+        return payload;
     }
 
     function responseErrorMessage(response, payload) {
@@ -1089,7 +2591,7 @@
             return 'Your session expired. Refresh the page, reopen the document, and try again.';
         }
         if (response.status === 413) {
-            return 'The marked image crops are too large to send. Use tighter field boxes and try again.';
+            return 'The aligned page is too large to send. Use a smaller scan and try again.';
         }
         if (response.status === 422) {
             const validationMessage = payload?.errors
@@ -1101,8 +2603,83 @@
         return payload?.message || payload?.error || `OCR failed with HTTP ${response.status}.`;
     }
 
+    // The run behind the progress window, so its × can stop it: the browser
+    // stops waiting at once, and the server is told to drop the page (or,
+    // for the read of a Detect result, to keep that result).
+    let activeRun = null;
+    const CANCEL_LABELS = { detect: 'Cancel detection', scan: 'Cancel scan', read: 'Cancel reading' };
+
+    function startRun(controller, kind, pageId = null) {
+        activeRun = { controller, kind, pageId, cancelled: false };
+        showRunKind(kind);
+        el('ocrProgressCancel').disabled = false;
+        return activeRun;
+    }
+
+    /** Name the cancel button after what is running. */
+    function showRunKind(kind) {
+        if (activeRun) activeRun.kind = kind;
+        el('ocrProgressCancel').textContent = CANCEL_LABELS[kind] ?? 'Cancel';
+    }
+
+    function cancelActiveRun() {
+        const run = activeRun;
+        if (!run || run.cancelled) return;
+        run.cancelled = true;
+        el('ocrProgressCancel').disabled = true;
+        el('ocrProgressCancel').textContent = 'Cancelling…';
+        setOcrProgress(ocrProgress, 'Cancelling', 'Stopping this run.');
+        run.controller.abort();
+        if (run.pageId !== null) {
+            fetch(config.pageCancelUrl.replace('__PAGE__', String(run.pageId)), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                keepalive: true,
+                body: JSON.stringify({ keep_detection: run.kind === 'read' }),
+            }).catch((error) => console.warn('Cancelling the page on the server failed:', error));
+        }
+    }
+
+    el('ocrProgressCancel').addEventListener('click', cancelActiveRun);
+
     el('scanNowBtn').addEventListener('click', async () => {
         if (scanInProgress) return;
+
+        // Outline changes are only read once saved: offer to save them first.
+        applyOpenDrawing();
+        const unsavedLines = detectionIsCurrent() ? unsavedLineCount() : 0;
+        if (unsavedLines > 0) {
+            const plural = unsavedLines === 1 ? 'line has an outline change' : 'lines have outline changes';
+            if (!window.confirm(`${unsavedLines} ${plural} that ${unsavedLines === 1 ? 'is' : 'are'} not saved.\n\nOK: save and scan.\nCancel: go back without scanning.`)) {
+                return;
+            }
+            await saveAllUnsavedLines();
+            if (unsavedLineCount() > 0) {
+                showOcrError('Some outline changes could not be saved. Check the lines marked not saved and try again.');
+                return;
+            }
+        }
+
+        // Outlining the page again works every line out afresh from the moved
+        // markers, so outlines adjusted against Detect's result cannot be kept.
+        if (canReoutline()) {
+            const adjusted = detection.page.lines.filter((line) => line.adjusted || isLineUnsaved(line)).length;
+            const plural = adjusted === 1 ? 'adjustment' : 'adjustments';
+            if (adjusted > 0 && !window.confirm(
+                `You moved a marker after Detect, so every line is worked out again `
+                + `and your ${adjusted} outline ${plural} will be lost.\n\n`
+                + `OK: scan from the markers as they are.\n`
+                + `Cancel: go back (Ctrl+Z brings the Detect result back).`,
+            )) {
+                return;
+            }
+        }
 
         const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
         if (markerValidationMessage) {
@@ -1113,90 +2690,85 @@
         const button = el('scanNowBtn');
         const originalButtonContent = button.innerHTML;
         const controller = new AbortController();
-        let modal = null;
+        const run = startRun(controller, 'scan');
+        let progress = null;
         let timeoutId = null;
 
         scanInProgress = true;
         clearOcrError();
         button.disabled = true;
         button.innerHTML = '<i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i> OCR in progress...';
+        el('detectBtn').disabled = true;
 
         try {
             // Cropping and modal creation used to happen outside the try block. A
             // browser-side failure there made the button appear to do nothing.
-            const Modal = window.bootstrap?.Modal;
-            if (!Modal) {
-                throw new Error('The OCR loading interface did not finish loading. Refresh the page and try again.');
-            }
-
-            modal = Modal.getOrCreateInstance(el('scanningModal'));
-            beginOcrProgress(marker.toJSON().length);
-            modal.show();
+            const aligned = marker.toJSON();
+            progress = openProgressModal();
+            beginOcrProgress(aligned.length);
 
             await new Promise((resolve) => window.requestAnimationFrame(resolve));
-            cropped = marker.crop();
 
-            if (!cropped.length) {
+            if (!aligned.length) {
                 throw new Error('Add at least one field before reading.');
             }
 
-            setOcrProgress(Math.max(ocrProgress, 18), 'Sending marked fields', 'Uploading the field crops securely to the OCR service.');
-            timeoutId = window.setTimeout(() => controller.abort(), 125000);
-
-            const response = await fetch(config.recogniseUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': config.csrf,
-                    'X-Requested-With': 'XMLHttpRequest',
-                    Accept: 'application/json',
-                },
-                credentials: 'same-origin',
-                signal: controller.signal,
-                body: JSON.stringify({
-                    fields: cropped.map((c) => ({ name: c.name, image: c.image })),
-                    // Absent unless Staff choice is enabled; the server falls back to
-                    // the promoted model and re-checks that the key is one it allows.
-                    model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null,
-                }),
-            });
-
-            const contentType = response.headers.get('content-type') || '';
-            const payload = contentType.includes('application/json')
-                ? await response.json()
-                : null;
-
-            if (!response.ok) {
-                throw new Error(responseErrorMessage(response, payload));
+            timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
+            let payload;
+            const readingDetectedPage = detectionIsCurrent();
+            if (readingDetectedPage) {
+                showRunKind('read');
+                run.pageId = detection.page.id;
+                // Saves still on their way are part of what is read.
+                await lineSaveQueue;
+                setLineEditing(false);
+                // The outlines Staff just checked are the ones read.
+                setOcrProgress(Math.max(ocrProgress, 60), 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
+                payload = await readDetectedPage(controller.signal);
+            } else if (canReoutline()) {
+                // The markers moved after Detect. That page is already here and
+                // already straightened, so only the markers go over, and its
+                // lines are reused rather than found again.
+                run.pageId = detection.page.id;
+                setLineEditing(false);
+                setOcrProgress(Math.max(ocrProgress, 30), 'Outlining from your markers',
+                    'Reusing the lines Detect found on this page.');
+                payload = await reoutlineDetectedPage(controller.signal);
+            } else {
+                // Finishing Align hands the page to the background line detector.
+                setOcrProgress(Math.max(ocrProgress, 8), 'Sending the aligned page', 'Uploading the page securely for line detection.');
+                payload = await uploadPage({ detect: false }, controller.signal);
+                run.pageId = payload.id;
             }
 
-            if (!Array.isArray(payload?.results) || payload.results.length === 0) {
-                throw new Error('The OCR service returned no field readings. Please try again.');
+            const page = await waitForPage(payload, controller.signal);
+            clearDetection();
+
+            // A tilted ledger grid makes the server straighten the page before
+            // outlining it; show that page so the outlines sit on their writing.
+            if (!readingDetectedPage && Math.abs(Number(page.deskew) || 0) >= 0.05) {
+                await marker.loadFromUrl(page.imageUrl);
+                marker.setBoxes(cloneBoxes(geometryMarkers(page.geometry, page)));
             }
 
-            if (typeof payload.modelKey !== 'string' || payload.modelKey.trim() === '') {
+            if (!Array.isArray(page.lines) || page.lines.length === 0) {
+                throw new Error('No handwriting was found inside the markers. Check the alignment and scan again.');
+            }
+
+            if (typeof page.modelKey !== 'string' || page.modelKey.trim() === '') {
                 throw new Error('The OCR service did not identify the model used. No data was saved; please scan again.');
             }
 
-            if (payload.results.length !== cropped.length) {
-                throw new Error('The OCR service returned an incomplete result. No data was saved; please scan again.');
-            }
-
-            const hasMismatchedResult = payload.results.some((result, index) => (
-                !result
-                || typeof result !== 'object'
-                || String(result?.name ?? '') !== String(cropped[index]?.name ?? '')
-            ));
-            if (hasMismatchedResult) {
-                throw new Error('The OCR fields no longer match their markers. No data was saved; please scan again.');
-            }
-
-            readings = payload.results;
-            requiredInput(document, '#ocrModelKey').value = payload.modelKey.trim();
-            el('summaryModel').textContent = payload.model || '—';
+            processedPage = page;
+            cropped = verificationItems(page.lines, page);
+            readings = cropped.map((item) => item.reading);
+            requiredInput(document, '#ocrModelKey').value = page.modelKey.trim();
+            requiredInput(document, '#documentPageId').value = String(page.id);
+            el('summaryModel').textContent = page.model || '—';
 
             setOcrProgress(96, 'Preparing validation', 'The handwriting results are ready for your review.');
             renderVerifyRows();
+            showGridNotes(page);
             await completeOcrProgress();
             showStep('verify');
             try {
@@ -1206,18 +2778,89 @@
                 throw error;
             }
         } catch (error) {
-            const message = error.name === 'AbortError'
-                ? 'OCR timed out after two minutes. Check the OCR service and try again.'
-                : (error.message || 'The document could not be scanned.');
-            console.error('Document OCR failed:', error);
-            showOcrError(message);
+            if (run.cancelled) {
+                // Cancelled from the progress window: back to Align. A Detect
+                // result that was being read is kept, ready to scan again.
+                if (run.kind !== 'read') retireDetection();
+            } else {
+                const message = error.name === 'AbortError'
+                    ? 'Line detection and reading timed out. Check the OCR service and the background worker, then try again.'
+                    : (error.message || 'The document could not be scanned.');
+                console.error('Document OCR failed:', error);
+                // A failed read leaves the detected page unusable; the next scan
+                // outlines the page afresh from the markers.
+                retireDetection();
+                showOcrError(message);
+            }
         } finally {
+            if (activeRun === run) activeRun = null;
             if (timeoutId !== null) window.clearTimeout(timeoutId);
             stopOcrProgress();
-            modal?.hide();
+            await closeProgressModal(progress);
             scanInProgress = false;
             button.innerHTML = originalButtonContent;
             button.disabled = marker.toJSON().length === 0;
+            el('detectBtn').disabled = button.disabled;
+        }
+    });
+
+    // Detect: straighten this page, fit the template's columns and rows to its
+    // own table, and outline every handwritten line - before anything is read.
+    el('detectBtn').addEventListener('click', async () => {
+        if (scanInProgress) return;
+
+        const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
+        if (markerValidationMessage) {
+            showOcrError(markerValidationMessage);
+            return;
+        }
+
+        const button = el('detectBtn');
+        const originalButtonContent = button.innerHTML;
+        const controller = new AbortController();
+        const run = startRun(controller, 'detect');
+        const timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
+        let progress = null;
+
+        scanInProgress = true;
+        clearOcrError();
+        button.disabled = true;
+        el('scanNowBtn').disabled = true;
+        button.innerHTML = '<i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Detecting...';
+
+        try {
+            progress = openProgressModal();
+            beginOcrProgress(marker.toJSON().length);
+            await new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+            setOcrProgress(Math.max(ocrProgress, 8), 'Sending the page', 'Uploading the page securely for detection.');
+            const payload = await uploadPage({ detect: true }, controller.signal);
+            run.pageId = payload.id;
+            const page = await waitForPage(payload, controller.signal, 'detected', 'detect');
+
+            if (!Array.isArray(page.lines) || page.lines.length === 0) {
+                throw new Error('No handwriting was found on this page. Check that the right template and file were chosen.');
+            }
+
+            await applyDetection(page);
+            await completeOcrProgress('Detection complete', 'Check the outlines, then Scan with OCR.');
+        } catch (error) {
+            if (!run.cancelled) {
+                const message = error.name === 'AbortError'
+                    ? 'Detection timed out. Check the background worker, then try again.'
+                    : (error.message || 'The page could not be detected.');
+                console.error('Detection failed:', error);
+                showOcrError(message);
+            }
+        } finally {
+            if (activeRun === run) activeRun = null;
+            window.clearTimeout(timeoutId);
+            stopOcrProgress();
+            await closeProgressModal(progress);
+            scanInProgress = false;
+            button.innerHTML = originalButtonContent;
+            button.disabled = marker.toJSON().length === 0;
+            el('scanNowBtn').disabled = button.disabled;
         }
     });
 
@@ -1239,12 +2882,20 @@
     function buildCustomValidationGroups() {
         const personGroups = new Map();
         const detailIndexes = [];
+        const unplacedIndexes = [];
 
         cropped.forEach((box, index) => {
             const personGroup = Number(box.personGroup);
             const personFieldOrder = Number(box.personFieldOrder);
             const grouped = Number.isInteger(personGroup) && personGroup > 0
                 && Number.isInteger(personFieldOrder) && personFieldOrder >= 0;
+
+            // A ledger line that could not be placed in a row belongs to no
+            // person until a reviewer decides.
+            if (!grouped && Array.isArray(box.flags) && box.flags.includes(FLAG_NO_ROW)) {
+                unplacedIndexes.push(index);
+                return;
+            }
 
             if (!grouped) {
                 detailIndexes.push(index);
@@ -1280,6 +2931,16 @@
                     indexes: members.map((member) => member.index),
                 });
             });
+
+        if (unplacedIndexes.length > 0) {
+            groups.push({
+                id: 'needs-review',
+                kind: 'details',
+                mode: 'custom',
+                label: 'Needs review',
+                indexes: unplacedIndexes,
+            });
+        }
 
         return groups;
     }
@@ -1464,7 +3125,8 @@
     }
 
     function buildValidationGroups() {
-        return config.groupingMode === 'custom'
+        // A ledger's rows are its people, so its lines always group by row.
+        return config.groupingMode === 'custom' || templateColumns.length > 0
             ? buildCustomValidationGroups()
             : buildAutomaticValidationGroups();
     }
@@ -1480,10 +3142,11 @@
     function groupIdentity(group) {
         if (group.kind !== 'person') return `${group.indexes.length} document field${group.indexes.length === 1 ? '' : 's'}`;
 
-        if (group.mode === 'auto' && group.indexes.length === 11) {
-            const childName = String(readings[group.indexes[2]]?.text ?? '').trim();
-            if (childName) return childName;
-        }
+        // The field the layout says holds the person's name.
+        const named = group.indexes.find((index) => (
+            settingsFor(index)?.role === 'name' && String(readings[index]?.text ?? '').trim() !== ''
+        ));
+        if (named !== undefined) return String(readings[named].text).trim();
 
         const candidates = group.indexes
             .map((index) => ({
@@ -1497,27 +3160,28 @@
         return candidates[0]?.text || `${group.indexes.length} fields`;
     }
 
+    // A line is labelled with its template field's or column's own name.
     function validationFieldLabel(group, columnIndex, fallback) {
-        const birthRegistryColumns = [
-            'Entry no.',
-            'Date registered',
-            "Child's name",
-            'Sex',
-            'Date of birth',
-            'Place of birth',
-            "Father's name",
-            "Mother's name",
-            'Nationality',
-            'Informant',
-            'Remarks',
-        ];
-
-        if (group.kind === 'person' && group.mode === 'auto'
-            && group.indexes.length === birthRegistryColumns.length) {
-            return birthRegistryColumns[columnIndex];
-        }
-
         return String(fallback || `Field ${columnIndex + 1}`);
+    }
+
+    /**
+     * Required fields of this person that nothing was read for: the ledger
+     * columns missing from a row, or a person's template fields.
+     */
+    function missingRequired(group) {
+        if (group.kind !== 'person' || group.indexes.length === 0) return [];
+
+        const present = new Set(group.indexes.map((index) => nameKey(cropped[index]?.label)));
+        const ledgerRow = group.indexes.some((index) => settingsFor(index)?.kind === 'column');
+        const personGroup = Number(cropped[group.indexes[0]]?.personGroup);
+        const expected = ledgerRow
+            ? config.boxes.filter((box) => box.kind === 'column')
+            : config.boxes.filter((box) => box.kind !== 'column' && Number(box.personGroup) === personGroup);
+
+        return expected
+            .filter((box) => box.required !== false && !present.has(nameKey(box.name)))
+            .map((box) => box.name);
     }
 
     function prepareValidationComparison() {
@@ -1536,29 +3200,19 @@
         context.fillRect(0, 0, target.width, target.height);
         context.drawImage(source, 0, 0);
 
-        validationMarker.setBoxes(cropped.map(({ name, x, y, w, h }) => ({ name, x, y, w, h })));
+        cancelOutlineEdit();
+        validationMarker.setBoxes([]);
+        lineOverlay.setLines(processedPage, cropped);
         validationMarker.resetZoom();
         el('validationDocViewport').scrollTo({ top: 0, left: 0 });
         el('validationFileName').textContent = scanFile?.name || 'Document';
 
         window.requestAnimationFrame(() => {
             validationMarker.layout();
-            makeValidationMarkersAccessible();
             updateValidationMarkerStates();
             const initialGroup = validationGroups.find((group) => group.kind === 'person')
                 ?? validationGroups[0];
             if (initialGroup) activateValidationGroup(initialGroup.id, 'initial');
-        });
-    }
-
-    function makeValidationMarkersAccessible() {
-        const boxes = validationMarker.toJSON();
-        el('validationFieldOverlay').querySelectorAll('.field-box').forEach((box, index) => {
-            const group = validationGroupForField(index);
-            box.tabIndex = 0;
-            box.setAttribute('role', 'button');
-            box.setAttribute('aria-label', `Compare ${boxes[index]?.name ?? `field ${index + 1}`} in ${group?.label ?? 'this record'}`);
-            box.title = `Compare ${boxes[index]?.name ?? `field ${index + 1}`}`;
         });
     }
 
@@ -1601,34 +3255,24 @@
         list.scrollTo({ top: clampedTarget, behavior: smooth ? 'smooth' : 'auto' });
     }
 
-    function revealValidationMarker(index) {
-        const viewport = el('validationDocViewport');
-        const box = el('validationFieldOverlay').querySelector(`[data-index="${index}"]`);
-        if (!box) return;
+    function revealValidationLines(indexes) {
+        const bounds = lineOverlay.displayBounds(indexes);
+        if (!bounds) return;
 
+        const viewport = el('validationDocViewport');
         viewport.scrollTo({
-            left: Math.max(0, box.offsetLeft + (box.offsetWidth / 2) - (viewport.clientWidth / 2)),
-            top: Math.max(0, box.offsetTop + (box.offsetHeight / 2) - (viewport.clientHeight / 2)),
+            left: Math.max(0, (bounds.left + bounds.right) / 2 - viewport.clientWidth / 2),
+            top: Math.max(0, (bounds.top + bounds.bottom) / 2 - viewport.clientHeight / 2),
             behavior: 'smooth',
         });
     }
 
-    function revealValidationGroup(group) {
-        const boxes = group.indexes
-            .map((index) => el('validationFieldOverlay').querySelector(`[data-index="${index}"]`))
-            .filter((box) => box instanceof HTMLElement);
-        if (boxes.length === 0) return;
+    function revealValidationMarker(index) {
+        revealValidationLines([index]);
+    }
 
-        const viewport = el('validationDocViewport');
-        const left = Math.min(...boxes.map((box) => box.offsetLeft));
-        const top = Math.min(...boxes.map((box) => box.offsetTop));
-        const right = Math.max(...boxes.map((box) => box.offsetLeft + box.offsetWidth));
-        const bottom = Math.max(...boxes.map((box) => box.offsetTop + box.offsetHeight));
-        viewport.scrollTo({
-            left: Math.max(0, (left + right) / 2 - viewport.clientWidth / 2),
-            top: Math.max(0, (top + bottom) / 2 - viewport.clientHeight / 2),
-            behavior: 'smooth',
-        });
+    function revealValidationGroup(group) {
+        revealValidationLines(group.indexes);
     }
 
     function setExpandedValidationGroup(groupId) {
@@ -1644,9 +3288,7 @@
     }
 
     function selectValidationGroupMarkers(group) {
-        syncingValidationSelection = true;
-        validationMarker.selectIndexes(group.indexes, { source: 'group' });
-        syncingValidationSelection = false;
+        lineOverlay.setSelection(group.indexes, activeValidationIndex);
     }
 
     function activateValidationGroup(groupId, source = 'group') {
@@ -1699,16 +3341,12 @@
     }
 
     function updateValidationMarkerStates() {
-        el('validationFieldOverlay').querySelectorAll('.field-box').forEach((box, index) => {
-            const checkbox = el('verifyRows')
-                .querySelector(`[data-field-index="${index}"] .validation-verified`);
-            const checked = checkbox instanceof HTMLInputElement && checkbox.checked;
-            box.classList.toggle('is-verified', checked);
-            const current = index === activeValidationIndex;
-            box.classList.toggle('is-current', current);
-            if (current) box.setAttribute('aria-current', 'true');
-            else box.removeAttribute('aria-current');
+        cropped.forEach((_, index) => {
+            const checkbox = validationRow(index)?.querySelector('.validation-verified');
+            lineOverlay.setVerified(index, checkbox instanceof HTMLInputElement && checkbox.checked);
         });
+        const group = validationGroups.find((candidate) => candidate.id === activeValidationGroupId);
+        lineOverlay.setSelection(group?.indexes ?? [], activeValidationIndex);
     }
 
     function clearValidationFieldError(index) {
@@ -1840,11 +3478,20 @@
             </div>
             <div class="validation-field__value">
                 <label class="visually-hidden" for="${inputId}"></label>
-                <input type="text" id="${inputId}" class="form-control verified"
-                       maxlength="2000" autocomplete="off">
-                <div class="validation-field__reading">
-                    TrOCR read: <span></span>
+                <div class="validation-field__entry">
+                    <img class="validation-field__crop" alt="" loading="lazy" decoding="async">
+                    <input type="text" id="${inputId}" class="form-control verified"
+                           maxlength="2000" autocomplete="off">
                 </div>
+                <div class="validation-field__reading">
+                    <span class="validation-field__reading-text">TrOCR read: <span></span></span>
+                    <button type="button" class="btn btn-link btn-sm validation-field__adjust">
+                        <i class="icon-base bx bx-shape-polygon" aria-hidden="true"></i>Adjust outline
+                    </button>
+                </div>
+                <div class="validation-field__hint d-none"></div>
+                <div class="validation-field__type d-none"></div>
+                <div class="validation-field__flag d-none"></div>
                 <div class="validation-field__ocr-error d-none">
                     TrOCR could not read this marker. Enter the value manually.
                 </div>
@@ -1860,7 +3507,8 @@
 
         const displayNumber = group.kind === 'person' ? columnIndex + 1 : index + 1;
         requiredPart(row, '.validation-field__number').textContent = String(displayNumber).padStart(2, '0');
-        const displayName = validationFieldLabel(group, columnIndex, reading.name);
+        const item = cropped[index] ?? {};
+        const displayName = validationFieldLabel(group, columnIndex, item.heading || item.label || reading.name);
         requiredPart(row, '.validation-field__name').textContent = displayName;
         requiredPart(row, `label[for="${inputId}"]`).textContent = `Verified value for ${displayName}`;
 
@@ -1868,13 +3516,56 @@
         badge.textContent = `${confidence.toFixed(1)}%`;
         badge.classList.add(flagged ? 'is-low' : 'is-ready');
 
+        // The exact masked crop TrOCR read, beside the value it produced.
+        const thumbnail = row.querySelector('.validation-field__crop');
+        if (thumbnail instanceof HTMLImageElement && item.cropUrl) {
+            thumbnail.src = item.cropUrl;
+            thumbnail.alt = `Crop TrOCR read for ${displayName}`;
+            thumbnail.title = 'The exact image TrOCR read';
+        } else {
+            thumbnail?.remove();
+        }
+
+        const adjust = requiredPart(row, '.validation-field__adjust');
+        adjust.setAttribute('aria-label', `Adjust the outline of ${displayName}`);
+        adjust.addEventListener('click', (event) => {
+            event.stopPropagation();
+            startOutlineEdit(index);
+        });
+
+        const explanation = flagExplanation(item.flags ?? []);
+        if (explanation) {
+            row.classList.add('has-line-flag');
+            const flag = requiredPart(row, '.validation-field__flag');
+            flag.textContent = explanation;
+            flag.classList.remove('d-none');
+        }
+
         const readingText = String(reading.text ?? '');
-        requiredPart(row, '.validation-field__reading span').textContent = readingText || '(nothing read)';
+        requiredPart(row, '.validation-field__reading-text span').textContent = readingText || '(nothing read)';
 
         const input = requiredInput(row, '.verified');
         const checkbox = requiredInput(row, '.validation-verified');
         input.value = readingText;
         if (flagged) row.classList.add('needs-review');
+
+        // The template's hint, and whether the value fits its field (a date,
+        // a number, one of a list). Pointed out, never blocking.
+        const settings = settingsFor(index);
+        const hint = requiredPart(row, '.validation-field__hint');
+        if (settings?.hint) {
+            hint.textContent = settings.hint;
+            hint.classList.remove('d-none');
+        }
+        const typeNote = requiredPart(row, '.validation-field__type');
+        const checkValue = () => {
+            const problem = valueProblem(input.value, settings ?? {});
+            typeNote.textContent = problem ?? '';
+            typeNote.classList.toggle('d-none', !problem);
+            row.classList.toggle('has-value-problem', Boolean(problem));
+        };
+        checkValue();
+        input.addEventListener('input', checkValue);
         if (reading.error) {
             row.classList.add('has-ocr-error');
             requiredPart(row, '.validation-field__ocr-error').classList.remove('d-none');
@@ -1945,12 +3636,25 @@
         requiredPart(section, '.validation-record-group__copy strong').textContent = group.label;
         requiredPart(section, '.validation-record-group__copy small').textContent = groupIdentity(group);
 
-        const reviewCount = group.indexes.filter((index) => normaliseConfidence(readings[index]) < config.threshold).length;
+        const reviewCount = group.indexes.filter((index) => (
+            normaliseConfidence(readings[index]) < config.threshold || cropped[index]?.needsReview
+        )).length;
+        const missing = missingRequired(group);
         const review = requiredPart(section, '.validation-record-group__review');
-        review.textContent = reviewCount > 0 ? `${reviewCount} to review` : 'Ready to review';
-        review.classList.toggle('has-review', reviewCount > 0);
+        review.textContent = [
+            reviewCount > 0 ? `${reviewCount} to review` : null,
+            missing.length > 0 ? `${missing.length} missing` : null,
+        ].filter(Boolean).join(' · ') || 'Ready to review';
+        review.classList.toggle('has-review', reviewCount > 0 || missing.length > 0);
 
         const body = requiredPart(section, '.validation-record-group__body');
+        if (missing.length > 0) {
+            const note = document.createElement('div');
+            note.className = 'validation-record-group__missing';
+            note.textContent = `Nothing was read for ${missing.join(', ')}. If the page has ${missing.length === 1 ? 'it' : 'them'}, `
+                + 'go back to Align and check the outlines; if the register leaves it blank, carry on.';
+            body.appendChild(note);
+        }
         if (group.kind === 'person') {
             const bulk = document.createElement('div');
             const checkboxId = `verifyGroup-${group.id}`;
@@ -2026,26 +3730,194 @@
         const average = confidences.length
             ? confidences.reduce((a, b) => a + b, 0) / confidences.length
             : 0;
-        const flaggedCount = confidences.filter((confidence) => confidence < config.threshold).length;
+        const flaggedCount = confidences.filter((confidence, index) => (
+            confidence < config.threshold || cropped[index]?.needsReview
+        )).length;
 
         el('summaryConfidence').textContent = `${average.toFixed(1)}%`;
         el('summaryReview').textContent = `${flaggedCount}/${confidences.length}`;
         updateVerificationSummary();
     }
 
-    el('validationFieldOverlay').addEventListener('click', (event) => {
-        if (!(event.target instanceof Element)) return;
-        const box = event.target.closest('.field-box');
-        if (!box) return;
-        validationMarker.selectBox(Number(box.dataset.index), { source: 'marker' });
-    });
+    // ---------------------------------------------------------- outline fixes
+    function lineUpdateUrl(lineId) {
+        return config.lineUpdateUrl
+            .replace('__PAGE__', String(processedPage?.id ?? ''))
+            .replace('__LINE__', String(lineId));
+    }
 
-    el('validationFieldOverlay').addEventListener('keydown', (event) => {
-        if (!(event.target instanceof Element)) return;
-        const box = event.target.closest('.field-box');
-        if (!box || !['Enter', ' '].includes(event.key)) return;
-        event.preventDefault();
-        validationMarker.selectBox(Number(box.dataset.index), { source: 'marker' });
+    function showLineEditStatus(message, isError = false) {
+        const status = el('lineEditStatus');
+        status.textContent = message;
+        status.title = message;
+        // Never hidden: its height is reserved so the toolbar does not resize (see the SCSS).
+        status.classList.toggle('is-error', isError);
+    }
+
+    function startOutlineEdit(index) {
+        if (!processedPage || !cropped[index]) return;
+        cancelOutlineEdit();
+
+        editingLineIndex = index;
+        activateValidationField(index, 'row');
+        el('lineEditName').textContent = cropped[index].name;
+        el('lineEditToolbar').classList.remove('d-none');
+        showLineEditStatus('');
+        const mode = document.querySelector('input[name="verifyLineMode"]:checked')?.value ?? 'box';
+        lineOverlay.beginEdit(index, mode);
+        showVerifyLineMode(mode);
+    }
+
+    const VERIFY_MODE_HINTS = {
+        box: 'Drag the handles to stretch the outline.',
+        points: 'Drag a corner to move it; drag a dot between corners to add one; Delete removes one.',
+        draw: 'Click round the writing or hold and trace. Enter closes it; Ctrl+Z undoes a point; Esc cancels.',
+        rectangle: 'Drag a box over the writing.',
+    };
+
+    /** Keep the Verify tool buttons and hint in step with the outline editor. */
+    function showVerifyLineMode(mode) {
+        const input = document.querySelector(`input[name="verifyLineMode"][value="${mode}"]`);
+        if (input) input.checked = true;
+        if (editingLineIndex !== null) showLineEditStatus(VERIFY_MODE_HINTS[mode] ?? '');
+    }
+
+    function showVerifyDraft(points) {
+        if (editingLineIndex === null || lineOverlay.editing?.mode !== 'draw') return;
+        showLineEditStatus(points === 0
+            ? VERIFY_MODE_HINTS.draw
+            : points < 3
+                ? `${points} point${points === 1 ? '' : 's'}. At least 3 to make an outline.`
+                : `${points} points. Enter or double-click closes it; Save and re-read uses it.`);
+    }
+
+    function cancelOutlineEdit() {
+        if (editingLineIndex === null) return;
+        lineOverlay.cancelEdit();
+        editingLineIndex = null;
+        el('lineEditToolbar').classList.add('d-none');
+        el('lineEditSave').disabled = false;
+    }
+
+    /**
+     * Save the redrawn outline: the server crops along it with crop_line() and
+     * TrOCR reads that one line again. Every other field keeps what the
+     * reviewer typed and checked.
+     */
+    async function saveOutlineEdit() {
+        const index = editingLineIndex;
+        if (index === null) return;
+        if (lineOverlay.isDrawing() && !lineOverlay.finishDrawing()) {
+            showLineEditStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+            return;
+        }
+        const polygon = lineOverlay.editedPolygon();
+        if (!polygon) return;
+
+        const item = cropped[index];
+        const button = el('lineEditSave');
+        button.disabled = true;
+        showLineEditStatus('Cropping along the new outline and reading it again…');
+
+        try {
+            const { response, payload } = await putLineOutline(lineUpdateUrl(item.lineId), { polygon });
+
+            if (!payload?.line) {
+                throw new Error(responseErrorMessage(response, payload));
+            }
+
+            applyLineUpdate(payload.line, payload.flags ?? {});
+            cancelOutlineEdit();
+            if (!response.ok) {
+                showOcrLineWarning(payload.line.id, payload.message || 'The outline was saved, but TrOCR could not read it.');
+            }
+        } catch (error) {
+            button.disabled = false;
+            showLineEditStatus(error.message || 'The outline could not be saved.', true);
+        }
+    }
+
+    function showOcrLineWarning(lineId, message) {
+        const index = cropped.findIndex((candidate) => candidate.lineId === lineId);
+        if (index >= 0) setValidationFieldError(index, message);
+    }
+
+    /**
+     * Fold one re-read line (and any flags that changed with it) back into the
+     * Verify list, keeping every other field's typed value and check.
+     */
+    function applyLineUpdate(line, flagsById) {
+        const kept = new Map();
+        cropped.forEach((item, index) => {
+            const row = validationRow(index);
+            if (!row || item.lineId === line.id) return;
+            kept.set(item.lineId, {
+                value: requiredInput(row, '.verified').value,
+                verified: requiredInput(row, '.validation-verified').checked,
+            });
+        });
+
+        processedPage.lines = processedPage.lines.map((candidate) => {
+            const next = candidate.id === line.id ? line : candidate;
+            const flags = flagsById[next.id];
+            return Array.isArray(flags) ? { ...next, flags } : next;
+        });
+        cropped = verificationItems(processedPage.lines, processedPage);
+        readings = cropped.map((item) => item.reading);
+
+        renderVerifyRows();
+        cropped.forEach((item, index) => {
+            const previous = kept.get(item.lineId);
+            const row = validationRow(index);
+            if (!previous || !row) return;
+            requiredInput(row, '.verified').value = previous.value;
+            requiredInput(row, '.validation-verified').checked = previous.verified;
+            row.classList.toggle('is-verified', previous.verified);
+        });
+        lineOverlay.setLines(processedPage, cropped);
+        updateVerificationSummary();
+
+        const index = cropped.findIndex((item) => item.lineId === line.id);
+        if (index >= 0) activateValidationField(index, 'row');
+    }
+
+    document.querySelectorAll('input[name="verifyLineMode"]').forEach((input) => {
+        input.addEventListener('change', () => {
+            if (!(input instanceof HTMLInputElement) || !input.checked) return;
+            // Leaving Draw keeps a drawing of three points or more.
+            if (input.value !== 'draw' && lineOverlay.isDrawing() && lineOverlay.finishDrawing()) {
+                if (input.value !== 'box') lineOverlay.setEditMode(input.value);
+            } else {
+                lineOverlay.setEditMode(input.value);
+            }
+            // Off the button, so Enter and Esc reach the drawing.
+            input.blur();
+        });
+    });
+    el('lineEditCancel').addEventListener('click', cancelOutlineEdit);
+    el('lineEditSave').addEventListener('click', saveOutlineEdit);
+    document.addEventListener('keydown', (event) => {
+        if (editingLineIndex === null) return;
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.matches('input:not([type="radio"]), textarea, select') || target.isContentEditable)) return;
+        const command = event.ctrlKey || event.metaKey;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            // Esc first drops a drawing, then the whole edit.
+            if (lineOverlay.editing?.mode === 'draw' && lineOverlay.isDrawing()) lineOverlay.setEditMode('draw');
+            else cancelOutlineEdit();
+        } else if (event.key === 'Enter' && lineOverlay.isDrawing()) {
+            event.preventDefault();
+            if (!lineOverlay.finishDrawing()) {
+                showLineEditStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+            }
+        } else if (command && !event.shiftKey && event.key.toLowerCase() === 'z' && lineOverlay.isDrawing()) {
+            event.preventDefault();
+            lineOverlay.undoDrawStep();
+        } else if (['Delete', 'Backspace'].includes(event.key) && lineOverlay.editing?.mode === 'points') {
+            event.preventDefault();
+            lineOverlay.deleteActivePoint();
+        }
     });
 
     function submissionErrorMessage(response, payload) {
@@ -2075,8 +3947,184 @@
         if (firstInvalidRow) requiredInput(firstInvalidRow, '.verified').focus();
     }
 
-    el('submitForm').addEventListener('submit', async (event) => {
+    /**
+     * What this submission leaves out that the layout requires: its own fields
+     * that no checked line was read under; in a register, the required columns
+     * missing from each row with something checked, then the rows with nothing
+     * checked (the page is removed after submitting, so they would have to be
+     * scanned again). The server makes the same list.
+     */
+    function requiredNotSubmitted(verifiedIndexes) {
+        const checkedIndexes = new Set(verifiedIndexes);
+        const checkedNames = new Set(verifiedIndexes.map((index) => nameKey(cropped[index]?.label)));
+        const missing = config.boxes
+            .filter((box) => box.kind !== 'column' && box.required !== false && !checkedNames.has(nameKey(box.name)))
+            .map((box) => box.name);
+
+        const requiredColumns = config.boxes.filter((box) => box.kind === 'column' && box.required !== false);
+        const untouchedRows = [];
+        validationGroups.forEach((group) => {
+            const ledgerRow = group.kind === 'person'
+                && group.indexes.some((index) => settingsFor(index)?.kind === 'column');
+            if (!ledgerRow) return;
+
+            const checkedHere = group.indexes.filter((index) => checkedIndexes.has(index));
+            if (checkedHere.length === 0) {
+                untouchedRows.push(Number(cropped[group.indexes[0]]?.personGroup));
+                return;
+            }
+
+            const columnsHere = new Set(checkedHere.map((index) => nameKey(cropped[index]?.label)));
+            const left = requiredColumns
+                .filter((box) => !columnsHere.has(nameKey(box.name)))
+                .map((box) => box.name);
+            if (left.length > 0) missing.push(`${group.label}: ${left.join(', ')}`);
+        });
+
+        if (untouchedRows.length > 0) {
+            missing.push(`Nothing ticked in ${rowRanges(untouchedRows)} `
+                + `(${untouchedRows.length === 1 ? 'this row is' : 'these rows are'} not saved)`);
+        }
+
+        return missing;
+    }
+
+    // "Person 02 – Person 05, Person 07" for rows 2 to 5 and 7, in order.
+    function rowRanges(rows) {
+        const label = (row) => `Person ${String(row).padStart(2, '0')}`;
+        const runs = [];
+        rows.forEach((row) => {
+            const run = runs[runs.length - 1];
+            if (run && run[1] === row - 1) run[1] = row;
+            else runs.push([row, row]);
+        });
+
+        return runs
+            .map(([first, last]) => (first === last ? label(first) : `${label(first)} – ${label(last)}`))
+            .join(', ');
+    }
+
+    function askToSubmitWithoutRequired(entries) {
+        el('missingRequiredList').replaceChildren(...missingRequiredItems(entries));
+        window.bootstrap.Modal.getOrCreateInstance(el('missingRequiredModal')).show();
+    }
+
+    /**
+     * The list's own wording (requiredNotSubmitted() here, the same list from
+     * the server) laid out as cards: the layout's fields together, then each
+     * person missing something, then the rows with nothing ticked.
+     */
+    function missingRequiredItems(entries) {
+        const fields = [];
+        const people = [];
+        let untouched = null;
+        entries.forEach((entry) => {
+            const rows = entry.match(/^Nothing ticked in (.+) \((this row is|these rows are) not saved\)$/);
+            const person = entry.match(/^Person (\d+): (.+)$/);
+            if (rows) {
+                untouched = missingRequiredItem({
+                    icon: 'bx-user-x',
+                    // One part per range, so "Person 02 – Person 05" never breaks.
+                    title: rows[1].split(', '),
+                    detail: `Nothing ticked, so ${rows[2]} not saved`,
+                    muted: true,
+                });
+            } else if (person) {
+                // The name Verify shows for this person, when one was read.
+                const group = validationGroups.find((candidate) => candidate.label === `Person ${person[1]}`);
+                const identity = group ? groupIdentity(group) : '';
+                people.push(missingRequiredItem({
+                    badge: person[1],
+                    title: `Person ${person[1]}`,
+                    subtitle: group && identity !== `${group.indexes.length} fields` ? identity : null,
+                    detail: `Missing: ${person[2]}`,
+                }));
+            } else {
+                fields.push(entry);
+            }
+        });
+
+        return [
+            ...(fields.length > 0 ? [missingRequiredItem({
+                icon: 'bx-file',
+                title: `${fields.length} required field${fields.length === 1 ? '' : 's'} not ticked`,
+                names: fields,
+            })] : []),
+            ...people,
+            ...(untouched ? [untouched] : []),
+        ];
+    }
+
+    function missingRequiredItem({ badge = '', icon = null, title, subtitle = null, detail = null, names = [], muted = false }) {
+        const item = document.createElement('li');
+        item.className = muted ? 'missing-required-item is-muted' : 'missing-required-item';
+
+        const marker = document.createElement('span');
+        marker.className = 'missing-required-item__badge';
+        marker.setAttribute('aria-hidden', 'true');
+        if (icon) {
+            const glyph = document.createElement('i');
+            glyph.className = `icon-base bx ${icon}`;
+            marker.append(glyph);
+        } else {
+            marker.textContent = badge;
+        }
+
+        const copy = document.createElement('div');
+        copy.className = 'missing-required-item__copy';
+        const heading = document.createElement('strong');
+        if (Array.isArray(title)) {
+            title.forEach((part, index) => {
+                const span = document.createElement('span');
+                span.className = 'text-nowrap';
+                span.textContent = part;
+                heading.append(...(index > 0 ? [', ', span] : [span]));
+            });
+        } else {
+            heading.textContent = title;
+        }
+        if (subtitle) {
+            const who = document.createElement('span');
+            who.className = 'missing-required-item__who';
+            who.textContent = ` · ${subtitle}`;
+            heading.append(who);
+        }
+        copy.append(heading);
+        if (detail) {
+            const text = document.createElement('small');
+            text.textContent = detail;
+            copy.append(text);
+        }
+        if (names.length > 0) {
+            const list = document.createElement('ul');
+            list.className = 'missing-required-item__names';
+            list.append(...names.map((name) => {
+                const chip = document.createElement('li');
+                chip.textContent = name;
+                return chip;
+            }));
+            copy.append(list);
+        }
+
+        item.append(marker, copy);
+        return item;
+    }
+
+    // The safe choice has the focus, so Enter never submits by accident.
+    el('missingRequiredModal').addEventListener('shown.bs.modal', () => el('missingRequiredBackBtn').focus());
+
+    el('confirmMissingRequiredBtn').addEventListener('click', () => {
+        window.bootstrap.Modal.getInstance(el('missingRequiredModal'))?.hide();
+        submitRecord({ allowMissing: true });
+    });
+
+    el('submitForm').addEventListener('submit', (event) => {
         event.preventDefault();
+        submitRecord();
+    });
+
+    // Only "Submit anyway" passes allowMissing, after the same checks again.
+    async function submitRecord({ allowMissing = false } = {}) {
         if (recordSubmitting) return;
 
         clearValidationSubmitError();
@@ -2118,9 +4166,18 @@
             return;
         }
 
+        if (!allowMissing) {
+            const missing = requiredNotSubmitted(verifiedIndexes);
+            if (missing.length > 0) {
+                askToSubmitWithoutRequired(missing);
+                return;
+            }
+        }
+
         const form = el('submitForm');
         const data = new FormData(form);
         data.set('scan', scanFile, scanFile.name);
+        if (allowMissing) data.set('allow_missing', '1');
 
         const personGroups = validationGroups.filter((candidate) => candidate.kind === 'person');
         const submittedFields = verifiedIndexes.map((sourceIndex) => {
@@ -2149,6 +4206,8 @@
                 y: Number(crop.y ?? 0).toFixed(5),
                 width: Number(crop.w ?? 0).toFixed(5),
                 height: Number(crop.h ?? 0).toFixed(5),
+                // The record keeps this line's outline and the exact crop TrOCR read.
+                line_id: crop.lineId ?? null,
             };
         });
         data.set('fields_json', JSON.stringify(submittedFields));
@@ -2177,6 +4236,12 @@
             const payload = contentType.includes('application/json') ? await response.json() : null;
 
             if (!response.ok) {
+                // The server found required fields missing that this page did
+                // not: nothing was saved, so ask the same question.
+                if (response.status === 422 && Array.isArray(payload?.errors?.missing_required)) {
+                    askToSubmitWithoutRequired(payload.errors.missing_required);
+                    return;
+                }
                 applyServerFieldErrors(payload?.errors, verifiedIndexes);
                 throw new Error(submissionErrorMessage(response, payload));
             }
@@ -2204,6 +4269,6 @@
                 updateVerificationSummary();
             }
         }
-    });
+    }
 </script>
 @endpush

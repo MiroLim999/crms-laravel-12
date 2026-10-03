@@ -3,12 +3,12 @@
 namespace App\Services;
 
 use App\Enums\ChangeRequestStatus;
+use App\Exceptions\ChangeRequestException;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
 use App\Models\RecordField;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
-use RuntimeException;
 
 /**
  * The correction workflow for locked records.
@@ -37,14 +37,6 @@ class ChangeRequestService
         User $requester,
         array $recordProposals = [],
     ): ChangeRequest {
-        if (! $record->isLocked()) {
-            throw new RuntimeException('This record is still a draft and does not need a change request.');
-        }
-
-        if ($record->hasPendingChangeRequest()) {
-            throw new RuntimeException('This record already has a pending change request.');
-        }
-
         $fields = $record->fields->keyBy('id');
 
         // Only keep fields whose value actually differs, so a reviewer is not
@@ -72,7 +64,7 @@ class ChangeRequestService
             : null;
 
         if ($changes === [] && ! $changesRegistryNumber) {
-            throw new RuntimeException('None of those values differ from what is on record.');
+            throw new ChangeRequestException('None of those values differ from what is on record.');
         }
 
         return DB::transaction(function () use (
@@ -84,6 +76,14 @@ class ChangeRequestService
             $changesRegistryNumber,
             $proposedRegistryNumber,
         ) {
+            // Lock the record row first, so two submissions for one record take
+            // turns here and the second one finds the request the first created.
+            CivilRecord::whereKey($record->getKey())->lockForUpdate()->first();
+
+            if ($record->hasPendingChangeRequest()) {
+                throw new ChangeRequestException('This record already has a pending change request.');
+            }
+
             $request = $record->changeRequests()->create([
                 'status' => ChangeRequestStatus::Pending,
                 'reason' => $reason,
@@ -124,9 +124,9 @@ class ChangeRequestService
      */
     public function approve(ChangeRequest $request, User $reviewer, ?string $note = null): ChangeRequest
     {
-        $this->guardOpen($request);
-
         return DB::transaction(function () use ($request, $reviewer, $note) {
+            $request = $this->lockOpen($request);
+
             $applied = [];
             $previous = [];
 
@@ -177,24 +177,28 @@ class ChangeRequestService
 
     public function reject(ChangeRequest $request, User $reviewer, ?string $note = null): ChangeRequest
     {
-        $this->guardOpen($request);
+        return DB::transaction(function () use ($request, $reviewer, $note) {
+            $request = $this->lockOpen($request);
 
-        $request->forceFill([
-            'status' => ChangeRequestStatus::Rejected,
-            'reviewed_by' => $reviewer->getKey(),
-            'reviewed_at' => now(),
-            'decision_note' => $note,
-        ])->save();
+            $request->forceFill([
+                'status' => ChangeRequestStatus::Rejected,
+                'reviewed_by' => $reviewer->getKey(),
+                'reviewed_at' => now(),
+                'decision_note' => $note,
+            ])->save();
 
-        $this->audit->log(
-            'change_request.rejected',
-            $request,
-            description: "Rejected change request #{$request->getKey()}."
-                .($note ? " Reason: {$note}" : ''),
-            actor: $reviewer,
-        );
+            // The note can run to 2,000 characters, so it goes in new_values,
+            // which the Audit Log shows in full, and the description stays short.
+            $this->audit->log(
+                'change_request.rejected',
+                $request,
+                new: ['decision_note' => $note],
+                description: "Rejected change request #{$request->getKey()}.",
+                actor: $reviewer,
+            );
 
-        return $request;
+            return $request;
+        });
     }
 
     /**
@@ -202,24 +206,43 @@ class ChangeRequestService
      */
     public function withdraw(ChangeRequest $request, User $actor): ChangeRequest
     {
-        $this->guardOpen($request);
+        return DB::transaction(function () use ($request, $actor) {
+            $request = $this->lockOpen($request);
 
-        $request->forceFill(['status' => ChangeRequestStatus::Withdrawn])->save();
+            $request->forceFill(['status' => ChangeRequestStatus::Withdrawn])->save();
 
-        $this->audit->log(
-            'change_request.withdrawn',
-            $request,
-            description: "Withdrew change request #{$request->getKey()}.",
-            actor: $actor,
-        );
+            $this->audit->log(
+                'change_request.withdrawn',
+                $request,
+                description: "Withdrew change request #{$request->getKey()}.",
+                actor: $actor,
+            );
 
-        return $request;
+            return $request;
+        });
+    }
+
+    /**
+     * Reload the request with its row locked, and check it is still pending.
+     * Call this inside a transaction.
+     *
+     * A double-click, or two reviewers deciding at once, would otherwise both
+     * pass the check on their own stale copy. With the lock, the second one
+     * waits for the first to commit, then sees the decision and is refused.
+     */
+    private function lockOpen(ChangeRequest $request): ChangeRequest
+    {
+        $locked = ChangeRequest::whereKey($request->getKey())->lockForUpdate()->firstOrFail();
+
+        $this->guardOpen($locked);
+
+        return $locked;
     }
 
     private function guardOpen(ChangeRequest $request): void
     {
         if (! $request->isOpen()) {
-            throw new RuntimeException(
+            throw new ChangeRequestException(
                 "This request is already {$request->status->value} and cannot be changed.",
             );
         }
@@ -230,7 +253,7 @@ class ChangeRequestService
         $normalised = $this->normaliseValue($value);
 
         if ($field->is_required && $normalised === null) {
-            throw new RuntimeException("{$field->name} is required and cannot be blank.");
+            throw new ChangeRequestException("{$field->name} is required and cannot be blank.");
         }
 
         return $normalised;

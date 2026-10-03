@@ -58,11 +58,40 @@ return [
         // this is the same loopback service; deployments may reverse-proxy it.
         'browser_url' => env('OCR_BROWSER_API_URL', env('OCR_API_URL', 'http://127.0.0.1:8001')),
         'timeout' => env('OCR_API_TIMEOUT', 120),
-        // FastAPI reads the same value. APP_KEY is a safe zero-configuration
+        // FastAPI reads the same value. It signs model-upload tickets, and
+        // OcrClient sends it as X-CRMS-Service-Key on every call, which the
+        // service requires on all but /health. APP_KEY is a safe zero-configuration
         // fallback for this two-process repository; a dedicated secret can rotate
-        // upload tickets independently in deployment.
+        // independently in deployment.
         'upload_secret' => env('OCR_UPLOAD_SECRET') ?: env('APP_KEY'),
         'upload_ticket_ttl' => env('OCR_UPLOAD_TICKET_TTL', 900),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Line markers (ml/line_markers.py)
+    |--------------------------------------------------------------------------
+    |
+    | Outlines every handwritten line on an aligned page and crops along the
+    | outlines. Runs as a local subprocess in its own Python environment,
+    | ml/.venv-kraken, because Kraken needs a newer torch than the TrOCR service.
+    | Build it with ml\setup_kraken.ps1. Leave `python` empty to use that
+    | environment when it exists.
+    |
+    | Nothing leaves the machine: Kraken's model ships inside its wheel.
+    |
+    */
+
+    'line_markers' => [
+        'python' => env('LINE_MARKERS_PYTHON'),
+        'script' => base_path('ml/line_markers.py'),
+        // One page on CPU takes about half a minute; a slow machine gets room.
+        'timeout' => (int) env('LINE_MARKERS_TIMEOUT', 600),
+        // Where Kraken finds the lines: auto (the GPU when ml/.venv-kraken has
+        // CUDA PyTorch and a card is present, else the CPU), cuda, or cpu.
+        'device' => env('LINE_MARKERS_DEVICE', 'auto'),
+        // Unsubmitted pages older than this are removed by documents:prune-pages.
+        'keep_hours' => (int) env('LINE_MARKERS_KEEP_HOURS', 24),
     ],
 
 ];

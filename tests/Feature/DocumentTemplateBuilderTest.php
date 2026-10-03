@@ -6,6 +6,7 @@ use App\Enums\DocumentType;
 use App\Enums\PageOrientation;
 use App\Enums\PaperSize;
 use App\Models\CivilRecord;
+use App\Models\DocumentPage;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTypeDefinition;
 use App\Models\User;
@@ -311,6 +312,47 @@ class DocumentTemplateBuilderTest extends TestCase
         ]);
     }
 
+    /**
+     * The same limit as a submitted record's: a page holds at most 450 fields,
+     * so at most 450 people.
+     */
+    public function test_person_numbers_past_the_field_limit_are_rejected(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $base = [
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'grouping_mode' => 'custom',
+        ];
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            ...$base,
+            'name' => 'Person group past the limit',
+            'fields' => [$this->personField('Person Name', 451, 0)],
+        ])->assertSessionHasErrors('fields.0.person_group');
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            ...$base,
+            'name' => 'Field order past the limit',
+            'fields' => [$this->personField('Person Name', 1, 450)],
+        ])->assertSessionHasErrors('fields.0.person_field_order');
+
+        $this->assertDatabaseCount('document_templates', 0);
+
+        // The highest numbers allowed are saved, renumbered from 1.
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            ...$base,
+            'name' => 'Highest person numbers',
+            'fields' => [$this->personField('Person Name', 450, 449)],
+        ])->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('document_template_fields', [
+            'name' => 'Person Name',
+            'person_group' => 1,
+            'person_field_order' => 0,
+        ]);
+    }
+
     public function test_layout_sample_is_privately_stored_previewed_and_deleted(): void
     {
         Storage::fake('local');
@@ -468,6 +510,25 @@ class DocumentTemplateBuilderTest extends TestCase
         ])->assertSessionHasErrors('sample_document');
 
         $this->assertDatabaseMissing('document_templates', ['name' => 'Unsafe sample']);
+        $this->assertSame([], Storage::disk('local')->allFiles(TemplateSampleStorage::ROOT));
+    }
+
+    public function test_a_tiff_sample_is_refused_with_a_clear_message(): void
+    {
+        Storage::fake('local');
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->actingAs($superAdmin)->post(route('templates.store'), [
+            'name' => 'TIFF sample',
+            'doc_type' => DocumentType::Birth->value,
+            ...$this->paperSpec(),
+            'sample_document' => UploadedFile::fake()->create('register.tiff', 10, 'image/tiff'),
+            'fields' => [$this->field('Child Full Name')],
+        ])->assertSessionHasErrors([
+            'sample_document' => 'The sample must be a PDF, PNG, JPG, WEBP or BMP file.',
+        ]);
+
+        $this->assertDatabaseMissing('document_templates', ['name' => 'TIFF sample']);
         $this->assertSame([], Storage::disk('local')->allFiles(TemplateSampleStorage::ROOT));
     }
 
@@ -657,7 +718,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'template.deleted']);
     }
 
-    public function test_deleting_a_used_template_keeps_its_existing_records(): void
+    public function test_a_template_that_records_use_cannot_be_deleted(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
         $staff = User::factory()->staff()->create();
@@ -670,13 +731,58 @@ class DocumentTemplateBuilderTest extends TestCase
         ]);
 
         $this->actingAs($superAdmin)
+            ->from(route('templates.index'))
+            ->delete(route('templates.destroy', $template))
+            ->assertRedirect(route('templates.index'))
+            ->assertSessionHas('error', "'Used layout' was used by 1 record and can't be deleted.");
+
+        // Nothing changed: the layout is still there, and the record still points at it.
+        $this->assertDatabaseHas('document_templates', ['id' => $template->getKey()]);
+        $this->assertSame($template->getKey(), $record->refresh()->document_template_id);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'template.deleted']);
+
+        // The library says why, and offers no way to delete it.
+        $this->get(route('templates.index'))
+            ->assertOk()
+            ->assertSee("so it can't be deleted.", escape: false)
+            ->assertDontSee('action="'.route('templates.destroy', $template).'"', escape: false);
+    }
+
+    public function test_a_layout_no_record_used_still_offers_delete(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $template = $this->template($superAdmin, DocumentType::Birth, 'Unused layout');
+
+        $this->actingAs($superAdmin)->get(route('templates.index'))
+            ->assertOk()
+            ->assertSee('This layout has not been used by any saved records.')
+            ->assertSee('action="'.route('templates.destroy', $template).'"', escape: false);
+    }
+
+    public function test_pages_still_in_progress_do_not_stop_a_template_being_deleted(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $template = $this->template($superAdmin, DocumentType::Birth, 'Layout with a page in progress');
+        $page = DocumentPage::create([
+            'document_template_id' => $template->getKey(),
+            'created_by' => $superAdmin->getKey(),
+            'status' => DocumentPage::STATUS_QUEUED,
+            'image_path' => '',
+            'width' => 800,
+            'height' => 600,
+            'geometry' => ['columns' => [], 'ruled_ys' => [], 'fields' => []],
+            'ocr_model_key' => 'test-model',
+        ]);
+
+        $this->actingAs($superAdmin)
             ->delete(route('templates.destroy', $template))
             ->assertRedirect(route('templates.index'))
             ->assertSessionHas('success');
 
+        // The page is only unlinked from the layout; the hourly prune removes it.
         $this->assertDatabaseMissing('document_templates', ['id' => $template->getKey()]);
-        $this->assertDatabaseHas('records', ['id' => $record->getKey()]);
-        $this->assertNull($record->refresh()->document_template_id);
+        $this->assertDatabaseHas('document_pages', ['id' => $page->getKey()]);
+        $this->assertNull($page->refresh()->document_template_id);
     }
 
     public function test_unknown_paper_settings_are_rejected(): void

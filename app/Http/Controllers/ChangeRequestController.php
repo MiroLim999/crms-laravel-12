@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ChangeRequestStatus;
+use App\Exceptions\ChangeRequestException;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
 use App\Services\ChangeRequestService;
@@ -10,7 +11,6 @@ use App\Services\RecordFieldGrouper;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
-use RuntimeException;
 
 /**
  * Corrections to locked records.
@@ -28,6 +28,13 @@ class ChangeRequestController extends Controller
 
     public function index(Request $request): View
     {
+        // Strings only. An edited URL can send ?q[]=x, an array, which would
+        // crash the string reads below.
+        $request->validate([
+            'q' => ['nullable', 'string'],
+            'status' => ['nullable', 'string'],
+        ], [], ['q' => 'search']);
+
         $user = $request->user();
         $search = trim($request->string('q')->toString());
         $selectedStatus = ChangeRequestStatus::tryFrom($request->string('status')->toString());
@@ -44,7 +51,7 @@ class ChangeRequestController extends Controller
             ->map(fn ($count) => (int) $count);
 
         $requests = (clone $visibleRequests)
-            ->with(['record.documentTypeDefinition', 'record.fields', 'requester', 'reviewer', 'items'])
+            ->with(['record.documentTypeDefinition', 'record.fields', 'record.template', 'requester', 'reviewer', 'items'])
             ->when($search !== '', function ($query) use ($search, $user): void {
                 $term = "%{$search}%";
 
@@ -83,7 +90,7 @@ class ChangeRequestController extends Controller
             ->filter()
             ->unique('id')
             ->mapWithKeys(function (CivilRecord $record): array {
-                $groups = $this->fieldGrouper->groups($record->fields);
+                $groups = $this->fieldGrouper->groups($record->fields, $record->template);
 
                 return [$record->getKey() => $this->fieldGrouper->heading($record, $groups)];
             });
@@ -106,11 +113,6 @@ class ChangeRequestController extends Controller
     {
         $this->authorize('change-requests.create');
 
-        if (! $record->isLocked()) {
-            return redirect()->route('records.show', $record)
-                ->with('error', 'This record is not locked, so it needs no change request.');
-        }
-
         $record->load(['fields', 'documentTypeDefinition']);
 
         if ($pendingRequest = $record->changeRequests()
@@ -128,7 +130,7 @@ class ChangeRequestController extends Controller
                 ->with('info', 'This record already has a change request waiting for review.');
         }
 
-        $fieldGroups = $this->fieldGrouper->groups($record->fields);
+        $fieldGroups = $this->fieldGrouper->groups($record->fields, $record->template);
 
         return view('change-requests.create', [
             'record' => $record,
@@ -161,7 +163,7 @@ class ChangeRequestController extends Controller
                     ? ['registry_number' => $validated['registry_number']]
                     : [],
             );
-        } catch (RuntimeException $e) {
+        } catch (ChangeRequestException $e) {
             return back()->withInput()->with('error', $e->getMessage());
         }
 
@@ -180,10 +182,10 @@ class ChangeRequestController extends Controller
         );
 
         $changeRequest->load([
-            'record.fields', 'record.documentTypeDefinition', 'requester', 'reviewer', 'items.field',
+            'record.fields', 'record.template', 'record.documentTypeDefinition', 'requester', 'reviewer', 'items.field',
         ]);
         $record = $changeRequest->record;
-        $recordGroups = $this->fieldGrouper->groups($record->fields);
+        $recordGroups = $this->fieldGrouper->groups($record->fields, $record->template);
         $itemsByField = $changeRequest->items
             ->filter(fn ($item) => $item->field !== null)
             ->keyBy('record_field_id');
@@ -219,7 +221,7 @@ class ChangeRequestController extends Controller
 
         try {
             $this->service->approve($changeRequest, $request->user(), $validated['decision_note'] ?? null);
-        } catch (RuntimeException $e) {
+        } catch (ChangeRequestException $e) {
             return back()->with('error', $e->getMessage());
         }
 
@@ -238,7 +240,7 @@ class ChangeRequestController extends Controller
 
         try {
             $this->service->reject($changeRequest, $request->user(), $validated['decision_note']);
-        } catch (RuntimeException $e) {
+        } catch (ChangeRequestException $e) {
             return back()->with('error', $e->getMessage());
         }
 
@@ -251,7 +253,7 @@ class ChangeRequestController extends Controller
 
         try {
             $this->service->withdraw($changeRequest, $request->user());
-        } catch (RuntimeException $e) {
+        } catch (ChangeRequestException $e) {
             return back()->with('error', $e->getMessage());
         }
 

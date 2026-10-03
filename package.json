@@ -2,8 +2,10 @@
     "private": true,
     "type": "module",
     "scripts": {
+        "prebuild": "node tools/copy-pdf-worker.mjs",
         "build": "vite build",
         "check:icons": "node tools/subset-icons.mjs --check",
+        "predev": "node tools/copy-pdf-worker.mjs",
         "dev": "vite",
         "test:js": "node --test tests/JavaScript/*.test.js",
         "subset-icons": "node tools/subset-icons.mjs"

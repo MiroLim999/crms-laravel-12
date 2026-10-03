@@ -652,6 +652,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   max-block-size: 70vh;
   overflow: auto;
   overscroll-behavior: contain;
+  // The page is fitted to the viewport's width; a vertical scrollbar that
+  // came and went would change that width and bring a horizontal one along.
+  scrollbar-gutter: stable;
   background: var(--bs-gray-100);
   border: 1px solid var(--bs-border-color);
   border-radius: var(--bs-border-radius);
@@ -664,7 +667,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     canvas,
     .field-overlay,
     .field-box,
-    .field-box-handle {
+    .field-box-handle,
+    .field-box-rotate {
       cursor: grabbing !important;
       pointer-events: none;
     }
@@ -732,17 +736,146 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   transition: opacity .12s ease, transform .12s ease, visibility .12s ease;
 }
 
+// Resize handles on every corner and side, shown on the selected marker only, so a
+// full ledger of columns does not bristle with handles.
 .field-box-handle {
   position: absolute;
-  right: -6px;
-  bottom: -6px;
   width: 12px;
   height: 12px;
   background-color: #fff;
   border: 2px solid var(--bs-primary);
   border-radius: 50%;
-  cursor: nwse-resize;
   touch-action: none;
+  z-index: 1;
+
+  &.is-nw { top: -6px; left: -6px; cursor: nwse-resize; }
+  &.is-ne { top: -6px; right: -6px; cursor: nesw-resize; }
+  &.is-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+  &.is-sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+
+  // Sides: short bars at the midpoints.
+  &.is-n,
+  &.is-s {
+    left: 50%;
+    width: 18px;
+    height: 8px;
+    margin-left: -9px;
+    border-radius: 4px;
+    cursor: ns-resize;
+  }
+  &.is-n { top: -4px; }
+  &.is-s { bottom: -4px; }
+
+  &.is-e,
+  &.is-w {
+    top: 50%;
+    width: 8px;
+    height: 18px;
+    margin-top: -9px;
+    border-radius: 4px;
+    cursor: ew-resize;
+  }
+  &.is-e { right: -4px; }
+  &.is-w { left: -4px; }
+
+  visibility: hidden;
+}
+
+// Only on a clicked marker, never on hover: neighbouring columns share edges, and
+// handles popping up under the pointer as it passes over them pile up on each other.
+.field-box.is-selected,
+.field-box.is-active {
+  > .field-box-handle {
+    visibility: visible;
+  }
+}
+
+// Tilt knob: a round button with a turning arrow on a stem below the bottom
+// edge, clear of the bottom resize handle (the name label sits above the top
+// edge). Shown on the clicked marker only, like the resize handles: on hover,
+// knobs popped up under the pointer as it crossed a ledger and covered the
+// neighbouring columns. Hidden, not removed: a knob below the page bottom
+// would otherwise make the viewport scrollable only while it shows.
+.field-box-rotate {
+  position: absolute;
+  bottom: -46px;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  visibility: hidden;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  color: var(--bs-info);
+  background-color: #fff;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(34, 48, 62, .25);
+  cursor: grab;
+  touch-action: none;
+
+  // The stem up to the marker's bottom edge.
+  &::before {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    width: 2px;
+    height: 20px;
+    margin-left: -1px;
+    content: "";
+    background-color: currentColor;
+    pointer-events: none;
+  }
+
+  // A wider grip over the stem, so the knob is easy to catch from the marker.
+  &::after {
+    position: absolute;
+    right: -4px;
+    bottom: 100%;
+    left: -4px;
+    height: 22px;
+    content: "";
+  }
+
+  svg {
+    width: 14px;
+    height: 14px;
+    pointer-events: none;
+  }
+
+  &:hover {
+    color: #fff;
+    background-color: var(--bs-info);
+    border-color: var(--bs-info);
+
+    &::before {
+      background-color: var(--bs-info);
+    }
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.field-box.is-selected .field-box-rotate {
+  visibility: visible;
+}
+
+.field-box.is-column .field-box-rotate {
+  color: #0e9aa7;
+
+  &:hover {
+    color: #fff;
+    background-color: #0e9aa7;
+    border-color: #0e9aa7;
+
+    &::before {
+      background-color: #0e9aa7;
+    }
+  }
 }
 
 // Read-only rendering in the archive: show where a value came from without
@@ -1321,10 +1454,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   scrollbar-width: thin;
 }
 
+// At least 27rem, and never shorter than its own content: a paper-size warning
+// or a long tip makes the card taller (the panel scrolls) instead of spilling
+// over the Detect summary below it. Only the field list scrolls inside.
 #step-mark .document-fields-card {
   display: flex;
-  min-block-size: 27rem;
-  flex: 1 1 auto;
+  flex: 1 0 27rem;
   flex-direction: column;
 
   .card-header {
@@ -1341,7 +1476,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .marker-field-list {
     min-block-size: 5rem;
     max-block-size: none;
-    flex: 1 1 auto;
+    flex: 1 1 0;
   }
 }
 
@@ -1528,6 +1663,151 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-radius: var(--bs-border-radius-lg);
 }
 
+// Verify: asks before a record is submitted without required fields.
+.missing-required-dialog {
+  max-inline-size: 32rem;
+}
+
+.missing-required-modal {
+  border-radius: var(--bs-border-radius-lg);
+
+  .modal-header {
+    align-items: flex-start;
+  }
+}
+
+.missing-required-modal__heading {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  min-inline-size: 0;
+}
+
+.missing-required-modal__icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  place-items: center;
+  border-radius: .625rem;
+
+  > .bx {
+    font-size: 1.35rem;
+  }
+}
+
+.missing-required-modal__summary {
+  margin: .2rem 0 0;
+  color: var(--bs-secondary-color);
+  font-size: .8125rem;
+}
+
+.missing-required-list {
+  display: grid;
+  gap: .5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.missing-required-item {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  padding: .7rem .8rem;
+  background: rgba(255, 171, 0, .06);
+  border: 1px solid rgba(255, 171, 0, .32);
+  border-radius: .5rem;
+
+  &.is-muted {
+    background: rgba(67, 89, 113, .03);
+    border-color: var(--bs-border-color);
+  }
+}
+
+// Shaped like the person numbers in the Verify list.
+.missing-required-item__badge {
+  display: inline-grid;
+  flex: 0 0 auto;
+  inline-size: 2rem;
+  block-size: 2rem;
+  place-items: center;
+  color: #8a6500;
+  background: rgba(255, 171, 0, .16);
+  border-radius: .4rem;
+  font-size: .6875rem;
+  font-weight: 700;
+
+  > .bx {
+    font-size: 1.1rem;
+  }
+
+  .is-muted > & {
+    color: var(--bs-secondary-color);
+    background: rgba(67, 89, 113, .08);
+  }
+}
+
+.missing-required-item__copy {
+  min-inline-size: 0;
+  padding-block-start: .1rem;
+
+  strong {
+    display: block;
+    color: var(--bs-heading-color);
+    font-size: .875rem;
+    font-weight: 600;
+  }
+
+  small {
+    display: block;
+    margin-block-start: .1rem;
+    color: var(--bs-secondary-color);
+    font-size: .75rem;
+    line-height: 1.4;
+  }
+}
+
+.missing-required-item__who {
+  color: var(--bs-secondary-color);
+  font-weight: 400;
+}
+
+.missing-required-item__names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin: .45rem 0 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    padding: .15rem .55rem;
+    color: #8a6500;
+    background: #fff;
+    border: 1px solid rgba(255, 171, 0, .45);
+    border-radius: 50rem;
+    font-size: .75rem;
+    font-weight: 500;
+  }
+}
+
+.missing-required-modal__note {
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  margin: .9rem 0 0;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  line-height: 1.45;
+
+  > .bx {
+    flex: 0 0 auto;
+    margin-block-start: .05rem;
+    font-size: 1rem;
+  }
+}
+
 @property --ocr-progress {
   syntax: '<number>';
   inherits: false;
@@ -1588,6 +1868,17 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     font-size: .625rem;
     letter-spacing: .05em;
     text-transform: uppercase;
+  }
+}
+
+// The one action on the progress window: cancel, set apart below the status.
+// Stop the run: solid red, the one action on the progress window.
+.ocr-progress-actions {
+  padding: 1rem 1.5rem 1.25rem;
+  border-block-start: 1px solid var(--bs-border-color);
+
+  .btn {
+    font-weight: 500;
   }
 }
 
@@ -1825,6 +2116,861 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// Handwritten line outlines in the Verify step. One SVG whose viewBox is the
+// page's pixel size, stretched over the canvas, so outlines sit on the ink at
+// every zoom. Colours match the rectangle markers they replace: orange for the
+// selected person's row, green for the exact field, red for lines to review.
+.line-overlay {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: visible;
+  pointer-events: none;
+
+  &.is-editing {
+    pointer-events: all;
+  }
+
+  &.is-editing[data-edit-mode="rectangle"] {
+    cursor: crosshair;
+  }
+}
+
+// The Align step's Detect preview: outlines only, never in the way of the
+// markers Staff drag underneath.
+.line-overlay.is-preview {
+  z-index: 1;
+
+  .line-marker {
+    cursor: default;
+    pointer-events: none;
+  }
+}
+
+// Edit lines (after Detect): the outlines take the pointer, and the field
+// markers underneath are locked and faded so a click never grabs one.
+.line-overlay.is-preview.is-interactive {
+  z-index: 3;
+  pointer-events: all;
+
+  .line-marker {
+    cursor: pointer;
+    pointer-events: visiblePainted;
+  }
+}
+
+.field-overlay.is-editing-lines .field-box {
+  opacity: .45;
+  pointer-events: none;
+}
+
+.line-edit__box {
+  fill: none;
+  stroke: var(--bs-success);
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.line-edit__grip {
+  rx: 1;
+}
+
+.line-overlay.is-editing[data-edit-mode="draw"] {
+  cursor: crosshair;
+}
+
+// Points mode: a faint dot halfway along each edge adds a corner when dragged;
+// the corner last touched is filled, for Delete.
+.line-edit__midpoint {
+  fill: rgba(255, 255, 255, .85);
+  stroke: var(--bs-success);
+  stroke-width: 1px;
+  stroke-dasharray: 2 1.5;
+  vector-effect: non-scaling-stroke;
+  cursor: copy;
+  pointer-events: all;
+  opacity: .8;
+
+  &:hover {
+    fill: var(--bs-success);
+    opacity: 1;
+  }
+}
+
+.line-edit__handle.is-active {
+  fill: var(--bs-success);
+}
+
+// Drawing a new outline: the old one fades, the new one follows the pointer.
+.line-edit__shape.is-replaced {
+  fill: none;
+  stroke-dasharray: 4 3;
+  opacity: .45;
+}
+
+.line-edit__draft {
+  fill: rgba(40, 199, 111, .12);
+  stroke: var(--bs-success);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.line-edit__vertex {
+  fill: #fff;
+  stroke: var(--bs-success);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+
+  // The first point: click it again to close the outline.
+  &.is-start {
+    fill: var(--bs-success);
+  }
+}
+
+.line-adjust-card__draw {
+  display: flex;
+  gap: .4rem;
+
+  &.d-none {
+    display: none !important;
+  }
+
+  .btn-success {
+    flex: 1 1 auto;
+  }
+}
+
+.line-adjust-card__modes {
+  display: flex;
+
+  .btn {
+    flex: 1 1 0;
+  }
+}
+
+.line-marker.is-adjusted .line-marker__shape {
+  stroke: #7367f0;
+  stroke-width: 1.6px;
+}
+
+// Changed here but not saved yet: not what Scan with OCR would read.
+.line-marker.is-unsaved .line-marker__shape {
+  fill: rgba(255, 171, 0, .14);
+  stroke: var(--bs-warning);
+  stroke-width: 2px;
+  stroke-dasharray: 6 3;
+}
+
+.line-adjust-card__save {
+  display: flex;
+  gap: .4rem;
+
+  .btn-primary {
+    flex: 1 1 auto;
+  }
+}
+
+// Adding and removing whole lines, set apart from the outline controls above
+// (Reset line, size, undo), so a reviewer working through stray lines does not
+// delete one by a slip of the same row.
+.line-adjust-card__structure {
+  display: flex;
+  gap: .4rem;
+  padding-block-start: .45rem;
+  border-block-start: 1px dashed var(--bs-border-color);
+
+  .btn {
+    flex: 1 1 0;
+  }
+
+  // While a new outline is being drawn.
+  .btn-outline-primary.active {
+    color: #fff;
+    background: var(--bs-primary);
+  }
+}
+
+.line-adjusted-mark {
+  fill: #7367f0;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+// The printed line a dragged marker's edge snapped to.
+.marker-snap-guide {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+
+  &.is-vertical {
+    top: 0;
+    bottom: 0;
+    width: 0;
+    border-left: 2px solid #ff3e1d;
+    margin-left: -1px;
+  }
+
+  &.is-horizontal {
+    left: 0;
+    right: 0;
+    height: 0;
+    border-top: 2px solid #ff3e1d;
+    margin-top: -1px;
+  }
+}
+
+// Snap to table while it works: the grid icon makes way for a spinner on the
+// right, in the same space (icon 1.125rem + .25rem gap), so the button keeps
+// its size; it keeps its colours too, rather than fading like a disabled one.
+.marker-snap-button {
+  .marker-snap-spinner {
+    display: none;
+    flex-shrink: 0;
+    inline-size: .875rem;
+    block-size: .875rem;
+    margin-inline: .375rem .125rem;
+    border-width: .125rem;
+  }
+
+  &.is-loading {
+    &:disabled {
+      opacity: 1;
+    }
+
+    .bx-grid-alt {
+      display: none;
+    }
+
+    .marker-snap-spinner {
+      display: inline-block;
+    }
+  }
+}
+
+.line-adjust-card {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  margin-block-end: .75rem;
+  padding: .7rem .75rem;
+  background: var(--bs-body-bg);
+  border: 1px solid rgba(40, 199, 111, .45);
+  border-radius: .5rem;
+  box-shadow: 0 1px 3px rgba(34, 48, 62, .08);
+  font-size: .8125rem;
+}
+
+.line-adjust-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .5rem;
+
+  strong {
+    min-inline-size: 0;
+    overflow: hidden;
+    color: var(--bs-heading-color);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.line-adjust-card__position {
+  flex: 0 0 auto;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+}
+
+.line-adjust-card__note {
+  margin: 0;
+  color: var(--bs-danger);
+  font-size: .75rem;
+}
+
+.line-adjust-card__crop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 3.5rem;
+  max-block-size: 9rem;
+  padding: .35rem;
+  overflow: hidden;
+  background: repeating-conic-gradient(#f3f4f6 0% 25%, #fff 0% 50%) 0 / 12px 12px;
+  border: 1px dashed var(--bs-border-color);
+  border-radius: .35rem;
+
+  canvas {
+    max-inline-size: 100%;
+    max-block-size: 8rem;
+    object-fit: contain;
+
+    &.is-empty {
+      display: none;
+    }
+  }
+}
+
+.line-adjust-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .4rem;
+}
+
+.line-adjust-card__status {
+  min-block-size: 1rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+
+  &.is-error {
+    color: var(--bs-danger);
+  }
+}
+
+.line-adjust-card__hint {
+  color: var(--bs-secondary-color);
+  font-size: .6875rem;
+  line-height: 1.4;
+}
+
+.line-overlay__guide {
+  stroke: #0e9aa7;
+  stroke-width: 1px;
+  stroke-dasharray: 5 4;
+  opacity: .75;
+  vector-effect: non-scaling-stroke;
+}
+
+.detect-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  margin-block-end: .75rem;
+  padding: .65rem .75rem;
+  color: #0b5f67;
+  background: rgba(14, 154, 167, .09);
+  border: 1px solid rgba(14, 154, 167, .3);
+  border-radius: .5rem;
+  font-size: .8125rem;
+
+  > .bx {
+    flex: 0 0 auto;
+    margin-block-start: .1rem;
+    font-size: 1.15rem;
+  }
+
+  &.has-review {
+    color: #8a2c1c;
+    background: rgba(255, 62, 29, .07);
+    border-color: rgba(255, 62, 29, .3);
+  }
+
+  &.is-stale,
+  &.has-notes:not(.has-review) {
+    color: #8a6500;
+    background: rgba(255, 171, 0, .1);
+    border-color: rgba(255, 171, 0, .35);
+  }
+
+  .form-check-label {
+    color: var(--bs-body-color);
+    font-size: .75rem;
+  }
+}
+
+// What Staff should check about the grid as a whole (Detect summary and Verify).
+.grid-notes {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  margin: .75rem 1rem 0;
+  padding: .65rem .75rem;
+  color: #8a6500;
+  background: rgba(255, 171, 0, .1);
+  border: 1px solid rgba(255, 171, 0, .35);
+  border-radius: .5rem;
+  font-size: .8125rem;
+
+  > .bx {
+    flex: 0 0 auto;
+    margin-block-start: .1rem;
+    font-size: 1.15rem;
+  }
+}
+
+.grid-notes__list {
+  margin: .15rem 0 0;
+  padding-inline-start: 1.1rem;
+  color: var(--bs-body-color);
+
+  li + li {
+    margin-block-start: .2rem;
+  }
+}
+
+.detect-summary__copy {
+  display: flex;
+  flex-direction: column;
+  gap: .1rem;
+  min-inline-size: 0;
+
+  strong {
+    color: inherit;
+  }
+}
+
+.line-marker {
+  cursor: pointer;
+  pointer-events: visiblePainted;
+  outline: none;
+
+  .line-marker__shape {
+    fill: rgba(105, 108, 255, .07);
+    stroke: rgba(105, 108, 255, .72);
+    stroke-width: 1.1px;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+    transition: fill .12s ease, stroke .12s ease;
+  }
+
+  &:hover .line-marker__shape,
+  &:focus-visible .line-marker__shape {
+    stroke-width: 1.8px;
+  }
+
+  &.is-verified:not(.is-selected) .line-marker__shape {
+    fill: rgba(40, 199, 111, .08);
+    stroke: rgba(40, 199, 111, .72);
+  }
+
+  &.is-selected .line-marker__shape {
+    fill: rgba(255, 171, 0, .18);
+    stroke: var(--bs-warning);
+    stroke-width: 1.6px;
+  }
+
+  &.is-selected.is-current .line-marker__shape {
+    fill: rgba(40, 199, 111, .26);
+    stroke: var(--bs-success);
+    stroke-width: 2.2px;
+  }
+
+  // Flagged lines stay red whatever else is selected; selection shows in the fill.
+  &.needs-review .line-marker__shape {
+    fill: rgba(255, 62, 29, .1);
+    stroke: var(--bs-danger);
+    stroke-width: 1.8px;
+    stroke-dasharray: 5 3;
+  }
+
+  &.needs-review.is-selected .line-marker__shape {
+    fill: rgba(255, 171, 0, .2);
+  }
+
+  &.needs-review.is-selected.is-current .line-marker__shape {
+    fill: rgba(40, 199, 111, .26);
+  }
+
+  &.is-editing {
+    opacity: .25;
+  }
+}
+
+.line-review-label {
+  pointer-events: none;
+
+  rect {
+    fill: var(--bs-danger);
+  }
+
+  text {
+    fill: #fff;
+    font-family: var(--bs-body-font-family);
+    font-weight: 600;
+  }
+}
+
+.line-edit__shape {
+  fill: rgba(40, 199, 111, .16);
+  stroke: var(--bs-success);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.line-edit__handle {
+  fill: #fff;
+  stroke: var(--bs-success);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+  pointer-events: all;
+
+  &:hover {
+    fill: var(--bs-success);
+  }
+}
+
+.line-edit-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem .6rem;
+  padding: .4rem .75rem .35rem;
+  background: rgba(40, 199, 111, .08);
+  border-block-end: 1px solid rgba(40, 199, 111, .35);
+
+  .btn-group .btn {
+    padding-inline: .6rem;
+    white-space: nowrap;
+  }
+}
+
+// Title and the field being edited on one line: "Adjust outline  Child's Name · row 20".
+.line-edit-toolbar__copy {
+  display: flex;
+  flex: 1 1 9rem;
+  align-items: baseline;
+  gap: .4rem;
+  min-inline-size: 0;
+  font-size: .75rem;
+
+  strong {
+    flex: 0 0 auto;
+    color: var(--bs-heading-color);
+    white-space: nowrap;
+  }
+
+  span {
+    overflow: hidden;
+    color: var(--bs-secondary-color);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.line-edit-toolbar__actions {
+  display: flex;
+  gap: .35rem;
+}
+
+.line-edit-toolbar__status {
+  flex: 1 0 100%;
+  overflow: hidden;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  // One line, always, empty or not. The hint changes as you draw ("3 points...",
+  // "Enter closes it"); a toolbar that grows and shrinks with it moves the page under
+  // the pointer in the middle of a stroke. The full text is in the tooltip.
+  min-block-size: 1.35em;
+
+  &.is-error {
+    color: var(--bs-danger);
+  }
+}
+
+// Template builder: printed row lines of a ruled register, drawn over the
+// sample. Only the lines take the pointer, so marquee selection still works
+// on the page around them.
+.ledger-rule-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ledger-rule {
+  cursor: ns-resize;
+
+  .ledger-rule__line {
+    stroke: #0e9aa7;
+    stroke-width: 1.5px;
+    stroke-dasharray: 6 3;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .ledger-rule__hit {
+    stroke: transparent;
+    stroke-width: 9px;
+    vector-effect: non-scaling-stroke;
+    pointer-events: stroke;
+  }
+
+  // Detect's estimate below the last printed rule: amber until checked.
+  &.is-estimated .ledger-rule__line {
+    stroke: #e59500;
+    stroke-dasharray: 3 3;
+  }
+
+  &.is-selected .ledger-rule__line {
+    stroke: var(--bs-primary);
+    stroke-width: 2.5px;
+    stroke-dasharray: none;
+  }
+
+  &:hover .ledger-rule__line,
+  &.is-dragging .ledger-rule__line {
+    stroke: var(--bs-danger);
+    stroke-width: 2px;
+  }
+}
+
+.template-builder-field-group.is-column {
+  color: #0b7e88;
+  background: rgba(14, 154, 167, .12);
+}
+
+.template-ledger-card__intro,
+.template-ledger-card__summary {
+  margin-block-end: .75rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  line-height: 1.4;
+}
+
+.template-ledger-card__summary {
+  margin-block: .75rem 0;
+  color: var(--bs-body-color);
+}
+
+.template-ledger-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+// Row line tools: add, remove, and space N rows evenly.
+.template-ledger-rows {
+  margin-block-start: .75rem;
+}
+
+.template-ledger-rows__heading {
+  margin-block-end: .35rem;
+  color: var(--bs-secondary-color);
+  font-size: .6875rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.template-ledger-rows__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+}
+
+.template-ledger-rows__even {
+  flex: 1 1 9.5rem;
+  inline-size: auto;
+  min-inline-size: 9.5rem;
+
+  .form-control {
+    max-inline-size: 4.25rem;
+  }
+}
+
+.template-ledger-card__covered {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-block-start: .6rem;
+  padding: .5rem .6rem;
+  color: #8a6500;
+  background: rgba(255, 171, 0, .12);
+  border-radius: .4rem;
+  font-size: .75rem;
+
+  .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
+
+.template-ledger-card__covered-actions {
+  display: inline-flex;
+  gap: .35rem;
+}
+
+// What is wrong with the grid; a blocking problem stops the save.
+.template-ledger-card__problems {
+  display: flex;
+  gap: .45rem;
+  margin-block-start: .6rem;
+  padding: .5rem .6rem;
+  color: #8a6500;
+  background: rgba(255, 171, 0, .12);
+  border-radius: .4rem;
+  font-size: .75rem;
+  line-height: 1.4;
+
+  ul {
+    padding-inline-start: 0;
+    list-style: none;
+  }
+
+  li + li {
+    margin-block-start: .25rem;
+  }
+
+  li.is-blocking {
+    color: var(--bs-danger);
+    font-weight: 500;
+  }
+}
+
+.template-ledger-card__footer {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+  margin-block-start: .75rem;
+
+  .btn {
+    align-self: flex-start;
+  }
+}
+
+// Ledger column markers in the Align step: aligned like any field, but read
+// line by line, so they read as a frame rather than a crop box.
+.field-box.is-column {
+  border-style: dashed;
+  border-color: #0e9aa7;
+  background-color: rgba(14, 154, 167, .06);
+
+  .field-box-label {
+    background-color: #0e9aa7;
+  }
+
+  &.is-selected {
+    border-style: dashed;
+  }
+}
+
+// The picture and the value box each get a fixed share of the row, so every
+// value box starts and ends in the same place whatever shape its picture is.
+.validation-field__entry {
+  display: grid;
+  grid-template-columns: minmax(0, 9fr) minmax(0, 11fr);
+  align-items: center;
+  gap: .6rem;
+  min-inline-size: 0;
+
+  // A line with no picture gives its whole width to the value.
+  &:not(:has(.validation-field__crop)) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .form-control {
+    min-inline-size: 0;
+  }
+}
+
+// The exact crop TrOCR read, beside the value it produced. Crops are about
+// 45-65 px tall, so this shows them at close to their real size.
+.validation-field__crop {
+  justify-self: start;
+  max-inline-size: 100%;
+  max-block-size: 3.5rem;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: .3rem;
+}
+
+.validation-field__reading {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.validation-field__reading .validation-field__reading-text {
+  overflow: hidden;
+  // Room for the italic reading's last letter, which overhangs the box and
+  // would be cut off ("Abad" read as "Abaa").
+  padding-inline-end: .25em;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  span {
+    font-style: italic;
+  }
+}
+
+.validation-field__adjust {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .2rem;
+  margin-inline-start: auto;
+  padding: 0;
+  color: var(--bs-primary);
+  background: none;
+  border: 0;
+  font-size: .6875rem;
+
+  &:hover,
+  &:focus-visible {
+    text-decoration: underline;
+  }
+}
+
+.validation-field__flag {
+  margin-block-start: .25rem;
+  color: var(--bs-danger);
+  font-size: .6875rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.validation-field.has-line-flag {
+  border-inline-start: 3px solid var(--bs-danger);
+}
+
+// The template's hint for this value, and a value that does not fit its field
+// (a date, a number, one of a list): pointed out, never blocking.
+.validation-field__hint {
+  margin-block-start: .25rem;
+  color: var(--bs-secondary-color);
+  font-size: .6875rem;
+  line-height: 1.35;
+}
+
+.validation-field__type {
+  margin-block-start: .25rem;
+  color: #a86b00;
+  font-size: .6875rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+// Required fields nothing was read for, in this person's row.
+.validation-record-group__missing {
+  margin-block-end: .5rem;
+  padding: .45rem .6rem;
+  color: #8a6500;
+  background: rgba(255, 171, 0, .12);
+  border-radius: .4rem;
+  font-size: .75rem;
+  line-height: 1.4;
+}
+
 .validation-pane__hint {
   display: flex;
   flex: 0 0 auto;
@@ -1927,7 +3073,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .validation-list-heading,
 .validation-field {
   display: grid;
-  grid-template-columns: minmax(9rem, .68fr) minmax(13rem, 1.32fr) 5.75rem;
+  grid-template-columns: minmax(8rem, .55fr) minmax(13rem, 1.6fr) 5.75rem;
   gap: .8rem;
 }
 
@@ -2195,17 +3341,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     box-shadow: inset 0 0 0 2px rgba(105, 108, 255, .25);
   }
 
-  &.is-active {
-    background: rgba(40, 199, 111, .07);
-    box-shadow: inset .16rem 0 0 var(--bs-success);
-  }
-
-  &.is-verified {
-    background: rgba(40, 199, 111, .045);
-  }
-
+  // Only the row you are on is tinted. A verified row stays plain, with its
+  // green number and tick, so the active row stands out in a long list.
+  &.is-active,
   &.is-active.is-verified {
-    background: rgba(40, 199, 111, .1);
+    background: rgba(40, 199, 111, .09);
+    box-shadow: inset .2rem 0 0 var(--bs-success);
   }
 
   &.is-invalid {
@@ -2413,10 +3554,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   #step-mark .document-fields-card {
-    min-block-size: 0;
+    flex: 0 0 auto;
 
     .marker-field-list {
       max-block-size: 20rem;
+      flex: 0 1 auto;
     }
   }
 
@@ -5153,7 +6295,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .template-builder-field-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: .45rem;
   min-block-size: 2.8rem;
@@ -5183,6 +6325,16 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   font-size: .5625rem;
   font-weight: 700;
   letter-spacing: .025em;
+}
+
+// What a field holds, in a few words: "Name · Date · optional".
+.template-builder-field-tags {
+  max-inline-size: 6.5rem;
+  overflow: hidden;
+  color: var(--bs-secondary-color);
+  font-size: .625rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .template-builder-field-number {
@@ -5234,6 +6386,120 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border: 1px solid var(--bs-border-color);
   border-radius: var(--bs-border-radius);
   box-shadow: 0 .15rem .65rem rgba(67, 89, 113, .07);
+}
+
+// Test on sample: what Detect makes of the sample with the layout.
+.layout-test__status {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: 1.25rem .5rem;
+  color: var(--bs-secondary-color);
+
+  &.is-error {
+    color: var(--bs-danger);
+  }
+}
+
+.layout-test__summary {
+  margin-block-end: .5rem;
+  font-weight: 600;
+}
+
+.layout-test__findings {
+  margin-block-end: .75rem;
+  padding-inline-start: 1.1rem;
+  font-size: .8125rem;
+  line-height: 1.45;
+
+  li + li {
+    margin-block-start: .2rem;
+  }
+
+  .is-warning {
+    color: #a86b00;
+  }
+
+  .is-ok {
+    color: #0b7e88;
+  }
+}
+
+.layout-test__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem 1rem;
+  margin-block-end: .6rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+
+  span::before {
+    display: inline-block;
+    inline-size: .75rem;
+    block-size: .75rem;
+    margin-inline-end: .35rem;
+    vertical-align: -.1rem;
+    content: "";
+    border: 2px solid currentColor;
+    border-radius: .15rem;
+  }
+
+  .is-placed::before { color: #0e9aa7; background: rgba(14, 154, 167, .16); }
+  .is-field::before { color: #696cff; background: rgba(105, 108, 255, .16); }
+  .is-shared::before { color: #e59500; background: rgba(255, 171, 0, .22); }
+  .is-no-row::before { color: #ff3e1d; background: rgba(255, 62, 29, .2); }
+  .is-rule::before { block-size: 0; color: #0e9aa7; border-width: 2px 0 0; border-style: dashed; }
+}
+
+.layout-test__page {
+  overflow: auto;
+  background: var(--bs-gray-100);
+  border: 1px solid var(--bs-border-color);
+  border-radius: .4rem;
+
+  canvas {
+    display: block;
+    inline-size: 100%;
+    block-size: auto;
+  }
+}
+
+// A layout in use: saving new markers makes a new version instead.
+.template-builder-in-use {
+  display: flex;
+  align-items: flex-start;
+  gap: .55rem;
+  margin-block-end: .75rem;
+  padding: .6rem .8rem;
+  background: rgba(3, 195, 236, .07);
+  border: 1px solid rgba(3, 195, 236, .25);
+  border-radius: .5rem;
+  font-size: .8125rem;
+  line-height: 1.45;
+
+  i {
+    flex: 0 0 auto;
+    margin-block-start: .15rem;
+    color: var(--bs-info);
+  }
+}
+
+.template-builder-page__parent {
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  text-decoration: underline dotted;
+}
+
+.template-field-settings-card {
+  .form-label {
+    margin-block-end: .2rem;
+    font-size: .75rem;
+  }
+
+  .form-text,
+  .form-check-label {
+    font-size: .6875rem;
+  }
 }
 
 .template-builder-live-note {

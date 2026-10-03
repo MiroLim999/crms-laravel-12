@@ -108,7 +108,7 @@
                             {{-- Data row --}}
                             <tr class="audit-data-row" id="row-{{ $entry->getKey() }}">
                                 <td class="text-nowrap">
-                                    {{ $entry->created_at?->format('j M Y H:i') }}
+                                    {{ \App\Support\LocalTime::format($entry->created_at, 'j M Y H:i') }}
                                     <div><small class="text-muted">{{ $entry->created_at?->diffForHumans() }}</small></div>
                                 </td>
                                 <td>

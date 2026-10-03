@@ -67,7 +67,6 @@
             $tiles = [
                 ['Matching records', number_format($summary['total'])],
                 ['Submitted', number_format($summary['submitted'])],
-                ['Drafts', number_format($summary['drafts'])],
                 ['Average OCR confidence',
                     $summary['average_confidence'] === null ? '—' : $summary['average_confidence'].'%'],
             ];
@@ -105,11 +104,6 @@
                     </thead>
                     <tbody>
                         @foreach ($records as $record)
-                            @php
-                                $confidences = $record->fields
-                                    ->pluck('ocr_confidence')
-                                    ->filter(fn ($value) => $value !== null);
-                            @endphp
                             <tr>
                                 <td>
                                     <div class="fw-medium">{{ $record->title() }}</div>
@@ -129,17 +123,17 @@
                                     </span>
                                 </td>
                                 <td class="text-muted">
-                                    {{ $record->created_at?->format('j M Y') }}
+                                    {{ \App\Support\LocalTime::format($record->created_at, 'j M Y') }}
                                     <div><small>{{ $record->creator?->name }}</small></div>
                                 </td>
                                 <td class="text-muted">
-                                    {{ $record->submitted_at?->format('j M Y') ?? '—' }}
+                                    {{ \App\Support\LocalTime::format($record->submitted_at, 'j M Y') ?: '—' }}
                                     @if ($record->submitter)
                                         <div><small>{{ $record->submitter->name }}</small></div>
                                     @endif
                                 </td>
                                 <td class="text-end">
-                                    {{ $confidences->isEmpty() ? '—' : round($confidences->avg(), 1).'%' }}
+                                    {{ $record->fields_avg_ocr_confidence === null ? '—' : round((float) $record->fields_avg_ocr_confidence, 1).'%' }}
                                 </td>
                             </tr>
                         @endforeach

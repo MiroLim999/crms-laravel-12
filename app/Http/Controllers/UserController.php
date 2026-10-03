@@ -24,6 +24,14 @@ class UserController extends Controller
 
     public function index(Request $request): View
     {
+        // Strings only. An edited URL can send ?q[]=x, an array, which would
+        // crash the string reads below.
+        $request->validate([
+            'q' => ['nullable', 'string'],
+            'role' => ['nullable', 'string'],
+            'status' => ['nullable', 'string'],
+        ], [], ['q' => 'search']);
+
         $users = User::query()
             ->with(['role', 'creator'])
             ->when($request->filled('q'), function ($query) use ($request) {

@@ -14,40 +14,48 @@
 
     <x-card>
         <form method="GET" action="{{ route('records.index') }}" class="row g-3">
+            {{-- Values come from the validated filters, so a bad one is not echoed back. --}}
             <div class="col-md-4">
                 <label for="q" class="form-label">Search</label>
-                <input type="search" id="q" name="q" value="{{ request('q') }}"
-                       class="form-control" placeholder="Name or registry number">
+                <input type="search" id="q" name="q" value="{{ $filters['q'] ?? '' }}"
+                       class="form-control @error('q') is-invalid @enderror" placeholder="Name or registry number">
+                @error('q')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
             <div class="col-md-2">
                 <label for="type" class="form-label">Type</label>
-                <select id="type" name="type" class="form-select">
+                <select id="type" name="type" class="form-select @error('type') is-invalid @enderror">
                     <option value="">All</option>
                     @foreach ($documentTypes as $type)
-                        <option value="{{ $type->value }}" @selected(request('type') === $type->value)>
+                        <option value="{{ $type->value }}" @selected(($filters['type'] ?? null) === $type->value)>
                             {{ $type->shortLabel() }}
                         </option>
                     @endforeach
                 </select>
+                @error('type')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
             <div class="col-md-2">
                 <label for="status" class="form-label">Status</label>
-                <select id="status" name="status" class="form-select">
+                <select id="status" name="status" class="form-select @error('status') is-invalid @enderror">
                     <option value="">Any</option>
                     @foreach ($statuses as $status)
-                        <option value="{{ $status->value }}" @selected(request('status') === $status->value)>
+                        <option value="{{ $status->value }}" @selected(($filters['status'] ?? null) === $status->value)>
                             {{ $status->label() }}
                         </option>
                     @endforeach
                 </select>
+                @error('status')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
             <div class="col-md-2">
                 <label for="from" class="form-label">From</label>
-                <input type="date" id="from" name="from" value="{{ request('from') }}" class="form-control">
+                <input type="date" id="from" name="from" value="{{ $filters['from'] ?? '' }}"
+                       class="form-control @error('from') is-invalid @enderror">
+                @error('from')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
             <div class="col-md-2">
                 <label for="to" class="form-label">To</label>
-                <input type="date" id="to" name="to" value="{{ request('to') }}" class="form-control">
+                <input type="date" id="to" name="to" value="{{ $filters['to'] ?? '' }}"
+                       class="form-control @error('to') is-invalid @enderror">
+                @error('to')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
             <div class="col-12 d-flex gap-2">
                 <button class="btn btn-primary" type="submit">
@@ -103,7 +111,7 @@
                                     @endif
                                 </td>
                                 <td class="text-muted">
-                                    {{ $record->submitted_at?->format('j M Y') ?? '—' }}
+                                    {{ \App\Support\LocalTime::format($record->submitted_at, 'j M Y') ?: '—' }}
                                     @if ($record->submitter)
                                         <div><small>{{ $record->submitter->name }}</small></div>
                                     @endif

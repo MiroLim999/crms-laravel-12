@@ -24,11 +24,19 @@ export default defineConfig({
                 'resources/js/dashboard-analytics.js',
                 // Own entry: pulls in the PDF.js module tree. Only the scanning
                 // workspace and the template builder use it.
-                // NOTE: pdf.worker.mjs is now served from the CDN (see field-marker.js).
-                //       Do not add `pdfjs-dist/build/pdf.worker.mjs?url` back here.
+                // NOTE: the PDF.js worker is not bundled. tools/copy-pdf-worker.mjs
+                //       copies it to public/vendor/pdfjs before every build (see
+                //       field-marker.js). Do not add `pdfjs-dist/build/pdf.worker.mjs?url`
+                //       here: the Node tests import field-marker.js directly.
                 'resources/js/field-marker.js',
                 // Shared Windows-style drag selection used by both marker editors.
                 'resources/js/marquee-selection.js',
+                // Line outlines in the Verify step: the geometry helpers and the
+                // SVG overlay, imported by the scanning workspace's inline module.
+                'resources/js/line-geometry.js',
+                'resources/js/line-overlay.js',
+                // The value checks Verify runs from each template field's settings.
+                'resources/js/value-types.js',
                 // Template Builder interaction shell. It shares FieldMarker with
                 // Staff scanning but is only loaded on Super Admin layout pages.
                 'resources/js/template-builder.js',

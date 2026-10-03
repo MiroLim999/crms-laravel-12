@@ -8,6 +8,7 @@ use App\Http\Controllers\Auth\PasswordChangeController;
 use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DashboardSystemStatusController;
+use App\Http\Controllers\DocumentPageController;
 use App\Http\Controllers\DocumentScanController;
 use App\Http\Controllers\DocumentTemplateController;
 use App\Http\Controllers\DocumentTypeDefinitionController;
@@ -83,10 +84,48 @@ Route::middleware('auth')->group(function () {
         Route::get('documents/new', [DocumentScanController::class, 'create'])->name('documents.create');
         Route::get('documents/workspace', [DocumentScanController::class, 'workspace'])
             ->name('documents.workspace');
-        // Proxies the FastAPI service; never called from the browser directly.
-        Route::post('documents/recognise', [DocumentScanController::class, 'recognise'])
-            ->name('documents.recognise');
         Route::post('documents', [DocumentScanController::class, 'store'])->name('documents.store');
+
+        // Finishing Align uploads the page and starts line detection in the
+        // background; Verify polls for the outlines and readings, shows the crop
+        // TrOCR read, and re-reads a line after its outline is redrawn.
+        Route::post('documents/pages', [DocumentPageController::class, 'store'])
+            ->name('documents.pages.store');
+        // Snap to table in Align: fit the markers to the printed table, fast.
+        Route::post('documents/pages/snap', [DocumentPageController::class, 'snap'])
+            ->name('documents.pages.snap');
+        Route::get('documents/pages/{page}', [DocumentPageController::class, 'show'])
+            ->name('documents.pages.show');
+        Route::get('documents/pages/{page}/image', [DocumentPageController::class, 'image'])
+            ->name('documents.pages.image');
+        Route::post('documents/pages/{page}/read', [DocumentPageController::class, 'read'])
+            ->name('documents.pages.read');
+        // Markers moved after Detect: outline this page again from them and read
+        // it, reusing the lines Detect already found instead of detecting again.
+        Route::put('documents/pages/{page}/geometry', [DocumentPageController::class, 'reoutline'])
+            ->name('documents.pages.reoutline');
+        Route::post('documents/pages/{page}/cancel', [DocumentPageController::class, 'cancel'])
+            ->name('documents.pages.cancel');
+        Route::get('documents/pages/{page}/lines/{line}/crop', [DocumentPageController::class, 'crop'])
+            ->scopeBindings()
+            ->name('documents.pages.lines.crop');
+        Route::put('documents/pages/{page}/lines/{line}', [DocumentPageController::class, 'updateLine'])
+            ->scopeBindings()
+            ->name('documents.pages.lines.update');
+        // Draw a line by hand where the detector found none.
+        Route::post('documents/pages/{page}/lines', [DocumentPageController::class, 'storeLine'])
+            ->name('documents.pages.lines.store');
+        // Remove one line before it is read: a stray mark, a wrongly split
+        // word, or one that does not belong. Only while Detect's result stands.
+        // It is kept, with its crop, until the page is outlined again, so
+        // restore puts it back (Ctrl+Z in the Align step).
+        Route::delete('documents/pages/{page}/lines/{line}', [DocumentPageController::class, 'destroyLine'])
+            ->scopeBindings()
+            ->name('documents.pages.lines.destroy');
+        Route::post('documents/pages/{page}/lines/{line}/restore', [DocumentPageController::class, 'restoreLine'])
+            ->scopeBindings()
+            ->withTrashed()
+            ->name('documents.pages.lines.restore');
     });
 
     /*
@@ -99,6 +138,7 @@ Route::middleware('auth')->group(function () {
         Route::get('records', [RecordController::class, 'index'])->name('records.index');
         Route::get('records/{record}', [RecordController::class, 'show'])->name('records.show');
         Route::get('records/{record}/scan', [RecordController::class, 'scan'])->name('records.scan');
+        Route::get('records/{record}/page', [RecordController::class, 'pageImage'])->name('records.page-image');
     });
 
     /*
@@ -186,6 +226,16 @@ Route::middleware('auth')->group(function () {
             ->name('templates.document-types.destroy');
         Route::get('templates', [DocumentTemplateController::class, 'index'])->name('templates.index');
         Route::get('templates/create', [DocumentTemplateController::class, 'create'])->name('templates.create');
+        // Suggests a ledger grid from the printed rules on a sample page.
+        Route::post('templates/detect-grid', [DocumentTemplateController::class, 'detectGrid'])
+            ->name('templates.detect-grid');
+        // Outlines the sample with the layout being built, as Detect would for Staff.
+        // It runs in the queue (about half a minute); the builder polls the status.
+        Route::post('templates/test-layout', [DocumentTemplateController::class, 'testLayout'])
+            ->name('templates.test-layout');
+        Route::get('templates/test-layout/{test}', [DocumentTemplateController::class, 'testLayoutStatus'])
+            ->whereUuid('test')
+            ->name('templates.test-layout.status');
         Route::post('templates', [DocumentTemplateController::class, 'store'])->name('templates.store');
         Route::get('templates/{template}/edit', [DocumentTemplateController::class, 'edit'])
             ->name('templates.edit');
@@ -197,6 +247,8 @@ Route::middleware('auth')->group(function () {
             ->name('templates.update');
         Route::post('templates/{template}/activate', [DocumentTemplateController::class, 'activate'])
             ->name('templates.activate');
+        Route::post('templates/{template}/duplicate', [DocumentTemplateController::class, 'duplicate'])
+            ->name('templates.duplicate');
         Route::delete('templates/{template}', [DocumentTemplateController::class, 'destroy'])
             ->name('templates.destroy');
     });

@@ -1,10 +1,17 @@
 <#
     serve.ps1
-    Starts the two processes CRMS needs, each in its own window, from the repo root.
+    Starts the processes CRMS needs, each in its own window, from the repo root:
+    Laravel, the queue worker that outlines and reads aligned pages, the
+    scheduler that deletes pages nobody submitted, and the OCR service.
 
-        .\serve.ps1            start both
+        .\serve.ps1            start all four: inside this terminal when run
+                               from Kiro / VS Code, else one window each
+        .\serve.ps1 -Windows   one window each, even from the editor
         .\serve.ps1 -Check     verify the environment and exit
-        .\serve.ps1 -NoOcr     Laravel only
+        .\serve.ps1 -NoOcr     everything but the OCR service
+        .\serve.ps1 -Only web|worker|scheduler|ocr
+                               run one of them in this terminal (Kiro's tasks
+                               in .vscode\tasks.json do this, one tab each)
 
     Apache is NOT used. Laravel is served by `php artisan serve` on port 8000, so
     the only XAMPP module that has to be running is MySQL. Sitting in htdocs is
@@ -20,6 +27,9 @@
 param(
     [switch]$Check,
     [switch]$NoOcr,
+    [switch]$Windows,
+    [ValidateSet('web', 'worker', 'scheduler', 'ocr')]
+    [string]$Only,
     [int]$AppPort = 8000,
     [int]$OcrPort = 8001
 )
@@ -34,6 +44,71 @@ function Write-Bad ($message) { Write-Host "  FAIL  $message" -ForegroundColor R
 
 function Test-Port([int]$Port) {
     $null -ne (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+}
+
+# A queue worker, or the loop that keeps one running (in its 5 s pause there is
+# no php process), other than this script itself.
+function Test-QueueWorker {
+    $null -ne (Get-CimInstance Win32_Process -Filter "Name='php.exe' OR Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -like '*artisan queue:work*' -or $_.CommandLine -like '*serve.ps1*-Only worker*') })
+}
+
+# The scheduler, or the loop that keeps it running, other than this script itself.
+function Test-Scheduler {
+    $null -ne (Get-CimInstance Win32_Process -Filter "Name='php.exe' OR Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -like '*artisan schedule:work*' -or $_.CommandLine -like '*serve.ps1*-Only scheduler*') })
+}
+
+# --- One service in this terminal ----------------------------------------
+# Each skips itself when that service is already running, so opening Kiro while
+# serve.ps1's windows are still up does not start anything twice.
+if ($Only) {
+    Set-Location $root
+    $ErrorActionPreference = 'Continue'
+    switch ($Only) {
+        'web' {
+            if (Test-Port $AppPort) { Write-Warn "Port $AppPort is already in use - Laravel is already running."; exit 0 }
+            # The warning about PHP_CLI_SERVER_WORKERS is harmless: PHP cannot
+            # run several server workers on Windows ("forking is not supported
+            # on this platform"), with or without --no-reload.
+            php artisan serve --port=$AppPort
+        }
+        'worker' {
+            if (Test-QueueWorker) { Write-Warn 'A queue worker is already running - not starting another.'; exit 0 }
+            # Finishing Align, and Detect, queue a job that outlines every
+            # handwritten line and reads it; without a worker, pages wait in
+            # "queued" forever. The loop brings it back after
+            # `php artisan queue:restart` (it exits so that new code loads),
+            # after a crash, and once MySQL is up if it started before MySQL.
+            $host.UI.RawUI.WindowTitle = 'CRMS queue worker'
+            while ($true) {
+                php artisan queue:work --timeout=900 --tries=1
+                Write-Host 'Worker stopped. Starting again in 5 s - close this terminal to stop it.' -ForegroundColor Yellow
+                Start-Sleep -Seconds 5
+            }
+        }
+        'scheduler' {
+            if (Test-Scheduler) { Write-Warn 'The scheduler is already running - not starting another.'; exit 0 }
+            # Runs what routes\console.php schedules: every hour,
+            # documents:prune-pages deletes aligned pages nobody submitted
+            # (unsubmitted civil registry scans) once they are
+            # LINE_MARKERS_KEEP_HOURS old. Each run is a fresh PHP process, so a
+            # code change needs no restart. The loop brings it back after a crash.
+            $host.UI.RawUI.WindowTitle = 'CRMS scheduler'
+            while ($true) {
+                php artisan schedule:work
+                Write-Host 'Scheduler stopped. Starting again in 5 s - close this terminal to stop it.' -ForegroundColor Yellow
+                Start-Sleep -Seconds 5
+            }
+        }
+        'ocr' {
+            if (Test-Port $OcrPort) { Write-Warn "Port $OcrPort is already in use - the OCR service is already running."; exit 0 }
+            # 127.0.0.1 only. The service has no authentication of its own;
+            # every authorization decision happens in Laravel.
+            python -m uvicorn ml.api.main:app --host 127.0.0.1 --port $OcrPort
+        }
+    }
+    exit $LASTEXITCODE
 }
 
 Write-Host ''
@@ -111,6 +186,20 @@ else:
     }
 }
 
+# --- Line detection (Kraken, its own environment) ------------------------
+# Aligned pages are outlined line by line by ml\line_markers.py in
+# ml\.venv-kraken. Without it, ledger templates cannot be scanned (older
+# rectangle templates still work).
+$krakenPython = Join-Path $root 'ml\.venv-kraken\Scripts\python.exe'
+if (Test-Path $krakenPython) {
+    $kraken = (& $krakenPython -c "from importlib.metadata import version; print('kraken ' + version('kraken'))" 2>$null)
+    if ($LASTEXITCODE -eq 0) { Write-Good "$kraken (ml\.venv-kraken)" }
+    else { Write-Warn 'ml\.venv-kraken exists but kraken does not import. Re-run ml\setup_kraken.ps1.'; $problems++ }
+} else {
+    Write-Warn 'Kraken environment missing. Run .\ml\setup_kraken.ps1 to scan ledger templates.'
+    $problems++
+}
+
 Write-Host ('-' * 40)
 
 if ($Check) {
@@ -129,16 +218,46 @@ Write-Host ''
 Write-Host 'Starting' -ForegroundColor White
 Write-Host ('-' * 40)
 
-# Each service gets its own window with -NoExit, so its log stays readable and
-# Ctrl+C in that window stops only that service.
+# Run from Kiro's or VS Code's terminal, the services share that terminal:
+# their logs appear in it and Ctrl+C there stops all of them. Elsewhere (or
+# with -Windows) each gets its own window, where Ctrl+C stops only that one.
+# (.vscode\tasks.json can also run them as one editor tab each.)
+$inEditor = -not $Windows -and (
+    $env:TERM_PROGRAM -in @('vscode', 'kiro') -or $env:VSCODE_INJECTION -or $env:VSCODE_SHELL_INTEGRATION
+)
+$started = @()
+
+function Start-ServiceWindow([string]$Service) {
+    $arguments = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', "`"$PSCommandPath`"", '-Only', $Service, '-AppPort', $AppPort, '-OcrPort', $OcrPort
+    )
+    if ($inEditor) {
+        $script:started += Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
+    } else {
+        Start-Process powershell -ArgumentList (@('-NoExit') + $arguments)
+    }
+}
+
 if (Test-Port $AppPort) {
     Write-Warn "Port $AppPort is already in use - assuming Laravel is already running."
 } else {
     Write-Step "Laravel        -> http://127.0.0.1:$AppPort"
-    Start-Process powershell -ArgumentList @(
-        '-NoExit', '-Command',
-        "Set-Location '$root'; php artisan serve --port=$AppPort"
-    )
+    Start-ServiceWindow 'web'
+}
+
+if (Test-QueueWorker) {
+    Write-Warn 'A queue worker is already running - not starting another.'
+} else {
+    Write-Step 'Queue worker   -> line detection and reading (restarts itself)'
+    Start-ServiceWindow 'worker'
+}
+
+if (Test-Scheduler) {
+    Write-Warn 'The scheduler is already running - not starting another.'
+} else {
+    Write-Step 'Scheduler      -> deletes unsubmitted pages every hour'
+    Start-ServiceWindow 'scheduler'
 }
 
 if (-not $NoOcr) {
@@ -146,17 +265,19 @@ if (-not $NoOcr) {
         Write-Warn "Port $OcrPort is already in use - assuming the OCR service is already running."
     } else {
         Write-Step "OCR service    -> http://127.0.0.1:$OcrPort"
-        # 127.0.0.1 only. The service has no authentication of its own; every
-        # authorization decision happens in Laravel.
-        Start-Process powershell -ArgumentList @(
-            '-NoExit', '-Command',
-            "Set-Location '$root'; python -m uvicorn ml.api.main:app --host 127.0.0.1 --port $OcrPort"
-        )
+        Start-ServiceWindow 'ocr'
     }
 }
 
 Write-Host ('-' * 40)
 Write-Host ''
 Write-Host "  Open  http://127.0.0.1:$AppPort" -ForegroundColor White
-Write-Host '  Stop  Ctrl+C in each window, or just close it.' -ForegroundColor Gray
-Write-Host ''
+if ($inEditor) {
+    Write-Host '  Stop  Ctrl+C in this terminal stops them all.' -ForegroundColor Gray
+    Write-Host ''
+    # Keep this terminal with the services; their output follows below.
+    if ($started.Count -gt 0) { $started | Wait-Process }
+} else {
+    Write-Host '  Stop  Ctrl+C in each window, or just close it.' -ForegroundColor Gray
+    Write-Host ''
+}

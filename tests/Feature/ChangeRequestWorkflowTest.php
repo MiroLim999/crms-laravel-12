@@ -3,11 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\ChangeRequestStatus;
+use App\Exceptions\ChangeRequestException;
 use App\Models\AuditLog;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
 use App\Models\RecordField;
 use App\Models\User;
+use App\Services\ChangeRequestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
@@ -224,6 +226,24 @@ class ChangeRequestWorkflowTest extends TestCase
         $this->assertSame(ChangeRequestStatus::Pending, $request->fresh()->status);
     }
 
+    public function test_a_long_rejection_note_is_kept_in_the_audit_log(): void
+    {
+        $request = $this->openRequest(User::factory()->staff()->create());
+        $note = str_repeat('The register differs. ', 18).'Fix.'; // 400 characters
+
+        $this->actingAs(User::factory()->admin()->create())
+            ->post(route('change-requests.reject', $request), ['decision_note' => $note])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertSame(ChangeRequestStatus::Rejected, $request->fresh()->status);
+
+        $entries = AuditLog::where('action', 'change_request.rejected')->get();
+        $this->assertCount(1, $entries);
+        $this->assertSame("Rejected change request #{$request->getKey()}.", $entries->first()->description);
+        $this->assertSame($note, $entries->first()->new_values['decision_note']);
+    }
+
     public function test_a_decided_request_cannot_be_decided_again(): void
     {
         $request = $this->openRequest(User::factory()->staff()->create());
@@ -234,6 +254,26 @@ class ChangeRequestWorkflowTest extends TestCase
         $this->actingAs($admin)
             ->post(route('change-requests.approve', $request))
             ->assertSessionHas('error');
+    }
+
+    public function test_a_decision_rechecks_the_request_in_the_database(): void
+    {
+        $request = $this->openRequest(User::factory()->staff()->create());
+        $field = $request->items->first()->field;
+
+        // Another reviewer rejects the request after this copy was loaded.
+        ChangeRequest::whereKey($request->getKey())
+            ->update(['status' => ChangeRequestStatus::Rejected->value]);
+
+        try {
+            app(ChangeRequestService::class)->approve($request, User::factory()->admin()->create());
+            $this->fail('Approving a request that was already rejected should be refused.');
+        } catch (ChangeRequestException $e) {
+            $this->assertSame('This request is already rejected and cannot be changed.', $e->getMessage());
+        }
+
+        $this->assertSame(ChangeRequestStatus::Rejected, $request->fresh()->status);
+        $this->assertSame('Mana Santos', $field->fresh()->verified_value);
     }
 
     public function test_approval_is_audit_logged_with_before_and_after(): void

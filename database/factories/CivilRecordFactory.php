@@ -28,14 +28,15 @@ class CivilRecordFactory extends Factory
         return [
             'doc_type' => $type->value,
             'registry_number' => strtoupper($type->value).'-'.fake()->unique()->numberBetween(1000, 9999),
-            'status' => RecordStatus::Draft->value,
+            'status' => RecordStatus::Submitted->value,
             'ocr_model_key' => 'base',
             'created_by' => fn () => User::factory()->staff(),
         ];
     }
 
     /**
-     * Submitted, and therefore locked. Values change only via a change request.
+     * Submitted by a named user (the default status already is Submitted; this
+     * state fills in submitted_by and submitted_at, defaulting to the creator).
      */
     public function submitted(?User $by = null): static
     {

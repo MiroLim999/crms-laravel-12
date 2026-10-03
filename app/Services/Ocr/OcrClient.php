@@ -33,9 +33,15 @@ class OcrClient
      */
     private ?array $health = null;
 
+    /**
+     * @param  string|null  $serviceKey  The secret Laravel and the service share
+     *                                   (services.ocr.upload_secret). The service
+     *                                   refuses every call but /health without it.
+     */
     public function __construct(
         private readonly string $baseUrl,
         private readonly int $timeout = 120,
+        private readonly ?string $serviceKey = null,
     ) {}
 
     // ------------------------------------------------------------------ reading
@@ -174,10 +180,16 @@ class OcrClient
 
     private function request(?int $timeout = null): PendingRequest
     {
-        return Http::baseUrl(rtrim($this->baseUrl, '/'))
+        $request = Http::baseUrl(rtrim($this->baseUrl, '/'))
             ->timeout($timeout ?? $this->timeout)
             ->acceptJson()
             ->asJson();
+
+        // Sent on every call: anything else on this machine that reaches the
+        // port, a local web page included, is refused without it.
+        return $this->serviceKey === null || $this->serviceKey === ''
+            ? $request
+            : $request->withHeaders(['X-CRMS-Service-Key' => $this->serviceKey]);
     }
 
     /**

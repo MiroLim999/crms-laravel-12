@@ -82,7 +82,6 @@ class AnalyticsDashboardTest extends TestCase
         $staff = User::factory()->staff()->create();
 
         $submitted = $this->record($staff, DocumentType::Birth, RecordStatus::Submitted);
-        $this->record($staff, DocumentType::Death, RecordStatus::Draft);
 
         $submitted->fields()->create([
             'name' => 'Child Full Name',
