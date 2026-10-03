@@ -3,16 +3,16 @@
 [![Laravel](https://img.shields.io/badge/Laravel-12.x-FF2D20?style=flat&logo=laravel&logoColor=white)](https://laravel.com/)
 [![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4?style=flat&logo=php&logoColor=white)](https://www.php.net/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.6%2B-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![Transformers](https://img.shields.io/badge/Hugging%20Face-TrOCR-FFD21E?style=flat&logo=huggingface&logoColor=black)](https://huggingface.co/microsoft/trocr-base-handwritten)
-[![Tests](https://img.shields.io/badge/Tests-204%20Passed%20(PHPUnit)-success)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-455%20passed%20(PHP%20300%20%C2%B7%20JS%2086%20%C2%B7%20Python%2069)-success)](#testing--quality-assurance)
 
 An enterprise-grade, AI-assisted civil registry digitisation and archival platform built with **Laravel 12**, **Bootstrap 5 (SNEAT design system)**, **FastAPI**, and a fine-tuned **Microsoft TrOCR** (Transformer-based Optical Character Recognition) handwriting engine.
 
 CRMS enables registry staff to scan historical civil certificates and register ledgers (birth, death, marriage, and custom document types), detect and outline each handwritten line on the page, run machine learning recognition on the outlined crops, perform human-in-the-loop verification, and archive immutable records backed by an append-only audit trail and formal change-request governance.
 
-Everything runs locally. Page images and their text are never sent to an external API or cloud service: the records are covered by the Data Privacy Act.
+Everything runs locally. Page images and their text are never sent to an external API or cloud service: the records are covered by the Data Privacy Act. Nothing needs the internet at run time either: the PDF reader's worker is served by the app itself, so PDFs open offline.
 
 ---
 
@@ -31,6 +31,7 @@ Everything runs locally. Page images and their text are never sent to an externa
 - [Production Deployment](#production-deployment)
 - [Testing & Quality Assurance](#testing--quality-assurance)
 - [Environment Configuration Reference](#environment-configuration-reference)
+- [Known Limitations & Planned Work](#known-limitations--planned-work)
 - [Technology Stack](#technology-stack)
 - [License](#license)
 
@@ -38,7 +39,7 @@ Everything runs locally. Page images and their text are never sent to an externa
 
 ## System Architecture
 
-CRMS runs as **four local processes** from a single repository: the Laravel web app, a Laravel **queue worker** that detects and outlines handwritten lines in the background, the Laravel **scheduler** that deletes unsubmitted pages every hour, and the FastAPI OCR service. The diagram shows the web app and the OCR service; the queue worker is described below it.
+CRMS runs as **four local processes** from a single repository: the Laravel web app, a Laravel **queue worker** that detects and outlines handwritten lines in the background, the Laravel **scheduler** that deletes unsubmitted pages every hour, and the FastAPI OCR service. The diagram shows the web app and the OCR service; the queue worker and scheduler are described below it.
 
 ```
                       +-------------------------------------------------------------+
@@ -61,7 +62,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
        |                    |                             |
        |                    +--- (2) Server-to-Server ----+
        v                             HTTP Requests
-+---------------+             (Private Loopback / Health / OCR)
++---------------+          (Loopback only, X-CRMS-Service-Key)
 | MySQL 8.0+ DB |
 +---------------+
 ```
@@ -69,15 +70,19 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 | Component | Stack | Primary Responsibilities |
 | :--- | :--- | :--- |
 | **Web Application** | Laravel 12, Blade, Bootstrap 5 (SNEAT), Vite, MySQL | User interfaces, authentication, template builder, verification workspace, record archival, change request moderation, audit logging, reporting. |
-| **Queue Worker** | `php artisan queue:work` (database queue), `ml/line_markers.py`, Kraken in `ml/.venv-kraken` | Runs the page job queued by **Detect** and **Scan with OCR**: straightens the page, fits the template to it, outlines every handwritten line, crops along the outlines and sends the crops to the OCR service. Without a running worker, pages wait at "Waiting for the line detector". |
-| **OCR Microservice** | FastAPI, PyTorch, Hugging Face `transformers`, Pillow | High-throughput TrOCR handwriting inference, model inventory discovery, signed direct-upload ingestion, model lifecycle management. |
+| **Queue Worker** | `php artisan queue:work` (database queue), `ml/line_markers.py`, Kraken in `ml/.venv-kraken` | Runs the page job queued by **Detect** and **Scan with OCR**: straightens the page, fits the template to it, outlines every handwritten line, crops along the outlines and sends the crops to the OCR service. Also runs the Template Builder's **Test on sample**. Without a running worker, pages wait at "Waiting for the line detector". |
+| **Scheduler** | `php artisan schedule:work` | Runs `documents:prune-pages` every hour, which deletes aligned pages nobody submitted (and abandoned Test on sample folders) once they are older than `LINE_MARKERS_KEEP_HOURS` (default 24). |
+| **OCR Microservice** | FastAPI, PyTorch, Hugging Face `transformers`, Pillow | TrOCR handwriting inference in batches of 16 crops, model inventory discovery, signed direct-upload ingestion, model lifecycle management. |
 
 ### Architectural Highlights
 
 1. **Zero-PHP Large Model Uploads**: Uploading gigabyte-scale model checkpoints (`safetensors`/`bin` archives) never passes through PHP or consumes web worker memory. Laravel generates a short-lived, HMAC-SHA256 signed ticket (`OCR_UPLOAD_SECRET`); the browser uploads directly to FastAPI's `/add_model` endpoint. Once written to disk, the client posts the model key to Laravel, which verifies the inventory and registers the model in a database transaction.
 2. **Server-Side AI Proxying**: Operational document recognition is called server-to-server: the queue worker sends each page's line crops from Laravel to FastAPI, and the browser never calls the OCR service. The FastAPI instance remains bound to loopback (`127.0.0.1`) without direct public access.
-3. **Decoupled Process Lifecycles**: Laravel never spawns, restarts, or terminates the Python OCR daemon. The OCR workspace actively monitors reachability via asynchronous health polling.
-4. **Separate Python Environment for Line Detection**: Kraken needs a newer PyTorch than the TrOCR service, so `ml/line_markers.py` runs in its own environment (`ml/.venv-kraken`, CPU). The queue worker calls it as a local subprocess; Kraken's model ships inside its package, so nothing is downloaded at run time.
+3. **Shared Service Key**: Binding to loopback keeps other machines out, but not other programs on the same computer (for example another site on XAMPP's `localhost`). So every call from Laravel carries the header `X-CRMS-Service-Key`, a secret both sides read from `.env` (`OCR_UPLOAD_SECRET`, or `APP_KEY` when that is empty). FastAPI compares it in constant time and answers **401** without it. Only `/health` stays open, and `/add_model` keeps its own signed ticket.
+4. **Batched Reading**: The OCR service reads a page's crops 16 at a time in one GPU pass instead of one by one: 40 crops took **6.14 s → 2.99 s** on an RTX 4050 laptop, with identical text and confidence. A crop that cannot be decoded becomes an error row on its own, and if a whole batch fails (for example out of GPU memory) that batch is read again one crop at a time.
+5. **Decoupled Process Lifecycles**: Laravel never spawns, restarts, or terminates the Python OCR daemon. The OCR workspace actively monitors reachability via asynchronous health polling.
+6. **Slow Work Never Blocks the Website**: On Windows, `php artisan serve` handles one request at a time. Everything slow (Detect, Scan with OCR and the Template Builder's Test on sample, 15–60 s each) therefore runs on the queue worker while the browser polls for the result, so other pages keep loading.
+7. **Separate Python Environment for Line Detection**: Kraken needs a newer PyTorch than the TrOCR service, so `ml/line_markers.py` runs in its own environment (`ml/.venv-kraken`, CPU). The queue worker calls it as a local subprocess; Kraken's model ships inside its package, so nothing is downloaded at run time.
 
 ---
 
@@ -92,7 +97,9 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Split-Screen Verification Viewer**: Dual-pane workspace with configurable horizontal/vertical split views, smooth keyboard-accelerated split-bar adjustments, and Ctrl-wheel zoom.
 - **Person Grouping**: Supports complex registry layouts grouping fields by role (e.g., Child, Mother, Father, Groom, Bride, Deceased, Informant) alongside general document details.
 - **Confidence Scoring & Review Warnings**: Computes token-level geometric mean confidence scores (0–100%). Fields falling below the configured threshold are visually flagged for manual operator review.
-- **Checked Values**: Verify uses each template field's settings (see the Template Builder). A person is titled by the field that holds their name. Under a value it shows the template's hint, and it points out a value that does not fit its field ("This does not look like a date", "Expected one of: M, F"). A person whose required columns had nothing read is marked "N missing", with the columns named. None of these blocks a submission: registers hold odd values.
+- **Checked Values**: Verify uses each template field's settings (see the Template Builder). A person is titled by the field that holds their name. Under a value it shows the template's hint, and it points out a value that does not fit its field ("This does not look like a date", "Expected one of: M, F"). A person whose required columns had nothing read is marked "N missing", with the columns named. None of these hints blocks a submission: registers hold odd values.
+- **Missing Required Fields Ask First**: Submitting with a required field, or a required register column, left unticked opens a confirmation that lists what will be left out ("Person 01: Column 2"), with **Go back** and **Submit anyway**. Register rows with nothing ticked are named in one line, because they are not saved and the page is removed after submitting. It asks rather than blocks, because some real certificates do leave a field blank. The server checks the same thing, so an edited form cannot skip the question, and an accepted omission is listed in the `record.submitted` audit entry (`missing_required_fields`).
+- **Accepted Scan Formats**: PDF, PNG, JPG, WEBP or BMP, up to 20 MB. TIFF is refused with a clear message, because Chrome and Edge cannot display it; scan to PDF or PNG instead.
 - **Human-in-the-Loop Enforcement**: Only explicitly verified fields are committed to the permanent record upon submission.
 
 ### 2. Handwritten Line Detection (Detect)
@@ -112,19 +119,24 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 ### 3. Dynamic Document Template Builder & Type Management
 - **Visual Template Designer**: Create and publish document layouts with real-time coordinate calibration.
 - **Paper Specification Support**: Supports standard paper dimensions (A4, Letter, Legal, Folio) as well as arbitrary custom millimeter dimensions in Portrait or Landscape orientations.
-- **Sample Document Upload**: Direct upload of PDF or image samples rendered with PDF.js for canvas alignment.
+- **Sample Document Upload**: Direct upload of a PDF, PNG, JPG, WEBP or BMP sample, rendered with PDF.js for canvas alignment.
 - **Custom Document Types**: Super Admins can define custom certificate classifications with distinct icons, validation rules, and active states.
 - **Field Settings**: Select a field or ledger column to set what it **holds** (the person's name or the entry number, one of each per person), its **value** (text, a date, a number, or one of a list of choices), a **hint** for Staff, and whether it is **required**. Verify and the records archive use these. They replace the one layout the code used to know by heart (an 11-column birth register whose third column was the child's name). The existing birth ledger's entry-number and child's-name columns were marked when the settings came in.
 - **Layouts in Use Keep Their Versions**: A layout that is published, or that records or unsubmitted pages were read with, is never changed in place. Saving changed markers, row lines or field settings makes a **new version**, so every record keeps the layout it was read with. **Save as new draft** leaves the published one live; **Save & publish new version** swaps it in. Its name, notes and sample only describe it and are saved in place. The editor says when a layout is in use. A save made from an older copy of the editor (another admin saved in between) is refused rather than overwriting the newer version. **Duplicate** in the template library makes a draft copy, sample included.
+- **Layouts Records Use Cannot Be Deleted**: Deleting a layout that any record was read with is refused ("This layout was used by N records…"), and the template library explains why instead of offering the delete, so every record keeps pointing at its layout. Pages still in progress do not block a delete; they are only unlinked, then pruned.
 - **Ledger Grid Tools**: Moving or stretching the columns as a table carries their row lines along, exactly as the Align step does, and columns sitting on the first and last row line follow those lines. Click a row line to select it, then drag it or nudge it with the arrow keys (<kbd>Shift</kbd>: 10 px) or press <kbd>Delete</kbd>. <kbd>Shift</kbd>+drag moves every line. **Add** puts a line under the selected one, and **N rows, evenly** spaces the rows between the first and last line. Once a sample is open, row lines and marker edges snap to its printed rules (<kbd>Alt</kbd>: place freely). Lines Detect estimated below the last printed rule are drawn amber until checked. **Make selected fields** turns a column back into a field. Undo (<kbd>Ctrl</kbd>+<kbd>Z</kbd>) covers row lines as well as markers. Arrow keys also nudge selected markers.
 - **Grid Checks**: The ledger card lists what is wrong while you work. Row lines outside the columns, or almost on top of each other, stop the save, and the server refuses them too. A column that spans other rows than the rest is a warning. A field that covers the middle of ledger cells is reported (**Select them** / **Remove them**), because line detection would read that handwriting as the field and the rows would lose those cells; saving asks first. A tilted marker whose corner leaves the page is refused, and publishing a ledger without a sample asks first.
-- **Test on Sample**: Runs Detect on the sample with the layout as it stands, saved or not (about half a minute). It shows every outlined line on the page and the fitted row lines, with the lines that fall between rows, lines sharing a cell, rows missing required cells, written lines outside every marker, and the grid notes. Nothing is read or stored.
+- **Test on Sample**: Runs Detect on the sample with the layout as it stands, saved or not (about half a minute). It shows every outlined line on the page and the fitted row lines, with the lines that fall between rows, lines sharing a cell, rows missing required cells, written lines outside every marker, and the grid notes. Nothing is read. The test runs on the queue worker, like Detect, so other pages stay usable meanwhile; until the worker picks it up the builder says "Waiting for the background worker". The copy of the sample made for the test is deleted as soon as the result is shown.
 - **Unsaved Changes**: Leaving the builder with unsaved changes (closing the tab, going back, following a link) asks first.
 
 ### 4. Immutable Record Archival & Change Request Governance
 - **Permanent Record Locking**: Once verified and submitted by Staff, records are sealed against direct in-place modification.
 - **Formal Change-Request Workflow**: Staff initiate modification requests detailing justifications and proposed field values. Admins or Super Admins review, approve, or reject changes.
 - **Data Integrity Constraints**: Mandatory captured fields cannot be blanked during correction; all historical iterations remain auditable.
+- **Safe Against Double Clicks**: Approve, reject and withdraw re-read the request under a database row lock before deciding, and opening a request locks the record first, so two reviewers (or one double-click) cannot both approve and reject a request, and a record cannot get two pending requests. The buttons also disable after the first click. A rejection note of any allowed length (up to 2,000 characters) is kept in the audit entry.
+- **The Record Shows the Page That Was Read**: A submitted record keeps the page image its boxes were measured on (straightened, when Detect straightened a tilted page) and draws its value boxes on it, so each box sits on its handwriting. (Drawn over the original upload instead, a 3° tilt put the boxes about one line off.) **Open full size** still opens the original upload, and records submitted before this change keep showing their upload.
+- **Archive Search & Filters**: Search by registry number or any verified value, and filter by document type and submission date. A bad filter from an edited URL (an impossible date, a list where one value belongs) is left out with a message under it, instead of an error page.
+- **One Record Status**: Every record is saved as **Submitted**, and therefore locked, the moment Staff submit it. The unused "Draft" status was removed.
 
 ### 5. OCR Model Management & Benchmark Provenance
 - **Multi-Model Registry**: Live model scanning from `ml/models/`, support for custom checkpoints and the baseline `microsoft/trocr-base-handwritten`.
@@ -137,7 +149,10 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 
 ### 7. Analytics & Administrative Oversight
 - **Role-Tailored Dashboards**: Real-time KPI summaries, digitisation volume charts, correction rate tracking, and live OCR engine diagnostic badges.
-- **Timezone-Aware Reporting**: Filterable civil registry reporting respecting configured local operational boundaries (e.g., `Asia/Manila`) with streaming CSV exports.
+- **Philippine Time Everywhere**: Times are stored in UTC and shown in `CRMS_REPORTING_TIMEZONE` (default `Asia/Manila`) on every page and in the CSV export, through one helper (`App\Support\LocalTime`). The date filters on Records, Audit Log and Reports all use Philippine days, so a record submitted at 7:30 AM on 2 October is found under 2 October.
+- **Filterable Reports with Streaming CSV Export**: Reports filter by document type, date range and submitting user, and export the matching records as a CSV that is written in chunks of 200 straight to the download, never built in memory.
+- **Light List Pages**: The Records list, the Reports page and the CSV export load only what they show (each record's title field and its average confidence), not every field of every record. With 15 register records of 242 fields each, the Records list went from 3,651 loaded rows to 36, and Reports from 3,653 to 38.
+- **Safe CSV Export**: A text cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading `'`, so Excel shows it as text instead of running it as a formula ("CSV injection"). Number columns are unchanged.
 - **Secure Account Management**: Controlled staff/admin provisioning (no public sign-ups), auto-generated temporary passwords, mandatory first-login password rotation, soft deactivation, and protection against accidental Super Admin demotion.
 
 ---
@@ -153,7 +168,7 @@ CRMS enforces a strict separation of duties verified end-to-end in the test suit
 | **Search & View Record Archive** | **Yes** | **Yes** | **Yes** | `records.index`, `can:records.view` |
 | **Propose Change Requests** | **Yes** | No | **Yes** | `records.change-requests.create`, `can:change-requests.create` |
 | **Approve / Reject Change Requests** | No | **Yes** | **Yes** | `change-requests.approve`, `can:change-requests.moderate` |
-| **Access Consolidated Analytics** | No | **Yes** | **Yes** | `analytics.index`, `can:analytics.view` |
+| **See Analytics (on the Dashboard)** | No | **Yes** | **Yes** | `analytics.index`, `can:analytics.view` |
 | **Generate & Export CSV Reports** | No | **Yes** | **Yes** | `reports.index`, `can:reports.generate` |
 | **Manage User Accounts & Roles** | No | **Yes** | **Yes** | `users.index`, `can:users.manage` |
 | **View Tamper-Evident Audit Log** | No | **Yes** | **Yes** | `audit.index`, `can:audit.view` |
@@ -174,46 +189,54 @@ crms-laravel-12/
 ├── app/                                # Core Laravel application logic
 │   ├── Console/Commands/               # crms:export-training, documents:prune-pages
 │   ├── Enums/                          # RoleSlug, DocumentType, RecordStatus, PaperSize, etc.
+│   ├── Exceptions/                     # ChangeRequestException (a refused change request, shown to the user)
 │   ├── Http/
 │   │   ├── Controllers/                # Gated web controllers (Scan, Record, ChangeRequest, etc.)
 │   │   ├── Middleware/                 # EnsureAccountIsActive, EnsurePasswordIsChanged
 │   │   └── Requests/                   # Form validation request classes
-│   ├── Jobs/                           # ProcessDocumentPage (Detect / outline / read, on the queue)
+│   ├── Jobs/                           # ProcessDocumentPage (Detect / outline / read), TestTemplateLayout (Test on sample)
 │   ├── Models/                         # Eloquent models (CivilRecord, RecordField, DocumentPage, PageLine, AuditLog, etc.)
 │   ├── Providers/                      # AuthServiceProvider (Capability Matrix Gate definitions)
 │   ├── Services/                       # Business logic (AuditLogger, ChangeRequestService, etc.)
 │   │   ├── Lines/                      # LineMarkers (runs ml/line_markers.py), PageLineReader, GeometryInput
-│   │   └── Ocr/                        # OcrClient, OcrModelManager, OcrUploadAuthorizer, EngineStatus
-│   └── Support/                        # Navigation, MarkerBounds (a tilted marker stays on the page)
+│   │   └── Ocr/                        # OcrClient (sends the service key), OcrModelManager, OcrUploadAuthorizer, EngineStatus
+│   └── Support/                        # LocalTime (Philippine time), Limits (450 fields), MarkerBounds, Navigation
 ├── bootstrap/                          # Application bootstrap and middleware pipeline configuration
 ├── config/                             # Configuration files (crms.php, services.php, database.php)
 ├── database/
 │   ├── factories/                      # Model factories for testing and seeding
 │   ├── migrations/                     # Database migrations (records, templates, audit logs, OCR)
 │   └── seeders/                        # RoleSeeder, SuperAdminSeeder, DocumentTemplateSeeder, DemoUsersSeeder
+├── docs/
+│   ├── roles.md                        # Who may do what: roles, abilities and account rules
+│   ├── CODE_REVIEW_TODO.md             # Findings of the 2026-10-02 code review, with checklists
+│   ├── IMPLEMENTATION_PLAN.md          # The order those fixes were made in, with decisions and measurements
+│   ├── HOW_TO_RUN_THE_PLAN.md          # How to run the plan's tasks with Claude Code
+│   └── CIVIC_PALETTE_EXECUTION_PLAN.md # The SNEAT UI and brand system plan
 ├── ml/                                 # Complete Python OCR & Machine Learning workspace
 │   ├── api/
-│   │   ├── main.py                     # FastAPI microservice (Inference, health, signed model uploads)
+│   │   ├── main.py                     # FastAPI microservice (batched inference, health, service key, signed model uploads)
 │   │   └── requirements.txt            # FastAPI microservice dependencies
-│   ├── dataset/                        # Training/validation/test images & manifest CSV (gitignored)
+│   ├── datasets/<name>/                # Training/validation/test images & manifest CSV (gitignored)
 │   ├── models/                         # Fine-tuned model checkpoints (gitignored)
-│   ├── evaluation-metrics/             # Timestamped evaluation metric charts
+│   ├── evaluation-metrics/             # Evaluation charts, in base/ and finetuned/
+│   ├── notebooks/
+│   │   └── trocr-finetuning-code.ipynb # Kaggle / Colab fine-tuning notebook; writes evaluation-report.json
 │   ├── dataset_registry.py             # Dataset names, folders and label rules
 │   ├── download_trocr.py               # Downloads Hugging Face base TrOCR weights
 │   ├── hf_quiet.py                     # Hugging Face environment logging silencer
 │   ├── line_markers.py                 # Deskew, template fit, line outlines and masked crops (Kraken)
-│   ├── notebooks/
-│   │   └── trocr-finetuning-code.ipynb # Kaggle / Colab fine-tuning and evaluation notebook
-│   ├── requirements-kraken.txt         # Line-detection environment (ml/.venv-kraken)
-│   ├── setup_kraken.ps1                # Builds ml/.venv-kraken
 │   ├── metrics.py                      # CER / WER / Exact-Match computation and plot generators
 │   ├── predict.py                      # Standalone CLI batch prediction tool
 │   ├── requirements.txt                # ML pipeline dependencies (PyTorch, Transformers, Pandas)
+│   ├── requirements-kraken.txt         # Line-detection environment (ml/.venv-kraken)
+│   ├── setup_kraken.ps1                # Builds ml/.venv-kraken
 │   ├── test_finetuned.py               # CLI benchmark evaluator for fine-tuned models
 │   ├── test_trocr.py                   # CLI benchmark evaluator for base model
 │   ├── train_trocr.py                  # PyTorch TrOCR fine-tuning script
 │   └── trocr_common.py                 # Shared model loading and confidence scoring (predict.py, test_finetuned.py, api/main.py)
 ├── public/                             # Publicly accessible web root
+│   └── vendor/pdfjs/                   # PDF.js worker, copied from node_modules on every build (gitignored)
 ├── resources/
 │   ├── css/ & scss/                    # SNEAT theme & custom CRMS stylesheet rules
 │   ├── js/                             # Interactive JS (Template Builder, Field Marker, Split View)
@@ -224,8 +247,11 @@ crms-laravel-12/
 ├── tests/                              # Automated test suites
 │   ├── Feature/                        # PHPUnit feature test classes (RBAC, workflows, OCR)
 │   ├── JavaScript/                     # Node.js test runner unit tests (controls, markers, SNEAT)
-│   └── Python/                         # Python unit tests for ML evaluation report normalization
-├── tools/                              # Development utility scripts (subset-icons.mjs)
+│   └── Python/                         # Line detection, OCR service key, batched reading, evaluation reports
+├── tools/
+│   ├── test-all.ps1                    # Runs every test suite; stops at the first failure
+│   ├── copy-pdf-worker.mjs             # Copies the PDF.js worker into public/vendor/pdfjs (runs before build and dev)
+│   └── subset-icons.mjs                # Builds and checks the Boxicons subset
 ├── serve.ps1                           # Starts the web app, queue worker, scheduler and OCR service (see Running)
 ├── vite.config.js                      # Vite asset bundler configuration
 ├── composer.json                       # PHP dependencies
@@ -245,7 +271,7 @@ Before setting up CRMS, ensure your environment meets the following requirements
 | **Node.js** | 20.x+ & npm 10+ | JavaScript runtime and asset compiler |
 | **MySQL / MariaDB** | MySQL 8.0+ / MariaDB 10.4+ | InnoDB engine, utf8mb4 charset |
 | **Python** | 3.10+ | Required for running the FastAPI OCR service and training |
-| **PyTorch & CUDA** | PyTorch 2.0+ (CUDA optional) | Optional GPU acceleration for rapid TrOCR inference |
+| **PyTorch & CUDA** | PyTorch 2.6+ (CUDA 12.4 wheel optional) | Optional GPU acceleration for rapid TrOCR inference. On Windows, install the CUDA wheel first (see step 3) |
 | **Kraken environment** | `ml/.venv-kraken` (kraken 7.1, CPU PyTorch 2.9+) | Line detection for Detect and ledger templates. Built by `ml\setup_kraken.ps1`; older rectangle-only templates work without it |
 
 ---
@@ -272,13 +298,16 @@ python -m venv .venv
 
 # Linux / macOS
 python3 -m venv .venv
-source ./venv/bin/activate
+source .venv/bin/activate
 
-# Install requirements
+# With an NVIDIA GPU, install the CUDA build of PyTorch FIRST (skip this line for CPU only)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+# Then everything else
 pip install -r ml/requirements.txt -r ml/api/requirements.txt
 ```
 
-> **PyTorch GPU Support**: To enable CUDA GPU acceleration, install the CUDA-enabled PyTorch wheel from [pytorch.org](https://pytorch.org/get-started/locally/) (e.g., `pip install torch --index-url https://download.pytorch.org/whl/cu121`).
+> **PyTorch GPU Support**: On Windows, the default `torch` from PyPI is CPU-only. Installed without the line above, the OCR service still works but is very slow, and nothing warns you. Check with `python -c "import torch; print(torch.cuda.is_available())"`, which prints `True` when the GPU can be used; once the service runs, `/health` reports `"device": "cuda"`. Other CUDA versions are listed on [pytorch.org](https://pytorch.org/get-started/locally/).
 
 #### Line-Detection Environment (Kraken)
 Kraken needs a newer PyTorch than the TrOCR service, so it gets its own environment. The script uses [`uv`](https://docs.astral.sh/uv/). From the repository root:
@@ -290,7 +319,8 @@ This creates `ml\.venv-kraken` with CPU PyTorch. With an NVIDIA GPU, use `.\ml\s
 
 ### 4. Configure Environment Files
 ```bash
-copy .env.example .env    # Windows PowerShell: copy .env.example .env
+copy .env.example .env    # Windows (PowerShell or cmd)
+cp .env.example .env      # Linux / macOS
 php artisan key:generate
 ```
 
@@ -306,9 +336,14 @@ DB_PASSWORD=
 # OCR Service Configuration
 OCR_API_URL=http://127.0.0.1:8001
 OCR_BROWSER_API_URL=http://127.0.0.1:8001
+# Optional shared secret (empty = APP_KEY). Don't put a comment on the same line:
+# the OCR service would read the comment as part of the secret.
+OCR_UPLOAD_SECRET=
 CRMS_CONFIDENCE_THRESHOLD=80
 CRMS_REPORTING_TIMEZONE=Asia/Manila
 ```
+
+The OCR service reads this same `.env` file, so the shared service key needs no extra setup. If you change `OCR_UPLOAD_SECRET` or `APP_KEY` later, run `php artisan queue:restart`, because the queue worker keeps the old value until it restarts.
 
 ### 5. Migrate Database & Seed Initial Data
 ```bash
@@ -316,10 +351,13 @@ php artisan migrate --seed
 ```
 `migrate --seed` seeds the core permission roles, default document templates (Birth, Death, Marriage), and the bootstrap Super Admin account.
 
+After pulling new code later, run `php artisan migrate` again to apply any new migrations.
+
 ### 6. Build Frontend Assets
 ```bash
 npm run build
 ```
+Before building, this copies the PDF.js worker from `node_modules` into `public/vendor/pdfjs/`, so PDFs open without internet and the worker always matches the installed PDF.js version.
 
 ### Default Credentials
 
@@ -350,7 +388,7 @@ CRMS needs **four processes** running, plus MySQL (start it in the XAMPP Control
 | Scheduler | `php artisan schedule:work` | – |
 | OCR service | `python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001` | [8001](http://127.0.0.1:8001) |
 
-> **Do not skip the queue worker.** `php artisan serve` starts the website only. Detect and Scan with OCR queue a background job, and without a worker the page stays on **"Waiting for the line detector"**.
+> **Do not skip the queue worker.** `php artisan serve` starts the website only. Detect, Scan with OCR and the Template Builder's Test on sample queue a background job, and without a worker the page stays on **"Waiting for the line detector"** (or **"Waiting for the background worker"** in the builder).
 >
 > **The scheduler** deletes, every hour, the aligned pages nobody submitted once they are older than `LINE_MARKERS_KEEP_HOURS` (default 24). They are unsubmitted civil registry scans, so without it they stay on disk.
 
@@ -384,18 +422,19 @@ Run **Ctrl+Shift+B** (or `.\serve.ps1`) again: it only starts what is not runnin
 | Symptom | What stopped |
 | :--- | :--- |
 | "This site can't be reached" at 127.0.0.1:8000 | web app |
-| Detect or Scan stays on "Waiting for the line detector" | queue worker |
+| Detect or Scan stays on "Waiting for the line detector", or Test on sample on "Waiting for the background worker" | queue worker |
 | Unsubmitted pages pile up in `storage\app\private\pages` | scheduler |
 | Scan fails with an OCR / TrOCR connection error, or the OCR workspace shows the engine offline | OCR service |
 
 - **"Port 8000/8001 is already in use"**: that service is still running (perhaps in an old window); close that window or keep using it.
+- **"This call needs the CRMS service key" (401)**: Laravel and the OCR service read different secrets. Both read `OCR_UPLOAD_SECRET` (or `APP_KEY` when it is empty) from `.env`. After changing either, run `php artisan queue:restart`, and `php artisan config:clear` if the configuration was cached. Also check that `.env` has no comment on the `OCR_UPLOAD_SECRET` line.
 - **"A queue worker is already running"** but nothing gets processed: a worker from a closed window may be left running without its window. Find it with `Get-CimInstance Win32_Process | Where-Object CommandLine -like '*queue:work*'`, stop it with `Stop-Process -Id <id>`, and start again.
 - **Database connection errors**: MySQL is not running. Start it in the XAMPP Control Panel; the queue worker reconnects by itself, the web app needs a restart.
 
 ### Notes on the Queue Worker
 - The worker started by Option A or B restarts itself: after a crash, after MySQL comes up late, and after `php artisan queue:restart`. Run `queue:restart` after changing job code (for example `app/Jobs/ProcessDocumentPage.php`), because a running worker keeps the old code loaded. A worker started by hand (Option C) does not come back; start it again.
 - While idle, the worker uses about 50 MB of memory and no noticeable CPU. Line detection uses the CPU for roughly 20–60 seconds per page when Detect or Scan runs; reading uses the GPU when CUDA is available.
-- The yellow `PHP_CLI_SERVER_WORKERS` warning from `php artisan serve` is harmless: PHP cannot run several server workers on Windows.
+- The yellow `PHP_CLI_SERVER_WORKERS` warning from `php artisan serve` is harmless: PHP cannot run several server workers on Windows. It does mean the website answers one request at a time, which is why every slow job runs on the queue worker instead.
 
 ---
 
@@ -501,10 +540,11 @@ php artisan crms:export-training --since=2026-09-01 --out=D:\exports\september  
 ### TrOCR Models
 With `.venv` activated. `<model>` is a folder under `ml\models\`, or `base` for the unmodified Microsoft model.
 ```powershell
-python ml\download_trocr.py                                  # Download microsoft/trocr-base-handwritten
-python ml\train_trocr.py                                     # Fine-tune (settings: CONFIG in the script)
+python ml\download_trocr.py                                  # Download microsoft/trocr-base-handwritten into ml\models\base
+python ml\train_trocr.py --dataset default --epochs 5        # Fine-tune; saves the best epoch to ml\models\trocr-finetuned
+python ml\train_trocr.py --help                              # Every option (--output-name, --batch-size, --learning-rate, ...)
 python ml\test_trocr.py                                      # Evaluate the base model on the test split
-python ml\test_finetuned.py --model <model>                  # Evaluate a model and write its evaluation report
+python ml\test_finetuned.py --model <model>                  # Evaluate a model: CER, WER, exact match, and a chart
 python ml\test_finetuned.py --model <model> --limit 200      # ... on the first 200 samples only
 python ml\predict.py --model <model> --folder ml\new_images  # Read a folder of loose images
 ```
@@ -533,67 +573,77 @@ All machine learning scripts, training routines, and evaluation utilities are is
 
 ```
 ml/
-├── train_trocr.py        # Fine-tunes VisionEncoderDecoderModel with Hugging Face Trainer
+├── train_trocr.py        # Fine-tunes VisionEncoderDecoderModel with its own PyTorch loop (AdamW, mixed precision)
 ├── test_trocr.py         # Evaluates base model performance against test split
-├── test_finetuned.py     # Evaluates fine-tuned model checkpoints & exports metrics
+├── test_finetuned.py     # Evaluates a model on a split: CER / WER / exact match, plus a chart
 ├── predict.py            # CLI batch inference on directory of image crops
 ├── metrics.py            # CER, WER, and exact-match computation logic
+├── trocr_common.py       # Model loading and confidence scoring shared with the OCR service
 ├── dataset_registry.py   # Dataset names and path resolution
-└── download_trocr.py     # Fetches microsoft/trocr-base-handwritten weights
+├── download_trocr.py     # Fetches microsoft/trocr-base-handwritten weights
+└── notebooks/            # Kaggle / Colab fine-tuning notebook (writes evaluation-report.json)
 ```
 
 ### 1. Dataset Layout Specification
-Training datasets must follow this folder structure:
+Training datasets live in named folders under `ml/datasets/` (gitignored). The scripts use the one called `default` unless you pass `--dataset <name>`:
 ```
-ml/dataset/
+ml/datasets/default/
 ├── manifest.csv          # Columns: filename,label,split,source
 ├── train/                # Training image crops (.png, .jpg)
 ├── val/                  # Validation image crops
 └── test/                 # Locked evaluation test split
 ```
-*Entries labeled `UNREADABLE` or with blank labels are automatically skipped.*
+*Entries labeled `UNREADABLE` or with blank labels are automatically skipped. An older checkout's single `ml/dataset/` folder is still used as `default` when `ml/datasets/default/` does not exist.*
 
 ### 2. Base Model Download
 ```bash
 python ml/download_trocr.py
 ```
+This saves the base model to `ml/models/base/`. Restart the OCR service, then click **Rescan models** in the OCR Workspace.
 
 ### 3. Fine-Tuning TrOCR
 ```bash
-python ml/train_trocr.py
+python ml/train_trocr.py --dataset default --epochs 5
 ```
-Fine-tuning configuration parameters (learning rate, batch size, epochs, warmup steps) are defined in the `CONFIG` dictionary of `ml/train_trocr.py`. Checkpoints with the lowest validation loss are saved into `ml/models/`.
+Every setting is a command-line option: `--dataset`, `--output-name` (default `trocr-finetuned`), `--base-model`, `--epochs` (5), `--batch-size` (8, for a 6 GB GPU), `--learning-rate` (5e-5), `--max-label-length` (32), and more (`--help` lists them). After each epoch the model is kept only if its validation loss is the lowest so far, so `ml/models/<output-name>/` ends up holding the best epoch.
 
-### 4. Evaluating Models & Generating Provenance Reports
+### 4. Evaluating Models
 ```bash
 python ml/test_finetuned.py --model trocr-v1   # a folder under ml/models/
 ```
-This generates evaluation charts under `ml/evaluation-metrics/` and produces a signed `evaluation-report.json` containing:
-- Sample count and dataset provenance
-- Character Error Rate (CER), Word Error Rate (WER), Exact Match accuracy
-- SHA-256 digests of the model weights file (`model.safetensors`) and the dataset manifest
+This prints the Character Error Rate (CER), Word Error Rate (WER) and exact-match accuracy on the test split, and saves a chart under `ml/evaluation-metrics/finetuned/` (`base/` for the base model).
 
-### 5. Installing Models into the Web Application
+### 5. Benchmark Provenance Report (`evaluation-report.json`)
+The OCR Workspace shows a model's CER, WER and exact match **only** from an `evaluation-report.json` inside the model folder, never from operational scans. The fine-tuning notebook (`ml/notebooks/trocr-finetuning-code.ipynb`) writes it. The OCR service accepts it only if it has:
+- `schema_version: 1` and `split: "test"` (the locked test split), with a positive `sample_count`
+- the `dataset` name and the SHA-256 of its manifest (`manifest_sha256`)
+- the weights file name (`weights_file`) and its SHA-256 (`weights_sha256`). The service hashes the real weights file and rejects the report if they differ, so metrics from one run cannot be attached to another checkpoint
+- `evaluated_at` with a timezone, and `metrics` with `cer`, `wer` and `exact_match`
+
+A model without a report still works; it just shows no benchmark. A report that fails these checks is refused when the model is uploaded.
+
+### 6. Installing Models into the Web Application
 1. Log in as **Super Admin** and navigate to the **OCR Workspace**.
-2. Click **Add Model** and upload either a `.zip` archive or directory containing `config.json`, `model.safetensors` (or `pytorch_model.bin`), tokenizer files, and `evaluation-report.json`.
-3. Select the model under **Model used for scanning** and click **Save settings**.
+2. Click **Add model** and upload either a `.zip` archive or the loose files: `config.json`, `model.safetensors` (or `pytorch_model.bin`), the tokenizer files, and optionally `evaluation-report.json`.
+3. Under **Scanning policy**, choose it as the **Approved model** and click **Save policy**. Turn on **Allow Staff model choice** to let Staff pick another installed model for a single document.
 
 ---
 
 ## OCR Microservice API Reference
 
-The FastAPI service exposes the following endpoints (bound to `127.0.0.1:8001`):
+The FastAPI service exposes the following endpoints (bound to `127.0.0.1:8001`). "Service key" means the request must carry the header `X-CRMS-Service-Key` with the secret Laravel and the service share (`OCR_UPLOAD_SECRET`, or `APP_KEY` when that is empty); without it the answer is **401**. Laravel's `OcrClient` sends it on every call.
 
 | Method | Endpoint | Description | Access / Authorization |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Returns service status, hardware device (`cuda`/`cpu`), active model, and model list. | Internal / Private |
-| `GET` | `/models` | Returns available installed model metadata and provenance metrics. | Internal / Private |
-| `POST` | `/ocr` | Ingests base64/dataURL cropped field images and returns predicted text + confidence scores. | Internal / Private |
-| `POST` | `/add_model` | Direct-browser multipart upload endpoint for model archives (`.zip` or loose files). | Signed Ticket (`ticket`, `expires`, `sig`) |
-| `POST` | `/rename_model` | Renames a model folder directory on disk. | Internal / Private |
-| `POST` | `/delete_model` | Removes an inactive model folder from `ml/models/`. | Internal / Private |
+| `GET` | `/health` | Returns service status, hardware device (`cuda`/`cpu`), active model, and model list. | Open (no key), so "is it up?" always works |
+| `GET` | `/models` | Returns available installed model metadata and provenance metrics. | Service key |
+| `POST` | `/ocr` | Reads base64 data-URL crops, 16 per GPU pass, and returns text + confidence for each. | Service key |
+| `POST` | `/add_model` | Direct-browser multipart upload endpoint for model archives (`.zip` or loose files). | Signed ticket from Laravel, in the `X-OCR-Upload-Authorization` header |
+| `POST` | `/rename_model` | Renames a model folder directory on disk. | Service key |
+| `POST` | `/delete_model` | Removes an inactive model folder from `ml/models/`. | Service key |
 
-### Sample OCR Request Payload (`POST /ocr`)
+### Sample OCR Request (`POST /ocr`)
+Header: `X-CRMS-Service-Key: <the shared secret>`
 ```json
 {
   "model": "trocr-v1",
@@ -606,18 +656,21 @@ The FastAPI service exposes the following endpoints (bound to `127.0.0.1:8001`):
 }
 ```
 
-### Sample OCR Response Payload
+### Sample OCR Response
 ```json
 {
   "results": [
     {
       "name": "child_first_name",
       "text": "MARIA CLARA",
-      "confidence": 96.84
+      "confidence": 96.8
     }
-  ]
+  ],
+  "model": "TrOCR v1",
+  "modelKey": "trocr-v1"
 }
 ```
+Results come back in the order the crops were sent. `confidence` is the model's certainty in its own reading (0–100), not accuracy. A crop that could not be read gets `"text": ""`, `"confidence": 0` and an `error` message, and the other crops are still read.
 
 ---
 
@@ -641,7 +694,8 @@ OCR_API_TIMEOUT=120
 OCR_BROWSER_API_URL=https://crms.example.com/ocr-api
 OCR_BROWSER_ORIGIN_REGEX=^https://crms\.example\.com$
 
-# Dedicated HMAC Secret shared by Laravel and FastAPI
+# Dedicated secret shared by Laravel and FastAPI: signs model-upload tickets
+# and is the X-CRMS-Service-Key on every other call
 OCR_UPLOAD_SECRET=generate-a-cryptographically-secure-production-secret
 OCR_UPLOAD_TICKET_TTL=3600
 ```
@@ -675,34 +729,46 @@ location = /ocr-api/add_model {
    php artisan route:cache
    php artisan view:cache
    ```
+4. **A Real Web Server**: Serve `public/` through Apache or Nginx with PHP-FPM rather than `php artisan serve`, which handles one request at a time on Windows.
+5. **Each Deployment**: Run `npm run build` (it also copies the PDF.js worker), `php artisan migrate --force`, then `php artisan queue:restart` so the worker loads the new code. Back up the database before a migration that drops a column.
 
 ---
 
 ## Testing & Quality Assurance
 
-CRMS maintains a comprehensive test suite across PHP, JavaScript, and Python layers.
+CRMS maintains a comprehensive test suite across PHP, JavaScript, and Python layers: **455 tests, all passing** (2026-10-03). The code review of 2026-10-02 started from 409; most of its fixes added a test that reproduces the problem they fixed.
+
+| Suite | Tests | Runs with |
+| :--- | ---: | :--- |
+| PHP (PHPUnit) | 300 | `php artisan test` |
+| JavaScript (Node.js test runner) | 86 | `npm run test:js` |
+| Python: line detection | 60 | `ml\.venv-kraken\Scripts\python.exe` |
+| Python: OCR service | 9 | `.venv\Scripts\python.exe` |
 
 ```
 tests/
-├── Feature/                    # 16 PHPUnit feature test classes (204 tests)
+├── Feature/                    # 22 PHPUnit feature test classes (300 tests)
 │   ├── AnalyticsDashboardTest.php
+│   ├── ArrayQueryParameterTest.php          # An array in the URL (?q[]=x) never gives an error page
 │   ├── AuditLogTest.php
-│   ├── AuditLogViewerTest.php
+│   ├── AuditLogViewerTest.php               # Includes times shown in Philippine time
 │   ├── AuthenticationTest.php
 │   ├── CapabilityMatrixTest.php
 │   ├── ChangeRequestPresentationTest.php
-│   ├── ChangeRequestWorkflowTest.php
-│   ├── DocumentTemplateBuilderTest.php
-│   ├── DocumentUploadWorkflowTest.php
+│   ├── ChangeRequestWorkflowTest.php        # Includes long rejection notes and decisions under a row lock
+│   ├── DocumentTemplateBuilderTest.php      # Includes refusing to delete a layout records use
+│   ├── DocumentUploadWorkflowTest.php       # Includes the missing-required-fields confirmation and TIFF refusal
 │   ├── LedgerTemplateAndExportTest.php      # Ledger grids, training CSV export
-│   ├── TemplateBuilderGridChecksTest.php    # Grid checks, tilted markers, printed rules, test on sample
-│   ├── TemplateFieldSettingsTest.php        # Roles, value types, required fields, record identity
-│   ├── TemplateVersioningTest.php           # New versions of layouts in use, stale saves, duplicates
 │   ├── LineOutlinePipelineTest.php          # Page job, Detect, outlines, manual fixes
+│   ├── OcrClientTest.php                    # Every call to the OCR service carries the service key
 │   ├── OcrModelPerformanceTest.php
 │   ├── OcrWorkspaceTest.php
-│   ├── RecordDetailPresentationTest.php
-│   ├── ReportExportTest.php
+│   ├── RecordArchiveFilterTest.php          # Records filters: bad dates, Philippine days
+│   ├── RecordDetailPresentationTest.php     # Includes the straightened page kept with a record
+│   ├── ReportExportTest.php                 # Includes CSV injection and Philippine time in the CSV
+│   ├── TemplateBuilderGridChecksTest.php    # Grid checks, tilted markers, printed rules, test on sample (queued)
+│   ├── TemplateFieldSettingsTest.php        # Roles, value types, required fields, record identity
+│   ├── TemplateVersioningTest.php           # New versions of layouts in use, stale saves, duplicates
 │   └── UserManagementTest.php
 ├── JavaScript/                 # Node.js unit tests (SNEAT controls, shortcuts, markers, line geometry)
 │   ├── change-request.test.js
@@ -720,14 +786,22 @@ tests/
 │   └── verification-groups.test.js
 └── Python/                     # Python unit tests
     ├── test_evaluation_report.py   # ML evaluation report verification
+    ├── test_grid_layouts.py        # Row grid on ledgers of many layouts, and the grid notes (needs ml/.venv-kraken)
     ├── test_line_markers.py        # Line detection on synthetic pages (needs ml/.venv-kraken)
-    └── test_grid_layouts.py        # Row grid on ledgers of many layouts, and the grid notes (needs ml/.venv-kraken)
+    ├── test_ocr_batch.py           # Batched reading: a broken crop, order across batches, per-crop confidence
+    └── test_service_key.py         # The OCR service refuses calls without the right key; /health stays open
 ```
 
 ### Running Test Suites
 
+#### All at Once
+```powershell
+.\tools\test-all.ps1
+```
+Runs the four suites in the order of the table above, using the right Python environment for each, and stops with a clear message at the first failure. MySQL must be running, and the `crms_test` database must exist (see below).
+
 #### 1. PHPUnit Automated Tests
-Create an isolated test database (`crms_test`) and run the test suite:
+Create an isolated test database (`crms_test`) once, then run the test suite. The tests empty and rebuild that database, never your real `crms` one:
 ```bash
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS crms_test;"
 php artisan test
@@ -740,23 +814,20 @@ npm run test:js
 ```
 
 #### 3. Python Unit Tests
-```bash
-python -m unittest discover tests/Python
-```
-The line-detection tests need scipy, scikit-image and shapely, which the Kraken environment has. Run them with it; under another interpreter the tests that need those packages are skipped:
+The Python tests need two environments. The line-detection tests need scipy, scikit-image and shapely, which the Kraken environment has; the OCR service tests need FastAPI and PyTorch, which `.venv` has:
 ```powershell
-ml\.venv-kraken\Scripts\python.exe -m unittest tests.Python.test_line_markers
-ml\.venv-kraken\Scripts\python.exe -m unittest tests.Python.test_grid_layouts
+ml\.venv-kraken\Scripts\python.exe -m unittest tests.Python.test_line_markers tests.Python.test_grid_layouts
+.venv\Scripts\python.exe -m unittest tests.Python.test_evaluation_report tests.Python.test_service_key tests.Python.test_ocr_batch
 ```
+`python -m unittest discover tests/Python` also works, but under one interpreter the tests that need the other environment's packages are skipped or fail to import.
 `test_grid_layouts` draws ledgers with different numbers of columns and rows, row heights, headers, missing rules and template mismatches, and checks every line lands in its own row both by Scan with OCR and by Detect. Add a layout there when a real page goes wrong, so the fix cannot be tuned to that one page.
 
 #### 4. Pre-Commit Validation Checklist
-```bash
-php artisan test                         # Verify Laravel business logic & capability matrix
-npm run test:js                          # Verify JS workspace logic & button controls
+```powershell
+.\tools\test-all.ps1                     # Every test suite: PHP, JavaScript and both Python environments
 npm run check:icons                      # Verify Boxicons icon subset coverage
-npm run build                            # Verify production asset compilation
-python -m py_compile ml/api/main.py      # Verify FastAPI microservice syntax
+npm run build                            # Verify production asset compilation (and copy the PDF.js worker)
+vendor\bin\pint --test                   # Verify PHP code style
 ```
 
 ---
@@ -778,20 +849,31 @@ python -m py_compile ml/api/main.py      # Verify FastAPI microservice syntax
 | `OCR_API_URL` | `http://127.0.0.1:8001` | Private address for Laravel-to-FastAPI server calls. |
 | `OCR_BROWSER_API_URL` | `http://127.0.0.1:8001` | Browser-resolvable URL for direct multipart model uploads. |
 | `OCR_API_TIMEOUT` | `120` | HTTP request timeout (seconds) for OCR inference operations. |
-| `OCR_UPLOAD_SECRET` | *(Empty / Falls back to `APP_KEY`)* | HMAC secret for signing direct model upload tickets. |
+| `OCR_UPLOAD_SECRET` | *(Empty / Falls back to `APP_KEY`)* | Secret shared by Laravel and the OCR service: signs direct model-upload tickets and is the `X-CRMS-Service-Key` sent on every other call. Both sides read it from `.env`. |
 | `OCR_UPLOAD_TICKET_TTL` | `900` | Validity lifetime in seconds for model upload tickets (max 3600). |
 | `QUEUE_CONNECTION` | `database` | Queue for the page job (Detect / outline / read). A worker must be running. |
 | `DB_QUEUE_RETRY_AFTER` | `960` | Seconds before a stuck page job is retried; keep it above the worker's `--timeout=900`. |
 | `LINE_MARKERS_PYTHON` | *(Empty: uses `ml/.venv-kraken`)* | Python interpreter that runs `ml/line_markers.py`. |
 | `LINE_MARKERS_TIMEOUT` | `600` | Seconds one page's line detection may take. |
 | `LINE_MARKERS_DEVICE` | `auto` | Where Kraken runs: `auto` (the GPU when `ml/.venv-kraken` has CUDA PyTorch, else the CPU), `cuda`, or `cpu`. |
-| `LINE_MARKERS_KEEP_HOURS` | `24` | Unsubmitted pages older than this are removed by `documents:prune-pages`. |
+| `LINE_MARKERS_KEEP_HOURS` | `24` | Unsubmitted pages, and abandoned Test on sample folders, older than this are removed by `documents:prune-pages`. |
 | `OCR_BROWSER_ORIGIN_REGEX` | *(Loopback regex)* | Allowed browser origins regex for CORS upload requests. |
 | `CRMS_CONFIDENCE_THRESHOLD` | `80` | Default OCR confidence threshold below which fields flag for review. |
-| `CRMS_REPORTING_TIMEZONE` | `Asia/Manila` | Local timezone used for civil registry day/month reporting boundaries. |
+| `CRMS_REPORTING_TIMEZONE` | `Asia/Manila` | Timezone every page and the CSV show times in, and whose days the date filters and dashboard use. Stored times stay UTC. |
 | `CRMS_SUPER_ADMIN_NAME` | `"Super Admin"` | Initial name for the bootstrap Super Admin seeder. |
 | `CRMS_SUPER_ADMIN_EMAIL` | `superadmin@admin.com` | Initial email for the bootstrap Super Admin seeder. |
 | `CRMS_SUPER_ADMIN_PASSWORD` | `superadmin@admin.com` | Initial password for the bootstrap Super Admin seeder. |
+
+---
+
+## Known Limitations & Planned Work
+
+The code review of 2026-10-02 ([docs/CODE_REVIEW_TODO.md](docs/CODE_REVIEW_TODO.md)) was worked through in the order set by [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). These items were deliberately left for after the capstone defense. None of them changes what users see.
+
+- **The document type is stored twice.** The `document_types` table is the source of truth, but the older `doc_type` column (on `records` and `document_templates`) and the `DocumentType` enum still repeat it, and every custom type is saved there as `custom`. Removing them touches most models and controllers.
+- **Three very large files.** `resources/views/scan/workspace.blade.php` (4,274 lines, most of it inline JavaScript), `app/Http/Controllers/DocumentTemplateController.php` (1,245 lines) and `ml/line_markers.py` (2,582 lines) are due to be split into smaller modules. The tests that cover them are in place first.
+- **Archive search uses `LIKE`.** That is fast enough for a few hundred records. Once there is much more data, a FULLTEXT index on `record_fields.verified_value` would be faster, but it matches whole words only, so search results would change slightly.
+- **Old migrations create and later drop `ml_jobs` and `ml_datasets`.** Model training and dataset preparation once ran from the website; that work moved to the command-line scripts in `ml/`. The migrations stay, because a migration that has already run on a database is never edited or deleted.
 
 ---
 
@@ -802,7 +884,7 @@ python -m py_compile ml/api/main.py      # Verify FastAPI microservice syntax
 - **OCR & ML Microservice**: [FastAPI](https://fastapi.tiangolo.com/), [PyTorch](https://pytorch.org/), [Hugging Face Transformers](https://huggingface.co/docs/transformers/index) (Microsoft TrOCR), Pillow, Pandas
 - **Frontend & UI**: Blade Templates, [Bootstrap 5](https://getbootstrap.com/), SNEAT Design System, Sass, [Vite](https://vitejs.dev/)
 - **Charts & Visuals**: [ApexCharts](https://apexcharts.com/)
-- **Document Viewing**: [PDF.js](https://mozilla.github.io/pdf.js/)
+- **Document Viewing**: [PDF.js](https://mozilla.github.io/pdf.js/) (its worker is served by the app, so it works offline)
 - **Icons**: [Boxicons](https://boxicons.com/) (Optimized and subsetted via `@iconify/utils`)
 - **Database**: MySQL 8.0+ / MariaDB
 
