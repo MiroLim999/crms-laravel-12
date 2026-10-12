@@ -26,6 +26,8 @@ class ArrayQueryParameterTest extends TestCase
         //                                    route                    parameter  status
         return [
             'navbar search on the dashboard' => ['dashboard', 'q', 200],
+            'dashboard trend period' => ['dashboard', 'trend_period', 200],
+            'dashboard staff start date' => ['dashboard', 'staff_from', 200],
             'navbar search on reports' => ['reports.index', 'q', 200],
             'records search' => ['records.index', 'q', 200],
             'change request search' => ['change-requests.index', 'q', 302],

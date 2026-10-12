@@ -7,7 +7,6 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordChangeController;
 use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\DashboardSystemStatusController;
 use App\Http\Controllers\DocumentPageController;
 use App\Http\Controllers\DocumentScanController;
 use App\Http\Controllers\DocumentTemplateController;
@@ -65,9 +64,6 @@ Route::middleware('auth')->group(function () {
     Route::redirect('/', '/dashboard');
 
     Route::get('dashboard', DashboardController::class)->name('dashboard');
-    Route::get('dashboard/system-status', DashboardSystemStatusController::class)
-        ->middleware('can:ocr.manage')
-        ->name('dashboard.system-status');
 
     // Self-service settings, available to every role.
     Route::get('settings', [AccountSettingsController::class, 'edit'])->name('settings.edit');
