@@ -46,7 +46,7 @@
 
 <div class="dropdown dashboard-period">
     <button id="{{ $panel }}-period-toggle" type="button"
-            class="btn dashboard-period__toggle dropdown-toggle"
+            class="btn btn-outline-secondary dashboard-period__toggle dropdown-toggle"
             data-bs-toggle="dropdown" data-bs-auto-close="outside"
             data-bs-popper-config='{"strategy":"fixed"}'
             aria-expanded="false">

@@ -10,12 +10,60 @@
             $quality = $analytics['ocr_quality'];
             $trend = $analytics['trend'];
             $throughput = $analytics['throughput']->take(6)->values();
-            // Each panel has its own period.
+            $throughputCount = $throughput->count();
+            $throughputTotal = (int) $throughput->sum('total');
+            $sparseThroughput = $throughputCount > 0 && $throughputCount <= 2;
+            $throughputMeta = match (true) {
+                $throughputCount === 0 => 'No contributing accounts',
+                $throughputCount <= 2 => number_format($throughputCount).' contributing '.($throughputCount === 1 ? 'account' : 'accounts'),
+                default => 'Top '.number_format($throughputCount).' accounts by records submitted',
+            };
+
+            $typeSlices = collect($analytics['type_slices'])
+                ->filter(fn (array $slice): bool => (int) $slice['total'] > 0)
+                ->values();
+            $typeTotal = (int) $typeSlices->sum('total');
+            $typeSlices = $typeSlices->map(fn (array $slice): array => [
+                ...$slice,
+                'share' => $typeTotal > 0 ? round((int) $slice['total'] / $typeTotal * 100, 1) : 0.0,
+            ]);
+            $inactiveTypeCount = $analytics['by_document_type']->where('total', 0)->count();
+
+            $accountActive = (int) $analytics['accounts']['active'];
+            $accountInactive = (int) $analytics['accounts']['inactive'];
+            $accountTotal = $accountActive + $accountInactive;
+            $accountActiveRate = $accountTotal > 0 ? round($accountActive / $accountTotal * 100, 1) : 0.0;
+
+            // A compact, truthful sparkline for the total card. It uses the
+            // same buckets and period as the volume chart below.
+            $recordSparkSource = collect($trend['totals'])->map(fn ($value): int => (int) $value)->values();
+            $recordSparkValues = $recordSparkSource->count() > 12
+                ? $recordSparkSource
+                    ->chunk((int) ceil($recordSparkSource->count() / 12))
+                    ->map(fn ($bucket): int => (int) $bucket->sum())
+                    ->values()
+                : $recordSparkSource;
+            if ($recordSparkValues->count() < 2) {
+                $onlyValue = (int) ($recordSparkValues->first() ?? 0);
+                $recordSparkValues = collect([$onlyValue, $onlyValue]);
+            }
+            $recordSparkPeak = max(1, (int) $recordSparkValues->max());
+            $recordSparkLastIndex = max(1, $recordSparkValues->count() - 1);
+            $recordSparkCoordinates = $recordSparkValues->map(fn (int $value, int $index): array => [
+                'x' => $index / $recordSparkLastIndex * 100,
+                'y' => 31 - ($value / $recordSparkPeak * 25),
+            ]);
+            $recordSparkPath = $recordSparkCoordinates
+                ->map(fn (array $point): string => number_format($point['x'], 2, '.', '').' '.number_format($point['y'], 2, '.', ''))
+                ->implode(' L ');
+            $recordSparkLine = 'M '.$recordSparkPath;
+            $recordSparkArea = $recordSparkLine.' L 100 36 L 0 36 Z';
+            $recordSparkLast = $recordSparkCoordinates->last();
+
+            // Each panel keeps its own reporting period.
             $trendScope = $scopes['trend'];
             $typesScope = $scopes['types'];
-            $ocrScope = $scopes['ocr'];
             $staffScope = $scopes['staff'];
-            // One decimal everywhere, so 6.0% sits beside 91.2% rather than 6%.
             $percent = fn (int|float|null $value): string => $value === null ? '—' : number_format($value, 1).'%';
             $comparisonNote = number_format($headline['period_records']).' in '.$trendScope['label']
                 .' · '.number_format($headline['previous_records']).' in '.$trendScope['previous_label'];
@@ -37,15 +85,10 @@
             ];
         @endphp
 
-        {{--
-            Wide screens: two summary cards and OCR quality, then volume beside
-            document types, then throughput across. The 1080px-wide portrait
-            monitor keeps that arrangement; tablets put OCR quality, volume and
-            types each on a row of their own; phones stack everything.
-        --}}
+        {{-- Desktop keeps the 3/3/6 summary and 8/4 analytics grid. --}}
         <section class="row g-4 mb-4" aria-label="CRMS performance summary">
             <div class="col-12 col-sm-6 col-lg-3">
-                {{-- Its period line follows the volume panel, so it is swapped with it. --}}
+                {{-- This period line follows the volume panel and refreshes with it. --}}
                 <a id="summary-total" href="{{ route('reports.index', ['status' => 'submitted']) }}"
                    class="dashboard-kpi card h-100 text-reset" data-dashboard-summary>
                     <div class="card-body">
@@ -55,11 +98,49 @@
                             </span>
                             <span class="badge bg-label-primary">All time</span>
                         </div>
-                        <span class="dashboard-kpi__label">Total digitized records</span>
-                        <strong class="dashboard-kpi__value">{{ number_format($headline['records']) }}</strong>
-                        <span class="dashboard-kpi__meta">
-                            {{ number_format($headline['period_records']) }} submitted in {{ $trendScope['phrase'] }}
-                        </span>
+
+                        <div class="dashboard-kpi__metric">
+                            <span class="dashboard-kpi__label">Total digitized records</span>
+                            <strong class="dashboard-kpi__value">{{ number_format($headline['records']) }}</strong>
+                        </div>
+
+                        <div class="dashboard-kpi__insight dashboard-kpi__insight--records">
+                            <div class="dashboard-kpi__insight-head">
+                                <span>Period trend</span>
+                                @if ($headline['change'] !== null)
+                                    <span @class([
+                                        'dashboard-kpi__delta',
+                                        'dashboard-kpi__delta--up' => $headline['change'] >= 0,
+                                        'dashboard-kpi__delta--down' => $headline['change'] < 0,
+                                    ])>
+                                        @if ($headline['change'] >= 0)
+                                            <i class="icon-base bx bx-trending-up" aria-hidden="true"></i>
+                                        @else
+                                            <i class="icon-base bx bx-trending-down" aria-hidden="true"></i>
+                                        @endif
+                                        {{ $headline['change'] >= 0 ? '+' : '' }}{{ $percent($headline['change']) }}
+                                    </span>
+                                @elseif ($headline['period_records'] > 0)
+                                    <span class="dashboard-kpi__delta">New activity</span>
+                                @else
+                                    <span class="dashboard-kpi__delta">No activity</span>
+                                @endif
+                            </div>
+
+                            <svg class="dashboard-kpi__sparkline" viewBox="0 0 100 36"
+                                 preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                                <line class="dashboard-kpi__sparkline-baseline" x1="0" y1="35" x2="100" y2="35" />
+                                <path class="dashboard-kpi__sparkline-area" d="{{ $recordSparkArea }}" />
+                                <path class="dashboard-kpi__sparkline-line" d="{{ $recordSparkLine }}" />
+                                <circle class="dashboard-kpi__sparkline-point"
+                                        cx="{{ number_format($recordSparkLast['x'], 2, '.', '') }}"
+                                        cy="{{ number_format($recordSparkLast['y'], 2, '.', '') }}" r="1.75" />
+                            </svg>
+
+                            <span class="dashboard-kpi__meta">
+                                {{ number_format($headline['period_records']) }} submitted in {{ $trendScope['phrase'] }}
+                            </span>
+                        </div>
                     </div>
                 </a>
             </div>
@@ -73,48 +154,72 @@
                             </span>
                             <span class="badge bg-label-success">Current</span>
                         </div>
-                        <span class="dashboard-kpi__label">Active accounts</span>
-                        <strong class="dashboard-kpi__value">{{ number_format($analytics['accounts']['active']) }}</strong>
-                        <span class="dashboard-kpi__meta">
-                            {{ number_format($analytics['accounts']['inactive']) }} inactive accounts
-                        </span>
+
+                        <div class="dashboard-kpi__metric">
+                            <span class="dashboard-kpi__label">Active accounts</span>
+                            <strong class="dashboard-kpi__value">{{ number_format($accountActive) }}</strong>
+                        </div>
+
+                        <div class="dashboard-kpi__insight dashboard-kpi__insight--accounts">
+                            <div class="dashboard-kpi__insight-head">
+                                <span>Availability</span>
+                                <strong class="dashboard-kpi__health-rate">{{ $percent($accountActiveRate) }}</strong>
+                            </div>
+
+                            <div class="dashboard-kpi__health-track" aria-hidden="true"
+                                 style="--dashboard-kpi-health: {{ number_format($accountActiveRate, 1, '.', '') }}%">
+                                <span></span>
+                            </div>
+
+                            <div class="dashboard-kpi__health-details">
+                                <span>{{ number_format($accountTotal) }} total</span>
+                                <span>
+                                    <i aria-hidden="true"></i>
+                                    {{ number_format($accountInactive) }} inactive
+                                </span>
+                            </div>
+                        </div>
                     </div>
                 </a>
             </div>
 
             <div class="col-12 col-lg-6">
-                {{-- Confidence is the model's certainty in its own reading, not measured accuracy. --}}
-                <x-dashboard.panel panel="ocr" title="OCR Confidence & Corrections">
-                    <x-slot:meta>Records submitted {{ $ocrScope['short_label'] }}</x-slot:meta>
+                <x-dashboard.panel panel="ocr" title="OCR Quality" class="dashboard-panel--quality">
                     <x-slot:tools>
                         <x-dashboard.period-filter panel="ocr" label="OCR confidence and corrections"
                                                    :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
                     </x-slot:tools>
 
                     <div class="dashboard-quality">
-                        <div id="dashboard-quality-chart" class="dashboard-chart dashboard-chart--radial"
-                             aria-label="OCR confidence and human correction rate"></div>
+                        <div class="dashboard-quality__visual">
+                            <div id="dashboard-quality-chart" class="dashboard-chart dashboard-chart--radial"
+                                 aria-label="OCR confidence {{ $percent($quality['average_confidence']) }} and corrections {{ $percent($quality['correction_rate']) }}"></div>
+                            <div class="dashboard-quality__center" aria-hidden="true">
+                                <span>Confidence</span>
+                                <strong>{{ $percent($quality['average_confidence']) }}</strong>
+                            </div>
+                        </div>
 
                         <div class="dashboard-quality__details">
                             <dl class="dashboard-quality__metrics">
                                 <div class="dashboard-quality__metric">
-                                    <dt>
+                                    <dt aria-label="Average OCR confidence" title="Average OCR confidence">
                                         <span class="dashboard-quality__dot bg-primary" aria-hidden="true"></span>
-                                        Average OCR confidence
+                                        Confidence
                                     </dt>
                                     <dd class="dashboard-quality__value">{{ $percent($quality['average_confidence']) }}</dd>
                                     <dd class="dashboard-quality__caption">
-                                        The model's own certainty, across {{ number_format($quality['confidence_fields']) }} scored fields
+                                        {{ number_format($quality['confidence_fields']) }} fields scored
                                     </dd>
                                 </div>
                                 <div class="dashboard-quality__metric">
-                                    <dt>
+                                    <dt aria-label="Human correction rate" title="Human correction rate">
                                         <span class="dashboard-quality__dot bg-warning" aria-hidden="true"></span>
-                                        Human correction rate
+                                        Corrections
                                     </dt>
                                     <dd class="dashboard-quality__value">{{ $percent($quality['correction_rate']) }}</dd>
                                     <dd class="dashboard-quality__caption">
-                                        {{ number_format($quality['corrected_fields']) }} of {{ number_format($quality['comparable_fields']) }} readings changed while verifying
+                                        {{ number_format($quality['corrected_fields']) }} of {{ number_format($quality['comparable_fields']) }} fields edited
                                     </dd>
                                 </div>
                             </dl>
@@ -122,8 +227,9 @@
                             <p class="dashboard-quality-note mb-0">
                                 <i class="icon-base bx bx-target-lock" aria-hidden="true"></i>
                                 <span>
-                                    Review threshold <strong>{{ $quality['threshold'] }}%</strong>
-                                    · {{ number_format($quality['below_threshold']) }} {{ $quality['below_threshold'] === 1 ? 'field' : 'fields' }} below it
+                                    {{ number_format($quality['below_threshold']) }}
+                                    {{ $quality['below_threshold'] === 1 ? 'field' : 'fields' }} below
+                                    <strong>{{ $quality['threshold'] }}% review floor</strong>
                                 </span>
                             </p>
                         </div>
@@ -136,7 +242,7 @@
             <div class="col-12 col-lg-8">
                 <x-dashboard.panel panel="trend" title="Digitization Volume & Trend">
                     <x-slot:badge>
-                        {{-- Compared with a period of the same length, never a running month with a finished one. --}}
+                        {{-- Compare periods of equal length. --}}
                         @if ($headline['change'] !== null)
                             <span class="dashboard-delta dashboard-delta--{{ $headline['change'] >= 0 ? 'up' : 'down' }}"
                                   title="{{ $comparisonNote }}">
@@ -185,22 +291,35 @@
 
                     @if ($trend['series'] !== [])
                         <details class="dashboard-chart-data mt-2">
-                            <summary>View chart data</summary>
-                            <div class="table-responsive mt-2">
+                            <summary>
+                                <span class="dashboard-chart-data__identity">
+                                    <i class="icon-base bx bx-data" aria-hidden="true"></i>
+                                    <span>Chart data</span>
+                                    <span class="dashboard-chart-data__count">
+                                        {{ number_format(count($trend['labels'])) }} {{ count($trend['labels']) === 1 ? 'point' : 'points' }}
+                                    </span>
+                                </span>
+                                <span class="dashboard-chart-data__action" aria-hidden="true">
+                                    <span class="dashboard-chart-data__view">View</span>
+                                    <span class="dashboard-chart-data__hide">Hide</span>
+                                    <i class="icon-base bx bx-chevron-down dashboard-chart-data__chevron"></i>
+                                </span>
+                            </summary>
+                            <div class="dashboard-chart-data__surface">
                                 <table class="table table-sm mb-0">
                                     <thead>
                                         <tr>
-                                            <th>{{ $trend['mode'] === 'day' ? 'Day' : 'Month' }}</th>
+                                            <th scope="col">{{ $trend['mode'] === 'day' ? 'Day' : 'Month' }}</th>
                                             @foreach ($trend['series'] as $series)
-                                                <th class="text-end">{{ $series['name'] }}</th>
+                                                <th scope="col" class="text-end">{{ $series['name'] }}</th>
                                             @endforeach
-                                            <th class="text-end">Total</th>
+                                            <th scope="col" class="text-end">Total</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         @foreach ($trend['labels'] as $index => $label)
                                             <tr>
-                                                <td>{{ $label }}</td>
+                                                <th scope="row">{{ $label }}</th>
                                                 @foreach ($trend['series'] as $series)
                                                     <td class="text-end">{{ number_format($series['data'][$index]) }}</td>
                                                 @endforeach
@@ -223,35 +342,55 @@
                                                    :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
                     </x-slot:tools>
 
-                    <div class="dashboard-types">
-                        @if ($analytics['by_document_type']->sum('total') > 0)
-                            <div id="dashboard-type-chart" class="dashboard-chart dashboard-chart--donut"
-                                 aria-label="Document type distribution"></div>
-                        @else
-                            <x-empty-state icon="bx-pie-chart-alt-2" title="No submissions in this period"
-                                           message="Choose a longer period to see document type shares." />
-                        @endif
+                    @if ($typeSlices->isNotEmpty())
+                        <div class="dashboard-types">
+                            <div class="dashboard-types__visual">
+                                <div class="dashboard-types__chart-shell">
+                                    <div id="dashboard-type-chart" class="dashboard-chart dashboard-chart--donut"
+                                         aria-label="Document type distribution across {{ number_format($typeTotal) }} records"></div>
+                                    <div class="dashboard-types__center" aria-hidden="true">
+                                        <span>Records</span>
+                                        <strong>{{ number_format($typeTotal) }}</strong>
+                                    </div>
+                                </div>
+                            </div>
 
-                        {{-- The donut's key and its numbers. A type with no records stays listed, muted. --}}
-                        <ul class="dashboard-type-legend">
-                            @foreach ($analytics['by_document_type'] as $row)
-                                <li @class(['dashboard-type-legend__row', 'is-empty' => $row['total'] === 0])>
-                                    <span class="dashboard-type-legend__name" title="{{ $row['type']->shortLabel() }}">
-                                        {{-- The type's own colour, the same on every chart. --}}
-                                        <span class="dashboard-type-legend__dot" aria-hidden="true"
-                                              style="--dashboard-type-color: {{ $row['color'] }}"></span>
-                                        <span class="text-truncate">{{ $row['type']->shortLabel() }}</span>
-                                    </span>
-                                    <span class="dashboard-type-legend__value">
-                                        <strong>{{ number_format($row['total']) }}</strong>
-                                        <span class="visually-hidden">{{ $row['total'] === 1 ? 'record' : 'records' }},</span>
-                                        <span aria-hidden="true">/</span>
-                                        {{ $percent($row['share']) }}
-                                    </span>
-                                </li>
-                            @endforeach
-                        </ul>
-                    </div>
+                            <div class="dashboard-types__details">
+                                <ul class="dashboard-type-slices" aria-label="Document type shares">
+                                    @foreach ($typeSlices as $slice)
+                                        <li class="dashboard-type-slices__row"
+                                            style="--dashboard-type-color: {{ $slice['color'] }}; --dashboard-type-share: {{ number_format(min(100, max(0, $slice['share'])), 1, '.', '') }}%">
+                                            <div class="dashboard-type-slices__line">
+                                                <span class="dashboard-type-slices__name" title="{{ $slice['label'] }}">
+                                                    <span class="dashboard-type-legend__dot" aria-hidden="true"></span>
+                                                    <span class="text-truncate">{{ $slice['label'] }}</span>
+                                                </span>
+                                                <span class="dashboard-type-slices__metrics">
+                                                    <strong>{{ number_format($slice['total']) }}</strong>
+                                                    <span class="dashboard-type-slices__share">{{ $percent($slice['share']) }}</span>
+                                                </span>
+                                            </div>
+                                            <span class="visually-hidden">
+                                                {{ $slice['total'] === 1 ? 'record' : 'records' }}
+                                            </span>
+                                            <div class="dashboard-type-slices__track" aria-hidden="true"><span></span></div>
+                                        </li>
+                                    @endforeach
+                                </ul>
+
+                                @if ($inactiveTypeCount > 0)
+                                    <p class="dashboard-types__inactive mb-0">
+                                        <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
+                                        {{ number_format($inactiveTypeCount) }} configured
+                                        {{ $inactiveTypeCount === 1 ? 'type has' : 'types have' }} no submissions
+                                    </p>
+                                @endif
+                            </div>
+                        </div>
+                    @else
+                        <x-empty-state icon="bx-pie-chart-alt-2" title="No submissions in this period"
+                                       message="Choose a longer period to see document type shares." />
+                    @endif
                 </x-dashboard.panel>
             </div>
         </div>
@@ -259,36 +398,87 @@
         <div class="row g-4">
             <div class="col-12">
                 <x-dashboard.panel panel="staff" title="Processing & Throughput">
-                    <x-slot:meta>Top 6 accounts by records submitted · {{ $staffScope['short_label'] }}</x-slot:meta>
+                    <x-slot:meta>{{ $throughputMeta }} · {{ $staffScope['short_label'] }}</x-slot:meta>
                     <x-slot:tools>
                         <x-dashboard.period-filter panel="staff" label="processing and throughput"
                                                    :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
                     </x-slot:tools>
 
-                    @if ($throughput->isNotEmpty())
+                    @if ($sparseThroughput)
+                        <div class="dashboard-throughput-sparse">
+                            <dl class="dashboard-throughput-summary" aria-label="Displayed throughput summary">
+                                <div>
+                                    <dt>Records</dt>
+                                    <dd>{{ number_format($throughputTotal) }}</dd>
+                                </div>
+                                <div>
+                                    <dt>Accounts</dt>
+                                    <dd>{{ number_format($throughputCount) }}</dd>
+                                </div>
+                            </dl>
+
+                            <ol class="dashboard-contributors">
+                                @foreach ($throughput as $person)
+                                    @php
+                                        $share = $throughputTotal > 0 ? round((int) $person['total'] / $throughputTotal * 100, 1) : 0.0;
+                                    @endphp
+                                    <li class="dashboard-contributor" style="--dashboard-throughput-share: {{ number_format($share, 1, '.', '') }}%">
+                                        <div class="dashboard-contributor__topline">
+                                            <span class="dashboard-contributor__rank" aria-label="Rank {{ $loop->iteration }}">
+                                                #{{ $loop->iteration }}
+                                            </span>
+                                            <span class="dashboard-throughput-avatar" aria-hidden="true">
+                                                {{ str($person['name'])->substr(0, 1)->upper() }}
+                                            </span>
+                                            <span class="dashboard-contributor__identity">
+                                                <span class="dashboard-contributor__name" title="{{ $person['name'] }}">{{ $person['name'] }}</span>
+                                                <small title="{{ $person['role'] }}">{{ $person['role'] }}</small>
+                                            </span>
+                                            <span class="dashboard-contributor__total">
+                                                <strong>{{ number_format($person['total']) }}</strong>
+                                                <small>{{ $person['total'] === 1 ? 'record' : 'records' }}</small>
+                                            </span>
+                                        </div>
+                                        <div class="dashboard-contributor__share">
+                                            <div class="dashboard-contributor__track" role="progressbar"
+                                                 aria-label="{{ $person['name'] }} share of displayed output"
+                                                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ $share }}">
+                                                <span></span>
+                                            </div>
+                                            <small>{{ $percent($share) }} of displayed output</small>
+                                        </div>
+                                    </li>
+                                @endforeach
+                            </ol>
+                        </div>
+                    @elseif ($throughput->isNotEmpty())
                         <div class="dashboard-throughput-layout">
                             <div id="dashboard-throughput-chart" class="dashboard-chart dashboard-chart--throughput"
                                  aria-label="Staff throughput comparison"></div>
 
-                            <div class="table-responsive">
+                            <div class="dashboard-throughput-table-wrap">
                                 <table class="table table-borderless align-middle dashboard-throughput-table mb-0">
                                     <thead>
                                         <tr>
-                                            <th>Account</th>
-                                            <th class="text-end">Records</th>
+                                            <th scope="col" class="dashboard-throughput-table__rank">Rank</th>
+                                            <th scope="col">Account</th>
+                                            <th scope="col" class="text-end">Records</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         @foreach ($throughput as $person)
                                             <tr>
+                                                <td class="dashboard-throughput-table__rank">
+                                                    <span>{{ $loop->iteration }}</span>
+                                                </td>
                                                 <td>
                                                     <div class="d-flex align-items-center gap-2 min-w-0">
-                                                        <span class="dashboard-throughput-avatar">
+                                                        <span class="dashboard-throughput-avatar" aria-hidden="true">
                                                             {{ str($person['name'])->substr(0, 1)->upper() }}
                                                         </span>
                                                         <span class="min-w-0">
-                                                            <span class="d-block fw-medium text-truncate">{{ $person['name'] }}</span>
-                                                            <small class="text-muted">{{ $person['role'] }}</small>
+                                                            <span class="d-block fw-medium text-truncate" title="{{ $person['name'] }}">{{ $person['name'] }}</span>
+                                                            <small class="d-block text-muted text-truncate" title="{{ $person['role'] }}">{{ $person['role'] }}</small>
                                                         </span>
                                                     </div>
                                                 </td>

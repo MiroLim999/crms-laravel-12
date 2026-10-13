@@ -1,7 +1,5 @@
 import ApexCharts from 'apexcharts';
 
-// Fallbacks only; the live values come from the theme, so a ring and the dot
-// beside it are always the same colour.
 const fallback = {
   primary: '#2563eb',
   warning: '#ffab00',
@@ -40,11 +38,9 @@ function themeOptions(target) {
   };
 }
 
-// An upright monitor (1080 x 1920) is narrow but tall, so its charts can be
-// taller. Keep this in step with the portrait rule in _crms.scss.
+// Keep this breakpoint aligned with the dashboard portrait rule in _crms.scss.
 const portraitDesk = window.matchMedia('(min-width: 992px) and (orientation: portrait)').matches;
-
-// The live charts by element id, so one is destroyed before it is drawn again.
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const charts = new Map();
 
 function draw(target, options) {
@@ -59,24 +55,12 @@ function emptyState(target, message) {
   target.innerHTML = `<div class="dashboard-chart-empty">${message}</div>`;
 }
 
-// Type names come from the type list, so they are escaped before they are
-// written into a tooltip.
 function escapeHtml(value) {
   const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   return String(value).replace(/[&<>"']/g, character => entities[character]);
 }
 
-// A long type name would spill out of the donut's centre; the key under the
-// chart has it in full.
-function shorten(text, length = 20) {
-  const value = String(text);
-  return value.length > length ? `${value.slice(0, length - 1).trimEnd()}…` : value;
-}
-
-// Records are counted in whole numbers, so the axis steps by 1, 2 or 5 times
-// a power of ten: the smallest step that needs at most five intervals to
-// reach the peak. No tick is a fraction, and the top is the first tick at or
-// above the peak, so the chart never runs far past its data.
+// Whole-record axes use a compact 1/2/5 scale.
 function countAxis(peak) {
   const top = Math.max(peak, 1);
   let step;
@@ -89,8 +73,6 @@ function countAxis(peak) {
   return { min: 0, max: intervals * step, tickAmount: intervals };
 }
 
-// The trend's tooltip, a small card: the count first, as the eye reads it,
-// then the day or month in full, then each type when there are several.
 function volumeTooltip(titles) {
   return ({ series: values, dataPointIndex: index, w }) => {
     const rows = w.globals.seriesNames.map((name, position) => ({
@@ -101,7 +83,7 @@ function volumeTooltip(titles) {
     const total = rows.reduce((sum, row) => sum + row.value, 0);
     const breakdown = rows.length > 1
       ? `<ul class="dashboard-tooltip__rows">${rows.map(row => '<li>'
-        + `<span class="dashboard-tooltip__dot" style="background:${row.color}"></span>`
+        + `<span class="dashboard-tooltip__dot" style="background:${escapeHtml(row.color)}"></span>`
         + `<span>${escapeHtml(row.name)}</span>`
         + `<strong>${row.value.toLocaleString()}</strong></li>`).join('')}</ul>`
       : '';
@@ -117,8 +99,6 @@ function renderVolume(data) {
   const target = document.getElementById('dashboard-volume-chart');
   if (!target || !data) return;
 
-  // Each series carries its document type's colour, so a type looks the same
-  // here as in the donut, whatever the order of either chart.
   const series = Array.isArray(data.series) ? data.series : [];
   const labels = Array.isArray(data.labels) ? data.labels : [];
   const titles = Array.isArray(data.titles) ? data.titles : labels;
@@ -139,17 +119,17 @@ function renderVolume(data) {
       parentHeightOffset: 0,
       toolbar: { show: false },
       zoom: { enabled: false },
+      animations: { enabled: !reducedMotion, speed: 420 },
     },
     colors: series.map(item => item.color),
     dataLabels: { enabled: false },
-    // Each line's own colour under it, fading out towards the baseline.
     fill: {
       type: 'gradient',
       gradient: {
         type: 'vertical',
         shadeIntensity: 0,
-        opacityFrom: 0.5,
-        opacityTo: 0.04,
+        opacityFrom: 0.42,
+        opacityTo: 0.03,
         stops: [0, 100],
       },
     },
@@ -160,10 +140,7 @@ function renderVolume(data) {
       yaxis: { lines: { show: true } },
       padding: { top: -10, left: 6, right: 10, bottom: 0 },
     },
-    // The key is in the panel's header.
     legend: { show: false },
-    // A line needs two points; with fewer, show the point itself. The point
-    // under the pointer is a ring in its line's colour.
     markers: {
       size: labels.length < 3 ? 5 : 0,
       colors: series.map(() => theme.paper),
@@ -172,9 +149,6 @@ function renderVolume(data) {
       hover: { size: 6 },
     },
     series: series.map(item => ({ name: item.name, data: item.data })),
-    // Smooth, but never above a peak or below zero between two counts. Square
-    // ends: the hidden hover markers take the line's cap, and a round one
-    // draws them as dots in the corner even at size 0.
     stroke: { curve: 'monotoneCubic', width: 3 },
     tooltip: {
       shared: true,
@@ -183,9 +157,11 @@ function renderVolume(data) {
     },
     xaxis: {
       categories: labels,
+      tickAmount: labels.length > 2
+        ? Math.max(2, Math.min(labels.length - 1, Math.floor(target.clientWidth / 100)))
+        : undefined,
       axisBorder: { show: false },
       axisTicks: { show: false },
-      // A hairline from the pointed-at day down to the axis.
       crosshairs: {
         show: true,
         width: 1,
@@ -207,6 +183,24 @@ function renderVolume(data) {
   });
 }
 
+function documentTypeTooltip(populated, total) {
+  return ({ series, seriesIndex }) => {
+    const slice = populated[seriesIndex] || {};
+    const count = Number(series[seriesIndex] ?? 0);
+    const share = total > 0 ? (count / total * 100).toFixed(1) : '0.0';
+
+    return '<div class="dashboard-tooltip dashboard-tooltip--donut">'
+      + '<div class="dashboard-tooltip__type">'
+      + `<span class="dashboard-tooltip__dot" style="background:${escapeHtml(slice.color || '')}"></span>`
+      + `<span>${escapeHtml(slice.label || '')}</span></div>`
+      + '<div class="dashboard-tooltip__type-value">'
+      + `<strong>${count.toLocaleString()}</strong>`
+      + `<span>${count === 1 ? 'record' : 'records'}</span>`
+      + `<span class="dashboard-tooltip__share">${share}%</span></div>`
+      + '</div>';
+  };
+}
+
 function renderDocumentTypes(slices) {
   const target = document.getElementById('dashboard-type-chart');
   if (!target || !Array.isArray(slices)) return;
@@ -216,69 +210,41 @@ function renderDocumentTypes(slices) {
 
   const theme = themeOptions(target);
   const total = populated.reduce((sum, slice) => sum + Number(slice.total), 0);
+  const size = Math.max(188, Math.min(target.parentElement?.clientWidth || 240, 260));
 
   draw(target, {
     chart: {
       type: 'donut',
-      // As tall as it is wide in a narrow card, so no band of space sits
-      // above and below the ring.
-      height: Math.max(240, Math.min(target.clientWidth || 280, 290)),
+      width: size,
+      height: size,
       fontFamily: theme.font,
       foreColor: theme.text,
       parentHeightOffset: 0,
+      animations: { enabled: !reducedMotion, speed: 420 },
     },
-    // The slices are largest first, but each keeps its own type's colour.
     colors: populated.map(slice => slice.color),
     dataLabels: { enabled: false },
     labels: populated.map(slice => slice.label),
-    // The key, with each type's numbers, is listed under the chart.
     legend: { show: false },
     plotOptions: {
       pie: {
         expandOnClick: false,
         donut: {
-          size: '70%',
-          labels: {
-            show: true,
-            // The centre shows the total; pointing at a slice shows that type.
-            name: {
-              show: true,
-              fontSize: '13px',
-              fontWeight: 500,
-              color: theme.text,
-              offsetY: -12,
-              formatter: name => shorten(name),
-            },
-            value: {
-              show: true,
-              fontSize: '28px',
-              fontWeight: 700,
-              color: theme.heading,
-              offsetY: 14,
-              formatter: value => Number(value).toLocaleString(),
-            },
-            total: {
-              show: true,
-              label: 'Total',
-              fontSize: '13px',
-              fontWeight: 500,
-              color: theme.text,
-              formatter: () => total.toLocaleString(),
-            },
-          },
+          size: '76%',
+          labels: { show: false },
         },
       },
     },
     series: populated.map(slice => Number(slice.total)),
     states: {
-      hover: { filter: { type: 'none' } },
+      hover: { filter: { type: 'lighten', value: 0.04 } },
       active: { filter: { type: 'none' } },
     },
-    // Thin gaps in the card's colour between slices. One slice is a whole
-    // ring, with no gap in it.
     stroke: { width: populated.length > 1 ? 3 : 0, colors: [theme.paper] },
-    // The centre already names the slice under the pointer.
-    tooltip: { enabled: false },
+    tooltip: {
+      enabled: true,
+      custom: documentTypeTooltip(populated, total),
+    },
   });
 }
 
@@ -286,133 +252,131 @@ function renderQuality(data) {
   const target = document.getElementById('dashboard-quality-chart');
   if (!target || !data) return;
 
-  // With nothing scored yet the rings stay empty; the figures beside them say
-  // so, which reads better in a small card than a sentence in the gauge.
   const confidenceAvailable = data.averageConfidence !== null && data.averageConfidence !== undefined;
   const correctionAvailable = data.correctionRate !== null && data.correctionRate !== undefined;
-
   const theme = themeOptions(target);
   const confidence = confidenceAvailable ? Number(data.averageConfidence) : 0;
   const correction = correctionAvailable ? Number(data.correctionRate) : 0;
+  const size = Math.min(target.clientWidth || 188, 188);
 
   draw(target, {
     chart: {
       type: 'radialBar',
-      // The gauge fills its column in the summary row, or a phone's width.
-      height: Math.max(150, Math.min(target.clientWidth || 160, 210)),
+      height: size,
       fontFamily: theme.font,
       foreColor: theme.text,
       parentHeightOffset: 0,
       sparkline: { enabled: true },
+      animations: { enabled: !reducedMotion, speed: 420 },
     },
     colors: [theme.primary, theme.warning],
-    labels: ['OCR confidence', 'Human correction'],
+    labels: ['Confidence', 'Corrections'],
     plotOptions: {
       radialBar: {
-        endAngle: 270,
-        // A wide centre, so its figure stays readable in a small gauge.
-        hollow: { size: '46%' },
         startAngle: -90,
+        endAngle: 270,
+        hollow: {
+          size: '54%',
+          background: 'transparent',
+        },
         track: {
           background: theme.border,
-          margin: 5,
-          strokeWidth: '100%',
+          margin: 7,
+          strokeWidth: '94%',
         },
-        dataLabels: {
-          name: { fontSize: '11px', fontWeight: 500, color: theme.text, offsetY: -6 },
-          value: {
-            fontSize: '18px',
-            fontWeight: 700,
-            color: theme.heading,
-            offsetY: 2,
-            formatter: value => `${Number(value).toFixed(1)}%`,
-          },
-          // The centre shows a result, not a setting: the review threshold
-          // is written out beside the gauge instead.
-          total: {
-            show: true,
-            label: confidenceAvailable ? 'Confidence' : 'No readings',
-            fontSize: '11px',
-            fontWeight: 500,
-            color: theme.text,
-            formatter: () => (confidenceAvailable ? `${confidence.toFixed(1)}%` : '—'),
-          },
-        },
+        dataLabels: { show: false },
       },
     },
     series: [confidence, correction],
+    states: {
+      hover: { filter: { type: 'none' } },
+      active: { filter: { type: 'none' } },
+    },
     stroke: { lineCap: 'round' },
+    tooltip: { enabled: false },
   });
 }
 
+function throughputAxis(peak, narrow) {
+  const desired = Math.max(peak * 1.14, peak + 1);
+  const targetIntervals = narrow ? 3 : 5;
+  const rawStep = desired / targetIntervals;
+  const magnitude = Math.max(1, 10 ** Math.floor(Math.log10(Math.max(rawStep, 1))));
+  const step = [1, 2, 2.5, 5, 10]
+    .map(multiplier => multiplier * magnitude)
+    .find(candidate => candidate >= rawStep) || magnitude * 10;
+  const max = Math.ceil(desired / step) * step;
+
+  return { max, ticks: Math.max(1, Math.round(max / step)) };
+}
+
 function renderThroughput(data) {
+  // Sparse periods intentionally have no chart target.
   const target = document.getElementById('dashboard-throughput-chart');
   if (!target || !data || !Array.isArray(data.totals) || !data.totals.length) return;
 
+  const totals = data.totals.map(Number);
   const theme = themeOptions(target);
-  const longest = Math.max(...data.totals.map(Number)) * 1.18;
-  const step = longest > 200 ? 100 : longest > 100 ? 50 : longest > 40 ? 20 : longest > 20 ? 10 : 5;
-  const axisMax = Math.max(step, Math.ceil(longest / step) * step);
-  const throughputAxis = { max: axisMax, ticks: Math.min(axisMax / step, target.clientWidth < 420 ? 3 : 6) };
+  const peak = Math.max(...totals);
+  const axis = throughputAxis(peak, target.clientWidth < 420);
+  const height = Math.max(196, totals.length * 54 + 34);
 
   draw(target, {
     chart: {
       type: 'bar',
-      height: Math.max(250, data.totals.length * 45),
+      height,
       fontFamily: theme.font,
       foreColor: theme.text,
       parentHeightOffset: 0,
       toolbar: { show: false },
+      animations: { enabled: !reducedMotion, speed: 420 },
     },
     colors: [theme.primary],
-    // Each count sits just past its bar's end in text colour, readable however
-    // short the bar is.
     dataLabels: {
       enabled: true,
       formatter: value => Number(value).toLocaleString(),
-      offsetX: 24,
-      style: { fontSize: '12px', fontWeight: 600, colors: [theme.text] },
+      offsetX: 16,
+      style: { fontSize: '12px', fontWeight: 700, colors: [theme.heading] },
     },
     grid: {
       borderColor: theme.border,
-      strokeDashArray: 5,
-      padding: { left: 8, right: 30, top: -12, bottom: -8 },
+      strokeDashArray: 4,
+      padding: { left: 6, right: 30, top: -8, bottom: -6 },
     },
     plotOptions: {
       bar: {
-        borderRadius: 6,
+        borderRadius: 8,
         borderRadiusApplication: 'end',
-        barHeight: '46%',
+        barHeight: '58%',
         horizontal: true,
         dataLabels: { position: 'top' },
       },
     },
-    series: [{ name: 'Submitted records', data: data.totals.map(Number) }],
+    series: [{ name: 'Submitted records', data: totals }],
     tooltip: {
-      y: { formatter: value => `${Number(value).toLocaleString()} records` },
+      y: { formatter: value => `${Number(value).toLocaleString()} ${Number(value) === 1 ? 'record' : 'records'}` },
     },
     xaxis: {
-      categories: data.labels || [],
+      categories: Array.isArray(data.labels) ? data.labels : [],
       min: 0,
-      // Headroom past the longest bar, so its count is not drawn over it.
-      // Rounded to a step, so the axis reads 0, 25, 50 and not 0, 19, 38.
-      max: throughputAxis.max,
-      tickAmount: throughputAxis.ticks,
+      max: axis.max,
+      tickAmount: axis.ticks,
       axisBorder: { show: false },
       axisTicks: { show: false },
-      labels: { formatter: value => Math.round(value).toLocaleString() },
+      labels: {
+        formatter: value => Math.round(value).toLocaleString(),
+        style: { fontSize: '11px' },
+      },
     },
     yaxis: {
       labels: {
-        // Room for whole names in a full-width card; a phone keeps the bars.
-        maxWidth: Math.round(Math.min(160, Math.max(90, target.clientWidth * 0.3))),
+        maxWidth: Math.round(Math.min(150, Math.max(82, target.clientWidth * 0.27))),
         style: { fontSize: '12px', fontWeight: 500 },
       },
     },
   });
 }
 
-// Each panel and the chart it draws.
 const panels = {
   trend: { chart: 'dashboard-volume-chart', key: 'volume', render: renderVolume },
   types: { chart: 'dashboard-type-chart', key: 'documentTypes', render: renderDocumentTypes },
@@ -429,8 +393,7 @@ function panelOf(element) {
   return name in panels ? name : null;
 }
 
-// The page's own query string with this panel's fields swapped for the new
-// ones, so every other panel keeps the period it already shows.
+// Swap only this panel's fields so every other period remains independent.
 function queryFor(panel, fields) {
   const query = new URLSearchParams(window.location.search);
 
@@ -444,15 +407,11 @@ function queryFor(panel, fields) {
   return query;
 }
 
-// The menu stays open while its dates are typed in, so it is closed here,
-// before its panel is replaced.
 function closeMenu(element) {
   const toggle = element?.closest('.dashboard-period')?.querySelector('[data-bs-toggle="dropdown"]');
   if (toggle && window.bootstrap?.Dropdown) window.bootstrap.Dropdown.getInstance(toggle)?.hide();
 }
 
-// "To" cannot be before "From", nor "From" after "To", so the browser stops a
-// reversed range before it is sent.
 function linkDates(form) {
   const from = form?.querySelector('[data-dashboard-from]');
   const to = form?.querySelector('[data-dashboard-to]');
@@ -462,7 +421,6 @@ function linkDates(form) {
   from.max = to.value || to.max;
 }
 
-// A panel's new period, for screen readers; the panel itself changed silently.
 function announce(card) {
   const status = document.querySelector('[data-dashboard-status]');
   const title = card.querySelector('.card-title')?.textContent.trim();
@@ -470,9 +428,6 @@ function announce(card) {
   if (status && title && range) status.textContent = `${title} now shows ${range}.`;
 }
 
-// Fetches the dashboard for the new query and swaps in only the panel that
-// changed, plus the summary cards, which read from the trend and OCR panels.
-// Anything unexpected falls back to an ordinary page load.
 async function refreshPanel(panel, query, trigger) {
   const url = `${window.location.pathname}${query.toString() ? `?${query}` : ''}`;
   const card = document.getElementById(`panel-${panel}`);
@@ -482,6 +437,7 @@ async function refreshPanel(panel, query, trigger) {
   }
 
   const hadFocus = card.contains(document.activeElement);
+  const chartDataWasOpen = card.querySelector('details.dashboard-chart-data')?.open === true;
   closeMenu(trigger);
 
   pending.get(panel)?.abort();
@@ -504,18 +460,19 @@ async function refreshPanel(panel, query, trigger) {
     const freshData = JSON.parse(page.getElementById('dashboard-chart-data')?.textContent || 'null');
     if (!freshCard || !freshData) throw new Error('Unexpected page');
 
+    if (chartDataWasOpen) {
+      const freshDisclosure = freshCard.querySelector('details.dashboard-chart-data');
+      if (freshDisclosure) freshDisclosure.open = true;
+    }
+
     charts.get(panels[panel].chart)?.destroy();
     charts.delete(panels[panel].chart);
     card.replaceWith(freshCard);
 
-    // Summary cards that quote a panel's period are swapped one by one; the
-    // summary row also holds the OCR panel, which must not be replaced
-    // without its chart being drawn again.
     page.querySelectorAll('[data-dashboard-summary][id]').forEach(fresh => {
       document.getElementById(fresh.id)?.replaceWith(fresh);
     });
 
-    // Keep the chart data current for the panel that was swapped.
     const holder = document.getElementById('dashboard-chart-data');
     const data = JSON.parse(holder?.textContent || '{}');
     data[panels[panel].key] = freshData[panels[panel].key];
@@ -526,11 +483,9 @@ async function refreshPanel(panel, query, trigger) {
 
     window.history.replaceState(null, '', url);
     announce(freshCard);
-    // Back to the period button, so the keyboard picks up where it was.
     if (hadFocus) document.getElementById(`${panel}-period-toggle`)?.focus({ preventScroll: true });
   } catch (error) {
     if (error.name === 'AbortError') return;
-    // Could not update in place: load the page the ordinary way.
     window.location.assign(url);
   } finally {
     if (pending.get(panel) === request) pending.delete(panel);
@@ -546,7 +501,6 @@ function setupPeriodFilters() {
     if (event.target.matches?.('[data-dashboard-from], [data-dashboard-to]')) linkDates(event.target.form);
   });
 
-  // Custom dates.
   document.addEventListener('submit', event => {
     const form = event.target.closest?.('[data-dashboard-filter]');
     const panel = form && panelOf(form);
@@ -556,7 +510,6 @@ function setupPeriodFilters() {
     if (form.reportValidity()) refreshPanel(panel, queryFor(panel, new FormData(form)), form);
   });
 
-  // A preset. A modified click still opens the link the ordinary way.
   document.addEventListener('click', event => {
     const link = event.target.closest?.('[data-dashboard-period-link]');
     const panel = link && panelOf(link);

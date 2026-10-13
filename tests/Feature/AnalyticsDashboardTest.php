@@ -58,7 +58,7 @@ class AnalyticsDashboardTest extends TestCase
                 ->assertSee('Total digitized records')
                 ->assertSee('Digitization Volume &amp; Trend', escape: false)
                 ->assertSee('Document Type Distribution')
-                ->assertSee('OCR Confidence &amp; Corrections', escape: false)
+                ->assertSee('OCR Quality')
                 ->assertSee('Processing &amp; Throughput', escape: false);
 
             $this->assertNotNull($response->viewData('analytics'));
