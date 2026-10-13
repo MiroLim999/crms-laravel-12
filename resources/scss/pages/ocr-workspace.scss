@@ -527,6 +527,24 @@
     }
   }
 
+  // Radar grid anchor handling: retain the triangle grid geometry when all models are unchecked
+  .apexcharts-legend-series[seriesName="ocr_radar_grid_anchor"],
+  .apexcharts-legend-series[seriesname="ocr_radar_grid_anchor"],
+  .apexcharts-legend-series:has([data-default-text*="ocr_radar_grid_anchor"]) {
+    display: none !important;
+  }
+
+  .apexcharts-series[seriesName="ocr_radar_grid_anchor"],
+  .apexcharts-series[seriesname="ocr_radar_grid_anchor"] {
+    display: none !important;
+    pointer-events: none !important;
+  }
+
+  .apexcharts-tooltip:empty {
+    display: none !important;
+    opacity: 0 !important;
+  }
+
   .ocr-performance-evidence {
     display: flex;
     gap: 0.5rem;

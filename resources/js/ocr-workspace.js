@@ -1121,7 +1121,15 @@ function initModelPerformance() {
         }
     };
 
-    const makeTooltipHtml = (profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex) => {
+    const makeTooltipHtml = (profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex, w) => {
+        const collapsed = w?.globals?.collapsedSeriesIndices || [];
+        const isModelVisible = !collapsed.includes(0);
+        const isBaseVisible = showBaseComparison && !collapsed.includes(1);
+
+        if (!isModelVisible && !isBaseVisible) {
+            return '';
+        }
+
         const metric = metrics[dataPointIndex];
         const val = scores?.[dataPointIndex];
         const bVal = baseScores ? baseScores[dataPointIndex] : null;
@@ -1134,20 +1142,21 @@ function initModelPerformance() {
 
         return `<div class="ocr-apex-tooltip">
             <div class="ocr-tooltip-title">${metric.label}</div>
+            ${isModelVisible ? `
             <div class="ocr-tooltip-row">
                 <div><span class="ocr-tooltip-badge" style="background:#696cff"></span><strong>${profileLabel}</strong></div>
                 <span class="fw-bold text-primary">${val !== null && val !== undefined ? val.toFixed(1) + '%' : '—'}</span>
-            </div>
-            ${showBaseComparison && bVal !== null && bVal !== undefined ? `
+            </div>` : ''}
+            ${isBaseVisible && bVal !== null && bVal !== undefined ? `
             <div class="ocr-tooltip-row">
                 <div><span class="ocr-tooltip-badge" style="background:#ff9f43"></span><span>TrOCR Base</span></div>
                 <span class="text-muted">${bVal.toFixed(1)}%</span>
-            </div>
+            </div>` : ''}
+            ${isModelVisible && isBaseVisible && diff !== null ? `
             <div class="ocr-tooltip-delta ${diff >= 0 ? 'text-success' : 'text-danger'}">
                 <i class="icon-base bx ${diff >= 0 ? 'bx-trending-up' : 'bx-trending-down'}"></i>
                 <span>${sign}${diff.toFixed(1)}% absolute gain ${relGain ? `(${sign}${relGain}% relative lift)` : ''}</span>
-            </div>
-            ` : ''}
+            </div>` : ''}
         </div>`;
     };
 
@@ -1210,6 +1219,14 @@ function initModelPerformance() {
         const comparisonColors = [colors.primary, '#ff9f43'];
 
         if (currentView === 'radar') {
+            const radarSeries = [
+                ...series,
+                {
+                    name: 'ocr_radar_grid_anchor',
+                    data: metrics.map(() => 0),
+                },
+            ];
+
             chart = new ApexCharts(target, {
                 chart: {
                     type: 'radar',
@@ -1224,12 +1241,14 @@ function initModelPerformance() {
                         speed: 350,
                     },
                 },
-                colors: showBaseComparison ? comparisonColors : [colors.primary],
+                colors: showBaseComparison
+                    ? [...comparisonColors, 'transparent']
+                    : [colors.primary, 'transparent'],
                 dataLabels: { enabled: false },
                 fill: showBaseComparison
                     ? {
-                        type: ['gradient', 'solid'],
-                        opacity: [0.30, 0.12],
+                        type: ['gradient', 'solid', 'solid'],
+                        opacity: [0.30, 0.12, 0],
                         gradient: {
                             type: 'horizontal',
                             shadeIntensity: 0,
@@ -1242,7 +1261,8 @@ function initModelPerformance() {
                         },
                     }
                     : {
-                        type: 'gradient',
+                        type: ['gradient', 'solid'],
+                        opacity: [0.28, 0],
                         gradient: {
                             type: 'horizontal',
                             shadeIntensity: 0,
@@ -1269,15 +1289,15 @@ function initModelPerformance() {
                 },
                 markers: showBaseComparison
                     ? {
-                        size: [7.5, 5.5],
-                        strokeColors: [colors.card, '#ff9f43'],
-                        strokeWidth: [2.5, 2],
+                        size: [7.5, 5.5, 0],
+                        strokeColors: [colors.card, '#ff9f43', 'transparent'],
+                        strokeWidth: [2.5, 2, 0],
                         hover: { size: 9 },
                     }
                     : {
-                        size: 7,
-                        strokeColors: colors.card,
-                        strokeWidth: 2.5,
+                        size: [7, 0],
+                        strokeColors: [colors.card, 'transparent'],
+                        strokeWidth: [2.5, 0],
                         discrete: metricColors.map((color, dataPointIndex) => ({
                             seriesIndex: 0,
                             dataPointIndex,
@@ -1298,12 +1318,12 @@ function initModelPerformance() {
                         },
                     },
                 },
-                series,
+                series: radarSeries,
                 stroke: showBaseComparison
-                    ? { width: [3.5, 2.5], dashArray: [0, 5] }
-                    : { width: 3.5, dashArray: 0 },
+                    ? { width: [3.5, 2.5, 0], dashArray: [0, 5, 0] }
+                    : { width: [3.5, 0], dashArray: [0, 0] },
                 tooltip: {
-                    custom: ({ dataPointIndex }) => makeTooltipHtml(profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex),
+                    custom: ({ dataPointIndex, w }) => makeTooltipHtml(profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex, w),
                 },
                 xaxis: {
                     categories: metrics.map((metric) => metric.axis || metric.label),
@@ -1326,7 +1346,11 @@ function initModelPerformance() {
                     options: {
                         chart: { height: 320 },
                         grid: { padding: { top: 8, right: 8, bottom: 8, left: 8 } },
-                        markers: { size: 5, strokeWidth: 2, hover: { size: 7 } },
+                        markers: {
+                            size: showBaseComparison ? [5, 4, 0] : [5, 0],
+                            strokeWidth: showBaseComparison ? [2, 1.5, 0] : [2, 0],
+                            hover: { size: 7 },
+                        },
                         plotOptions: { radar: { size: 105 } },
                     },
                 }],
@@ -1386,7 +1410,7 @@ function initModelPerformance() {
                 },
                 series,
                 tooltip: {
-                    custom: ({ dataPointIndex }) => makeTooltipHtml(profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex),
+                    custom: ({ dataPointIndex, w }) => makeTooltipHtml(profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex, w),
                 },
                 xaxis: {
                     categories: metrics.map((m) => m.label),
