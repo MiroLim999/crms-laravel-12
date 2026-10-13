@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OCR Workspace Redesign Showcase · 4 Enterprise Versions · CRMS</title>
+
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/img/crms-logo.png">
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/crms-base.css">
+
+  <style>
+    .hub-hero {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: #fff;
+      padding: 3.5rem 2rem 3rem;
+      border-radius: var(--bs-border-radius-xl);
+      margin-bottom: 2.5rem;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
+    }
+
+    .hub-hero::after {
+      content: "";
+      position: absolute;
+      top: -50%;
+      right: -20%;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(105, 108, 255, 0.25) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hub-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(105, 108, 255, 0.2);
+      border: 1px solid rgba(105, 108, 255, 0.4);
+      color: #a5b4fc;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 0.3rem 0.8rem;
+      border-radius: 999px;
+      margin-bottom: 1rem;
+    }
+
+    .hub-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .hub-card {
+      background: var(--bs-card-bg);
+      border: 1.5px solid var(--bs-border-color);
+      border-radius: var(--bs-border-radius-lg);
+      padding: 1.75rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+    }
+
+    .hub-card:hover {
+      border-color: var(--bs-primary);
+      box-shadow: 0 12px 28px rgba(105, 108, 255, 0.12);
+      transform: translateY(-4px);
+    }
+
+    .hub-card-num {
+      position: absolute;
+      top: 1.25rem;
+      right: 1.25rem;
+      font-size: 2rem;
+      font-weight: 800;
+      color: rgba(67, 89, 113, 0.1);
+      line-height: 1;
+    }
+
+    .hub-card-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 0.65rem;
+      background: rgba(105, 108, 255, 0.1);
+      color: var(--bs-primary);
+      display: grid;
+      place-items: center;
+      font-size: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .hub-card-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--bs-heading-color);
+      margin: 0 0 0.45rem;
+    }
+
+    .hub-card-desc {
+      font-size: 0.875rem;
+      color: #8592a3;
+      margin-bottom: 1.25rem;
+      line-height: 1.5;
+    }
+
+    .hub-feature-list {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+      font-size: 0.8125rem;
+    }
+
+    .hub-feature-list li {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: #566a7f;
+    }
+
+    .hub-feature-list li i {
+      color: var(--bs-success);
+      font-size: 1rem;
+    }
+
+    .hub-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+      background: #fff;
+      border-radius: var(--bs-border-radius-lg);
+      overflow: hidden;
+      border: 1px solid var(--bs-border-color);
+    }
+
+    .hub-table th {
+      background: #f8fafc;
+      padding: 1rem 1.25rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #8592a3;
+      border-bottom: 1px solid var(--bs-border-color);
+    }
+
+    .hub-table td {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--bs-border-color);
+      vertical-align: middle;
+    }
+
+    .hub-table tr:last-child td {
+      border-bottom: none;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Top Switcher Bar -->
+  <header class="redesign-switcher-bar">
+    <div class="redesign-switcher-left">
+      <span class="redesign-switcher-title">
+        <i class="icon-base bx bx-palette" style="color:#696cff;"></i>
+        CRMS Redesign Prototypes
+      </span>
+      <span class="redesign-switcher-badge">Overview Hub</span>
+    </div>
+    <nav class="redesign-switcher-nav" aria-label="Redesign versions">
+      <a href="index.html" class="redesign-switcher-link is-active"><i class="icon-base bx bx-grid-alt"></i> Showcase
+        Hub</a>
+      <a href="version-1-command-hub.html" class="redesign-switcher-link"><i class="icon-base bx bx-check-circle"></i>
+        V1: Command Hub</a>
+      <a href="version-2-split-deck.html" class="redesign-switcher-link"><i class="icon-base bx bx-columns"></i> V2:
+        Split-Deck</a>
+      <a href="version-3-linear-minimal.html" class="redesign-switcher-link"><i class="icon-base bx bx-layer"></i> V3:
+        Linear Minimal</a>
+      <a href="version-4-tabbed-governance.html" class="redesign-switcher-link"><i
+          class="icon-base bx bx-shield-quarter"></i> V4: Tabbed Governance</a>
+      <a href="version-5-enterprise-fleet.html" class="redesign-switcher-link"><i
+          class="icon-base bx bx-server"></i> V5: Enterprise Fleet (Multi-Model)</a>
+    </nav>
+  </header>
+
+  <div class="layout-wrapper">
+    <!-- Sidebar -->
+    <aside class="layout-sidebar" aria-label="Main Navigation">
+      <div class="sidebar-header">
+        <img src="assets/img/crms-logo.png" alt="CRMS Logo" class="sidebar-brand-logo">
+        <span class="sidebar-brand-name">CRMS</span>
+      </div>
+      <ul class="sidebar-menu">
+        <li class="sidebar-section-header">Digitization</li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-file"></i> New Document</a></li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-archive"></i> Records Archive</a></li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-git-pull-request"></i> Change Requests</a>
+        </li>
+
+        <li class="sidebar-section-header">Oversight</li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-bar-chart-alt-2"></i> Reports</a></li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-user"></i> User Accounts</a></li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-history"></i> Audit Log</a></li>
+
+        <li class="sidebar-section-header">System</li>
+        <li class="sidebar-menu-item active"><a href="#"><i class="icon-base bx bx-brain"></i> OCR Workspace</a></li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-layout"></i> Template Builder</a></li>
+      </ul>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="layout-page">
+      <nav class="layout-navbar">
+        <div class="navbar-search">
+          <i class="icon-base bx bx-search"></i>
+          <input type="text" placeholder="Search records...">
+        </div>
+        <div class="navbar-user">
+          <div class="navbar-avatar" title="Super Admin">SA<span class="navbar-avatar-status"></span></div>
+        </div>
+      </nav>
+
+      <main class="content-wrapper">
+        <div class="container-workspace">
+
+          <!-- Hero Banner -->
+          <div class="hub-hero">
+            <span class="hub-badge"><i class="icon-base bx bx-rocket"></i> UX/UI Overhaul Specification</span>
+            <h1 class="display-6 fw-bold mb-2">OCR Workspace Redesign Suite</h1>
+            <p style="color:#cbd5e1; max-width:860px; font-size:1.05rem; margin-bottom:1.5rem; line-height:1.6;">
+              We crafted <strong>5 distinct enterprise redesign architectures</strong> addressing your UX requirements:
+              outdated PowerShell commands removed, service telemetry streamlined to the top, model fleet elevated with
+              direct 1-click controls, and <strong>Version 5</strong> built specifically for <strong>scalable multi-model registries (5+ models)</strong> with live search, tier filters, compact table density, and the locked evaluation radar chart <strong>fully retained and interactive</strong>.
+            </p>
+
+            <div class="d-flex flex-wrap gap-3">
+              <a href="version-5-enterprise-fleet.html" class="btn btn-primary"
+                style="padding:0.6rem 1.4rem; font-weight:600; background:linear-gradient(135deg, #696cff 0%, #5356e3 100%); border-color:#696cff;">
+                <i class="icon-base bx bx-server me-1"></i> Launch Version 5 (Multi-Model Fleet)
+              </a>
+              <a href="version-4-tabbed-governance.html" class="btn btn-outline-light"
+                style="padding:0.6rem 1.4rem; font-weight:600;">
+                <i class="icon-base bx bx-shield-quarter me-1"></i> Version 4 Baseline
+              </a>
+              <span class="d-flex align-items-center gap-2 text-white small" style="opacity:0.85;">
+                <i class="icon-base bx bx-check-double text-success fs-5"></i> Pure Standalone HTML/CSS/JS
+              </span>
+            </div>
+          </div>
+
+          <!-- The 4 Versions Grid -->
+          <div class="hub-grid">
+
+            <!-- Card 1: Command Hub -->
+            <div class="hub-card">
+              <span class="hub-card-num">01</span>
+              <div>
+                <div class="hub-card-icon">
+                  <i class="icon-base bx bx-check-shield"></i>
+                </div>
+                <h2 class="hub-card-title">Version 1: Command Hub</h2>
+                <div class="badge bg-label-primary mb-2">Unified Fleet Matrix · Recommended</div>
+                <p class="hub-card-desc">
+                  Blends model fleet inventory and scanning policy into an interactive, high-contrast deployment matrix
+                  with direct 1-click model promotion.
+                </p>
+                <ul class="hub-feature-list">
+                  <li><i class="icon-base bx bx-check"></i> Integrated Service Telemetry strip at top</li>
+                  <li><i class="icon-base bx bx-check"></i> 1-click model deploy without separate dropdown</li>
+                  <li><i class="icon-base bx bx-check"></i> Inline staff override toggle in card header</li>
+                  <li><i class="icon-base bx bx-check"></i> Unmodified performance radar & audit below</li>
+                </ul>
+              </div>
+              <a href="version-1-command-hub.html" class="btn btn-primary w-100">
+                <i class="icon-base bx bx-right-arrow-alt me-1"></i> Open Version 1
+              </a>
+            </div>
+
+            <!-- Card 2: Split-Deck Operations -->
+            <div class="hub-card">
+              <span class="hub-card-num">02</span>
+              <div>
+                <div class="hub-card-icon" style="background:rgba(3,195,236,0.1); color:#03c3ec;">
+                  <i class="icon-base bx bx-columns"></i>
+                </div>
+                <h2 class="hub-card-title">Version 2: Split-Deck</h2>
+                <div class="badge bg-label-info mb-2">Dual Side-by-Side Cards</div>
+                <p class="hub-card-desc">
+                  A balanced, compact layout: Model Repository data table on the left, and Scanning Policy with live
+                  hardware telemetry on the right.
+                </p>
+                <ul class="hub-feature-list">
+                  <li><i class="icon-base bx bx-check"></i> Compact tabular view for model checkpoints</li>
+                  <li><i class="icon-base bx bx-check"></i> Live API latency and memory widget on right</li>
+                  <li><i class="icon-base bx bx-check"></i> Active deployment preview box</li>
+                  <li><i class="icon-base bx bx-check"></i> Zero vertical scrolling needed for fleet actions</li>
+                </ul>
+              </div>
+              <a href="version-2-split-deck.html" class="btn btn-outline-primary w-100">
+                <i class="icon-base bx bx-right-arrow-alt me-1"></i> Open Version 2
+              </a>
+            </div>
+
+            <!-- Card 3: Linear Minimalist -->
+            <div class="hub-card">
+              <span class="hub-card-num">03</span>
+              <div>
+                <div class="hub-card-icon" style="background:rgba(113,221,55,0.1); color:#71dd37;">
+                  <i class="icon-base bx bx-layer"></i>
+                </div>
+                <h2 class="hub-card-title">Version 3: Linear Minimal</h2>
+                <div class="badge bg-label-success mb-2">Vercel/Linear Horizon Cards</div>
+                <p class="hub-card-desc">
+                  Ultra-clean, modern SaaS card carousel. Focuses purely on model production cards and a slim
+                  single-line ingestion policy bar.
+                </p>
+                <ul class="hub-feature-list">
+                  <li><i class="icon-base bx bx-check"></i> Horizontal deck with subtle active border glow</li>
+                  <li><i class="icon-base bx bx-check"></i> Direct "+ Install New Weights" action card</li>
+                  <li><i class="icon-base bx bx-check"></i> Single-line policy bar with operator switch</li>
+                  <li><i class="icon-base bx bx-check"></i> Cleanest visual hierarchy with minimal noise</li>
+                </ul>
+              </div>
+              <a href="version-3-linear-minimal.html" class="btn btn-outline-primary w-100">
+                <i class="icon-base bx bx-right-arrow-alt me-1"></i> Open Version 3
+              </a>
+            </div>
+
+            <!-- Card 4: Tabbed Enterprise Governance -->
+            <div class="hub-card">
+              <span class="hub-card-num">04</span>
+              <div>
+                <div class="hub-card-icon" style="background:rgba(255,171,0,0.1); color:#ffab00;">
+                  <i class="icon-base bx bx-shield-quarter"></i>
+                </div>
+                <h2 class="hub-card-title">Version 4: Tabbed Governance</h2>
+                <div class="badge bg-label-warning mb-2">Segmented Control Suite</div>
+                <p class="hub-card-desc">
+                  Built for scalable enterprise deployments: 4 KPI status cards at top with segmented tabs for Model
+                  Fleet, Ingestion Rules, and Diagnostics.
+                </p>
+                <ul class="hub-feature-list">
+                  <li><i class="icon-base bx bx-check"></i> 4 KPI telemetry cards (Status, Model, Device, Latency)</li>
+                  <li><i class="icon-base bx bx-check"></i> Segmented pill tabs: Fleet, Rules, Diagnostics</li>
+                  <li><i class="icon-base bx bx-check"></i> Radio-based model selector with instant auto-save</li>
+                  <li><i class="icon-base bx bx-check"></i> Complete diagnostic stats for IT administrators</li>
+                </ul>
+              </div>
+              <a href="version-4-tabbed-governance.html" class="btn btn-outline-primary w-100">
+                <i class="icon-base bx bx-right-arrow-alt me-1"></i> Open Version 4
+              </a>
+            </div>
+
+            <!-- Card 5: Scalable Multi-Model Fleet (Version 5) -->
+            <div class="hub-card" style="border: 2px solid #696cff; box-shadow: 0 8px 24px rgba(105, 108, 255, 0.15);">
+              <span class="hub-card-num" style="color: rgba(105, 108, 255, 0.2);">05</span>
+              <div>
+                <div class="hub-card-icon" style="background:rgba(105,108,255,0.15); color:#696cff;">
+                  <i class="icon-base bx bx-server"></i>
+                </div>
+                <h2 class="hub-card-title">Version 5: Enterprise Fleet</h2>
+                <div class="badge bg-primary mb-2">Scalable Multi-Model Registry (>2 Models)</div>
+                <p class="hub-card-desc">
+                  Engineered specifically for expanding model collections (5+ models): real-time search filtering, tier filter chips (All, Fine-Tuned, Base), compact table density, model metadata tags, and radar sync.
+                </p>
+                <ul class="hub-feature-list">
+                  <li><i class="icon-base bx bx-check"></i> Instant search filtering across all 5 registered models</li>
+                  <li><i class="icon-base bx bx-check"></i> Tier category chips (All 5, Fine-Tuned 4, Baseline 1)</li>
+                  <li><i class="icon-base bx bx-check"></i> Compact row density with metadata chips & direct 1-click deploy</li>
+                  <li><i class="icon-base bx bx-check"></i> "Evaluate in Radar" jump button + total disk footprint bar</li>
+                </ul>
+              </div>
+              <a href="version-5-enterprise-fleet.html" class="btn btn-primary w-100">
+                <i class="icon-base bx bx-right-arrow-alt me-1"></i> Open Version 5 (Multi-Model)
+              </a>
+            </div>
+
+          </div>
+
+          <!-- Comparison Table -->
+          <div class="card mb-4">
+            <div class="card-header">
+              <h2 class="card-title mb-0">Architecture Comparison Matrix</h2>
+              <span class="badge bg-label-secondary">Design Specifications</span>
+            </div>
+            <div class="table-responsive">
+              <table class="hub-table">
+                <thead>
+                  <tr>
+                    <th>Version</th>
+                    <th>Layout Philosophy</th>
+                    <th>Deployment Action</th>
+                    <th>Service Telemetry</th>
+                    <th>Best For</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>V1: Command Hub</strong></td>
+                    <td>Unified Fleet Matrix</td>
+                    <td><span class="badge bg-label-success">1-Click Direct Button</span></td>
+                    <td>Integrated Horizon Strip</td>
+                    <td>Fastest day-to-day operations & direct model swaps</td>
+                  </tr>
+                  <tr>
+                    <td><strong>V2: Split-Deck</strong></td>
+                    <td>Side-by-Side Dual Deck</td>
+                    <td>Table Action + Preview Card</td>
+                    <td>Dedicated Telemetry Widget</td>
+                    <td>High-density desktop displays with zero vertical scrolling</td>
+                  </tr>
+                  <tr>
+                    <td><strong>V3: Linear Minimal</strong></td>
+                    <td>Horizontal Card Units</td>
+                    <td>Production Card Promote</td>
+                    <td>Compact Header Beacon</td>
+                    <td>Modern minimal UI with focus on visual aesthetics</td>
+                  </tr>
+                  <tr>
+                    <td><strong>V4: Tabbed Governance</strong></td>
+                    <td>Segmented Tab Suite</td>
+                    <td>Radio Selection with live audit</td>
+                    <td>4 Executive KPI Cards</td>
+                    <td>Enterprise teams with multiple models and audit logging</td>
+                  </tr>
+                  <tr style="background: rgba(105, 108, 255, 0.04);">
+                    <td><strong>V5: Enterprise Fleet Matrix</strong> <span class="badge bg-primary ms-1">New · Scalable</span></td>
+                    <td>Multi-Model High-Density Grid</td>
+                    <td><span class="badge bg-label-success">1-Click Direct + Radar Sync</span></td>
+                    <td>4 Executive KPI Cards + Fleet Scale</td>
+                    <td>High-volume registries with 5+ models, search, filters & storage auditing</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Requirements Verification Card -->
+          <div class="card bg-white">
+            <div class="card-body">
+              <h5 class="fw-bold mb-3 d-flex align-items-center gap-2">
+                <i class="icon-base bx bx-check-circle text-success"></i> Requirements Compliance Checklist
+              </h5>
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <div class="p-3 border rounded bg-light">
+                    <strong class="d-block text-dark mb-1">1. Removed Outdated PowerShell Setup (2nd image)</strong>
+                    <p class="text-muted small mb-0">Obsolete command lines (<code>.\.venv\Scripts\Activate.ps1</code>
+                      and uvicorn launch script) removed. Replaced by clean live telemetry.</p>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="p-3 border rounded bg-light">
+                    <strong class="d-block text-dark mb-1">2. Moved Models & Policy to Top (3rd image)</strong>
+                    <p class="text-muted small mb-0">Elevated to the top of the workspace for immediate visibility and
+                      rapid operational control.</p>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="p-3 border rounded bg-light">
+                    <strong class="d-block text-dark mb-1">3. Removed Review Threshold Form (4th image)</strong>
+                    <p class="text-muted small mb-0">Noisy 80% threshold and discard/save buttons eliminated for a
+                      minimal, direct enterprise user experience.</p>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="p-3 border rounded bg-light">
+                    <strong class="d-block text-dark mb-1">4. Performance Radar Intact (5th image)</strong>
+                    <p class="text-muted small mb-0">Exact 5th image layout preserved. Radar and side-by-side toggles
+                      work, and <strong>radar triangle web remains retained when models are unchecked</strong>.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </main>
+    </div>
+  </div>
+
+</body>
+
+</html>

@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OCR Workspace · Version 1: Command Hub · CRMS</title>
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/img/crms-logo.png">
+  
+  <!-- Boxicons & Fonts -->
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+  
+  <!-- CSS Stylesheets -->
+  <link rel="stylesheet" href="assets/css/crms-base.css">
+  <link rel="stylesheet" href="assets/css/performance-intact.css">
+  <link rel="stylesheet" href="assets/css/ocr-redesigns.css">
+</head>
+<body>
+
+  <!-- =========================================================================
+       Redesign Version Switcher Header
+       ========================================================================= -->
+  <header class="redesign-switcher-bar">
+    <div class="redesign-switcher-left">
+      <span class="redesign-switcher-title">
+        <i class="icon-base bx bx-palette" style="color:#696cff;"></i>
+        CRMS Redesign Prototypes
+      </span>
+      <span class="redesign-switcher-badge">Version 1 of 4</span>
+    </div>
+    <nav class="redesign-switcher-nav" aria-label="Redesign versions">
+      <a href="index.html" class="redesign-switcher-link"><i class="icon-base bx bx-grid-alt"></i> Showcase Hub</a>
+      <a href="version-1-command-hub.html" class="redesign-switcher-link is-active"><i class="icon-base bx bx-check-circle"></i> V1: Command Hub</a>
+      <a href="version-2-split-deck.html" class="redesign-switcher-link"><i class="icon-base bx bx-columns"></i> V2: Split-Deck</a>
+      <a href="version-3-linear-minimal.html" class="redesign-switcher-link"><i class="icon-base bx bx-layer"></i> V3: Linear Minimal</a>
+      <a href="version-4-tabbed-governance.html" class="redesign-switcher-link"><i class="icon-base bx bx-shield-quarter"></i> V4: Tabbed Governance</a>
+      <a href="version-5-enterprise-fleet.html" class="redesign-switcher-link"><i class="icon-base bx bx-server"></i> V5: Enterprise Fleet</a>
+    </nav>
+  </header>
+
+  <!-- =========================================================================
+       CRMS Layout Wrapper
+       ========================================================================= -->
+  <div class="layout-wrapper">
+
+    <!-- Sidebar -->
+    <aside class="layout-sidebar" aria-label="Main Navigation">
+      <div class="sidebar-header">
+        <img src="assets/img/crms-logo.png" alt="CRMS Logo" class="sidebar-brand-logo">
+        <span class="sidebar-brand-name">CRMS</span>
+      </div>
+
+      <ul class="sidebar-menu">
+        <li class="sidebar-section-header">Digitization</li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-file"></i> New Document</a></li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-archive"></i> Records Archive</a></li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-git-pull-request"></i> Change Requests</a></li>
+
+        <li class="sidebar-section-header">Oversight</li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-bar-chart-alt-2"></i> Reports</a></li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-user"></i> User Accounts</a></li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-history"></i> Audit Log</a></li>
+
+        <li class="sidebar-section-header">System</li>
+        <li class="sidebar-menu-item active"><a href="#"><i class="icon-base bx bx-brain"></i> OCR Workspace</a></li>
+        <li class="sidebar-menu-item"><a href="#"><i class="icon-base bx bx-layout"></i> Template Builder</a></li>
+      </ul>
+    </aside>
+
+    <!-- Page Content Container -->
+    <div class="layout-page">
+
+      <!-- Top Navbar -->
+      <nav class="layout-navbar">
+        <div class="navbar-search">
+          <i class="icon-base bx bx-search"></i>
+          <input type="text" placeholder="Search records...">
+        </div>
+        <div class="navbar-user">
+          <button type="button" class="btn btn-sm btn-label-secondary js-rescan-btn" title="Rescan models">
+            <i class="icon-base bx bx-refresh me-1"></i> Rescan
+          </button>
+          <div class="navbar-avatar" title="Super Admin">
+            SA
+            <span class="navbar-avatar-status"></span>
+          </div>
+        </div>
+      </nav>
+
+      <!-- Content Wrapper -->
+      <main class="content-wrapper">
+        <div class="container-workspace">
+
+          <!-- Page Header -->
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">OCR Workspace</h1>
+              <p class="page-subtitle">Manage handwriting recognition models and review locked evaluation telemetry.</p>
+            </div>
+            <div>
+              <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModelModal">
+                <i class="icon-base bx bx-plus me-1"></i> Add Model
+              </button>
+            </div>
+          </div>
+
+          <!-- =================================================================
+               1. STREAMLINED SERVICE TELEMETRY STRIP (Transferred from 2nd Image)
+               ================================================================= -->
+          <div class="telemetry-strip">
+            <div class="telemetry-status-group">
+              <span class="telemetry-pill is-active">
+                <span class="pulse-dot"></span>
+                <strong>OCR Service Online</strong>
+              </span>
+              <span class="telemetry-pill">
+                <i class="icon-base bx bx-chip text-primary"></i>
+                CUDA Accelerated (NVIDIA GPU)
+              </span>
+              <span class="telemetry-pill telemetry-pill-mono">
+                <i class="icon-base bx bx-terminal text-secondary"></i>
+                127.0.0.1:8001
+              </span>
+              <span class="badge bg-label-info">
+                <i class="icon-base bx bx-pulse me-1"></i> Latency: 9ms
+              </span>
+            </div>
+            <div>
+              <button type="button" class="btn btn-sm btn-label-secondary js-rescan-btn">
+                <i class="icon-base bx bx-refresh me-1"></i> Synchronize Registry
+              </button>
+            </div>
+          </div>
+
+          <!-- =================================================================
+               2. REDESIGNED MODELS & SCANNING POLICY (Moved to Top from 3rd Image)
+                  Outdated Review Threshold (4th Image) completely removed!
+               ================================================================= -->
+          <section class="v1-unified-card">
+            <div class="v1-card-header">
+              <div class="d-flex align-items-center gap-2">
+                <div class="ocr-section-icon bg-label-primary p-2 rounded">
+                  <i class="icon-base bx bx-brain text-primary fs-5"></i>
+                </div>
+                <div>
+                  <div class="d-flex align-items-center gap-2">
+                    <h2 class="card-title mb-0">Model Deployment & Governance</h2>
+                    <span class="badge bg-label-secondary">2 Available</span>
+                  </div>
+                  <small class="text-muted">Direct 1-click model promotion for live civil registry handwriting scans.</small>
+                </div>
+              </div>
+
+              <!-- Staff Override Switch (Clean, direct policy control) -->
+              <div class="d-flex align-items-center gap-3">
+                <div class="form-check form-switch m-0 d-flex align-items-center gap-2">
+                  <input class="form-check-input js-staff-choice-switch" type="checkbox" role="switch" id="v1-staff-switch">
+                  <label class="form-check-label small fw-medium" for="v1-staff-switch">
+                    Allow Staff Model Choice
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Model Fleet Matrix Tiles -->
+            <div class="v1-model-matrix-grid">
+              
+              <!-- Active Production Model -->
+              <article class="v1-model-tile is-active-deployment" data-model-key="TrOcr-50k-broken-samples">
+                <div>
+                  <div class="v1-tile-top">
+                    <div class="v1-tile-icon">
+                      <i class="icon-base bx bx-brain"></i>
+                    </div>
+                    <div class="v1-tile-meta">
+                      <h3 class="v1-tile-title">
+                        TrOcr-50k-broken-samples
+                        <span class="badge bg-label-success">Active</span>
+                      </h3>
+                      <p class="v1-tile-desc">Fine-tuned weights on broken handwriting samples · Super Admin</p>
+                    </div>
+                  </div>
+
+                  <div class="v1-tile-stats">
+                    <div class="v1-stat-col">
+                      <span class="v1-stat-label">Word Accuracy</span>
+                      <span class="v1-stat-value text-success">76.0%</span>
+                    </div>
+                    <div style="width:1px; height:24px; background:var(--bs-border-color);"></div>
+                    <div class="v1-stat-col">
+                      <span class="v1-stat-label">Char Accuracy</span>
+                      <span class="v1-stat-value text-primary">92.0%</span>
+                    </div>
+                    <div style="width:1px; height:24px; background:var(--bs-border-color);"></div>
+                    <div class="v1-stat-col">
+                      <span class="v1-stat-label">Locked Test Vol</span>
+                      <span class="v1-stat-value">5,000 samples</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="v1-tile-footer">
+                  <button type="button" class="btn btn-sm btn-label-success w-100 v1-deploy-btn" disabled>
+                    <i class="icon-base bx bx-check me-1"></i> Currently Active in Production
+                  </button>
+                </div>
+              </article>
+
+              <!-- Available Reference Model -->
+              <article class="v1-model-tile" data-model-key="base">
+                <div>
+                  <div class="v1-tile-top">
+                    <div class="v1-tile-icon" style="background:rgba(133,146,163,0.12); color:#8592a3;">
+                      <i class="icon-base bx bx-chip"></i>
+                    </div>
+                    <div class="v1-tile-meta">
+                      <h3 class="v1-tile-title">
+                        base
+                        <span class="badge bg-label-secondary">Built-in Base</span>
+                      </h3>
+                      <p class="v1-tile-desc">microsoft/trocr-base-handwritten standard reference weights</p>
+                    </div>
+                  </div>
+
+                  <div class="v1-tile-stats">
+                    <div class="v1-stat-col">
+                      <span class="v1-stat-label">Word Accuracy</span>
+                      <span class="v1-stat-value text-muted">48.5%</span>
+                    </div>
+                    <div style="width:1px; height:24px; background:var(--bs-border-color);"></div>
+                    <div class="v1-stat-col">
+                      <span class="v1-stat-label">Char Accuracy</span>
+                      <span class="v1-stat-value text-muted">88.0%</span>
+                    </div>
+                    <div style="width:1px; height:24px; background:var(--bs-border-color);"></div>
+                    <div class="v1-stat-col">
+                      <span class="v1-stat-label">Architecture</span>
+                      <span class="v1-stat-value">TrOCR Baseline</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="v1-tile-footer">
+                  <button type="button" class="btn btn-sm btn-outline-primary w-100 v1-deploy-btn js-deploy-btn"
+                          data-key="base" data-label="TrOCR Base (Baseline)">
+                    <i class="icon-base bx bx-rocket me-1"></i> Deploy as Active Model
+                  </button>
+                </div>
+              </article>
+
+            </div>
+
+            <!-- Policy Footer Strip -->
+            <div class="v1-policy-footer-bar">
+              <div class="text-muted small d-flex align-items-center gap-2">
+                <i class="icon-base bx bx-info-circle text-primary"></i>
+                <span>All incoming handwritten registry scans immediately execute against the chosen active model without service restart.</span>
+              </div>
+              <div class="text-muted small">
+                Last modified: <strong>Super Admin</strong> (Oct 13, 2026)
+              </div>
+            </div>
+          </section>
+
+          <!-- =================================================================
+               3. OCR MODEL PERFORMANCE (Image 5: Unmodified / Intact Specification)
+               ================================================================= -->
+          <section class="ocr-performance-section" aria-labelledby="ocr-perf-title">
+            <div class="ocr-performance-header">
+              <div class="ocr-perf-title-group">
+                <div class="ocr-perf-icon" aria-hidden="true">
+                  <i class="icon-base bx bx-radar"></i>
+                </div>
+                <div>
+                  <div class="d-flex align-items-center gap-2">
+                    <h2 class="card-title mb-0" id="ocr-perf-title">OCR model performance</h2>
+                    <span class="badge bg-label-primary">Locked test set</span>
+                  </div>
+                  <small class="text-muted">Locked test-set evaluation (CER, WER, Exact Match) comparing fine-tuned weights against baseline.</small>
+                </div>
+              </div>
+
+              <!-- Model Selector Dropdown -->
+              <div class="ocr-perf-model-select">
+                <select class="form-select form-select-sm" id="perf-model-selector">
+                  <option value="TrOcr-50k-broken-samples" selected>TrOcr-50k-broken-samples (active)</option>
+                  <option value="base">base (built-in baseline)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="ocr-performance-body">
+              <div class="ocr-performance-grid">
+                
+                <!-- Left Chart Column -->
+                <div>
+                  <!-- Top 3 Metric Cards -->
+                  <div class="ocr-metric-cards-row">
+                    <div class="ocr-metric-box">
+                      <div class="ocr-metric-box-label">CHARACTERS</div>
+                      <div class="ocr-metric-box-val-row">
+                        <span class="ocr-metric-box-val text-primary" id="perf-val-char">92.0%</span>
+                        <span class="ocr-metric-box-delta badge bg-label-success">+4.0%</span>
+                      </div>
+                      <div class="ocr-metric-box-sub">vs 88.0% Base</div>
+                    </div>
+
+                    <div class="ocr-metric-box">
+                      <div class="ocr-metric-box-label">WORDS</div>
+                      <div class="ocr-metric-box-val-row">
+                        <span class="ocr-metric-box-val text-primary" id="perf-val-word">76.0%</span>
+                        <span class="ocr-metric-box-delta badge bg-label-success">+27.5%</span>
+                      </div>
+                      <div class="ocr-metric-box-sub">vs 48.5% Base</div>
+                    </div>
+
+                    <div class="ocr-metric-box">
+                      <div class="ocr-metric-box-label">EXACT MATCH</div>
+                      <div class="ocr-metric-box-val-row">
+                        <span class="ocr-metric-box-val text-primary" id="perf-val-exact">48.0%</span>
+                        <span class="ocr-metric-box-delta badge bg-label-success">+14.8%</span>
+                      </div>
+                      <div class="ocr-metric-box-sub">vs 33.2% Base</div>
+                    </div>
+                  </div>
+
+                  <!-- Controls Bar -->
+                  <div class="ocr-chart-controls-bar">
+                    <div class="ocr-legend-pills">
+                      <span class="ocr-legend-pill">
+                        <span class="ocr-legend-dot" style="background:#696cff;"></span>
+                        <span>TrOcr-50k-broken-samples</span>
+                      </span>
+                      <span class="ocr-legend-pill">
+                        <span class="ocr-legend-dot" style="background:#ff9f43;"></span>
+                        <span>TrOCR Base (Baseline)</span>
+                      </span>
+                    </div>
+
+                    <div class="ocr-chart-toggles">
+                      <div class="form-check form-switch m-0 d-flex align-items-center gap-2">
+                        <input class="form-check-input" type="checkbox" role="switch" id="perf-overlay-toggle" checked>
+                        <label class="form-check-label small" for="perf-overlay-toggle">Overlay Base</label>
+                      </div>
+
+                      <div class="ocr-view-btn-group">
+                        <button type="button" class="ocr-view-btn active" id="perf-btn-radar">
+                          <i class="icon-base bx bx-radar"></i> Radar
+                        </button>
+                        <button type="button" class="ocr-view-btn" id="perf-btn-bars">
+                          <i class="icon-base bx bx-bar-chart-alt-2"></i> Side-by-Side
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ApexCharts Target Canvas -->
+                  <div class="ocr-chart-container">
+                    <div id="ocr-model-radar" style="width:100%;"></div>
+                  </div>
+                </div>
+
+                <!-- Right Benchmark Audit Column -->
+                <aside class="ocr-audit-card">
+                  <div class="ocr-audit-title-row">
+                    <div class="ocr-audit-title">BENCHMARK AUDIT</div>
+                    <h3 class="ocr-audit-model-name" id="audit-model-name">TrOcr-50k-broken-samples</h3>
+                    <div class="ocr-audit-badges">
+                      <span class="badge bg-label-success">Active</span>
+                      <span class="badge bg-label-success">Active Fine-tuned</span>
+                    </div>
+                  </div>
+
+                  <div class="ocr-audit-metrics-list">
+                    <!-- Word Error Rate -->
+                    <div class="ocr-audit-metric-item">
+                      <div class="ocr-audit-metric-info">
+                        <span class="ocr-audit-metric-name">Word Error Rate (WER)</span>
+                        <span class="ocr-audit-metric-baseline">Baseline: 51.5%</span>
+                      </div>
+                      <div class="ocr-audit-metric-val-wrap">
+                        <span class="ocr-audit-metric-val text-primary" id="audit-wer-val">24.0%</span>
+                        <span class="badge bg-label-success">-53.4%</span>
+                      </div>
+                    </div>
+
+                    <!-- Character Error Rate -->
+                    <div class="ocr-audit-metric-item">
+                      <div class="ocr-audit-metric-info">
+                        <span class="ocr-audit-metric-name">Character Error Rate (CER)</span>
+                        <span class="ocr-audit-metric-baseline">Baseline: 12.0%</span>
+                      </div>
+                      <div class="ocr-audit-metric-val-wrap">
+                        <span class="ocr-audit-metric-val text-primary" id="audit-cer-val">8.0%</span>
+                        <span class="badge bg-label-success">-33.3%</span>
+                      </div>
+                    </div>
+
+                    <!-- Exact Line Match -->
+                    <div class="ocr-audit-metric-item">
+                      <div class="ocr-audit-metric-info">
+                        <span class="ocr-audit-metric-name">Exact Line Match</span>
+                        <span class="ocr-audit-metric-baseline">Baseline: 33.2%</span>
+                      </div>
+                      <div class="ocr-audit-metric-val-wrap">
+                        <span class="ocr-audit-metric-val text-primary" id="audit-exact-val">48.0%</span>
+                        <span class="badge bg-label-success">+14.8%</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Green Verdict Box -->
+                  <div class="ocr-verdict-box">
+                    <i class="icon-base bx bx-check-circle"></i>
+                    <span id="audit-verdict-text">Word errors cut by 53.4% vs baseline, reaching 48.0% exact lines.</span>
+                  </div>
+
+                  <!-- Metadata Rows -->
+                  <div class="ocr-audit-meta-list">
+                    <div class="ocr-audit-meta-item">
+                      <i class="icon-base bx bx-data"></i>
+                      <span>Dataset: <strong>synthetic-broken-handwritten-samples50k (test)</strong></span>
+                    </div>
+                    <div class="ocr-audit-meta-item">
+                      <i class="icon-base bx bx-layer"></i>
+                      <span>Volume: <strong>5,000 samples</strong> · Evaluated Oct 13, 2026</span>
+                    </div>
+                  </div>
+                </aside>
+
+              </div>
+            </div>
+
+            <!-- Footer locked test split note -->
+            <div class="ocr-performance-footer-note">
+              <i class="icon-base bx bx-info-circle"></i>
+              <span>Scores are evaluated on identical locked test splits without teacher forcing. Error reduction reflects relative improvement over the pre-trained baseline.</span>
+            </div>
+          </section>
+
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Modal for Adding Models -->
+  <div class="modal fade" id="addModelModal" tabindex="-1" style="display:none;" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:520px; margin:auto; padding-top:4rem;">
+      <div class="modal-content" style="background:#fff; border-radius:8px; border:1px solid rgba(67,89,113,0.15); box-shadow:0 12px 32px rgba(0,0,0,0.2); padding:1.5rem;">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5 class="modal-title m-0 fw-bold"><i class="icon-base bx bx-upload text-primary me-2"></i>Install OCR Model</h5>
+          <button type="button" class="btn btn-sm btn-label-secondary" data-bs-dismiss="modal">✕</button>
+        </div>
+        <p class="text-muted small mb-3">Upload safetensors weights or register an existing model folder inside <code>ml/models/</code>.</p>
+        <div style="border:2px dashed #696cff; background:rgba(105,108,255,0.03); border-radius:8px; padding:2rem; text-align:center; cursor:pointer;" class="mb-3">
+          <i class="icon-base bx bx-cloud-upload text-primary" style="font-size:2.5rem;"></i>
+          <div class="fw-bold mt-2">Drag and drop model folder / weights</div>
+          <div class="text-muted small">Supports .safetensors and HuggingFace formatted folders</div>
+        </div>
+        <div class="d-flex justify-content-end gap-2">
+          <button type="button" class="btn btn-label-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">Upload Model</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="assets/js/apexcharts.min.js"></script>
+  <script src="assets/js/performance-chart.js"></script>
+  <script src="assets/js/workspace-interactions.js"></script>
+</body>
+</html>

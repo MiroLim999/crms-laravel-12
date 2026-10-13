@@ -1,0 +1,594 @@
+/* ==========================================================================
+   OCR Redesigns Specific Styles (Versions 1, 2, 3, 4)
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Shared Service Telemetry Components
+   -------------------------------------------------------------------------- */
+.telemetry-strip {
+  background: var(--bs-card-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  box-shadow: 0 1px 3px rgba(67, 89, 113, 0.05);
+}
+
+.telemetry-status-group {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.telemetry-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #f0f2f5;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #566a7f;
+}
+
+.telemetry-pill.is-active {
+  background: rgba(113, 221, 55, 0.12);
+  border-color: rgba(113, 221, 55, 0.3);
+  color: #3b8a13;
+}
+
+.telemetry-pill-mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.76rem;
+}
+
+/* --------------------------------------------------------------------------
+   VERSION 1: Command Hub (Unified Fleet Matrix + Deployment Control)
+   -------------------------------------------------------------------------- */
+.v1-unified-card {
+  background: var(--bs-card-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(67, 89, 113, 0.08);
+}
+
+.v1-card-header {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: linear-gradient(to right, #ffffff, #fafbff);
+}
+
+.v1-model-matrix-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 1.25rem;
+  padding: 1.5rem;
+}
+
+.v1-model-tile {
+  background: #ffffff;
+  border: 1.5px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  padding: 1.25rem;
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.v1-model-tile:hover {
+  border-color: rgba(105, 108, 255, 0.4);
+  box-shadow: 0 6px 18px rgba(105, 108, 255, 0.08);
+  transform: translateY(-2px);
+}
+
+.v1-model-tile.is-active-deployment {
+  border-color: var(--bs-success);
+  background: linear-gradient(180deg, #ffffff 0%, rgba(113, 221, 55, 0.02) 100%);
+  box-shadow: 0 4px 14px rgba(113, 221, 55, 0.15);
+}
+
+.v1-model-tile.is-active-deployment::before {
+  content: "ACTIVE IN PRODUCTION";
+  position: absolute;
+  top: -10px;
+  right: 1.25rem;
+  background: var(--bs-success);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(113, 221, 55, 0.3);
+}
+
+.v1-tile-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.v1-tile-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 0.5rem;
+  background: rgba(105, 108, 255, 0.1);
+  color: var(--bs-primary);
+  display: grid;
+  place-items: center;
+  font-size: 1.4rem;
+  flex-shrink: 0;
+}
+
+.v1-model-tile.is-active-deployment .v1-tile-icon {
+  background: rgba(113, 221, 55, 0.15);
+  color: #55a823;
+}
+
+.v1-tile-meta {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.v1-tile-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--bs-heading-color);
+  margin: 0 0 0.2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.v1-tile-desc {
+  font-size: 0.78rem;
+  color: #8592a3;
+  margin: 0;
+}
+
+.v1-tile-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding: 0.65rem 0.85rem;
+  background: #f8fafc;
+  border-radius: var(--bs-border-radius);
+  border: 1px dashed var(--bs-border-color);
+  font-size: 0.78rem;
+}
+
+.v1-stat-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.v1-stat-label {
+  font-size: 0.68rem;
+  color: #8592a3;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.v1-stat-value {
+  font-weight: 700;
+  color: var(--bs-heading-color);
+}
+
+.v1-tile-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-top: 1px solid var(--bs-border-color);
+  padding-top: 0.85rem;
+}
+
+.v1-deploy-btn {
+  width: 100%;
+}
+
+/* Policy quick bar in footer */
+.v1-policy-footer-bar {
+  background: #f8fafc;
+  border-top: 1px solid var(--bs-border-color);
+  padding: 0.85rem 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.84rem;
+}
+
+/* --------------------------------------------------------------------------
+   VERSION 2: Split-Deck Operations (Dual Cards: Fleet Left, Policy Right)
+   -------------------------------------------------------------------------- */
+.v2-split-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(360px, 1fr);
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 991px) {
+  .v2-split-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.v2-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.v2-table th {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8592a3;
+  border-bottom: 1px solid var(--bs-border-color);
+  background: #fafafa;
+}
+
+.v2-table td {
+  padding: 0.95rem 1rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  vertical-align: middle;
+}
+
+.v2-table tr:hover td {
+  background: rgba(105, 108, 255, 0.02);
+}
+
+.v2-table tr.is-active td {
+  background: rgba(113, 221, 55, 0.04);
+}
+
+.v2-policy-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.v2-active-preview-box {
+  background: #f8fafc;
+  border: 1.5px solid rgba(113, 221, 55, 0.4);
+  border-radius: var(--bs-border-radius-lg);
+  padding: 1.15rem;
+  margin-bottom: 1.25rem;
+  position: relative;
+}
+
+.v2-active-preview-badge {
+  position: absolute;
+  top: -9px;
+  left: 1rem;
+  background: var(--bs-success);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+
+.v2-active-model-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--bs-heading-color);
+  margin: 0.35rem 0 0.25rem;
+}
+
+.v2-telemetry-widget {
+  background: #fafafa;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  padding: 0.85rem 1rem;
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+  font-size: 0.78rem;
+}
+
+/* --------------------------------------------------------------------------
+   VERSION 3: Linear SaaS Minimalist (Hero Horizon Cards + Clean Bar)
+   -------------------------------------------------------------------------- */
+.v3-horizon-container {
+  margin-bottom: 1.5rem;
+}
+
+.v3-horizon-deck {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.v3-horizon-card {
+  background: #ffffff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  padding: 1.35rem;
+  transition: all 0.25s ease;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.v3-horizon-card:hover {
+  border-color: rgba(105, 108, 255, 0.5);
+  box-shadow: 0 8px 24px rgba(105, 108, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+.v3-horizon-card.is-active {
+  border-color: var(--bs-primary);
+  box-shadow: 0 0 0 1px var(--bs-primary), 0 8px 24px rgba(105, 108, 255, 0.12);
+}
+
+.v3-card-tag {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 0.45rem;
+  color: var(--bs-primary);
+}
+
+.v3-card-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--bs-heading-color);
+  margin: 0 0 0.45rem;
+}
+
+.v3-card-desc {
+  font-size: 0.8125rem;
+  color: #8592a3;
+  margin-bottom: 1rem;
+  line-height: 1.45;
+}
+
+.v3-add-card {
+  border: 1.5px dashed rgba(105, 108, 255, 0.35);
+  background: rgba(105, 108, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  cursor: pointer;
+  padding: 2rem 1.5rem;
+}
+
+.v3-add-card:hover {
+  background: rgba(105, 108, 255, 0.05);
+  border-color: var(--bs-primary);
+}
+
+.v3-policy-strip {
+  background: var(--bs-card-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  padding: 0.95rem 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  box-shadow: 0 2px 6px rgba(67, 89, 113, 0.04);
+}
+
+/* --------------------------------------------------------------------------
+   VERSION 4: Tabbed Enterprise Governance (Segmented Control Suite)
+   -------------------------------------------------------------------------- */
+.v4-kpi-deck {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.v4-kpi-card {
+  background: #ffffff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  box-shadow: 0 2px 4px rgba(67, 89, 113, 0.05);
+}
+
+.v4-kpi-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 0.5rem;
+  background: rgba(105, 108, 255, 0.1);
+  color: var(--bs-primary);
+  display: grid;
+  place-items: center;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.v4-kpi-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.v4-kpi-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #8592a3;
+}
+
+.v4-kpi-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--bs-heading-color);
+}
+
+.v4-segmented-container {
+  background: var(--bs-card-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(67, 89, 113, 0.08);
+}
+
+.v4-segmented-tabs-header {
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  background: #fafafa;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.v4-tab-pill-group {
+  display: inline-flex;
+  background: #eceef1;
+  padding: 0.25rem;
+  border-radius: var(--bs-border-radius);
+  gap: 0.25rem;
+}
+
+.v4-tab-btn {
+  border: none;
+  background: transparent;
+  padding: 0.45rem 1rem;
+  border-radius: 0.25rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #697a8d;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.v4-tab-btn.active {
+  background: #ffffff;
+  color: var(--bs-primary);
+  box-shadow: 0 2px 4px rgba(67, 89, 113, 0.1);
+}
+
+.v4-tab-pane {
+  display: none;
+  padding: 1.5rem;
+}
+
+.v4-tab-pane.active {
+  display: block;
+}
+
+/* --------------------------------------------------------------------------
+   VERSION 5: Enterprise Fleet Matrix (Scalable Multi-Model Governance)
+   -------------------------------------------------------------------------- */
+.v5-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.25rem;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.v5-search-box {
+  min-width: 260px;
+  max-width: 380px;
+  position: relative;
+}
+
+.v5-filter-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.v5-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.v5-table th {
+  background: #fafbfc;
+  padding: 0.85rem 1rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8592a3;
+  border-bottom: 1px solid var(--bs-border-color);
+  white-space: nowrap;
+}
+
+.v5-table td {
+  padding: 0.95rem 1rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  vertical-align: middle;
+}
+
+.v5-table tr:hover td {
+  background: rgba(105, 108, 255, 0.025);
+}
+
+.v5-table tr.is-active td {
+  background: rgba(113, 221, 55, 0.035);
+}
+
+.v5-model-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  border-radius: 4px;
+  background: #f1f3f5;
+  color: #697a8d;
+}
+
+.v5-footer-bar {
+  padding: 0.75rem 1.25rem;
+  background: #fafafa;
+  border-top: 1px solid var(--bs-border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: #8592a3;
+}
