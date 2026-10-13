@@ -37,10 +37,17 @@
             ];
         @endphp
 
-        <section class="row g-4 mb-4" aria-label="CRMS performance summary" data-dashboard-summary>
-            <div class="col-sm-6 col-lg-3">
-                <a href="{{ route('reports.index', ['status' => 'submitted']) }}"
-                   class="dashboard-kpi card h-100 text-reset">
+        {{--
+            Wide screens: two summary cards and OCR quality, then volume beside
+            document types, then throughput across. The 1080px-wide portrait
+            monitor keeps that arrangement; tablets put OCR quality, volume and
+            types each on a row of their own; phones stack everything.
+        --}}
+        <section class="row g-4 mb-4" aria-label="CRMS performance summary">
+            <div class="col-12 col-sm-6 col-lg-3">
+                {{-- Its period line follows the volume panel, so it is swapped with it. --}}
+                <a id="summary-total" href="{{ route('reports.index', ['status' => 'submitted']) }}"
+                   class="dashboard-kpi card h-100 text-reset" data-dashboard-summary>
                     <div class="card-body">
                         <div class="dashboard-kpi__header">
                             <span class="dashboard-kpi__icon bg-label-primary">
@@ -57,47 +64,7 @@
                 </a>
             </div>
 
-            <div class="col-sm-6 col-lg-3">
-                <a href="#panel-ocr" class="dashboard-kpi card h-100 text-reset">
-                    <div class="card-body">
-                        <div class="dashboard-kpi__header">
-                            <span class="dashboard-kpi__icon bg-label-info">
-                                <i class="icon-base bx bx-brain" aria-hidden="true"></i>
-                            </span>
-                            <span class="badge bg-label-info">{{ $ocrScope['badge'] }}</span>
-                        </div>
-                        <span class="dashboard-kpi__label">Average OCR confidence</span>
-                        <strong class="dashboard-kpi__value">
-                            {{ $percent($quality['average_confidence']) }}
-                        </strong>
-                        <span class="dashboard-kpi__meta">
-                            {{ number_format($quality['confidence_fields']) }} confidence-scored fields
-                        </span>
-                    </div>
-                </a>
-            </div>
-
-            <div class="col-sm-6 col-lg-3">
-                <a href="#panel-ocr" class="dashboard-kpi card h-100 text-reset">
-                    <div class="card-body">
-                        <div class="dashboard-kpi__header">
-                            <span class="dashboard-kpi__icon bg-label-warning">
-                                <i class="icon-base bx bx-edit-alt" aria-hidden="true"></i>
-                            </span>
-                            <span class="badge bg-label-warning">{{ $ocrScope['badge'] }}</span>
-                        </div>
-                        <span class="dashboard-kpi__label">Human correction rate</span>
-                        <strong class="dashboard-kpi__value">
-                            {{ $percent($quality['correction_rate']) }}
-                        </strong>
-                        <span class="dashboard-kpi__meta">
-                            {{ number_format($quality['corrected_fields']) }} of {{ number_format($quality['comparable_fields']) }} OCR readings changed while verifying
-                        </span>
-                    </div>
-                </a>
-            </div>
-
-            <div class="col-sm-6 col-lg-3">
+            <div class="col-12 col-sm-6 col-lg-3">
                 <a href="{{ route('users.index') }}" class="dashboard-kpi card h-100 text-reset">
                     <div class="card-body">
                         <div class="dashboard-kpi__header">
@@ -114,122 +81,149 @@
                     </div>
                 </a>
             </div>
+
+            <div class="col-12 col-lg-6">
+                {{-- Confidence is the model's certainty in its own reading, not measured accuracy. --}}
+                <x-dashboard.panel panel="ocr" title="OCR Confidence & Corrections">
+                    <x-slot:meta>Records submitted {{ $ocrScope['short_label'] }}</x-slot:meta>
+                    <x-slot:tools>
+                        <x-dashboard.period-filter panel="ocr" label="OCR confidence and corrections"
+                                                   :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
+                    </x-slot:tools>
+
+                    <div class="dashboard-quality">
+                        <div id="dashboard-quality-chart" class="dashboard-chart dashboard-chart--radial"
+                             aria-label="OCR confidence and human correction rate"></div>
+
+                        <div class="dashboard-quality__details">
+                            <dl class="dashboard-quality__metrics">
+                                <div class="dashboard-quality__metric">
+                                    <dt>
+                                        <span class="dashboard-quality__dot bg-primary" aria-hidden="true"></span>
+                                        Average OCR confidence
+                                    </dt>
+                                    <dd class="dashboard-quality__value">{{ $percent($quality['average_confidence']) }}</dd>
+                                    <dd class="dashboard-quality__caption">
+                                        The model's own certainty, across {{ number_format($quality['confidence_fields']) }} scored fields
+                                    </dd>
+                                </div>
+                                <div class="dashboard-quality__metric">
+                                    <dt>
+                                        <span class="dashboard-quality__dot bg-warning" aria-hidden="true"></span>
+                                        Human correction rate
+                                    </dt>
+                                    <dd class="dashboard-quality__value">{{ $percent($quality['correction_rate']) }}</dd>
+                                    <dd class="dashboard-quality__caption">
+                                        {{ number_format($quality['corrected_fields']) }} of {{ number_format($quality['comparable_fields']) }} readings changed while verifying
+                                    </dd>
+                                </div>
+                            </dl>
+
+                            <p class="dashboard-quality-note mb-0">
+                                <i class="icon-base bx bx-target-lock" aria-hidden="true"></i>
+                                <span>
+                                    Review threshold <strong>{{ $quality['threshold'] }}%</strong>
+                                    · {{ number_format($quality['below_threshold']) }} {{ $quality['below_threshold'] === 1 ? 'field' : 'fields' }} below it
+                                </span>
+                            </p>
+                        </div>
+                    </div>
+                </x-dashboard.panel>
+            </div>
         </section>
 
-        {{-- Wide screens: volume and types, then quality and throughput. A 1080px-wide portrait screen: volume across, types beside quality, throughput across. --}}
-        <div class="row g-4">
-            <div class="col-12 col-xxl-8">
-                <div id="panel-trend" class="card dashboard-panel h-100">
-                    <div class="card-header dashboard-panel__header">
-                        <div class="dashboard-panel__heading">
-                            <div class="dashboard-panel__title-row">
-                                <h5 class="card-title mb-0">Digitization Volume &amp; Trend</h5>
-                                {{-- Compared with a period of the same length, never a running month with a finished one. --}}
-                                @if ($headline['change'] !== null)
-                                    <span class="dashboard-delta dashboard-delta--{{ $headline['change'] >= 0 ? 'up' : 'down' }}"
-                                          title="{{ $comparisonNote }}">
-                                        @if ($headline['change'] >= 0)
-                                            <i class="icon-base bx bx-trending-up" aria-hidden="true"></i>
-                                        @else
-                                            <i class="icon-base bx bx-trending-down" aria-hidden="true"></i>
-                                        @endif
-                                        {{ $headline['change'] >= 0 ? '+' : '' }}{{ $percent($headline['change']) }} vs {{ $trendScope['comparison'] }}
-                                    </span>
-                                @elseif ($headline['period_records'] > 0)
-                                    <span class="dashboard-delta" title="{{ $comparisonNote }}">
-                                        None in {{ $trendScope['comparison'] }}
-                                    </span>
+        <div class="row g-4 mb-4">
+            <div class="col-12 col-lg-8">
+                <x-dashboard.panel panel="trend" title="Digitization Volume & Trend">
+                    <x-slot:badge>
+                        {{-- Compared with a period of the same length, never a running month with a finished one. --}}
+                        @if ($headline['change'] !== null)
+                            <span class="dashboard-delta dashboard-delta--{{ $headline['change'] >= 0 ? 'up' : 'down' }}"
+                                  title="{{ $comparisonNote }}">
+                                @if ($headline['change'] >= 0)
+                                    <i class="icon-base bx bx-trending-up" aria-hidden="true"></i>
+                                @else
+                                    <i class="icon-base bx bx-trending-down" aria-hidden="true"></i>
                                 @endif
-                            </div>
-                            <p class="dashboard-panel__meta">
-                                <span>{{ $trend['mode'] === 'day' ? 'Daily' : 'Monthly' }} submissions · {{ $trendScope['short_label'] }}</span>
-                            </p>
-                        </div>
-
-                        <div class="dashboard-panel__tools">
-                            {{-- The chart's key, in the header as on the period menu's left. --}}
-                            @if ($trend['series'] !== [])
-                                <ul class="dashboard-legend" aria-label="Document types on the chart">
-                                    @foreach ($trend['series'] as $series)
-                                        <li>
-                                            <span class="dashboard-legend__dot" aria-hidden="true"
-                                                  style="--dashboard-type-color: {{ $series['color'] }}"></span>
-                                            {{ $series['name'] }}
-                                        </li>
-                                    @endforeach
-                                </ul>
-                            @endif
-
-                            <x-dashboard.period-filter panel="trend" label="digitization volume and trend"
-                                                       :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
-                        </div>
-                    </div>
-
-                    <div class="card-body">
-                        <x-dashboard.period-error panel="trend" />
-
-                        <div id="dashboard-volume-chart" class="dashboard-chart dashboard-chart--volume"
-                             aria-label="{{ $trend['mode'] === 'day' ? 'Daily' : 'Monthly' }} digitization volume by document type"></div>
-
-                        @if ($trend['starts_at'])
-                            <p class="dashboard-chart-note mb-0">
-                                The first archived record is from {{ $trend['starts_at']->format('j M Y') }},
-                                so the chart starts there.
-                            </p>
+                                {{ $headline['change'] >= 0 ? '+' : '' }}{{ $percent($headline['change']) }} vs {{ $trendScope['comparison'] }}
+                            </span>
+                        @elseif ($headline['period_records'] > 0)
+                            <span class="dashboard-delta" title="{{ $comparisonNote }}">
+                                None in {{ $trendScope['comparison'] }}
+                            </span>
                         @endif
-
+                    </x-slot:badge>
+                    <x-slot:meta>
+                        {{ $trend['mode'] === 'day' ? 'Daily' : 'Monthly' }} submissions · {{ $trendScope['short_label'] }}
+                    </x-slot:meta>
+                    <x-slot:tools>
                         @if ($trend['series'] !== [])
-                            <details class="dashboard-chart-data mt-2">
-                                <summary>View chart data</summary>
-                                <div class="table-responsive mt-2">
-                                    <table class="table table-sm mb-0">
-                                        <thead>
-                                            <tr>
-                                                <th>{{ $trend['mode'] === 'day' ? 'Day' : 'Month' }}</th>
-                                                @foreach ($trend['series'] as $series)
-                                                    <th class="text-end">{{ $series['name'] }}</th>
-                                                @endforeach
-                                                <th class="text-end">Total</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            @foreach ($trend['labels'] as $index => $label)
-                                                <tr>
-                                                    <td>{{ $label }}</td>
-                                                    @foreach ($trend['series'] as $series)
-                                                        <td class="text-end">{{ number_format($series['data'][$index]) }}</td>
-                                                    @endforeach
-                                                    <td class="text-end fw-medium">{{ number_format($trend['totals'][$index]) }}</td>
-                                                </tr>
-                                            @endforeach
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </details>
+                            <ul class="dashboard-legend" aria-label="Document types on the chart">
+                                @foreach ($trend['series'] as $series)
+                                    <li>
+                                        <span class="dashboard-legend__dot" aria-hidden="true"
+                                              style="--dashboard-type-color: {{ $series['color'] }}"></span>
+                                        {{ $series['name'] }}
+                                    </li>
+                                @endforeach
+                            </ul>
                         @endif
-                    </div>
-                </div>
+
+                        <x-dashboard.period-filter panel="trend" label="digitization volume and trend"
+                                                   :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
+                    </x-slot:tools>
+
+                    <div id="dashboard-volume-chart" class="dashboard-chart dashboard-chart--volume"
+                         aria-label="{{ $trend['mode'] === 'day' ? 'Daily' : 'Monthly' }} digitization volume by document type"></div>
+
+                    @if ($trend['starts_at'])
+                        <p class="dashboard-chart-note mb-0">
+                            The first archived record is from {{ $trend['starts_at']->format('j M Y') }},
+                            so the chart starts there.
+                        </p>
+                    @endif
+
+                    @if ($trend['series'] !== [])
+                        <details class="dashboard-chart-data mt-2">
+                            <summary>View chart data</summary>
+                            <div class="table-responsive mt-2">
+                                <table class="table table-sm mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>{{ $trend['mode'] === 'day' ? 'Day' : 'Month' }}</th>
+                                            @foreach ($trend['series'] as $series)
+                                                <th class="text-end">{{ $series['name'] }}</th>
+                                            @endforeach
+                                            <th class="text-end">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach ($trend['labels'] as $index => $label)
+                                            <tr>
+                                                <td>{{ $label }}</td>
+                                                @foreach ($trend['series'] as $series)
+                                                    <td class="text-end">{{ number_format($series['data'][$index]) }}</td>
+                                                @endforeach
+                                                <td class="text-end fw-medium">{{ number_format($trend['totals'][$index]) }}</td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        </details>
+                    @endif
+                </x-dashboard.panel>
             </div>
 
-            <div class="col-12 col-lg-6 col-xxl-4">
-                <div id="panel-types" class="card dashboard-panel h-100">
-                    <div class="card-header dashboard-panel__header">
-                        <div class="dashboard-panel__heading">
-                            <h5 class="card-title mb-0">Document Type Distribution</h5>
-                            <p class="dashboard-panel__meta">
-                                <span>Submitted {{ $typesScope['short_label'] }}</span>
-                            </p>
-                        </div>
+            <div class="col-12 col-lg-4">
+                <x-dashboard.panel panel="types" title="Document Type Distribution">
+                    <x-slot:meta>Submitted {{ $typesScope['short_label'] }}</x-slot:meta>
+                    <x-slot:tools>
+                        <x-dashboard.period-filter panel="types" label="document type distribution"
+                                                   :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
+                    </x-slot:tools>
 
-                        <div class="dashboard-panel__tools">
-                            <x-dashboard.period-filter panel="types" label="document type distribution"
-                                                       :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
-                        </div>
-                    </div>
-
-                    <div class="card-body">
-                        <x-dashboard.period-error panel="types" />
-
+                    <div class="dashboard-types">
                         @if ($analytics['by_document_type']->sum('total') > 0)
                             <div id="dashboard-type-chart" class="dashboard-chart dashboard-chart--donut"
                                  aria-label="Document type distribution"></div>
@@ -258,60 +252,18 @@
                             @endforeach
                         </ul>
                     </div>
-                </div>
+                </x-dashboard.panel>
             </div>
+        </div>
 
-            <div class="col-12 col-lg-6 col-xxl-5">
-                {{-- Confidence is the model's certainty in its own reading, not measured accuracy. --}}
-                <x-card id="panel-ocr" class="dashboard-panel h-100"
-                        title="OCR Confidence & Corrections"
-                        subtitle="How sure the OCR was of its readings, and how often staff changed them while verifying.">
-                    <x-slot:actions>
-                        <x-dashboard.period-filter panel="ocr" label="OCR confidence and corrections"
-                                                   :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
-                    </x-slot:actions>
-
-                    <x-dashboard.period-error panel="ocr" />
-
-                    <div id="dashboard-quality-chart" class="dashboard-chart dashboard-chart--radial"
-                         aria-label="OCR confidence and human correction rate"></div>
-
-                    <div class="dashboard-quality-summary">
-                        <div>
-                            <span class="dashboard-quality-summary__dot bg-primary" aria-hidden="true"></span>
-                            <span>
-                                <small>Average confidence</small>
-                                <strong>{{ $percent($quality['average_confidence']) }}</strong>
-                            </span>
-                        </div>
-                        <div>
-                            <span class="dashboard-quality-summary__dot bg-warning" aria-hidden="true"></span>
-                            <span>
-                                <small>Human correction</small>
-                                <strong>{{ $percent($quality['correction_rate']) }}</strong>
-                            </span>
-                        </div>
-                    </div>
-
-                    <p class="dashboard-quality-note mb-0">
-                        <i class="icon-base bx bx-target-lock" aria-hidden="true"></i>
-                        System review threshold: <strong>{{ $quality['threshold'] }}%</strong>
-                        <span>·</span>
-                        {{ number_format($quality['below_threshold']) }} fields below threshold
-                    </p>
-                </x-card>
-            </div>
-
-            <div class="col-12 col-xxl-7">
-                <x-card id="panel-staff" class="dashboard-panel h-100"
-                        title="Processing & Throughput"
-                        :subtitle="'Accounts that submitted the most records in '.$staffScope['phrase'].' (top 6).'">
-                    <x-slot:actions>
+        <div class="row g-4">
+            <div class="col-12">
+                <x-dashboard.panel panel="staff" title="Processing & Throughput">
+                    <x-slot:meta>Top 6 accounts by records submitted · {{ $staffScope['short_label'] }}</x-slot:meta>
+                    <x-slot:tools>
                         <x-dashboard.period-filter panel="staff" label="processing and throughput"
                                                    :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
-                    </x-slot:actions>
-
-                    <x-dashboard.period-error panel="staff" />
+                    </x-slot:tools>
 
                     @if ($throughput->isNotEmpty())
                         <div class="dashboard-throughput-layout">
@@ -351,7 +303,7 @@
                         <x-empty-state icon="bx-group" title="No submissions in this period"
                                        message="Choose a longer period to compare accounts." />
                     @endif
-                </x-card>
+                </x-dashboard.panel>
             </div>
         </div>
 

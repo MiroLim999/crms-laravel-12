@@ -4357,6 +4357,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   min-inline-size: 0;
 }
 
+// What a panel holds is laid out by the card's own width (@container).
+.dashboard-panel__body {
+  container-type: inline-size;
+}
+
 // The title and, for the trend, its change against the period before.
 .dashboard-panel__title-row {
   display: flex;
@@ -4980,12 +4985,14 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   min-block-size: 21.875rem;
 }
 
+// No taller than the narrowest donut drawn, so a narrow card has no gap
+// under it.
 .dashboard-chart--donut {
-  min-block-size: 16.875rem;
+  min-block-size: 15rem;
 }
 
 .dashboard-chart--radial {
-  min-block-size: 19.375rem;
+  min-block-size: 9.375rem;
 }
 
 .dashboard-chart--throughput {
@@ -4999,60 +5006,93 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   font-size: .75rem;
 }
 
-.dashboard-quality-summary {
+// OCR quality, compact enough for the summary row: the gauge beside its
+// numbers when the card has room, above them when it does not.
+.dashboard-quality {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: .75rem;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 1rem 1.5rem;
+}
 
-  > div {
-    display: flex;
-    align-items: center;
-    gap: .7rem;
-    min-inline-size: 0;
-    padding: .75rem;
-    background: rgba(105, 108, 255, .045);
-    border: 1px solid var(--bs-border-color);
-    border-radius: .5rem;
-  }
-
-  small,
-  strong {
-    display: block;
-  }
-
-  small {
-    overflow: hidden;
-    color: var(--bs-secondary-color);
-    font-size: .6875rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  strong {
-    margin-block-start: .1rem;
-    color: var(--bs-heading-color);
+@container (min-width: 22rem) {
+  .dashboard-quality {
+    grid-template-columns: 10rem minmax(0, 1fr);
   }
 }
 
-.dashboard-quality-summary__dot {
+.dashboard-quality__details {
+  display: grid;
+  gap: .85rem;
+  min-inline-size: 0;
+}
+
+.dashboard-quality__metrics {
+  display: grid;
+  gap: .75rem;
+  margin: 0;
+}
+
+// The label and its figure on one line, what the figure means beneath.
+.dashboard-quality__metric {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: .15rem .75rem;
+
+  dt {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    min-inline-size: 0;
+    color: var(--bs-heading-color);
+    font-size: .8125rem;
+    font-weight: 500;
+  }
+}
+
+.dashboard-quality__value {
+  grid-area: 1 / 2;
+  margin: 0;
+  color: var(--bs-heading-color);
+  font-size: 1.125rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.dashboard-quality__caption {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-inline-start: 1.175rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  line-height: 1.4;
+}
+
+.dashboard-quality__dot {
   flex: 0 0 auto;
-  inline-size: .65rem;
-  block-size: .65rem;
+  inline-size: .625rem;
+  block-size: .625rem;
   border-radius: 50%;
 }
 
 .dashboard-quality-note {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: .3rem;
-  margin-block-start: 1rem;
-  padding: .7rem .8rem;
+  align-items: flex-start;
+  gap: .45rem;
+  padding: .55rem .75rem;
   color: var(--bs-secondary-color);
-  background: rgba(3, 195, 236, .06);
+  background: rgba(var(--bs-info-rgb), .07);
   border-radius: .5rem;
   font-size: .75rem;
+  line-height: 1.4;
+
+  i {
+    flex: 0 0 auto;
+    margin-block-start: .05rem;
+    font-size: .95rem;
+  }
 
   i,
   strong {
@@ -5060,14 +5100,49 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// Document types: the donut above its key in a narrow card, side by side when
+// the card runs the full width of a tablet.
+.dashboard-types {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: .5rem 2.5rem;
+}
+
+@container (min-width: 34rem) {
+  .dashboard-types {
+    grid-template-columns: minmax(13rem, 1fr) minmax(14rem, 1fr);
+
+    .dashboard-type-legend {
+      margin-block-start: 0;
+    }
+  }
+}
+// Throughput: the bars beside the leaderboard once the card is wide enough.
 .dashboard-throughput-layout {
   display: grid;
-  grid-template-columns: minmax(15rem, .95fr) minmax(16rem, 1.05fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: 1.25rem;
+  gap: 1.25rem 2.5rem;
+}
+
+@container (min-width: 40rem) {
+  .dashboard-throughput-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
 }
 
 .dashboard-throughput-table {
+  // Fixed columns, so a long name is cut short rather than pushing the
+  // record count out of a phone-width card.
+  table-layout: fixed;
+
+  th:last-child,
+  td:last-child {
+    inline-size: 6.5rem;
+    white-space: nowrap;
+  }
+
   thead th {
     padding-block-start: 0;
     color: var(--bs-secondary-color);
@@ -5104,15 +5179,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 // portraitDesk in dashboard-analytics.js.
 @media (min-width: 992px) and (orientation: portrait) {
   .dashboard-chart--volume {
-    min-block-size: 26.25rem;
-  }
-
-  .dashboard-chart--donut {
-    min-block-size: 18.75rem;
-  }
-
-  .dashboard-chart--radial {
-    min-block-size: 21.25rem;
+    min-block-size: 23.75rem;
   }
 }
 
@@ -5138,9 +5205,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     min-block-size: 16rem;
   }
 
-  .dashboard-throughput-layout {
-    grid-template-columns: 1fr;
-  }
 
   .dashboard-panel {
     > .card-header {
@@ -5157,10 +5221,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 @media (max-width: 479.98px) {
   .dashboard-metric__value {
     font-size: 1.5rem;
-  }
-
-  .dashboard-quality-summary {
-    grid-template-columns: 1fr;
   }
 
   .dashboard-kpi__value {

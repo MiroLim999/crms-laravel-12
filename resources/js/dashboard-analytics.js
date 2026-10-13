@@ -133,7 +133,7 @@ function renderVolume(data) {
   draw(target, {
     chart: {
       type: 'area',
-      height: portraitDesk ? 420 : 350,
+      height: portraitDesk ? 380 : 350,
       fontFamily: theme.font,
       foreColor: theme.text,
       parentHeightOffset: 0,
@@ -220,7 +220,9 @@ function renderDocumentTypes(slices) {
   draw(target, {
     chart: {
       type: 'donut',
-      height: portraitDesk ? 300 : 270,
+      // As tall as it is wide in a narrow card, so no band of space sits
+      // above and below the ring.
+      height: Math.max(240, Math.min(target.clientWidth || 280, 290)),
       fontFamily: theme.font,
       foreColor: theme.text,
       parentHeightOffset: 0,
@@ -284,12 +286,10 @@ function renderQuality(data) {
   const target = document.getElementById('dashboard-quality-chart');
   if (!target || !data) return;
 
+  // With nothing scored yet the rings stay empty; the figures beside them say
+  // so, which reads better in a small card than a sentence in the gauge.
   const confidenceAvailable = data.averageConfidence !== null && data.averageConfidence !== undefined;
   const correctionAvailable = data.correctionRate !== null && data.correctionRate !== undefined;
-  if (!confidenceAvailable && !correctionAvailable) {
-    emptyState(target, 'OCR quality signals will appear after scored fields are verified.');
-    return;
-  }
 
   const theme = themeOptions(target);
   const confidence = confidenceAvailable ? Number(data.averageConfidence) : 0;
@@ -298,7 +298,8 @@ function renderQuality(data) {
   draw(target, {
     chart: {
       type: 'radialBar',
-      height: portraitDesk ? 340 : 310,
+      // The gauge fills its column in the summary row, or a phone's width.
+      height: Math.max(150, Math.min(target.clientWidth || 160, 210)),
       fontFamily: theme.font,
       foreColor: theme.text,
       parentHeightOffset: 0,
@@ -309,27 +310,31 @@ function renderQuality(data) {
     plotOptions: {
       radialBar: {
         endAngle: 270,
-        hollow: { size: '38%' },
+        // A wide centre, so its figure stays readable in a small gauge.
+        hollow: { size: '46%' },
         startAngle: -90,
         track: {
           background: theme.border,
-          margin: 7,
-          strokeWidth: '96%',
+          margin: 5,
+          strokeWidth: '100%',
         },
         dataLabels: {
-          name: { fontSize: '12px', offsetY: -1 },
+          name: { fontSize: '11px', fontWeight: 500, color: theme.text, offsetY: -6 },
           value: {
-            fontSize: '22px',
-            fontWeight: 600,
-            offsetY: 4,
+            fontSize: '18px',
+            fontWeight: 700,
+            color: theme.heading,
+            offsetY: 2,
             formatter: value => `${Number(value).toFixed(1)}%`,
           },
           // The centre shows a result, not a setting: the review threshold
-          // is written out below the chart instead.
+          // is written out beside the gauge instead.
           total: {
             show: true,
-            label: 'Avg confidence',
-            fontSize: '12px',
+            label: confidenceAvailable ? 'Confidence' : 'No readings',
+            fontSize: '11px',
+            fontWeight: 500,
+            color: theme.text,
             formatter: () => (confidenceAvailable ? `${confidence.toFixed(1)}%` : '—'),
           },
         },
@@ -345,6 +350,10 @@ function renderThroughput(data) {
   if (!target || !data || !Array.isArray(data.totals) || !data.totals.length) return;
 
   const theme = themeOptions(target);
+  const longest = Math.max(...data.totals.map(Number)) * 1.18;
+  const step = longest > 200 ? 100 : longest > 100 ? 50 : longest > 40 ? 20 : longest > 20 ? 10 : 5;
+  const axisMax = Math.max(step, Math.ceil(longest / step) * step);
+  const throughputAxis = { max: axisMax, ticks: Math.min(axisMax / step, target.clientWidth < 420 ? 3 : 6) };
 
   draw(target, {
     chart: {
@@ -385,13 +394,18 @@ function renderThroughput(data) {
     xaxis: {
       categories: data.labels || [],
       min: 0,
+      // Headroom past the longest bar, so its count is not drawn over it.
+      // Rounded to a step, so the axis reads 0, 25, 50 and not 0, 19, 38.
+      max: throughputAxis.max,
+      tickAmount: throughputAxis.ticks,
       axisBorder: { show: false },
       axisTicks: { show: false },
       labels: { formatter: value => Math.round(value).toLocaleString() },
     },
     yaxis: {
       labels: {
-        maxWidth: 105,
+        // Room for whole names in a full-width card; a phone keeps the bars.
+        maxWidth: Math.round(Math.min(160, Math.max(90, target.clientWidth * 0.3))),
         style: { fontSize: '12px', fontWeight: 500 },
       },
     },
@@ -494,9 +508,12 @@ async function refreshPanel(panel, query, trigger) {
     charts.delete(panels[panel].chart);
     card.replaceWith(freshCard);
 
-    const summary = page.querySelector('[data-dashboard-summary]');
-    const currentSummary = document.querySelector('[data-dashboard-summary]');
-    if (summary && currentSummary) currentSummary.replaceWith(summary);
+    // Summary cards that quote a panel's period are swapped one by one; the
+    // summary row also holds the OCR panel, which must not be replaced
+    // without its chart being drawn again.
+    page.querySelectorAll('[data-dashboard-summary][id]').forEach(fresh => {
+      document.getElementById(fresh.id)?.replaceWith(fresh);
+    });
 
     // Keep the chart data current for the panel that was swapped.
     const holder = document.getElementById('dashboard-chart-data');
