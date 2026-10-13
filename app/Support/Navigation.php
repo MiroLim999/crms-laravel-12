@@ -50,8 +50,8 @@ class Navigation
             [
                 'header' => 'System',
                 'items' => [
-                    self::item('Template Builder', 'templates.index', 'bx-layout', 'templates.manage'),
                     self::item('OCR Workspace', 'ocr.index', 'bx-brain', 'ocr.manage'),
+                    self::item('Template Builder', 'templates.index', 'bx-layout', 'templates.manage'),
                 ],
             ],
         ];
