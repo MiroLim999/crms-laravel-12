@@ -465,110 +465,19 @@
     font-weight: 700;
   }
 
-  .ocr-performance-metrics {
-    display: grid;
-    gap: 0;
-  }
+  .ocr-audit-row {
+    background: rgba(var(--bs-primary-rgb), 0.02);
+    border-color: var(--ocr-soft-border) !important;
+    transition: background 0.15s ease, border-color 0.15s ease;
 
-  .ocr-performance-metric {
-    --ocr-metric-color: var(--ocr-metric-character);
-
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    padding: 0.85rem 0;
-    border-bottom: 1px solid var(--ocr-soft-border);
-
-    &:first-child {
-      padding-top: 0.25rem;
-    }
-
-    &:last-child {
-      padding-bottom: 0.25rem;
-      border-bottom: 0;
-    }
-
-    &[data-performance-metric='word_accuracy'] {
-      --ocr-metric-color: var(--ocr-metric-word);
-    }
-
-    &[data-performance-metric='exact_match'] {
-      --ocr-metric-color: var(--ocr-metric-exact);
-    }
-
-    dt {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      min-width: 0;
-      color: var(--bs-heading-color);
-      font-size: 0.875rem;
-      font-weight: 600;
-    }
-
-    dd {
-      margin: 0;
-      color: var(--ocr-metric-color);
-    }
-
-    > span {
-      color: var(--bs-secondary-color);
-      font-size: 0.75rem;
-      line-height: 1.4;
+    &:hover {
+      background: rgba(var(--bs-primary-rgb), 0.04);
+      border-color: rgba(var(--bs-primary-rgb), 0.25) !important;
     }
   }
 
-  .ocr-performance-metric__key {
-    width: 0.5rem;
-    height: 0.5rem;
-    flex: 0 0 auto;
-    background: var(--ocr-metric-color);
-    border-radius: 50%;
-  }
-
-  .ocr-metric-dual-track {
-    .ocr-track-row {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .ocr-track-label {
-      width: 2.75rem;
-      flex: 0 0 auto;
-      font-size: 0.725rem;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-    }
-
-    .ocr-track-val {
-      width: 3.25rem;
-      flex: 0 0 auto;
-      text-align: right;
-      font-size: 0.75rem;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .ocr-performance-metric__progress {
-      height: 0.375rem;
-      margin: 0;
-      background: rgba(67, 89, 113, 0.08);
-      border-radius: 50rem;
-
-      .progress-bar {
-        background: var(--ocr-metric-color);
-        border-radius: inherit;
-        transition: width 0.45s ease;
-      }
-    }
-
-    .ocr-progress-base {
-      background: rgba(255, 159, 67, 0.12);
-
-      .progress-bar {
-        background: #ff9f43 !important;
-      }
-    }
+  .ocr-audit-verdict {
+    line-height: 1.35;
   }
 
   .ocr-apex-tooltip {

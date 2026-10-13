@@ -100,11 +100,15 @@ class OcrModelPerformance
     private function profile(string $key, string $label, bool $isActive, ?OcrModel $model): array
     {
         $complete = $model?->hasEvaluation() ?? false;
+        $displayLabel = ($key === 'base' && ($label === 'base' || ! $label))
+            ? 'TrOCR Base (Baseline)'
+            : ($label ?: $key);
 
         if (! $complete) {
             return [
                 'key' => $key,
                 'label' => $label ?: $key,
+                'display_label' => $displayLabel,
                 'is_active' => $isActive,
                 'has_data' => false,
                 'source' => null,
@@ -113,6 +117,12 @@ class OcrModelPerformance
                 'record_count' => 0,
                 'field_count' => 0,
                 'scores' => $this->emptyScores(),
+                'cer' => null,
+                'wer' => null,
+                'dataset' => null,
+                'split' => null,
+                'sample_count' => 0,
+                'evaluated_at' => null,
             ];
         }
 
@@ -122,6 +132,7 @@ class OcrModelPerformance
         return [
             'key' => $key,
             'label' => $label ?: $key,
+            'display_label' => $displayLabel,
             'is_active' => $isActive,
             'has_data' => true,
             'source' => 'evaluation',
@@ -135,6 +146,12 @@ class OcrModelPerformance
                 'word_accuracy' => $this->percentage(1 - $model->wer),
                 'exact_match' => $this->percentage($model->exact_match),
             ],
+            'cer' => $model->cer !== null ? $this->percentage($model->cer) : null,
+            'wer' => $model->wer !== null ? $this->percentage($model->wer) : null,
+            'dataset' => $model->evaluation_dataset,
+            'split' => $model->evaluation_split ?? 'test',
+            'sample_count' => $model->evaluation_sample_count,
+            'evaluated_at' => $date,
         ];
     }
 
