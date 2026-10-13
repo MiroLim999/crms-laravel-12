@@ -242,7 +242,7 @@ def _model_info():
             info["evaluation"] = evaluation
         infos.append(info)
     base_is_local = _looks_like_model(BASE_MODEL_DIR)
-    infos.append({
+    base_info = {
         "key": BASE_MODEL_KEY,
         "label": BASE_MODEL_LABEL,
         # Keep the legacy online fallback, but report the actual local files so
@@ -254,7 +254,12 @@ def _model_info():
             for name in os.listdir(BASE_MODEL_DIR)
             if base_is_local and os.path.isfile(os.path.join(BASE_MODEL_DIR, name))
         ) if base_is_local else [],
-    })
+    }
+    if base_is_local:
+        base_evaluation = _read_evaluation_report(BASE_MODEL_DIR)
+        if base_evaluation is not None:
+            base_info["evaluation"] = base_evaluation
+    infos.append(base_info)
     return infos
 
 

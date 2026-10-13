@@ -820,7 +820,17 @@ function initModelPerformance() {
     const modelName = $('#ocr-performance-model-name');
     const active = $('#ocr-performance-active');
     const evidence = $('#ocr-performance-evidence');
+    const btnRadar = $('#ocr-btn-view-radar');
+    const btnBars = $('#ocr-btn-view-bars');
+    const compareToggle = $('#ocr-compare-toggle');
+    const compareToggleWrap = $('#ocr-compare-toggle-wrap');
+    const toolbarModelName = $('#ocr-toolbar-model-name');
+    const toolbarBasePill = $('#ocr-toolbar-base-pill');
+    const kpiWrap = $('#ocr-performance-kpis');
+
     let chart = null;
+    let currentView = 'radar';
+    let overlayBase = true;
 
     const scoreNodes = new Map(
         Array.from(document.querySelectorAll('[data-performance-score]'))
@@ -830,15 +840,40 @@ function initModelPerformance() {
         Array.from(document.querySelectorAll('[data-performance-bar]'))
             .map((node) => [node.dataset.performanceBar, node]),
     );
+    const deltaNodes = new Map(
+        Array.from(document.querySelectorAll('[data-performance-delta]'))
+            .map((node) => [node.dataset.performanceDelta, node]),
+    );
+    const kpiVals = new Map(
+        Array.from(document.querySelectorAll('[data-kpi-val]')).map((n) => [n.dataset.kpiVal, n]),
+    );
+    const kpiDeltas = new Map(
+        Array.from(document.querySelectorAll('[data-kpi-delta]')).map((n) => [n.dataset.kpiDelta, n]),
+    );
+    const kpiSubs = new Map(
+        Array.from(document.querySelectorAll('[data-kpi-sub]')).map((n) => [n.dataset.kpiSub, n]),
+    );
+    const baseTrackRows = new Map(
+        Array.from(document.querySelectorAll('[data-performance-base-row]')).map((n) => [n.dataset.performanceBaseRow, n]),
+    );
+    const baseTrackBars = new Map(
+        Array.from(document.querySelectorAll('[data-performance-base-bar]')).map((n) => [n.dataset.performanceBaseBar, n]),
+    );
+    const baseTrackVals = new Map(
+        Array.from(document.querySelectorAll('[data-performance-base-val]')).map((n) => [n.dataset.performanceBaseVal, n]),
+    );
+    const modelTrackVals = new Map(
+        Array.from(document.querySelectorAll('[data-performance-bar-val]')).map((n) => [n.dataset.performanceBarVal, n]),
+    );
 
     const theme = () => {
         const styles = getComputedStyle(target.closest('.ocr-workspace') || document.documentElement);
 
         return {
-            primary: styles.getPropertyValue('--bs-primary').trim() || '#0d6efd',
-            character: styles.getPropertyValue('--ocr-metric-character').trim() || '#0d6efd',
-            word: styles.getPropertyValue('--ocr-metric-word').trim() || '#00a7c4',
-            exact: styles.getPropertyValue('--ocr-metric-exact').trim() || '#2aa876',
+            primary: styles.getPropertyValue('--bs-primary').trim() || '#696cff',
+            character: styles.getPropertyValue('--ocr-metric-character').trim() || '#696cff',
+            word: styles.getPropertyValue('--ocr-metric-word').trim() || '#03c3ec',
+            exact: styles.getPropertyValue('--ocr-metric-exact').trim() || '#71dd37',
             text: styles.getPropertyValue('--bs-secondary-color').trim() || '#8592a3',
             border: styles.getPropertyValue('--bs-border-color').trim() || 'rgba(67, 89, 113, .12)',
             card: styles.getPropertyValue('--bs-card-bg').trim() || '#fff',
@@ -856,6 +891,7 @@ function initModelPerformance() {
 
     const updateSummary = (profile) => {
         if (modelName) modelName.textContent = profile?.label || 'No model selected';
+        if (toolbarModelName) toolbarModelName.textContent = profile?.label || 'Selected';
         if (active) active.classList.toggle('d-none', !profile?.is_active);
         if (evidence) evidence.textContent = profile?.evidence || 'No evidence available.';
 
@@ -867,13 +903,91 @@ function initModelPerformance() {
             source.textContent = profile?.source_label || 'No data';
         }
 
+        const isBase = profile?.key === 'base';
+        const baseProfile = !isBase ? profiles.get('base') : null;
+        const baseHasData = Boolean(baseProfile?.has_data);
+        const isComparing = baseHasData && overlayBase && !isBase;
+
+        if (toolbarBasePill) toolbarBasePill.classList.toggle('d-none', !isComparing);
+        if (compareToggleWrap) compareToggleWrap.classList.toggle('d-none', isBase || !baseHasData);
+        if (kpiWrap) kpiWrap.classList.toggle('d-none', !profile?.has_data || !isComparing);
+
         metrics.forEach((metric) => {
             const node = scoreNodes.get(metric.key);
             const bar = scoreBars.get(metric.key);
+            const deltaNode = deltaNodes.get(metric.key);
+            const modelTrackVal = modelTrackVals.get(metric.key);
+            const baseRow = baseTrackRows.get(metric.key);
+            const baseBar = baseTrackBars.get(metric.key);
+            const baseValNode = baseTrackVals.get(metric.key);
+            const kpiValNode = kpiVals.get(metric.key);
+            const kpiDeltaNode = kpiDeltas.get(metric.key);
+            const kpiSubNode = kpiSubs.get(metric.key);
+
             const value = scoreValue(profile, metric.key);
+            const baseValue = baseHasData ? scoreValue(baseProfile, metric.key) : null;
+
             if (node) node.textContent = value === null ? '—' : `${value.toFixed(1)}%`;
             if (bar) bar.style.width = `${Math.max(0, Math.min(100, value ?? 0))}%`;
+            if (modelTrackVal) modelTrackVal.textContent = value === null ? '—' : `${value.toFixed(1)}%`;
+
+            if (isComparing && value !== null && baseValue !== null) {
+                const diff = value - baseValue;
+                const sign = diff >= 0 ? '+' : '';
+                const deltaText = `${sign}${diff.toFixed(1)}% vs Base`;
+
+                if (deltaNode) {
+                    deltaNode.textContent = deltaText;
+                    deltaNode.className = `badge ${diff >= 0 ? 'bg-label-success' : 'bg-label-danger'}`;
+                    deltaNode.classList.remove('d-none');
+                }
+
+                if (kpiValNode) kpiValNode.textContent = `${value.toFixed(1)}%`;
+                if (kpiDeltaNode) {
+                    kpiDeltaNode.textContent = `${sign}${diff.toFixed(1)}%`;
+                    kpiDeltaNode.className = `badge ${diff >= 0 ? 'bg-label-success' : 'bg-label-danger'} ocr-kpi-delta`;
+                }
+                if (kpiSubNode) kpiSubNode.textContent = `vs ${baseValue.toFixed(1)}% Base`;
+
+                if (baseRow) baseRow.classList.remove('d-none');
+                if (baseBar) baseBar.style.width = `${Math.max(0, Math.min(100, baseValue))}%`;
+                if (baseValNode) baseValNode.textContent = `${baseValue.toFixed(1)}%`;
+            } else {
+                if (deltaNode) deltaNode.classList.add('d-none');
+                if (baseRow) baseRow.classList.add('d-none');
+                if (kpiValNode) kpiValNode.textContent = value === null ? '—' : `${value.toFixed(1)}%`;
+                if (kpiDeltaNode) kpiDeltaNode.textContent = '—';
+            }
         });
+    };
+
+    const makeTooltipHtml = (profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex) => {
+        const metric = metrics[dataPointIndex];
+        const val = scores?.[dataPointIndex];
+        const bVal = baseScores ? baseScores[dataPointIndex] : null;
+        const diff = (val !== null && bVal !== null && val !== undefined && bVal !== undefined)
+            ? val - bVal
+            : null;
+        const sign = diff !== null && diff >= 0 ? '+' : '';
+        const relGain = (diff !== null && bVal > 0) ? ((diff / bVal) * 100).toFixed(1) : null;
+
+        return `<div class="ocr-apex-tooltip">
+            <div class="ocr-tooltip-title">${metric.label}</div>
+            <div class="ocr-tooltip-row">
+                <div><span class="ocr-tooltip-badge" style="background:#696cff"></span><strong>${profile.label}</strong></div>
+                <span class="fw-bold text-primary">${val !== null && val !== undefined ? val.toFixed(1) + '%' : '—'}</span>
+            </div>
+            ${showBaseComparison && bVal !== null && bVal !== undefined ? `
+            <div class="ocr-tooltip-row">
+                <div><span class="ocr-tooltip-badge" style="background:#ff9f43"></span><span>TrOCR Base</span></div>
+                <span class="text-muted">${bVal.toFixed(1)}%</span>
+            </div>
+            <div class="ocr-tooltip-delta ${diff >= 0 ? 'text-success' : 'text-danger'}">
+                <i class="icon-base bx ${diff >= 0 ? 'bx-trending-up' : 'bx-trending-down'}"></i>
+                <span>${sign}${diff.toFixed(1)}% net gain ${relGain ? `(${sign}${relGain}%)` : ''}</span>
+            </div>
+            ` : ''}
+        </div>`;
     };
 
     const render = (profile) => {
@@ -906,116 +1020,292 @@ function initModelPerformance() {
             word_accuracy: colors.word,
             exact_match: colors.exact,
         })[metric.key] || colors.primary);
-        target.setAttribute('aria-label', `Performance radar for ${profile.label}`);
+        target.setAttribute('aria-label', `Performance evaluation for ${profile.label}`);
 
-        chart = new ApexCharts(target, {
-            chart: {
-                type: 'radar',
-                height: 460,
-                fontFamily: colors.font,
-                foreColor: colors.text,
-                parentHeightOffset: 0,
-                toolbar: { show: false },
-                animations: {
-                    enabled: true,
-                    easing: 'easeinout',
-                    speed: 450,
-                },
-            },
-            colors: [colors.primary],
-            dataLabels: { enabled: false },
-            fill: {
-                type: 'gradient',
-                gradient: {
-                    type: 'horizontal',
-                    shadeIntensity: 0,
-                    inverseColors: false,
-                    colorStops: [
-                        { offset: 0, color: colors.exact, opacity: 0.2 },
-                        { offset: 50, color: colors.character, opacity: 0.22 },
-                        { offset: 100, color: colors.word, opacity: 0.2 },
-                    ],
-                },
-            },
-            grid: {
-                padding: { top: 12, right: 24, bottom: 12, left: 24 },
-            },
-            legend: { show: false },
-            markers: {
-                size: 6,
-                strokeColors: colors.card,
-                strokeWidth: 3,
-                discrete: metricColors.map((color, dataPointIndex) => ({
-                    seriesIndex: 0,
-                    dataPointIndex,
-                    fillColor: color,
-                    strokeColor: colors.card,
-                    size: 7,
-                })),
-                hover: { size: 8 },
-            },
-            plotOptions: {
-                radar: {
-                    size: 205,
-                    polygons: {
-                        strokeColors: colors.border,
-                        strokeWidth: 1,
-                        connectorColors: colors.border,
-                        fill: { colors: ['rgba(67, 89, 113, 0.035)', 'transparent'] },
+        const isBase = profile?.key === 'base';
+        const baseProfile = !isBase ? profiles.get('base') : null;
+        const baseHasData = Boolean(baseProfile?.has_data);
+        const baseScores = baseHasData
+            ? metrics.map((metric) => scoreValue(baseProfile, metric.key))
+            : null;
+        const showBaseComparison = baseHasData
+            && overlayBase
+            && !isBase
+            && Array.isArray(baseScores)
+            && baseScores.every((s) => s !== null);
+
+        const series = [{
+            name: `${profile.label} (Fine-tuned)`,
+            data: scores,
+        }];
+
+        if (showBaseComparison) {
+            series.push({
+                name: 'TrOCR Base (Baseline)',
+                data: baseScores,
+            });
+        }
+
+        const comparisonColors = [colors.primary, '#ff9f43'];
+
+        if (currentView === 'radar') {
+            chart = new ApexCharts(target, {
+                chart: {
+                    type: 'radar',
+                    height: 440,
+                    fontFamily: colors.font,
+                    foreColor: colors.text,
+                    parentHeightOffset: 0,
+                    toolbar: { show: false },
+                    animations: {
+                        enabled: true,
+                        easing: 'easeinout',
+                        speed: 400,
                     },
                 },
-            },
-            series: [{
-                name: profile.label,
-                data: scores,
-            }],
-            stroke: { width: 3.5 },
-            tooltip: {
-                marker: { show: false },
-                y: { formatter: (value) => `${Number(value).toFixed(1)}%` },
-            },
-            xaxis: {
-                categories: metrics.map((metric) => metric.axis || metric.label),
-                labels: {
-                    style: {
-                        colors: metricColors,
-                        fontSize: '14px',
-                        fontWeight: 600,
+                colors: showBaseComparison ? comparisonColors : [colors.primary],
+                dataLabels: { enabled: false },
+                fill: showBaseComparison
+                    ? {
+                        type: ['gradient', 'solid'],
+                        opacity: [0.32, 0.14],
+                        gradient: {
+                            type: 'horizontal',
+                            shadeIntensity: 0,
+                            inverseColors: false,
+                            colorStops: [
+                                { offset: 0, color: colors.exact, opacity: 0.32 },
+                                { offset: 50, color: colors.character, opacity: 0.35 },
+                                { offset: 100, color: colors.word, opacity: 0.32 },
+                            ],
+                        },
+                    }
+                    : {
+                        type: 'gradient',
+                        gradient: {
+                            type: 'horizontal',
+                            shadeIntensity: 0,
+                            inverseColors: false,
+                            colorStops: [
+                                { offset: 0, color: colors.exact, opacity: 0.28 },
+                                { offset: 50, color: colors.character, opacity: 0.28 },
+                                { offset: 100, color: colors.word, opacity: 0.25 },
+                            ],
+                        },
                     },
+                grid: {
+                    padding: { top: 24, right: 24, bottom: 12, left: 24 },
                 },
-            },
-            yaxis: {
-                min: 0,
-                max: 100,
-                tickAmount: 4,
-                labels: {
-                    show: false,
-                    formatter: (value) => `${Math.round(value)}`,
-                    style: { colors: [colors.text], fontSize: '11px', fontWeight: 500 },
+                legend: {
+                    show: showBaseComparison,
+                    position: 'bottom',
+                    horizontalAlign: 'center',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    fontFamily: colors.font,
+                    markers: { radius: 6, width: 10, height: 10 },
+                    itemMargin: { horizontal: 16, vertical: 6 },
                 },
-            },
-            responsive: [{
-                breakpoint: 575,
-                options: {
-                    chart: { height: 350 },
-                    grid: { padding: { top: 4, right: 4, bottom: 4, left: 4 } },
-                    markers: { size: 5, strokeWidth: 2, hover: { size: 7 } },
-                    plotOptions: { radar: { size: 120 } },
-                    xaxis: {
-                        labels: {
-                            style: {
-                                colors: metricColors,
-                                fontSize: '12px',
-                                fontWeight: 600,
-                            },
+                markers: showBaseComparison
+                    ? {
+                        size: [7.5, 5.5],
+                        strokeColors: [colors.card, '#ff9f43'],
+                        strokeWidth: [2.5, 2],
+                        hover: { size: 9 },
+                    }
+                    : {
+                        size: 7,
+                        strokeColors: colors.card,
+                        strokeWidth: 2.5,
+                        discrete: metricColors.map((color, dataPointIndex) => ({
+                            seriesIndex: 0,
+                            dataPointIndex,
+                            fillColor: color,
+                            strokeColor: colors.card,
+                            size: 7.5,
+                        })),
+                        hover: { size: 9 },
+                    },
+                plotOptions: {
+                    radar: {
+                        size: 155,
+                        polygons: {
+                            strokeColors: colors.border,
+                            strokeWidth: 1,
+                            connectorColors: colors.border,
+                            fill: { colors: ['rgba(67, 89, 113, 0.03)', 'transparent'] },
                         },
                     },
                 },
-            }],
-        });
+                series,
+                stroke: showBaseComparison
+                    ? { width: [3.5, 2.5], dashArray: [0, 5] }
+                    : { width: 3.5, dashArray: 0 },
+                tooltip: {
+                    custom: ({ dataPointIndex }) => makeTooltipHtml(profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex),
+                },
+                xaxis: {
+                    categories: metrics.map((metric) => {
+                        const val = scoreValue(profile, metric.key);
+                        const name = metric.axis || metric.label;
+                        if (val === null) return name;
+                        if (showBaseComparison) {
+                            const baseVal = scoreValue(baseProfile, metric.key);
+                            const diff = baseVal !== null ? val - baseVal : null;
+                            const diffText = diff !== null
+                                ? (diff >= 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`)
+                                : '';
+                            return [name, `${val.toFixed(0)}% vs ${baseVal !== null ? baseVal.toFixed(0) : '—'}% (${diffText})`];
+                        }
+                        return [name, `${val.toFixed(0)}%`];
+                    }),
+                    labels: {
+                        style: {
+                            colors: metricColors,
+                            fontSize: '12px',
+                            fontWeight: 600,
+                        },
+                    },
+                },
+                yaxis: {
+                    show: false,
+                    min: 0,
+                    max: 100,
+                    tickAmount: 4,
+                    labels: {
+                        show: false,
+                        formatter: (value) => `${Math.round(value)}`,
+                        style: { colors: [colors.text], fontSize: '11px', fontWeight: 500 },
+                    },
+                },
+                responsive: [{
+                    breakpoint: 575,
+                    options: {
+                        chart: { height: 340 },
+                        grid: { padding: { top: 8, right: 8, bottom: 8, left: 8 } },
+                        markers: { size: 5, strokeWidth: 2, hover: { size: 7 } },
+                        plotOptions: { radar: { size: 110 } },
+                        xaxis: {
+                            labels: {
+                                style: {
+                                    colors: metricColors,
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                },
+                            },
+                        },
+                    },
+                }],
+            });
+        } else {
+            // Grouped horizontal comparison bars
+            chart = new ApexCharts(target, {
+                chart: {
+                    type: 'bar',
+                    height: 380,
+                    fontFamily: colors.font,
+                    foreColor: colors.text,
+                    toolbar: { show: false },
+                    animations: {
+                        enabled: true,
+                        easing: 'easeinout',
+                        speed: 400,
+                    },
+                },
+                plotOptions: {
+                    bar: {
+                        horizontal: true,
+                        barHeight: '56%',
+                        borderRadius: 6,
+                        dataLabels: { position: 'center' },
+                    },
+                },
+                colors: showBaseComparison ? comparisonColors : [colors.primary],
+                dataLabels: {
+                    enabled: true,
+                    style: {
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        colors: ['#fff'],
+                    },
+                    formatter: (v) => `${Number(v).toFixed(1)}%`,
+                },
+                stroke: {
+                    show: true,
+                    width: 1,
+                    colors: ['transparent'],
+                },
+                grid: {
+                    borderColor: colors.border,
+                    strokeDashArray: 4,
+                    padding: { top: 8, right: 20, bottom: 12, left: 16 },
+                },
+                legend: {
+                    show: showBaseComparison,
+                    position: 'bottom',
+                    horizontalAlign: 'center',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    fontFamily: colors.font,
+                    markers: { radius: 6, width: 10, height: 10 },
+                    itemMargin: { horizontal: 16, vertical: 6 },
+                },
+                series,
+                tooltip: {
+                    custom: ({ dataPointIndex }) => makeTooltipHtml(profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex),
+                },
+                xaxis: {
+                    categories: metrics.map((m) => m.label),
+                    min: 0,
+                    max: 100,
+                    labels: {
+                        formatter: (v) => `${Math.round(v)}%`,
+                        style: { colors: colors.text, fontSize: '11px' },
+                    },
+                },
+                yaxis: {
+                    labels: {
+                        style: {
+                            colors: metricColors,
+                            fontSize: '13px',
+                            fontWeight: 600,
+                        },
+                    },
+                },
+            });
+        }
 
         chart.render();
     };
+
+    if (btnRadar && btnBars) {
+        btnRadar.addEventListener('click', () => {
+            if (currentView === 'radar') return;
+            currentView = 'radar';
+            btnRadar.classList.remove('btn-label-secondary');
+            btnRadar.classList.add('btn-primary');
+            btnBars.classList.remove('btn-primary');
+            btnBars.classList.add('btn-label-secondary');
+            render(profiles.get(selector.value));
+        });
+
+        btnBars.addEventListener('click', () => {
+            if (currentView === 'bars') return;
+            currentView = 'bars';
+            btnBars.classList.remove('btn-label-secondary');
+            btnBars.classList.add('btn-primary');
+            btnRadar.classList.remove('btn-primary');
+            btnRadar.classList.add('btn-label-secondary');
+            render(profiles.get(selector.value));
+        });
+    }
+
+    if (compareToggle) {
+        compareToggle.addEventListener('change', () => {
+            overlayBase = compareToggle.checked;
+            render(profiles.get(selector.value));
+        });
+    }
 
     selector.addEventListener('change', () => render(profiles.get(selector.value)));
 
