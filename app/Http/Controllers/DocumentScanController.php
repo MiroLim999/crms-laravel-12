@@ -56,7 +56,7 @@ class DocumentScanController extends Controller
     {
         $health = $this->ocr->health();
 
-        $documentTypes = DocumentTypeDefinition::ordered();
+        $documentTypes = DocumentTypeDefinition::ordered(activeOnly: true);
         $templates = $documentTypes
             ->mapWithKeys(fn (DocumentTypeDefinition $type) => [
                 $type->key => DocumentTemplate::activeFor($type),
@@ -85,7 +85,7 @@ class DocumentScanController extends Controller
         $key = $request->query('type');
         $type = is_string($key) ? DocumentTypeDefinition::where('key', $key)->first() : null;
 
-        if ($type === null) {
+        if ($type === null || $type->isArchived()) {
             return redirect()->route('documents.create');
         }
 
@@ -154,6 +154,12 @@ class DocumentScanController extends Controller
         $templateId = (int) $validated['document_template_id'];
         $documentType = DocumentTypeDefinition::where('key', (string) $validated['doc_type'])->firstOrFail();
         $template = DocumentTemplate::with(['documentTypeDefinition', 'fields'])->find($templateId);
+
+        if ($documentType->isArchived()) {
+            throw ValidationException::withMessages([
+                'doc_type' => 'This document type is archived and can no longer be scanned.',
+            ]);
+        }
 
         if ($template?->document_type_id !== $documentType->getKey()) {
             throw ValidationException::withMessages([

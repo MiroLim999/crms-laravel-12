@@ -12,7 +12,7 @@
                 New layout
             </button>
             <div class="dropdown-menu dropdown-menu-end">
-                @foreach ($documentTypes as $type)
+                @foreach ($documentTypes->reject->isArchived() as $type)
                     <a class="dropdown-item" href="{{ route('templates.create', ['type' => $type->value]) }}">
                         <i class="icon-base bx {{ $type->icon() }} icon-sm me-2" aria-hidden="true"></i>
                         {{ $type->label() }}
@@ -54,8 +54,15 @@
                                 <i class="icon-base bx {{ $type->icon() }} icon-md"></i>
                             </span>
                             <div>
-                                <h2 class="h5 mb-1" id="template-type-{{ $type->getKey() }}">{{ $type->label() }}</h2>
-                                @if ($published)
+                                <h2 class="h5 mb-1" id="template-type-{{ $type->getKey() }}">
+                                    {{ $type->label() }}
+                                    @if ($type->isArchived())
+                                        <span class="badge bg-label-secondary ms-1 align-middle">Archived</span>
+                                    @endif
+                                </h2>
+                                @if ($type->isArchived())
+                                    <p class="mb-0 text-muted small">Hidden from Staff. Records and layouts are kept.</p>
+                                @elseif ($published)
                                     <p class="mb-0 text-muted small">
                                         Staff currently use <strong class="text-body">{{ $published->name }}</strong>.
                                     </p>
@@ -68,11 +75,13 @@
                         <div class="template-library-card__summary">
                             <span><strong>{{ $group->count() }}</strong> {{ Str::plural('layout', $group->count()) }}</span>
                             <span><strong>{{ $draftCount }}</strong> {{ Str::plural('draft', $draftCount) }}</span>
-                            <a href="{{ route('templates.create', ['type' => $type->value]) }}"
-                               class="btn btn-sm btn-primary">
-                                <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>
-                                New layout
-                            </a>
+                            @unless ($type->isArchived())
+                                <a href="{{ route('templates.create', ['type' => $type->value]) }}"
+                                   class="btn btn-sm btn-primary">
+                                    <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>
+                                    New layout
+                                </a>
+                            @endunless
                             <div class="dropdown template-library-manage">
                                 <button type="button" class="btn btn-sm btn-secondary"
                                         data-bs-toggle="dropdown" aria-expanded="false"
@@ -87,6 +96,14 @@
                                         <i class="icon-base bx bx-edit-alt icon-sm me-2" aria-hidden="true"></i>
                                         Rename
                                     </button>
+                                    <form method="POST"
+                                          action="{{ route($type->isArchived() ? 'templates.document-types.restore' : 'templates.document-types.archive', $type) }}">
+                                        @csrf
+                                        <button type="submit" class="dropdown-item">
+                                            <i class="icon-base bx {{ $type->isArchived() ? 'bx-undo' : 'bx-archive' }} icon-sm me-2" aria-hidden="true"></i>
+                                            {{ $type->isArchived() ? 'Restore for Staff' : 'Archive (hide from Staff)' }}
+                                        </button>
+                                    </form>
                                     @unless ($type->is_system)
                                         <div class="dropdown-divider"></div>
                                         <button type="button" class="dropdown-item text-danger"

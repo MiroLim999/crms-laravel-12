@@ -21,7 +21,18 @@ class DocumentTypeDefinition extends Model
 
     protected function casts(): array
     {
-        return ['is_system' => 'boolean'];
+        return ['is_system' => 'boolean', 'archived_at' => 'datetime'];
+    }
+
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
+    }
+
+    /** Types Staff can scan and Super Admins can add layouts to. */
+    public function scopeActive($query)
+    {
+        return $query->whereNull('archived_at');
     }
 
     public function templates(): HasMany
@@ -69,9 +80,10 @@ class DocumentTypeDefinition extends Model
     }
 
     /** @return Collection<int, self> */
-    public static function ordered(): Collection
+    public static function ordered(bool $activeOnly = false): Collection
     {
         return static::query()
+            ->when($activeOnly, fn ($query) => $query->active())
             ->withCount(['templates', 'records'])
             ->orderByDesc('is_system')
             ->orderBy('id')

@@ -70,6 +70,42 @@ class DocumentTypeDefinitionController extends Controller
             ->with('success', "Document type renamed to '{$name}'.");
     }
 
+    /**
+     * Hide a type from Staff scanning without touching its records or layouts.
+     */
+    public function archive(DocumentTypeDefinition $documentType): RedirectResponse
+    {
+        if (! $documentType->isArchived()) {
+            $documentType->archived_at = now();
+            $this->audit->saveAndLog(
+                'document-type.archived',
+                $documentType,
+                "Archived document type '{$documentType->name}'.",
+            );
+        }
+
+        return redirect()->route('templates.index')->with(
+            'success',
+            "'{$documentType->name}' was archived. Its records and layouts are kept.",
+        );
+    }
+
+    public function restore(DocumentTypeDefinition $documentType): RedirectResponse
+    {
+        if ($documentType->isArchived()) {
+            $documentType->archived_at = null;
+            $this->audit->saveAndLog(
+                'document-type.restored',
+                $documentType,
+                "Restored document type '{$documentType->name}'.",
+            );
+        }
+
+        return redirect()
+            ->route('templates.index', ['open' => $documentType->key])
+            ->with('success', "'{$documentType->name}' was restored.");
+    }
+
     public function destroy(DocumentTypeDefinition $documentType): RedirectResponse
     {
         abort_if($documentType->is_system, 403, 'Built-in document types cannot be deleted.');

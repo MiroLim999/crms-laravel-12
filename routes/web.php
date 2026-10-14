@@ -218,6 +218,10 @@ Route::middleware('auth')->group(function () {
             ->name('templates.document-types.store');
         Route::put('templates/document-types/{documentType}', [DocumentTypeDefinitionController::class, 'update'])
             ->name('templates.document-types.update');
+        Route::post('templates/document-types/{documentType}/archive', [DocumentTypeDefinitionController::class, 'archive'])
+            ->name('templates.document-types.archive');
+        Route::post('templates/document-types/{documentType}/restore', [DocumentTypeDefinitionController::class, 'restore'])
+            ->name('templates.document-types.restore');
         Route::delete('templates/document-types/{documentType}', [DocumentTypeDefinitionController::class, 'destroy'])
             ->name('templates.document-types.destroy');
         Route::get('templates', [DocumentTemplateController::class, 'index'])->name('templates.index');
