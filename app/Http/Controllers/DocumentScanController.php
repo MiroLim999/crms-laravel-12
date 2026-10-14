@@ -155,12 +155,8 @@ class DocumentScanController extends Controller
         $documentType = DocumentTypeDefinition::where('key', (string) $validated['doc_type'])->firstOrFail();
         $template = DocumentTemplate::with(['documentTypeDefinition', 'fields'])->find($templateId);
 
-        if ($documentType->isArchived()) {
-            throw ValidationException::withMessages([
-                'doc_type' => 'This document type is archived and can no longer be scanned.',
-            ]);
-        }
-
+        // Archiving only stops new scans from starting (create/workspace). A scan
+        // already verified by Staff can still be submitted, so no work is lost.
         if ($template?->document_type_id !== $documentType->getKey()) {
             throw ValidationException::withMessages([
                 'document_template_id' => 'The selected template does not belong to this document type.',
