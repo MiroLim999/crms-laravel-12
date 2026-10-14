@@ -1,5 +1,34 @@
 // CRMS-specific styling that sits on top of the harvested SNEAT theme.
-// Keep this thin. If Bootstrap or a SNEAT component already does the job, use it.
+// SNEAT official font: Public Sans globally applied across the entire system
+:root {
+  --bs-body-font-family: 'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --bs-font-sans-serif: 'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-sans: 'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+body,
+html,
+button,
+input,
+optgroup,
+select,
+textarea,
+.btn,
+.card,
+.table,
+.form-control,
+.form-select,
+.dropdown-menu,
+.nav,
+.navbar,
+.badge,
+.modal,
+.toast,
+.popover,
+.tooltip,
+.apexcharts-canvas {
+  font-family: 'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+}
 
 // Confidence badges for OCR field review. Confidence is the model's certainty in
 // its own output, not accuracy, so these read as review flags rather than scores.
@@ -203,14 +232,28 @@
 
 // ---------------------------------------------------------------- primary navigation
 
+// One set of header measurements shared by the top bar, the sidebar brand row and
+// the collapse toggle, so they never drift apart at any breakpoint.
+:root {
+  --crms-header-offset: 1rem;
+  --crms-header-height: 4rem;
+  --crms-header-band: calc(var(--crms-header-offset) + var(--crms-header-height));
+  --crms-toggle-size: 2.375rem;
+}
+
 #layout-menu {
   background: #fff !important;
   border-inline-end: 1px solid var(--bs-border-color);
   box-shadow: none !important;
 
+  // The brand row mirrors the detached top bar: same top offset, same height,
+  // so the logo, the collapse toggle and the bar's content share one centreline
+  // and the divider lines up with the bar's bottom edge.
   .sidebar-brand {
-    min-block-size: 4.75rem;
-    padding: .75rem 1.25rem;
+    box-sizing: border-box;
+    block-size: var(--crms-header-band);
+    min-block-size: var(--crms-header-band);
+    padding: var(--crms-header-offset) 1.25rem 0;
   }
 
   .sidebar-brand__link {
@@ -326,16 +369,83 @@
   }
 }
 
+#layout-navbar.navbar-detached {
+  margin-block-start: var(--crms-header-offset);
+}
+
+#layout-navbar.navbar-detached.bg-navbar-theme {
+  box-sizing: border-box;
+  block-size: var(--crms-header-height);
+  // The collapse toggle straddles the sidebar edge and reaches 1rem into the bar,
+  // so the content starts clear of it at every width.
+  padding-inline: calc(var(--crms-toggle-size) / 2 + .75rem) 1.25rem !important;
+
+  .navbar-nav-right {
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 1rem;
+    min-inline-size: 0;
+    block-size: 100%;
+  }
+
+  // Search: icon and field share one centreline and the field fills the space
+  // up to the avatar.
+  .navbar-nav-right > .navbar-nav:first-child {
+    flex: 1 1 auto;
+    flex-direction: row;
+    min-inline-size: 0;
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  form[role='search'] {
+    flex: 1 1 auto;
+    inline-size: 100%;
+    align-items: center;
+    gap: .5rem;
+    min-inline-size: 0;
+    max-inline-size: 32rem;
+    margin: 0;
+
+    .icon-base {
+      flex: 0 0 auto;
+      color: var(--bs-secondary-color);
+      font-size: 1.25rem;
+      line-height: 1;
+    }
+
+    .form-control {
+      flex: 1 1 auto;
+      min-inline-size: 0;
+      block-size: 2.5rem;
+      padding-block: 0;
+      padding-inline: 0 !important;
+      background: transparent;
+      line-height: 2.5rem;
+    }
+  }
+
+  .navbar-nav-right > .navbar-nav.ms-auto {
+    flex: 0 0 auto;
+    align-items: center;
+    margin-inline-start: auto !important;
+  }
+
+  .avatar {
+    display: block;
+  }
+}
+
 .global-sidebar-toggle {
   position: fixed;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   z-index: 1090;
-  inset-block-start: 1.375rem;
+  inset-block-start: calc(var(--crms-header-offset) + (var(--crms-header-height) - var(--crms-toggle-size)) / 2);
   inset-inline-start: calc(var(--bs-menu-width) - 1rem);
-  inline-size: 2.375rem;
-  block-size: 2.375rem;
+  inline-size: var(--crms-toggle-size);
+  block-size: var(--crms-toggle-size);
   padding: 0;
   color: var(--bs-secondary-color);
   background-color: #fff;
@@ -378,6 +488,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 // the same 2.375rem icon centerline, so the navigation never shifts laterally.
 @media (min-width: 1200px) {
   html {
+    --bs-menu-width: 16.25rem;
     --bs-menu-collapsed-width: 4.75rem;
   }
 
@@ -388,6 +499,16 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
     .layout-page {
       transition: padding-inline-start .3s cubic-bezier(.4, 0, .2, 1) !important;
+    }
+  }
+
+  html.layout-menu-fixed-offcanvas:not(.layout-menu-collapsed) {
+    #layout-menu {
+      inline-size: var(--bs-menu-width);
+    }
+
+    .layout-page {
+      padding-inline-start: var(--bs-menu-width);
     }
   }
 
@@ -417,7 +538,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
     #layout-menu .app-brand {
       justify-content: flex-start;
-      min-block-size: 4.75rem;
       padding-inline: 1.25rem;
     }
 
@@ -592,12 +712,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   .global-sidebar-toggle {
     z-index: 1110;
-    inset-block-start: 1.375rem;
     inset-inline-start: calc(var(--bs-menu-collapsed-width) - 1rem);
-  }
-
-  #layout-navbar {
-    padding-inline-start: 2rem !important;
   }
 
   html.layout-menu-expanded .global-sidebar-toggle {
@@ -914,14 +1029,14 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   grid-template-columns: minmax(12rem, 1fr) minmax(20rem, 30rem) minmax(6rem, 1fr);
   align-items: center;
   gap: 1rem;
-  min-block-size: 4.5rem;
-  margin-block: .75rem 0;
+  min-block-size: var(--crms-header-height);
+  margin-block: var(--crms-header-offset) 0;
   padding: .5rem .75rem .5rem 2rem;
   background: #fff;
   border: 1px solid var(--bs-border-color);
   border-radius: .5rem;
   box-shadow: 0 .125rem .375rem rgba(67, 89, 113, .08);
-  inset-block-start: .75rem;
+  inset-block-start: var(--crms-header-offset);
 }
 
 .document-workspace-topbar__context {
@@ -4925,7 +5040,13 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .dashboard-panel--quality {
   > .card-header {
-    gap: .65rem 1rem;
+    padding-block: .65rem .35rem !important;
+    padding-inline: 1.15rem !important;
+    gap: .5rem 1rem;
+  }
+
+  > .card-body {
+    padding: .35rem 1.15rem .75rem !important;
   }
 
   .dashboard-panel__heading {
@@ -4975,6 +5096,16 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   block-size: 2.5rem;
   border-radius: .625rem;
   font-size: 1.25rem;
+}
+
+.dashboard-kpi__mini-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  border-radius: .375rem;
+  font-size: .95rem;
 }
 
 .dashboard-kpi__label {
@@ -5162,15 +5293,273 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .dashboard-chart--donut,
+.dashboard-chart--bars,
+.dashboard-chart--radar,
 .dashboard-chart--throughput {
   min-block-size: 0;
 }
 
-.dashboard-chart--donut {
+.dashboard-chart--donut,
+.dashboard-chart--bars,
+.dashboard-chart--radar {
   inline-size: 100%;
 
   .apexcharts-canvas {
     margin-inline: auto;
+  }
+}
+
+.dashboard-kpi--combined {
+  > .card-body {
+    min-block-size: 0 !important;
+    padding: .75rem 1.15rem !important;
+  }
+
+  // Each half takes an equal share of the card: header on top, the number
+  // and its visual centred in the space below, so a tall row has no gaps.
+  .dashboard-kpi-subcard {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    text-decoration: none;
+    border-radius: .5rem;
+    min-inline-size: 0;
+
+    // Header row: the title may shorten with an ellipsis, the badge never does,
+    // so the two can no longer run into each other on a narrow card.
+    > :first-child {
+      gap: .5rem;
+      min-inline-size: 0;
+
+      > :first-child {
+        flex: 1 1 auto;
+        min-inline-size: 0;
+      }
+
+      > .badge {
+        flex: 0 0 auto;
+      }
+    }
+
+    // Number row: wraps under the figure when the card cannot fit both side by
+    // side, instead of letting the visual overlap the figure's caption.
+    > :last-child {
+      flex: 1 1 auto;
+      flex-wrap: wrap;
+      align-items: center !important;
+      gap: .5rem .75rem;
+      margin-block-start: .5rem !important;
+
+      > .dashboard-kpi__metric {
+        flex: 1 1 7rem;
+      }
+
+      > .ms-2 {
+        margin-inline-start: auto !important;
+      }
+    }
+  }
+
+  // Titles wrap rather than being cut to an ellipsis on narrow cards.
+  .dashboard-kpi__label {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    line-height: 1.25;
+    font-size: .875rem;
+    color: var(--bs-heading-color);
+  }
+
+  .dashboard-kpi__value {
+    display: block;
+    font-size: 2.25rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    letter-spacing: -.03em;
+    line-height: 1;
+    margin-block-end: 0;
+  }
+
+  .dashboard-kpi__meta {
+    display: block;
+    font-size: .75rem;
+    line-height: 1.3;
+    margin-block-start: .35rem;
+  }
+
+  .dashboard-kpi__sparkline {
+    inline-size: min(8.5rem, 100%);
+    block-size: 3rem;
+    margin-block: 0;
+  }
+
+  .dashboard-kpi__health {
+    inline-size: min(8.5rem, 100%);
+    gap: .4rem;
+  }
+
+  .dashboard-kpi__health-label {
+    font-size: .75rem;
+  }
+
+  .dashboard-kpi__health-details {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    font-size: .75rem;
+    gap: .15rem .6rem;
+    margin-block-start: .35rem;
+  }
+
+  .dashboard-kpi__health-track {
+    block-size: .5rem;
+    margin-block: 0;
+  }
+
+  .dashboard-kpi__health-rate {
+    font-size: .875rem;
+  }
+
+  .dashboard-kpi__divider {
+    flex: 0 0 auto;
+    inline-size: 100%;
+    block-size: 1px;
+    background-color: rgba(67, 89, 113, .08);
+    margin-block: .75rem;
+  }
+}
+
+.dashboard-panel--quality {
+  // Gauge centred in the free space, chips pinned to the bottom edge.
+  > .card-body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .dashboard-quality {
+    display: flex !important;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: center !important;
+    gap: .6rem !important;
+    min-inline-size: 0;
+  }
+
+  // A fixed square keeps the ring and the centre label on the same centre.
+  .dashboard-quality__visual {
+    flex: 0 0 auto;
+    margin-block: auto;
+    inline-size: 13rem !important;
+    max-inline-size: 100%;
+    block-size: 13rem !important;
+  }
+
+  .dashboard-chart--radial {
+    inline-size: 13rem !important;
+    max-inline-size: 100%;
+    min-block-size: 13rem !important;
+    block-size: 13rem !important;
+    margin: 0 !important;
+
+    .apexcharts-canvas {
+      margin: 0 auto;
+    }
+  }
+
+  .dashboard-quality__center {
+    inline-size: 6.5rem !important;
+    block-size: 6.5rem !important;
+    padding: .35rem !important;
+
+    span {
+      font-size: .625rem !important;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    strong {
+      font-size: 1.65rem !important;
+    }
+  }
+
+}
+
+// Chip row shared by OCR Quality and OCR Performance. Both cards pin it to
+// the bottom edge, so the two rows sit on one line across the top row.
+.dashboard-panel--quality,
+.dashboard-panel--performance {
+  .dashboard-quality__chips {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: .4rem;
+    min-inline-size: 0;
+    margin-block-start: auto;
+  }
+
+  .dashboard-quality__chip {
+    max-inline-size: 100%;
+    min-inline-size: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    padding: .2rem .55rem;
+    color: var(--bs-secondary-color);
+    background: rgba(67, 89, 113, .05);
+    border-radius: 50rem;
+    font-size: .75rem;
+    line-height: 1.3;
+    white-space: nowrap;
+
+    strong {
+      min-inline-size: 0;
+      color: var(--bs-heading-color);
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+
+    i {
+      font-size: .9rem;
+    }
+  }
+
+  .dashboard-quality__dot {
+    flex: 0 0 auto;
+    inline-size: .5rem;
+    block-size: .5rem;
+    box-shadow: none;
+  }
+}
+
+.dashboard-panel--performance {
+  > .card-header {
+    padding-block: .65rem .35rem !important;
+    padding-inline: 1.15rem !important;
+  }
+
+  > .card-body {
+    padding: .25rem 1.15rem .75rem !important;
+  }
+
+  .dashboard-chart--radar {
+    flex: 0 0 auto;
+    min-inline-size: 0;
+    min-block-size: 240px !important;
+    block-size: 240px !important;
+    margin-block: auto .6rem;
+  }
+}
+
+.dashboard-page {
+  // The top bar is also a .container-xxl; it keeps its own detached width
+  // (viewport minus gutters) and only shares the wider cap with the content.
+  .content-wrapper > .container-xxl {
+    max-inline-size: 1720px;
+    inline-size: 100%;
+  }
+
+  #layout-navbar.navbar-detached.container-xxl {
+    max-inline-size: calc(1720px - 3rem);
   }
 }
 
@@ -5345,13 +5734,51 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-radius: .75rem;
 }
 
+// The bar chart keeps a fixed row height per type (see renderDocumentTypes)
+// and sits centred in whatever height the row gives the panel.
+.dashboard-panel--types {
+  > .dashboard-panel__body {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.dashboard-types-sneat {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: .75rem;
+  min-block-size: 0;
+}
+
+.dashboard-types__total {
+  display: flex;
+  align-items: baseline;
+  gap: .45rem;
+
+  strong {
+    color: var(--bs-heading-color);
+    font-size: 2.25rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    letter-spacing: -.03em;
+    line-height: 1;
+  }
+
+  > span:not(.badge) {
+    color: var(--bs-secondary-color);
+    font-size: .875rem;
+  }
+
+  .badge {
+    align-self: center;
+  }
+}
+
 .dashboard-types__chart-shell {
-  position: relative;
-  display: grid;
-  min-block-size: 14.25rem;
-  overflow: hidden;
-  place-items: center;
-  isolation: isolate;
+  flex: 0 0 auto;
+  min-inline-size: 0;
+  margin-block: auto;
 }
 
 .dashboard-types__center {
@@ -5383,87 +5810,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.dashboard-types__details {
-  min-inline-size: 0;
-}
-
-.dashboard-type-slices {
-  display: grid;
-  gap: .85rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.dashboard-type-slices__row {
-  min-inline-size: 0;
-}
-
-.dashboard-type-slices__line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .75rem;
-  min-inline-size: 0;
-}
-
-.dashboard-type-slices__name {
-  display: inline-flex;
-  align-items: center;
-  gap: .55rem;
-  min-inline-size: 0;
-  color: var(--bs-heading-color);
-  font-size: .8125rem;
-  font-weight: 600;
-}
-
-.dashboard-type-slices__metrics {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: .45rem;
-  font-variant-numeric: tabular-nums;
-
-  strong {
-    color: var(--bs-heading-color);
-    font-size: .875rem;
-    font-weight: 700;
-  }
-}
-
-.dashboard-type-slices__share {
-  min-inline-size: 3.25rem;
-  padding: .12rem .4rem;
-  color: var(--bs-secondary-color);
-  background: rgba(67, 89, 113, .07);
-  border-radius: 999px;
-  font-size: .6875rem;
-  font-weight: 600;
-  text-align: center;
-}
-
-.dashboard-type-slices__track {
-  overflow: hidden;
-  block-size: .22rem;
-  margin-block-start: .4rem;
-  background: rgba(67, 89, 113, .08);
-  border-radius: 999px;
-
-  span {
-    display: block;
-    inline-size: var(--dashboard-type-share, 0%);
-    block-size: 100%;
-    background: var(--dashboard-type-color, var(--bs-primary));
-    border-radius: inherit;
-  }
-}
-
 .dashboard-types__inactive {
   display: flex;
   align-items: center;
   gap: .4rem;
-  margin-block-start: 1rem;
-  padding-block-start: .75rem;
+  padding-block-start: .65rem;
   color: var(--bs-secondary-color);
   border-block-start: 1px solid rgba(67, 89, 113, .09);
   font-size: .6875rem;
@@ -5977,6 +6328,21 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     inline-size: 2rem;
     block-size: 2rem;
   }
+
+  // On a phone, names wrap instead of being cut down to a few letters.
+  .dashboard-contributor__name,
+  .dashboard-contributor__identity small {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .dashboard-throughput-summary dt {
+    overflow: visible;
+    text-overflow: clip;
+  }
+
 }
 
 @media (max-width: 359.98px) {
@@ -6007,12 +6373,98 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// ---------------------------------------------------------- dashboard motion
+// Cards rise in one after another (--dashboard-reveal is each card's place
+// in reading order). `backwards` holds the start state during the delay and
+// then lets go, so no finished card keeps a transform or stacking context
+// that would trap a period menu underneath its neighbour.
+$dashboard-ease: cubic-bezier(.22, .61, .36, 1);
+$dashboard-reveal-step: 40ms;
+
+.dashboard-reveal {
+  animation: dashboard-card-in .3s $dashboard-ease backwards;
+  animation-delay: calc(var(--dashboard-reveal, 0) * #{$dashboard-reveal-step});
+}
+
+@keyframes dashboard-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(.75rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+// A panel swapped in after a period change fades up in place.
+.dashboard-panel--refreshed {
+  animation: dashboard-panel-refresh .25s $dashboard-ease backwards;
+}
+
+@keyframes dashboard-panel-refresh {
+  from {
+    opacity: .35;
+  }
+}
+
+// The sparkline draws left to right once its card has arrived.
+.dashboard-reveal .dashboard-kpi__sparkline {
+  animation: dashboard-sparkline-in .55s $dashboard-ease backwards;
+  animation-delay: calc(var(--dashboard-reveal, 0) * #{$dashboard-reveal-step} + 150ms);
+}
+
+@keyframes dashboard-sparkline-in {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+// The availability bar fills to its value.
+.dashboard-reveal .dashboard-kpi__health-track span {
+  animation: dashboard-track-in .55s $dashboard-ease backwards;
+  animation-delay: calc(var(--dashboard-reveal, 0) * #{$dashboard-reveal-step} + 180ms);
+}
+
+@keyframes dashboard-track-in {
+  from {
+    inline-size: 0;
+  }
+}
+
+// Chips and the inactive-type note settle in after their chart.
+.dashboard-reveal .dashboard-quality__chips,
+.dashboard-reveal .dashboard-types__inactive {
+  animation: dashboard-fade-in .25s $dashboard-ease backwards;
+  animation-delay: calc(var(--dashboard-reveal, 0) * #{$dashboard-reveal-step} + 400ms);
+}
+
+@keyframes dashboard-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dashboard-kpi,
   .dashboard-panel--loading,
   .dashboard-chart-data > summary,
   .dashboard-chart-data__chevron {
     transition: none;
+  }
+
+  .dashboard-reveal,
+  .dashboard-panel--refreshed,
+  .dashboard-reveal .dashboard-kpi__sparkline,
+  .dashboard-reveal .dashboard-kpi__health-track span,
+  .dashboard-reveal .dashboard-quality__chips,
+  .dashboard-reveal .dashboard-types__inactive {
+    animation: none;
   }
 
   .dashboard-kpi[href]:hover,

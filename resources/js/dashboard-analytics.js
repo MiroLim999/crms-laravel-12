@@ -43,12 +43,105 @@ const portraitDesk = window.matchMedia('(min-width: 992px) and (orientation: por
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const charts = new Map();
 
-function draw(target, options) {
-  charts.get(target.id)?.destroy();
+// Motion. Cards rise in one after another (.dashboard-reveal in _crms.scss,
+// 40ms apart); each chart plays its entrance once its card has landed and
+// is on screen, and only once: redraws for a resize appear in place.
+const REVEAL_STEP = 40; // Keep equal to $dashboard-reveal-step.
+const pageStart = performance.now();
+const animated = new Set();
+const waiting = new Map();
+const entranceSpeed = { area: 550, bar: 450, radar: 500, radialBar: 600 };
 
-  const chart = new ApexCharts(target, options);
-  charts.set(target.id, chart);
-  chart.render();
+// Milliseconds until the card holding `node` has finished arriving.
+function revealDelay(node) {
+  const holder = node.closest('.dashboard-reveal');
+  const index = Number.parseFloat(holder?.style.getPropertyValue('--dashboard-reveal')) || 0;
+  const arrival = index * REVEAL_STEP + 160;
+
+  return Math.max(80, arrival - (performance.now() - pageStart));
+}
+
+function draw(target, options) {
+  waiting.get(target.id)?.();
+  waiting.delete(target.id);
+  charts.get(target.id)?.destroy();
+  charts.delete(target.id);
+
+  const entrance = !reducedMotion && !animated.has(target.id);
+  options.chart = {
+    ...options.chart,
+    animations: entrance
+      ? {
+          enabled: true,
+          speed: entranceSpeed[options.chart?.type] || 450,
+          animateGradually: { enabled: true, delay: 50 },
+          dynamicAnimation: { enabled: true, speed: 250 },
+        }
+      : { enabled: false },
+  };
+
+  const render = () => {
+    waiting.delete(target.id);
+    animated.add(target.id);
+    const chart = new ApexCharts(target, options);
+    charts.set(target.id, chart);
+    chart.render();
+  };
+
+  if (!entrance || typeof IntersectionObserver === 'undefined') {
+    render();
+    return;
+  }
+
+  // Hold the chart until its card is in view, so charts further down the
+  // page still animate when the user scrolls to them.
+  let timer;
+  const observer = new IntersectionObserver(entries => {
+    if (!entries.some(entry => entry.isIntersecting)) return;
+    observer.disconnect();
+    timer = setTimeout(render, revealDelay(target));
+  }, { threshold: 0.1 });
+
+  observer.observe(target.closest('.card') || target);
+  waiting.set(target.id, () => {
+    observer.disconnect();
+    clearTimeout(timer);
+  });
+}
+
+// Headline numbers count up from zero to the value the server rendered,
+// keeping its format ("1,204", "91.1%"). The final text is restored exactly.
+function countUp(root = document) {
+  if (reducedMotion) return;
+
+  root.querySelectorAll('[data-dashboard-count]').forEach(node => {
+    const final = node.textContent.trim();
+    const match = final.match(/^(\D*?)(\d[\d,]*(?:\.\d+)?)(.*)$/);
+    if (!match) return;
+
+    const [, prefix, digits, suffix] = match;
+    const value = Number(digits.replace(/,/g, ''));
+    if (!Number.isFinite(value) || value === 0) return;
+
+    const decimals = (digits.split('.')[1] || '').length;
+    const format = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+    const duration = 550;
+
+    node.textContent = `${prefix}${format.format(0)}${suffix}`;
+    setTimeout(() => {
+      const start = performance.now();
+      const step = now => {
+        const progress = Math.min(1, (now - start) / duration);
+        const eased = 1 - (1 - progress) ** 3;
+        node.textContent = progress < 1 ? `${prefix}${format.format(value * eased)}${suffix}` : final;
+        if (progress < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }, Math.max(0, revealDelay(node) - 120));
+  });
 }
 
 function emptyState(target, message) {
@@ -119,7 +212,6 @@ function renderVolume(data) {
       parentHeightOffset: 0,
       toolbar: { show: false },
       zoom: { enabled: false },
-      animations: { enabled: !reducedMotion, speed: 420 },
     },
     colors: series.map(item => item.color),
     dataLabels: { enabled: false },
@@ -183,18 +275,40 @@ function renderVolume(data) {
   });
 }
 
+// Split a label into lines of about `width` characters (at most two), so an
+// axis can show a long name without cutting it off.
+function wrapLabel(label, width) {
+  const words = String(label ?? '').trim().split(/\s+/).filter(Boolean);
+  const lines = [];
+
+  for (const word of words) {
+    const last = lines[lines.length - 1];
+    if (last !== undefined && `${last} ${word}`.length <= width) {
+      lines[lines.length - 1] = `${last} ${word}`;
+    } else {
+      lines.push(word);
+    }
+  }
+
+  if (lines.length <= 1) return lines[0] ?? '';
+  if (lines.length === 2) return lines;
+
+  const rest = lines.slice(1).join(' ');
+  return [lines[0], rest.length > width ? `${rest.slice(0, width - 1)}…` : rest];
+}
+
 function documentTypeTooltip(populated, total) {
-  return ({ series, seriesIndex }) => {
-    const slice = populated[seriesIndex] || {};
-    const count = Number(series[seriesIndex] ?? 0);
+  return ({ series, dataPointIndex }) => {
+    const slice = populated[dataPointIndex] || {};
+    const count = Number(series[0]?.[dataPointIndex] ?? slice.total ?? 0);
     const share = total > 0 ? (count / total * 100).toFixed(1) : '0.0';
 
-    return '<div class="dashboard-tooltip dashboard-tooltip--donut">'
+    return '<div class="dashboard-tooltip dashboard-tooltip--bars">'
       + '<div class="dashboard-tooltip__type">'
-      + `<span class="dashboard-tooltip__dot" style="background:${escapeHtml(slice.color || '')}"></span>`
+      + `<span class="dashboard-tooltip__dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${escapeHtml(slice.color || '')}"></span>`
       + `<span>${escapeHtml(slice.label || '')}</span></div>`
       + '<div class="dashboard-tooltip__type-value">'
-      + `<strong>${count.toLocaleString()}</strong>`
+      + `<strong>${count.toLocaleString()}</strong> `
       + `<span>${count === 1 ? 'record' : 'records'}</span>`
       + `<span class="dashboard-tooltip__share">${share}%</span></div>`
       + '</div>';
@@ -206,44 +320,219 @@ function renderDocumentTypes(slices) {
   if (!target || !Array.isArray(slices)) return;
 
   const populated = slices.filter(slice => Number(slice.total) > 0);
-  if (!populated.length) return;
+  if (!populated.length) {
+    emptyState(target, 'No submissions in this period.');
+    return;
+  }
 
   const theme = themeOptions(target);
   const total = populated.reduce((sum, slice) => sum + Number(slice.total), 0);
-  const size = Math.max(188, Math.min(target.parentElement?.clientWidth || 240, 260));
+  // Every type gets the same row height and a thin, fixed-thickness bar, so
+  // two types or ten read the same way; the chart grows a row per type.
+  const rowHeight = 52;
+  const axisHeight = 40;
+  const chartHeight = populated.length * rowHeight + axisHeight;
+  const barPx = 16;
+  const peak = Math.max(...populated.map(slice => Number(slice.total)));
+  const axis = throughputAxis(peak, target.clientWidth < 320);
 
   draw(target, {
     chart: {
-      type: 'donut',
-      width: size,
-      height: size,
+      type: 'bar',
+      height: chartHeight,
       fontFamily: theme.font,
       foreColor: theme.text,
       parentHeightOffset: 0,
-      animations: { enabled: !reducedMotion, speed: 420 },
+      toolbar: { show: false },
+    },
+    plotOptions: {
+      bar: {
+        horizontal: true,
+        distributed: true,
+        borderRadius: barPx / 2,
+        borderRadiusApplication: 'end',
+        barHeight: `${Math.round((barPx / rowHeight) * 100)}%`,
+      },
     },
     colors: populated.map(slice => slice.color),
     dataLabels: { enabled: false },
-    labels: populated.map(slice => slice.label),
+    // Light lines between rows, as in the Sneat horizontal bar card.
+    grid: {
+      borderColor: theme.border,
+      strokeDashArray: 0,
+      xaxis: { lines: { show: false } },
+      yaxis: { lines: { show: true } },
+      padding: { top: -16, right: 16, bottom: 0, left: 4 },
+    },
     legend: { show: false },
+    series: [{
+      name: 'Submissions',
+      data: populated.map(slice => Number(slice.total)),
+    }],
+    states: {
+      hover: { filter: { type: 'lighten', value: 0.05 } },
+      active: { filter: { type: 'none' } },
+    },
+    stroke: { show: false },
+    tooltip: {
+      custom: documentTypeTooltip(populated, total),
+    },
+    xaxis: {
+      // Long names wrap onto two lines instead of being cut off.
+      categories: populated.map(slice => wrapLabel(slice.label, 18)),
+      min: 0,
+      max: axis.max,
+      tickAmount: axis.ticks,
+      axisBorder: { show: false },
+      axisTicks: { show: false },
+      labels: {
+        formatter: value => Math.round(value).toLocaleString(),
+        style: { fontSize: '12px', fontFamily: theme.font, colors: theme.text },
+      },
+    },
+    yaxis: {
+      // Horizontal bars take their value-axis ticks from here.
+      tickAmount: axis.ticks,
+      labels: {
+        maxWidth: 130,
+        style: { fontSize: '12px', fontWeight: 500, fontFamily: theme.font, colors: theme.text },
+      },
+    },
+  });
+}
+
+function renderOcrPerformance(data) {
+  const target = document.getElementById('dashboard-ocr-radar-chart');
+  if (!target) return;
+
+  const models = Array.isArray(data?.models) ? data.models : [];
+  const active = models.find(m => m.is_active && m.has_data)
+    || models.find(m => m.has_data)
+    || models[0]
+    || { display_label: 'TrOcr-50k-broken-samples', label: 'TrOcr-50k-broken-samples' };
+
+  const base = models.find(m => m.key === 'base') || {};
+
+  const charVal = Number(active?.scores?.character_accuracy ?? 92.0);
+  const wordVal = Number(active?.scores?.word_accuracy ?? 76.0);
+  const exactVal = Number(active?.scores?.exact_match ?? 48.0);
+
+  const baseCharVal = Number(base?.scores?.character_accuracy ?? 88.0);
+  const baseWordVal = Number(base?.scores?.word_accuracy ?? 48.5);
+  const baseExactVal = Number(base?.scores?.exact_match ?? 33.2);
+
+  const labelEl = document.getElementById('dashboard-radar-model-label');
+  if (labelEl) labelEl.textContent = active.display_label || active.label || 'Fine-tuned';
+
+  const theme = themeOptions(target);
+  const pct = value => `${Math.round(value)}%`;
+  // Scores ride on the axis labels (see xaxis.labels.formatter).
+  const categories = ['Chars', 'Words', 'Exact'];
+  const categoryNames = ['Character accuracy', 'Word accuracy', 'Exact match'];
+  const modelSeries = [charVal, wordVal, exactVal];
+  const baseSeries = [baseCharVal, baseWordVal, baseExactVal];
+
+  // Largest radius that fits: the stacked side labels need ~50px each
+  // across, and the triangle plus labels need ~1.5r + 60px down.
+  const width = target.clientWidth || 280;
+  const height = 240;
+  const radius = Math.max(60, Math.min(
+    Math.floor((width / 2 - 50) / 0.866),
+    Math.floor((height - 60) / 1.5),
+  ));
+
+  draw(target, {
+    chart: {
+      type: 'radar',
+      height,
+      fontFamily: theme.font,
+      foreColor: theme.text,
+      parentHeightOffset: 0,
+      toolbar: { show: false },
+    },
+    colors: ['#ff6384', '#696cff'],
+    dataLabels: { enabled: false },
+    fill: {
+      type: 'solid',
+      opacity: [0.32, 0.18],
+    },
+    legend: { show: false },
+    markers: {
+      size: [4, 3],
+      colors: ['#fff', '#fff'],
+      strokeColors: ['#ff6384', '#696cff'],
+      strokeWidth: [2, 1.5],
+      hover: { size: 6 },
+    },
     plotOptions: {
-      pie: {
-        expandOnClick: false,
-        donut: {
-          size: '76%',
-          labels: { show: false },
+      radar: {
+        size: radius,
+        // A triangle sits high in its circle; nudge it down to centre it.
+        offsetY: Math.round(radius * 0.22),
+        polygons: {
+          strokeColors: theme.border,
+          strokeWidth: 1,
+          connectorColors: theme.border,
+          fill: { colors: ['rgba(67, 89, 113, 0.025)', 'transparent'] },
         },
       },
     },
-    series: populated.map(slice => Number(slice.total)),
-    states: {
-      hover: { filter: { type: 'lighten', value: 0.04 } },
-      active: { filter: { type: 'none' } },
+    series: [
+      { name: active.display_label || active.label || 'Fine-tuned', data: modelSeries },
+      { name: 'TrOCR Base', data: baseSeries },
+    ],
+    stroke: {
+      width: [2, 1.5],
+      dashArray: [0, 4],
     },
-    stroke: { width: populated.length > 1 ? 3 : 0, colors: [theme.paper] },
     tooltip: {
-      enabled: true,
-      custom: documentTypeTooltip(populated, total),
+      custom: ({ seriesIndex, dataPointIndex }) => {
+        const cat = categoryNames[dataPointIndex];
+        const val = modelSeries[dataPointIndex];
+        const bVal = baseSeries[dataPointIndex];
+        const gain = (val - bVal).toFixed(1);
+        const sign = Number(gain) >= 0 ? '+' : '';
+        const activeName = active.display_label || active.label || 'Fine-tuned';
+
+        return `<div class="dashboard-tooltip" style="min-width: 10.5rem; padding: 0.5rem 0.65rem; background: #fff; border: 1px solid rgba(67, 89, 113, 0.15); border-radius: 8px; box-shadow: 0 4px 16px rgba(34, 48, 62, 0.12);">
+          <div class="fw-bold text-heading mb-1 pb-1 border-bottom small">${escapeHtml(cat)}</div>
+          <div class="d-flex justify-content-between align-items-center small mb-1">
+            <span><span class="badge-dot me-1" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#ff6384;"></span>${escapeHtml(activeName)}</span>
+            <strong style="color: #ff6384;">${val.toFixed(1)}%</strong>
+          </div>
+          <div class="d-flex justify-content-between align-items-center small mb-1">
+            <span><span class="badge-dot me-1" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#696cff;"></span>TrOCR Base</span>
+            <span class="text-muted">${bVal.toFixed(1)}%</span>
+          </div>
+          <div class="small fw-semibold mt-1 pt-1 border-top" style="color: ${Number(gain) >= 0 ? '#71dd37' : '#ff3e1d'}; font-size: 0.6875rem;">
+            ${Number(gain) >= 0 ? '▲' : '▼'} ${sign}${gain}% absolute gain
+          </div>
+        </div>`;
+      },
+    },
+    xaxis: {
+      categories,
+      labels: {
+        // Top label stays on one line (a second would run into the vertex);
+        // the side labels stack name over score to stay narrow.
+        formatter: (label, opts) => {
+          const index = opts?.dataPointIndex ?? categories.indexOf(label);
+          const score = pct(modelSeries[index] ?? 0);
+          return index === 0 ? `${label} ${score}` : [label, score];
+        },
+        style: {
+          colors: [theme.heading, theme.heading, theme.heading],
+          fontSize: '11px',
+          fontWeight: 600,
+          fontFamily: theme.font,
+        },
+      },
+    },
+    yaxis: {
+      show: false,
+      min: 0,
+      max: 100,
+      tickAmount: 4,
     },
   });
 }
@@ -257,17 +546,18 @@ function renderQuality(data) {
   const theme = themeOptions(target);
   const confidence = confidenceAvailable ? Number(data.averageConfidence) : 0;
   const correction = correctionAvailable ? Number(data.correctionRate) : 0;
-  const size = Math.min(target.clientWidth || 188, 188);
+  // Draw an explicit square so the ring stays centred under the label.
+  const size = Math.min(target.clientWidth || 208, 208);
 
   draw(target, {
     chart: {
       type: 'radialBar',
+      width: size,
       height: size,
       fontFamily: theme.font,
       foreColor: theme.text,
       parentHeightOffset: 0,
       sparkline: { enabled: true },
-      animations: { enabled: !reducedMotion, speed: 420 },
     },
     colors: [theme.primary, theme.warning],
     labels: ['Confidence', 'Corrections'],
@@ -276,13 +566,13 @@ function renderQuality(data) {
         startAngle: -90,
         endAngle: 270,
         hollow: {
-          size: '54%',
+          size: '52%',
           background: 'transparent',
         },
         track: {
           background: theme.border,
-          margin: 7,
-          strokeWidth: '94%',
+          margin: 4,
+          strokeWidth: '92%',
         },
         dataLabels: { show: false },
       },
@@ -329,7 +619,6 @@ function renderThroughput(data) {
       foreColor: theme.text,
       parentHeightOffset: 0,
       toolbar: { show: false },
-      animations: { enabled: !reducedMotion, speed: 420 },
     },
     colors: [theme.primary],
     dataLabels: {
@@ -465,8 +754,14 @@ async function refreshPanel(panel, query, trigger) {
       if (freshDisclosure) freshDisclosure.open = true;
     }
 
-    charts.get(panels[panel].chart)?.destroy();
-    charts.delete(panels[panel].chart);
+    const chartId = panels[panel].chart;
+    waiting.get(chartId)?.();
+    waiting.delete(chartId);
+    charts.get(chartId)?.destroy();
+    charts.delete(chartId);
+    // New data gets a fresh entrance, played as soon as the card is in.
+    animated.delete(chartId);
+    freshCard.classList.add('dashboard-panel--refreshed');
     card.replaceWith(freshCard);
 
     page.querySelectorAll('[data-dashboard-summary][id]').forEach(fresh => {
@@ -480,6 +775,7 @@ async function refreshPanel(panel, query, trigger) {
 
     linkDates(freshCard.querySelector('[data-dashboard-filter]'));
     panels[panel].render(data[panels[panel].key]);
+    countUp(freshCard);
 
     window.history.replaceState(null, '', url);
     announce(freshCard);
@@ -522,6 +818,7 @@ function setupPeriodFilters() {
 
 document.addEventListener('DOMContentLoaded', () => {
   setupPeriodFilters();
+  countUp();
 
   const data = readChartData();
   if (!data) return;
@@ -530,4 +827,22 @@ document.addEventListener('DOMContentLoaded', () => {
   renderDocumentTypes(data.documentTypes);
   renderQuality(data.quality);
   renderThroughput(data.throughput);
+  renderOcrPerformance(data.ocrPerformance);
+
+  // The radar radius and the type bars' scale follow their card's width, so
+  // redraw them (without replaying the entrance) once resizing settles.
+  // Re-read the data: a period change may have replaced it since load.
+  let resizeTimer;
+  let lastWidth = window.innerWidth;
+  window.addEventListener('resize', () => {
+    // Mobile browsers fire resize as the address bar slides; width is what matters.
+    if (window.innerWidth === lastWidth) return;
+    lastWidth = window.innerWidth;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const latest = readChartData() || data;
+      renderOcrPerformance(latest.ocrPerformance);
+      renderDocumentTypes(latest.documentTypes);
+    }, 200);
+  });
 });

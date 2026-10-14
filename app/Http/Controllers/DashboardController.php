@@ -20,7 +20,10 @@ use Illuminate\View\View;
  */
 class DashboardController extends Controller
 {
-    public function __construct(private readonly DashboardAnalytics $analytics) {}
+    public function __construct(
+        private readonly DashboardAnalytics $analytics,
+        private readonly \App\Services\Ocr\OcrModelPerformance $ocrPerformance,
+    ) {}
 
     public function __invoke(Request $request): View
     {
@@ -28,6 +31,7 @@ class DashboardController extends Controller
         $scopes = null;
         $overview = null;
         $periodForms = null;
+        $modelPerformance = null;
 
         if ($user->hasOversight()) {
             $problems = new MessageBag;
@@ -44,6 +48,7 @@ class DashboardController extends Controller
 
             $scopes = array_map(fn (array $panelFilters) => $this->analytics->scope($panelFilters), $filters);
             $overview = $this->analytics->oversight($scopes);
+            $modelPerformance = $this->ocrPerformance->summary();
 
             // What each form shows: what was typed when it was rejected,
             // otherwise the period actually in use.
@@ -63,6 +68,7 @@ class DashboardController extends Controller
             'periodForms' => $periodForms,
             'scopes' => $scopes,
             'analytics' => $overview,
+            'modelPerformance' => $modelPerformance,
             'staffOverview' => $user->hasOversight() ? null : $this->analytics->staff($user),
             'recentActivity' => $user->hasOversight()
                 ? collect()
