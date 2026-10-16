@@ -123,6 +123,23 @@ UNEVEN_BAND = 0.20
 CROP_PADDING = 8
 CROP_FILL = "paper"
 
+# Kraken traces an outline around each line it finds, one line after another on
+# one CPU core: about 6.6 s of a 215-line register page. The outlines do not
+# depend on one another, so they are traced in this many helper processes
+# (LINE_MARKERS_WORKERS in Laravel's .env; 1 keeps Kraken's own single core).
+# Measured on page 133, i5-14500HX: 1 -> 6.6 s, 2 -> 4.1 s, 4 -> 2.3 s,
+# 6 -> 2.1 s, identical outlines each time. Threads do not help (5.3-6.2 s):
+# the work is mostly Python and holds the interpreter lock.
+OUTLINE_WORKERS = 4
+
+# Smaller pages (a cropped field, a few lines) are traced on one core: starting
+# the helpers would cost more than they save. Register pages are 1.4-1.6 MP.
+PARALLEL_MIN_PIXELS = 500_000
+
+# The traced-outline step is a copy of this Kraken release's blla.vec_lines
+# (see _vec_lines_in_parallel); any other release keeps Kraken's own.
+PARALLEL_KRAKEN = "7.1."
+
 
 # ============================================================ line detector
 
@@ -160,27 +177,46 @@ def kraken_lines(image, device=None):
     Runs on the GPU when there is one (see detector_device). If the GPU
     fails - out of memory while TrOCR holds it, a driver hiccup - the page is
     segmented again on the CPU rather than failing the scan.
+
+    The outlines are traced on several CPU cores (see outline_workers).
     """
     import warnings
 
     warnings.filterwarnings("ignore")
+    # Started before Kraken is even imported: each helper is a fresh Python
+    # that imports Kraken itself (2.5-3.5 s), and that overlaps with this
+    # process's own import and the network, so the page does not wait for it.
+    workers = outline_workers()
+    pool = _start_outline_pool(workers) if workers > 1 and _can_trace_in_parallel(image) else None
     try:
-        from kraken import blla
-    except ImportError as error:  # pragma: no cover - depends on the environment
-        raise RuntimeError(
-            "Kraken is not installed in this Python environment. "
-            "Run ml\\setup_kraken.ps1, or point LINE_MARKERS_PYTHON at ml\\.venv-kraken."
-        ) from error
+        try:
+            from kraken import blla
+        except ImportError as error:  # pragma: no cover - depends on the environment
+            raise RuntimeError(
+                "Kraken is not installed in this Python environment. "
+                "Run ml\\setup_kraken.ps1, or point LINE_MARKERS_PYTHON at ml\\.venv-kraken."
+            ) from error
 
-    device = detector_device(device)
-    try:
-        segmentation = blla.segment(image.convert("RGB"), device=device)
-    except RuntimeError as error:
-        if device == "cpu":
-            raise
-        print(f"[line_markers] GPU line detection failed ({error}); using the CPU.", file=sys.stderr)
-        device = "cpu (GPU failed)"
-        segmentation = blla.segment(image.convert("RGB"), device="cpu")
+        # segment() offers no way to pass its outline step, so its module
+        # global is swapped for the call and always put back.
+        kraken_vec_lines = blla.vec_lines
+        if pool is not None:
+            blla.vec_lines = _vec_lines_in_parallel(pool, workers)
+        try:
+            device = detector_device(device)
+            try:
+                segmentation = blla.segment(image.convert("RGB"), device=device)
+            except RuntimeError as error:
+                if device == "cpu":
+                    raise
+                print(f"[line_markers] GPU line detection failed ({error}); using the CPU.", file=sys.stderr)
+                device = "cpu (GPU failed)"
+                segmentation = blla.segment(image.convert("RGB"), device="cpu")
+        finally:
+            blla.vec_lines = kraken_vec_lines
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=False, cancel_futures=True)
     # Recorded in lines.json, so a page shows where its lines were found.
     kraken_lines.used_device = device
     lines = []
@@ -190,6 +226,114 @@ def kraken_lines(image, device=None):
         if len(baseline) >= 2 and len(boundary) >= 3:
             lines.append({"baseline": baseline, "boundary": boundary})
     return lines
+
+
+def outline_workers(requested=None):
+    """How many helper processes trace Kraken's outlines; 1 means none.
+
+    LINE_MARKERS_WORKERS chooses (OUTLINE_WORKERS when unset or unreadable),
+    capped at this machine's processor count."""
+    raw = requested if requested is not None else os.environ.get("LINE_MARKERS_WORKERS", "")
+    try:
+        workers = int(str(raw).strip()) if str(raw).strip() else OUTLINE_WORKERS
+    except ValueError:
+        workers = OUTLINE_WORKERS
+    return max(1, min(workers, os.cpu_count() or 1))
+
+
+def _can_trace_in_parallel(image):
+    """A page big enough to be worth the helpers, with the Kraken they were written for."""
+    if image.width * image.height < PARALLEL_MIN_PIXELS:
+        return False
+    try:
+        from importlib.metadata import version
+
+        return version("kraken").startswith(PARALLEL_KRAKEN)
+    except Exception:  # not installed: kraken_lines reports that itself
+        return False
+
+
+def _start_outline_pool(workers):
+    """Helper processes for tracing outlines, all of them starting now."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    pool = ProcessPoolExecutor(max_workers=workers)
+    # Helpers are started as work arrives; one import each starts them all
+    # at once, and leaves Kraken loaded in each for the real work.
+    for _ in range(workers):
+        pool.submit(_import_kraken_outlines)
+    return pool
+
+
+def _import_kraken_outlines():
+    import kraken.lib.segmentation  # noqa: F401
+
+
+def _outline_chunk(tasks, im_feats, topline, raise_on_error):
+    """Kraken's outline for each (baseline, boundaries) task, in order; None where it found none."""
+    from kraken.lib.segmentation import calculate_polygonal_environment
+
+    return [
+        calculate_polygonal_environment(baselines=[baseline], im_feats=im_feats, suppl_obj=others,
+                                        topline=topline, raise_on_error=raise_on_error)[0]
+        for baseline, others in tasks
+    ]
+
+
+def _trace_outlines(pool, workers, tasks, im_feats, topline, raise_on_error):
+    """_outline_chunk over all tasks, spread over the pool, in task order.
+
+    A few chunks per helper keeps them all busy to the end; the feature map
+    (about 35 MB on a register page) is sent once per chunk, not per line. If
+    the pool itself fails, the page is traced here on one core instead."""
+    size = max(1, math.ceil(len(tasks) / (workers * 3)))
+    chunks = [tasks[start:start + size] for start in range(0, len(tasks), size)]
+    try:
+        futures = [pool.submit(_outline_chunk, chunk, im_feats, topline, raise_on_error) for chunk in chunks]
+        return [polygon for future in futures for polygon in future.result()]
+    except Exception as error:
+        print(f"[line_markers] Tracing outlines in parallel failed ({error}); using one core.", file=sys.stderr)
+        return _outline_chunk(tasks, im_feats, topline, raise_on_error)
+
+
+def _vec_lines_in_parallel(pool, workers):
+    """Kraken 7.1's blla.vec_lines with the per-line outlines traced in `pool`.
+
+    A copy of kraken/blla.py's vec_lines (7.1.1) except for its loop over the
+    lines, so the baselines and outlines are Kraken's own: identical on page
+    133 with 2, 4 and 6 helpers. PARALLEL_KRAKEN keeps it to that release."""
+    import shapely.geometry as geom
+    from kraken.lib.segmentation import is_in_region, scale_polygonal_lines, vectorize_lines
+    from scipy.ndimage import gaussian_filter
+    from skimage.filters import sobel
+
+    def vec_lines(heatmap, cls_map, scale, text_direction="horizontal-lr", regions=None, scal_im=None,
+                  suppl_obj=None, topline=False, raise_on_error=False, **kwargs):
+        st_sep = cls_map["aux"]["_start_separator"]
+        end_sep = cls_map["aux"]["_end_separator"]
+        baselines = []
+        for bl_type, idx in cls_map["baselines"].items():
+            baselines.extend([(bl_type, x) for x in vectorize_lines(heatmap[(st_sep, end_sep, idx), :, :],
+                                                                    text_direction=text_direction[:-3])])
+        im_feats = gaussian_filter(sobel(scal_im), 0.5)
+
+        # Each line is bounded by every other baseline and by the regions it
+        # lies in, exactly as Kraken's loop builds them.
+        reg_pols = [geom.Polygon(x) for x in regions]
+        tasks = []
+        for bl_idx, (_, baseline) in enumerate(baselines):
+            bl_ls = geom.LineString(baseline)
+            others = [x[1] for x in baselines[:bl_idx] + baselines[bl_idx + 1:]]
+            others += [regions[i] for i, reg_pol in enumerate(reg_pols) if is_in_region(bl_ls, reg_pol)]
+            tasks.append((baseline, others))
+        polygons = _trace_outlines(pool, workers, tasks, im_feats, topline, raise_on_error)
+
+        lines = [(bl_type, bl, pol) for (bl_type, bl), pol in zip(baselines, polygons) if pol is not None]
+        sc = scale_polygonal_lines([x[1:] for x in lines], scale)
+        return [{"tags": {"type": [{"type": bl_type}]}, "baseline": bl, "boundary": pl}
+                for (bl_type, _, _), (bl, pl) in zip(lines, sc)]
+
+    return vec_lines
 
 
 def _image_key(page_path):

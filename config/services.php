@@ -90,6 +90,10 @@ return [
         // Where Kraken finds the lines: auto (the GPU when ml/.venv-kraken has
         // CUDA PyTorch and a card is present, else the CPU), cuda, or cpu.
         'device' => env('LINE_MARKERS_DEVICE', 'auto'),
+        // CPU cores that trace Kraken's line outlines at once (1 = one core,
+        // as Kraken does on its own). 4 takes a register page's outlines from
+        // about 6.6 s to 2.3 s; more barely helps.
+        'workers' => (int) env('LINE_MARKERS_WORKERS', 4),
         // Unsubmitted pages older than this are removed by documents:prune-pages.
         'keep_hours' => (int) env('LINE_MARKERS_KEEP_HOURS', 24),
     ],

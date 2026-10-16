@@ -745,5 +745,69 @@ class DetectorDeviceTest(unittest.TestCase):
         self.assertEqual(["cuda", "cpu"], calls)
 
 
+class OutlineWorkersTest(unittest.TestCase):
+    """Kraken's outlines traced on several cores, in order, and on one core if that fails."""
+
+    def test_the_setting_is_read_and_kept_sensible(self):
+        with unittest.mock.patch.object(lm.os, "cpu_count", return_value=8):
+            with unittest.mock.patch.dict(os.environ, {"LINE_MARKERS_WORKERS": ""}):
+                self.assertEqual(lm.OUTLINE_WORKERS, lm.outline_workers())
+            with unittest.mock.patch.dict(os.environ, {"LINE_MARKERS_WORKERS": "1"}):
+                self.assertEqual(1, lm.outline_workers())
+            self.assertEqual(1, lm.outline_workers("0"))
+            self.assertEqual(lm.OUTLINE_WORKERS, lm.outline_workers("many"))
+            self.assertEqual(8, lm.outline_workers("64"))
+
+    def test_small_pages_are_traced_on_one_core(self):
+        self.assertFalse(lm._can_trace_in_parallel(Image.new("RGB", (408, 428))))
+
+    def test_outlines_come_back_in_line_order(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        def chunk(tasks, im_feats, topline, raise_on_error):
+            return [f"outline {baseline}" for baseline, _ in tasks]
+
+        tasks = [(n, []) for n in range(23)]
+        with ThreadPoolExecutor(4) as pool, unittest.mock.patch.object(lm, "_outline_chunk", side_effect=chunk):
+            outlines = lm._trace_outlines(pool, 4, tasks, None, False, False)
+        self.assertEqual([f"outline {n}" for n in range(23)], outlines)
+
+    def test_a_broken_pool_traces_on_one_core(self):
+        from concurrent.futures.process import BrokenProcessPool
+
+        pool = unittest.mock.Mock()
+        pool.submit.side_effect = BrokenProcessPool("a helper died")
+        with unittest.mock.patch.object(lm, "_outline_chunk", return_value=["a", "b"]) as chunk:
+            outlines = lm._trace_outlines(pool, 4, [(0, []), (1, [])], None, False, False)
+        self.assertEqual(["a", "b"], outlines)
+        chunk.assert_called_once_with([(0, []), (1, [])], None, False, False)
+
+    @unittest.skipUnless(importlib.util.find_spec("kraken"), "needs Kraken (ml/.venv-kraken)")
+    def test_the_parallel_copy_finds_what_kraken_finds(self):
+        """Guards the copy of blla.vec_lines: same baselines and outlines as Kraken's own."""
+        from concurrent.futures import ThreadPoolExecutor
+        from importlib import resources
+
+        from PIL import ImageFont
+        from kraken import blla
+        from kraken.lib import vgsl
+
+        # Tall and narrow: Kraken scales every page to 1800 px high.
+        page = Image.new("RGB", (360, 520), (PAPER,) * 3)
+        draw = ImageDraw.Draw(page)
+        font = ImageFont.load_default(size=24)
+        for i, text in enumerate(["Maria Santos", "Quezon City", "12 March 1987", "Juan dela Cruz", "Manila"]):
+            draw.text((30, 30 + i * 95), text, fill=(INK,) * 3, font=font)
+
+        net = vgsl.TorchVGSLModel.load_model(resources.files("kraken").joinpath("blla.mlmodel"))
+        rets = blla.compute_segmentation_map(page, None, net, "cpu")
+        kraken_own = blla.vec_lines(**rets, regions=[], suppl_obj=[], topline=False)
+        with ThreadPoolExecutor(2) as pool:
+            ours = lm._vec_lines_in_parallel(pool, 2)(**rets, regions=[], suppl_obj=[], topline=False)
+
+        self.assertGreaterEqual(len(kraken_own), 3)
+        self.assertEqual(kraken_own, ours)
+
+
 if __name__ == "__main__":
     unittest.main()

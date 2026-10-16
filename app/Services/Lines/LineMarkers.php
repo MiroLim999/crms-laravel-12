@@ -194,6 +194,7 @@ class LineMarkers
                 'PYTHONIOENCODING' => 'utf-8',
                 'PYTHONWARNINGS' => 'ignore',
                 'LINE_MARKERS_DEVICE' => (string) config('services.line_markers.device', 'auto'),
+                'LINE_MARKERS_WORKERS' => (string) config('services.line_markers.workers', 4),
             ]);
         $command = [$this->python(), config('services.line_markers.script'), ...$arguments];
 
