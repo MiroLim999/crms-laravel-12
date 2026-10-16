@@ -6,7 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.6%2B-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![Transformers](https://img.shields.io/badge/Hugging%20Face-TrOCR-FFD21E?style=flat&logo=huggingface&logoColor=black)](https://huggingface.co/microsoft/trocr-base-handwritten)
-[![Tests](https://img.shields.io/badge/Tests-455%20passed%20(PHP%20300%20%C2%B7%20JS%2086%20%C2%B7%20Python%2069)-success)](#testing--quality-assurance)
+[![Tests](https://img.shields.io/badge/Tests-467%20passed%20(PHP%20312%20%C2%B7%20JS%2086%20%C2%B7%20Python%2069)-success)](#testing--quality-assurance)
 
 An enterprise-grade, AI-assisted civil registry digitisation and archival platform built with **Laravel 12**, **Bootstrap 5 (SNEAT design system)**, **FastAPI**, and a fine-tuned **Microsoft TrOCR** (Transformer-based Optical Character Recognition) handwriting engine.
 
@@ -121,6 +121,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Paper Specification Support**: Supports standard paper dimensions (A4, Letter, Legal, Folio) as well as arbitrary custom millimeter dimensions in Portrait or Landscape orientations.
 - **Sample Document Upload**: Direct upload of a PDF, PNG, JPG, WEBP or BMP sample, rendered with PDF.js for canvas alignment.
 - **Custom Document Types**: Super Admins can define custom certificate classifications with distinct icons, validation rules, and active states.
+- **Archiving a Document Type**: A type that is no longer used can be archived from its menu in the Template Builder (**Archive (hide from Staff)**). Staff can no longer start a scan of it, and the builder stops offering new layouts for it, but its records and layouts are kept. A scan Staff already started can still be submitted, so no work is lost. The type stays in the list marked **Archived**, with **Restore for Staff** to bring it back. Archiving and restoring are written to the audit log.
 - **Field Settings**: Select a field or ledger column to set what it **holds** (the person's name or the entry number, one of each per person), its **value** (text, a date, a number, or one of a list of choices), a **hint** for Staff, and whether it is **required**. Verify and the records archive use these. They replace the one layout the code used to know by heart (an 11-column birth register whose third column was the child's name). The existing birth ledger's entry-number and child's-name columns were marked when the settings came in.
 - **Layouts in Use Keep Their Versions**: A layout that is published, or that records or unsubmitted pages were read with, is never changed in place. Saving changed markers, row lines or field settings makes a **new version**, so every record keeps the layout it was read with. **Save as new draft** leaves the published one live; **Save & publish new version** swaps it in. Its name, notes and sample only describe it and are saved in place. The editor says when a layout is in use. A save made from an older copy of the editor (another admin saved in between) is refused rather than overwriting the newer version. **Duplicate** in the template library makes a draft copy, sample included.
 - **Layouts Records Use Cannot Be Deleted**: Deleting a layout that any record was read with is refused ("This layout was used by N records…"), and the template library explains why instead of offering the delete, so every record keeps pointing at its layout. Pages still in progress do not block a delete; they are only unlinked, then pruned.
@@ -141,6 +142,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 ### 5. OCR Model Management & Benchmark Provenance
 - **Multi-Model Registry**: Live model scanning from `ml/models/`, support for custom checkpoints and the baseline `microsoft/trocr-base-handwritten`.
 - **Benchmark Provenance Radar**: Visualizes Character Error Rate (CER), Word Error Rate (WER), and Exact Match metrics strictly from locked test-split reports (`evaluation-report.json`) verified against model weight SHA-256 hashes. CRMS never fabricates benchmark statistics from operational scans.
+- **Base Model Comparison**: The base model gets benchmark figures too, when `ml/models/base/` holds its own `evaluation-report.json`, so the OCR Workspace and the Dashboard can compare the active model with the unmodified Microsoft model.
 - **Operator Selection Flexibility**: Global model assignment with an optional Super Admin toggle allowing Staff to select approved alternative models during digitisation.
 
 ### 6. Tamper-Evident Audit Trail
@@ -148,7 +150,8 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Automatic Secret Redaction**: Sensitive attributes (passwords, tokens, credentials) are stripped before persistence.
 
 ### 7. Analytics & Administrative Oversight
-- **Role-Tailored Dashboards**: Real-time KPI summaries, digitisation volume charts, correction rate tracking, and live OCR engine diagnostic badges.
+- **Role-Tailored Dashboards**: Staff see their own submissions and activity. Admin and Super Admin see KPI summaries, digitisation volume and trend, document type distribution, OCR quality (average confidence, correction rate, fields below the confidence threshold), processing and throughput per user, and an OCR performance radar comparing the active model with the base model.
+- **A Reporting Period per Panel**: Each dashboard panel (volume and trend, document types, OCR quality, processing and throughput) has its own period: the last 30 days, the last 90 days, the last 12 months (the default, in whole calendar months), or custom dates. The trend compares a period with the one of the same length before it. A bad period in an edited URL shows a message on that panel and the default period, instead of an error page.
 - **Philippine Time Everywhere**: Times are stored in UTC and shown in `CRMS_REPORTING_TIMEZONE` (default `Asia/Manila`) on every page and in the CSV export, through one helper (`App\Support\LocalTime`). The date filters on Records, Audit Log and Reports all use Philippine days, so a record submitted at 7:30 AM on 2 October is found under 2 October.
 - **Filterable Reports with Streaming CSV Export**: Reports filter by document type, date range and submitting user, and export the matching records as a CSV that is written in chunks of 200 straight to the download, never built in memory.
 - **Light List Pages**: The Records list, the Reports page and the CSV export load only what they show (each record's title field and its average confidence), not every field of every record. With 15 register records of 242 fields each, the Records list went from 3,651 loaded rows to 36, and Reports from 3,653 to 38.
@@ -177,7 +180,21 @@ CRMS enforces a strict separation of duties verified end-to-end in the test suit
 
 > **Note on Separation of Duties**: Administrators perform supervisory and oversight functions and cannot perform primary data entry or directly edit civil records. Record corrections must strictly traverse the authenticated change request moderation pipeline.
 
-The full rules, including who may create, edit and deactivate which accounts, are in [docs/roles.md](docs/roles.md).
+Each row is one ability in `app/Providers/AuthServiceProvider.php`; the roles are in `app/Enums/RoleSlug.php`. `CapabilityMatrixTest` checks every row, both the ability and the pages it guards. If a rule changes, change the provider, the test and this table together. The sidebar menu is built from the same abilities, so nobody sees a link they cannot follow, but every route still checks its ability itself.
+
+Every signed-in account can also open the Dashboard, change its own password in Settings, and open the change requests list (Staff see only their own requests, Admin and Super Admin see all of them). Whoever made a request can withdraw it while it is pending.
+
+### Account Rules
+
+There is no sign-up page. The first Super Admin is created by `SuperAdminSeeder`, and every other account is created by an Admin or a Super Admin.
+
+| Action | Super Admin | Admin | Ability |
+| :--- | :--- | :--- | :--- |
+| Create an account | With any role | Staff accounts only | `users.manage-role` |
+| Edit an account, reset its password or reactivate it | Any account | Staff accounts only | `users.update` |
+| Deactivate an account | Any account except their own | Staff accounts only | `users.deactivate` |
+
+A deactivated account can do nothing, whatever its role. Accounts are deactivated, never deleted, so the audit log always points at a real person. No ability lets an Admin enter or edit record values, and none should be added: that separation of duties is what makes the audit log meaningful.
 
 ---
 
@@ -207,12 +224,6 @@ crms-laravel-12/
 │   ├── factories/                      # Model factories for testing and seeding
 │   ├── migrations/                     # Database migrations (records, templates, audit logs, OCR)
 │   └── seeders/                        # RoleSeeder, SuperAdminSeeder, DocumentTemplateSeeder, DemoUsersSeeder
-├── docs/
-│   ├── roles.md                        # Who may do what: roles, abilities and account rules
-│   ├── CODE_REVIEW_TODO.md             # Findings of the 2026-10-02 code review, with checklists
-│   ├── IMPLEMENTATION_PLAN.md          # The order those fixes were made in, with decisions and measurements
-│   ├── HOW_TO_RUN_THE_PLAN.md          # How to run the plan's tasks with Claude Code
-│   └── CIVIC_PALETTE_EXECUTION_PLAN.md # The SNEAT UI and brand system plan
 ├── ml/                                 # Complete Python OCR & Machine Learning workspace
 │   ├── api/
 │   │   ├── main.py                     # FastAPI microservice (batched inference, health, service key, signed model uploads)
@@ -228,6 +239,7 @@ crms-laravel-12/
 │   ├── line_markers.py                 # Deskew, template fit, line outlines and masked crops (Kraken)
 │   ├── metrics.py                      # CER / WER / Exact-Match computation and plot generators
 │   ├── predict.py                      # Standalone CLI batch prediction tool
+│   ├── regenerate_report.py            # Rewrites a model's evaluation-report.json from metrics you pass in (does not measure them)
 │   ├── requirements.txt                # ML pipeline dependencies (PyTorch, Transformers, Pandas)
 │   ├── requirements-kraken.txt         # Line-detection environment (ml/.venv-kraken)
 │   ├── setup_kraken.ps1                # Builds ml/.venv-kraken
@@ -235,6 +247,7 @@ crms-laravel-12/
 │   ├── test_trocr.py                   # CLI benchmark evaluator for base model
 │   ├── train_trocr.py                  # PyTorch TrOCR fine-tuning script
 │   └── trocr_common.py                 # Shared model loading and confidence scoring (predict.py, test_finetuned.py, api/main.py)
+├── OCR-REDESIGN-VERSIONS/              # Static HTML mockups of OCR Workspace redesigns (open index.html; not used by the app)
 ├── public/                             # Publicly accessible web root
 │   └── vendor/pdfjs/                   # PDF.js worker, copied from node_modules on every build (gitignored)
 ├── resources/
@@ -577,6 +590,7 @@ ml/
 ├── test_trocr.py         # Evaluates base model performance against test split
 ├── test_finetuned.py     # Evaluates a model on a split: CER / WER / exact match, plus a chart
 ├── predict.py            # CLI batch inference on directory of image crops
+├── regenerate_report.py  # Rewrites evaluation-report.json from metrics you pass in (see section 5)
 ├── metrics.py            # CER, WER, and exact-match computation logic
 ├── trocr_common.py       # Model loading and confidence scoring shared with the OCR service
 ├── dataset_registry.py   # Dataset names and path resolution
@@ -621,6 +635,12 @@ The OCR Workspace shows a model's CER, WER and exact match **only** from an `eva
 - `evaluated_at` with a timezone, and `metrics` with `cer`, `wer` and `exact_match`
 
 A model without a report still works; it just shows no benchmark. A report that fails these checks is refused when the model is uploaded.
+
+`ml/regenerate_report.py` rebuilds a lost or outdated report for numbers that were already measured, for example in the fine-tuning notebook:
+```bash
+python ml/regenerate_report.py --model trocr-v1 --dataset <dataset-name> --samples <test-sample-count> --cer <cer> --wer <wer> --exact <exact-match>
+```
+It hashes the real weights file, but it **does not measure anything**: the metrics are whatever you pass in, and a metric you leave out falls back to a number written into the script. Its `manifest_sha256` is a hash of the dataset name, not of a manifest file. Pass every figure from a real test-split run, so the benchmark shown in the app stays a real measurement.
 
 ### 6. Installing Models into the Web Application
 1. Log in as **Super Admin** and navigate to the **OCR Workspace**.
@@ -736,19 +756,19 @@ location = /ocr-api/add_model {
 
 ## Testing & Quality Assurance
 
-CRMS maintains a comprehensive test suite across PHP, JavaScript, and Python layers: **455 tests, all passing** (2026-10-03). The code review of 2026-10-02 started from 409; most of its fixes added a test that reproduces the problem they fixed.
+CRMS maintains a comprehensive test suite across PHP, JavaScript, and Python layers: **467 tests, all passing** (2026-10-16). The code review of 2026-10-02 started from 409; most of its fixes added a test that reproduces the problem they fixed.
 
 | Suite | Tests | Runs with |
 | :--- | ---: | :--- |
-| PHP (PHPUnit) | 300 | `php artisan test` |
+| PHP (PHPUnit) | 312 | `php artisan test` |
 | JavaScript (Node.js test runner) | 86 | `npm run test:js` |
 | Python: line detection | 60 | `ml\.venv-kraken\Scripts\python.exe` |
 | Python: OCR service | 9 | `.venv\Scripts\python.exe` |
 
 ```
 tests/
-├── Feature/                    # 22 PHPUnit feature test classes (300 tests)
-│   ├── AnalyticsDashboardTest.php
+├── Feature/                    # 23 PHPUnit feature test classes (312 tests)
+│   ├── AnalyticsDashboardTest.php           # Includes each panel's own period and bad periods in the URL
 │   ├── ArrayQueryParameterTest.php          # An array in the URL (?q[]=x) never gives an error page
 │   ├── AuditLogTest.php
 │   ├── AuditLogViewerTest.php               # Includes times shown in Philippine time
@@ -757,6 +777,7 @@ tests/
 │   ├── ChangeRequestPresentationTest.php
 │   ├── ChangeRequestWorkflowTest.php        # Includes long rejection notes and decisions under a row lock
 │   ├── DocumentTemplateBuilderTest.php      # Includes refusing to delete a layout records use
+│   ├── DocumentTypeArchiveTest.php          # Archiving hides a type from Staff scanning but keeps it; restoring
 │   ├── DocumentUploadWorkflowTest.php       # Includes the missing-required-fields confirmation and TIFF refusal
 │   ├── LedgerTemplateAndExportTest.php      # Ledger grids, training CSV export
 │   ├── LineOutlinePipelineTest.php          # Page job, Detect, outlines, manual fixes
@@ -868,7 +889,7 @@ vendor\bin\pint --test                   # Verify PHP code style
 
 ## Known Limitations & Planned Work
 
-The code review of 2026-10-02 ([docs/CODE_REVIEW_TODO.md](docs/CODE_REVIEW_TODO.md)) was worked through in the order set by [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). These items were deliberately left for after the capstone defense. None of them changes what users see.
+These items from the code review of 2026-10-02 were deliberately left for after the capstone defense. (The review's notes and plan were removed from `docs/` on 2026-10-13; they remain in the git history.) None of them changes what users see.
 
 - **The document type is stored twice.** The `document_types` table is the source of truth, but the older `doc_type` column (on `records` and `document_templates`) and the `DocumentType` enum still repeat it, and every custom type is saved there as `custom`. Removing them touches most models and controllers.
 - **Three very large files.** `resources/views/scan/workspace.blade.php` (4,274 lines, most of it inline JavaScript), `app/Http/Controllers/DocumentTemplateController.php` (1,245 lines) and `ml/line_markers.py` (2,582 lines) are due to be split into smaller modules. The tests that cover them are in place first.
