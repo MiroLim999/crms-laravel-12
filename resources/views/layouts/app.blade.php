@@ -20,6 +20,8 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="robots" content="noindex, nofollow">
 
+    @include('layouts.partials.theme-init')
+
     {{-- Restore the desktop sidebar preference before the first paint. --}}
     <script>
         try {

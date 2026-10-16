@@ -172,7 +172,7 @@
                                                 <div class="table-responsive">
                                                     <table class="table table-sm mb-0" style="border-collapse:separate">
                                                         <thead>
-                                                            <tr style="background:rgba(0,0,0,.02)">
+                                                            <tr style="background:rgba(var(--crms-ink-rgb),.03)">
                                                                 <th class="ps-3 text-uppercase fw-semibold small text-muted border-0"
                                                                     style="width:26%;letter-spacing:.04em">Field</th>
                                                                 <th class="text-uppercase fw-semibold small border-0"
@@ -189,7 +189,7 @@
                                                                     $changed = $before !== $after;
                                                                 @endphp
                                                                 <tr class="{{ $loop->even ? '' : '' }}"
-                                                                    style="{{ $loop->last ? '' : 'border-bottom:1px solid rgba(0,0,0,.05)' }}">
+                                                                    style="{{ $loop->last ? '' : 'border-bottom:1px solid rgba(var(--crms-ink-rgb),.1)' }}">
                                                                     <td class="ps-3 align-top py-2">
                                                                         <span class="badge bg-label-secondary font-monospace fw-normal"
                                                                               style="font-size:.72rem">{{ $key }}</span>

@@ -1,0 +1,202 @@
+// Light / dark colour modes for CRMS.
+//
+// Bootstrap switches modes with `data-bs-theme` on <html>; resources/js/theme.js
+// sets it and an inline script in the layouts applies it before first paint.
+// The dark palette is an OLED-style black: page #000, cards #18181f, with SNEAT's
+// lavender-tinted text. This file has to load after Bootstrap's own
+// `[data-bs-theme='dark']` block so these values win.
+
+// Light-mode values of the CRMS-only colour tokens used in _crms.scss. They sit
+// here, beside their dark twins, so the two modes are edited together.
+:root {
+  --crms-ink-rgb: 67, 89, 113;     // tint base for hairlines, scrollbars, striping
+  --crms-shadow-rgb: 34, 48, 62;   // shadow base
+
+  --crms-warning-text: #8a6500;
+  --crms-warning-text-b: #9a6b00;
+  --crms-warning-text-c: #a86b00;
+  --crms-warning-text-d: #b77900;
+  --crms-info-text: #0b7e88;
+  --crms-info-text-b: #0b5f67;
+  --crms-danger-text: #b42318;
+  --crms-danger-text-b: #8a2c1c;
+  --crms-success-text: #187846;
+  --crms-success-text-b: #31812d;
+  --crms-slate-text: #475569;
+  --crms-slate-border: #cbd5e1;
+  --crms-slate-hover-bg: #f8fafc;
+
+  --crms-blue-text: #2563eb;
+  --crms-blue-bg: #eff6ff;
+  --crms-blue-hover-bg: #dbeafe;
+  --crms-blue-border: #bfdbfe;
+  --crms-green-text: #16a34a;
+  --crms-green-bg: #f0fdf4;
+  --crms-green-border: #dcfce7;
+
+  // Backdrop behind a scanned page. The scan itself is a photo of white paper
+  // and stays white in both modes.
+  --crms-viewport-bg: #e9ebf0;
+}
+
+[data-bs-theme='dark'] {
+  color-scheme: dark;
+
+  // Surfaces: a true-black page (lets an OLED panel switch those pixels off)
+  // with dark-grey cards, sidebar and top bar lifted off it.
+  --bs-body-bg: #000;
+  --bs-body-bg-rgb: 0, 0, 0;
+  --bs-paper-bg: #18181f;
+  --bs-paper-bg-rgb: 24, 24, 31;
+  --bs-secondary-bg: #24242d;
+  --bs-secondary-bg-rgb: 36, 36, 45;
+  --bs-tertiary-bg: #1e1e26;
+  --bs-tertiary-bg-rgb: 30, 30, 38;
+
+  // Text
+  --bs-body-color: #c3c4da;
+  --bs-body-color-rgb: 195, 196, 218;
+  --bs-heading-color: #f0f0f8;
+  --bs-emphasis-color: #f0f0f8;
+  --bs-emphasis-color-rgb: 240, 240, 248;
+  --bs-secondary-color: #a4a6c2;
+  --bs-secondary-color-rgb: 164, 166, 194;
+  --bs-tertiary-color: rgba(163, 164, 204, .55);
+  --bs-tertiary-color-rgb: 163, 164, 204;
+
+  // The template derives input borders, table lines and soft badge fills from
+  // this "ink" colour, so lightening it adapts all of them at once.
+  --bs-base-color: #cfd0ec;
+  --bs-base-color-rgb: 207, 208, 236;
+
+  // Status colours. Black makes saturated colour pop, so these are full-strength
+  // rather than pastel. Solid buttons that pin their own colours in _crms.scss
+  // are unaffected.
+  --bs-primary: #4d8dff;
+  --bs-primary-rgb: 77, 141, 255;
+  --bs-secondary: #9ba4c4;
+  --bs-secondary-rgb: 155, 164, 196;
+  --bs-success: #22d46a;
+  --bs-success-rgb: 34, 212, 106;
+  --bs-info: #1fd0e2;
+  --bs-info-rgb: 31, 208, 226;
+  --bs-warning: #ffae1a;
+  --bs-warning-rgb: 255, 174, 26;
+  --bs-danger: #ff5a4d;
+  --bs-danger-rgb: 255, 90, 77;
+  --bs-primary-contrast: #1c1d2e;
+  --bs-secondary-contrast: #1c1d2e;
+  --bs-success-contrast: #1c1d2e;
+  --bs-info-contrast: #1c1d2e;
+  --bs-warning-contrast: #1c1d2e;
+  --bs-danger-contrast: #1c1d2e;
+
+  // Lines
+  --bs-border-color: #33333e;
+  --bs-border-color-translucent: rgba(174, 175, 203, .2);
+
+  // The grey scale is used as "recessed surface" in _crms.scss, so flip it.
+  --bs-gray-25: #131318;
+  --bs-gray-60: #18181e;
+  --bs-gray-80: #1c1c23;
+  --bs-gray-100: #202028;
+  --bs-gray-200: #2b2b35;
+  --bs-gray-300: #40404c;
+  --bs-gray-400: #6b6c8c;
+  --bs-gray-500: #8183a8;
+  --bs-gray-600: #9a9cc4;
+  --bs-gray-700: #b3b5dc;
+  --bs-gray-800: #cfd0ec;
+  --bs-gray-900: #e1e2f5;
+
+  // Shadows disappear on black; a faint edge line carries the depth instead.
+  --bs-box-shadow: 0 0 0 1px rgba(174, 175, 203, .06);
+  --bs-box-shadow-xs: 0 0 0 1px rgba(174, 175, 203, .05);
+  --bs-box-shadow-sm: 0 0 0 1px rgba(174, 175, 203, .06);
+  --bs-box-shadow-lg: 0 .25rem .75rem 0 rgba(0, 0, 0, .8), 0 0 0 1px rgba(174, 175, 203, .08);
+  --bs-box-shadow-xl: 0 .3125rem 1.375rem 0 rgba(0, 0, 0, .9), 0 0 0 1px rgba(174, 175, 203, .08);
+  --bs-floating-component-shadow: 0 .1875rem .5rem 0 rgba(0, 0, 0, .8), 0 0 0 1px rgba(174, 175, 203, .08);
+
+  // Sidebar and top bar
+  --bs-menu-color: #a3a4cc;
+  --bs-menu-color-rgb: 163, 164, 204;
+  --bs-menu-hover-bg: rgba(174, 175, 203, .1);
+  --bs-menu-hover-color: #cfd0ec;
+  --bs-menu-active-toggle-bg: rgba(163, 164, 204, .1);
+  --bs-menu-box-shadow: none;
+  --bs-navbar-box-shadow: 0 0 0 1px #2a2a34;
+
+  // Soft status fills (badges, alerts, bg-label-*)
+  @each $name in (primary, success, info, warning, danger) {
+    --bs-#{$name}-bg-subtle: color-mix(in srgb, var(--bs-#{$name}) 24%, var(--bs-paper-bg));
+    --bs-#{$name}-border-subtle: color-mix(in srgb, var(--bs-#{$name}) 45%, var(--bs-paper-bg));
+  }
+  --bs-secondary-bg-subtle: rgba(163, 164, 204, .14);
+  --bs-secondary-border-subtle: rgba(163, 164, 204, .28);
+  --bs-secondary-text-emphasis: #b4b6da;
+  --bs-primary-text-emphasis: #6aa3ff;
+  --bs-success-text-emphasis: #4ee088;
+  --bs-info-text-emphasis: #3fdcea;
+  --bs-warning-text-emphasis: #ffc24d;
+  --bs-danger-text-emphasis: #ff7a6e;
+  --bs-link-color: #5f9bff;
+  --bs-link-color-rgb: 95, 155, 255;
+  --bs-link-hover-color: #8ab8ff;
+  --bs-link-hover-color-rgb: 138, 184, 255;
+
+  // CRMS tokens
+  --crms-ink-rgb: 163, 164, 204;
+  --crms-shadow-rgb: 0, 0, 0;
+
+  --crms-warning-text: #ffc24d;
+  --crms-warning-text-b: #ffc24d;
+  --crms-warning-text-c: #ffc24d;
+  --crms-warning-text-d: #ffc24d;
+  --crms-info-text: #3fdcea;
+  --crms-info-text-b: #3fdcea;
+  --crms-danger-text: #ff6b5f;
+  --crms-danger-text-b: #ff6b5f;
+  --crms-success-text: #4ee088;
+  --crms-success-text-b: #5fe070;
+  --crms-slate-text: #c3c4da;
+  --crms-slate-border: #55567a;
+  --crms-slate-hover-bg: rgba(163, 164, 204, .1);
+
+  --crms-blue-text: #6aa3ff;
+  --crms-blue-bg: rgba(77, 141, 255, .2);
+  --crms-blue-hover-bg: rgba(77, 141, 255, .3);
+  --crms-blue-border: rgba(77, 141, 255, .5);
+  --crms-green-text: #3fdc80;
+  --crms-green-bg: rgba(34, 212, 106, .18);
+  --crms-green-border: rgba(34, 212, 106, .45);
+
+  --crms-viewport-bg: #101015;
+}
+
+// ApexCharts draws its default tooltip, axis tooltip and menu in a light theme
+// of its own; give them the paper colours.
+[data-bs-theme='dark'] {
+  .apexcharts-tooltip.apexcharts-theme-light,
+  .apexcharts-xaxistooltip,
+  .apexcharts-yaxistooltip,
+  .apexcharts-menu {
+    color: var(--bs-body-color);
+    background: var(--bs-paper-bg);
+    border-color: var(--bs-border-color);
+  }
+
+  .apexcharts-tooltip.apexcharts-theme-light .apexcharts-tooltip-title {
+    color: var(--bs-heading-color);
+    background: var(--bs-tertiary-bg);
+    border-bottom-color: var(--bs-border-color);
+  }
+
+  .apexcharts-xaxistooltip-bottom::before,
+  .apexcharts-xaxistooltip-bottom::after {
+    border-bottom-color: var(--bs-border-color);
+  }
+
+  .apexcharts-menu-item:hover {
+    background: var(--bs-tertiary-bg);
+  }
+}

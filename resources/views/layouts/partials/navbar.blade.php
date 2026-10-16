@@ -22,6 +22,30 @@
         @endcan
 
         <ul class="navbar-nav flex-row align-items-center ms-auto">
+            {{-- Colour mode: handled by resources/js/theme.js --}}
+            <li class="nav-item dropdown me-2">
+                <button type="button" class="btn btn-icon btn-label-secondary rounded-pill dropdown-toggle hide-arrow"
+                        data-bs-toggle="dropdown" aria-expanded="false" aria-label="Colour mode" title="Colour mode">
+                    <i class="icon-base bx bx-sun icon-md" data-theme-current-icon aria-hidden="true"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li>
+                        <button type="button" class="dropdown-item d-flex align-items-center" data-theme-choice="light">
+                            <i class="icon-base bx bx-sun icon-md me-3" aria-hidden="true"></i>Light
+                        </button>
+                    </li>
+                    <li>
+                        <button type="button" class="dropdown-item d-flex align-items-center" data-theme-choice="dark">
+                            <i class="icon-base bx bx-moon icon-md me-3" aria-hidden="true"></i>Dark
+                        </button>
+                    </li>
+                    <li>
+                        <button type="button" class="dropdown-item d-flex align-items-center" data-theme-choice="system">
+                            <i class="icon-base bx bx-desktop icon-md me-3" aria-hidden="true"></i>System
+                        </button>
+                    </li>
+                </ul>
+            </li>
             <li class="nav-item navbar-dropdown dropdown-user dropdown">
                 <a class="nav-link dropdown-toggle hide-arrow p-0" href="javascript:void(0);"
                    data-bs-toggle="dropdown" aria-expanded="false">

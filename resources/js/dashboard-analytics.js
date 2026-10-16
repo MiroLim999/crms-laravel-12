@@ -32,6 +32,7 @@ function themeOptions(target) {
     heading: read(root, '--bs-heading-color', fallback.heading),
     border: read(root, '--bs-border-color', 'rgba(67, 89, 113, .12)'),
     paper: read(card, '--bs-card-bg', '#fff'),
+    inkRgb: read(root, '--crms-ink-rgb', '67, 89, 113'),
     font: read(root, '--bs-body-font-family', 'Public Sans, sans-serif'),
     primary: read(root, '--bs-primary', fallback.primary),
     warning: read(root, '--bs-warning', fallback.warning),
@@ -459,7 +460,7 @@ function renderOcrPerformance(data) {
     legend: { show: false },
     markers: {
       size: [4, 3],
-      colors: ['#fff', '#fff'],
+      colors: [theme.paper, theme.paper],
       strokeColors: ['#ff6384', '#696cff'],
       strokeWidth: [2, 1.5],
       hover: { size: 6 },
@@ -473,7 +474,7 @@ function renderOcrPerformance(data) {
           strokeColors: theme.border,
           strokeWidth: 1,
           connectorColors: theme.border,
-          fill: { colors: ['rgba(67, 89, 113, 0.025)', 'transparent'] },
+          fill: { colors: [`rgba(${theme.inkRgb}, 0.025)`, 'transparent'] },
         },
       },
     },
@@ -494,7 +495,7 @@ function renderOcrPerformance(data) {
         const sign = Number(gain) >= 0 ? '+' : '';
         const activeName = active.display_label || active.label || 'Fine-tuned';
 
-        return `<div class="dashboard-tooltip" style="min-width: 10.5rem; padding: 0.5rem 0.65rem; background: #fff; border: 1px solid rgba(67, 89, 113, 0.15); border-radius: 8px; box-shadow: 0 4px 16px rgba(34, 48, 62, 0.12);">
+        return `<div class="dashboard-tooltip" style="min-width: 10.5rem; padding: 0.5rem 0.65rem; background: var(--bs-paper-bg); border: 1px solid var(--bs-border-color); border-radius: 8px; box-shadow: var(--bs-box-shadow-lg);">
           <div class="fw-bold text-heading mb-1 pb-1 border-bottom small">${escapeHtml(cat)}</div>
           <div class="d-flex justify-content-between align-items-center small mb-1">
             <span><span class="badge-dot me-1" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#ff6384;"></span>${escapeHtml(activeName)}</span>
@@ -828,6 +829,16 @@ document.addEventListener('DOMContentLoaded', () => {
   renderQuality(data.quality);
   renderThroughput(data.throughput);
   renderOcrPerformance(data.ocrPerformance);
+
+  // Colours are read when a chart is drawn, so a colour-mode switch redraws them all.
+  window.addEventListener('crms:themechange', () => {
+    const latest = readChartData() || data;
+    renderVolume(latest.volume);
+    renderDocumentTypes(latest.documentTypes);
+    renderQuality(latest.quality);
+    renderThroughput(latest.throughput);
+    renderOcrPerformance(latest.ocrPerformance);
+  });
 
   // The radar radius and the type bars' scale follow their card's width, so
   // redraw them (without replaying the entrance) once resizing settles.

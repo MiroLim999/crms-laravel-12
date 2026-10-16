@@ -1466,6 +1466,8 @@ function initModelPerformance() {
     }
 
     selector.addEventListener('change', () => render(profiles.get(selector.value)));
+    // Chart colours are read when it is drawn; redraw after a colour-mode switch.
+    window.addEventListener('crms:themechange', () => render(profiles.get(selector.value)));
 
     function updatePerformanceDataset(nextData) {
         if (!nextData || typeof nextData !== 'object') return;
