@@ -600,11 +600,15 @@ def _read_crops(model, processor, device, eos_id, images):
     """(text, confidence) for each image, in order, from one generate() call."""
     pixel_values = processor(images=images, return_tensors="pt").pixel_values.to(device)
     with torch.no_grad():
+        # use_cache: fine-tuned models save use_cache=false from training, so
+        # each new token recomputed every earlier one. Same readings and
+        # confidences, measured on 597 real crops; 215 crops 17 s -> 8 s.
         gen_output = model.generate(
             pixel_values,
             max_new_tokens=MAX_NEW_TOKENS,
             output_scores=True,
             return_dict_in_generate=True,
+            use_cache=True,
         )
     texts = processor.batch_decode(gen_output.sequences, skip_special_tokens=True)
     return [
