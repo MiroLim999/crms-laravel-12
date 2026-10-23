@@ -9,7 +9,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
- * The capability matrix from .kiro/steering/product.md, asserted end to end.
+ * The capability matrix from docs/roles.md, asserted end to end.
  *
  * This is the load-bearing test in the suite. The separation of duties it guards
  * is what makes the audit trail legally meaningful:
@@ -36,7 +36,8 @@ class CapabilityMatrixTest extends TestCase
             'upload & process documents' => ['documents.create', 200, 403, 200],
             'search records archive' => ['records.index', 200, 200, 200],
             'change requests' => ['change-requests.index', 200, 200, 200],
-            'analytics dashboard' => ['analytics.index', 403, 200, 200],
+            // Legacy bookmark: oversight users are redirected to the consolidated Dashboard.
+            'analytics dashboard' => ['analytics.index', 403, 302, 302],
             'generate reports' => ['reports.index', 403, 200, 200],
             'manage user accounts' => ['users.index', 403, 200, 200],
             'view audit log' => ['audit.index', 403, 200, 200],
@@ -78,7 +79,6 @@ class CapabilityMatrixTest extends TestCase
         //                            ability                    staff admin super
         return [
             'documents.process' => ['documents.process', true, false, true],
-            'records.submit' => ['records.submit', true, false, true],
             'change-requests.create' => ['change-requests.create', true, false, true],
             'records.view' => ['records.view', true, true, true],
             'change-requests.moderate' => ['change-requests.moderate', false, true, true],
@@ -123,7 +123,7 @@ class CapabilityMatrixTest extends TestCase
 
         $this->assertFalse($admin->canEnterData());
 
-        foreach (['documents.process', 'records.submit', 'change-requests.create'] as $ability) {
+        foreach (['documents.process', 'change-requests.create'] as $ability) {
             $this->assertFalse(
                 $admin->can($ability),
                 "Admin must not have '{$ability}'. Data entry belongs to Staff.",

@@ -42,7 +42,6 @@ class Navigation
             [
                 'header' => 'Oversight',
                 'items' => [
-                    self::item('Analytics', 'analytics.index', 'bx-bar-chart-alt-2', 'analytics.view'),
                     self::item('Reports', 'reports.index', 'bx-file', 'reports.generate'),
                     self::item('User Accounts', 'users.index', 'bx-user', 'users.manage'),
                     self::item('Audit Log', 'audit.index', 'bx-history', 'audit.view'),
@@ -51,8 +50,8 @@ class Navigation
             [
                 'header' => 'System',
                 'items' => [
-                    self::item('Document Templates', 'templates.index', 'bx-layout', 'templates.manage'),
                     self::item('OCR Workspace', 'ocr.index', 'bx-brain', 'ocr.manage'),
+                    self::item('Template Builder', 'templates.index', 'bx-layout', 'templates.manage'),
                 ],
             ],
         ];
@@ -86,12 +85,21 @@ class Navigation
             default => true,
         };
 
+        $badge = null;
+        if ($route === 'change-requests.index' && Gate::allows('change-requests.moderate')) {
+            $pendingCount = \App\Models\ChangeRequest::where('status', \App\Enums\ChangeRequestStatus::Pending)->count();
+            if ($pendingCount > 0) {
+                $badge = ['count' => $pendingCount, 'class' => 'bg-warning text-dark'];
+            }
+        }
+
         return [
             'label' => $label,
             'route' => $route,
             'icon' => $icon,
             'visible' => $visible && Route::has($route),
             'active' => self::isActive($route),
+            'badge' => $badge,
         ];
     }
 

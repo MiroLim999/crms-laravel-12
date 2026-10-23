@@ -12,3 +12,4 @@ import './sneat/helpers';
 import './sneat/theme-config';
 import './sneat/menu';
 import './sneat/main';
+import './theme';

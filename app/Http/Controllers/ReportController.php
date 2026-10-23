@@ -2,16 +2,16 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
 use App\Enums\RoleSlug;
 use App\Models\CivilRecord;
+use App\Models\DocumentTypeDefinition;
 use App\Models\RecordField;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Support\LocalTime;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -31,8 +31,7 @@ class ReportController extends Controller
     {
         $filters = $this->filters($request);
 
-        $records = $this->query($filters)
-            ->with(['fields', 'submitter', 'creator'])
+        $records = $this->listQuery($filters)
             ->orderByDesc('created_at')
             ->paginate(25)
             ->withQueryString();
@@ -41,7 +40,7 @@ class ReportController extends Controller
             'filters' => $filters,
             'records' => $records,
             'summary' => $this->summary($filters),
-            'documentTypes' => DocumentType::cases(),
+            'documentTypes' => DocumentTypeDefinition::ordered(),
             'dataEntryUsers' => $this->dataEntryUsers(),
         ]);
     }
@@ -70,7 +69,7 @@ class ReportController extends Controller
             actor: $request->user(),
         );
 
-        $filename = 'crms-records-'.Carbon::now()->format('Ymd-His').'.csv';
+        $filename = 'crms-records-'.LocalTime::format(now(), 'Ymd-His').'.csv';
 
         return response()->streamDownload(function () use ($filters) {
             $handle = fopen('php://output', 'w');
@@ -81,8 +80,7 @@ class ReportController extends Controller
                 'OCR model', 'Fields', 'Average confidence',
             ]);
 
-            $this->query($filters)
-                ->with(['fields', 'submitter', 'creator'])
+            $this->listQuery($filters)
                 ->chunkById(200, function (Collection $chunk) use ($handle) {
                     foreach ($chunk as $record) {
                         fputcsv($handle, $this->row($record));
@@ -103,24 +101,36 @@ class ReportController extends Controller
      */
     private function row(CivilRecord $record): array
     {
-        $confidences = $record->fields
-            ->pluck('ocr_confidence')
-            ->filter(fn ($value) => $value !== null);
-
-        return [
+        return array_map($this->safeCell(...), [
             $record->getKey(),
             $record->registry_number,
-            $record->doc_type->label(),
+            $record->typeLabel(),
             $record->status->label(),
             $record->title(),
-            $record->created_at?->toDateTimeString(),
+            LocalTime::format($record->created_at, 'Y-m-d H:i:s'),
             $record->creator?->name,
-            $record->submitted_at?->toDateTimeString(),
+            LocalTime::format($record->submitted_at, 'Y-m-d H:i:s'),
             $record->submitter?->name,
             $record->ocr_model_key,
-            $record->fields->count(),
-            $confidences->isEmpty() ? null : round($confidences->avg(), 1),
-        ];
+            $record->fields_count,
+            $record->fields_avg_ocr_confidence === null ? null : round((float) $record->fields_avg_ocr_confidence, 1),
+        ]);
+    }
+
+    /**
+     * Keep Excel from running a cell as a formula ("CSV injection").
+     *
+     * Most text here was typed by someone, so a value such as =HYPERLINK(...)
+     * would otherwise run when the file is opened. A leading apostrophe makes
+     * Excel show it as plain text. Numbers are not strings, so they pass through.
+     */
+    private function safeCell(mixed $value): mixed
+    {
+        if (! is_string($value) || $value === '') {
+            return $value;
+        }
+
+        return in_array($value[0], ['=', '+', '-', '@', "\t", "\r"], true) ? "'".$value : $value;
     }
 
     /**
@@ -134,7 +144,7 @@ class ReportController extends Controller
         $validated = $request->validate([
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
-            'doc_type' => ['nullable', 'string', 'in:'.implode(',', array_column(DocumentType::cases(), 'value'))],
+            'doc_type' => ['nullable', 'string', 'exists:document_types,key'],
             'status' => ['nullable', 'string', 'in:'.implode(',', array_column(RecordStatus::cases(), 'value'))],
             'submitted_by' => ['nullable', 'integer', 'exists:users,id'],
         ]);
@@ -149,6 +159,23 @@ class ReportController extends Controller
     }
 
     /**
+     * The matching records with what the table and the CSV show. The field
+     * count and average confidence are worked out by the database, and only
+     * the title's field is loaded, because a ledger record has hundreds of
+     * fields.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function listQuery(array $filters): Builder
+    {
+        return $this->query($filters)
+            ->withTitleField()
+            ->withCount('fields')
+            ->withAvg('fields', 'ocr_confidence')
+            ->with(['submitter', 'creator', 'documentTypeDefinition']);
+    }
+
+    /**
      * @param  array<string, mixed>  $filters
      */
     private function query(array $filters): Builder
@@ -157,14 +184,17 @@ class ReportController extends Controller
             ->when($filters['from'], fn (Builder $q, $from) => $q->where(
                 'records.created_at',
                 '>=',
-                Carbon::parse($from)->startOfDay(),
+                LocalTime::dayStart($from),
             ))
             ->when($filters['to'], fn (Builder $q, $to) => $q->where(
                 'records.created_at',
                 '<=',
-                Carbon::parse($to)->endOfDay(),
+                LocalTime::dayEnd($to),
             ))
-            ->when($filters['doc_type'], fn (Builder $q, $type) => $q->where('doc_type', $type))
+            ->when($filters['doc_type'], fn (Builder $q, $type) => $q->whereHas(
+                'documentTypeDefinition',
+                fn (Builder $typeQuery) => $typeQuery->where('key', $type),
+            ))
             ->when($filters['status'], fn (Builder $q, $status) => $q->where('status', $status))
             ->when($filters['submitted_by'], fn (Builder $q, $id) => $q->where('submitted_by', $id));
     }
@@ -180,7 +210,6 @@ class ReportController extends Controller
         return [
             'total' => $matching->clone()->count(),
             'submitted' => $matching->clone()->where('status', RecordStatus::Submitted->value)->count(),
-            'drafts' => $matching->clone()->where('status', RecordStatus::Draft->value)->count(),
             'average_confidence' => $this->averageConfidence($filters),
         ];
     }

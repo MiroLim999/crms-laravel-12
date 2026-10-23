@@ -12,17 +12,25 @@ class RecordField extends Model
 
     protected $fillable = [
         'record_id', 'name', 'ocr_text', 'ocr_confidence', 'verified_value',
+        'is_required', 'person_group', 'person_field_order', 'role',
         'crop_path', 'x', 'y', 'width', 'height', 'sort_order',
+        'polygon', 'line_column', 'line_row', 'line_flags',
     ];
 
     protected function casts(): array
     {
         return [
             'ocr_confidence' => 'float',
+            'is_required' => 'boolean',
+            'person_group' => 'integer',
+            'person_field_order' => 'integer',
             'x' => 'float',
             'y' => 'float',
             'width' => 'float',
             'height' => 'float',
+            'polygon' => 'array',
+            'line_row' => 'integer',
+            'line_flags' => 'array',
         ];
     }
 

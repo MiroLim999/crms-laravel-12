@@ -4,6 +4,9 @@
 
 .ocr-workspace {
   --ocr-soft-border: color-mix(in srgb, var(--bs-border-color) 72%, transparent);
+  --ocr-metric-character: var(--bs-primary, #0d6efd);
+  --ocr-metric-word: #00a7c4;
+  --ocr-metric-exact: #2aa876;
 
   .min-w-0 {
     min-width: 0;
@@ -16,6 +19,7 @@
   }
 
   .ocr-engine-card,
+  .ocr-performance-card,
   .ocr-models-card,
   .ocr-policy-card {
     overflow: hidden;
@@ -127,6 +131,49 @@
 
   // ------------------------------------------------------------- model list
 
+  .ocr-models-card {
+    align-self: start;
+    min-height: 0;
+  }
+
+  .ocr-models-toggle > i {
+    transition: transform 0.2s ease;
+  }
+
+  .ocr-models-toggle[aria-expanded='true'] > i {
+    transform: rotate(180deg);
+  }
+
+  .ocr-models-panel {
+    display: grid;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 0;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+      grid-template-rows 0.3s ease,
+      max-height 0.3s ease,
+      opacity 0.2s ease;
+
+    &.is-expanded {
+      max-height: 32rem;
+      grid-template-rows: 1fr;
+      opacity: 1;
+    }
+  }
+
+  .ocr-models-scroll {
+    min-height: 0;
+    overflow: hidden;
+    scrollbar-color: var(--bs-secondary-bg) transparent;
+    scrollbar-width: thin;
+  }
+
+  .ocr-models-panel.is-expanded .ocr-models-scroll {
+    overflow-y: auto;
+  }
+
   .ocr-model-list {
     display: flex;
     flex-direction: column;
@@ -138,21 +185,39 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    min-height: 5.25rem;
-    padding: 1rem 1.5rem;
+    min-height: 4.875rem;
+    padding: 0.875rem 1.5rem;
     border-bottom: 1px solid var(--ocr-soft-border);
     transition: background-color 0.15s ease;
+
+    &::before {
+      position: absolute;
+      inset-block: 0.75rem;
+      inset-inline-start: 0;
+      width: 0.1875rem;
+      background: transparent;
+      border-radius: 0 50rem 50rem 0;
+      content: '';
+    }
 
     &:last-child {
       border-bottom: 0;
     }
 
     &:hover {
-      background: rgba(var(--bs-primary-rgb), 0.025);
+      background: var(--bs-tertiary-bg);
     }
 
     &.is-active {
-      background: rgba(var(--bs-success-rgb), 0.035);
+      background: transparent;
+
+      &::before {
+        background: var(--bs-success);
+      }
+
+      &:hover {
+        background: var(--bs-tertiary-bg);
+      }
     }
   }
 
@@ -176,13 +241,26 @@
   .ocr-model-icon {
     display: inline-grid;
     flex: 0 0 auto;
-    width: 2.65rem;
-    height: 2.65rem;
+    width: 2.35rem;
+    height: 2.35rem;
     place-items: center;
-    border-radius: 0.625rem;
+    color: var(--bs-primary);
+    background: var(--bs-card-bg, #fff);
+    border: 1px solid color-mix(in srgb, var(--bs-primary) 24%, var(--bs-border-color));
+    border-radius: 50%;
+
+    &.is-active {
+      color: var(--bs-success);
+      border-color: color-mix(in srgb, var(--bs-success) 35%, var(--bs-border-color));
+    }
+
+    &.is-base {
+      color: var(--bs-secondary-color);
+      border-color: var(--bs-border-color);
+    }
 
     > i {
-      font-size: 1.2rem;
+      font-size: 1.1rem;
     }
   }
 
@@ -250,19 +328,239 @@
   // ---------------------------------------------------------- scanning policy
 
   .ocr-policy-card .card-body {
-    padding-bottom: 1.25rem;
+    padding-block: 0 0.25rem;
+  }
+
+  .ocr-policy-model {
+    padding-block: 1.25rem;
+    border-bottom: 1px solid var(--ocr-soft-border);
   }
 
   .ocr-setting-block {
-    padding: 1rem;
-    background: var(--bs-tertiary-bg);
-    border: 1px solid var(--ocr-soft-border);
-    border-radius: var(--bs-border-radius-lg);
+    padding-block: 1.25rem;
+    background: transparent;
+    border-bottom: 1px solid var(--ocr-soft-border);
+
+    &:last-child {
+      border-bottom: 0;
+    }
+  }
+
+  .ocr-threshold-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 7.5rem;
+    align-items: end;
+    gap: 1rem;
   }
 
   .ocr-threshold-control {
     flex: 0 0 7.5rem;
     width: 7.5rem;
+  }
+
+  // ------------------------------------------------------- model performance
+
+  .ocr-performance-picker {
+    flex: 0 1 19rem;
+    width: min(19rem, 100%);
+  }
+
+  .ocr-performance-layout {
+    display: grid;
+    gap: 1.5rem;
+    align-items: stretch;
+  }
+
+  .ocr-performance-visual {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 32rem;
+    padding: 1.25rem;
+    background: var(--bs-card-bg, #fff);
+    border: 1px solid var(--ocr-soft-border);
+    border-radius: var(--bs-border-radius-lg);
+  }
+
+  .ocr-performance-toolbar {
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--ocr-soft-border);
+
+    .badge-dot {
+      display: inline-block;
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+    }
+  }
+
+  .ocr-performance-kpis {
+    .ocr-kpi-card {
+      padding: 0.65rem 0.85rem;
+      background: rgba(var(--bs-primary-rgb), 0.025);
+      border: 1px solid var(--ocr-soft-border);
+      border-radius: var(--bs-border-radius);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+      &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(67, 89, 113, 0.06);
+      }
+    }
+
+    .ocr-kpi-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    .ocr-kpi-val {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--bs-heading-color);
+      line-height: 1.2;
+    }
+
+    .ocr-kpi-delta {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.2rem 0.45rem;
+    }
+
+    .ocr-kpi-sub {
+      font-size: 0.7rem;
+      color: var(--bs-secondary-color);
+      margin-top: 0.15rem;
+    }
+  }
+
+  .ocr-performance-chart {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 26rem;
+  }
+
+  .ocr-performance-empty {
+    max-width: 28rem;
+    margin: auto;
+    padding: 2.5rem 1rem;
+    text-align: center;
+  }
+
+  .ocr-performance-summary {
+    display: flex;
+    min-width: 0;
+    padding: 1.25rem;
+    flex-direction: column;
+    background: var(--bs-card-bg, #fff);
+    border: 1px solid var(--ocr-soft-border);
+    border-radius: var(--bs-border-radius-lg);
+  }
+
+  .ocr-performance-model-name {
+    margin-top: 0.15rem;
+    color: var(--bs-heading-color);
+    font-size: 1.125rem;
+    font-weight: 700;
+  }
+
+  .ocr-audit-row {
+    background: rgba(var(--bs-primary-rgb), 0.02);
+    border-color: var(--ocr-soft-border) !important;
+    transition: background 0.15s ease, border-color 0.15s ease;
+
+    &:hover {
+      background: rgba(var(--bs-primary-rgb), 0.04);
+      border-color: rgba(var(--bs-primary-rgb), 0.25) !important;
+    }
+  }
+
+  .ocr-audit-verdict {
+    line-height: 1.35;
+  }
+
+  .ocr-apex-tooltip {
+    padding: 0.75rem 0.9rem;
+    background: var(--bs-card-bg, #fff);
+    border: 1px solid var(--ocr-soft-border);
+    border-radius: 0.5rem;
+    box-shadow: 0 8px 24px rgba(67, 89, 113, 0.18);
+    font-family: inherit;
+    min-width: 13rem;
+
+    .ocr-tooltip-title {
+      font-size: 0.8125rem;
+      font-weight: 700;
+      color: var(--bs-heading-color);
+      margin-bottom: 0.45rem;
+      padding-bottom: 0.35rem;
+      border-bottom: 1px solid var(--ocr-soft-border);
+    }
+
+    .ocr-tooltip-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      font-size: 0.8125rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .ocr-tooltip-badge {
+      display: inline-block;
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      margin-right: 0.35rem;
+    }
+
+    .ocr-tooltip-delta {
+      margin-top: 0.45rem;
+      padding-top: 0.35rem;
+      border-top: 1px dashed var(--ocr-soft-border);
+      font-size: 0.75rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+  }
+
+  // Radar grid anchor handling: retain the triangle grid geometry when all models are unchecked
+  .apexcharts-legend-series[seriesName="ocr_radar_grid_anchor"],
+  .apexcharts-legend-series[seriesname="ocr_radar_grid_anchor"],
+  .apexcharts-legend-series:has([data-default-text*="ocr_radar_grid_anchor"]) {
+    display: none !important;
+  }
+
+  .apexcharts-series[seriesName="ocr_radar_grid_anchor"],
+  .apexcharts-series[seriesname="ocr_radar_grid_anchor"] {
+    display: none !important;
+    pointer-events: none !important;
+  }
+
+  .apexcharts-tooltip:empty {
+    display: none !important;
+    opacity: 0 !important;
+  }
+
+  .ocr-performance-evidence {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    margin-top: auto;
+    padding-top: 1rem;
+    color: var(--bs-secondary-color);
+    border-top: 1px solid var(--ocr-soft-border);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+
+    > i {
+      flex: 0 0 auto;
+      margin-top: 0.1rem;
+      color: var(--ocr-metric-word);
+    }
   }
 
   // --------------------------------------------------------------- modals
@@ -372,7 +670,23 @@
 
 @media (min-width: 1200px) {
   .ocr-workspace .ocr-workspace-grid {
-    grid-template-columns: minmax(0, 1.55fr) minmax(21rem, 0.85fr);
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1.45fr) minmax(24rem, 0.95fr);
+  }
+
+  .ocr-workspace .ocr-models-card.has-expanded-models {
+    align-self: stretch;
+    contain: size;
+  }
+
+  .ocr-workspace .ocr-models-panel.is-expanded {
+    max-height: 100%;
+  }
+}
+
+@media (min-width: 992px) {
+  .ocr-workspace .ocr-performance-layout {
+    grid-template-columns: minmax(0, 1.3fr) minmax(23rem, 0.7fr);
   }
 }
 
@@ -404,6 +718,28 @@
     .ocr-threshold-control {
       flex-basis: 100%;
       width: 100%;
+    }
+
+    .ocr-threshold-row {
+      grid-template-columns: 1fr;
+    }
+
+    .ocr-performance-picker {
+      flex-basis: 100%;
+      width: 100%;
+    }
+
+    .ocr-performance-visual {
+      min-height: 23rem;
+      padding: 0.25rem;
+    }
+
+    .ocr-performance-chart {
+      min-height: 21.875rem;
+    }
+
+    .ocr-performance-summary {
+      padding: 1rem;
     }
   }
 }

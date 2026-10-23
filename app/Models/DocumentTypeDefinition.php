@@ -1,0 +1,92 @@
+<?php
+
+namespace App\Models;
+
+use App\Enums\DocumentType;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
+
+/**
+ * A document category available to Template Builder and Staff scanning.
+ *
+ * The key is permanent so renaming a category never disconnects its templates
+ * or historical records.
+ */
+class DocumentTypeDefinition extends Model
+{
+    protected $table = 'document_types';
+
+    protected $fillable = ['key', 'name', 'short_name', 'icon', 'is_system'];
+
+    protected function casts(): array
+    {
+        return ['is_system' => 'boolean', 'archived_at' => 'datetime'];
+    }
+
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
+    }
+
+    /** Types Staff can scan and Super Admins can add layouts to. */
+    public function scopeActive($query)
+    {
+        return $query->whereNull('archived_at');
+    }
+
+    public function templates(): HasMany
+    {
+        return $this->hasMany(DocumentTemplate::class, 'document_type_id');
+    }
+
+    public function records(): HasMany
+    {
+        return $this->hasMany(CivilRecord::class, 'document_type_id');
+    }
+
+    public function label(): string
+    {
+        return $this->name;
+    }
+
+    public function shortLabel(): string
+    {
+        return $this->short_name ?: $this->name;
+    }
+
+    public function icon(): string
+    {
+        return match ($this->icon) {
+            null, '', 'bx-file-blank' => 'bx-file',
+            default => $this->icon,
+        };
+    }
+
+    /** @return list<array{name: string, x: float, y: float, width: float, height: float}> */
+    public function defaultFields(): array
+    {
+        return (DocumentType::tryFrom($this->key) ?? DocumentType::Custom)->defaultFields();
+    }
+
+    public function legacyType(): DocumentType
+    {
+        return DocumentType::tryFrom($this->key) ?? DocumentType::Custom;
+    }
+
+    public function getValueAttribute(): string
+    {
+        return $this->key;
+    }
+
+    /** @return Collection<int, self> */
+    public static function ordered(bool $activeOnly = false): Collection
+    {
+        return static::query()
+            ->when($activeOnly, fn ($query) => $query->active())
+            ->withCount(['templates', 'records'])
+            ->orderByDesc('is_system')
+            ->orderBy('id')
+            ->get();
+    }
+}

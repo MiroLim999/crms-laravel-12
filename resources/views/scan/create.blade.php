@@ -4,7 +4,7 @@
 
 @section('content')
     <x-page-header title="New Document"
-                   subtitle="Choose a certificate type, then mark and verify its fields." />
+                   subtitle="Choose a document type, then mark and verify its fields." />
 
     @unless ($health['reachable'])
         <div class="alert alert-danger d-flex align-items-start" role="alert">
@@ -31,7 +31,7 @@
         @foreach ($documentTypes as $type)
             @php $template = $templates[$type->value]; @endphp
 
-            <div class="col-md-4">
+            <div class="col-sm-6 col-xl-4">
                 <div class="card h-100">
                     <div class="card-body d-flex flex-column">
                         <span class="badge bg-label-primary rounded p-2 lh-1 align-self-start mb-3">
@@ -42,7 +42,9 @@
 
                         @if ($template)
                             <p class="text-muted small flex-grow-1">
-                                {{ $template->name }} · {{ $template->fields->count() }} fields
+                                {{ $template->name }} &middot; {{ $template->fields->count() }} fields<br>
+                                {{ $template->paper_size->label() }} &middot; {{ $template->orientation->label() }}
+                                <span class="text-muted">&middot; {{ $template->paperDimensionsLabel() }}</span>
                             </p>
                             <a href="{{ route('documents.workspace', ['type' => $type->value]) }}"
                                class="btn btn-primary">

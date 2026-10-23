@@ -3,11 +3,12 @@
 namespace App\Services;
 
 use App\Enums\ChangeRequestStatus;
+use App\Exceptions\ChangeRequestException;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
+use App\Models\RecordField;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
-use RuntimeException;
 
 /**
  * The correction workflow for locked records.
@@ -27,35 +28,69 @@ class ChangeRequestService
      * Raise a request against a locked record.
      *
      * @param  array<int, string|null>  $proposals  Keyed by record_field id.
+     * @param  array{registry_number?: string|null}  $recordProposals
      */
-    public function open(CivilRecord $record, array $proposals, string $reason, User $requester): ChangeRequest
-    {
-        if (! $record->isLocked()) {
-            throw new RuntimeException('This record is still a draft and does not need a change request.');
-        }
-
-        if ($record->hasPendingChangeRequest()) {
-            throw new RuntimeException('This record already has a pending change request.');
-        }
-
+    public function open(
+        CivilRecord $record,
+        array $proposals,
+        string $reason,
+        User $requester,
+        array $recordProposals = [],
+    ): ChangeRequest {
         $fields = $record->fields->keyBy('id');
 
         // Only keep fields whose value actually differs, so a reviewer is not
-        // asked to approve no-ops.
-        $changes = collect($proposals)
-            ->filter(fn ($value, $id) => $fields->has($id)
-                && trim((string) $value) !== trim((string) $fields[$id]->verified_value))
-            ->all();
+        // asked to approve no-ops. Requiredness is a capture-time invariant and
+        // cannot be bypassed by manually posting an empty proposal.
+        $changes = [];
+        foreach ($proposals as $fieldId => $value) {
+            $field = $fields->get((int) $fieldId);
 
-        if ($changes === []) {
-            throw new RuntimeException('None of those values differ from what is on record.');
+            if (! $field instanceof RecordField) {
+                continue;
+            }
+
+            $proposed = $this->normaliseFieldValue($field, $value);
+            if ($proposed !== $this->normaliseValue($field->verified_value)) {
+                $changes[$field->getKey()] = $proposed;
+            }
         }
 
-        return DB::transaction(function () use ($record, $changes, $fields, $reason, $requester) {
+        $changesRegistryNumber = array_key_exists('registry_number', $recordProposals)
+            && $this->normaliseValue($recordProposals['registry_number'])
+                !== $this->normaliseValue($record->registry_number);
+        $proposedRegistryNumber = $changesRegistryNumber
+            ? $this->normaliseValue($recordProposals['registry_number'])
+            : null;
+
+        if ($changes === [] && ! $changesRegistryNumber) {
+            throw new ChangeRequestException('None of those values differ from what is on record.');
+        }
+
+        return DB::transaction(function () use (
+            $record,
+            $changes,
+            $fields,
+            $reason,
+            $requester,
+            $changesRegistryNumber,
+            $proposedRegistryNumber,
+        ) {
+            // Lock the record row first, so two submissions for one record take
+            // turns here and the second one finds the request the first created.
+            CivilRecord::whereKey($record->getKey())->lockForUpdate()->first();
+
+            if ($record->hasPendingChangeRequest()) {
+                throw new ChangeRequestException('This record already has a pending change request.');
+            }
+
             $request = $record->changeRequests()->create([
                 'status' => ChangeRequestStatus::Pending,
                 'reason' => $reason,
                 'requested_by' => $requester->getKey(),
+                'changes_registry_number' => $changesRegistryNumber,
+                'current_registry_number' => $changesRegistryNumber ? $record->registry_number : null,
+                'proposed_registry_number' => $proposedRegistryNumber,
             ]);
 
             foreach ($changes as $fieldId => $proposed) {
@@ -66,12 +101,17 @@ class ChangeRequestService
                 ]);
             }
 
+            $changeCount = count($changes) + ($changesRegistryNumber ? 1 : 0);
+
             $this->audit->log(
                 'change_request.opened',
                 $request,
-                new: ['record_id' => $record->getKey(), 'field_count' => count($changes)],
-                description: 'Requested changes to '.count($changes)
-                    ." field(s) on record #{$record->getKey()}.",
+                new: [
+                    'record_id' => $record->getKey(),
+                    'field_count' => count($changes),
+                    'registry_number_changed' => $changesRegistryNumber,
+                ],
+                description: "Requested {$changeCount} change(s) on record #{$record->getKey()}.",
                 actor: $requester,
             );
 
@@ -81,19 +121,14 @@ class ChangeRequestService
 
     /**
      * Approve and apply. This is the only place a locked record's values move.
-     *
-     * @param  array<int>|null  $selectedItemIds  When provided, only items whose primary
-     *                                            key is in this list have their field values
-     *                                            updated. Null means apply all items.
      */
-    public function approve(ChangeRequest $request, User $reviewer, ?string $note = null, ?array $selectedItemIds = null): ChangeRequest
+    public function approve(ChangeRequest $request, User $reviewer, ?string $note = null): ChangeRequest
     {
-        $this->guardOpen($request);
+        return DB::transaction(function () use ($request, $reviewer, $note) {
+            $request = $this->lockOpen($request);
 
-        return DB::transaction(function () use ($request, $reviewer, $note, $selectedItemIds) {
             $applied = [];
             $previous = [];
-            $skipped = [];
 
             foreach ($request->items as $item) {
                 $field = $item->field;
@@ -102,22 +137,27 @@ class ChangeRequestService
                     continue;
                 }
 
-                // When the moderator selected specific items, skip anything not chosen.
-                if ($selectedItemIds !== null && ! in_array($item->getKey(), $selectedItemIds, true)) {
-                    $skipped[$field->name] = $item->proposed_value;
-                    continue;
-                }
+                $proposed = $this->normaliseFieldValue($field, $item->proposed_value);
 
                 $previous[$field->name] = $field->verified_value;
-                $applied[$field->name]  = $item->proposed_value;
+                $applied[$field->name] = $proposed;
 
-                $field->forceFill(['verified_value' => $item->proposed_value])->save();
+                $field->forceFill(['verified_value' => $proposed])->save();
+            }
+
+            if ($request->changes_registry_number) {
+                $previous['Registry Number'] = $request->record->registry_number;
+                $applied['Registry Number'] = $request->proposed_registry_number;
+
+                $request->record->forceFill([
+                    'registry_number' => $request->proposed_registry_number,
+                ])->save();
             }
 
             $request->forceFill([
-                'status'        => ChangeRequestStatus::Approved,
-                'reviewed_by'   => $reviewer->getKey(),
-                'reviewed_at'   => now(),
+                'status' => ChangeRequestStatus::Approved,
+                'reviewed_by' => $reviewer->getKey(),
+                'reviewed_at' => now(),
                 'decision_note' => $note,
             ])->save();
 
@@ -127,8 +167,7 @@ class ChangeRequestService
                 old: $previous,
                 new: $applied,
                 description: "Approved change request #{$request->getKey()} and applied "
-                    . count($applied) . ' value(s)'
-                    . (count($skipped) ? '; skipped: ' . implode(', ', array_keys($skipped)) : '') . '.',
+                    .count($applied).' value(s).',
                 actor: $reviewer,
             );
 
@@ -138,24 +177,28 @@ class ChangeRequestService
 
     public function reject(ChangeRequest $request, User $reviewer, ?string $note = null): ChangeRequest
     {
-        $this->guardOpen($request);
+        return DB::transaction(function () use ($request, $reviewer, $note) {
+            $request = $this->lockOpen($request);
 
-        $request->forceFill([
-            'status' => ChangeRequestStatus::Rejected,
-            'reviewed_by' => $reviewer->getKey(),
-            'reviewed_at' => now(),
-            'decision_note' => $note,
-        ])->save();
+            $request->forceFill([
+                'status' => ChangeRequestStatus::Rejected,
+                'reviewed_by' => $reviewer->getKey(),
+                'reviewed_at' => now(),
+                'decision_note' => $note,
+            ])->save();
 
-        $this->audit->log(
-            'change_request.rejected',
-            $request,
-            description: "Rejected change request #{$request->getKey()}."
-                .($note ? " Reason: {$note}" : ''),
-            actor: $reviewer,
-        );
+            // The note can run to 2,000 characters, so it goes in new_values,
+            // which the Audit Log shows in full, and the description stays short.
+            $this->audit->log(
+                'change_request.rejected',
+                $request,
+                new: ['decision_note' => $note],
+                description: "Rejected change request #{$request->getKey()}.",
+                actor: $reviewer,
+            );
 
-        return $request;
+            return $request;
+        });
     }
 
     /**
@@ -163,26 +206,67 @@ class ChangeRequestService
      */
     public function withdraw(ChangeRequest $request, User $actor): ChangeRequest
     {
-        $this->guardOpen($request);
+        return DB::transaction(function () use ($request, $actor) {
+            $request = $this->lockOpen($request);
 
-        $request->forceFill(['status' => ChangeRequestStatus::Withdrawn])->save();
+            $request->forceFill(['status' => ChangeRequestStatus::Withdrawn])->save();
 
-        $this->audit->log(
-            'change_request.withdrawn',
-            $request,
-            description: "Withdrew change request #{$request->getKey()}.",
-            actor: $actor,
-        );
+            $this->audit->log(
+                'change_request.withdrawn',
+                $request,
+                description: "Withdrew change request #{$request->getKey()}.",
+                actor: $actor,
+            );
 
-        return $request;
+            return $request;
+        });
+    }
+
+    /**
+     * Reload the request with its row locked, and check it is still pending.
+     * Call this inside a transaction.
+     *
+     * A double-click, or two reviewers deciding at once, would otherwise both
+     * pass the check on their own stale copy. With the lock, the second one
+     * waits for the first to commit, then sees the decision and is refused.
+     */
+    private function lockOpen(ChangeRequest $request): ChangeRequest
+    {
+        $locked = ChangeRequest::whereKey($request->getKey())->lockForUpdate()->firstOrFail();
+
+        $this->guardOpen($locked);
+
+        return $locked;
     }
 
     private function guardOpen(ChangeRequest $request): void
     {
         if (! $request->isOpen()) {
-            throw new RuntimeException(
+            throw new ChangeRequestException(
                 "This request is already {$request->status->value} and cannot be changed.",
             );
         }
+    }
+
+    private function normaliseFieldValue(RecordField $field, mixed $value): ?string
+    {
+        $normalised = $this->normaliseValue($value);
+
+        if ($field->is_required && $normalised === null) {
+            throw new ChangeRequestException("{$field->name} is required and cannot be blank.");
+        }
+
+        return $normalised;
+    }
+
+    private function normaliseValue(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalised = trim((string) $value);
+
+        return $normalised === '' ? null : $normalised;
     }
 }

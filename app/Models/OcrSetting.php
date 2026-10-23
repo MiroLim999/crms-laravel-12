@@ -37,11 +37,12 @@ class OcrSetting extends Model
     }
 
     /**
-     * The settings row, created on first read so callers never deal with null.
+     * The current settings, represented by an unsaved default model until the
+     * first explicit settings save. Read-only pages must not create database rows.
      */
     public static function current(): self
     {
-        return self::$cached ??= static::query()->first() ?? static::create([]);
+        return self::$cached ??= static::query()->first() ?? new static;
     }
 
     /**

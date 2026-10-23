@@ -5,13 +5,6 @@
 <nav class="layout-navbar container-xxl navbar-detached navbar navbar-expand-xl align-items-center bg-navbar-theme"
      id="layout-navbar">
 
-    {{-- Menu toggle, small screens only. --}}
-    <div class="layout-menu-toggle navbar-nav align-items-xl-center me-4 me-xl-0 d-xl-none">
-        <a class="nav-item nav-link px-0 me-xl-6" href="javascript:void(0)" aria-label="Toggle menu">
-            <i class="icon-base bx bx-menu icon-md"></i>
-        </a>
-    </div>
-
     <div class="navbar-nav-right d-flex align-items-center" id="navbar-collapse">
 
         {{-- Archive search. Every signed-in role may search records. --}}
@@ -20,7 +13,8 @@
                 <form action="{{ route('records.index') }}" method="GET"
                       class="nav-item d-flex align-items-center" role="search">
                     <i class="icon-base bx bx-search icon-md"></i>
-                    <input type="search" name="q" value="{{ request('q') }}"
+                    {{-- An edited URL can send ?q[]=x, an array, which can't be printed. --}}
+                    <input type="search" name="q" value="{{ is_string(request('q')) ? request('q') : '' }}"
                            class="form-control border-0 shadow-none ps-1 ps-sm-2"
                            placeholder="Search records..." aria-label="Search records">
                 </form>
@@ -28,6 +22,30 @@
         @endcan
 
         <ul class="navbar-nav flex-row align-items-center ms-auto">
+            {{-- Colour mode: handled by resources/js/theme.js --}}
+            <li class="nav-item dropdown me-2">
+                <button type="button" class="btn btn-icon btn-label-secondary rounded-pill dropdown-toggle hide-arrow"
+                        data-bs-toggle="dropdown" aria-expanded="false" aria-label="Colour mode" title="Colour mode">
+                    <i class="icon-base bx bx-sun icon-md" data-theme-current-icon aria-hidden="true"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li>
+                        <button type="button" class="dropdown-item d-flex align-items-center" data-theme-choice="light">
+                            <i class="icon-base bx bx-sun icon-md me-3" aria-hidden="true"></i>Light
+                        </button>
+                    </li>
+                    <li>
+                        <button type="button" class="dropdown-item d-flex align-items-center" data-theme-choice="dark">
+                            <i class="icon-base bx bx-moon icon-md me-3" aria-hidden="true"></i>Dark
+                        </button>
+                    </li>
+                    <li>
+                        <button type="button" class="dropdown-item d-flex align-items-center" data-theme-choice="system">
+                            <i class="icon-base bx bx-desktop icon-md me-3" aria-hidden="true"></i>System
+                        </button>
+                    </li>
+                </ul>
+            </li>
             <li class="nav-item navbar-dropdown dropdown-user dropdown">
                 <a class="nav-link dropdown-toggle hide-arrow p-0" href="javascript:void(0);"
                    data-bs-toggle="dropdown" aria-expanded="false">

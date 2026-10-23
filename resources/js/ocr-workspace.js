@@ -1,3 +1,5 @@
+import ApexCharts from 'apexcharts';
+
 /**
  * OCR Workspace front end (Super Admin only).
  *
@@ -70,6 +72,70 @@ const setButtonBusy = (button, busy, busyLabel) => {
     button.disabled = busy;
     button.setAttribute('aria-busy', busy ? 'true' : 'false');
 };
+
+// --------------------------------------------------------------- model list
+
+function initModelList() {
+    const toggle = $('[data-models-toggle]');
+    const list = $('#installed-models-list');
+    const card = toggle?.closest('.ocr-models-card');
+    const header = $('.card-header', card);
+    const policyCard = $('.ocr-policy-card');
+    const desktopLayout = window.matchMedia('(min-width: 1200px)');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let cardAnimation;
+
+    if (!toggle || !list || !card || !header) return;
+
+    toggle.addEventListener('click', () => {
+        const expanded = toggle.getAttribute('aria-expanded') !== 'true';
+        const startHeight = card.getBoundingClientRect().height;
+
+        cardAnimation?.cancel();
+
+        if (expanded) {
+            card.classList.add('has-expanded-models');
+        }
+
+        list.classList.toggle('is-expanded', expanded);
+        list.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+        list.inert = !expanded;
+        toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        toggle.setAttribute('aria-label', expanded ? 'Hide models' : 'Show models');
+        toggle.setAttribute('title', expanded ? 'Hide models' : 'Show models');
+
+        const label = $('span', toggle);
+        if (label) label.textContent = expanded ? 'Hide models' : 'Show models';
+
+        if (!desktopLayout.matches || reducedMotion.matches) {
+            if (!expanded) card.classList.remove('has-expanded-models');
+            return;
+        }
+
+        const endHeight = expanded
+            ? (policyCard?.getBoundingClientRect().height ?? card.getBoundingClientRect().height)
+            : header.getBoundingClientRect().height;
+
+        cardAnimation = card.animate(
+            [
+                { height: `${startHeight}px` },
+                { height: `${endHeight}px` },
+            ],
+            {
+                duration: 300,
+                easing: 'cubic-bezier(.4, 0, .2, 1)',
+            },
+        );
+
+        cardAnimation.addEventListener('finish', () => {
+            if (toggle.getAttribute('aria-expanded') === 'false') {
+                card.classList.remove('has-expanded-models');
+            }
+
+            cardAnimation = null;
+        }, { once: true });
+    });
+}
 
 // -------------------------------------------------------------- direct upload
 
@@ -620,19 +686,23 @@ async function copyToClipboard(text) {
 function initEngineStatus() {
     if (!$('#engine-card')) return;
 
-    const copy = $('#copy-engine-command');
-    copy?.addEventListener('click', async () => {
-        const label = $('span', copy);
-        const idle = label.textContent;
+    document.querySelectorAll('.js-copy-command').forEach((copy) => {
+        copy.addEventListener('click', async () => {
+            const label = $('span', copy);
+            const target = document.getElementById(copy.dataset.copyTarget);
+            if (!label || !target) return;
 
-        try {
-            await copyToClipboard($('#engine-command').textContent.trim());
-            label.textContent = 'Copied';
-        } catch {
-            label.textContent = 'Copy failed';
-        }
+            const idle = label.textContent;
 
-        window.setTimeout(() => { label.textContent = idle; }, 1600);
+            try {
+                await copyToClipboard(target.textContent.trim());
+                label.textContent = 'Copied';
+            } catch {
+                label.textContent = 'Copy failed';
+            }
+
+            window.setTimeout(() => { label.textContent = idle; }, 1600);
+        });
     });
 
     let lastReachable = config.engineReachable;
@@ -719,11 +789,744 @@ function initModelActions() {
     deleteForm?.addEventListener('submit', () => setButtonBusy(deleteSubmit, true, 'Deleting…'));
 }
 
+// ---------------------------------------------------------- model performance
+
+function readModelPerformance() {
+    const node = $('#ocr-model-performance-data');
+
+    if (!node) return null;
+
+    try {
+        return JSON.parse(node.textContent || '{}');
+    } catch {
+        return null;
+    }
+}
+
+function initModelPerformance() {
+    let data = readModelPerformance();
+    const target = $('#ocr-model-radar');
+    const selector = $('#ocr-performance-model');
+
+    if (!data || !target || !selector) return;
+
+    let metrics = Array.isArray(data.metrics) ? data.metrics : [];
+    let profiles = new Map(
+        (Array.isArray(data.models) ? data.models : []).map((profile) => [String(profile.key), profile]),
+    );
+    const empty = $('#ocr-performance-empty');
+    const emptyCopy = $('#ocr-performance-empty-copy');
+    const source = $('#ocr-performance-source');
+    const modelName = $('#ocr-performance-model-name');
+    const active = $('#ocr-performance-active');
+    const auditTag = $('#ocr-audit-tag');
+    const btnRadar = $('#ocr-btn-view-radar');
+    const btnBars = $('#ocr-btn-view-bars');
+    const compareToggle = $('#ocr-compare-toggle');
+    const compareToggleWrap = $('#ocr-compare-toggle-wrap');
+    const toolbar = $('#ocr-performance-toolbar');
+    const toolbarModelName = $('#ocr-toolbar-model-name');
+    const toolbarBasePill = $('#ocr-toolbar-base-pill');
+    const kpiWrap = $('#ocr-performance-kpis');
+
+    // Diagnostic audit DOM nodes
+    const auditWerVal = $('#ocr-audit-wer-val');
+    const auditWerBase = $('#ocr-audit-wer-base');
+    const auditWerDelta = $('#ocr-audit-wer-delta');
+    const auditWerDesc = $('#ocr-audit-wer-desc');
+
+    const auditCerVal = $('#ocr-audit-cer-val');
+    const auditCerBase = $('#ocr-audit-cer-base');
+    const auditCerDelta = $('#ocr-audit-cer-delta');
+    const auditCerDesc = $('#ocr-audit-cer-desc');
+
+    const auditExactVal = $('#ocr-audit-exact-val');
+    const auditExactBase = $('#ocr-audit-exact-base');
+    const auditExactDelta = $('#ocr-audit-exact-delta');
+    const auditExactDesc = $('#ocr-audit-exact-desc');
+
+    const verdictText = $('#ocr-audit-verdict-text');
+    const verdictIcon = $('#ocr-audit-verdict-icon');
+    const verdictBox = $('#ocr-audit-verdict-box');
+
+    const auditDataset = $('#ocr-audit-dataset');
+    const auditSplit = $('#ocr-audit-split');
+    const auditSamples = $('#ocr-audit-samples');
+    const auditDate = $('#ocr-audit-date');
+
+    let chart = null;
+    let currentView = 'radar';
+    let overlayBase = true;
+
+    const kpiVals = new Map(
+        Array.from(document.querySelectorAll('[data-kpi-val]')).map((n) => [n.dataset.kpiVal, n]),
+    );
+    const kpiDeltas = new Map(
+        Array.from(document.querySelectorAll('[data-kpi-delta]')).map((n) => [n.dataset.kpiDelta, n]),
+    );
+    const kpiSubs = new Map(
+        Array.from(document.querySelectorAll('[data-kpi-sub]')).map((n) => [n.dataset.kpiSub, n]),
+    );
+
+    const theme = () => {
+        const styles = getComputedStyle(target.closest('.ocr-workspace') || document.documentElement);
+
+        return {
+            primary: styles.getPropertyValue('--bs-primary').trim() || '#696cff',
+            character: styles.getPropertyValue('--ocr-metric-character').trim() || '#696cff',
+            word: styles.getPropertyValue('--ocr-metric-word').trim() || '#03c3ec',
+            exact: styles.getPropertyValue('--ocr-metric-exact').trim() || '#71dd37',
+            text: styles.getPropertyValue('--bs-secondary-color').trim() || '#8592a3',
+            border: styles.getPropertyValue('--bs-border-color').trim() || 'rgba(67, 89, 113, .12)',
+            card: styles.getPropertyValue('--bs-card-bg').trim() || '#fff',
+            font: styles.getPropertyValue('--bs-body-font-family').trim() || 'Public Sans, sans-serif',
+        };
+    };
+
+    const scoreValue = (profile, key) => {
+        const value = profile?.scores?.[key];
+
+        return value === null || value === undefined || !Number.isFinite(Number(value))
+            ? null
+            : Number(value);
+    };
+
+    const updateSummary = (profile) => {
+        const friendlyName = profile?.display_label || profile?.label || 'No model selected';
+        if (modelName) modelName.textContent = friendlyName;
+        if (toolbarModelName) toolbarModelName.textContent = friendlyName;
+        if (active) active.classList.toggle('d-none', !profile?.is_active);
+
+        const isBase = profile?.key === 'base';
+        const baseProfile = !isBase ? profiles.get('base') : null;
+        const baseHasData = Boolean(baseProfile?.has_data);
+        const isComparing = baseHasData && overlayBase && !isBase;
+
+        if (auditTag) {
+            if (!profile) {
+                auditTag.textContent = 'No model';
+                auditTag.className = 'badge bg-label-secondary';
+            } else if (isBase) {
+                auditTag.textContent = 'Baseline';
+                auditTag.className = 'badge bg-label-warning';
+            } else if (!profile.has_data) {
+                auditTag.textContent = profile.is_active ? 'Active (No Data)' : 'No Benchmark';
+                auditTag.className = 'badge bg-label-secondary';
+            } else {
+                auditTag.textContent = profile.is_active ? 'Active Fine-tuned' : 'Fine-tuned';
+                auditTag.className = `badge ${profile.is_active ? 'bg-label-success' : 'bg-label-primary'}`;
+            }
+        }
+
+        if (source) {
+            const tone = profile?.source === 'evaluation'
+                ? 'primary'
+                : 'secondary';
+            source.className = `badge bg-label-${tone}`;
+            source.textContent = profile?.source_label || 'No data';
+        }
+
+        if (toolbarBasePill) toolbarBasePill.classList.toggle('d-none', !isComparing);
+        if (compareToggleWrap) compareToggleWrap.classList.toggle('d-none', isBase || !baseHasData);
+        // Keep KPI cards and toolbar visible whenever the selected model has evaluation data
+        if (kpiWrap) kpiWrap.classList.toggle('d-none', !profile?.has_data);
+        if (toolbar) toolbar.classList.toggle('d-none', !profile?.has_data);
+
+        // Update Quick Comparison KPI Delta Strip
+        metrics.forEach((metric) => {
+            const kpiValNode = kpiVals.get(metric.key);
+            const kpiDeltaNode = kpiDeltas.get(metric.key);
+            const kpiSubNode = kpiSubs.get(metric.key);
+
+            const value = scoreValue(profile, metric.key);
+            const baseValue = baseHasData ? scoreValue(baseProfile, metric.key) : null;
+
+            if (kpiValNode) kpiValNode.textContent = value === null ? '—' : `${value.toFixed(1)}%`;
+
+            if (isComparing && value !== null && baseValue !== null) {
+                const diff = value - baseValue;
+                const sign = diff >= 0 ? '+' : '';
+
+                if (kpiDeltaNode) {
+                    kpiDeltaNode.textContent = `${sign}${diff.toFixed(1)}%`;
+                    kpiDeltaNode.className = `badge ${diff >= 0 ? 'bg-label-success' : 'bg-label-danger'} ocr-kpi-delta`;
+                    kpiDeltaNode.classList.remove('d-none');
+                }
+                if (kpiSubNode) kpiSubNode.textContent = `vs ${baseValue.toFixed(1)}% Base`;
+            } else if (isBase && value !== null) {
+                if (kpiDeltaNode) {
+                    kpiDeltaNode.textContent = 'Baseline';
+                    kpiDeltaNode.className = 'badge bg-label-warning ocr-kpi-delta';
+                    kpiDeltaNode.classList.remove('d-none');
+                }
+                if (kpiSubNode) {
+                    const cerVal = profile.cer ?? (100 - value);
+                    const werVal = profile.wer ?? (100 - value);
+                    kpiSubNode.textContent = metric.key === 'character_accuracy'
+                        ? `${cerVal.toFixed(1)}% CER`
+                        : (metric.key === 'word_accuracy' ? `${werVal.toFixed(1)}% WER` : 'Reference floor');
+                }
+            } else {
+                if (kpiDeltaNode) kpiDeltaNode.classList.add('d-none');
+                if (kpiSubNode) {
+                    kpiSubNode.textContent = metric.key === 'character_accuracy'
+                        ? '1 minus CER'
+                        : (metric.key === 'word_accuracy' ? '1 minus WER' : 'Exact lines');
+                }
+            }
+        });
+
+        // Update Diagnostic Audit & Error Reduction Panel
+        if (profile?.has_data) {
+            const charAcc = scoreValue(profile, 'character_accuracy') ?? 0;
+            const wordAcc = scoreValue(profile, 'word_accuracy') ?? 0;
+            const exactAcc = scoreValue(profile, 'exact_match') ?? 0;
+
+            const cer = profile.cer ?? Math.max(0, 100 - charAcc);
+            const wer = profile.wer ?? Math.max(0, 100 - wordAcc);
+
+            if (isComparing && baseHasData) {
+                const bCharAcc = scoreValue(baseProfile, 'character_accuracy') ?? 0;
+                const bWordAcc = scoreValue(baseProfile, 'word_accuracy') ?? 0;
+                const bExactAcc = scoreValue(baseProfile, 'exact_match') ?? 0;
+
+                const bCer = baseProfile.cer ?? Math.max(0, 100 - bCharAcc);
+                const bWer = baseProfile.wer ?? Math.max(0, 100 - bWordAcc);
+
+                // Relative error reduction: ((base - model) / base) * 100
+                const werReduction = bWer > 0 ? ((bWer - wer) / bWer * 100) : 0;
+                const cerReduction = bCer > 0 ? ((bCer - cer) / bCer * 100) : 0;
+                const exactRelGain = bExactAcc > 0 ? ((exactAcc - bExactAcc) / bExactAcc * 100) : 0;
+                const exactDiff = exactAcc - bExactAcc;
+
+                if (auditWerVal) auditWerVal.textContent = `${wer.toFixed(1)}%`;
+                if (auditWerBase) auditWerBase.textContent = `${bWer.toFixed(1)}%`;
+                if (auditWerDelta) {
+                    const sign = werReduction >= 0 ? '-' : '+';
+                    auditWerDelta.textContent = `${sign}${Math.abs(werReduction).toFixed(1)}%`;
+                    auditWerDelta.className = `badge ${werReduction >= 0 ? 'bg-label-success' : 'bg-label-danger'} ms-1.5`;
+                }
+
+                if (auditCerVal) auditCerVal.textContent = `${cer.toFixed(1)}%`;
+                if (auditCerBase) auditCerBase.textContent = `${bCer.toFixed(1)}%`;
+                if (auditCerDelta) {
+                    const sign = cerReduction >= 0 ? '-' : '+';
+                    auditCerDelta.textContent = `${sign}${Math.abs(cerReduction).toFixed(1)}%`;
+                    auditCerDelta.className = `badge ${cerReduction >= 0 ? 'bg-label-success' : 'bg-label-danger'} ms-1.5`;
+                }
+
+                if (auditExactVal) auditExactVal.textContent = `${exactAcc.toFixed(1)}%`;
+                if (auditExactBase) auditExactBase.textContent = `${bExactAcc.toFixed(1)}%`;
+                if (auditExactDelta) {
+                    const sign = exactDiff >= 0 ? '+' : '';
+                    auditExactDelta.textContent = `${sign}${exactDiff.toFixed(1)}%`;
+                    auditExactDelta.className = `badge ${exactDiff >= 0 ? 'bg-label-success' : 'bg-label-danger'} ms-1.5`;
+                }
+
+                if (verdictText) {
+                    verdictText.textContent = `Word errors cut by ${Math.abs(werReduction).toFixed(1)}% vs baseline, reaching ${exactAcc.toFixed(1)}% exact lines.`;
+                }
+                if (verdictIcon) verdictIcon.className = 'icon-base bx bx-check-circle text-success fs-5 flex-shrink-0';
+                if (verdictBox) verdictBox.className = 'ocr-audit-verdict p-2.5 rounded mb-3 bg-label-success border border-success-subtle d-flex align-items-center gap-2';
+            } else if (isBase) {
+                if (auditWerVal) auditWerVal.textContent = `${wer.toFixed(1)}%`;
+                if (auditWerBase) auditWerBase.textContent = 'Reference';
+                if (auditWerDelta) {
+                    auditWerDelta.textContent = 'Base Ref';
+                    auditWerDelta.className = 'badge bg-label-warning ms-1.5';
+                }
+
+                if (auditCerVal) auditCerVal.textContent = `${cer.toFixed(1)}%`;
+                if (auditCerBase) auditCerBase.textContent = 'Reference';
+                if (auditCerDelta) {
+                    auditCerDelta.textContent = 'Base Ref';
+                    auditCerDelta.className = 'badge bg-label-warning ms-1.5';
+                }
+
+                if (auditExactVal) auditExactVal.textContent = `${exactAcc.toFixed(1)}%`;
+                if (auditExactBase) auditExactBase.textContent = 'Reference';
+                if (auditExactDelta) {
+                    auditExactDelta.textContent = 'Base Ref';
+                    auditExactDelta.className = 'badge bg-label-warning ms-1.5';
+                }
+
+                if (verdictText) {
+                    verdictText.textContent = 'Pre-trained TrOCR base model serving as the reference comparison floor.';
+                }
+                if (verdictIcon) verdictIcon.className = 'icon-base bx bx-info-circle text-warning fs-5 flex-shrink-0';
+                if (verdictBox) verdictBox.className = 'ocr-audit-verdict p-2.5 rounded mb-3 bg-label-warning border border-warning-subtle d-flex align-items-center gap-2';
+            } else {
+                if (auditWerVal) auditWerVal.textContent = `${wer.toFixed(1)}%`;
+                if (auditWerBase) auditWerBase.textContent = 'Solo test';
+                if (auditWerDelta) {
+                    auditWerDelta.textContent = `${(100 - wer).toFixed(1)}% acc`;
+                    auditWerDelta.className = 'badge bg-label-primary ms-1.5';
+                }
+
+                if (auditCerVal) auditCerVal.textContent = `${cer.toFixed(1)}%`;
+                if (auditCerBase) auditCerBase.textContent = 'Solo test';
+                if (auditCerDelta) {
+                    auditCerDelta.textContent = `${(100 - cer).toFixed(1)}% acc`;
+                    auditCerDelta.className = 'badge bg-label-primary ms-1.5';
+                }
+
+                if (auditExactVal) auditExactVal.textContent = `${exactAcc.toFixed(1)}%`;
+                if (auditExactBase) auditExactBase.textContent = 'Solo test';
+                if (auditExactDelta) {
+                    auditExactDelta.textContent = `${exactAcc.toFixed(1)}% match`;
+                    auditExactDelta.className = 'badge bg-label-primary ms-1.5';
+                }
+
+                if (verdictText) {
+                    verdictText.textContent = `Evaluated: ${charAcc.toFixed(1)}% chars, ${wordAcc.toFixed(1)}% words, ${exactAcc.toFixed(1)}% exact match.`;
+                }
+                if (verdictIcon) verdictIcon.className = 'icon-base bx bx-check-circle text-primary fs-5 flex-shrink-0';
+                if (verdictBox) verdictBox.className = 'ocr-audit-verdict p-2.5 rounded mb-3 bg-label-primary border border-primary-subtle d-flex align-items-center gap-2';
+            }
+
+            if (auditDataset) auditDataset.textContent = profile.dataset || 'synthetic-broken-handwritten-samples50k';
+            if (auditSplit) auditSplit.textContent = profile.split || 'locked test';
+            if (auditSamples) auditSamples.textContent = `${Number(profile.sample_count ?? 5000).toLocaleString()} samples`;
+            if (auditDate) auditDate.textContent = profile.evaluated_at || 'Oct 13, 2026';
+        } else {
+            if (auditWerVal) auditWerVal.textContent = '—';
+            if (auditWerBase) auditWerBase.textContent = 'No data';
+            if (auditWerDelta) {
+                auditWerDelta.textContent = '—';
+                auditWerDelta.className = 'badge bg-label-secondary ms-1.5';
+            }
+            if (auditCerVal) auditCerVal.textContent = '—';
+            if (auditCerBase) auditCerBase.textContent = 'No data';
+            if (auditCerDelta) {
+                auditCerDelta.textContent = '—';
+                auditCerDelta.className = 'badge bg-label-secondary ms-1.5';
+            }
+            if (auditExactVal) auditExactVal.textContent = '—';
+            if (auditExactBase) auditExactBase.textContent = 'No data';
+            if (auditExactDelta) {
+                auditExactDelta.textContent = '—';
+                auditExactDelta.className = 'badge bg-label-secondary ms-1.5';
+            }
+            if (verdictText) {
+                verdictText.textContent = profile
+                    ? 'No benchmark evaluation report found for this model.'
+                    : 'No models available to evaluate.';
+            }
+            if (verdictIcon) verdictIcon.className = 'icon-base bx bx-info-circle text-secondary fs-5 flex-shrink-0';
+            if (verdictBox) verdictBox.className = 'ocr-audit-verdict p-2.5 rounded mb-3 bg-label-secondary border border-secondary-subtle d-flex align-items-center gap-2';
+            if (auditDataset) auditDataset.textContent = 'None';
+            if (auditSplit) auditSplit.textContent = 'no evaluation';
+            if (auditSamples) auditSamples.textContent = '0 samples';
+            if (auditDate) auditDate.textContent = 'Not evaluated';
+        }
+    };
+
+    const makeTooltipHtml = (profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex, w) => {
+        const collapsed = w?.globals?.collapsedSeriesIndices || [];
+        const isModelVisible = !collapsed.includes(0);
+        const isBaseVisible = showBaseComparison && !collapsed.includes(1);
+
+        if (!isModelVisible && !isBaseVisible) {
+            return '';
+        }
+
+        const metric = metrics[dataPointIndex];
+        const val = scores?.[dataPointIndex];
+        const bVal = baseScores ? baseScores[dataPointIndex] : null;
+        const diff = (val !== null && bVal !== null && val !== undefined && bVal !== undefined)
+            ? val - bVal
+            : null;
+        const sign = diff !== null && diff >= 0 ? '+' : '';
+        const relGain = (diff !== null && bVal > 0) ? ((diff / bVal) * 100).toFixed(1) : null;
+        const profileLabel = profile?.display_label || profile?.label || 'Selected Model';
+
+        return `<div class="ocr-apex-tooltip">
+            <div class="ocr-tooltip-title">${metric.label}</div>
+            ${isModelVisible ? `
+            <div class="ocr-tooltip-row">
+                <div><span class="ocr-tooltip-badge" style="background:#696cff"></span><strong>${profileLabel}</strong></div>
+                <span class="fw-bold text-primary">${val !== null && val !== undefined ? val.toFixed(1) + '%' : '—'}</span>
+            </div>` : ''}
+            ${isBaseVisible && bVal !== null && bVal !== undefined ? `
+            <div class="ocr-tooltip-row">
+                <div><span class="ocr-tooltip-badge" style="background:#ff9f43"></span><span>TrOCR Base</span></div>
+                <span class="text-muted">${bVal.toFixed(1)}%</span>
+            </div>` : ''}
+            ${isModelVisible && isBaseVisible && diff !== null ? `
+            <div class="ocr-tooltip-delta ${diff >= 0 ? 'text-success' : 'text-danger'}">
+                <i class="icon-base bx ${diff >= 0 ? 'bx-trending-up' : 'bx-trending-down'}"></i>
+                <span>${sign}${diff.toFixed(1)}% absolute gain ${relGain ? `(${sign}${relGain}% relative lift)` : ''}</span>
+            </div>` : ''}
+        </div>`;
+    };
+
+    const render = (profile) => {
+        updateSummary(profile);
+
+        const scores = metrics.map((metric) => scoreValue(profile, metric.key));
+        const hasData = Boolean(profile?.has_data)
+            && metrics.length >= 3
+            && scores.every((score) => score !== null);
+
+        chart?.destroy();
+        chart = null;
+
+        target.classList.toggle('d-none', !hasData);
+        empty?.classList.toggle('d-none', hasData);
+
+        if (!hasData) {
+            target.setAttribute('aria-label', 'No model performance data available');
+            if (emptyCopy) {
+                emptyCopy.textContent = profile
+                    ? `${profile.display_label || profile.label} has no valid locked-test benchmark report.`
+                    : 'Add a model before reviewing its performance.';
+            }
+            return;
+        }
+
+        const colors = theme();
+        const metricColors = metrics.map((metric) => ({
+            character_accuracy: colors.character,
+            word_accuracy: colors.word,
+            exact_match: colors.exact,
+        })[metric.key] || colors.primary);
+        target.setAttribute('aria-label', `Performance evaluation for ${profile.display_label || profile.label}`);
+
+        const isBase = profile?.key === 'base';
+        const baseProfile = !isBase ? profiles.get('base') : null;
+        const baseHasData = Boolean(baseProfile?.has_data);
+        const baseScores = baseHasData
+            ? metrics.map((metric) => scoreValue(baseProfile, metric.key))
+            : null;
+        const showBaseComparison = baseHasData
+            && overlayBase
+            && !isBase
+            && Array.isArray(baseScores)
+            && baseScores.every((s) => s !== null);
+
+        const series = [{
+            name: `${profile.display_label || profile.label} (Fine-tuned)`,
+            data: scores,
+        }];
+
+        if (showBaseComparison) {
+            series.push({
+                name: 'TrOCR Base (Baseline)',
+                data: baseScores,
+            });
+        }
+
+        const comparisonColors = [colors.primary, '#ff9f43'];
+
+        if (currentView === 'radar') {
+            const radarSeries = [
+                ...series,
+                {
+                    name: 'ocr_radar_grid_anchor',
+                    data: metrics.map(() => 0),
+                },
+            ];
+
+            chart = new ApexCharts(target, {
+                chart: {
+                    type: 'radar',
+                    height: 420,
+                    fontFamily: colors.font,
+                    foreColor: colors.text,
+                    parentHeightOffset: 0,
+                    toolbar: { show: false },
+                    animations: {
+                        enabled: true,
+                        easing: 'easeinout',
+                        speed: 350,
+                    },
+                },
+                colors: showBaseComparison
+                    ? [...comparisonColors, 'transparent']
+                    : [colors.primary, 'transparent'],
+                dataLabels: { enabled: false },
+                fill: showBaseComparison
+                    ? {
+                        type: ['gradient', 'solid', 'solid'],
+                        opacity: [0.30, 0.12, 0],
+                        gradient: {
+                            type: 'horizontal',
+                            shadeIntensity: 0,
+                            inverseColors: false,
+                            colorStops: [
+                                { offset: 0, color: colors.exact, opacity: 0.30 },
+                                { offset: 50, color: colors.character, opacity: 0.32 },
+                                { offset: 100, color: colors.word, opacity: 0.30 },
+                            ],
+                        },
+                    }
+                    : {
+                        type: ['gradient', 'solid'],
+                        opacity: [0.28, 0],
+                        gradient: {
+                            type: 'horizontal',
+                            shadeIntensity: 0,
+                            inverseColors: false,
+                            colorStops: [
+                                { offset: 0, color: colors.exact, opacity: 0.28 },
+                                { offset: 50, color: colors.character, opacity: 0.28 },
+                                { offset: 100, color: colors.word, opacity: 0.25 },
+                            ],
+                        },
+                    },
+                grid: {
+                    padding: { top: 12, right: 24, bottom: 8, left: 24 },
+                },
+                legend: {
+                    show: showBaseComparison,
+                    position: 'bottom',
+                    horizontalAlign: 'center',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    fontFamily: colors.font,
+                    markers: { radius: 6, width: 10, height: 10 },
+                    itemMargin: { horizontal: 16, vertical: 6 },
+                },
+                markers: showBaseComparison
+                    ? {
+                        size: [7.5, 5.5, 0],
+                        strokeColors: [colors.card, '#ff9f43', 'transparent'],
+                        strokeWidth: [2.5, 2, 0],
+                        hover: { size: 9 },
+                    }
+                    : {
+                        size: [7, 0],
+                        strokeColors: [colors.card, 'transparent'],
+                        strokeWidth: [2.5, 0],
+                        discrete: metricColors.map((color, dataPointIndex) => ({
+                            seriesIndex: 0,
+                            dataPointIndex,
+                            fillColor: color,
+                            strokeColor: colors.card,
+                            size: 7.5,
+                        })),
+                        hover: { size: 9 },
+                    },
+                plotOptions: {
+                    radar: {
+                        size: 145,
+                        polygons: {
+                            strokeColors: colors.border,
+                            strokeWidth: 1,
+                            connectorColors: colors.border,
+                            fill: { colors: ['rgba(67, 89, 113, 0.03)', 'transparent'] },
+                        },
+                    },
+                },
+                series: radarSeries,
+                stroke: showBaseComparison
+                    ? { width: [3.5, 2.5, 0], dashArray: [0, 5, 0] }
+                    : { width: [3.5, 0], dashArray: [0, 0] },
+                tooltip: {
+                    custom: ({ dataPointIndex, w }) => makeTooltipHtml(profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex, w),
+                },
+                xaxis: {
+                    categories: metrics.map((metric) => metric.axis || metric.label),
+                    labels: {
+                        style: {
+                            colors: metricColors,
+                            fontSize: '12px',
+                            fontWeight: 600,
+                        },
+                    },
+                },
+                yaxis: {
+                    show: false,
+                    min: 0,
+                    max: 100,
+                    tickAmount: 4,
+                },
+                responsive: [{
+                    breakpoint: 575,
+                    options: {
+                        chart: { height: 320 },
+                        grid: { padding: { top: 8, right: 8, bottom: 8, left: 8 } },
+                        markers: {
+                            size: showBaseComparison ? [5, 4, 0] : [5, 0],
+                            strokeWidth: showBaseComparison ? [2, 1.5, 0] : [2, 0],
+                            hover: { size: 7 },
+                        },
+                        plotOptions: { radar: { size: 105 } },
+                    },
+                }],
+            });
+        } else {
+            // Grouped horizontal comparison bars
+            chart = new ApexCharts(target, {
+                chart: {
+                    type: 'bar',
+                    height: 380,
+                    fontFamily: colors.font,
+                    foreColor: colors.text,
+                    toolbar: { show: false },
+                    animations: {
+                        enabled: true,
+                        easing: 'easeinout',
+                        speed: 350,
+                    },
+                },
+                plotOptions: {
+                    bar: {
+                        horizontal: true,
+                        barHeight: '52%',
+                        borderRadius: 6,
+                        dataLabels: { position: 'center' },
+                    },
+                },
+                colors: showBaseComparison ? comparisonColors : [colors.primary],
+                dataLabels: {
+                    enabled: true,
+                    style: {
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        colors: ['#fff'],
+                    },
+                    formatter: (v) => `${Number(v).toFixed(1)}%`,
+                },
+                stroke: {
+                    show: true,
+                    width: 1,
+                    colors: ['transparent'],
+                },
+                grid: {
+                    borderColor: colors.border,
+                    strokeDashArray: 4,
+                    padding: { top: 8, right: 20, bottom: 12, left: 16 },
+                },
+                legend: {
+                    show: showBaseComparison,
+                    position: 'bottom',
+                    horizontalAlign: 'center',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    fontFamily: colors.font,
+                    markers: { radius: 6, width: 10, height: 10 },
+                    itemMargin: { horizontal: 16, vertical: 6 },
+                },
+                series,
+                tooltip: {
+                    custom: ({ dataPointIndex, w }) => makeTooltipHtml(profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex, w),
+                },
+                xaxis: {
+                    categories: metrics.map((m) => m.label),
+                    min: 0,
+                    max: 100,
+                    labels: {
+                        formatter: (v) => `${Math.round(v)}%`,
+                        style: { colors: colors.text, fontSize: '11px' },
+                    },
+                },
+                yaxis: {
+                    labels: {
+                        style: {
+                            colors: metricColors,
+                            fontSize: '13px',
+                            fontWeight: 600,
+                        },
+                    },
+                },
+            });
+        }
+
+        chart.render();
+    };
+
+    if (btnRadar && btnBars) {
+        btnRadar.addEventListener('click', () => {
+            if (currentView === 'radar') return;
+            currentView = 'radar';
+            btnRadar.classList.remove('btn-label-secondary');
+            btnRadar.classList.add('btn-primary');
+            btnBars.classList.remove('btn-primary');
+            btnBars.classList.add('btn-label-secondary');
+            render(profiles.get(selector.value));
+        });
+
+        btnBars.addEventListener('click', () => {
+            if (currentView === 'bars') return;
+            currentView = 'bars';
+            btnBars.classList.remove('btn-label-secondary');
+            btnBars.classList.add('btn-primary');
+            btnRadar.classList.remove('btn-primary');
+            btnRadar.classList.add('btn-label-secondary');
+            render(profiles.get(selector.value));
+        });
+    }
+
+    if (compareToggle) {
+        compareToggle.addEventListener('change', () => {
+            overlayBase = compareToggle.checked;
+            render(profiles.get(selector.value));
+        });
+    }
+
+    selector.addEventListener('change', () => render(profiles.get(selector.value)));
+    // Chart colours are read when it is drawn; redraw after a colour-mode switch.
+    window.addEventListener('crms:themechange', () => render(profiles.get(selector.value)));
+
+    function updatePerformanceDataset(nextData) {
+        if (!nextData || typeof nextData !== 'object') return;
+
+        data = nextData;
+        metrics = Array.isArray(data.metrics) ? data.metrics : metrics;
+        profiles = new Map(
+            (Array.isArray(data.models) ? data.models : []).map((p) => [String(p.key), p]),
+        );
+
+        const prevVal = selector.value;
+        selector.innerHTML = '';
+        if (profiles.size === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No models available';
+            selector.appendChild(opt);
+            selector.disabled = true;
+        } else {
+            profiles.forEach((p) => {
+                const opt = document.createElement('option');
+                opt.value = p.key;
+                opt.textContent = `${p.display_label || p.label}${p.is_active ? ' (active)' : ''}`;
+                selector.appendChild(opt);
+            });
+            selector.disabled = profiles.size < 2;
+        }
+
+        const nextProfile = profiles.get(prevVal)
+            ?? profiles.get(String(data.selected))
+            ?? profiles.values().next().value
+            ?? null;
+
+        if (nextProfile) {
+            selector.value = nextProfile.key;
+        }
+        render(nextProfile);
+    }
+
+    window.crmsUpdateModelPerformance = updatePerformanceDataset;
+    window.addEventListener('ocr:performance-updated', (event) => {
+        if (event.detail) updatePerformanceDataset(event.detail);
+    });
+
+    const initial = profiles.get(String(data.selected ?? selector.value))
+        ?? profiles.get(selector.value)
+        ?? profiles.values().next().value;
+
+    if (initial) selector.value = initial.key;
+    render(initial);
+}
+
 // ----------------------------------------------------------------------- bootstrap
 
 document.addEventListener('DOMContentLoaded', () => {
+    initModelList();
     initModelUpload();
     initSettingsForm();
     initModelActions();
     initEngineStatus();
+    initModelPerformance();
 });

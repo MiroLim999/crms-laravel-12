@@ -55,10 +55,10 @@
                 <input type="date" id="to" name="to" value="{{ $filters['to'] ?? '' }}" class="form-control">
             </div>
             <div class="col-md-6 d-flex align-items-end gap-2">
-                <button class="btn btn-outline-secondary" type="submit">
+                <button class="btn btn-primary" type="submit">
                     <i class="icon-base bx bx-filter-alt icon-sm me-1"></i> Filter
                 </button>
-                <a href="{{ route('audit.index') }}" class="btn btn-text-secondary">Reset</a>
+                <a href="{{ route('audit.index') }}" class="btn btn-outline-secondary">Reset</a>
             </div>
         </form>
     </x-card>
@@ -108,7 +108,7 @@
                             {{-- Data row --}}
                             <tr class="audit-data-row" id="row-{{ $entry->getKey() }}">
                                 <td class="text-nowrap">
-                                    {{ $entry->created_at?->format('j M Y H:i') }}
+                                    {{ \App\Support\LocalTime::format($entry->created_at, 'j M Y H:i') }}
                                     <div><small class="text-muted">{{ $entry->created_at?->diffForHumans() }}</small></div>
                                 </td>
                                 <td>
@@ -172,7 +172,7 @@
                                                 <div class="table-responsive">
                                                     <table class="table table-sm mb-0" style="border-collapse:separate">
                                                         <thead>
-                                                            <tr style="background:rgba(0,0,0,.02)">
+                                                            <tr style="background:rgba(var(--crms-ink-rgb),.03)">
                                                                 <th class="ps-3 text-uppercase fw-semibold small text-muted border-0"
                                                                     style="width:26%;letter-spacing:.04em">Field</th>
                                                                 <th class="text-uppercase fw-semibold small border-0"
@@ -189,7 +189,7 @@
                                                                     $changed = $before !== $after;
                                                                 @endphp
                                                                 <tr class="{{ $loop->even ? '' : '' }}"
-                                                                    style="{{ $loop->last ? '' : 'border-bottom:1px solid rgba(0,0,0,.05)' }}">
+                                                                    style="{{ $loop->last ? '' : 'border-bottom:1px solid rgba(var(--crms-ink-rgb),.1)' }}">
                                                                     <td class="ps-3 align-top py-2">
                                                                         <span class="badge bg-label-secondary font-monospace fw-normal"
                                                                               style="font-size:.72rem">{{ $key }}</span>

@@ -28,7 +28,7 @@ enum RoleSlug: string
         return match ($this) {
             self::Staff => 'Digitizes documents, verifies extracted records, and requests corrections.',
             self::Admin => 'Oversees people and approvals. Cannot edit record values.',
-            self::SuperAdmin => 'Full access, including document templates and OCR model management.',
+            self::SuperAdmin => 'Full access, including template building and OCR model management.',
         };
     }
 
@@ -36,7 +36,7 @@ enum RoleSlug: string
      * Roles that may perform data entry (upload, verify, submit records).
      *
      * Admin is deliberately excluded: data entry belongs to Staff and corrections
-     * go through the change-request flow. See .kiro/steering/product.md.
+     * go through the change-request flow. See docs/roles.md.
      */
     public function canEnterData(): bool
     {

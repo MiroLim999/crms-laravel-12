@@ -3,11 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\ChangeRequestStatus;
+use App\Exceptions\ChangeRequestException;
 use App\Models\AuditLog;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
 use App\Models\RecordField;
 use App\Models\User;
+use App\Services\ChangeRequestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
@@ -98,6 +100,105 @@ class ChangeRequestWorkflowTest extends TestCase
         $this->assertNotNull($request->reviewed_by);
     }
 
+    public function test_registry_number_can_be_corrected_through_the_reviewed_workflow(): void
+    {
+        $staff = User::factory()->staff()->create();
+        $record = $this->lockedRecord();
+        $record->update(['registry_number' => 'OLD-2026-001']);
+
+        $this->actingAs($staff)
+            ->post(route('records.change-requests.store', $record), [
+                'reason' => 'The original register confirms a different registry number.',
+                'registry_number' => 'NEW-2026-001',
+            ])
+            ->assertRedirect();
+
+        $request = ChangeRequest::latest('id')->firstOrFail()->load('items');
+
+        $this->assertTrue($request->changes_registry_number);
+        $this->assertSame('OLD-2026-001', $request->current_registry_number);
+        $this->assertSame('NEW-2026-001', $request->proposed_registry_number);
+        $this->assertCount(0, $request->items);
+        $this->assertSame('OLD-2026-001', $record->fresh()->registry_number);
+
+        $this->actingAs(User::factory()->admin()->create())
+            ->post(route('change-requests.approve', $request), [
+                'decision_note' => 'Checked against the original register.',
+            ])
+            ->assertRedirect();
+
+        $this->assertSame('NEW-2026-001', $record->fresh()->registry_number);
+
+        $entry = AuditLog::where('action', 'change_request.approved')->latest('id')->firstOrFail();
+        $this->assertSame('OLD-2026-001', $entry->old_values['Registry Number']);
+        $this->assertSame('NEW-2026-001', $entry->new_values['Registry Number']);
+    }
+
+    public function test_a_required_field_cannot_be_cleared_in_a_change_request(): void
+    {
+        $staff = User::factory()->staff()->create();
+        $record = $this->lockedRecord();
+        $field = $record->fields->first();
+
+        $this->actingAs($staff)
+            ->post(route('records.change-requests.store', $record), [
+                'reason' => 'Attempting to remove a value that is required on this record.',
+                'values' => [$field->getKey() => '   '],
+            ])
+            ->assertSessionHas('error', 'Wife Full Name is required and cannot be blank.');
+
+        $this->assertDatabaseCount('change_requests', 0);
+        $this->assertSame('Mana Santos', $field->fresh()->verified_value);
+    }
+
+    public function test_requiredness_is_rechecked_when_a_request_is_approved(): void
+    {
+        $staff = User::factory()->staff()->create();
+        $record = $this->lockedRecord();
+        $field = $record->fields->first();
+
+        $request = $record->changeRequests()->create([
+            'status' => ChangeRequestStatus::Pending,
+            'reason' => 'A legacy or tampered proposal should still be safe at approval.',
+            'requested_by' => $staff->getKey(),
+        ]);
+        $request->items()->create([
+            'record_field_id' => $field->getKey(),
+            'current_value' => $field->verified_value,
+            'proposed_value' => null,
+        ]);
+
+        $this->actingAs(User::factory()->admin()->create())
+            ->post(route('change-requests.approve', $request))
+            ->assertSessionHas('error', 'Wife Full Name is required and cannot be blank.');
+
+        $this->assertSame(ChangeRequestStatus::Pending, $request->fresh()->status);
+        $this->assertSame('Mana Santos', $field->fresh()->verified_value);
+    }
+
+    public function test_an_optional_field_can_be_cleared_through_approval(): void
+    {
+        $staff = User::factory()->staff()->create();
+        $record = $this->lockedRecord();
+        $field = $record->fields->first();
+        $field->update(['is_required' => false]);
+
+        $this->actingAs($staff)
+            ->post(route('records.change-requests.store', $record), [
+                'reason' => 'The optional value does not appear in the original register.',
+                'values' => [$field->getKey() => null],
+            ]);
+
+        $request = ChangeRequest::latest('id')->firstOrFail();
+
+        $this->actingAs(User::factory()->admin()->create())
+            ->post(route('change-requests.approve', $request))
+            ->assertRedirect();
+
+        $this->assertNull($field->fresh()->verified_value);
+        $this->assertSame(ChangeRequestStatus::Approved, $request->fresh()->status);
+    }
+
     public function test_rejecting_leaves_the_record_untouched(): void
     {
         $staff = User::factory()->staff()->create();
@@ -125,6 +226,24 @@ class ChangeRequestWorkflowTest extends TestCase
         $this->assertSame(ChangeRequestStatus::Pending, $request->fresh()->status);
     }
 
+    public function test_a_long_rejection_note_is_kept_in_the_audit_log(): void
+    {
+        $request = $this->openRequest(User::factory()->staff()->create());
+        $note = str_repeat('The register differs. ', 18).'Fix.'; // 400 characters
+
+        $this->actingAs(User::factory()->admin()->create())
+            ->post(route('change-requests.reject', $request), ['decision_note' => $note])
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertSame(ChangeRequestStatus::Rejected, $request->fresh()->status);
+
+        $entries = AuditLog::where('action', 'change_request.rejected')->get();
+        $this->assertCount(1, $entries);
+        $this->assertSame("Rejected change request #{$request->getKey()}.", $entries->first()->description);
+        $this->assertSame($note, $entries->first()->new_values['decision_note']);
+    }
+
     public function test_a_decided_request_cannot_be_decided_again(): void
     {
         $request = $this->openRequest(User::factory()->staff()->create());
@@ -135,6 +254,26 @@ class ChangeRequestWorkflowTest extends TestCase
         $this->actingAs($admin)
             ->post(route('change-requests.approve', $request))
             ->assertSessionHas('error');
+    }
+
+    public function test_a_decision_rechecks_the_request_in_the_database(): void
+    {
+        $request = $this->openRequest(User::factory()->staff()->create());
+        $field = $request->items->first()->field;
+
+        // Another reviewer rejects the request after this copy was loaded.
+        ChangeRequest::whereKey($request->getKey())
+            ->update(['status' => ChangeRequestStatus::Rejected->value]);
+
+        try {
+            app(ChangeRequestService::class)->approve($request, User::factory()->admin()->create());
+            $this->fail('Approving a request that was already rejected should be refused.');
+        } catch (ChangeRequestException $e) {
+            $this->assertSame('This request is already rejected and cannot be changed.', $e->getMessage());
+        }
+
+        $this->assertSame(ChangeRequestStatus::Rejected, $request->fresh()->status);
+        $this->assertSame('Mana Santos', $field->fresh()->verified_value);
     }
 
     public function test_approval_is_audit_logged_with_before_and_after(): void
@@ -245,6 +384,7 @@ class ChangeRequestWorkflowTest extends TestCase
             'name' => 'Wife Full Name',
             'ocr_text' => 'Mana Santos',
             'verified_value' => 'Mana Santos',
+            'is_required' => true,
         ]);
 
         return $record->load('fields');

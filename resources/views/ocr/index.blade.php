@@ -24,6 +24,7 @@
         </x-page-header>
 
         @include('ocr.partials.engine')
+        @include('ocr.partials.performance')
         @include('ocr.partials.models')
         @include('ocr.partials.modals')
     </div>

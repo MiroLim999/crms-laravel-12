@@ -27,7 +27,6 @@ class UserFactory extends Factory
         return [
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
-            'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'role_id' => fn () => Role::of(RoleSlug::Staff)->getKey(),
             'must_change_password' => false,
@@ -71,10 +70,5 @@ class UserFactory extends Factory
     public function inactive(): static
     {
         return $this->state(fn () => ['is_active' => false]);
-    }
-
-    public function unverified(): static
-    {
-        return $this->state(fn () => ['email_verified_at' => null]);
     }
 }

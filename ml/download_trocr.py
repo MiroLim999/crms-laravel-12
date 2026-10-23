@@ -1,55 +1,60 @@
 """
 download_trocr.py
-Downloads the TrOCR processor and model from Hugging Face.
+Downloads the TrOCR processor and model from Hugging Face into ml/models/base.
 Model: microsoft/trocr-base-handwritten
 """
 
-import torch
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+from pathlib import Path
+
+from huggingface_hub import hf_hub_download, snapshot_download
 
 
 def main():
     model_name = "microsoft/trocr-base-handwritten"
+    target = Path(__file__).resolve().parent / "models" / "base"
 
-    # Check GPU availability
     print("=" * 50)
-    print("SYSTEM CHECK")
+    print("DOWNLOADING LOCAL TrOCR BASE MODEL")
     print("=" * 50)
-    cuda_available = torch.cuda.is_available()
-    print(f"PyTorch version : {torch.__version__}")
-    print(f"CUDA available  : {cuda_available}")
-    if cuda_available:
-        print(f"GPU device      : {torch.cuda.get_device_name(0)}")
-    else:
-        print("WARNING: CUDA not available. Model will run on CPU (slower).")
-    print()
+    print(f"Source : {model_name}")
+    print(f"Target : {target}")
+    print("The safetensors checkpoint is about 1.3 GB and the download can resume.")
+    target.mkdir(parents=True, exist_ok=True)
 
-    # Download the processor (tokenizer + image processor)
-    print("=" * 50)
-    print("DOWNLOADING PROCESSOR")
-    print("=" * 50)
-    print(f"Downloading processor from: {model_name}")
-    print("This handles image preprocessing and text decoding.")
-    processor = TrOCRProcessor.from_pretrained(model_name)
-    print("Processor downloaded successfully!\n")
+    snapshot_download(
+        repo_id=model_name,
+        local_dir=target,
+        allow_patterns=[
+            "config.json",
+            "generation_config.json",
+            "model.safetensors",
+            "preprocessor_config.json",
+            "processor_config.json",
+            "special_tokens_map.json",
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "merges.txt",
+            "vocab.json",
+        ],
+    )
 
-    # Download the model (encoder-decoder architecture)
-    print("=" * 50)
-    print("DOWNLOADING MODEL")
-    print("=" * 50)
-    print(f"Downloading model from: {model_name}")
-    print("This may take several minutes on first run (~1.2 GB)...")
-    model = VisionEncoderDecoderModel.from_pretrained(model_name)
-    print("Model downloaded successfully!\n")
+    # The upstream main branch still lacks tokenizer.json. Transformers 5.x no
+    # longer constructs this legacy tokenizer from vocab/merges alone, so use
+    # the upstream repository's pending compatibility-file revision when needed.
+    if not (target / "tokenizer.json").is_file():
+        print("Downloading the Transformers 5 tokenizer compatibility file...")
+        hf_hub_download(
+            repo_id=model_name,
+            filename="tokenizer.json",
+            revision="refs/pr/11",
+            local_dir=target,
+        )
 
-    # Summary
     print("=" * 50)
     print("DOWNLOAD COMPLETE")
     print("=" * 50)
-    print(f"Model       : {model_name}")
-    print(f"Parameters  : {sum(p.numel() for p in model.parameters()):,}")
-    print(f"CUDA ready  : {cuda_available}")
-    print("\nYou can now run test_trocr.py to test the model.")
+    print(f"Saved to: {target}")
+    print("Restart the OCR service, then click Rescan models in OCR Workspace.")
 
 
 if __name__ == "__main__":

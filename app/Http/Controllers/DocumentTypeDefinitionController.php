@@ -1,0 +1,168 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\DocumentTypeDefinition;
+use App\Services\AuditLogger;
+use App\Services\TemplateSampleStorage;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+
+class DocumentTypeDefinitionController extends Controller
+{
+    public function __construct(
+        private readonly AuditLogger $audit,
+        private readonly TemplateSampleStorage $samples,
+    ) {}
+
+    public function store(Request $request): RedirectResponse
+    {
+        $name = $this->validatedName($request);
+        $base = Str::slug($name) ?: 'document';
+        $key = 'custom-'.Str::limit($base, 54, '').'-'.Str::lower(Str::random(6));
+
+        $type = DocumentTypeDefinition::create([
+            'key' => $key,
+            'name' => $name,
+            'short_name' => Str::limit($name, 80, ''),
+            'icon' => 'bx-file',
+            'is_system' => false,
+        ]);
+
+        $this->audit->log(
+            'document-type.created',
+            $type,
+            new: ['key' => $type->key, 'name' => $type->name],
+            description: "Created custom document type '{$type->name}'.",
+        );
+
+        return redirect()
+            ->route('templates.create', ['type' => $type->key])
+            ->with('success', "Document type '{$type->name}' created. Build its first layout.");
+    }
+
+    public function update(Request $request, DocumentTypeDefinition $documentType): RedirectResponse
+    {
+        $name = $this->validatedName($request, $documentType);
+        $old = $documentType->name;
+        $documentType->fill([
+            'name' => $name,
+            'short_name' => Str::limit($name, 80, ''),
+        ]);
+        $this->audit->saveAndLog(
+            'document-type.renamed',
+            $documentType,
+            "Renamed document type '{$old}' to '{$name}'.",
+        );
+
+        $documentType->templates()->with('documentTypeDefinition')->get()->each(function ($template) {
+            $relocated = $this->samples->relocate($template);
+            if ($relocated !== $template->sample_path) {
+                $template->forceFill(['sample_path' => $relocated])->saveQuietly();
+            }
+        });
+
+        return redirect()
+            ->route('templates.index', ['open' => $documentType->key])
+            ->with('success', "Document type renamed to '{$name}'.");
+    }
+
+    /**
+     * Hide a type from Staff scanning without touching its records or layouts.
+     */
+    public function archive(DocumentTypeDefinition $documentType): RedirectResponse
+    {
+        if (! $documentType->isArchived()) {
+            $documentType->archived_at = now();
+            $this->audit->saveAndLog(
+                'document-type.archived',
+                $documentType,
+                "Archived document type '{$documentType->name}'.",
+            );
+        }
+
+        return redirect()->route('templates.index')->with(
+            'success',
+            "'{$documentType->name}' was archived. Its records and layouts are kept.",
+        );
+    }
+
+    public function restore(DocumentTypeDefinition $documentType): RedirectResponse
+    {
+        if ($documentType->isArchived()) {
+            $documentType->archived_at = null;
+            $this->audit->saveAndLog(
+                'document-type.restored',
+                $documentType,
+                "Restored document type '{$documentType->name}'.",
+            );
+        }
+
+        return redirect()
+            ->route('templates.index', ['open' => $documentType->key])
+            ->with('success', "'{$documentType->name}' was restored.");
+    }
+
+    public function destroy(DocumentTypeDefinition $documentType): RedirectResponse
+    {
+        abort_if($documentType->is_system, 403, 'Built-in document types cannot be deleted.');
+
+        if ($documentType->records()->exists()) {
+            return back()->with(
+                'error',
+                "'{$documentType->name}' cannot be deleted because saved records use it.",
+            );
+        }
+
+        $templates = $documentType->templates()->get();
+        $layoutCount = $templates->count();
+        DB::transaction(function () use ($documentType, $layoutCount) {
+            $this->audit->log(
+                'document-type.deleted',
+                $documentType,
+                old: [
+                    'key' => $documentType->key,
+                    'name' => $documentType->name,
+                    'layout_count' => $layoutCount,
+                ],
+                description: "Deleted custom document type '{$documentType->name}' and {$layoutCount} unused layout(s).",
+            );
+
+            $documentType->templates()->delete();
+            $documentType->delete();
+        });
+
+        $templates->each(fn ($template) => $this->samples->delete($template));
+
+        return redirect()->route('templates.index')->with(
+            'success',
+            "Document type '{$documentType->name}' and its unused layouts were deleted.",
+        );
+    }
+
+    private function validatedName(Request $request, ?DocumentTypeDefinition $current = null): string
+    {
+        $validated = $request->validate([
+            'document_type_name' => ['required', 'string', 'max:120'],
+        ]);
+        $name = preg_replace('/\s+/', ' ', trim($validated['document_type_name'])) ?? '';
+
+        if ($name === '') {
+            throw ValidationException::withMessages(['document_type_name' => 'Enter a document type name.']);
+        }
+
+        $duplicate = DocumentTypeDefinition::query()
+            ->when($current, fn ($query) => $query->whereKeyNot($current->getKey()))
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($name)])
+            ->exists();
+
+        if ($duplicate) {
+            throw ValidationException::withMessages(['document_type_name' => 'A document type with this name already exists.']);
+        }
+
+        return $name;
+    }
+}

@@ -10,9 +10,10 @@ use Illuminate\Support\ServiceProvider;
 /**
  * The capability matrix, in code.
  *
- * This is the single authoritative translation of the table in
- * .kiro/steering/product.md. Every route and view guard must reference one of
- * these abilities rather than testing roles inline.
+ * This is the single authoritative translation of the table in docs/roles.md;
+ * change the two together (CapabilityMatrixTest checks this side). Every route
+ * and view guard must reference one of these abilities rather than testing
+ * roles inline.
  *
  * Note what is deliberately absent: there is no ability that lets Admin write
  * record values. Data entry belongs to Staff, and corrections go through the
@@ -27,7 +28,6 @@ class AuthServiceProvider extends ServiceProvider
 
         // -------------------------------------------------- data entry (Staff, Super Admin)
         Gate::define('documents.process', fn (User $u) => $u->canEnterData());
-        Gate::define('records.submit', fn (User $u) => $u->canEnterData());
         Gate::define('change-requests.create', fn (User $u) => $u->canEnterData());
 
         // -------------------------------------------------- archive (everyone signed in)

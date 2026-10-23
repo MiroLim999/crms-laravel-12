@@ -1,146 +1,217 @@
 @extends('layouts.app')
 
-@section('title', 'Record #' . $record->getKey())
+@section('title', $recordHeading)
+@section('body-class', 'record-detail-focused')
+
+@section('workspace-navbar')
+    <nav class="layout-navbar container-xxl navbar-detached navbar document-workspace-topbar record-detail-topbar"
+         id="layout-navbar" aria-label="Completed document workflow">
+        <div class="document-workspace-topbar__context">
+            <strong>{{ $recordHeading }}</strong>
+            <small>{{ $record->typeLabel() }} · {{ $record->registry_number ?? 'No registry number' }}</small>
+        </div>
+
+        <nav class="document-flow-steps" aria-label="Document processing complete">
+            @foreach (['Upload', 'Align', 'Verified'] as $step)
+                <div class="document-flow-step is-complete">
+                    <span class="document-flow-step__number">{{ $loop->iteration }}</span>
+                    <span class="document-flow-step__copy"><strong>{{ $step }}</strong></span>
+                </div>
+            @endforeach
+        </nav>
+
+        <div class="record-detail-topbar__actions">
+            @if ($record->isLocked() && auth()->user()->can('change-requests.create'))
+                @if ($record->hasPendingChangeRequest())
+                    <span class="badge bg-label-warning align-self-center">Change request pending</span>
+                @else
+                    <a href="{{ route('records.change-requests.create', $record) }}"
+                       class="btn btn-sm btn-outline-primary">
+                        <i class="icon-base bx bx-edit icon-sm me-1"></i> Request a change
+                    </a>
+                @endif
+            @endif
+            <a href="{{ route('records.index') }}" class="btn btn-sm btn-outline-secondary">Back to archive</a>
+        </div>
+    </nav>
+@endsection
 
 @section('content')
-    <x-page-header :title="$record->title()"
-                   :subtitle="$record->doc_type->label() . ' · ' . ($record->registry_number ?? 'No registry number')">
-        @if ($record->isLocked() && auth()->user()->can('change-requests.create'))
-            @if ($record->hasPendingChangeRequest())
-                <span class="badge bg-label-warning align-self-center">Change request pending</span>
-            @else
-                <a href="{{ route('records.change-requests.create', $record) }}" class="btn btn-outline-primary">
-                    <i class="icon-base bx bx-edit icon-sm me-1"></i> Request a change
-                </a>
-            @endif
-        @endif
-        <a href="{{ route('records.index') }}" class="btn btn-outline-secondary">Back to archive</a>
-    </x-page-header>
-
-    @if ($record->isLocked())
-        <div class="alert alert-info d-flex align-items-center" role="alert">
-            <i class="icon-base bx bx-lock-alt icon-md me-2"></i>
-            <div>
-                This record is locked. Values change only through a change request approved
-                by an Admin — nobody edits them in place.
-            </div>
-        </div>
-    @endif
-
-    <div class="row g-4">
-        <div class="col-lg-7">
-            <x-card title="Recorded values"
-                    subtitle="Verified text is the value of record. The reading is kept for traceability.">
-                <div class="table-responsive">
-                    <table class="table align-middle mb-0">
-                        <thead>
-                            <tr>
-                                <th>Field</th>
-                                <th>Verified value</th>
-                                <th>Model read</th>
-                                <th class="text-end">Confidence</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach ($record->fields as $field)
-                                <tr class="{{ $field->needsReview() ? 'table-warning' : '' }}">
-                                    <td class="text-muted">{{ $field->name }}</td>
-                                    <td class="fw-medium">{{ $field->verified_value ?: '—' }}</td>
-                                    <td>
-                                        <span class="fst-italic text-muted">{{ $field->ocr_text ?: '—' }}</span>
-                                        @if ($field->wasCorrected())
-                                            <span class="badge bg-label-info ms-1">corrected</span>
-                                        @endif
-                                    </td>
-                                    <td class="text-end">
-                                        @if ($field->ocr_confidence !== null)
-                                            <span class="confidence-badge">
-                                                {{ number_format($field->ocr_confidence, 1) }}%
-                                            </span>
-                                        @else
-                                            <span class="text-muted">—</span>
-                                        @endif
-                                    </td>
-                                </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
+    <main class="record-detail" data-record-detail>
+        @if ($record->isLocked())
+            <div class="alert alert-info record-lock-notice" role="alert">
+                <i class="icon-base bx bx-lock-alt icon-md" aria-hidden="true"></i>
+                <div>
+                    <strong>Verified record</strong>
+                    <span>Values are locked and can change only through an approved request.</span>
                 </div>
+            </div>
+        @endif
 
-                <p class="small text-muted mt-3 mb-0">
-                    Confidence is the model's certainty in its own output, not accuracy.
-                    Rows highlighted were below {{ $threshold }}% at capture time.
-                </p>
-            </x-card>
-
-            @if ($record->changeRequests->isNotEmpty())
-                <x-card class="mt-4" title="Change history">
-                    @foreach ($record->changeRequests as $request)
-                        <div class="{{ ! $loop->last ? 'mb-3 pb-3 border-bottom' : '' }}">
-                            <div class="d-flex align-items-start justify-content-between gap-2">
-                                <div>
-                                    <a href="{{ route('change-requests.show', $request) }}" class="fw-medium">
-                                        Request #{{ $request->getKey() }}
-                                    </a>
-                                    <div class="small text-muted">
-                                        {{ $request->requester?->name }}
-                                        · {{ $request->created_at->diffForHumans() }}
-                                        · {{ $request->items->count() }} field(s)
-                                    </div>
-                                </div>
-                                <span class="badge {{ $request->status->badgeClass() }}">
-                                    {{ $request->status->label() }}
-                                </span>
-                            </div>
-                            <p class="small mb-0 mt-2">{{ $request->reason }}</p>
-                        </div>
-                    @endforeach
-                </x-card>
+        <section class="record-summary-strip" aria-label="Record summary">
+            <div class="record-summary-item {{ $record->registry_number ? '' : 'is-warning' }}">
+                <span>Registry number</span>
+                <strong>{{ $record->registry_number ?? 'Not recorded' }}</strong>
+                @if ($registryWasCorrected)
+                    <small>Corrected after submission</small>
+                @endif
+            </div>
+            @if ($personCount > 0)
+                <div class="record-summary-item">
+                    <span>People</span>
+                    <strong>{{ $personCount }}</strong>
+                    <small>Grouped registry entries</small>
+                </div>
             @endif
-        </div>
+            <div class="record-summary-item">
+                <span>Verified fields</span>
+                <strong>{{ $record->fields->count() }}</strong>
+                <small>Human-confirmed values</small>
+            </div>
+            <div class="record-summary-item">
+                <span>OCR adjustments</span>
+                <strong>{{ $ocrAdjustedCount }}</strong>
+                <small>Changed during verification</small>
+            </div>
+            <div class="record-summary-item">
+                <span>Later corrections</span>
+                <strong>{{ $postSubmissionChangeCount }}</strong>
+                <small>Approved after submission</small>
+            </div>
+        </section>
 
-        <div class="col-lg-5">
-            <x-card title="Provenance" class="mb-4">
-                <dl class="row mb-0">
-                    <dt class="col-5 fw-normal text-muted">Status</dt>
-                    <dd class="col-7">
-                        <span class="badge {{ $record->status->badgeClass() }}">
-                            {{ $record->status->label() }}
-                        </span>
-                    </dd>
+        <div class="record-split-workspace {{ $record->scan_path ? 'has-scan' : 'has-no-scan' }}" data-record-split>
+            <section class="record-split-pane record-data-pane" id="recordDataPane">
+                <x-card class="record-values-card" bodyClass="p-0" title="Verified data">
+                    @if ($record->scan_path)
+                        <x-slot:actions>
+                            <button type="button" class="btn btn-sm btn-outline-primary record-compare-toggle"
+                                    data-original-toggle aria-pressed="false" aria-controls="recordScanPane">
+                                <i class="icon-base bx bx-images icon-sm me-1" aria-hidden="true"></i>
+                                <span data-original-toggle-label>Compare original</span>
+                            </button>
+                        </x-slot:actions>
+                    @endif
 
-                    <dt class="col-5 fw-normal text-muted">Submitted by</dt>
-                    <dd class="col-7">{{ $record->submitter?->name ?? '—' }}</dd>
+                    <div class="record-group-list">
+                        @forelse ($fieldGroups as $group)
+                            <details class="record-field-group"
+                                     data-group-id="{{ $group['id'] }}"
+                                     @if (($firstPersonGroupId && $group['id'] === $firstPersonGroupId) || (!$firstPersonGroupId && $loop->first)) open @endif>
+                                <summary class="record-field-group__summary">
+                                    <span class="record-field-group__number">
+                                        {{ $group['kind'] === 'person' ? str($group['label'])->after('Person ') : 'i' }}
+                                    </span>
+                                    <span class="record-field-group__copy">
+                                        <strong>{{ $group['label'] }}</strong>
+                                        <small>{{ $group['identity'] ?? $group['field_count'].' verified field(s)' }}</small>
+                                    </span>
+                                    <span class="record-field-group__meta">
+                                        <span class="badge bg-label-success">{{ $group['field_count'] }}/{{ $group['field_count'] }} verified</span>
+                                        @if ($group['corrected_count'] > 0)
+                                            <span class="badge bg-label-info">{{ $group['corrected_count'] }} OCR adjusted</span>
+                                        @endif
+                                    </span>
+                                    <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
+                                </summary>
 
-                    <dt class="col-5 fw-normal text-muted">Submitted at</dt>
-                    <dd class="col-7">{{ $record->submitted_at?->format('j M Y, H:i') ?? '—' }}</dd>
+                                <div class="record-field-group__body">
+                                    @foreach ($group['fields'] as $field)
+                                        @php($changes = $fieldChanges->get($field->getKey(), collect()))
+                                        <div class="record-field-row"
+                                             data-record-field="{{ $field->getKey() }}"
+                                             data-group="{{ $group['id'] }}"
+                                             @if ($record->scan_path && !str_contains((string) $record->scan_mime, 'pdf'))
+                                                 role="button" tabindex="0"
+                                                 aria-label="Show {{ $field->name }} on the original scan"
+                                             @endif>
+                                            <div class="record-field-row__label">
+                                                <span>{{ $field->name }}</span>
+                                                @if ($field->is_required)
+                                                    <small>Required</small>
+                                                @endif
+                                            </div>
 
-                    <dt class="col-5 fw-normal text-muted">Template</dt>
-                    <dd class="col-7">{{ $record->template?->name ?? '—' }}</dd>
+                                            <div class="record-field-row__verified">
+                                                <strong>{{ filled($field->verified_value) ? $field->verified_value : 'Not recorded' }}</strong>
+                                                @if ($changes->isNotEmpty())
+                                                    <span class="record-field-row__change-note">
+                                                        Updated by request #{{ $changes->last()['request']->getKey() }}
+                                                    </span>
+                                                @endif
+                                            </div>
 
-                    <dt class="col-5 fw-normal text-muted">OCR model</dt>
-                    <dd class="col-7 mb-0">
-                        <code>{{ $record->ocr_model_key ?? '—' }}</code>
-                    </dd>
-                </dl>
-            </x-card>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </details>
+                        @empty
+                            <div class="p-4 text-muted">No verified fields were stored for this record.</div>
+                        @endforelse
+                    </div>
+
+                    <div class="record-values-card__footnote">
+                        @if ($record->scan_path)
+                            Select a value to open the original scan and locate its source.
+                        @else
+                            These values were confirmed during document verification.
+                        @endif
+                    </div>
+                </x-card>
+
+                @if ($record->changeRequests->isNotEmpty())
+                    <details class="card record-history-card mt-4">
+                        <summary class="card-header record-disclosure-summary">
+                            <span>
+                                <strong>Change history</strong>
+                                <small>{{ $record->changeRequests->count() }} reviewed request(s)</small>
+                            </span>
+                            <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
+                        </summary>
+                        <div class="card-body">
+                            @foreach ($record->changeRequests as $request)
+                                <div class="record-history-entry {{ ! $loop->last ? 'border-bottom' : '' }}">
+                                    <div>
+                                        <a href="{{ route('change-requests.show', $request) }}" class="fw-medium">
+                                            Request #{{ $request->getKey() }}
+                                        </a>
+                                        <small>
+                                            {{ $request->requester?->name }} · {{ $request->created_at->diffForHumans() }}
+                                            · {{ $request->changeCount() }} change(s)
+                                        </small>
+                                        <p>{{ $request->reason }}</p>
+                                    </div>
+                                    <span class="badge {{ $request->status->badgeClass() }}">
+                                        {{ $request->status->label() }}
+                                    </span>
+                                </div>
+                            @endforeach
+                        </div>
+                    </details>
+                @endif
+            </section>
 
             @if ($record->scan_path)
-                <x-card title="Original scan"
-                        subtitle="Held outside the web root and served only to signed-in users.">
-                    @if (str_contains((string) $record->scan_mime, 'pdf'))
-                        <a href="{{ route('records.scan', $record) }}" target="_blank"
-                           class="btn btn-outline-secondary w-100">
-                            <i class="icon-base bx bx-file icon-sm me-1"></i> Open scanned PDF
-                        </a>
-                    @else
-                        <a href="{{ route('records.scan', $record) }}" target="_blank">
-                            <img src="{{ route('records.scan', $record) }}" alt="Original scanned certificate"
-                                 class="img-fluid rounded border">
-                        </a>
-                    @endif
-                </x-card>
+                <div class="record-splitter" data-record-splitter
+                     role="separator" tabindex="0" aria-orientation="vertical"
+                     aria-label="Resize original scan and verified data panels"
+                     aria-controls="recordScanPane recordDataPane"
+                     aria-valuemin="35" aria-valuemax="75" aria-valuenow="58"
+                     aria-valuetext="Original scan 58%, verified data 42%"></div>
             @endif
+
+            <section class="record-split-pane record-scan-pane" id="recordScanPane">
+                <div class="record-detail-sidebar">
+                    @if ($record->scan_path)
+                        @include('records.partials.scan-card', ['record' => $record])
+                    @endif
+
+                </div>
+            </section>
         </div>
-    </div>
+    </main>
 @endsection
+
+@push('scripts')
+    @vite('resources/js/record-detail.js')
+@endpush

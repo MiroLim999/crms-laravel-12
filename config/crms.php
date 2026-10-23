@@ -44,4 +44,16 @@ return [
 
     'confidence_review_threshold' => env('CRMS_CONFIDENCE_THRESHOLD', 80.0),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Registry Reporting Timezone
+    |--------------------------------------------------------------------------
+    |
+    | Database timestamps remain UTC, while dashboard day and month boundaries
+    | follow the civil registry's local working day.
+    |
+    */
+
+    'reporting_timezone' => env('CRMS_REPORTING_TIMEZONE', 'Asia/Manila'),
+
 ];

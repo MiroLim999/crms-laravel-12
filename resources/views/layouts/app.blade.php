@@ -8,7 +8,7 @@
 --}}
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}"
-      class="layout-menu-fixed layout-compact"
+      class="layout-menu-fixed-offcanvas layout-compact"
       dir="ltr"
       data-skin="default"
       data-bs-theme="light"
@@ -20,8 +20,23 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="robots" content="noindex, nofollow">
 
+    @include('layouts.partials.theme-init')
+
+    {{-- Restore the desktop sidebar preference before the first paint. --}}
+    <script>
+        try {
+            if (window.matchMedia('(min-width: 1200px)').matches
+                && window.localStorage.getItem('crms.sidebar.hidden') === 'true') {
+                document.documentElement.classList.add('layout-menu-collapsed');
+            }
+        } catch (error) {
+            // Storage can be unavailable in private or locked-down browsers.
+        }
+    </script>
+
     <title>@yield('title', 'Dashboard') · {{ config('app.name') }}</title>
 
+    <link rel="icon" type="image/x-icon" href="{{ asset('favicon.ico') }}">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('assets/img/favicon-32.png') }}">
     <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('assets/img/apple-touch-icon.png') }}">
 
@@ -40,14 +55,27 @@
     @stack('styles')
 </head>
 
-<body>
+<body class="@yield('body-class')">
     <div class="layout-wrapper layout-content-navbar">
         <div class="layout-container">
 
             @include('layouts.partials.sidebar')
 
+            <button type="button"
+                    class="btn btn-sm btn-icon btn-outline-secondary rounded-pill layout-menu-toggle global-sidebar-toggle"
+                    data-menu-toggle-control
+                    aria-controls="layout-menu"
+                    aria-expanded="true"
+                    aria-label="Collapse navigation">
+                <i class="icon-base bx bx-chevron-left" aria-hidden="true"></i>
+            </button>
+
             <div class="layout-page">
-                @include('layouts.partials.navbar')
+                @hasSection('workspace-navbar')
+                    @yield('workspace-navbar')
+                @else
+                    @include('layouts.partials.navbar')
+                @endif
 
                 <div class="content-wrapper">
                     <div class="container-xxl flex-grow-1 container-p-y">

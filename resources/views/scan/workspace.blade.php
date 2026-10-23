@@ -1,30 +1,37 @@
 @extends('layouts.app')
 
 @section('title', 'Scan ' . $docType->shortLabel())
+@section('body-class', 'document-workspace-focused')
+
+@section('workspace-navbar')
+    <nav class="layout-navbar container-xxl navbar-detached navbar document-workspace-topbar"
+         id="layout-navbar" aria-label="Document workspace">
+        <div class="document-workspace-topbar__context">
+            <strong>Scan: {{ $docType->label() }}</strong>
+            <small>{{ $template->name }} · {{ $template->paper_size->label() }} ({{ $template->paperDimensionsLabel() }}) · {{ $template->orientation->label() }}</small>
+        </div>
+
+        <nav class="document-flow-steps" id="documentFlowSteps" aria-label="Document processing progress">
+            <div class="document-flow-step is-active" data-flow-step="upload" aria-current="step">
+                <span class="document-flow-step__number">1</span>
+                <span class="document-flow-step__copy"><strong>Upload</strong><small>Choose a scan</small></span>
+            </div>
+            <div class="document-flow-step" data-flow-step="mark">
+                <span class="document-flow-step__number">2</span>
+                <span class="document-flow-step__copy"><strong>Align</strong><small>Check the markers</small></span>
+            </div>
+            <div class="document-flow-step" data-flow-step="verify">
+                <span class="document-flow-step__number">3</span>
+                <span class="document-flow-step__copy"><strong>Verify</strong><small>Review and submit</small></span>
+            </div>
+        </nav>
+
+        <a href="{{ route('documents.create') }}"
+           class="btn btn-sm btn-outline-secondary document-workspace-topbar__cancel">Cancel</a>
+    </nav>
+@endsection
 
 @section('content')
-    <div id="documentPageHeader">
-        <x-page-header :title="'Scan: ' . $docType->label()"
-                       :subtitle="'Template: ' . $template->name">
-            <a href="{{ route('documents.create') }}" class="btn btn-outline-secondary">Cancel</a>
-        </x-page-header>
-    </div>
-
-    <nav class="document-flow-steps" id="documentFlowSteps" aria-label="Document processing progress">
-        <div class="document-flow-step is-active" data-flow-step="upload" aria-current="step">
-            <span class="document-flow-step__number">1</span>
-            <span class="document-flow-step__copy"><strong>Upload</strong><small>Choose a scan</small></span>
-        </div>
-        <div class="document-flow-step" data-flow-step="mark">
-            <span class="document-flow-step__number">2</span>
-            <span class="document-flow-step__copy"><strong>Align fields</strong><small>Check the markers</small></span>
-        </div>
-        <div class="document-flow-step" data-flow-step="verify">
-            <span class="document-flow-step__number">3</span>
-            <span class="document-flow-step__copy"><strong>Validate</strong><small>Review OCR results</small></span>
-        </div>
-    </nav>
-
     {{-- Step 1: upload --}}
     <section id="step-upload" class="document-step-panel">
         <div class="document-upload-wrap">
@@ -37,11 +44,11 @@
                     <span class="document-dropzone__text">or choose a file from your computer</span>
                     <span class="btn btn-primary document-dropzone__button">Choose document</span>
                     <span class="document-dropzone__formats">
-                        <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>TIFF</span>
+                        <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>BMP</span>
                     </span>
                 </label>
                 <input type="file" id="scanFile" class="visually-hidden"
-                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp,image/tiff">
+                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp">
 
                 <div class="document-upload-note">
                     <span><i class="icon-base bx bx-file me-1"></i> Maximum file size: 20 MB</span>
@@ -57,8 +64,8 @@
 
     {{-- Step 2: mark the fields --}}
     <section id="step-mark" class="document-step-panel d-none">
-        <div class="row g-4">
-            <div class="col-lg-8">
+        <div class="field-marker-comparison-grid">
+            <div class="field-marker-document-pane">
                 <x-card class="document-canvas-card" bodyClass="p-0">
                     <div class="marker-toolbar">
                         <div class="marker-toolbar__primary">
@@ -67,30 +74,40 @@
                                 <span id="selectedFileName">Document</span>
                             </span>
                             <span class="marker-toolbar__divider" aria-hidden="true"></span>
-                            <div class="marker-zoom-controls" role="group" aria-label="Document zoom controls">
-                                <button type="button" class="marker-tool-button" id="zoomOutBtn"
-                                        aria-label="Zoom out">&minus;</button>
-                                <button type="button" class="marker-tool-button marker-zoom-value"
+                            <div class="btn-group marker-zoom-controls" role="group" aria-label="Document zoom controls">
+                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="zoomOutBtn"
+                                        aria-label="Zoom out">
+                                    <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary marker-tool-button marker-zoom-value"
                                         id="zoomResetBtn" title="Fit document to the workspace">100%</button>
-                                <button type="button" class="marker-tool-button" id="zoomInBtn"
-                                        aria-label="Zoom in">+</button>
+                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="zoomInBtn"
+                                        aria-label="Zoom in">
+                                    <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
+                                </button>
                             </div>
                         </div>
 
                         <div class="marker-toolbar__actions">
                             <div class="dropdown">
-                                <button type="button" class="marker-help-button" data-bs-toggle="dropdown"
+                                <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle marker-help-button" data-bs-toggle="dropdown"
                                         aria-expanded="false" aria-label="Show editor shortcuts">
-                                    <i class="icon-base bx bx-terminal icon-sm"></i>
+                                    <i class="icon-base bx bx-terminal icon-sm me-1" aria-hidden="true"></i>
                                     <span>Shortcuts</span>
-                                    <i class="icon-base bx bx-chevron-down"></i>
                                 </button>
                                 <div class="dropdown-menu dropdown-menu-end marker-shortcuts-menu">
                                     <div class="marker-shortcuts-menu__title">Editor shortcuts</div>
                                     <div><span><kbd>Ctrl</kbd> + scroll</span><small>Zoom document</small></div>
+                                    <div><span><kbd>Ctrl</kbd> + drag</span><small>Move document</small></div>
                                     <div><span><kbd>Shift</kbd> + click</span><small>Select multiple</small></div>
+                                    <div><span>Drag empty document area</span><small>Select fields in a rectangle</small></div>
+                                    <div><span><kbd>Shift</kbd> + drag</span><small>Add fields to selection</small></div>
                                     <div><span>Drag selection</span><small>Move selected fields</small></div>
                                     <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
+                                    <div><span><kbd>Alt</kbd> + drag</span><small>Place without snapping to printed lines</small></div>
+                                    <div><span>Drag the rotate knob below a field</span><small>Tilt that field (<kbd>Shift</kbd>: 5° steps)</small></div>
+                                    <div><span><kbd>[</kbd> or <kbd>]</kbd></span><small>Tilt selected 0.5° (<kbd>Shift</kbd>: 5°)</small></div>
+                                    <div><span>Double-click the knob</span><small>Straighten</small></div>
                                     <div><span><kbd>Ctrl</kbd> + <kbd>C</kbd></span><small>Copy selected</small></div>
                                     <div><span><kbd>Ctrl</kbd> + <kbd>V</kbd></span><small>Paste fields</small></div>
                                     <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Delete selected</small></div>
@@ -98,9 +115,16 @@
                                 </div>
                             </div>
 
-                            <button type="button" class="marker-reset-button" id="resetFieldsBtn"
+                            <button type="button" class="btn btn-sm btn-outline-primary marker-snap-button" id="snapTableBtn"
+                                    title="Fit the column and row markers onto the page's printed table lines">
+                                <i class="icon-base bx bx-grid-alt icon-sm me-1" aria-hidden="true"></i>
+                                <span>Snap to table</span>
+                                <span class="spinner-border marker-snap-spinner" aria-hidden="true"></span>
+                            </button>
+
+                            <button type="button" class="btn btn-sm btn-outline-secondary marker-reset-button" id="resetFieldsBtn"
                                     title="Restore the original template fields and document view" disabled>
-                                <i class="icon-base bx bx-refresh icon-sm" aria-hidden="true"></i>
+                                <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
                                 <span>Reset</span>
                             </button>
 
@@ -108,9 +132,9 @@
                                 <i class="icon-base bx bx-check-circle"></i>
                                 <span>0 selected</span>
                             </span>
-                            <button type="button" class="marker-delete-button"
+                            <button type="button" class="btn btn-sm btn-outline-danger marker-delete-button"
                                     id="deleteSelectedBtn" disabled>
-                                <i class="icon-base bx bx-trash icon-sm"></i>
+                                <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
                                 <span>Delete</span>
                             </button>
                         </div>
@@ -119,26 +143,42 @@
                     <div class="doc-viewport" id="docViewport">
                         <div class="doc-stage" id="docStage">
                             <canvas id="pageCanvas"></canvas>
-                            <div class="field-overlay" id="fieldOverlay"></div>
+                            <div class="field-overlay" id="fieldOverlay">
+                                <div class="field-selection-marquee" id="staffFieldSelectionMarquee"
+                                     aria-hidden="true"></div>
+                            </div>
                         </div>
                     </div>
                 </x-card>
             </div>
 
-            <div class="col-lg-4">
-                <div class="document-side-panel">
+            <div class="document-side-panel field-marker-controls-pane">
                 <x-card title="Fields" class="mb-4 document-fields-card">
                     <x-slot:actions>
                         <span class="badge bg-label-primary" id="fieldCount">0 fields</span>
                     </x-slot:actions>
+
+                    <div class="document-paper-spec">
+                        <i class="icon-base bx bx-file" aria-hidden="true"></i>
+                        <div>
+                            <strong>{{ $template->paper_size->label() }} &middot; {{ $template->orientation->label() }}</strong>
+                            <span>{{ $template->paperDimensionsLabel() }} expected</span>
+                        </div>
+                    </div>
+
+                    <div class="document-paper-warning d-none" id="paperMismatchWarning"
+                         role="alert" aria-live="polite">
+                        <i class="icon-base bx bx-error" aria-hidden="true"></i>
+                        <span id="paperMismatchMessage"></span>
+                    </div>
 
                     <div class="marker-field-bulk-actions">
                         <div class="form-check mb-0">
                             <input class="form-check-input" type="checkbox" id="selectAllFields">
                             <label class="form-check-label" for="selectAllFields">Select all</label>
                         </div>
-                        <button type="button" class="marker-field-delete" id="deleteFieldsBtn" disabled>
-                            <i class="icon-base bx bx-trash" aria-hidden="true"></i>
+                        <button type="button" class="btn btn-sm btn-outline-danger marker-field-delete" id="deleteFieldsBtn" disabled>
+                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
                             <span>Delete</span>
                         </button>
                     </div>
@@ -147,7 +187,8 @@
 
                     <label class="form-label small fw-medium" for="newFieldName">Add another field</label>
                     <div class="input-group">
-                        <input type="text" id="newFieldName" class="form-control" placeholder="Field name">
+                        <input type="text" id="newFieldName" class="form-control" placeholder="Field name"
+                               maxlength="500">
                         <button class="btn btn-outline-primary" type="button" id="addFieldBtn">
                             <i class="icon-base bx bx-plus me-1"></i>Add
                         </button>
@@ -189,14 +230,106 @@
                     <span id="ocrActionMessage"></span>
                 </div>
 
-                <div class="d-grid gap-2">
+                {{-- Filled in after Detect: what was found on this page. --}}
+                <div class="detect-summary d-none" id="detectSummary" role="status" aria-live="polite">
+                    <i class="icon-base bx bx-radar" aria-hidden="true"></i>
+                    <div class="detect-summary__copy">
+                        <strong id="detectSummaryTitle"></strong>
+                        <span id="detectSummaryText"></span>
+                        <ul class="grid-notes__list d-none" id="detectSummaryNotes"></ul>
+                        <div class="form-check form-switch mb-0 mt-1">
+                            <input class="form-check-input" type="checkbox" id="lineEditToggle">
+                            <label class="form-check-label" for="lineEditToggle"
+                                   title="Click a line on the page to fix its outline before it is read">Adjust line crops</label>
+                        </div>
+                    </div>
+                </div>
+
+                {{--
+                    Line editing after Detect: click an outline on the page, stretch it
+                    by its handles or grow/shrink it, and see the crop TrOCR will read.
+                    Saved as you go; nothing is read until Scan with OCR.
+                --}}
+                <div class="line-adjust-card d-none" id="lineAdjustCard" aria-live="polite">
+                    <div class="line-adjust-card__head">
+                        <strong id="lineAdjustName">Click a line on the page</strong>
+                        <span class="line-adjust-card__position" id="lineAdjustPosition"></span>
+                    </div>
+                    <p class="line-adjust-card__note d-none" id="lineAdjustNote"></p>
+                    <div class="line-adjust-card__crop">
+                        <canvas id="lineAdjustThumb" aria-label="What TrOCR will read for this line"></canvas>
+                    </div>
+                    <div class="btn-group btn-group-sm line-adjust-card__modes" role="radiogroup" aria-label="How to change the outline" id="lineModeGroup">
+                        <input type="radio" class="btn-check" name="alignLineMode" id="lineModeBox" value="box" autocomplete="off" checked>
+                        <label class="btn btn-outline-primary" for="lineModeBox" title="Stretch the outline by its handles">Stretch</label>
+                        <input type="radio" class="btn-check" name="alignLineMode" id="lineModePoints" value="points" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="lineModePoints" title="Drag the outline's own corners">Points</label>
+                        <input type="radio" class="btn-check" name="alignLineMode" id="lineModeDraw" value="draw" autocomplete="off">
+                        <label class="btn btn-outline-primary" for="lineModeDraw" title="Draw a new outline round the writing">Draw</label>
+                    </div>
+                    <div class="line-adjust-card__draw d-none" id="lineDrawActions">
+                        <button type="button" class="btn btn-sm btn-success" id="lineDrawUseBtn" disabled
+                                title="Make this drawing the line's outline and crop (Enter)">
+                            <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>Use this outline
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="lineDrawCancelBtn"
+                                title="Throw the drawing away (Esc)">Cancel</button>
+                    </div>
+                    <div class="line-adjust-card__actions" id="lineAdjustActions">
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Outline size">
+                            <button type="button" class="btn btn-outline-secondary" id="lineShrinkBtn" title="Shrink the outline (−)">
+                                <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i><span class="visually-hidden">Shrink</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="lineGrowBtn" title="Grow the outline (+)">
+                                <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i><span class="visually-hidden">Grow</span>
+                            </button>
+                        </div>
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Undo outline changes">
+                            <button type="button" class="btn btn-outline-secondary" id="lineUndoBtn" title="Undo (Ctrl+Z)" disabled>
+                                <i class="icon-base bx bx-undo icon-sm" aria-hidden="true"></i><span class="visually-hidden">Undo</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="lineRedoBtn" title="Redo (Ctrl+Y)" disabled>
+                                <i class="icon-base bx bx-redo icon-sm" aria-hidden="true"></i><span class="visually-hidden">Redo</span>
+                            </button>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="lineResetBtn" disabled
+                                title="Back to the outline Detect drew">
+                            <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>Reset line
+                        </button>
+                    </div>
+                    <div class="line-adjust-card__structure">
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="lineAddBtn"
+                                title="Draw a line the detector missed">
+                            <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add line
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="lineDeleteBtn" disabled
+                                title="Remove this line (Delete). Ctrl+Z puts it back">
+                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>Delete line
+                        </button>
+                    </div>
+                    <div class="line-adjust-card__save">
+                        <button type="button" class="btn btn-sm btn-primary" id="lineSaveBtn" disabled
+                                title="Make this outline the line's crop (Ctrl+S)">
+                            <i class="icon-base bx bx-save icon-sm me-1" aria-hidden="true"></i>Save crop
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="lineDiscardBtn" disabled
+                                title="Back to the last saved outline">Discard</button>
+                    </div>
+                    <span class="line-adjust-card__status" id="lineAdjustStatus"></span>
+                    <small class="line-adjust-card__hint" id="lineAdjustHint"></small>
+                </div>
+
+                <div class="d-grid gap-2 field-marker-actions">
+                    <button class="btn btn-outline-primary" type="button" id="detectBtn"
+                            title="Straighten this page, find its table, and outline every handwritten line before reading">
+                        <i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Detect fields and ink
+                    </button>
                     <button class="btn btn-primary btn-lg" type="button" id="scanNowBtn">
                         <i class="icon-base bx bx-scan icon-sm me-1"></i> Scan with OCR
                     </button>
                     <button class="btn btn-outline-secondary" type="button" id="backToUpload">
                         <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Choose another file
                     </button>
-                </div>
                 </div>
             </div>
         </div>
@@ -205,61 +338,180 @@
     {{-- Step 3: verify and submit --}}
     <section id="step-verify" class="document-step-panel d-none">
         <form method="POST" action="{{ route('documents.store') }}" id="submitForm"
-              enctype="multipart/form-data">
+              enctype="multipart/form-data" novalidate>
             @csrf
             <input type="hidden" name="doc_type" value="{{ $docType->value }}">
             <input type="hidden" name="document_template_id" value="{{ $template->getKey() }}">
             <input type="hidden" name="ocr_model_key" id="ocrModelKey">
+            <input type="hidden" name="document_page_id" id="documentPageId">
 
-            <div class="row g-4">
-                <div class="col-lg-8">
-                    <x-card class="document-validation-card" title="Validate extracted fields"
-                            subtitle="Compare each crop with the reading and correct it. The corrected value is what gets stored.">
-                        <div id="verifyRows"></div>
-                    </x-card>
+            <div class="validation-workspace">
+                <div class="validation-submit-error d-none" id="validationSubmitError"
+                     role="alert" aria-live="assertive">
+                    <i class="icon-base bx bx-error" aria-hidden="true"></i>
+                    <div>
+                        <strong>Unable to submit this record</strong>
+                        <div id="validationSubmitMessage"></div>
+                    </div>
                 </div>
 
-                <div class="col-lg-4">
-                    <div class="document-side-panel">
-                    <x-card title="Scan summary" class="mb-4 document-summary-card">
-                        <dl class="row mb-0">
-                            <dt class="col-7 fw-normal text-muted">Model</dt>
-                            <dd class="col-5"><code id="summaryModel">—</code></dd>
+                <div class="validation-comparison-grid">
+                    <section class="card validation-pane validation-document-pane"
+                             aria-labelledby="originalDocumentTitle">
+                        <header class="validation-pane__header">
+                            <div class="min-w-0">
+                                <span class="validation-pane__eyebrow">Source</span>
+                                <h3 class="h5 mb-1" id="originalDocumentTitle">Original document</h3>
+                                <span class="validation-file-name" id="validationFileName">Document</span>
+                            </div>
 
-                            <dt class="col-7 fw-normal text-muted">Average confidence</dt>
-                            <dd class="col-5" id="summaryConfidence">—</dd>
+                            <div class="btn-group marker-zoom-controls" role="group"
+                                 aria-label="Original document zoom controls">
+                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="validationZoomOutBtn"
+                                        aria-label="Zoom out">
+                                    <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary marker-tool-button marker-zoom-value"
+                                        id="validationZoomResetBtn" title="Fit document to panel">100%</button>
+                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="validationZoomInBtn"
+                                        aria-label="Zoom in">
+                                    <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                        </header>
 
-                            <dt class="col-7 fw-normal text-muted">Needs review</dt>
-                            <dd class="col-5 mb-0" id="summaryReview">—</dd>
-                        </dl>
+                        {{-- Shown while a reviewer redraws one line's outline. --}}
+                        <div class="line-edit-toolbar d-none" id="lineEditToolbar" role="toolbar"
+                             aria-label="Adjust outline">
+                            <div class="line-edit-toolbar__copy">
+                                <strong>Adjust outline</strong>
+                                <span id="lineEditName"></span>
+                            </div>
+                            <div class="btn-group btn-group-sm" role="group" aria-label="Outline tool">
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditBox"
+                                       value="box" checked>
+                                <label class="btn btn-outline-secondary" for="lineEditBox" title="Stretch the outline by its handles">
+                                    <i class="icon-base bx bx-expand-alt icon-sm me-1" aria-hidden="true"></i>Stretch
+                                </label>
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditPoints"
+                                       value="points">
+                                <label class="btn btn-outline-secondary" for="lineEditPoints"
+                                       title="Drag corners; drag a dot between corners to add one; Delete removes one">
+                                    <i class="icon-base bx bx-shape-polygon icon-sm me-1" aria-hidden="true"></i>Move points
+                                </label>
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditDraw"
+                                       value="draw">
+                                <label class="btn btn-outline-secondary" for="lineEditDraw"
+                                       title="Draw a new outline: click points or hold and trace; Enter or double-click closes it">
+                                    <i class="icon-base bx bx-pen icon-sm me-1" aria-hidden="true"></i>Draw
+                                </label>
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditRectangle"
+                                       value="rectangle">
+                                <label class="btn btn-outline-secondary" for="lineEditRectangle" title="Drag a box over the writing">
+                                    <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>Rectangle
+                                </label>
+                            </div>
+                            <div class="line-edit-toolbar__actions">
+                                <button type="button" class="btn btn-sm btn-label-secondary" id="lineEditCancel">Cancel</button>
+                                <button type="button" class="btn btn-sm btn-primary" id="lineEditSave">
+                                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>Save and re-read
+                                </button>
+                            </div>
+                            <div class="line-edit-toolbar__status" id="lineEditStatus" role="status" aria-live="polite"></div>
+                        </div>
 
-                        <hr>
-                        <p class="small text-muted mb-0">
-                            Confidence is the model's certainty in its own output, not accuracy.
-                            Fields under {{ $threshold }}% are flagged for a closer look.
-                        </p>
-                    </x-card>
+                        <div class="doc-viewport validation-doc-viewport" id="validationDocViewport">
+                            <div class="doc-stage" id="validationDocStage">
+                                <canvas id="validationPageCanvas"></canvas>
+                                <div class="field-overlay validation-field-overlay"
+                                     id="validationFieldOverlay"></div>
+                            </div>
+                        </div>
 
-                    <x-card title="Registry details" class="mb-4">
-                        <label for="registry_number" class="form-label">Registry number</label>
-                        <input type="text" id="registry_number" name="registry_number"
-                               class="form-control" placeholder="As written on the certificate">
-                    </x-card>
+                        <footer class="validation-pane__hint">
+                            <i class="icon-base bx bx-scan" aria-hidden="true"></i>
+                            Orange shows the complete person row; green identifies the exact field;
+                            red outlines need review.
+                            Hold <kbd>Ctrl</kbd> and scroll to zoom or drag to move.
+                        </footer>
+                    </section>
 
-                    <div class="document-lock-notice">
-                        <i class="icon-base bx bx-lock-alt"></i>
-                        <span>Submitting locks this record. Later corrections need a change request approved by an Admin.</span>
-                    </div>
+                    <section class="card validation-pane validation-output-pane"
+                             aria-labelledby="digitalDocumentTitle">
+                        <header class="validation-pane__header validation-output-header">
+                            <div>
+                                <span class="validation-pane__eyebrow">Transcription</span>
+                                <h3 class="h5 mb-1" id="digitalDocumentTitle">Digital text output</h3>
+                                <p class="small text-muted mb-0">Correct the text, then check Verified.</p>
+                            </div>
 
-                    <div class="d-grid gap-2 mt-4">
-                        <button class="btn btn-primary btn-lg" type="submit" id="submitBtn">
-                            <i class="icon-base bx bx-check-shield icon-sm me-1"></i> Submit &amp; lock record
-                        </button>
-                        <button class="btn btn-outline-secondary" type="button" id="backToMark">
-                            <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Back to marking
-                        </button>
-                    </div>
-                    </div>
+                            <div class="validation-output-summary">
+                                <div class="validation-model-summary" aria-label="OCR summary">
+                                    <span><small>Model</small><code id="summaryModel">&mdash;</code></span>
+                                    <span><small>Confidence</small><strong id="summaryConfidence">&mdash;</strong></span>
+                                    <span><small>Review</small><strong id="summaryReview">&mdash;</strong></span>
+                                </div>
+
+                                <div class="validation-progress-summary" aria-live="polite">
+                                    <div>
+                                        <strong id="verifiedCount">0 of 0</strong>
+                                        <span>fields verified</span>
+                                    </div>
+                                    <div class="progress" role="progressbar" aria-label="Field verification progress"
+                                         aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+                                         id="verifiedProgress">
+                                        <div class="progress-bar" id="verifiedProgressBar" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </header>
+
+                        <div class="validation-registry-row">
+                            <label for="registry_number">
+                                Registry number <span>optional</span>
+                            </label>
+                            <input type="text" id="registry_number" name="registry_number"
+                                   class="form-control" maxlength="64"
+                                   placeholder="As written on the certificate">
+                        </div>
+
+                        {{-- Filled in when the page job has something to say about the grid as a whole. --}}
+                        <div class="grid-notes d-none" id="verifyNotes" role="status" aria-live="polite">
+                            <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
+                            <div>
+                                <strong>Check the grid before you verify</strong>
+                                <ul class="grid-notes__list" id="verifyNotesList"></ul>
+                            </div>
+                        </div>
+
+                        <div class="validation-record-list-heading">
+                            <div>
+                                <i class="icon-base bx bx-list-check" aria-hidden="true"></i>
+                                <span>Registry records</span>
+                            </div>
+                            <small>Select a person to compare the complete row.</small>
+                        </div>
+                        <div class="validation-result-list" id="verifyRows"></div>
+
+                        <footer class="validation-submit-bar">
+                            <div class="validation-lock-copy">
+                                <i class="icon-base bx bx-lock-alt" aria-hidden="true"></i>
+                                <span>Submitted fields are locked. Corrections require an approved change request.</span>
+                            </div>
+
+                            <div class="validation-submit-actions">
+                                <button class="btn btn-outline-secondary" type="button" id="backToMark">
+                                    <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Back to marking
+                                </button>
+                                <button class="btn btn-primary" type="submit" id="submitBtn" disabled>
+                                    <i class="icon-base bx bx-check-shield icon-sm me-1"></i>
+                                    {{-- One inline span: .btn is a flex container, which drops the
+                                         spaces between separate text and element children. --}}
+                                    <span>Submit <span id="submitVerifiedCount">0</span> verified</span>
+                                </button>
+                            </div>
+                        </footer>
+                    </section>
                 </div>
             </div>
         </form>
@@ -287,7 +539,7 @@
                 </div>
 
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">
                         Cancel
                     </button>
                     <button type="button" class="btn btn-primary" id="confirmResetFieldsBtn">
@@ -299,12 +551,56 @@
         </div>
     </div>
 
+    {{-- Confirm submitting a record that leaves required fields out --}}
+    <div class="modal fade" id="missingRequiredModal" tabindex="-1"
+         aria-labelledby="missingRequiredModalTitle" aria-describedby="missingRequiredModalDescription"
+         aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable missing-required-dialog">
+            <div class="modal-content missing-required-modal">
+                <div class="modal-header">
+                    <div class="missing-required-modal__heading">
+                        <span class="missing-required-modal__icon bg-label-warning" aria-hidden="true">
+                            <i class="icon-base bx bx-error"></i>
+                        </span>
+                        <div>
+                            <h5 class="modal-title" id="missingRequiredModalTitle">Submit without required fields?</h5>
+                            <p class="missing-required-modal__summary" id="missingRequiredModalDescription">
+                                The record would be saved without the following.
+                            </p>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                            aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body">
+                    <ul class="missing-required-list" id="missingRequiredList"></ul>
+                    <p class="missing-required-modal__note">
+                        <i class="icon-base bx bx-history" aria-hidden="true"></i>
+                        <span>Submit anyway only if the page really leaves them blank. The audit log records what was left out.</span>
+                    </p>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal"
+                            id="missingRequiredBackBtn">
+                        <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>
+                        Go back
+                    </button>
+                    <button type="button" class="btn btn-warning" id="confirmMissingRequiredBtn">
+                        Submit anyway
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- OCR progress while the model runs --}}
     <div class="modal fade" id="scanningModal" tabindex="-1" data-bs-backdrop="static"
          data-bs-keyboard="false" aria-hidden="true">
         <div class="modal-dialog modal-sm modal-dialog-centered">
             <div class="modal-content ocr-progress-modal text-center">
-                <div class="modal-body p-4 p-sm-5">
+                <div class="modal-body p-4 p-sm-5 pb-sm-4">
                     <div class="ocr-progress-ring mx-auto mb-4" id="ocrProgressRing"
                          role="progressbar" aria-label="OCR progress" aria-valuemin="0"
                          aria-valuemax="100" aria-valuenow="0">
@@ -324,6 +620,10 @@
                         <span id="ocrProgressFields">Preparing marked fields</span>
                     </div>
                 </div>
+                {{-- Stops this run and returns to Align; the label names what is running. --}}
+                <div class="ocr-progress-actions">
+                    <button type="button" class="btn btn-danger w-100" id="ocrProgressCancel">Cancel</button>
+                </div>
             </div>
         </div>
     </div>
@@ -331,44 +631,186 @@
 
 @push('scripts')
 <script type="module">
-    import { FieldMarker } from '{{ Vite::asset('resources/js/field-marker.js') }}';
+    import {
+        canVerifyValue,
+        FieldMarker,
+        markerAngleMetadata,
+        markerColumnMetadata,
+        markerPersonMetadata,
+        verificationGroupState,
+    } from '{{ Vite::asset('resources/js/field-marker.js') }}';
+    import { attachMarqueeSelection } from '{{ Vite::asset('resources/js/marquee-selection.js') }}';
+    import { setDisclosureExpanded } from '{{ Vite::asset('resources/js/disclosure-motion.js') }}';
+    import {
+        alignedGeometry,
+        detectionSummary,
+        flagExplanation,
+        FLAG_NO_ROW,
+        geometryMarkers,
+        gridNotes,
+        verificationItems,
+    } from '{{ Vite::asset('resources/js/line-geometry.js') }}';
+    import { LineOverlay, polygonBounds } from '{{ Vite::asset('resources/js/line-overlay.js') }}';
+    import { valueProblem } from '{{ Vite::asset('resources/js/value-types.js') }}';
 
     const config = {
         boxes: @json($boxes),
+        ruledYs: @json($ruledYs),
+        templateId: @json($template->getKey()),
+        groupingMode: @json(
+            $template->grouping_mode instanceof \BackedEnum
+                ? $template->grouping_mode->value
+                : ($template->grouping_mode ?? 'auto')
+        ),
         threshold: @json($threshold),
-        recogniseUrl: @json(route('documents.recognise')),
+        maxFields: @json(App\Support\Limits::MAX_FIELDS),
+        maxFieldNameLength: 500,
+        pagesUrl: @json(route('documents.pages.store')),
+        pageGeometryUrl: @json(route('documents.pages.reoutline', ['page' => '__PAGE__'])),
+        snapUrl: @json(route('documents.pages.snap')),
+        lineUpdateUrl: @json(route('documents.pages.lines.update', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        lineDeleteUrl: @json(route('documents.pages.lines.destroy', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        lineRestoreUrl: @json(route('documents.pages.lines.restore', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        lineStoreUrl: @json(route('documents.pages.lines.store', ['page' => '__PAGE__'])),
+        pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
         csrf: @json(csrf_token()),
+        paper: {!! Illuminate\Support\Js::encode([
+            'sizeLabel' => $template->paper_size->label(),
+            'dimensionsLabel' => $template->paperDimensionsLabel(),
+            'orientation' => $template->orientation->value,
+            'orientationLabel' => $template->orientation->label(),
+            'aspectRatio' => $template->paperAspectRatio(),
+        ]) !!},
     };
 
-    const el = (id) => document.getElementById(id);
+    const el = (id) => {
+        const node = document.getElementById(id);
+        if (!node) throw new Error(`Required interface element #${id} was not found.`);
+        return node;
+    };
+
+    const requiredPart = (root, selector) => {
+        const node = root.querySelector(selector);
+        if (!(node instanceof HTMLElement)) {
+            throw new Error(`Required interface element ${selector} was not found.`);
+        }
+        return node;
+    };
+
+    const requiredInput = (root, selector) => {
+        const node = root.querySelector(selector);
+        if (!(node instanceof HTMLInputElement)) {
+            throw new Error(`Required input ${selector} was not found.`);
+        }
+        return node;
+    };
     const steps = { upload: el('step-upload'), mark: el('step-mark'), verify: el('step-verify') };
+    const modelSelect = document.getElementById('modelSelect');
+    const scanFileInput = requiredInput(document, '#scanFile');
+    const selectAllFieldsInput = requiredInput(document, '#selectAllFields');
 
     let scanFile = null;
+    // One entry per outlined line of the processed page (see verificationItems).
     let cropped = [];
     let readings = [];
+    let processedPage = null;
+    let editingLineIndex = null;
     let fieldHistory = [];
     let currentFieldSnapshot = null;
     let restoringFieldHistory = false;
     let markerClipboard = [];
     let pasteSequence = 0;
+    let activeValidationIndex = null;
+    let activeValidationGroupId = null;
+    let validationGroups = [];
+    let validationGroupByField = new Map();
+    let validationRowByIndex = new Map();
+    let syncingValidationSelection = false;
+    let recordSubmitting = false;
+    let markerConstraintMessage = null;
 
+    const markerOverlay = el('fieldOverlay');
     const marker = new FieldMarker({
         canvas: el('pageCanvas'),
-        overlay: el('fieldOverlay'),
+        overlay: markerOverlay,
         viewport: el('docViewport'),
         onChange: handleMarkerChange,
         onSelectionChange: updateSelectionUI,
         onZoomChange: updateZoomUI,
     });
 
-    const cloneBoxes = (boxes) => boxes.map(({ name, x, y, w, h }) => ({ name, x, y, w, h }));
+    attachMarqueeSelection({
+        marker,
+        overlay: markerOverlay,
+        marquee: el('staffFieldSelectionMarquee'),
+    });
+
+    // Zoom and pan for the Verify page. It holds no boxes: the outlines are
+    // drawn by lineOverlay, one SVG stretched over the same canvas.
+    const validationMarker = new FieldMarker({
+        canvas: el('validationPageCanvas'),
+        overlay: el('validationFieldOverlay'),
+        viewport: el('validationDocViewport'),
+        readOnly: true,
+        onSelectionChange: handleValidationMarkerSelection,
+        onZoomChange: updateValidationZoomUI,
+    });
+
+    const lineOverlay = new LineOverlay({
+        container: el('validationFieldOverlay'),
+        onSelect: (index) => activateValidationField(index, 'marker'),
+        onModeChange: (mode) => showVerifyLineMode(mode),
+        onDraftChange: (points) => showVerifyDraft(points),
+    });
+
+    // Detect's preview in the Align step: outlines and fitted row lines over
+    // the page, read-only so the markers underneath stay draggable.
+    const alignPreview = new LineOverlay({
+        container: markerOverlay,
+        preview: true,
+        onSelect: (index) => selectLine(index),
+        onBackground: () => selectLine(null),
+        onEdit: (polygon, final) => lineEdited(polygon, final),
+        onModeChange: (mode) => showLineMode(mode),
+        onDraftChange: (points) => showDraft(points),
+        selectWhileEditing: true,
+    });
+
+    // What Detect found on this page and the markers it fitted. Scan with OCR
+    // reads Detect's crops only while the markers are still exactly these;
+    // once Staff move one, the page is outlined again from their markers.
+    let detection = null;
+
+    const cloneBoxes = (boxes) => boxes.map(({
+        name, x, y, w, h, personGroup, personFieldOrder, kind, columnIndex, angle,
+    }) => ({
+        name,
+        x,
+        y,
+        w,
+        h,
+        ...markerPersonMetadata({ personGroup, personFieldOrder }),
+        ...markerColumnMetadata({ kind, columnIndex }),
+        ...markerAngleMetadata({ angle }),
+    }));
     const templateBoxes = config.boxes.map((box) => ({
         name: box.name,
         x: +box.x,
         y: +box.y,
         w: +box.w,
         h: +box.h,
+        ...markerPersonMetadata(box),
+        ...markerColumnMetadata(box),
+        ...markerAngleMetadata(box),
     }));
+    const templateColumns = templateBoxes.filter((box) => box.kind === 'column');
+
+    // What each template field and ledger column holds and how its value is
+    // checked (Template Builder settings), by name: a line is read under its
+    // field's or column's name.
+    const nameKey = (name) => String(name ?? '').trim().toLowerCase();
+    const templateSettings = new Map(config.boxes.map((box) => [nameKey(box.name), box]));
+    const settingsFor = (index) => templateSettings.get(nameKey(cropped[index]?.label)) ?? null;
 
     function fieldsMatchTemplate() {
         return JSON.stringify(marker.toJSON()) === JSON.stringify(templateBoxes);
@@ -392,6 +834,931 @@
         currentFieldSnapshot = next;
         renderFieldList(boxes);
         updateResetUI();
+        syncDetection();
+    }
+
+    // ------------------------------------------------------------- detection
+    // Detect's outlines were split at, and placed by, the markers as Detect
+    // left them. Moving a marker sets the result aside (Scan with OCR then
+    // outlines the page afresh); undoing back to those markers brings it back,
+    // line adjustments included. `stale` is for good: the detected page can no
+    // longer be read (a failed read, a cancelled run).
+    function detectionIsCurrent() {
+        return detection !== null && !detection.stale
+            && JSON.stringify(marker.toJSON()) === detection.snapshot;
+    }
+
+    function syncDetection() {
+        if (!detection || detection.stale) return;
+        const current = JSON.stringify(marker.toJSON()) === detection.snapshot;
+        if (!current && !detection.setAside) setDetectionAside();
+        else if (current && detection.setAside) restoreDetection();
+    }
+
+    function setDetectionAside() {
+        const changed = detection.page.lines.filter((line) => line.adjusted || isLineUnsaved(line)).length;
+        setLineEditing(false);
+        detection.setAside = true;
+        alignPreview.setVisible(false);
+        el('lineEditToggle').disabled = true;
+        el('detectSummaryTitle').textContent = 'Markers moved after Detect';
+        // Outlining again reuses the lines Detect found on this page, so it
+        // takes seconds; only the adjusted outlines cannot come with it.
+        el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers, '
+            + 'reusing the lines Detect found. Undo (Ctrl+Z) to bring the Detect result back'
+            + (changed > 0 ? ` with your ${changed} line adjustment${changed === 1 ? '' : 's'}` : '')
+            + ', or Detect again to refit the markers.';
+        el('detectSummary').classList.add('is-stale');
+        // The notes describe Detect's grid, which is set aside now.
+        fillGridNotes(el('detectSummaryNotes'), []);
+    }
+
+    /** The detected page can no longer be read: undo cannot bring it back either. */
+    function retireDetection() {
+        if (!detection) return;
+        detection.stale = true;
+        if (detection.setAside) {
+            el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers. '
+                + 'Detect again to refit them.';
+        }
+    }
+
+    function restoreDetection() {
+        detection.setAside = false;
+        alignPreview.setVisible(true);
+        el('lineEditToggle').disabled = detection.page.lines.length === 0;
+        el('detectSummary').classList.remove('is-stale');
+        showDetectionSummary();
+    }
+
+    function clearDetection() {
+        setLineEditing(false);
+        resetLineHistory();
+        detection = null;
+        alignPreview.clear();
+        el('detectSummary').classList.add('d-none');
+        el('detectSummary').classList.remove('is-stale', 'has-review', 'has-notes');
+        fillGridNotes(el('detectSummaryNotes'), []);
+    }
+
+    /**
+     * Show what Detect found: the page as it was straightened, the markers
+     * fitted to this page's own table, and every outline it will read.
+     */
+    async function applyDetection(page) {
+        // The same pixels the outlines were found on, and that go on to TrOCR.
+        await marker.loadFromUrl(page.imageUrl);
+        updatePaperMatchWarning();
+        fetchSnapLines();
+        const fitted = cloneBoxes(geometryMarkers(page.geometry, page));
+        marker.setBoxes(fitted);
+        window.requestAnimationFrame(() => marker.resetZoom());
+
+        setLineEditing(false);
+        detection = {
+            page,
+            snapshot: JSON.stringify(marker.toJSON()),
+            stale: false,
+            setAside: false,
+            columns: fitted.filter((box) => box.kind === 'column'),
+            // The detector's outlines, for Reset line.
+            originalOutlines: new Map(page.lines.map((line) => [line.id, line.polygon.map((point) => [...point])])),
+        };
+        resetLineHistory();
+
+        alignPreview.setLines(page, verificationItems(page.lines, page));
+        const columns = page.geometry?.columns ?? [];
+        if (columns.length > 0) {
+            const left = Math.min(...columns.map((column) => column.box[0])) * page.width;
+            const right = Math.max(...columns.map((column) => column.box[0] + column.box[2])) * page.width;
+            alignPreview.setGuides((page.geometry?.ruled_ys ?? [])
+                .map((y) => [left, y * page.height, right, y * page.height]));
+        } else {
+            alignPreview.setGuides([]);
+        }
+        alignPreview.setVisible(true);
+
+        el('detectSummary').classList.remove('d-none', 'is-stale');
+        el('lineEditToggle').disabled = page.lines.length === 0;
+        showDetectionSummary();
+    }
+
+    // ------------------------------------------------------- line editing
+    // After Detect, each outline can be clicked, stretched by its handles,
+    // grown/shrunk, have its corners moved, or be drawn anew, with a live
+    // preview of the crop TrOCR will read. Changes stay here until the
+    // reviewer presses Save crop: only then is the line re-cropped on the
+    // server (not read). Scan with OCR reads the saved crops, and offers to
+    // save any line still unsaved. The field markers are locked meanwhile:
+    // moving one sets Detect's result and these adjustments aside until the
+    // move is undone.
+
+    const LINE_GROW_STEP = 2;
+    const LINE_MODE_HINTS = {
+        box: 'Drag the handles to stretch. + / − grow or shrink. Save crop (Ctrl+S) keeps the change. Ctrl+Z undo, Ctrl+Y redo. Tab: next line. Esc: done.',
+        points: 'Drag a corner to move it. Drag a small dot between corners to add one. Delete (or double-click) removes the corner last touched. Ctrl+Z undo.',
+        draw: 'Click to place as many points as you like, or hold and trace. Then press Use this outline, Enter, or double-click, or click the first point. Ctrl+Z takes back the last point. Esc cancels.',
+    };
+    let lineEditing = false;
+    let editedLineIndex = null;
+    let lineSaveQueue = Promise.resolve();
+    // Undo and redo of outline changes: each entry is one line before and
+    // after one change. lineShown is each line as last changed here; a line
+    // whose shown outline differs from its saved one is unsaved.
+    // Each entry is one undoable step: an outline change ({id, before, after}),
+    // or a line removed or drawn ({kind, id, position}), which are put back and
+    // taken away again on the server.
+    let lineUndo = [];
+    let lineRedo = [];
+    let lineShown = new Map();
+    // True while a new outline is being drawn for a line that does not exist yet.
+    let addingLine = false;
+
+    function resetLineHistory() {
+        lineUndo = [];
+        lineRedo = [];
+        lineShown = new Map();
+        updateLineHistoryButtons();
+    }
+
+    function updateLineHistoryButtons() {
+        el('lineUndoBtn').disabled = lineUndo.length === 0;
+        el('lineRedoBtn').disabled = lineRedo.length === 0;
+    }
+
+    function shownLine(index) {
+        const line = detection.page.lines[index];
+        return lineShown.get(line.id) ?? { polygon: line.polygon.map((point) => [...point]), adjusted: Boolean(line.adjusted) };
+    }
+
+    /** Remember one change to a line, so it can be undone. */
+    function recordLineChange(index, polygon, adjusted) {
+        const id = detection.page.lines[index].id;
+        const after = { polygon: polygon.map((point) => [...point]), adjusted };
+        lineUndo.push({ id, before: shownLine(index), after });
+        if (lineUndo.length > 200) lineUndo.shift();
+        lineRedo = [];
+        lineShown.set(id, after);
+        updateLineHistoryButtons();
+        lineChanged(index);
+    }
+
+    /** Is this line's outline here different from the one saved on the server? */
+    function isLineUnsaved(line) {
+        const shown = lineShown.get(line.id);
+        if (!shown) return false;
+        return shown.adjusted !== Boolean(line.adjusted)
+            || JSON.stringify(shown.polygon) !== JSON.stringify(line.polygon);
+    }
+
+    function unsavedLineCount() {
+        return detection ? detection.page.lines.filter(isLineUnsaved).length : 0;
+    }
+
+    /** Redraw a changed line and the save state everywhere it shows. */
+    function lineChanged(index) {
+        alignPreview.updateLine(index, lineItems()[index]);
+        showDetectionSummary();
+        if (editedLineIndex !== index) return;
+        const unsaved = isLineUnsaved(detection.page.lines[index]);
+        el('lineSaveBtn').disabled = !unsaved;
+        el('lineDiscardBtn').disabled = !unsaved;
+        el('lineResetBtn').disabled = !shownLine(index).adjusted;
+        const status = el('lineAdjustStatus');
+        status.classList.remove('is-error');
+        status.textContent = unsaved
+            ? 'Not saved yet. Press Save crop (Ctrl+S) to make this the crop.'
+            : 'Same as the saved crop.';
+    }
+
+    /** Put a line back to a remembered outline (undo, redo, reset, discard). */
+    function applyLineState(id, state) {
+        const index = detection?.page.lines.findIndex((line) => line.id === id) ?? -1;
+        if (index < 0) return;
+        if (editedLineIndex !== index) selectLine(index);
+        if (alignPreview.editing?.mode !== 'box') alignPreview.setEditMode('box');
+        alignPreview.setEditedPolygon(state.polygon, { notify: false });
+        drawLineThumbnail(state.polygon);
+        lineShown.set(id, { polygon: state.polygon.map((point) => [...point]), adjusted: state.adjusted });
+        lineChanged(index);
+    }
+
+    /**
+     * One step back or forward. An outline change is undone here; a line
+     * removed or drawn is put back or taken away on the server, so undo means
+     * the same thing to Scan with OCR as it does on screen.
+     */
+    function stepLineHistory(from, to, forward) {
+        const entry = from.pop();
+        if (!entry) return false;
+        to.push(entry);
+        updateLineHistoryButtons();
+
+        // 'delete' undone puts the line back; 'add' undone takes it away.
+        const puttingBack = entry.kind === 'delete' ? !forward : forward;
+        if (entry.kind === 'delete' || entry.kind === 'add') {
+            runLineChange(
+                () => (puttingBack ? restoreLine(entry.id) : removeLine(entry.id)),
+                puttingBack ? 'The line could not be put back.' : 'The line could not be taken away.',
+            );
+            return true;
+        }
+
+        applyLineState(entry.id, forward ? entry.after : entry.before);
+        updateLineHistoryButtons();
+        return true;
+    }
+
+    function undoLineChange() {
+        return stepLineHistory(lineUndo, lineRedo, false);
+    }
+
+    function redoLineChange() {
+        return stepLineHistory(lineRedo, lineUndo, true);
+    }
+
+    function lineItems() {
+        if (!detection) return [];
+        const lines = detection.page.lines.map((line) => {
+            const shown = lineShown.get(line.id);
+            return shown ? { ...line, polygon: shown.polygon, adjusted: shown.adjusted } : line;
+        });
+        return verificationItems(lines, detection.page).map((item, index) => ({
+            ...item,
+            unsaved: isLineUnsaved(detection.page.lines[index]),
+        }));
+    }
+
+    function adjustedLineCount() {
+        return detection ? detection.page.lines.filter((line) => line.adjusted).length : 0;
+    }
+
+    function showDetectionSummary() {
+        const summary = detectionSummary(detection.page);
+        const adjusted = adjustedLineCount();
+        const unsaved = unsavedLineCount();
+        el('detectSummaryTitle').textContent = summary.title;
+        el('detectSummaryText').textContent = summary.text
+            + (adjusted > 0 ? ` · ${adjusted} line${adjusted === 1 ? '' : 's'} adjusted` : '')
+            + (unsaved > 0 ? ` · ${unsaved} not saved` : '');
+        el('detectSummary').classList.toggle('has-review', summary.flagged > 0);
+        el('detectSummary').classList.toggle('has-notes', summary.notes.length > 0);
+        fillGridNotes(el('detectSummaryNotes'), summary.notes);
+    }
+
+    /** One list item per note; the list hides itself when there is nothing to say. */
+    function fillGridNotes(list, notes) {
+        list.replaceChildren(...notes.map((text) => {
+            const item = document.createElement('li');
+            item.textContent = text;
+            return item;
+        }));
+        list.classList.toggle('d-none', notes.length === 0);
+    }
+
+    /** In Verify: the same notes, above the people, so they are read before anything is verified. */
+    function showGridNotes(page) {
+        const notes = gridNotes(page?.notes);
+        fillGridNotes(el('verifyNotesList'), notes);
+        el('verifyNotes').classList.toggle('d-none', notes.length === 0);
+    }
+
+    function setLineEditing(on) {
+        const allowed = on && detection !== null && !detection.stale && !detection.setAside
+            && detection.page.lines.length > 0;
+        if (!allowed && lineEditing) applyOpenDrawing();
+        if (!allowed) {
+            addingLine = false;
+            editedLineIndex = null;
+            alignPreview.cancelEdit();
+            alignPreview.setSelection([]);
+        }
+        lineEditing = allowed;
+        el('lineEditToggle').checked = allowed;
+        updateAddLineButton();
+        alignPreview.setInteractive(allowed);
+        markerOverlay.classList.toggle('is-editing-lines', allowed);
+        if (allowed) {
+            // Editing needs the outlines on screen.
+            alignPreview.setVisible(true);
+            marker.clearSelection();
+            el('lineAdjustCard').classList.remove('d-none');
+            if (editedLineIndex === null) showLineCard(null);
+            revealLineCard();
+        } else {
+            el('lineAdjustCard').classList.add('d-none');
+        }
+    }
+
+    el('lineEditToggle').addEventListener('change', (event) => {
+        setLineEditing(event.currentTarget.checked);
+        // Off the switch, so the line keys (Tab, +, -, Esc) work at once.
+        event.currentTarget.blur();
+    });
+
+    function selectLine(index) {
+        if (!lineEditing) return;
+        if (index !== editedLineIndex) applyOpenDrawing();
+        addingLine = false;
+        if (index === null || !detection?.page.lines[index]) {
+            editedLineIndex = null;
+            alignPreview.cancelEdit();
+            alignPreview.setSelection([]);
+            showLineCard(null);
+            return;
+        }
+        editedLineIndex = index;
+        alignPreview.setSelection([index], index);
+        alignPreview.beginEdit(index, 'box');
+        showLineCard(index);
+        showLineMode('box');
+        // Bring it into view when Tab moved to a line off screen.
+        alignPreview.groups[index]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+        revealLineCard();
+    }
+
+    /**
+     * Scroll the side panel down to the line tools: the Detect summary at the
+     * top of the view (or as near as the panel scrolls), then the line card
+     * and the Detect / Scan buttons below it.
+     */
+    function revealLineCard() {
+        const card = el('lineAdjustCard');
+        if (card.classList.contains('d-none')) return;
+        window.requestAnimationFrame(() => {
+            const panel = card.closest('.document-side-panel');
+            if (!panel || panel.scrollHeight <= panel.clientHeight + 1) {
+                // A stacked (narrow) layout scrolls the page instead.
+                card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                return;
+            }
+            const summary = el('detectSummary');
+            const summaryTop = summary.getBoundingClientRect().top - panel.getBoundingClientRect().top + panel.scrollTop;
+            const bottom = panel.scrollHeight - panel.clientHeight;
+            panel.scrollTo({ top: Math.max(0, Math.min(bottom, summaryTop - 12)), behavior: 'smooth' });
+        });
+    }
+
+    function showLineCard(index) {
+        const items = lineItems();
+        const item = index === null ? null : items[index];
+        const line = index === null ? null : detection.page.lines[index];
+        el('lineAdjustName').textContent = item ? item.name : 'Click a line on the page';
+        el('lineAdjustPosition').textContent = item ? `${index + 1} of ${items.length}` : '';
+        const note = item ? flagExplanation(item.flags) : '';
+        el('lineAdjustNote').textContent = note;
+        el('lineAdjustNote').classList.toggle('d-none', note === '');
+        el('lineAdjustActions').querySelectorAll('button').forEach((button) => { button.disabled = !item; });
+        el('lineDeleteBtn').disabled = !item;
+        updateAddLineButton();
+        // Undo and redo follow the history, whichever line is selected.
+        updateLineHistoryButtons();
+        el('lineModeGroup').querySelectorAll('input').forEach((input) => { input.disabled = !item; });
+        if (!item) el('lineDrawActions').classList.add('d-none');
+        el('lineAdjustHint').textContent = item
+            ? LINE_MODE_HINTS.box
+            : 'Click an outline on the page to adjust it, or Add line to draw one the detector missed.';
+        const unsaved = Boolean(line && isLineUnsaved(line));
+        el('lineResetBtn').disabled = !(line && shownLine(index).adjusted);
+        el('lineSaveBtn').disabled = !unsaved;
+        el('lineDiscardBtn').disabled = !unsaved;
+        el('lineAdjustStatus').textContent = unsaved ? 'Not saved yet. Press Save crop (Ctrl+S) to make this the crop.' : '';
+        el('lineAdjustStatus').classList.remove('is-error');
+        drawLineThumbnail(item ? item.polygon : null);
+    }
+
+    /** The crop TrOCR will read: the page inside the outline, with a margin. */
+    function drawLineThumbnail(polygon) {
+        const canvas = el('lineAdjustThumb');
+        const source = marker.canvas;
+        if (!polygon || polygon.length < 3 || !source.width) {
+            canvas.width = 1;
+            canvas.height = 1;
+            canvas.classList.add('is-empty');
+            return;
+        }
+        const pad = 8;
+        const bounds = polygonBounds(polygon);
+        const left = Math.max(0, Math.floor(bounds.left - pad));
+        const top = Math.max(0, Math.floor(bounds.top - pad));
+        const right = Math.min(source.width, Math.ceil(bounds.right + pad));
+        const bottom = Math.min(source.height, Math.ceil(bounds.bottom + pad));
+        canvas.width = Math.max(1, right - left);
+        canvas.height = Math.max(1, bottom - top);
+        canvas.classList.remove('is-empty');
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.save();
+        context.beginPath();
+        polygon.forEach(([x, y], i) => (i === 0 ? context.moveTo(x - left, y - top) : context.lineTo(x - left, y - top)));
+        context.closePath();
+        context.clip();
+        context.drawImage(source, -left, -top);
+        context.restore();
+    }
+
+    function lineEdited(polygon, final) {
+        if (!lineEditing) return;
+        // A line being drawn from nothing belongs to no line yet: closing it
+        // makes one, rather than changing an outline.
+        if (addingLine) {
+            drawLineThumbnail(polygon);
+            if (final) createDrawnLine(polygon);
+            return;
+        }
+        if (editedLineIndex === null) return;
+        drawLineThumbnail(polygon);
+        if (!final) return;
+        // Pressing a corner without moving it (to pick it for Delete) changes nothing.
+        if (JSON.stringify(polygon) === JSON.stringify(shownLine(editedLineIndex).polygon)) return;
+        recordLineChange(editedLineIndex, polygon, true);
+    }
+
+    /** Save crop: the selected line's outline becomes its crop. */
+    function saveSelectedLine() {
+        if (!lineEditing || editedLineIndex === null) return;
+        applyOpenDrawing();
+        const index = editedLineIndex;
+        if (!isLineUnsaved(detection.page.lines[index])) return;
+        const shown = shownLine(index);
+        // Back to the detector's own outline counts as not adjusted.
+        saveLine(index, shown.polygon, { reset: !shown.adjusted });
+    }
+
+    /** Discard: back to the last saved outline (undoable). */
+    function discardSelectedLine() {
+        if (!lineEditing || editedLineIndex === null) return;
+        if (alignPreview.editing?.mode === 'draw') alignPreview.setEditMode('box');
+        const line = detection.page.lines[editedLineIndex];
+        if (!isLineUnsaved(line)) return;
+        const saved = { polygon: line.polygon.map((point) => [...point]), adjusted: Boolean(line.adjusted) };
+        recordLineChange(editedLineIndex, saved.polygon, saved.adjusted);
+        applyLineState(line.id, saved);
+    }
+
+    /** Save every unsaved line, and wait for all saves to finish. */
+    function saveAllUnsavedLines() {
+        detection?.page.lines.forEach((line, index) => {
+            if (!isLineUnsaved(line)) return;
+            const shown = shownLine(index);
+            saveLine(index, shown.polygon, { reset: !shown.adjusted });
+        });
+        return lineSaveQueue;
+    }
+
+    /**
+     * Take a deleted line out of everything that remembers it: the page's own
+     * line list, its outline history, and what the overlay draws. Moves the
+     * card on to whichever line now sits where the deleted one was, so a run
+     * of stray lines can be cleared one after another.
+     */
+    function removeLineLocally(id, flagsById = {}) {
+        if (!detection) return null;
+        const removedIndex = detection.page.lines.findIndex((line) => line.id === id);
+        if (removedIndex === -1) return null;
+
+        detection.page.lines = detection.page.lines
+            .filter((line) => line.id !== id)
+            .map((line) => {
+                const flags = flagsById[line.id];
+                return Array.isArray(flags) ? { ...line, flags } : line;
+            });
+        // Its outline history is kept: a line put back is the same line, and
+        // the delete is always the newest step on it, so undo reaches it first.
+        lineShown.delete(id);
+
+        editedLineIndex = null;
+        alignPreview.setLines(detection.page, lineItems());
+        el('lineEditToggle').disabled = detection.page.lines.length === 0;
+        showDetectionSummary();
+
+        if (detection.page.lines.length === 0) {
+            setLineEditing(false);
+            return removedIndex;
+        }
+        selectLine(Math.min(removedIndex, detection.page.lines.length - 1));
+        return removedIndex;
+    }
+
+    /**
+     * Put a line into the page where the server has it: back after a delete,
+     * or newly drawn. Lines are held in the server's own order (position), so
+     * one that comes back lands where it was.
+     */
+    function insertLineLocally(line, flagsById = {}) {
+        if (!detection) return;
+        const lines = detection.page.lines
+            .filter((existing) => existing.id !== line.id)
+            .map((existing) => {
+                const flags = flagsById[existing.id];
+                return Array.isArray(flags) ? { ...existing, flags } : existing;
+            });
+        const at = lines.findIndex((existing) => Number(existing.position) > Number(line.position));
+        const index = at === -1 ? lines.length : at;
+        lines.splice(index, 0, line);
+        detection.page.lines = lines;
+        detection.originalOutlines.set(line.id, line.polygon.map((point) => [...point]));
+        lineShown.delete(line.id);
+
+        if (!lineEditing) setLineEditing(true);
+        alignPreview.setLines(detection.page, lineItems());
+        el('lineEditToggle').disabled = false;
+        showDetectionSummary();
+        selectLine(index);
+    }
+
+    /** One call to the server about a whole line, with the usual headers. */
+    async function lineRequest(url, method) {
+        const response = await fetch(url, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok) {
+            throw new Error(payload?.message || `The line could not be changed (HTTP ${response.status}).`);
+        }
+        return payload ?? {};
+    }
+
+    const lineUrl = (template, id) => template
+        .replace('__PAGE__', String(detection.page.id))
+        .replace('__LINE__', String(id));
+
+    /** Tell the reviewer what happened to a line, in the card's status line. */
+    function showLineStatus(message, isError = false) {
+        const status = el('lineAdjustStatus');
+        status.textContent = message;
+        status.classList.toggle('is-error', isError);
+    }
+
+    /**
+     * Delete: take the selected line out of the page. It is kept on the server
+     * until the page is outlined again, so Ctrl+Z puts it back; nothing reads
+     * or submits it meanwhile.
+     */
+    function deleteSelectedLine() {
+        if (!lineEditing || editedLineIndex === null) return Promise.resolve();
+        applyOpenDrawing();
+        const line = detection?.page.lines[editedLineIndex];
+        if (!line) return Promise.resolve();
+
+        const name = lineItems()[editedLineIndex]?.name ?? 'That line';
+        return runLineChange(async () => {
+            // A second press before the first was applied has nothing to do.
+            if (!detection?.page.lines.some((existing) => existing.id === line.id)) return;
+            const payload = await lineRequest(lineUrl(config.lineDeleteUrl, line.id), 'DELETE');
+            const at = removeLineLocally(line.id, payload.flags ?? {});
+            if (at === null) return;
+            lineUndo.push({ kind: 'delete', id: line.id });
+            lineRedo = [];
+            updateLineHistoryButtons();
+            showLineStatus(`${name} deleted. Ctrl+Z puts it back.`);
+        }, 'The line could not be deleted.');
+    }
+
+    /** Put a deleted line back where it was (undo), or take a drawn one away again. */
+    async function restoreLine(id) {
+        const payload = await lineRequest(lineUrl(config.lineRestoreUrl, id), 'POST');
+        if (payload.line) insertLineLocally(payload.line, payload.flags ?? {});
+    }
+
+    async function removeLine(id) {
+        const payload = await lineRequest(lineUrl(config.lineDeleteUrl, id), 'DELETE');
+        removeLineLocally(id, payload.flags ?? {});
+    }
+
+    /** Start drawing a line where the detector found none. */
+    function startAddingLine() {
+        if (!lineEditing) return;
+        applyOpenDrawing();
+        addingLine = true;
+        editedLineIndex = null;
+        alignPreview.setSelection([]);
+        alignPreview.beginDraw();
+        el('lineAdjustName').textContent = 'Drawing a new line';
+        el('lineAdjustPosition').textContent = '';
+        el('lineAdjustNote').classList.add('d-none');
+        el('lineAdjustActions').querySelectorAll('button').forEach((button) => { button.disabled = true; });
+        el('lineDeleteBtn').disabled = true;
+        el('lineModeGroup').querySelectorAll('input').forEach((input) => { input.disabled = true; });
+        el('lineAdjustHint').textContent = LINE_MODE_HINTS.draw;
+        updateAddLineButton();
+        revealLineCard();
+    }
+
+    function cancelAddingLine() {
+        if (!addingLine) return;
+        addingLine = false;
+        alignPreview.cancelEdit();
+        updateAddLineButton();
+        showLineCard(null);
+    }
+
+    function updateAddLineButton() {
+        const button = el('lineAddBtn');
+        button.disabled = !lineEditing;
+        button.classList.toggle('active', addingLine);
+    }
+
+    /** A drawn outline becomes a line of its own on the server. */
+    function createDrawnLine(polygon) {
+        addingLine = false;
+        updateAddLineButton();
+        if (!detection) return Promise.resolve();
+
+        showLineStatus('Adding the line…');
+        return runLineChange(async () => {
+            const response = await fetch(config.lineStoreUrl.replace('__PAGE__', String(detection.page.id)), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ polygon }),
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            if (!response.ok || !payload?.line) {
+                throw new Error(payload?.message || `The line could not be added (HTTP ${response.status}).`);
+            }
+            insertLineLocally(payload.line, payload.flags ?? {});
+            lineUndo.push({ kind: 'add', id: payload.line.id });
+            lineRedo = [];
+            updateLineHistoryButtons();
+            showLineStatus('Line added. Ctrl+Z takes it away again.');
+        }, 'The line could not be added.');
+    }
+
+    /** Run one whole-line change on the save queue, reporting failures in the card. */
+    function runLineChange(work, failure) {
+        lineSaveQueue = lineSaveQueue.then(work).catch((error) => {
+            console.error(failure, error);
+            showLineStatus(error.message || failure, true);
+        });
+        return lineSaveQueue;
+    }
+
+    el('lineSaveBtn').addEventListener('click', saveSelectedLine);
+    el('lineDiscardBtn').addEventListener('click', discardSelectedLine);
+    el('lineDeleteBtn').addEventListener('click', deleteSelectedLine);
+    el('lineAddBtn').addEventListener('click', () => (addingLine ? cancelAddingLine() : startAddingLine()));
+
+    /** Keep the Stretch / Points / Draw switch and its hint in step with the overlay. */
+    function showLineMode(mode) {
+        const input = el('lineModeGroup').querySelector(`input[value="${mode}"]`);
+        if (input) input.checked = true;
+        el('lineDrawActions').classList.toggle('d-none', mode !== 'draw' || editedLineIndex === null);
+        if (editedLineIndex !== null) {
+            el('lineAdjustHint').textContent = LINE_MODE_HINTS[mode] ?? '';
+            // The preview shows the outline in force until a drawing has three points.
+            const polygon = alignPreview.editedPolygon();
+            if (polygon) drawLineThumbnail(polygon);
+        }
+    }
+
+    function showDraft(points) {
+        el('lineDrawUseBtn').disabled = points < 3;
+        if (editedLineIndex === null || alignPreview.editing?.mode !== 'draw') return;
+        const status = el('lineAdjustStatus');
+        status.classList.remove('is-error');
+        status.textContent = points === 0
+            ? 'Click round the writing, or hold and trace.'
+            : points < 3
+                ? `${points} point${points === 1 ? '' : 's'}. At least 3 to make an outline.`
+                : `${points} points. The preview shows the new crop: press Use this outline (or Enter) to keep it.`;
+        if (points < 3) drawLineThumbnail(alignPreview.editedPolygon());
+    }
+
+    /**
+     * A drawing of three points or more is applied, not lost, when the
+     * reviewer moves on without closing it (another mode, another line,
+     * Adjust line crops off, Scan with OCR). Only Esc or Cancel throw it away.
+     */
+    function applyOpenDrawing() {
+        return alignPreview.isDrawing() && alignPreview.finishDrawing();
+    }
+
+    /** Close the drawing, or say why it cannot be an outline yet. */
+    function useDrawing() {
+        if (alignPreview.finishDrawing()) return;
+        const status = el('lineAdjustStatus');
+        status.textContent = 'This drawing has no height or width to crop. Add points round the writing.';
+        status.classList.add('is-error');
+    }
+
+    el('lineDrawUseBtn').addEventListener('click', useDrawing);
+    el('lineDrawCancelBtn').addEventListener('click', () => alignPreview.setEditMode('box'));
+
+    el('lineModeGroup').addEventListener('change', (event) => {
+        if (!(event.target instanceof HTMLInputElement) || editedLineIndex === null) return;
+        const target = event.target.value;
+        if (target !== 'draw' && applyOpenDrawing()) {
+            // The drawing is the outline now (and the mode is Stretch).
+            if (target !== 'box') alignPreview.setEditMode(target);
+        } else {
+            alignPreview.setEditMode(target);
+        }
+        // Off the switch, so Enter and Esc reach the drawing.
+        event.target.blur();
+    });
+
+    function growLine(distance) {
+        if (!lineEditing || editedLineIndex === null || alignPreview.editing?.mode === 'draw') return;
+        alignPreview.growEdit(distance);
+    }
+
+    function resetLine() {
+        if (!lineEditing || editedLineIndex === null) return;
+        const line = detection.page.lines[editedLineIndex];
+        const original = detection.originalOutlines.get(line.id);
+        if (!original) return;
+        // A reset is a change like any other: Ctrl+Z brings the adjustment back.
+        recordLineChange(editedLineIndex, original, false);
+        applyLineState(line.id, { polygon: original, adjusted: false });
+    }
+
+    el('lineShrinkBtn').addEventListener('click', () => growLine(-LINE_GROW_STEP));
+    el('lineGrowBtn').addEventListener('click', () => growLine(LINE_GROW_STEP));
+    el('lineResetBtn').addEventListener('click', resetLine);
+    el('lineUndoBtn').addEventListener('click', () => (alignPreview.isDrawing() ? alignPreview.undoDrawStep() : undoLineChange()));
+    el('lineRedoBtn').addEventListener('click', redoLineChange);
+
+    /**
+     * PUT a line's new outline. When the outline sits in another cell than the
+     * line's own, the server saves nothing and says where; the reviewer then
+     * decides whether this field really belongs there (another person's row,
+     * or another column). Resolves to { response, payload }.
+     */
+    async function putLineOutline(url, body) {
+        const send = async (extra) => {
+            const response = await fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ ...body, ...extra }),
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            return { response, payload };
+        };
+
+        const first = await send({});
+        const move = first.payload?.move;
+        if (first.response.status !== 409 || !move) return first;
+
+        const confirmed = window.confirm(
+            `This outline covers writing in ${move.to.column}, row ${move.to.row}.\n`
+            + `The field you are adjusting is ${move.from.column}, row ${move.from.row}.\n\n`
+            + `OK: move this field to ${move.to.column}, row ${move.to.row}.\n`
+            + 'Cancel: keep it where it is (nothing is saved).',
+        );
+        if (!confirmed) {
+            throw new Error(`Not saved: the outline is over ${move.to.column}, row ${move.to.row}. `
+                + `Draw it over ${move.from.column}, row ${move.from.row}, or pick the right field first.`);
+        }
+        return send({ allow_move: true });
+    }
+
+    /** Re-crop one line on the server from its new outline. Saves run one at a time. */
+    function saveLine(index, polygon, { reset = false } = {}) {
+        const page = detection?.page;
+        const line = page?.lines[index];
+        if (!line) return Promise.resolve();
+        const status = el('lineAdjustStatus');
+        status.textContent = 'Saving…';
+        status.classList.remove('is-error');
+
+        lineSaveQueue = lineSaveQueue.then(async () => {
+            if (detection?.page !== page) return;
+            const { response, payload } = await putLineOutline(config.lineUpdateUrl
+                .replace('__PAGE__', String(page.id))
+                .replace('__LINE__', String(line.id)), { polygon, reset });
+            if (!response.ok || !payload?.line) {
+                throw new Error(payload?.message || `The outline could not be saved (HTTP ${response.status}).`);
+            }
+            if (detection?.page !== page) return;
+
+            // One line moved can make or clear a shared cell elsewhere.
+            page.lines = page.lines.map((existing) => {
+                if (existing.id === payload.line.id) return payload.line;
+                const flags = payload.flags?.[existing.id];
+                return Array.isArray(flags) ? { ...existing, flags } : existing;
+            });
+            // Unless it was changed again meanwhile, what is shown is now the
+            // saved outline (the server rounds it to a tenth of a pixel).
+            const shownNow = lineShown.get(line.id);
+            if (!shownNow || JSON.stringify(shownNow.polygon) === JSON.stringify(polygon)) {
+                lineShown.set(line.id, { polygon: payload.line.polygon, adjusted: Boolean(payload.line.adjusted) });
+            }
+            const items = lineItems();
+            items.forEach((item, i) => alignPreview.updateLine(i, item));
+            showDetectionSummary();
+            if (editedLineIndex === index) {
+                const unsaved = isLineUnsaved(page.lines[index]);
+                el('lineSaveBtn').disabled = !unsaved;
+                el('lineDiscardBtn').disabled = !unsaved;
+                el('lineResetBtn').disabled = !shownLine(index).adjusted;
+                const note = flagExplanation(items[index].flags);
+                el('lineAdjustNote').textContent = note;
+                el('lineAdjustNote').classList.toggle('d-none', note === '');
+                status.textContent = unsaved
+                    ? 'Saved an earlier version. Press Save crop again for the latest.'
+                    : reset ? 'Saved: back to the detected outline.' : 'Saved. Scan with OCR reads this crop.';
+            }
+        }).catch((error) => {
+            console.error('Saving the line outline failed:', error);
+            if (editedLineIndex === index) {
+                status.textContent = error.message || 'The outline could not be saved.';
+                status.classList.add('is-error');
+            }
+        });
+        return lineSaveQueue;
+    }
+
+    /** Line editing keys, handled before the marker shortcuts. Returns true when used. */
+    function handleLineEditKey(event) {
+        if (!lineEditing) return false;
+        const items = detection?.page.lines ?? [];
+        // Tab steps through lines while working on the page; in the side
+        // panel it keeps moving focus as usual.
+        const onPage = document.activeElement === document.body
+            || el('docViewport').contains(document.activeElement);
+        if (event.key === 'Tab' && items.length > 0 && onPage) {
+            event.preventDefault();
+            const step = event.shiftKey ? -1 : 1;
+            const from = editedLineIndex ?? (step > 0 ? -1 : 0);
+            selectLine((from + step + items.length) % items.length);
+            return true;
+        }
+        if (['+', '=', 'Add'].includes(event.key) || event.code === 'NumpadAdd') {
+            event.preventDefault();
+            growLine(event.shiftKey && event.key !== '+' ? LINE_GROW_STEP * 3 : LINE_GROW_STEP);
+            return true;
+        }
+        if (['-', '_', 'Subtract'].includes(event.key) || event.code === 'NumpadSubtract') {
+            event.preventDefault();
+            growLine(event.shiftKey ? -LINE_GROW_STEP * 3 : -LINE_GROW_STEP);
+            return true;
+        }
+        if (event.key === 'Enter' && alignPreview.isDrawing()) {
+            event.preventDefault();
+            useDrawing();
+            return true;
+        }
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            // Esc first leaves a drawing or point editing, then the line, then editing.
+            if (addingLine) cancelAddingLine();
+            else if (editedLineIndex !== null && alignPreview.editing && alignPreview.editing.mode !== 'box') alignPreview.setEditMode('box');
+            else if (editedLineIndex !== null) selectLine(null);
+            else setLineEditing(false);
+            return true;
+        }
+        const command = event.ctrlKey || event.metaKey;
+        const key = event.key.toLowerCase();
+        if (command && key === 's') {
+            event.preventDefault();
+            saveSelectedLine();
+            return true;
+        }
+        // Ctrl+Z: the last point while drawing, else the last outline change.
+        if (command && !event.shiftKey && key === 'z') {
+            event.preventDefault();
+            if (!alignPreview.undoDrawStep()) undoLineChange();
+            return true;
+        }
+        if (command && (key === 'y' || (event.shiftKey && key === 'z'))) {
+            event.preventDefault();
+            redoLineChange();
+            return true;
+        }
+        if (['Delete', 'Backspace'].includes(event.key)) {
+            event.preventDefault();
+            // A corner of the outline first (Points mode), then the line itself.
+            if (!alignPreview.deleteActivePoint()) deleteSelectedLine();
+            return true;
+        }
+        // The markers are locked while lines are edited: no marker shortcuts.
+        return ['BracketLeft', 'BracketRight'].includes(event.code) || (command && ['c', 'v'].includes(key));
     }
 
     function resetFieldHistory() {
@@ -422,12 +1789,15 @@
     }
 
     function nextCopyName(name, takenNames) {
-        let candidate = `${name} copy`;
-        let suffix = 2;
+        const base = name.trim() || 'Field';
+        let suffix = 1;
+        let tail = ' copy';
+        let candidate = `${base.slice(0, config.maxFieldNameLength - tail.length)}${tail}`;
 
         while (takenNames.has(candidate.toLocaleLowerCase())) {
-            candidate = `${name} copy ${suffix}`;
             suffix += 1;
+            tail = ` copy ${suffix}`;
+            candidate = `${base.slice(0, config.maxFieldNameLength - tail.length)}${tail}`;
         }
 
         takenNames.add(candidate.toLocaleLowerCase());
@@ -438,6 +1808,11 @@
         if (markerClipboard.length === 0) return;
 
         const existing = marker.toJSON();
+        if (existing.length + markerClipboard.length > config.maxFields) {
+            showOcrError(`You can use at most ${config.maxFields} fields. Delete some markers before pasting this selection.`);
+            return;
+        }
+
         const minX = Math.min(...markerClipboard.map((box) => box.x));
         const minY = Math.min(...markerClipboard.map((box) => box.y));
         const maxX = Math.max(...markerClipboard.map((box) => box.x + box.w));
@@ -446,12 +1821,19 @@
         const dx = maxX + distance <= 1 ? distance : (minX - distance >= 0 ? -distance : 0);
         const dy = maxY + distance <= 1 ? distance : (minY - distance >= 0 ? -distance : 0);
         const takenNames = new Set(existing.map((box) => box.name.toLocaleLowerCase()));
-        const copies = markerClipboard.map((box) => ({
-            ...box,
-            name: nextCopyName(box.name, takenNames),
-            x: box.x + dx,
-            y: box.y + dy,
-        }));
+        const copies = markerClipboard.map((box) => {
+            // A pasted marker is a new, ad-hoc field. It must not silently join
+            // the original template person's validation group, nor become a
+            // second copy of a ledger column.
+            const { personGroup, personFieldOrder, kind, columnIndex, ...ungroupedBox } = box;
+
+            return {
+                ...ungroupedBox,
+                name: nextCopyName(box.name, takenNames),
+                x: box.x + dx,
+                y: box.y + dy,
+            };
+        });
         const firstCopyIndex = existing.length;
 
         pasteSequence += 1;
@@ -465,9 +1847,10 @@
         Object.entries(steps).forEach(([key, node]) => node.classList.toggle('d-none', key !== name));
 
         const marking = name === 'mark';
-        el('documentPageHeader').classList.toggle('d-none', marking);
-        el('documentFlowSteps').classList.toggle('d-none', marking);
-        el('layout-navbar')?.classList.toggle('d-none', marking);
+        const focusedWorkspace = marking || name === 'verify';
+        el('layout-navbar').classList.remove('d-none');
+        el('documentFlowSteps').classList.remove('d-none');
+        document.querySelector('.content-footer')?.classList.toggle('d-none', focusedWorkspace);
 
         const order = ['upload', 'mark', 'verify'];
         const activeIndex = order.indexOf(name);
@@ -482,16 +1865,36 @@
             }
         });
 
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        window.scrollTo({ top: 0, behavior: 'auto' });
     }
 
     // ---------------------------------------------------------------- step 1
+    function updatePaperMatchWarning() {
+        const warning = el('paperMismatchWarning');
+        const message = el('paperMismatchMessage');
+        const actualRatio = marker.canvas.width / marker.canvas.height;
+        const actualOrientation = actualRatio >= 1 ? 'landscape' : 'portrait';
+        const orientationMismatch = actualOrientation !== config.paper.orientation;
+        const ratioDifference = Math.abs(actualRatio - config.paper.aspectRatio) / config.paper.aspectRatio;
+
+        if (!orientationMismatch && ratioDifference <= 0.1) {
+            warning.classList.add('d-none');
+            message.textContent = '';
+            return;
+        }
+
+        message.textContent = orientationMismatch
+            ? `This scan looks ${actualOrientation}, but the published template expects ${config.paper.orientation}. The image is not stretched; align the markers carefully or choose an upright scan.`
+            : `This scan's proportions differ from ${config.paper.sizeLabel} (${config.paper.dimensionsLabel}). Check that the correct template and paper size were selected.`;
+        warning.classList.remove('d-none');
+    }
+
     async function openDocument(file) {
         if (!file) return;
 
         if (file.size > 20 * 1024 * 1024) {
             alert('Choose a document smaller than 20 MB.');
-            el('scanFile').value = '';
+            scanFileInput.value = '';
             return;
         }
 
@@ -500,18 +1903,21 @@
 
         try {
             scanFile = file;
+            clearDetection();
             await marker.load(file);
+            updatePaperMatchWarning();
             el('selectedFileName').textContent = file.name;
             showStep('mark');
             resetFieldHistory();
             marker.setBoxes(cloneBoxes(templateBoxes));
+            fetchSnapLines();
 
             // The marking section was hidden while the file loaded, so fit only
             // after it becomes measurable in the layout.
             window.requestAnimationFrame(() => marker.resetZoom());
         } catch (error) {
             scanFile = null;
-            el('scanFile').value = '';
+            scanFileInput.value = '';
             alert(error.message || 'That document could not be opened.');
         } finally {
             dropzone.classList.remove('is-loading');
@@ -519,8 +1925,9 @@
         }
     }
 
-    el('scanFile').addEventListener('change', (event) => {
-        openDocument(event.target.files?.[0]);
+    scanFileInput.addEventListener('change', (event) => {
+        if (!(event.currentTarget instanceof HTMLInputElement)) return;
+        openDocument(event.currentTarget.files?.[0]);
     });
 
     const dropzone = el('documentDropzone');
@@ -540,7 +1947,7 @@
     dropzone.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            el('scanFile').click();
+            scanFileInput.click();
         }
     });
 
@@ -563,7 +1970,7 @@
             li.innerHTML = `
                 <span class="badge bg-label-primary">${index + 1}</span>
                 <span class="flex-grow-1 small"></span>
-                <button type="button" class="btn btn-sm btn-icon btn-text-danger" aria-label="Remove field">
+                <button type="button" class="btn btn-sm btn-icon btn-outline-danger rounded-pill" aria-label="Remove field">
                     <i class="icon-base bx bx-x icon-sm"></i>
                 </button>`;
             li.querySelector('span.flex-grow-1').textContent = box.name;
@@ -579,12 +1986,85 @@
         });
 
         el('fieldCount').textContent = `${boxes.length} field${boxes.length === 1 ? '' : 's'}`;
-        el('selectAllFields').disabled = boxes.length === 0;
-        el('scanNowBtn').disabled = boxes.length === 0;
+        selectAllFieldsInput.disabled = boxes.length === 0;
+        const constraintMessage = markerSetValidationMessage(boxes);
+        el('scanNowBtn').disabled = boxes.length === 0 || constraintMessage !== null;
+        el('detectBtn').disabled = el('scanNowBtn').disabled || scanInProgress;
+        el('addFieldBtn').disabled = boxes.length >= config.maxFields;
+        el('newFieldName').disabled = boxes.length >= config.maxFields;
+        if (constraintMessage) {
+            markerConstraintMessage = constraintMessage;
+            showOcrError(constraintMessage);
+        } else if (markerConstraintMessage !== null
+            && el('ocrActionMessage').textContent === markerConstraintMessage) {
+            markerConstraintMessage = null;
+            clearOcrError();
+        }
         updateSelectionUI(marker.selectedIndexes());
     }
 
-    function updateSelectionUI(indexes) {
+    function markerSetValidationMessage(boxes) {
+        if (boxes.length > config.maxFields) {
+            return `This document has ${boxes.length} fields. OCR supports at most ${config.maxFields}; delete extra markers or reset the layout.`;
+        }
+
+        const invalidNameIndex = boxes.findIndex((box) => (
+            typeof box.name !== 'string'
+            || box.name.trim() === ''
+            || box.name.length > config.maxFieldNameLength
+        ));
+        if (invalidNameIndex >= 0) {
+            return `Field ${invalidNameIndex + 1} has an invalid name. Field names must contain 1 to ${config.maxFieldNameLength} characters.`;
+        }
+
+        const names = new Set();
+        const duplicateNameIndex = boxes.findIndex((box) => {
+            const key = box.name.trim().toLocaleLowerCase();
+            if (names.has(key)) return true;
+            names.add(key);
+            return false;
+        });
+
+        return duplicateNameIndex >= 0
+            ? `Field ${duplicateNameIndex + 1} has a duplicate name. Give every field a unique name.`
+            : null;
+    }
+
+    function centerFieldListRow(index) {
+        const list = el('fieldList');
+        const row = list.querySelector(`[data-field-index="${index}"]`);
+        if (!(row instanceof HTMLElement)) return;
+
+        const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const listRect = list.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        const listTarget = list.scrollTop
+            + rowRect.top - listRect.top
+            - (list.clientHeight - rowRect.height) / 2;
+        const clampedListTarget = Math.min(
+            Math.max(0, list.scrollHeight - list.clientHeight),
+            Math.max(0, listTarget),
+        );
+        list.scrollTop = clampedListTarget;
+
+        const panel = list.closest('.document-side-panel');
+        if (!(panel instanceof HTMLElement) || panel.scrollHeight <= panel.clientHeight) return;
+
+        const panelRect = panel.getBoundingClientRect();
+        const centeredRowRect = row.getBoundingClientRect();
+        const panelTarget = panel.scrollTop
+            + centeredRowRect.top - panelRect.top
+            - (panel.clientHeight - centeredRowRect.height) / 2;
+        panel.scrollTo({
+            top: Math.min(
+                Math.max(0, panel.scrollHeight - panel.clientHeight),
+                Math.max(0, panelTarget),
+            ),
+            behavior: smooth ? 'smooth' : 'auto',
+        });
+    }
+
+    function updateSelectionUI(indexes, context = {}) {
         const selected = new Set(indexes);
         document.querySelectorAll('#fieldList .field-list-item').forEach((item) => {
             item.classList.toggle('is-selected', selected.has(Number(item.dataset.fieldIndex)));
@@ -595,20 +2075,35 @@
         const summary = el('selectionSummary');
         summary.querySelector('span').textContent = `${count} selected`;
         summary.classList.toggle('is-active', count > 0);
-        el('selectAllFields').checked = total > 0 && count === total;
-        el('selectAllFields').indeterminate = count > 0 && count < total;
+        selectAllFieldsInput.checked = total > 0 && count === total;
+        selectAllFieldsInput.indeterminate = count > 0 && count < total;
         el('deleteSelectedBtn').disabled = count === 0;
         el('deleteFieldsBtn').disabled = count === 0;
+
+        if (context.source === 'marker' && Number.isInteger(context.activeIndex)) {
+            centerFieldListRow(context.activeIndex);
+        }
     }
 
     function updateZoomUI(zoom) {
         el('zoomResetBtn').textContent = `${Math.round(zoom * 100)}%`;
         updateResetUI();
+        // Line edit handles are sized in page pixels; keep them a constant size on screen.
+        alignPreview?.refresh();
+    }
+
+    function updateValidationZoomUI(zoom) {
+        el('validationZoomResetBtn').textContent = `${Math.round(zoom * 100)}%`;
+        // Edit handles are sized in page pixels; keep them a constant size on screen.
+        lineOverlay?.refresh();
     }
 
     el('zoomOutBtn').addEventListener('click', () => marker.zoomBy(-0.1));
     el('zoomInBtn').addEventListener('click', () => marker.zoomBy(0.1));
     el('zoomResetBtn').addEventListener('click', () => marker.resetZoom());
+    el('validationZoomOutBtn').addEventListener('click', () => validationMarker.zoomBy(-0.1));
+    el('validationZoomInBtn').addEventListener('click', () => validationMarker.zoomBy(0.1));
+    el('validationZoomResetBtn').addEventListener('click', () => validationMarker.resetZoom());
 
     function restoreTemplateFields() {
         marker.setBoxes(cloneBoxes(templateBoxes));
@@ -635,7 +2130,7 @@
     });
     el('deleteSelectedBtn').addEventListener('click', () => marker.removeSelected());
     el('deleteFieldsBtn').addEventListener('click', () => marker.removeSelected());
-    el('selectAllFields').addEventListener('change', (event) => {
+    selectAllFieldsInput.addEventListener('change', (event) => {
         if (event.target.checked) {
             marker.selectAll();
         } else {
@@ -656,6 +2151,8 @@
         if (isEditing) {
             return;
         }
+
+        if (handleLineEditKey(event)) return;
 
         const commandPressed = event.ctrlKey || event.metaKey;
         const key = event.key.toLowerCase();
@@ -682,6 +2179,13 @@
             return;
         }
 
+        // [ and ] tilt the selection half a degree; with Shift, five degrees.
+        if (!commandPressed && ['BracketLeft', 'BracketRight'].includes(event.code) && marker.selectedIndexes().length > 0) {
+            event.preventDefault();
+            marker.rotateSelected((event.code === 'BracketLeft' ? -1 : 1) * (event.shiftKey ? 5 : 0.5));
+            return;
+        }
+
         if (['Backspace', 'Delete'].includes(event.key) && marker.selectedIndexes().length > 0) {
             event.preventDefault();
             marker.removeSelected();
@@ -692,6 +2196,21 @@
         const input = el('newFieldName');
         const name = input.value.trim();
         if (!name) return;
+
+        const boxes = marker.toJSON();
+        if (boxes.length >= config.maxFields) {
+            showOcrError(`You can use at most ${config.maxFields} fields. Delete a marker before adding another one.`);
+            return;
+        }
+        if (name.length > config.maxFieldNameLength) {
+            showOcrError(`Field names must not exceed ${config.maxFieldNameLength} characters.`);
+            return;
+        }
+        if (boxes.some((box) => box.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+            showOcrError('Field names must be unique. Choose a different name.');
+            return;
+        }
+
         marker.addBox(name);
         input.value = '';
         input.focus();
@@ -704,10 +2223,14 @@
     });
 
     el('backToUpload').addEventListener('click', () => {
-        el('scanFile').value = '';
+        scanFileInput.value = '';
         showStep('upload');
     });
-    el('backToMark').addEventListener('click', () => showStep('mark'));
+    el('backToMark').addEventListener('click', () => {
+        cancelOutlineEdit();
+        clearValidationSubmitError();
+        showStep('mark');
+    });
 
     let scanInProgress = false;
     let ocrProgressTimer = null;
@@ -736,28 +2259,125 @@
         if (note) el('scanningNote').textContent = note;
     }
 
-    function beginOcrProgress(fieldCount) {
+    // The ring creeps toward the current phase's ceiling, then waits for the
+    // page's real status to open the next phase.
+    let ocrProgressCeiling = 12;
+
+    function beginOcrProgress(markerCount) {
         if (ocrProgressTimer !== null) window.clearInterval(ocrProgressTimer);
 
-        el('ocrProgressFields').textContent = `${fieldCount} marked field${fieldCount === 1 ? '' : 's'}`;
-        setOcrProgress(4, 'Preparing document', 'Creating clear image crops for each marked field.');
+        el('ocrProgressFields').textContent = `${markerCount} marker${markerCount === 1 ? '' : 's'} aligned`;
+        ocrProgressCeiling = 12;
+        setOcrProgress(4, 'Preparing document', 'Saving the aligned page for line detection.');
 
         ocrProgressTimer = window.setInterval(() => {
-            if (ocrProgress >= 92) return;
+            if (ocrProgress >= ocrProgressCeiling) return;
+            setOcrProgress(Math.min(ocrProgressCeiling, ocrProgress + 0.6));
+        }, 400);
+    }
 
-            const increment = ocrProgress < 30 ? 4 : (ocrProgress < 70 ? 2 : 1);
-            const next = Math.min(92, ocrProgress + increment);
+    /**
+     * Show the progress window. `shown` settles once it has finished opening:
+     * Bootstrap ignores a hide() while the window is still fading in, which
+     * would leave it open over a run that ended at once.
+     */
+    function openProgressModal() {
+        const Modal = window.bootstrap?.Modal;
+        if (!Modal) {
+            throw new Error('The progress window did not finish loading. Refresh the page and try again.');
+        }
+        const element = el('scanningModal');
+        const modal = Modal.getOrCreateInstance(element);
+        const shown = new Promise((resolve) => {
+            element.addEventListener('shown.bs.modal', resolve, { once: true });
+            window.setTimeout(resolve, 1000);
+        });
+        modal.show();
 
-            if (next < 18) {
-                setOcrProgress(next, 'Preparing document', 'Creating clear image crops for each marked field.');
-            } else if (next < 30) {
-                setOcrProgress(next, 'Sending marked fields', 'Uploading the field crops securely to the OCR service.');
-            } else if (next < 78) {
-                setOcrProgress(next, 'Reading handwriting', 'The selected TrOCR model is reading the marked areas.');
-            } else {
-                setOcrProgress(next, 'Finalizing results', 'Checking the OCR response before validation.');
+        return { modal, shown };
+    }
+
+    async function closeProgressModal(progress) {
+        if (!progress) return;
+        await progress.shown;
+        progress.modal.hide();
+    }
+
+    function showPageStatus(page, waitedMs, mode = 'scan') {
+        if (page.status === 'detecting' && mode === 'detect') {
+            ocrProgressCeiling = 92;
+            setOcrProgress(Math.max(ocrProgress, 18), 'Detecting fields and ink',
+                'Straightening the page, fitting the columns and rows to its table, and outlining every handwritten line.');
+            return;
+        }
+        if (page.status === 'queued') {
+            ocrProgressCeiling = 18;
+            setOcrProgress(
+                Math.max(ocrProgress, 12),
+                'Waiting for the line detector',
+                waitedMs > 20000
+                    ? 'No background worker has picked this page up. Start one with: php artisan queue:work (serve.ps1 starts it for you).'
+                    : 'The page is queued for line detection.',
+            );
+        } else if (page.status === 'detecting') {
+            ocrProgressCeiling = 60;
+            setOcrProgress(Math.max(ocrProgress, 18), 'Finding handwritten lines',
+                'Outlining every handwritten line, including capitals and tails that cross the ruled lines.');
+        } else if (page.status === 'reading') {
+            ocrProgressCeiling = 92;
+            setOcrProgress(Math.max(ocrProgress, 60), 'Reading handwriting',
+                'The selected TrOCR model is reading each outlined line.');
+        }
+    }
+
+    function canvasBlob(canvas) {
+        return new Promise((resolve, reject) => {
+            canvas.toBlob(
+                (blob) => (blob ? resolve(blob) : reject(new Error('The aligned page could not be prepared. Please try again.'))),
+                'image/png',
+            );
+        });
+    }
+
+    function wait(ms, signal) {
+        return new Promise((resolve, reject) => {
+            const timer = window.setTimeout(resolve, ms);
+            signal?.addEventListener('abort', () => {
+                window.clearTimeout(timer);
+                reject(new DOMException('Aborted', 'AbortError'));
+            }, { once: true });
+        });
+    }
+
+    /**
+     * Poll the page until line detection and reading are finished. The results
+     * are stored server-side, so this only ever loads them.
+     */
+    async function waitForPage(initial, signal, done = 'ready', mode = 'scan') {
+        const started = Date.now();
+        let page = initial;
+
+        for (;;) {
+            showPageStatus(page, Date.now() - started, mode);
+            if (page.status === done) return page;
+            if (page.status === 'failed') {
+                throw new Error(page.error || 'The page could not be processed. Please scan again.');
             }
-        }, 350);
+
+            await wait(1500, signal);
+            const response = await fetch(page.statusUrl, {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+                signal,
+            });
+            const next = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            if (!response.ok || !next) {
+                throw new Error(responseErrorMessage(response, next));
+            }
+            page = next;
+        }
     }
 
     function stopOcrProgress() {
@@ -766,11 +2386,204 @@
         ocrProgressTimer = null;
     }
 
-    async function completeOcrProgress() {
+    async function completeOcrProgress(title = 'Scan complete', note = 'Opening the validation results.') {
         stopOcrProgress();
         await new Promise((resolve) => window.setTimeout(resolve, 180));
-        setOcrProgress(100, 'Scan complete', 'Opening the validation results.');
+        setOcrProgress(100, title, note);
         await new Promise((resolve) => window.setTimeout(resolve, 420));
+    }
+
+    /** The markers as they stand, as the geometry the server works with. */
+    function currentGeometry() {
+        // After Detect, small marker edits are measured from what Detect fitted
+        // rather than from the template's own positions.
+        const base = detection
+            ? { columns: detection.columns, ruledYs: detection.page.geometry?.ruled_ys ?? config.ruledYs }
+            : { columns: templateColumns, ruledYs: config.ruledYs };
+        return alignedGeometry(marker.toJSON(), base.columns, base.ruledYs);
+    }
+
+    // ------------------------------------------------------- snap to table
+    // The page's printed table lines, found in well under a second: "Snap to
+    // table" fits every column and row marker onto them, and while a marker
+    // is dragged its edges snap to them (Alt places it freely).
+
+    let snapToken = 0;
+
+    async function requestSnap(signal = null) {
+        const form = new FormData();
+        form.set('geometry_json', JSON.stringify(currentGeometry()));
+        form.set('page', await canvasBlob(marker.canvas), 'page.png');
+        const response = await fetch(config.snapUrl, {
+            method: 'POST',
+            headers: { 'X-CSRF-TOKEN': config.csrf, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+            body: form,
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.lines) throw new Error(responseErrorMessage(response, payload));
+        return payload;
+    }
+
+    /** In the background, so a dragged marker's edges snap from the start. */
+    async function fetchSnapLines() {
+        const token = ++snapToken;
+        marker.setSnapLines(null);
+        try {
+            const payload = await requestSnap();
+            if (token === snapToken) marker.setSnapLines(payload.lines);
+        } catch (error) {
+            console.warn('Printed lines for snapping could not be found:', error);
+        }
+    }
+
+    // While it works, the button shows a spinner in place of its icon; its
+    // size is held so nothing around it shifts. Detect and Scan wait meanwhile.
+    function setSnapBusy(busy) {
+        const button = el('snapTableBtn');
+        const { width, height } = button.getBoundingClientRect();
+        button.style.inlineSize = busy ? `${width}px` : '';
+        button.style.blockSize = busy ? `${height}px` : '';
+        button.classList.toggle('is-loading', busy);
+        button.setAttribute('aria-busy', busy ? 'true' : 'false');
+        button.disabled = busy;
+    }
+
+    el('snapTableBtn').addEventListener('click', async () => {
+        if (scanInProgress) return;
+        const token = ++snapToken;
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 60 * 1000);
+
+        scanInProgress = true;
+        clearOcrError();
+        setSnapBusy(true);
+        el('detectBtn').disabled = true;
+        el('scanNowBtn').disabled = true;
+
+        try {
+            const payload = await requestSnap(controller.signal);
+            if (token !== snapToken) return;
+            marker.setSnapLines(payload.lines);
+            if (!payload.fitted) {
+                showOcrError(payload.reason || 'No printed table matching these markers was found on this page.');
+                return;
+            }
+            // One undoable change (Ctrl+Z) like any marker edit.
+            marker.setBoxes(cloneBoxes(geometryMarkers(payload.geometry, null)));
+        } catch (error) {
+            showOcrError(error.name === 'AbortError'
+                ? 'Snap to table timed out. Check that the web app is running, then try again.'
+                : (error.message || 'The page could not be snapped to its table.'));
+        } finally {
+            window.clearTimeout(timeoutId);
+            scanInProgress = false;
+            setSnapBusy(false);
+            const boxes = marker.toJSON();
+            el('scanNowBtn').disabled = boxes.length === 0 || markerSetValidationMessage(boxes) !== null;
+            el('detectBtn').disabled = el('scanNowBtn').disabled;
+        }
+    });
+
+    /**
+     * Send the page exactly as rendered here, with the markers as they stand,
+     * so every outline that comes back lines up with this canvas pixel for pixel.
+     */
+    async function uploadPage({ detect }, signal) {
+        const form = new FormData();
+        form.set('document_template_id', String(config.templateId));
+        form.set('geometry_json', JSON.stringify(currentGeometry()));
+        form.set('page', await canvasBlob(marker.canvas), 'page.png');
+        // Absent unless Staff choice is enabled; the server falls back to the
+        // promoted model and re-checks that the key is one it allows.
+        if (modelSelect instanceof HTMLSelectElement) form.set('model', modelSelect.value);
+        if (detect) form.set('detect', '1');
+
+        const response = await fetch(config.pagesUrl, {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            signal,
+            body: form,
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.statusUrl) {
+            throw new Error(responseErrorMessage(response, payload));
+        }
+        return payload;
+    }
+
+    /**
+     * Markers moved after Detect: outline that same page again from where they
+     * are now, and read it. The page is already on the server, straightened,
+     * so only the markers are sent - and the server reuses the lines Detect
+     * found instead of detecting the page again, which is nearly all of a
+     * scan's work.
+     */
+    async function reoutlineDetectedPage(signal) {
+        const response = await fetch(config.pageGeometryUrl.replace('__PAGE__', String(detection.page.id)), {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            signal,
+            body: JSON.stringify({
+                geometry_json: JSON.stringify(currentGeometry()),
+                model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null,
+            }),
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.statusUrl) {
+            throw new Error(responseErrorMessage(response, payload));
+        }
+        return payload;
+    }
+
+    /**
+     * Whether that page can be outlined again instead of sent afresh: Detect
+     * ran, its page is still usable, and Staff have only moved the markers on
+     * it (the page shown is the one the server holds).
+     */
+    function canReoutline() {
+        return detection !== null && !detection.stale && !detectionIsCurrent();
+    }
+
+    /** Scan with OCR after Detect: read the crops Detect already made. */
+    async function readDetectedPage(signal) {
+        const response = await fetch(detection.page.readUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            signal,
+            body: JSON.stringify({ model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null }),
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        if (!response.ok || !payload?.statusUrl) {
+            throw new Error(responseErrorMessage(response, payload));
+        }
+        return payload;
     }
 
     function responseErrorMessage(response, payload) {
@@ -778,7 +2591,7 @@
             return 'Your session expired. Refresh the page, reopen the document, and try again.';
         }
         if (response.status === 413) {
-            return 'The marked image crops are too large to send. Use tighter field boxes and try again.';
+            return 'The aligned page is too large to send. Use a smaller scan and try again.';
         }
         if (response.status === 422) {
             const validationMessage = payload?.errors
@@ -790,43 +2603,35 @@
         return payload?.message || payload?.error || `OCR failed with HTTP ${response.status}.`;
     }
 
-    el('scanNowBtn').addEventListener('click', async () => {
-        if (scanInProgress) return;
+    // The run behind the progress window, so its × can stop it: the browser
+    // stops waiting at once, and the server is told to drop the page (or,
+    // for the read of a Detect result, to keep that result).
+    let activeRun = null;
+    const CANCEL_LABELS = { detect: 'Cancel detection', scan: 'Cancel scan', read: 'Cancel reading' };
 
-        const button = el('scanNowBtn');
-        const originalButtonContent = button.innerHTML;
-        const controller = new AbortController();
-        let modal = null;
-        let timeoutId = null;
+    function startRun(controller, kind, pageId = null) {
+        activeRun = { controller, kind, pageId, cancelled: false };
+        showRunKind(kind);
+        el('ocrProgressCancel').disabled = false;
+        return activeRun;
+    }
 
-        scanInProgress = true;
-        clearOcrError();
-        button.disabled = true;
-        button.innerHTML = '<i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i> OCR in progress...';
+    /** Name the cancel button after what is running. */
+    function showRunKind(kind) {
+        if (activeRun) activeRun.kind = kind;
+        el('ocrProgressCancel').textContent = CANCEL_LABELS[kind] ?? 'Cancel';
+    }
 
-        try {
-            // Cropping and modal creation used to happen outside the try block. A
-            // browser-side failure there made the button appear to do nothing.
-            const Modal = window.bootstrap?.Modal;
-            if (!Modal) {
-                throw new Error('The OCR loading interface did not finish loading. Refresh the page and try again.');
-            }
-
-            modal = Modal.getOrCreateInstance(el('scanningModal'));
-            beginOcrProgress(marker.toJSON().length);
-            modal.show();
-
-            await new Promise((resolve) => window.requestAnimationFrame(resolve));
-            cropped = marker.crop();
-
-            if (!cropped.length) {
-                throw new Error('Add at least one field before reading.');
-            }
-
-            setOcrProgress(Math.max(ocrProgress, 18), 'Sending marked fields', 'Uploading the field crops securely to the OCR service.');
-            timeoutId = window.setTimeout(() => controller.abort(), 125000);
-
-            const response = await fetch(config.recogniseUrl, {
+    function cancelActiveRun() {
+        const run = activeRun;
+        if (!run || run.cancelled) return;
+        run.cancelled = true;
+        el('ocrProgressCancel').disabled = true;
+        el('ocrProgressCancel').textContent = 'Cancelling…';
+        setOcrProgress(ocrProgress, 'Cancelling', 'Stopping this run.');
+        run.controller.abort();
+        if (run.pageId !== null) {
+            fetch(config.pageCancelUrl.replace('__PAGE__', String(run.pageId)), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -835,153 +2640,1635 @@
                     Accept: 'application/json',
                 },
                 credentials: 'same-origin',
-                signal: controller.signal,
-                body: JSON.stringify({
-                    fields: cropped.map((c) => ({ name: c.name, image: c.image })),
-                    // Absent unless Staff choice is enabled; the server falls back to
-                    // the promoted model and re-checks that the key is one it allows.
-                    model: el('modelSelect')?.value ?? null,
-                }),
-            });
+                keepalive: true,
+                body: JSON.stringify({ keep_detection: run.kind === 'read' }),
+            }).catch((error) => console.warn('Cancelling the page on the server failed:', error));
+        }
+    }
 
-            const contentType = response.headers.get('content-type') || '';
-            const payload = contentType.includes('application/json')
-                ? await response.json()
-                : null;
+    el('ocrProgressCancel').addEventListener('click', cancelActiveRun);
 
-            if (!response.ok) {
-                throw new Error(responseErrorMessage(response, payload));
+    el('scanNowBtn').addEventListener('click', async () => {
+        if (scanInProgress) return;
+
+        // Outline changes are only read once saved: offer to save them first.
+        applyOpenDrawing();
+        const unsavedLines = detectionIsCurrent() ? unsavedLineCount() : 0;
+        if (unsavedLines > 0) {
+            const plural = unsavedLines === 1 ? 'line has an outline change' : 'lines have outline changes';
+            if (!window.confirm(`${unsavedLines} ${plural} that ${unsavedLines === 1 ? 'is' : 'are'} not saved.\n\nOK: save and scan.\nCancel: go back without scanning.`)) {
+                return;
+            }
+            await saveAllUnsavedLines();
+            if (unsavedLineCount() > 0) {
+                showOcrError('Some outline changes could not be saved. Check the lines marked not saved and try again.');
+                return;
+            }
+        }
+
+        // Outlining the page again works every line out afresh from the moved
+        // markers, so outlines adjusted against Detect's result cannot be kept.
+        if (canReoutline()) {
+            const adjusted = detection.page.lines.filter((line) => line.adjusted || isLineUnsaved(line)).length;
+            const plural = adjusted === 1 ? 'adjustment' : 'adjustments';
+            if (adjusted > 0 && !window.confirm(
+                `You moved a marker after Detect, so every line is worked out again `
+                + `and your ${adjusted} outline ${plural} will be lost.\n\n`
+                + `OK: scan from the markers as they are.\n`
+                + `Cancel: go back (Ctrl+Z brings the Detect result back).`,
+            )) {
+                return;
+            }
+        }
+
+        const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
+        if (markerValidationMessage) {
+            showOcrError(markerValidationMessage);
+            return;
+        }
+
+        const button = el('scanNowBtn');
+        const originalButtonContent = button.innerHTML;
+        const controller = new AbortController();
+        const run = startRun(controller, 'scan');
+        let progress = null;
+        let timeoutId = null;
+
+        scanInProgress = true;
+        clearOcrError();
+        button.disabled = true;
+        button.innerHTML = '<i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i> OCR in progress...';
+        el('detectBtn').disabled = true;
+
+        try {
+            // Cropping and modal creation used to happen outside the try block. A
+            // browser-side failure there made the button appear to do nothing.
+            const aligned = marker.toJSON();
+            progress = openProgressModal();
+            beginOcrProgress(aligned.length);
+
+            await new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+            if (!aligned.length) {
+                throw new Error('Add at least one field before reading.');
             }
 
-            if (!Array.isArray(payload?.results) || payload.results.length === 0) {
-                throw new Error('The OCR service returned no field readings. Please try again.');
+            timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
+            let payload;
+            const readingDetectedPage = detectionIsCurrent();
+            if (readingDetectedPage) {
+                showRunKind('read');
+                run.pageId = detection.page.id;
+                // Saves still on their way are part of what is read.
+                await lineSaveQueue;
+                setLineEditing(false);
+                // The outlines Staff just checked are the ones read.
+                setOcrProgress(Math.max(ocrProgress, 60), 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
+                payload = await readDetectedPage(controller.signal);
+            } else if (canReoutline()) {
+                // The markers moved after Detect. That page is already here and
+                // already straightened, so only the markers go over, and its
+                // lines are reused rather than found again.
+                run.pageId = detection.page.id;
+                setLineEditing(false);
+                setOcrProgress(Math.max(ocrProgress, 30), 'Outlining from your markers',
+                    'Reusing the lines Detect found on this page.');
+                payload = await reoutlineDetectedPage(controller.signal);
+            } else {
+                // Finishing Align hands the page to the background line detector.
+                setOcrProgress(Math.max(ocrProgress, 8), 'Sending the aligned page', 'Uploading the page securely for line detection.');
+                payload = await uploadPage({ detect: false }, controller.signal);
+                run.pageId = payload.id;
             }
 
-            readings = payload.results;
-            el('ocrModelKey').value = payload.modelKey ?? '';
-            el('summaryModel').textContent = payload.model || '—';
+            const page = await waitForPage(payload, controller.signal);
+            clearDetection();
+
+            // A tilted ledger grid makes the server straighten the page before
+            // outlining it; show that page so the outlines sit on their writing.
+            if (!readingDetectedPage && Math.abs(Number(page.deskew) || 0) >= 0.05) {
+                await marker.loadFromUrl(page.imageUrl);
+                marker.setBoxes(cloneBoxes(geometryMarkers(page.geometry, page)));
+            }
+
+            if (!Array.isArray(page.lines) || page.lines.length === 0) {
+                throw new Error('No handwriting was found inside the markers. Check the alignment and scan again.');
+            }
+
+            if (typeof page.modelKey !== 'string' || page.modelKey.trim() === '') {
+                throw new Error('The OCR service did not identify the model used. No data was saved; please scan again.');
+            }
+
+            processedPage = page;
+            cropped = verificationItems(page.lines, page);
+            readings = cropped.map((item) => item.reading);
+            requiredInput(document, '#ocrModelKey').value = page.modelKey.trim();
+            requiredInput(document, '#documentPageId').value = String(page.id);
+            el('summaryModel').textContent = page.model || '—';
 
             setOcrProgress(96, 'Preparing validation', 'The handwriting results are ready for your review.');
             renderVerifyRows();
+            showGridNotes(page);
             await completeOcrProgress();
             showStep('verify');
+            try {
+                prepareValidationComparison();
+            } catch (error) {
+                showStep('mark');
+                throw error;
+            }
         } catch (error) {
-            const message = error.name === 'AbortError'
-                ? 'OCR timed out after two minutes. Check the OCR service and try again.'
-                : (error.message || 'The document could not be scanned.');
-            console.error('Document OCR failed:', error);
-            showOcrError(message);
+            if (run.cancelled) {
+                // Cancelled from the progress window: back to Align. A Detect
+                // result that was being read is kept, ready to scan again.
+                if (run.kind !== 'read') retireDetection();
+            } else {
+                const message = error.name === 'AbortError'
+                    ? 'Line detection and reading timed out. Check the OCR service and the background worker, then try again.'
+                    : (error.message || 'The document could not be scanned.');
+                console.error('Document OCR failed:', error);
+                // A failed read leaves the detected page unusable; the next scan
+                // outlines the page afresh from the markers.
+                retireDetection();
+                showOcrError(message);
+            }
         } finally {
+            if (activeRun === run) activeRun = null;
             if (timeoutId !== null) window.clearTimeout(timeoutId);
             stopOcrProgress();
-            modal?.hide();
+            await closeProgressModal(progress);
             scanInProgress = false;
             button.innerHTML = originalButtonContent;
             button.disabled = marker.toJSON().length === 0;
+            el('detectBtn').disabled = button.disabled;
+        }
+    });
+
+    // Detect: straighten this page, fit the template's columns and rows to its
+    // own table, and outline every handwritten line - before anything is read.
+    el('detectBtn').addEventListener('click', async () => {
+        if (scanInProgress) return;
+
+        const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
+        if (markerValidationMessage) {
+            showOcrError(markerValidationMessage);
+            return;
+        }
+
+        const button = el('detectBtn');
+        const originalButtonContent = button.innerHTML;
+        const controller = new AbortController();
+        const run = startRun(controller, 'detect');
+        const timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
+        let progress = null;
+
+        scanInProgress = true;
+        clearOcrError();
+        button.disabled = true;
+        el('scanNowBtn').disabled = true;
+        button.innerHTML = '<i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Detecting...';
+
+        try {
+            progress = openProgressModal();
+            beginOcrProgress(marker.toJSON().length);
+            await new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+            setOcrProgress(Math.max(ocrProgress, 8), 'Sending the page', 'Uploading the page securely for detection.');
+            const payload = await uploadPage({ detect: true }, controller.signal);
+            run.pageId = payload.id;
+            const page = await waitForPage(payload, controller.signal, 'detected', 'detect');
+
+            if (!Array.isArray(page.lines) || page.lines.length === 0) {
+                throw new Error('No handwriting was found on this page. Check that the right template and file were chosen.');
+            }
+
+            await applyDetection(page);
+            await completeOcrProgress('Detection complete', 'Check the outlines, then Scan with OCR.');
+        } catch (error) {
+            if (!run.cancelled) {
+                const message = error.name === 'AbortError'
+                    ? 'Detection timed out. Check the background worker, then try again.'
+                    : (error.message || 'The page could not be detected.');
+                console.error('Detection failed:', error);
+                showOcrError(message);
+            }
+        } finally {
+            if (activeRun === run) activeRun = null;
+            window.clearTimeout(timeoutId);
+            stopOcrProgress();
+            await closeProgressModal(progress);
+            scanInProgress = false;
+            button.innerHTML = originalButtonContent;
+            button.disabled = marker.toJSON().length === 0;
+            el('scanNowBtn').disabled = button.disabled;
         }
     });
 
     // ---------------------------------------------------------------- step 3
-    function renderVerifyRows() {
-        const container = el('verifyRows');
-        container.innerHTML = '';
-
-        readings.forEach((reading, index) => {
-            const crop = cropped[index] ?? {};
-            const confidence = Number(reading.confidence ?? 0);
-            const flagged = confidence < config.threshold;
-
-            const row = document.createElement('div');
-            row.className = 'validation-field row g-3 align-items-center';
-            row.innerHTML = `
-                <div class="col-md-5">
-                    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
-                        <label class="form-label mb-0 fw-semibold"></label>
-                        <span class="badge confidence-badge"></span>
-                    </div>
-                    <div class="validation-crop">
-                        <img alt="Scanned crop" class="img-fluid">
-                    </div>
-                    <div class="small text-muted">
-                        Model read: <span class="fst-italic reading"></span>
-                    </div>
-                </div>
-                <div class="col-md-7">
-                    <label class="form-label mb-1 small fw-medium">Verified value</label>
-                    <input type="text" class="form-control form-control-lg verified">
-                    ${reading.error ? '<div class="text-danger small mt-1">This crop failed to read.</div>' : ''}
-                </div>`;
-
-            row.querySelector('label').textContent = reading.name;
-            row.querySelector('img').src = crop.image ?? '';
-            row.querySelector('.reading').textContent = reading.text || '(nothing read)';
-
-            const badge = row.querySelector('.confidence-badge');
-            badge.textContent = `${confidence.toFixed(1)}% confidence`;
-            badge.classList.add(flagged ? 'bg-label-warning' : 'bg-label-success');
-
-            const input = row.querySelector('.verified');
-            input.value = reading.text || '';
-            input.name = `fields[${index}][verified_value]`;
-            if (flagged) input.classList.add('field-needs-review');
-
-            // Hidden values submitted alongside the correction.
-            const hidden = {
-                name: reading.name,
-                ocr_text: reading.text || '',
-                ocr_confidence: confidence,
-                x: (crop.x ?? 0).toFixed(5),
-                y: (crop.y ?? 0).toFixed(5),
-                width: (crop.w ?? 0).toFixed(5),
-                height: (crop.h ?? 0).toFixed(5),
-            };
-
-            Object.entries(hidden).forEach(([key, value]) => {
-                const node = document.createElement('input');
-                node.type = 'hidden';
-                node.name = `fields[${index}][${key}]`;
-                node.value = value;
-                row.appendChild(node);
-            });
-
-            container.appendChild(row);
-        });
-
-        const confidences = readings.map((r) => Number(r.confidence ?? 0));
-        const average = confidences.length
-            ? confidences.reduce((a, b) => a + b, 0) / confidences.length
-            : 0;
-        const flaggedCount = confidences.filter((c) => c < config.threshold).length;
-
-        el('summaryConfidence').textContent = `${average.toFixed(1)}%`;
-        el('summaryReview').textContent = `${flaggedCount} of ${confidences.length}`;
+    function normaliseConfidence(reading) {
+        const confidence = Number(reading?.confidence ?? 0);
+        return Number.isFinite(confidence) ? Math.max(0, Math.min(100, confidence)) : 0;
     }
 
-    // The scan file lives in an input the form does not own, so attach it via
-    // FormData on submit.
-    el('submitForm').addEventListener('submit', (event) => {
-        if (!scanFile) {
-            event.preventDefault();
-            alert('The scanned file is missing. Start again from the upload step.');
+    function median(values) {
+        if (values.length === 0) return 0;
+        const sorted = [...values].sort((a, b) => a - b);
+        const middle = Math.floor(sorted.length / 2);
+        return sorted.length % 2 === 0
+            ? (sorted[middle - 1] + sorted[middle]) / 2
+            : sorted[middle];
+    }
+
+    function buildCustomValidationGroups() {
+        const personGroups = new Map();
+        const detailIndexes = [];
+        const unplacedIndexes = [];
+
+        cropped.forEach((box, index) => {
+            const personGroup = Number(box.personGroup);
+            const personFieldOrder = Number(box.personFieldOrder);
+            const grouped = Number.isInteger(personGroup) && personGroup > 0
+                && Number.isInteger(personFieldOrder) && personFieldOrder >= 0;
+
+            // A ledger line that could not be placed in a row belongs to no
+            // person until a reviewer decides.
+            if (!grouped && Array.isArray(box.flags) && box.flags.includes(FLAG_NO_ROW)) {
+                unplacedIndexes.push(index);
+                return;
+            }
+
+            if (!grouped) {
+                detailIndexes.push(index);
+                return;
+            }
+
+            if (!personGroups.has(personGroup)) personGroups.set(personGroup, []);
+            personGroups.get(personGroup).push({ index, order: personFieldOrder });
+        });
+
+        const groups = [];
+        if (detailIndexes.length > 0) {
+            groups.push({
+                id: 'document-details',
+                kind: 'details',
+                mode: 'custom',
+                label: 'Document details',
+                indexes: detailIndexes,
+            });
+        }
+
+        [...personGroups.entries()]
+            .sort(([groupA], [groupB]) => groupA - groupB)
+            .forEach(([personGroup, members]) => {
+                members.sort((memberA, memberB) => (
+                    memberA.order - memberB.order || memberA.index - memberB.index
+                ));
+                groups.push({
+                    id: `person-${personGroup}`,
+                    kind: 'person',
+                    mode: 'custom',
+                    label: `Person ${String(personGroup).padStart(2, '0')}`,
+                    indexes: members.map((member) => member.index),
+                });
+            });
+
+        if (unplacedIndexes.length > 0) {
+            groups.push({
+                id: 'needs-review',
+                kind: 'details',
+                mode: 'custom',
+                label: 'Needs review',
+                indexes: unplacedIndexes,
+            });
+        }
+
+        return groups;
+    }
+
+    function buildAutomaticValidationGroups() {
+        const items = cropped.map((box, index) => ({
+            index,
+            x: Number(box.x ?? 0),
+            y: Number(box.y ?? 0),
+            w: Number(box.w ?? 0),
+            h: Math.max(0.00001, Number(box.h ?? 0)),
+            centerY: Number(box.y ?? 0) + Math.max(0.00001, Number(box.h ?? 0)) / 2,
+        })).sort((a, b) => a.centerY - b.centerY || a.x - b.x);
+
+        if (items.length === 0) return [];
+
+        const typicalHeight = median(items.map((item) => item.h));
+        const centerTolerance = Math.max(0.004, typicalHeight * 0.58);
+        const geometricRows = [];
+
+        items.forEach((item) => {
+            let closest = null;
+            let closestDistance = Number.POSITIVE_INFINITY;
+            geometricRows.forEach((row) => {
+                const distance = Math.abs(item.centerY - row.centerY);
+                if (distance <= centerTolerance && distance < closestDistance) {
+                    closest = row;
+                    closestDistance = distance;
+                }
+            });
+
+            if (!closest) {
+                geometricRows.push({ centerY: item.centerY, items: [item] });
+                return;
+            }
+
+            closest.items.push(item);
+            closest.centerY = closest.items.reduce((sum, current) => sum + current.centerY, 0)
+                / closest.items.length;
+        });
+
+        geometricRows.sort((a, b) => a.centerY - b.centerY);
+        geometricRows.forEach((row) => row.items.sort((a, b) => a.x - b.x));
+
+        const repeatedRows = geometricRows.filter((row) => row.items.length >= 3);
+        if (repeatedRows.length < 2) {
+            return [{
+                id: 'record-details',
+                kind: 'details',
+                mode: 'auto',
+                label: 'Record details',
+                indexes: items.map((item) => item.index),
+            }];
+        }
+
+        // A registry row is not merely a dense horizontal band. It repeats the
+        // same column geometry several times. Requiring that X signature keeps
+        // ordinary certificates and headings from becoming fake people.
+        const columnFrequency = new Map();
+        repeatedRows.forEach((row) => {
+            columnFrequency.set(row.items.length, (columnFrequency.get(row.items.length) ?? 0) + 1);
+        });
+        const dominantColumns = [...columnFrequency.entries()]
+            .sort(([columnsA, frequencyA], [columnsB, frequencyB]) => {
+                const scoreDifference = (columnsB * frequencyB) - (columnsA * frequencyA);
+                return scoreDifference || frequencyB - frequencyA || columnsB - columnsA;
+            })[0]?.[0] ?? 0;
+        const prototypeRows = repeatedRows.filter((row) => row.items.length === dominantColumns);
+
+        if (prototypeRows.length === 0) {
+            return [{
+                id: 'record-details',
+                kind: 'details',
+                mode: 'auto',
+                label: 'Record details',
+                indexes: items.map((item) => item.index),
+            }];
+        }
+
+        const centersFor = (row) => row.items.map((item) => item.x + item.w / 2);
+        const prototype = prototypeRows
+            .map((row) => {
+                const centers = centersFor(row);
+                const typicalWidth = median(row.items.map((item) => item.w));
+                const spacing = centers.slice(1).map((center, index) => center - centers[index]);
+                const tolerance = Math.max(
+                    0.006,
+                    Math.min(typicalWidth * 0.48, (median(spacing) || typicalWidth) * 0.36),
+                );
+                const alignedPeers = prototypeRows.filter((candidate) => {
+                    const candidateCenters = centersFor(candidate);
+                    return candidateCenters.every((center, index) => Math.abs(center - centers[index]) <= tolerance);
+                }).length;
+                return { row, centers, tolerance, alignedPeers };
+            })
+            .sort((a, b) => b.alignedPeers - a.alignedPeers)[0];
+
+        const minimumColumns = Math.max(3, Math.ceil(dominantColumns * 0.6));
+        const alignedRows = geometricRows.filter((row) => {
+            if (row.items.length < minimumColumns || row.items.length > dominantColumns + 2) return false;
+            const available = new Set(prototype.centers.map((_, index) => index));
+            let matches = 0;
+            centersFor(row).forEach((center) => {
+                let nearestIndex = null;
+                let nearestDistance = Number.POSITIVE_INFINITY;
+                available.forEach((prototypeIndex) => {
+                    const distance = Math.abs(center - prototype.centers[prototypeIndex]);
+                    if (distance < nearestDistance) {
+                        nearestDistance = distance;
+                        nearestIndex = prototypeIndex;
+                    }
+                });
+                if (nearestIndex !== null && nearestDistance <= prototype.tolerance) {
+                    matches += 1;
+                    available.delete(nearestIndex);
+                }
+            });
+            return matches >= Math.max(3, Math.ceil(Math.min(row.items.length, dominantColumns) * 0.75));
+        });
+
+        const minimumRepeatedRows = dominantColumns >= 6 ? 2 : 3;
+        if (alignedRows.length < minimumRepeatedRows) {
+            return [{
+                id: 'record-details',
+                kind: 'details',
+                mode: 'auto',
+                label: 'Record details',
+                indexes: items.map((item) => item.index),
+            }];
+        }
+
+        const rowGaps = alignedRows.slice(1).map((row, index) => row.centerY - alignedRows[index].centerY);
+        const typicalGap = median(rowGaps.filter((gap) => gap > 0));
+        const rowRuns = [[]];
+        alignedRows.forEach((row, index) => {
+            if (index > 0 && typicalGap > 0 && row.centerY - alignedRows[index - 1].centerY > typicalGap * 2.2) {
+                rowRuns.push([]);
+            }
+            rowRuns[rowRuns.length - 1].push(row);
+        });
+        const personRows = rowRuns
+            .filter((run) => run.length >= minimumRepeatedRows)
+            .sort((a, b) => b.length - a.length)[0] ?? [];
+
+        if (personRows.length === 0) {
+            return [{
+                id: 'record-details',
+                kind: 'details',
+                mode: 'auto',
+                label: 'Record details',
+                indexes: items.map((item) => item.index),
+            }];
+        }
+
+        const personRowSet = new Set(personRows);
+        const detailIndexes = geometricRows
+            .filter((row) => !personRowSet.has(row))
+            .flatMap((row) => row.items.map((item) => item.index));
+        const groups = [];
+
+        if (detailIndexes.length > 0) {
+            groups.push({
+                id: 'document-details',
+                kind: 'details',
+                mode: 'auto',
+                label: 'Document details',
+                indexes: detailIndexes,
+            });
+        }
+
+        personRows.forEach((row, personIndex) => {
+            groups.push({
+                id: `person-${personIndex + 1}`,
+                kind: 'person',
+                mode: 'auto',
+                label: `Person ${String(personIndex + 1).padStart(2, '0')}`,
+                indexes: row.items.map((item) => item.index),
+            });
+        });
+
+        return groups;
+    }
+
+    function buildValidationGroups() {
+        // A ledger's rows are its people, so its lines always group by row.
+        return config.groupingMode === 'custom' || templateColumns.length > 0
+            ? buildCustomValidationGroups()
+            : buildAutomaticValidationGroups();
+    }
+
+    function validationGroupForField(index) {
+        return validationGroupByField.get(index) ?? null;
+    }
+
+    function validationRow(index) {
+        return validationRowByIndex.get(index) ?? null;
+    }
+
+    function groupIdentity(group) {
+        if (group.kind !== 'person') return `${group.indexes.length} document field${group.indexes.length === 1 ? '' : 's'}`;
+
+        // The field the layout says holds the person's name.
+        const named = group.indexes.find((index) => (
+            settingsFor(index)?.role === 'name' && String(readings[index]?.text ?? '').trim() !== ''
+        ));
+        if (named !== undefined) return String(readings[named].text).trim();
+
+        const candidates = group.indexes
+            .map((index) => ({
+                index,
+                width: Number(cropped[index]?.w ?? 0),
+                text: String(readings[index]?.text ?? '').trim(),
+            }))
+            .filter((candidate) => candidate.text.length >= 3 && /[a-z]/i.test(candidate.text))
+            .sort((a, b) => b.width - a.width);
+
+        return candidates[0]?.text || `${group.indexes.length} fields`;
+    }
+
+    // A line is labelled with its template field's or column's own name.
+    function validationFieldLabel(group, columnIndex, fallback) {
+        return String(fallback || `Field ${columnIndex + 1}`);
+    }
+
+    /**
+     * Required fields of this person that nothing was read for: the ledger
+     * columns missing from a row, or a person's template fields.
+     */
+    function missingRequired(group) {
+        if (group.kind !== 'person' || group.indexes.length === 0) return [];
+
+        const present = new Set(group.indexes.map((index) => nameKey(cropped[index]?.label)));
+        const ledgerRow = group.indexes.some((index) => settingsFor(index)?.kind === 'column');
+        const personGroup = Number(cropped[group.indexes[0]]?.personGroup);
+        const expected = ledgerRow
+            ? config.boxes.filter((box) => box.kind === 'column')
+            : config.boxes.filter((box) => box.kind !== 'column' && Number(box.personGroup) === personGroup);
+
+        return expected
+            .filter((box) => box.required !== false && !present.has(nameKey(box.name)))
+            .map((box) => box.name);
+    }
+
+    function prepareValidationComparison() {
+        const source = el('pageCanvas');
+        const target = el('validationPageCanvas');
+        const context = target.getContext('2d');
+
+        if (!context || source.width === 0 || source.height === 0) {
+            throw new Error('The original document could not be prepared for comparison. Please scan again.');
+        }
+
+        activeValidationIndex = null;
+        target.width = source.width;
+        target.height = source.height;
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, target.width, target.height);
+        context.drawImage(source, 0, 0);
+
+        cancelOutlineEdit();
+        validationMarker.setBoxes([]);
+        lineOverlay.setLines(processedPage, cropped);
+        validationMarker.resetZoom();
+        el('validationDocViewport').scrollTo({ top: 0, left: 0 });
+        el('validationFileName').textContent = scanFile?.name || 'Document';
+
+        window.requestAnimationFrame(() => {
+            validationMarker.layout();
+            updateValidationMarkerStates();
+            const initialGroup = validationGroups.find((group) => group.kind === 'person')
+                ?? validationGroups[0];
+            if (initialGroup) activateValidationGroup(initialGroup.id, 'initial');
+        });
+    }
+
+    function handleValidationMarkerSelection(indexes, context = {}) {
+        if (syncingValidationSelection) return;
+        if (indexes.length === 0) {
+            activeValidationIndex = null;
+            activeValidationGroupId = null;
+            el('verifyRows').querySelectorAll('.validation-field').forEach((row) => {
+                row.classList.remove('is-active');
+                row.removeAttribute('aria-current');
+            });
+            el('verifyRows').querySelectorAll('.validation-record-group').forEach((group) => {
+                group.classList.remove('is-active');
+            });
+            updateValidationMarkerStates();
+            return;
+        }
+        const selectedIndex = Number.isInteger(context.activeIndex)
+            ? context.activeIndex
+            : indexes[indexes.length - 1];
+        activateValidationField(selectedIndex, 'marker');
+    }
+
+    function revealValidationRow(index) {
+        const list = el('verifyRows');
+        const row = validationRow(index);
+        if (!(row instanceof HTMLElement)) return;
+
+        const listRect = list.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        const target = list.scrollTop
+            + rowRect.top - listRect.top
+            - (list.clientHeight - rowRect.height) / 2;
+        const clampedTarget = Math.min(
+            Math.max(0, list.scrollHeight - list.clientHeight),
+            Math.max(0, target),
+        );
+        const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        list.scrollTo({ top: clampedTarget, behavior: smooth ? 'smooth' : 'auto' });
+    }
+
+    function revealValidationLines(indexes) {
+        const bounds = lineOverlay.displayBounds(indexes);
+        if (!bounds) return;
+
+        const viewport = el('validationDocViewport');
+        viewport.scrollTo({
+            left: Math.max(0, (bounds.left + bounds.right) / 2 - viewport.clientWidth / 2),
+            top: Math.max(0, (bounds.top + bounds.bottom) / 2 - viewport.clientHeight / 2),
+            behavior: 'smooth',
+        });
+    }
+
+    function revealValidationMarker(index) {
+        revealValidationLines([index]);
+    }
+
+    function revealValidationGroup(group) {
+        revealValidationLines(group.indexes);
+    }
+
+    function setExpandedValidationGroup(groupId) {
+        el('verifyRows').querySelectorAll('.validation-record-group').forEach((section) => {
+            const expanded = section.dataset.groupId === groupId;
+            section.classList.toggle('is-expanded', expanded);
+            const button = section.querySelector('.validation-record-group__toggle');
+            const body = section.querySelector('.validation-record-group__body');
+            button?.setAttribute('aria-expanded', String(expanded));
+            button?.classList.toggle('collapsed', !expanded);
+            if (body instanceof HTMLElement) setDisclosureExpanded(body, expanded);
+        });
+    }
+
+    function selectValidationGroupMarkers(group) {
+        lineOverlay.setSelection(group.indexes, activeValidationIndex);
+    }
+
+    function activateValidationGroup(groupId, source = 'group') {
+        const group = validationGroups.find((candidate) => candidate.id === groupId);
+        if (!group) return;
+
+        activeValidationGroupId = group.id;
+        activeValidationIndex = null;
+        setExpandedValidationGroup(group.id);
+        selectValidationGroupMarkers(group);
+
+        el('verifyRows').querySelectorAll('.validation-record-group').forEach((section) => {
+            section.classList.toggle('is-active', section.dataset.groupId === group.id);
+        });
+        el('verifyRows').querySelectorAll('.validation-field').forEach((row) => {
+            row.classList.remove('is-active');
+            row.removeAttribute('aria-current');
+        });
+        updateValidationMarkerStates();
+
+        if (source === 'group') revealValidationGroup(group);
+        const section = el('verifyRows').querySelector(`[data-group-id="${group.id}"]`);
+        section?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    function activateValidationField(index, source = 'row') {
+        if (!Number.isInteger(index) || index < 0 || index >= readings.length) return;
+        const group = validationGroupForField(index);
+        if (!group) return;
+
+        activeValidationIndex = index;
+        activeValidationGroupId = group.id;
+        setExpandedValidationGroup(group.id);
+
+        selectValidationGroupMarkers(group);
+
+        el('verifyRows').querySelectorAll('.validation-field').forEach((row) => {
+            const active = Number(row.dataset.fieldIndex) === index;
+            row.classList.toggle('is-active', active);
+            if (active) row.setAttribute('aria-current', 'true');
+            else row.removeAttribute('aria-current');
+        });
+        el('verifyRows').querySelectorAll('.validation-record-group').forEach((section) => {
+            section.classList.toggle('is-active', section.dataset.groupId === group.id);
+        });
+        updateValidationMarkerStates();
+
+        if (source === 'marker') revealValidationRow(index);
+        if (source === 'row') revealValidationMarker(index);
+    }
+
+    function updateValidationMarkerStates() {
+        cropped.forEach((_, index) => {
+            const checkbox = validationRow(index)?.querySelector('.validation-verified');
+            lineOverlay.setVerified(index, checkbox instanceof HTMLInputElement && checkbox.checked);
+        });
+        const group = validationGroups.find((candidate) => candidate.id === activeValidationGroupId);
+        lineOverlay.setSelection(group?.indexes ?? [], activeValidationIndex);
+    }
+
+    function clearValidationFieldError(index) {
+        const row = el('verifyRows').querySelector(`[data-field-index="${index}"]`);
+        if (!row) return;
+        row.classList.remove('is-invalid');
+        requiredInput(row, '.verified').classList.remove('is-invalid');
+        const message = requiredPart(row, '.validation-field__error');
+        message.textContent = '';
+        message.classList.add('d-none');
+    }
+
+    function setValidationFieldError(index, message) {
+        const row = el('verifyRows').querySelector(`[data-field-index="${index}"]`);
+        if (!row) return;
+        row.classList.add('is-invalid');
+        requiredInput(row, '.verified').classList.add('is-invalid');
+        const error = requiredPart(row, '.validation-field__error');
+        error.textContent = message;
+        error.classList.remove('d-none');
+    }
+
+    function clearValidationSubmitError() {
+        el('validationSubmitMessage').textContent = '';
+        el('validationSubmitError').classList.add('d-none');
+    }
+
+    function showValidationSubmitError(message) {
+        el('validationSubmitMessage').textContent = message;
+        el('validationSubmitError').classList.remove('d-none');
+        el('validationSubmitError').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    function updateVerificationSummary() {
+        const checkboxes = [...el('verifyRows').querySelectorAll('.validation-verified')];
+        const verified = checkboxes.filter((checkbox) => checkbox.checked).length;
+        const total = checkboxes.length;
+        const percentage = total > 0 ? Math.round((verified / total) * 100) : 0;
+
+        el('verifiedCount').textContent = `${verified} of ${total}`;
+        el('verifiedProgress').setAttribute('aria-valuenow', String(percentage));
+        el('verifiedProgressBar').style.width = `${percentage}%`;
+        el('submitVerifiedCount').textContent = String(verified);
+        el('submitBtn').disabled = verified === 0 || recordSubmitting;
+        updateValidationGroupSummaries();
+        updateValidationMarkerStates();
+    }
+
+    function updateValidationGroupSummaries() {
+        validationGroups.forEach((group) => {
+            const section = el('verifyRows').querySelector(`[data-group-id="${group.id}"]`);
+            if (!(section instanceof HTMLElement)) return;
+
+            const checkedStates = group.indexes.map((index) => {
+                const checkbox = validationRow(index)?.querySelector('.validation-verified');
+                return checkbox instanceof HTMLInputElement && checkbox.checked;
+            });
+            const state = verificationGroupState(checkedStates);
+            const status = section.querySelector('.validation-record-group__status');
+            if (status) status.textContent = `${state.verified}/${state.total} verified`;
+            section.classList.toggle('is-complete', state.checked);
+
+            const groupCheckbox = section.querySelector('.validation-group-verified');
+            if (groupCheckbox instanceof HTMLInputElement) {
+                groupCheckbox.checked = state.checked;
+                groupCheckbox.indeterminate = state.indeterminate;
+                groupCheckbox.setAttribute(
+                    'aria-checked',
+                    state.indeterminate ? 'mixed' : String(state.checked),
+                );
+            }
+        });
+    }
+
+    function setGroupVerified(group, checked) {
+        let firstBlankIndex = null;
+
+        group.indexes.forEach((index) => {
+            const row = validationRow(index);
+            if (!(row instanceof HTMLElement)) return;
+
+            const input = requiredInput(row, '.verified');
+            const checkbox = requiredInput(row, '.validation-verified');
+
+            if (checked && !canVerifyValue(input.value)) {
+                checkbox.checked = false;
+                row.classList.remove('is-verified');
+                setValidationFieldError(index, 'Enter or confirm a value before marking this field as verified.');
+                firstBlankIndex ??= index;
+                return;
+            }
+
+            checkbox.checked = checked;
+            row.classList.toggle('is-verified', checked);
+            clearValidationFieldError(index);
+        });
+
+        updateVerificationSummary();
+
+        if (firstBlankIndex !== null) {
+            showValidationSubmitError(`${group.label} has blank fields that could not be verified.`);
+            activateValidationField(firstBlankIndex, 'marker');
+            const row = validationRow(firstBlankIndex);
+            if (row) requiredInput(row, '.verified').focus();
             return;
         }
 
-        const transfer = new DataTransfer();
-        transfer.items.add(scanFile);
+        clearValidationSubmitError();
+    }
 
-        let input = el('scanInput');
-        if (!input) {
-            input = document.createElement('input');
-            input.type = 'file';
-            input.name = 'scan';
-            input.id = 'scanInput';
-            input.className = 'd-none';
-            el('submitForm').appendChild(input);
+    function createValidationFieldRow(reading, index, group, columnIndex) {
+        const confidence = normaliseConfidence(reading);
+        const flagged = confidence < config.threshold;
+        const inputId = `verifiedField${index}`;
+        const checkboxId = `verifyField${index}`;
+        const row = document.createElement('article');
+
+        row.className = 'validation-field';
+        row.dataset.fieldIndex = String(index);
+        row.tabIndex = 0;
+        validationRowByIndex.set(index, row);
+        row.innerHTML = `
+            <div class="validation-field__identity">
+                <span class="validation-field__number"></span>
+                <div class="min-w-0">
+                    <strong class="validation-field__name"></strong>
+                    <span class="confidence-badge validation-field__confidence"></span>
+                </div>
+            </div>
+            <div class="validation-field__value">
+                <label class="visually-hidden" for="${inputId}"></label>
+                <div class="validation-field__entry">
+                    <img class="validation-field__crop" alt="" loading="lazy" decoding="async">
+                    <input type="text" id="${inputId}" class="form-control verified"
+                           maxlength="2000" autocomplete="off">
+                </div>
+                <div class="validation-field__reading">
+                    <span class="validation-field__reading-text">TrOCR read: <span></span></span>
+                    <button type="button" class="btn btn-link btn-sm validation-field__adjust">
+                        <i class="icon-base bx bx-shape-polygon" aria-hidden="true"></i>Adjust outline
+                    </button>
+                </div>
+                <div class="validation-field__hint d-none"></div>
+                <div class="validation-field__type d-none"></div>
+                <div class="validation-field__flag d-none"></div>
+                <div class="validation-field__ocr-error d-none">
+                    TrOCR could not read this marker. Enter the value manually.
+                </div>
+                <div class="validation-field__error d-none" role="alert"></div>
+            </div>
+            <div class="validation-field__check">
+                <label class="validation-verified-control" for="${checkboxId}">
+                    <input class="form-check-input validation-verified" type="checkbox"
+                           id="${checkboxId}">
+                    <span>Verified</span>
+                </label>
+            </div>`;
+
+        const displayNumber = group.kind === 'person' ? columnIndex + 1 : index + 1;
+        requiredPart(row, '.validation-field__number').textContent = String(displayNumber).padStart(2, '0');
+        const item = cropped[index] ?? {};
+        const displayName = validationFieldLabel(group, columnIndex, item.heading || item.label || reading.name);
+        requiredPart(row, '.validation-field__name').textContent = displayName;
+        requiredPart(row, `label[for="${inputId}"]`).textContent = `Verified value for ${displayName}`;
+
+        const badge = requiredPart(row, '.validation-field__confidence');
+        badge.textContent = `${confidence.toFixed(1)}%`;
+        badge.classList.add(flagged ? 'is-low' : 'is-ready');
+
+        // The exact masked crop TrOCR read, beside the value it produced.
+        const thumbnail = row.querySelector('.validation-field__crop');
+        if (thumbnail instanceof HTMLImageElement && item.cropUrl) {
+            thumbnail.src = item.cropUrl;
+            thumbnail.alt = `Crop TrOCR read for ${displayName}`;
+            thumbnail.title = 'The exact image TrOCR read';
+        } else {
+            thumbnail?.remove();
         }
-        input.files = transfer.files;
 
-        el('submitBtn').disabled = true;
-        el('submitBtn').textContent = 'Submitting...';
+        const adjust = requiredPart(row, '.validation-field__adjust');
+        adjust.setAttribute('aria-label', `Adjust the outline of ${displayName}`);
+        adjust.addEventListener('click', (event) => {
+            event.stopPropagation();
+            startOutlineEdit(index);
+        });
+
+        const explanation = flagExplanation(item.flags ?? []);
+        if (explanation) {
+            row.classList.add('has-line-flag');
+            const flag = requiredPart(row, '.validation-field__flag');
+            flag.textContent = explanation;
+            flag.classList.remove('d-none');
+        }
+
+        const readingText = String(reading.text ?? '');
+        requiredPart(row, '.validation-field__reading-text span').textContent = readingText || '(nothing read)';
+
+        const input = requiredInput(row, '.verified');
+        const checkbox = requiredInput(row, '.validation-verified');
+        input.value = readingText;
+        if (flagged) row.classList.add('needs-review');
+
+        // The template's hint, and whether the value fits its field (a date,
+        // a number, one of a list). Pointed out, never blocking.
+        const settings = settingsFor(index);
+        const hint = requiredPart(row, '.validation-field__hint');
+        if (settings?.hint) {
+            hint.textContent = settings.hint;
+            hint.classList.remove('d-none');
+        }
+        const typeNote = requiredPart(row, '.validation-field__type');
+        const checkValue = () => {
+            const problem = valueProblem(input.value, settings ?? {});
+            typeNote.textContent = problem ?? '';
+            typeNote.classList.toggle('d-none', !problem);
+            row.classList.toggle('has-value-problem', Boolean(problem));
+        };
+        checkValue();
+        input.addEventListener('input', checkValue);
+        if (reading.error) {
+            row.classList.add('has-ocr-error');
+            requiredPart(row, '.validation-field__ocr-error').classList.remove('d-none');
+        }
+
+        row.addEventListener('click', () => activateValidationField(index, 'row'));
+        row.addEventListener('focusin', () => activateValidationField(index, 'row'));
+        row.addEventListener('keydown', (event) => {
+            if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
+            event.preventDefault();
+            activateValidationField(index, 'row');
+            input.focus();
+        });
+
+        input.addEventListener('input', () => {
+            clearValidationFieldError(index);
+            clearValidationSubmitError();
+            if (checkbox.checked) {
+                checkbox.checked = false;
+                row.classList.remove('is-verified');
+                updateVerificationSummary();
+            }
+        });
+
+        checkbox.addEventListener('change', () => {
+            activateValidationField(index, 'row');
+            clearValidationFieldError(index);
+            clearValidationSubmitError();
+
+            if (checkbox.checked && input.value.trim() === '') {
+                checkbox.checked = false;
+                setValidationFieldError(index, 'Enter or confirm a value before marking this field as verified.');
+                input.focus();
+            }
+
+            row.classList.toggle('is-verified', checkbox.checked);
+            updateVerificationSummary();
+        });
+
+        return row;
+    }
+
+    function createValidationGroup(group) {
+        const section = document.createElement('section');
+        const bodyId = `validationGroupBody-${group.id}`;
+        section.className = 'validation-record-group';
+        section.dataset.groupId = group.id;
+        section.innerHTML = `
+            <button type="button" class="accordion-button collapsed validation-record-group__toggle"
+                    aria-expanded="false" aria-controls="${bodyId}">
+                <span class="validation-record-group__number"></span>
+                <span class="validation-record-group__copy">
+                    <strong></strong>
+                    <small></small>
+                </span>
+                <span class="validation-record-group__meta">
+                    <span class="validation-record-group__review"></span>
+                    <span class="validation-record-group__status"></span>
+                </span>
+                <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
+            </button>
+            <div class="validation-record-group__body" id="${bodyId}" hidden></div>`;
+
+        const number = requiredPart(section, '.validation-record-group__number');
+        number.textContent = group.kind === 'person'
+            ? group.label.replace('Person ', '')
+            : 'i';
+        requiredPart(section, '.validation-record-group__copy strong').textContent = group.label;
+        requiredPart(section, '.validation-record-group__copy small').textContent = groupIdentity(group);
+
+        const reviewCount = group.indexes.filter((index) => (
+            normaliseConfidence(readings[index]) < config.threshold || cropped[index]?.needsReview
+        )).length;
+        const missing = missingRequired(group);
+        const review = requiredPart(section, '.validation-record-group__review');
+        review.textContent = [
+            reviewCount > 0 ? `${reviewCount} to review` : null,
+            missing.length > 0 ? `${missing.length} missing` : null,
+        ].filter(Boolean).join(' · ') || 'Ready to review';
+        review.classList.toggle('has-review', reviewCount > 0 || missing.length > 0);
+
+        const body = requiredPart(section, '.validation-record-group__body');
+        if (missing.length > 0) {
+            const note = document.createElement('div');
+            note.className = 'validation-record-group__missing';
+            note.textContent = `Nothing was read for ${missing.join(', ')}. If the page has ${missing.length === 1 ? 'it' : 'them'}, `
+                + 'go back to Align and check the outlines; if the register leaves it blank, carry on.';
+            body.appendChild(note);
+        }
+        if (group.kind === 'person') {
+            const bulk = document.createElement('div');
+            const checkboxId = `verifyGroup-${group.id}`;
+            bulk.className = 'validation-record-group__bulk';
+            bulk.innerHTML = `
+                <div class="validation-record-group__bulk-copy">
+                    <strong>All fields</strong>
+                    <small></small>
+                </div>
+                <div class="validation-record-group__bulk-action">
+                    <label class="validation-verified-control validation-group-verified-control"
+                           for="${checkboxId}">
+                        <input class="form-check-input validation-group-verified" type="checkbox"
+                               id="${checkboxId}">
+                        <span>Verify all</span>
+                    </label>
+                </div>`;
+            requiredPart(bulk, 'small').textContent = `Mark every populated field in ${group.label} as verified.`;
+
+            const groupCheckbox = requiredInput(bulk, '.validation-group-verified');
+            groupCheckbox.setAttribute('aria-label', `Verify all fields for ${group.label}`);
+            groupCheckbox.addEventListener('change', () => {
+                setGroupVerified(group, groupCheckbox.checked);
+            });
+            body.appendChild(bulk);
+        }
+
+        group.indexes.forEach((index, columnIndex) => {
+            body.appendChild(createValidationFieldRow(readings[index], index, group, columnIndex));
+        });
+
+        const toggle = requiredPart(section, '.validation-record-group__toggle');
+        toggle.addEventListener('click', () => {
+            if (section.classList.contains('is-expanded')) {
+                section.classList.remove('is-expanded');
+                toggle.setAttribute('aria-expanded', 'false');
+                toggle.classList.add('collapsed');
+                setDisclosureExpanded(body, false);
+                activeValidationGroupId = group.id;
+                activeValidationIndex = null;
+                selectValidationGroupMarkers(group);
+                section.classList.add('is-active');
+                el('verifyRows').querySelectorAll('.validation-field').forEach((row) => {
+                    row.classList.remove('is-active');
+                    row.removeAttribute('aria-current');
+                });
+                updateValidationMarkerStates();
+                revealValidationGroup(group);
+                return;
+            }
+            activateValidationGroup(group.id, 'group');
+        });
+
+        return section;
+    }
+
+    function renderVerifyRows() {
+        const container = el('verifyRows');
+        container.innerHTML = '';
+        activeValidationIndex = null;
+        activeValidationGroupId = null;
+        validationGroupByField = new Map();
+        validationRowByIndex = new Map();
+        clearValidationSubmitError();
+        validationGroups = buildValidationGroups();
+        validationGroups.forEach((group) => {
+            group.indexes.forEach((index) => validationGroupByField.set(index, group));
+        });
+
+        validationGroups.forEach((group) => container.appendChild(createValidationGroup(group)));
+
+        const confidences = readings.map(normaliseConfidence);
+        const average = confidences.length
+            ? confidences.reduce((a, b) => a + b, 0) / confidences.length
+            : 0;
+        const flaggedCount = confidences.filter((confidence, index) => (
+            confidence < config.threshold || cropped[index]?.needsReview
+        )).length;
+
+        el('summaryConfidence').textContent = `${average.toFixed(1)}%`;
+        el('summaryReview').textContent = `${flaggedCount}/${confidences.length}`;
+        updateVerificationSummary();
+    }
+
+    // ---------------------------------------------------------- outline fixes
+    function lineUpdateUrl(lineId) {
+        return config.lineUpdateUrl
+            .replace('__PAGE__', String(processedPage?.id ?? ''))
+            .replace('__LINE__', String(lineId));
+    }
+
+    function showLineEditStatus(message, isError = false) {
+        const status = el('lineEditStatus');
+        status.textContent = message;
+        status.title = message;
+        // Never hidden: its height is reserved so the toolbar does not resize (see the SCSS).
+        status.classList.toggle('is-error', isError);
+    }
+
+    function startOutlineEdit(index) {
+        if (!processedPage || !cropped[index]) return;
+        cancelOutlineEdit();
+
+        editingLineIndex = index;
+        activateValidationField(index, 'row');
+        el('lineEditName').textContent = cropped[index].name;
+        el('lineEditToolbar').classList.remove('d-none');
+        showLineEditStatus('');
+        const mode = document.querySelector('input[name="verifyLineMode"]:checked')?.value ?? 'box';
+        lineOverlay.beginEdit(index, mode);
+        showVerifyLineMode(mode);
+    }
+
+    const VERIFY_MODE_HINTS = {
+        box: 'Drag the handles to stretch the outline.',
+        points: 'Drag a corner to move it; drag a dot between corners to add one; Delete removes one.',
+        draw: 'Click round the writing or hold and trace. Enter closes it; Ctrl+Z undoes a point; Esc cancels.',
+        rectangle: 'Drag a box over the writing.',
+    };
+
+    /** Keep the Verify tool buttons and hint in step with the outline editor. */
+    function showVerifyLineMode(mode) {
+        const input = document.querySelector(`input[name="verifyLineMode"][value="${mode}"]`);
+        if (input) input.checked = true;
+        if (editingLineIndex !== null) showLineEditStatus(VERIFY_MODE_HINTS[mode] ?? '');
+    }
+
+    function showVerifyDraft(points) {
+        if (editingLineIndex === null || lineOverlay.editing?.mode !== 'draw') return;
+        showLineEditStatus(points === 0
+            ? VERIFY_MODE_HINTS.draw
+            : points < 3
+                ? `${points} point${points === 1 ? '' : 's'}. At least 3 to make an outline.`
+                : `${points} points. Enter or double-click closes it; Save and re-read uses it.`);
+    }
+
+    function cancelOutlineEdit() {
+        if (editingLineIndex === null) return;
+        lineOverlay.cancelEdit();
+        editingLineIndex = null;
+        el('lineEditToolbar').classList.add('d-none');
+        el('lineEditSave').disabled = false;
+    }
+
+    /**
+     * Save the redrawn outline: the server crops along it with crop_line() and
+     * TrOCR reads that one line again. Every other field keeps what the
+     * reviewer typed and checked.
+     */
+    async function saveOutlineEdit() {
+        const index = editingLineIndex;
+        if (index === null) return;
+        if (lineOverlay.isDrawing() && !lineOverlay.finishDrawing()) {
+            showLineEditStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+            return;
+        }
+        const polygon = lineOverlay.editedPolygon();
+        if (!polygon) return;
+
+        const item = cropped[index];
+        const button = el('lineEditSave');
+        button.disabled = true;
+        showLineEditStatus('Cropping along the new outline and reading it again…');
+
+        try {
+            const { response, payload } = await putLineOutline(lineUpdateUrl(item.lineId), { polygon });
+
+            if (!payload?.line) {
+                throw new Error(responseErrorMessage(response, payload));
+            }
+
+            applyLineUpdate(payload.line, payload.flags ?? {});
+            cancelOutlineEdit();
+            if (!response.ok) {
+                showOcrLineWarning(payload.line.id, payload.message || 'The outline was saved, but TrOCR could not read it.');
+            }
+        } catch (error) {
+            button.disabled = false;
+            showLineEditStatus(error.message || 'The outline could not be saved.', true);
+        }
+    }
+
+    function showOcrLineWarning(lineId, message) {
+        const index = cropped.findIndex((candidate) => candidate.lineId === lineId);
+        if (index >= 0) setValidationFieldError(index, message);
+    }
+
+    /**
+     * Fold one re-read line (and any flags that changed with it) back into the
+     * Verify list, keeping every other field's typed value and check.
+     */
+    function applyLineUpdate(line, flagsById) {
+        const kept = new Map();
+        cropped.forEach((item, index) => {
+            const row = validationRow(index);
+            if (!row || item.lineId === line.id) return;
+            kept.set(item.lineId, {
+                value: requiredInput(row, '.verified').value,
+                verified: requiredInput(row, '.validation-verified').checked,
+            });
+        });
+
+        processedPage.lines = processedPage.lines.map((candidate) => {
+            const next = candidate.id === line.id ? line : candidate;
+            const flags = flagsById[next.id];
+            return Array.isArray(flags) ? { ...next, flags } : next;
+        });
+        cropped = verificationItems(processedPage.lines, processedPage);
+        readings = cropped.map((item) => item.reading);
+
+        renderVerifyRows();
+        cropped.forEach((item, index) => {
+            const previous = kept.get(item.lineId);
+            const row = validationRow(index);
+            if (!previous || !row) return;
+            requiredInput(row, '.verified').value = previous.value;
+            requiredInput(row, '.validation-verified').checked = previous.verified;
+            row.classList.toggle('is-verified', previous.verified);
+        });
+        lineOverlay.setLines(processedPage, cropped);
+        updateVerificationSummary();
+
+        const index = cropped.findIndex((item) => item.lineId === line.id);
+        if (index >= 0) activateValidationField(index, 'row');
+    }
+
+    document.querySelectorAll('input[name="verifyLineMode"]').forEach((input) => {
+        input.addEventListener('change', () => {
+            if (!(input instanceof HTMLInputElement) || !input.checked) return;
+            // Leaving Draw keeps a drawing of three points or more.
+            if (input.value !== 'draw' && lineOverlay.isDrawing() && lineOverlay.finishDrawing()) {
+                if (input.value !== 'box') lineOverlay.setEditMode(input.value);
+            } else {
+                lineOverlay.setEditMode(input.value);
+            }
+            // Off the button, so Enter and Esc reach the drawing.
+            input.blur();
+        });
     });
+    el('lineEditCancel').addEventListener('click', cancelOutlineEdit);
+    el('lineEditSave').addEventListener('click', saveOutlineEdit);
+    document.addEventListener('keydown', (event) => {
+        if (editingLineIndex === null) return;
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.matches('input:not([type="radio"]), textarea, select') || target.isContentEditable)) return;
+        const command = event.ctrlKey || event.metaKey;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            // Esc first drops a drawing, then the whole edit.
+            if (lineOverlay.editing?.mode === 'draw' && lineOverlay.isDrawing()) lineOverlay.setEditMode('draw');
+            else cancelOutlineEdit();
+        } else if (event.key === 'Enter' && lineOverlay.isDrawing()) {
+            event.preventDefault();
+            if (!lineOverlay.finishDrawing()) {
+                showLineEditStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+            }
+        } else if (command && !event.shiftKey && event.key.toLowerCase() === 'z' && lineOverlay.isDrawing()) {
+            event.preventDefault();
+            lineOverlay.undoDrawStep();
+        } else if (['Delete', 'Backspace'].includes(event.key) && lineOverlay.editing?.mode === 'points') {
+            event.preventDefault();
+            lineOverlay.deleteActivePoint();
+        }
+    });
+
+    function submissionErrorMessage(response, payload) {
+        if (response.status === 419) return 'Your session expired. Refresh the page and scan the document again.';
+        if (response.status === 413) return 'The uploaded document is too large. The maximum size is 20 MB.';
+        if (response.status === 422) {
+            const messages = payload?.errors ? Object.values(payload.errors).flat() : [];
+            return messages[0] || payload?.message || 'Review the highlighted fields and try again.';
+        }
+        return payload?.message || 'The record could not be submitted. Nothing was saved.';
+    }
+
+    function applyServerFieldErrors(errors, submittedIndexes) {
+        const invalidIndexes = [];
+        Object.entries(errors ?? {}).forEach(([key, messages]) => {
+            const match = key.match(/^fields\.(\d+)\./);
+            if (!match) return;
+            const originalIndex = submittedIndexes[Number(match[1])];
+            if (originalIndex === undefined) return;
+            setValidationFieldError(originalIndex, Array.isArray(messages) ? messages[0] : String(messages));
+            invalidIndexes.push(originalIndex);
+        });
+
+        if (invalidIndexes.length === 0) return;
+        activateValidationField(invalidIndexes[0], 'marker');
+        const firstInvalidRow = validationRow(invalidIndexes[0]);
+        if (firstInvalidRow) requiredInput(firstInvalidRow, '.verified').focus();
+    }
+
+    /**
+     * What this submission leaves out that the layout requires: its own fields
+     * that no checked line was read under; in a register, the required columns
+     * missing from each row with something checked, then the rows with nothing
+     * checked (the page is removed after submitting, so they would have to be
+     * scanned again). The server makes the same list.
+     */
+    function requiredNotSubmitted(verifiedIndexes) {
+        const checkedIndexes = new Set(verifiedIndexes);
+        const checkedNames = new Set(verifiedIndexes.map((index) => nameKey(cropped[index]?.label)));
+        const missing = config.boxes
+            .filter((box) => box.kind !== 'column' && box.required !== false && !checkedNames.has(nameKey(box.name)))
+            .map((box) => box.name);
+
+        const requiredColumns = config.boxes.filter((box) => box.kind === 'column' && box.required !== false);
+        const untouchedRows = [];
+        validationGroups.forEach((group) => {
+            const ledgerRow = group.kind === 'person'
+                && group.indexes.some((index) => settingsFor(index)?.kind === 'column');
+            if (!ledgerRow) return;
+
+            const checkedHere = group.indexes.filter((index) => checkedIndexes.has(index));
+            if (checkedHere.length === 0) {
+                untouchedRows.push(Number(cropped[group.indexes[0]]?.personGroup));
+                return;
+            }
+
+            const columnsHere = new Set(checkedHere.map((index) => nameKey(cropped[index]?.label)));
+            const left = requiredColumns
+                .filter((box) => !columnsHere.has(nameKey(box.name)))
+                .map((box) => box.name);
+            if (left.length > 0) missing.push(`${group.label}: ${left.join(', ')}`);
+        });
+
+        if (untouchedRows.length > 0) {
+            missing.push(`Nothing ticked in ${rowRanges(untouchedRows)} `
+                + `(${untouchedRows.length === 1 ? 'this row is' : 'these rows are'} not saved)`);
+        }
+
+        return missing;
+    }
+
+    // "Person 02 – Person 05, Person 07" for rows 2 to 5 and 7, in order.
+    function rowRanges(rows) {
+        const label = (row) => `Person ${String(row).padStart(2, '0')}`;
+        const runs = [];
+        rows.forEach((row) => {
+            const run = runs[runs.length - 1];
+            if (run && run[1] === row - 1) run[1] = row;
+            else runs.push([row, row]);
+        });
+
+        return runs
+            .map(([first, last]) => (first === last ? label(first) : `${label(first)} – ${label(last)}`))
+            .join(', ');
+    }
+
+    function askToSubmitWithoutRequired(entries) {
+        el('missingRequiredList').replaceChildren(...missingRequiredItems(entries));
+        window.bootstrap.Modal.getOrCreateInstance(el('missingRequiredModal')).show();
+    }
+
+    /**
+     * The list's own wording (requiredNotSubmitted() here, the same list from
+     * the server) laid out as cards: the layout's fields together, then each
+     * person missing something, then the rows with nothing ticked.
+     */
+    function missingRequiredItems(entries) {
+        const fields = [];
+        const people = [];
+        let untouched = null;
+        entries.forEach((entry) => {
+            const rows = entry.match(/^Nothing ticked in (.+) \((this row is|these rows are) not saved\)$/);
+            const person = entry.match(/^Person (\d+): (.+)$/);
+            if (rows) {
+                untouched = missingRequiredItem({
+                    icon: 'bx-user-x',
+                    // One part per range, so "Person 02 – Person 05" never breaks.
+                    title: rows[1].split(', '),
+                    detail: `Nothing ticked, so ${rows[2]} not saved`,
+                    muted: true,
+                });
+            } else if (person) {
+                // The name Verify shows for this person, when one was read.
+                const group = validationGroups.find((candidate) => candidate.label === `Person ${person[1]}`);
+                const identity = group ? groupIdentity(group) : '';
+                people.push(missingRequiredItem({
+                    badge: person[1],
+                    title: `Person ${person[1]}`,
+                    subtitle: group && identity !== `${group.indexes.length} fields` ? identity : null,
+                    detail: `Missing: ${person[2]}`,
+                }));
+            } else {
+                fields.push(entry);
+            }
+        });
+
+        return [
+            ...(fields.length > 0 ? [missingRequiredItem({
+                icon: 'bx-file',
+                title: `${fields.length} required field${fields.length === 1 ? '' : 's'} not ticked`,
+                names: fields,
+            })] : []),
+            ...people,
+            ...(untouched ? [untouched] : []),
+        ];
+    }
+
+    function missingRequiredItem({ badge = '', icon = null, title, subtitle = null, detail = null, names = [], muted = false }) {
+        const item = document.createElement('li');
+        item.className = muted ? 'missing-required-item is-muted' : 'missing-required-item';
+
+        const marker = document.createElement('span');
+        marker.className = 'missing-required-item__badge';
+        marker.setAttribute('aria-hidden', 'true');
+        if (icon) {
+            const glyph = document.createElement('i');
+            glyph.className = `icon-base bx ${icon}`;
+            marker.append(glyph);
+        } else {
+            marker.textContent = badge;
+        }
+
+        const copy = document.createElement('div');
+        copy.className = 'missing-required-item__copy';
+        const heading = document.createElement('strong');
+        if (Array.isArray(title)) {
+            title.forEach((part, index) => {
+                const span = document.createElement('span');
+                span.className = 'text-nowrap';
+                span.textContent = part;
+                heading.append(...(index > 0 ? [', ', span] : [span]));
+            });
+        } else {
+            heading.textContent = title;
+        }
+        if (subtitle) {
+            const who = document.createElement('span');
+            who.className = 'missing-required-item__who';
+            who.textContent = ` · ${subtitle}`;
+            heading.append(who);
+        }
+        copy.append(heading);
+        if (detail) {
+            const text = document.createElement('small');
+            text.textContent = detail;
+            copy.append(text);
+        }
+        if (names.length > 0) {
+            const list = document.createElement('ul');
+            list.className = 'missing-required-item__names';
+            list.append(...names.map((name) => {
+                const chip = document.createElement('li');
+                chip.textContent = name;
+                return chip;
+            }));
+            copy.append(list);
+        }
+
+        item.append(marker, copy);
+        return item;
+    }
+
+    // The safe choice has the focus, so Enter never submits by accident.
+    el('missingRequiredModal').addEventListener('shown.bs.modal', () => el('missingRequiredBackBtn').focus());
+
+    el('confirmMissingRequiredBtn').addEventListener('click', () => {
+        window.bootstrap.Modal.getInstance(el('missingRequiredModal'))?.hide();
+        submitRecord({ allowMissing: true });
+    });
+
+    el('submitForm').addEventListener('submit', (event) => {
+        event.preventDefault();
+        submitRecord();
+    });
+
+    // Only "Submit anyway" passes allowMissing, after the same checks again.
+    async function submitRecord({ allowMissing = false } = {}) {
+        if (recordSubmitting) return;
+
+        clearValidationSubmitError();
+        const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
+        rows.forEach((row) => clearValidationFieldError(Number(row.dataset.fieldIndex)));
+
+        const verifiedIndexes = rows
+            .filter((row) => requiredInput(row, '.validation-verified').checked)
+            .map((row) => Number(row.dataset.fieldIndex));
+
+        if (verifiedIndexes.length === 0) {
+            showValidationSubmitError('Check Verified on at least one field before submitting.');
+            if (rows[0]) {
+                const firstIndex = Number(rows[0].dataset.fieldIndex);
+                activateValidationField(firstIndex, 'marker');
+                requiredInput(rows[0], '.validation-verified').focus();
+            }
+            return;
+        }
+
+        const invalidIndexes = verifiedIndexes.filter((index) => {
+            const row = validationRow(index);
+            if (!row) return true;
+            const input = requiredInput(row, '.verified');
+            if (input.value.trim()) return false;
+            setValidationFieldError(index, 'A verified field must contain a value.');
+            return true;
+        });
+        if (invalidIndexes.length > 0) {
+            showValidationSubmitError('Some checked fields still need a value.');
+            activateValidationField(invalidIndexes[0], 'marker');
+            const invalidRow = validationRow(invalidIndexes[0]);
+            if (invalidRow) requiredInput(invalidRow, '.verified').focus();
+            return;
+        }
+
+        if (!scanFile) {
+            showValidationSubmitError('The original scan is no longer available. Return to marking and choose the file again.');
+            return;
+        }
+
+        if (!allowMissing) {
+            const missing = requiredNotSubmitted(verifiedIndexes);
+            if (missing.length > 0) {
+                askToSubmitWithoutRequired(missing);
+                return;
+            }
+        }
+
+        const form = el('submitForm');
+        const data = new FormData(form);
+        data.set('scan', scanFile, scanFile.name);
+        if (allowMissing) data.set('allow_missing', '1');
+
+        const personGroups = validationGroups.filter((candidate) => candidate.kind === 'person');
+        const submittedFields = verifiedIndexes.map((sourceIndex) => {
+            const reading = readings[sourceIndex];
+            const crop = cropped[sourceIndex];
+            const group = validationGroupForField(sourceIndex);
+            const personGroup = group?.kind === 'person'
+                ? personGroups.findIndex((candidate) => candidate.id === group.id) + 1
+                : null;
+            const personFieldOrder = group?.kind === 'person'
+                ? group.indexes.indexOf(sourceIndex)
+                : null;
+            const row = validationRow(sourceIndex);
+            const value = row instanceof HTMLElement
+                ? requiredInput(row, '.verified').value.trim()
+                : '';
+            return {
+                verified: '1',
+                name: String(reading.name ?? ''),
+                ocr_text: String(reading.text ?? ''),
+                ocr_confidence: normaliseConfidence(reading).toFixed(1),
+                verified_value: value,
+                person_group: personGroup,
+                person_field_order: personFieldOrder,
+                x: Number(crop.x ?? 0).toFixed(5),
+                y: Number(crop.y ?? 0).toFixed(5),
+                width: Number(crop.w ?? 0).toFixed(5),
+                height: Number(crop.h ?? 0).toFixed(5),
+                // The record keeps this line's outline and the exact crop TrOCR read.
+                line_id: crop.lineId ?? null,
+            };
+        });
+        data.set('fields_json', JSON.stringify(submittedFields));
+
+        const button = el('submitBtn');
+        const idleButton = button.innerHTML;
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 120000);
+        let submissionSucceeded = false;
+        recordSubmitting = true;
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Submitting verified fields...';
+
+        try {
+            const response = await fetch(form.action, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+                signal: controller.signal,
+                body: data,
+            });
+            const contentType = response.headers.get('content-type') || '';
+            const payload = contentType.includes('application/json') ? await response.json() : null;
+
+            if (!response.ok) {
+                // The server found required fields missing that this page did
+                // not: nothing was saved, so ask the same question.
+                if (response.status === 422 && Array.isArray(payload?.errors?.missing_required)) {
+                    askToSubmitWithoutRequired(payload.errors.missing_required);
+                    return;
+                }
+                applyServerFieldErrors(payload?.errors, verifiedIndexes);
+                throw new Error(submissionErrorMessage(response, payload));
+            }
+
+            if (!payload?.redirect) {
+                throw new Error('The record was saved, but the archive location was not returned. Open Records Archive to confirm it.');
+            }
+
+            button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved. Opening record...';
+            window.location.assign(payload.redirect);
+            submissionSucceeded = true;
+        } catch (error) {
+            console.error('Record submission failed:', error);
+            const message = error.name === 'AbortError'
+                ? 'Submission timed out. Check your connection, then confirm the record in Records Archive before trying again.'
+                : (error instanceof TypeError
+                    ? 'The server could not be reached. Check your connection and try again.'
+                    : (error.message || 'The record could not be submitted. Nothing was saved.'));
+            showValidationSubmitError(message);
+        } finally {
+            window.clearTimeout(timeoutId);
+            if (!submissionSucceeded) {
+                recordSubmitting = false;
+                button.innerHTML = idleButton;
+                updateVerificationSummary();
+            }
+        }
+    }
 </script>
 @endpush

@@ -2,15 +2,17 @@
 
 namespace App\Enums;
 
+/**
+ * A record's status. Submitted is the only case: no code path creates a
+ * draft, so one was never kept here (see docs/CODE_REVIEW_TODO.md #18).
+ */
 enum RecordStatus: string
 {
-    case Draft = 'draft';
     case Submitted = 'submitted';
 
     public function label(): string
     {
         return match ($this) {
-            self::Draft => 'Draft',
             self::Submitted => 'Submitted',
         };
     }
@@ -18,7 +20,6 @@ enum RecordStatus: string
     public function badgeClass(): string
     {
         return match ($this) {
-            self::Draft => 'bg-label-warning',
             self::Submitted => 'bg-label-success',
         };
     }

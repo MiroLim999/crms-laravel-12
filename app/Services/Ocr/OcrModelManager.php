@@ -217,14 +217,17 @@ class OcrModelManager
             ->values()
             ->all();
 
-        return DB::transaction(function () use ($name, $files, $actor) {
+        return DB::transaction(function () use ($name, $files, $remote, $actor) {
             $existing = OcrModel::query()->where('key', $name)->lockForUpdate()->first();
 
             if ($existing !== null && $existing->disk_deleted_at === null) {
+                $this->syncEvaluation($existing, $remote, $actor);
+
                 return $existing;
             }
 
             $model = $this->register($name, $actor, artifactReplaced: true);
+            $this->syncEvaluation($model, $remote, $actor);
 
             $this->audit->log(
                 'ocr_model.added',
@@ -305,12 +308,13 @@ class OcrModelManager
                 $counts['restored']++;
             }
 
-            $this->register(
+            $model = $this->register(
                 $key,
                 $actor,
                 $row['label'] ?? null,
                 artifactReplaced: $local?->disk_deleted_at !== null,
             );
+            $this->syncEvaluation($model, $row, $actor);
         }
 
         foreach ($registry as $key => $model) {
@@ -352,6 +356,65 @@ class OcrModelManager
         }
 
         return $counts;
+    }
+
+    /**
+     * Persist only the normalized report returned by FastAPI. Browser-supplied
+     * metrics never reach this method, and absence of a report clears stale
+     * benchmark data when a model artifact has been replaced or rescanned.
+     *
+     * @param  array<string, mixed>  $remote
+     */
+    private function syncEvaluation(OcrModel $model, array $remote, User $actor): void
+    {
+        $evaluation = $remote['evaluation'] ?? null;
+        $metrics = is_array($evaluation) ? ($evaluation['metrics'] ?? null) : null;
+        $complete = is_array($metrics)
+            && isset($metrics['cer'], $metrics['wer'], $metrics['exact_match'])
+            && isset(
+                $evaluation['dataset'],
+                $evaluation['manifest_sha256'],
+                $evaluation['weights_sha256'],
+                $evaluation['evaluated_at'],
+            )
+            && ($evaluation['split'] ?? null) === 'test'
+            && (int) ($evaluation['sample_count'] ?? 0) > 0;
+
+        $attributes = $complete ? [
+            'cer' => (float) $metrics['cer'],
+            'wer' => (float) $metrics['wer'],
+            'exact_match' => (float) $metrics['exact_match'],
+            'evaluation_dataset' => (string) $evaluation['dataset'],
+            'evaluation_split' => 'test',
+            'evaluation_sample_count' => (int) $evaluation['sample_count'],
+            'evaluation_manifest_sha256' => (string) $evaluation['manifest_sha256'],
+            'evaluation_weights_sha256' => (string) $evaluation['weights_sha256'],
+            'evaluated_at' => (string) $evaluation['evaluated_at'],
+        ] : [
+            'cer' => null,
+            'wer' => null,
+            'exact_match' => null,
+            'evaluation_dataset' => null,
+            'evaluation_split' => null,
+            'evaluation_sample_count' => null,
+            'evaluation_manifest_sha256' => null,
+            'evaluation_weights_sha256' => null,
+            'evaluated_at' => null,
+        ];
+
+        $model->fill($attributes);
+        if (! $model->isDirty()) {
+            return;
+        }
+
+        $this->audit->saveAndLog(
+            $complete ? 'ocr_model.evaluation_imported' : 'ocr_model.evaluation_cleared',
+            $model,
+            $complete
+                ? "Imported the locked test-set evaluation for '{$model->key}'."
+                : "Cleared benchmark data because '{$model->key}' has no valid evaluation report.",
+            $actor,
+        );
     }
 
     private function guardNotBase(string $key, string $verb): void

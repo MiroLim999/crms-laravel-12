@@ -1,0 +1,368 @@
+/* ==========================================================================
+   OCR Model Performance (Image 5: Unmodified / Intact Specification)
+   ========================================================================== */
+
+.ocr-performance-section {
+  background: var(--bs-card-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  box-shadow: 0 2px 6px 0 rgba(67, 89, 113, 0.08);
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+
+.ocr-performance-header {
+  padding: 1.25rem 1.5rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.ocr-perf-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ocr-perf-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 0.375rem;
+  background: rgba(105, 108, 255, 0.12);
+  color: var(--bs-primary);
+  display: grid;
+  place-items: center;
+  font-size: 1.25rem;
+}
+
+.ocr-perf-model-select {
+  min-width: 280px;
+}
+
+.ocr-performance-body {
+  padding: 1.5rem;
+}
+
+.ocr-performance-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr);
+  gap: 1.75rem;
+  align-items: stretch;
+}
+
+@media (max-width: 991px) {
+  .ocr-performance-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Metric Top Cards */
+.ocr-metric-cards-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+@media (max-width: 575px) {
+  .ocr-metric-cards-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ocr-metric-box {
+  background: #fafafa;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  padding: 0.85rem 1rem;
+  transition: all 0.15s ease;
+}
+
+.ocr-metric-box:hover {
+  background: #fdfdfd;
+  border-color: rgba(105, 108, 255, 0.25);
+  box-shadow: 0 2px 6px rgba(67, 89, 113, 0.05);
+}
+
+.ocr-metric-box-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8592a3;
+  margin-bottom: 0.25rem;
+}
+
+.ocr-metric-box-val-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.15rem;
+}
+
+.ocr-metric-box-val {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--bs-heading-color);
+  line-height: 1.2;
+}
+
+.ocr-metric-box-delta {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+}
+
+.ocr-metric-box-sub {
+  font-size: 0.75rem;
+  color: #a1acb8;
+}
+
+/* Controls Bar (Toggles & Legend items) */
+.ocr-chart-controls-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.75rem;
+}
+
+.ocr-legend-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.ocr-legend-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: #f0f2f5;
+  color: #566a7f;
+}
+
+.ocr-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.ocr-chart-toggles {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.ocr-view-btn-group {
+  display: inline-flex;
+  border-radius: var(--bs-border-radius);
+  overflow: hidden;
+  border: 1px solid var(--bs-border-color);
+}
+
+.ocr-view-btn {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: none;
+  background: #fff;
+  color: #697a8d;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: all 0.15s ease;
+}
+
+.ocr-view-btn:hover {
+  background: #f5f5f9;
+}
+
+.ocr-view-btn.active {
+  background: var(--bs-primary);
+  color: #fff;
+}
+
+/* Radar Chart Canvas */
+.ocr-chart-container {
+  min-height: 400px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Radar Grid Anchor CSS rules (Retain Triangle Web when models are unchecked!) */
+.apexcharts-legend-series[seriesName="ocr_radar_grid_anchor"],
+.apexcharts-legend-series[seriesname="ocr_radar_grid_anchor"],
+.apexcharts-legend-series:has([data-default-text*="ocr_radar_grid_anchor"]) {
+  display: none !important;
+}
+
+.apexcharts-series[seriesName="ocr_radar_grid_anchor"],
+.apexcharts-series[seriesname="ocr_radar_grid_anchor"] {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+.apexcharts-tooltip:empty {
+  display: none !important;
+  opacity: 0 !important;
+}
+
+/* Benchmark Audit Column (Right side) */
+.ocr-audit-card {
+  background: #fafafa;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.ocr-audit-title-row {
+  margin-bottom: 1rem;
+}
+
+.ocr-audit-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8592a3;
+  margin-bottom: 0.35rem;
+}
+
+.ocr-audit-model-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--bs-heading-color);
+  margin: 0 0 0.45rem;
+  word-break: break-all;
+}
+
+.ocr-audit-badges {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.ocr-audit-metrics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.ocr-audit-metric-item {
+  background: #ffffff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ocr-audit-metric-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.ocr-audit-metric-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--bs-heading-color);
+}
+
+.ocr-audit-metric-baseline {
+  font-size: 0.72rem;
+  color: #8592a3;
+}
+
+.ocr-audit-metric-val-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ocr-audit-metric-val {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--bs-heading-color);
+}
+
+/* Green Key Takeaway Verdict Card */
+.ocr-verdict-box {
+  background: rgba(113, 221, 55, 0.12);
+  border: 1px solid rgba(113, 221, 55, 0.3);
+  border-radius: var(--bs-border-radius);
+  padding: 0.75rem 0.9rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-bottom: 1.15rem;
+  font-size: 0.8125rem;
+  color: #2e6812;
+  line-height: 1.4;
+}
+
+.ocr-verdict-box i {
+  font-size: 1.15rem;
+  color: #5bb326;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+/* Dataset Metadata Rows */
+.ocr-audit-meta-list {
+  margin-top: auto;
+  border-top: 1px solid var(--bs-border-color);
+  padding-top: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: #8592a3;
+}
+
+.ocr-audit-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ocr-audit-meta-item i {
+  color: var(--bs-primary);
+  font-size: 0.95rem;
+}
+
+/* Footer locked test split note */
+.ocr-performance-footer-note {
+  border-top: 1px solid var(--bs-border-color);
+  padding: 0.85rem 1.5rem;
+  font-size: 0.78rem;
+  color: #8592a3;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fafafa;
+}
+
+.ocr-performance-footer-note i {
+  font-size: 1rem;
+  color: #8592a3;
+  flex-shrink: 0;
+}

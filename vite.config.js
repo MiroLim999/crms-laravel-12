@@ -11,17 +11,35 @@ export default defineConfig({
                 'resources/scss/app.scss',
                 'resources/css/app.css',
                 'resources/js/app.js',
+                // Page-scoped archive split view and shared disclosure animation.
+                'resources/js/record-detail.js',
+                'resources/js/disclosure-motion.js',
+                // Grouped correction editor with live no-op detection.
+                'resources/js/change-request.js',
                 // Auth-page decoration (centred card, corner shapes). Only the
                 // guest layout loads it, so it stays out of the main bundle.
                 'resources/scss/pages/page-auth.scss',
-                // Loaded only by the analytics page. Keeping it out of app.js
-                // saves everyone else ~154 KB gzip on every page load.
-                'resources/js/sneat/apexcharts.js',
+                // Consolidated dashboard analytics. Its ApexCharts dependency is
+                // isolated from app.js so non-dashboard pages do not pay for it.
+                'resources/js/dashboard-analytics.js',
                 // Own entry: pulls in the PDF.js module tree. Only the scanning
                 // workspace and the template builder use it.
-                // NOTE: pdf.worker.mjs is now served from the CDN (see field-marker.js).
-                //       Do not add `pdfjs-dist/build/pdf.worker.mjs?url` back here.
+                // NOTE: the PDF.js worker is not bundled. tools/copy-pdf-worker.mjs
+                //       copies it to public/vendor/pdfjs before every build (see
+                //       field-marker.js). Do not add `pdfjs-dist/build/pdf.worker.mjs?url`
+                //       here: the Node tests import field-marker.js directly.
                 'resources/js/field-marker.js',
+                // Shared Windows-style drag selection used by both marker editors.
+                'resources/js/marquee-selection.js',
+                // Line outlines in the Verify step: the geometry helpers and the
+                // SVG overlay, imported by the scanning workspace's inline module.
+                'resources/js/line-geometry.js',
+                'resources/js/line-overlay.js',
+                // The value checks Verify runs from each template field's settings.
+                'resources/js/value-types.js',
+                // Template Builder interaction shell. It shares FieldMarker with
+                // Staff scanning but is only loaded on Super Admin layout pages.
+                'resources/js/template-builder.js',
                 // OCR workspace layout refinements. Loaded from the page's head
                 // stack to avoid a flash of the uncomposed cards before JS runs.
                 'resources/scss/pages/ocr-workspace.scss',
@@ -87,9 +105,9 @@ export default defineConfig({
                         return 'vendor-pdfjs';
                     }
 
-                    // ApexCharts already has its own entry (apexcharts.js) which
-                    // prevents it from appearing in app.js, but mark it explicitly
-                    // to stop Rollup from hoisting it into a shared chunk.
+                    // ApexCharts enters through the page-scoped dashboard and OCR
+                    // analytics bundles, which keeps it out of app.js. Mark it
+                    // explicitly so Rollup retains a separately cached vendor chunk.
                     if (id.includes('node_modules/apexcharts')) {
                         return 'vendor-apexcharts';
                     }

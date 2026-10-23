@@ -1,38 +1,39 @@
 {{-- Role-driven vertical menu. Items come from App\Support\Navigation. --}}
-<aside id="layout-menu" class="layout-menu menu-vertical menu bg-menu-theme">
+<aside id="layout-menu" class="layout-menu menu-vertical menu bg-menu-theme"
+       aria-label="Primary navigation">
 
-    <div class="app-brand demo">
-        <a href="{{ route('dashboard') }}" class="app-brand-link">
-            <span class="app-brand-logo demo">
-                <img src="{{ asset('assets/img/logo.png') }}" alt="{{ config('app.name') }} logo"
-                     width="36" height="36" class="d-block rounded">
+    <div class="app-brand sidebar-brand">
+        <a href="{{ route('dashboard') }}" class="app-brand-link sidebar-brand__link"
+           aria-label="{{ config('app.name') }} dashboard">
+            <span class="app-brand-logo sidebar-brand__mark">
+                <img src="{{ asset('assets/img/crms-logo.png') }}" alt="{{ config('app.name') }} logo"
+                     width="36" height="36">
             </span>
-            <span class="app-brand-text demo menu-text fw-bold ms-2">CRMS</span>
-        </a>
-
-        <a href="javascript:void(0);"
-           class="layout-menu-toggle menu-link text-large ms-auto d-block d-xl-none"
-           aria-label="Collapse menu">
-            <i class="icon-base bx bx-chevron-left icon-sm d-flex align-items-center justify-content-center"></i>
+            <span class="app-brand-text menu-text sidebar-brand__name">CRMS</span>
         </a>
     </div>
 
-    <div class="menu-divider mt-0"></div>
+    <div class="menu-divider sidebar-brand-divider"></div>
     <div class="menu-inner-shadow"></div>
 
-    <ul class="menu-inner py-1">
-        @foreach (\App\Support\Navigation::sections() as $section)
+    <ul class="menu-inner sidebar-nav">
+        @foreach (\App\Support\Navigation::sections() as $sectionIndex => $section)
             @if ($section['header'])
-                <li class="menu-header small text-uppercase">
+                <li class="menu-header sidebar-nav__section" id="sidebar-section-{{ $sectionIndex }}">
                     <span class="menu-header-text">{{ $section['header'] }}</span>
                 </li>
             @endif
 
             @foreach ($section['items'] as $item)
-                <li class="menu-item {{ $item['active'] ? 'active' : '' }}">
-                    <a href="{{ route($item['route']) }}" class="menu-link">
-                        <i class="menu-icon icon-base bx {{ $item['icon'] }}"></i>
-                        <div>{{ $item['label'] }}</div>
+                <li class="menu-item sidebar-nav__item {{ $item['active'] ? 'active' : '' }}">
+                    <a href="{{ route($item['route']) }}" class="menu-link sidebar-nav__link"
+                       aria-label="{{ $item['label'] }}" title="{{ $item['label'] }}"
+                       @if ($item['active']) aria-current="page" @endif>
+                        <i class="menu-icon icon-base bx {{ $item['icon'] }}" aria-hidden="true"></i>
+                        <span class="sidebar-nav__label">{{ $item['label'] }}</span>
+                        @if (! empty($item['badge']))
+                            <span class="badge rounded-pill {{ $item['badge']['class'] ?? 'bg-primary' }} ms-auto sidebar-nav__badge">{{ $item['badge']['count'] }}</span>
+                        @endif
                     </a>
                 </li>
             @endforeach

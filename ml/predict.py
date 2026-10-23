@@ -24,22 +24,23 @@ import os
 import hf_quiet  # noqa: F401
 
 import csv
-import math
 
 import torch
 from PIL import Image
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 import dataset_registry as ds
+from trocr_common import (
+    ModelNotFoundError,
+    eos_token_id,
+    load_model,
+    resolve_model,
+    sequence_confidence,
+)
 
 # ============================================================
 # CONFIG - defaults only.
 # ============================================================
 ML_ROOT = os.path.dirname(os.path.abspath(__file__))
-MODELS_DIR = os.path.join(ML_ROOT, "models")
-
-BASE_MODEL_KEY = "base"
-BASE_MODEL_NAME = "microsoft/trocr-base-handwritten"
 
 DEFAULT_MODEL = "TrOCR-fine-tune-10k-samples"
 DEFAULT_FOLDER = os.path.join(ML_ROOT, "new_images")
@@ -63,62 +64,6 @@ class PredictionError(Exception):
 
 def _noop(*_args, **_kwargs):
     pass
-
-
-def resolve_model(model):
-    """Turn a model key from the UI into something from_pretrained accepts."""
-    if not model or model == BASE_MODEL_KEY:
-        return BASE_MODEL_NAME, BASE_MODEL_KEY
-
-    if os.path.isdir(model):
-        return model, os.path.basename(os.path.normpath(model))
-
-    candidate = os.path.join(MODELS_DIR, model)
-    if os.path.isdir(candidate):
-        return candidate, model
-
-    raise PredictionError(f"Model '{model}' was not found under ml/models/.")
-
-
-def _load(source):
-    return (
-        TrOCRProcessor.from_pretrained(source),
-        VisionEncoderDecoderModel.from_pretrained(source),
-    )
-
-
-def eos_token_id(net, processor):
-    """The EOS id can live in several places depending on the model."""
-    return (
-        getattr(net.generation_config, "eos_token_id", None)
-        or getattr(net.config, "eos_token_id", None)
-        or getattr(net.config.decoder, "eos_token_id", None)
-        or processor.tokenizer.sep_token_id
-    )
-
-
-def sequence_confidence(net, gen_output, eos_id):
-    """Geometric mean of per-token probabilities up to the first EOS, as a %.
-
-    Identical to the calculation in api/main.py - the number a Super Admin sees
-    while spot-checking must be the number Staff see while scanning."""
-    try:
-        scores = net.compute_transition_scores(
-            gen_output.sequences, gen_output.scores, normalize_logits=True
-        )[0]
-        gen_tokens = gen_output.sequences[0][1:1 + len(scores)]
-        log_probs = []
-        for tok, lp in zip(gen_tokens, scores):
-            if not torch.isfinite(lp):
-                continue
-            log_probs.append(lp.item())
-            if tok.item() == eos_id:
-                break
-        if not log_probs:
-            return 0.0
-        return round(math.exp(sum(log_probs) / len(log_probs)) * 100.0, 1)
-    except Exception:
-        return 0.0
 
 
 def collect_images(folder, limit=MAX_IMAGES):
@@ -159,9 +104,12 @@ def run_prediction(
         average_confidence, low_confidence count, and csv path if written.
     """
     log = log or _noop
-    loader = loader or _load
+    loader = loader or load_model
 
-    source, model_key = resolve_model(model)
+    try:
+        source, model_key = resolve_model(model)
+    except ModelNotFoundError as e:
+        raise PredictionError(str(e)) from e
 
     if image_paths:
         paths = list(image_paths)[:limit] if limit else list(image_paths)

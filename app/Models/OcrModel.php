@@ -20,6 +20,8 @@ class OcrModel extends Model
     protected $fillable = [
         'key', 'label', 'notes', 'is_active',
         'cer', 'wer', 'exact_match', 'evaluated_at', 'registered_by',
+        'evaluation_dataset', 'evaluation_split', 'evaluation_sample_count',
+        'evaluation_manifest_sha256', 'evaluation_weights_sha256',
         'disk_deleted_at', 'disk_deleted_by',
     ];
 
@@ -30,6 +32,7 @@ class OcrModel extends Model
             'cer' => 'float',
             'wer' => 'float',
             'exact_match' => 'float',
+            'evaluation_sample_count' => 'integer',
             'evaluated_at' => 'datetime',
             'disk_deleted_at' => 'datetime',
         ];
@@ -72,6 +75,13 @@ class OcrModel extends Model
 
     public function hasEvaluation(): bool
     {
-        return $this->cer !== null || $this->wer !== null || $this->exact_match !== null;
+        return $this->cer !== null
+            && $this->wer !== null
+            && $this->exact_match !== null
+            && $this->evaluation_dataset !== null
+            && $this->evaluation_split === 'test'
+            && $this->evaluation_sample_count > 0
+            && $this->evaluation_manifest_sha256 !== null
+            && $this->evaluation_weights_sha256 !== null;
     }
 }

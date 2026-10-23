@@ -35,7 +35,7 @@
                     <h3 class="h6 mb-1">Drop a .zip or model folder here</h3>
                     <p class="text-muted small mb-3">or choose one from this computer</p>
                     <div class="d-flex flex-wrap justify-content-center gap-2">
-                        <button type="button" class="btn btn-sm btn-label-primary" data-role="browse-zip">
+                        <button type="button" class="btn btn-sm btn-primary" data-role="browse-zip">
                             Choose .zip
                         </button>
                         <button type="button" class="btn btn-sm btn-outline-primary" data-role="browse-folder">
@@ -54,7 +54,7 @@
                         <div class="fw-medium text-truncate" id="model-file-summary-title"></div>
                         <div class="text-muted small" id="model-file-summary-detail"></div>
                     </div>
-                    <button class="btn btn-sm btn-text-secondary" type="button" id="model-selection-clear">
+                    <button class="btn btn-sm btn-outline-secondary" type="button" id="model-selection-clear">
                         Change
                     </button>
                 </div>

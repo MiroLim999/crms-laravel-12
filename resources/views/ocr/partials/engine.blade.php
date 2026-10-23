@@ -1,7 +1,7 @@
 {{--
     Read-only service state. CRMS deliberately does not start or stop this OS
-    process. The launch command remains visible in every state so a Super Admin can
-    copy it before opening Command Prompt or PowerShell.
+    process. The setup commands remain visible in every state so a Super Admin can
+    copy them before opening PowerShell.
 --}}
 <section class="card ocr-engine-card {{ $engine['reachable'] ? 'is-online' : 'is-offline' }} mb-4"
          id="engine-card"
@@ -39,17 +39,44 @@
         </div>
 
         <div class="ocr-engine-recovery mt-3 pt-3 border-top">
-            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-                <div>
-                    <div class="fw-medium small">Launch command</div>
-                    <div class="text-muted small">Run from the project root in Command Prompt or PowerShell.</div>
-                </div>
-                <button class="btn btn-sm btn-label-secondary" type="button" id="copy-engine-command">
-                    <i class="icon-base bx bx-copy icon-sm me-1"></i>
-                    <span>Copy command</span>
-                </button>
+            <div class="mb-3">
+                <div class="fw-medium small">PowerShell setup</div>
+                <div class="text-muted small">Run these commands from the project root, in order.</div>
             </div>
-            <div class="ocr-command-line" id="engine-command">{{ $engine['command'] }}</div>
+
+            <div class="row g-3">
+                <div class="col-12 col-lg-6">
+                    <div class="ocr-command-step h-100">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                            <div class="small"><span class="text-muted me-1">1.</span> Activate virtual environment</div>
+                            <button class="btn btn-sm btn-label-secondary js-copy-command"
+                                    type="button"
+                                    data-copy-target="activate-environment-command"
+                                    aria-label="Copy virtual environment activation command">
+                                <i class="icon-base bx bx-copy icon-sm me-1"></i>
+                                <span>Copy command</span>
+                            </button>
+                        </div>
+                        <div class="ocr-command-line" id="activate-environment-command">.\.venv\Scripts\Activate.ps1</div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-6">
+                    <div class="ocr-command-step h-100">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                            <div class="small"><span class="text-muted me-1">2.</span> Start OCR service</div>
+                            <button class="btn btn-sm btn-label-secondary js-copy-command"
+                                    type="button"
+                                    data-copy-target="engine-command"
+                                    aria-label="Copy OCR service launch command">
+                                <i class="icon-base bx bx-copy icon-sm me-1"></i>
+                                <span>Copy command</span>
+                            </button>
+                        </div>
+                        <div class="ocr-command-line" id="engine-command">{{ $engine['command'] }}</div>
+                    </div>
+                </div>
+            </div>
             @unless ($engine['reachable'])
                 @if ($engine['error'])
                     <div class="text-danger small mt-2">

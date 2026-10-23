@@ -54,10 +54,10 @@
                 </select>
             </div>
             <div class="col-md-8 d-flex align-items-end gap-2">
-                <button class="btn btn-outline-secondary" type="submit">
+                <button class="btn btn-primary" type="submit">
                     <i class="icon-base bx bx-filter-alt icon-sm me-1"></i> Apply filters
                 </button>
-                <a href="{{ route('reports.index') }}" class="btn btn-text-secondary">Reset</a>
+                <a href="{{ route('reports.index') }}" class="btn btn-outline-secondary">Reset</a>
             </div>
         </form>
     </x-card>
@@ -67,7 +67,6 @@
             $tiles = [
                 ['Matching records', number_format($summary['total'])],
                 ['Submitted', number_format($summary['submitted'])],
-                ['Drafts', number_format($summary['drafts'])],
                 ['Average OCR confidence',
                     $summary['average_confidence'] === null ? '—' : $summary['average_confidence'].'%'],
             ];
@@ -105,11 +104,6 @@
                     </thead>
                     <tbody>
                         @foreach ($records as $record)
-                            @php
-                                $confidences = $record->fields
-                                    ->pluck('ocr_confidence')
-                                    ->filter(fn ($value) => $value !== null);
-                            @endphp
                             <tr>
                                 <td>
                                     <div class="fw-medium">{{ $record->title() }}</div>
@@ -119,8 +113,8 @@
                                 </td>
                                 <td>
                                     <span class="d-inline-flex align-items-center gap-1">
-                                        <i class="icon-base bx {{ $record->doc_type->icon() }} icon-sm text-muted"></i>
-                                        {{ $record->doc_type->shortLabel() }}
+                                        <i class="icon-base bx {{ $record->typeIcon() }} icon-sm text-muted"></i>
+                                        {{ $record->typeShortLabel() }}
                                     </span>
                                 </td>
                                 <td>
@@ -129,17 +123,17 @@
                                     </span>
                                 </td>
                                 <td class="text-muted">
-                                    {{ $record->created_at?->format('j M Y') }}
+                                    {{ \App\Support\LocalTime::format($record->created_at, 'j M Y') }}
                                     <div><small>{{ $record->creator?->name }}</small></div>
                                 </td>
                                 <td class="text-muted">
-                                    {{ $record->submitted_at?->format('j M Y') ?? '—' }}
+                                    {{ \App\Support\LocalTime::format($record->submitted_at, 'j M Y') ?: '—' }}
                                     @if ($record->submitter)
                                         <div><small>{{ $record->submitter->name }}</small></div>
                                     @endif
                                 </td>
                                 <td class="text-end">
-                                    {{ $confidences->isEmpty() ? '—' : round($confidences->avg(), 1).'%' }}
+                                    {{ $record->fields_avg_ocr_confidence === null ? '—' : round((float) $record->fields_avg_ocr_confidence, 1).'%' }}
                                 </td>
                             </tr>
                         @endforeach

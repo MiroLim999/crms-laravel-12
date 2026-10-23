@@ -20,6 +20,9 @@ Endpoints:
   POST /delete_model -> { "model": "<key>" } removes that folder from ml/models/
   POST /rename_model -> { "model": "<key>", "newName": "<name>" } renames the folder
 
+Every endpoint but /health and /add_model needs the X-CRMS-Service-Key header:
+the secret Laravel shares with this service (OCR_UPLOAD_SECRET, else APP_KEY).
+
 Training, evaluation, dataset preparation, and batch prediction are deliberately
 NOT here. They are long-running command-line work - see ml/train_trocr.py,
 ml/test_finetuned.py, ml/predict.py - and a request handler is the wrong place to
@@ -36,10 +39,12 @@ import hmac
 import hashlib
 import shutil
 import base64
+import logging
 import tempfile
 import threading
 import zipfile
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, Optional
 
 # ml/ and ml/api/ go on sys.path so the sibling modules import by bare name
@@ -59,17 +64,32 @@ import hf_quiet  # noqa: E402,F401
 
 import torch
 from PIL import Image
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 # Import-cheap sibling: no torch, so /health stays responsive while the GPU is busy.
 # Only `sanitise_name` is used, so model and dataset names fold to a safe path
 # segment by exactly one rule rather than two copies of it.
 import dataset_registry as ds
+# Shared with predict.py and test_finetuned.py, so a reading is loaded and
+# scored the same way everywhere.
+from trocr_common import eos_token_id, load_model, sequence_confidence
+
+# The service's own messages (models loading, added, deleted, renamed). Uvicorn
+# configures only its own loggers, so without a handler of its own INFO would
+# vanish. Not logging.basicConfig(): that turns on the root logger and makes
+# every library chatty again (see hf_quiet.py). The guard keeps one handler
+# when this module is imported under two names (ml.api.main and main).
+logger = logging.getLogger("ocr-api")
+if not logger.handlers:
+    _log_handler = logging.StreamHandler()
+    _log_handler.setFormatter(logging.Formatter("[ocr-api] %(message)s"))
+    logger.addHandler(_log_handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 # ============================================================
 # CONFIG
@@ -87,12 +107,20 @@ MODELS_DIR = os.path.join(ML_ROOT, "models")
 FALLBACK_MODEL = "microsoft/trocr-base-handwritten"
 BASE_MODEL_KEY = "base"
 BASE_MODEL_LABEL = "TrOCR base (not fine-tuned)"
+BASE_MODEL_DIR = os.path.join(MODELS_DIR, BASE_MODEL_KEY)
 
 MAX_NEW_TOKENS = 32
+
+# /ocr reads this many crops in one generate() call. A GPU reads a batch in
+# about the time it takes to read one crop; a smaller number uses less GPU
+# memory.
+OCR_BATCH_SIZE = 16
 
 # Uploaded weights are ~1.3 GB, so they are copied to disk in chunks rather
 # than read into memory.
 UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
+EVALUATION_REPORT_FILE = "evaluation-report.json"
+MAX_EVALUATION_REPORT_BYTES = 1024 * 1024
 
 # Optional friendly labels for known folders. Any folder not listed here gets a
 # label auto-generated from its name.
@@ -114,6 +142,7 @@ DEFAULT_BROWSER_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$"
 # and each model is only loaded once.
 _device = None
 _models = {}  # cache_key -> {"model", "processor", "eos_id", "label"}
+_evaluation_cache = {}  # model_dir -> {signature, report}; avoids re-hashing 1.3 GB on every poll
 
 # Inference endpoints are plain `def`, so FastAPI runs them on a threadpool, and
 # evaluation jobs run on their own thread. Several of those can ask for the same
@@ -152,6 +181,10 @@ def _discover_models():
     found = {}
     if os.path.isdir(MODELS_DIR):
         for name in sorted(os.listdir(MODELS_DIR)):
+            # The built-in base checkpoint has its own stable key and descriptor
+            # below. Do not expose its local folder as a duplicate custom model.
+            if name == BASE_MODEL_KEY:
+                continue
             path = os.path.join(MODELS_DIR, name)
             if _looks_like_model(path):
                 found[name] = path
@@ -189,8 +222,9 @@ def _resolve_key(requested):
 def _model_info():
     """Descriptor list of every selectable model for /models and /health."""
     discovered = _discover_models()
-    infos = [
-        {
+    infos = []
+    for key, path in discovered.items():
+        info = {
             "key": key,
             "label": _label_for(key),
             "available": True,
@@ -203,16 +237,29 @@ def _model_info():
                 if os.path.isfile(os.path.join(path, name))
             ),
         }
-        for key, path in discovered.items()
-    ]
-    # The base model is always available (pulled from the HF cache / hub).
-    infos.append({
+        evaluation = _read_evaluation_report(path)
+        if evaluation is not None:
+            info["evaluation"] = evaluation
+        infos.append(info)
+    base_is_local = _looks_like_model(BASE_MODEL_DIR)
+    base_info = {
         "key": BASE_MODEL_KEY,
         "label": BASE_MODEL_LABEL,
+        # Keep the legacy online fallback, but report the actual local files so
+        # the workspace can distinguish a reproducible install from a hub load.
         "available": True,
         "loaded": BASE_MODEL_KEY in _models,
-        "files": [],
-    })
+        "files": sorted(
+            name
+            for name in os.listdir(BASE_MODEL_DIR)
+            if base_is_local and os.path.isfile(os.path.join(BASE_MODEL_DIR, name))
+        ) if base_is_local else [],
+    }
+    if base_is_local:
+        base_evaluation = _read_evaluation_report(BASE_MODEL_DIR)
+        if base_evaluation is not None:
+            base_info["evaluation"] = base_evaluation
+    infos.append(base_info)
     return infos
 
 
@@ -221,7 +268,8 @@ def _load_model(key):
     device = _get_device()
 
     if key == BASE_MODEL_KEY:
-        model_src, label, cache_key = FALLBACK_MODEL, BASE_MODEL_LABEL, BASE_MODEL_KEY
+        model_src = BASE_MODEL_DIR if _looks_like_model(BASE_MODEL_DIR) else FALLBACK_MODEL
+        label, cache_key = BASE_MODEL_LABEL, BASE_MODEL_KEY
     else:
         model_src = _discover_models().get(key)
         if model_src is None:
@@ -243,22 +291,16 @@ def _load_model(key):
         if entry is not None:
             return entry
 
-        print(f"[ocr-api] Loading model: {label}  ({model_src})  on  {device}")
-        processor = TrOCRProcessor.from_pretrained(model_src)
-        model = VisionEncoderDecoderModel.from_pretrained(model_src)
+        logger.info(f"Loading model: {label}  ({model_src})  on  {device}")
+        processor, model = load_model(model_src)
         model.to(device)
         model.eval()
 
-        eos_id = (
-            getattr(model.generation_config, "eos_token_id", None)
-            or getattr(model.config, "eos_token_id", None)
-            or getattr(model.config.decoder, "eos_token_id", None)
-            or processor.tokenizer.sep_token_id
-        )
+        eos_id = eos_token_id(model, processor)
 
-        entry = {"model": model, "processor": processor, "eos_id": eos_id, "label": label}
+        entry ={"model": model, "processor": processor, "eos_id": eos_id, "label": label}
         _models[cache_key] = entry
-        print(f"[ocr-api] Model ready: {label}")
+        logger.info(f"Model ready: {label}")
         return entry
 
 
@@ -331,6 +373,16 @@ def _upload_secret():
     return secret.encode("utf-8")
 
 
+def require_service_key(supplied: str = Header("", alias="X-CRMS-Service-Key")) -> None:
+    """Only Laravel may call the service: it sends the secret both sides share.
+
+    Binding to 127.0.0.1 keeps other machines out, but not other programs on this
+    one, such as a page in the browser. /health stays open for "is it up?", and
+    /add_model has its own short-lived signed ticket instead."""
+    if not hmac.compare_digest(supplied.encode("utf-8"), _upload_secret()):
+        raise HTTPException(status_code=401, detail="This call needs the CRMS service key.")
+
+
 def _base64_url_decode(value):
     padding = "=" * (-len(value) % 4)
     return base64.urlsafe_b64decode(value + padding)
@@ -368,27 +420,6 @@ def _authorize_model_upload(token, requested_name):
         raise HTTPException(status_code=401, detail="Model-upload authorization has expired.")
 
 
-def _sequence_confidence(model, gen_output, eos_id):
-    """Geometric mean of per-token probabilities up to the first EOS, as a %."""
-    try:
-        scores = model.compute_transition_scores(
-            gen_output.sequences, gen_output.scores, normalize_logits=True
-        )[0]
-        gen_tokens = gen_output.sequences[0][1:1 + len(scores)]
-        log_probs = []
-        for tok, lp in zip(gen_tokens, scores):
-            if not torch.isfinite(lp):
-                continue
-            log_probs.append(lp.item())
-            if tok.item() == eos_id:
-                break
-        if not log_probs:
-            return 0.0
-        return round(math.exp(sum(log_probs) / len(log_probs)) * 100.0, 1)
-    except Exception:
-        return 0.0
-
-
 def _decode_data_url(data_url):
     """Turn a 'data:image/png;base64,...' string into a PIL RGB image."""
     if "," in data_url:
@@ -406,6 +437,7 @@ class ModelInfo(BaseModel):
     available: bool
     loaded: bool
     files: list[str] = Field(default_factory=list)
+    evaluation: Optional[dict[str, Any]] = None
 
 
 class HealthResponse(BaseModel):
@@ -484,8 +516,8 @@ async def lifespan(app: FastAPI):
     # Nothing heavy here on purpose: models stay lazy so the service answers
     # /health immediately after start, and the device is only probed on the
     # first real inference.
-    print(f"[ocr-api] Models directory:   {MODELS_DIR}")
-    print(f"[ocr-api] Discovered models: {sorted(_discover_models()) or '(none)'}")
+    logger.info(f"Models directory:   {MODELS_DIR}")
+    logger.info(f"Discovered models: {sorted(_discover_models()) or '(none)'}")
     yield
     _models.clear()
 
@@ -555,7 +587,7 @@ def health() -> dict:
     }
 
 
-@app.get("/models", response_model=ModelsResponse)
+@app.get("/models", response_model=ModelsResponse, dependencies=[Depends(require_service_key)])
 def models() -> dict:
     """List selectable models so the frontend can build its dropdown."""
     return {
@@ -564,10 +596,37 @@ def models() -> dict:
     }
 
 
+def _read_crops(model, processor, device, eos_id, images):
+    """(text, confidence) for each image, in order, from one generate() call."""
+    pixel_values = processor(images=images, return_tensors="pt").pixel_values.to(device)
+    with torch.no_grad():
+        # use_cache: fine-tuned models save use_cache=false from training, so
+        # each new token recomputed every earlier one. Same readings and
+        # confidences, measured on 597 real crops; 215 crops 17 s -> 8 s.
+        gen_output = model.generate(
+            pixel_values,
+            max_new_tokens=MAX_NEW_TOKENS,
+            output_scores=True,
+            return_dict_in_generate=True,
+            use_cache=True,
+        )
+    texts = processor.batch_decode(gen_output.sequences, skip_special_tokens=True)
+    return [
+        (text.strip(), sequence_confidence(model, gen_output, eos_id, row))
+        for row, text in enumerate(texts)
+    ]
+
+
+def _ocr_error(name, error):
+    """The result row for a crop that could not be read."""
+    return {"name": name, "text": "", "confidence": 0.0, "error": str(error)}
+
+
 # Plain `def`, not `async def`: generate() is blocking and CPU/GPU-bound, so
 # FastAPI runs it in a worker thread and /health and uploads stay responsive
 # while an OCR job is running.
-@app.post("/ocr", response_model=OcrResponse, response_model_exclude_none=True)
+@app.post("/ocr", response_model=OcrResponse, response_model_exclude_none=True,
+          dependencies=[Depends(require_service_key)])
 def ocr(payload: OcrRequest) -> dict:
     if not payload.fields:
         raise HTTPException(status_code=400, detail="Send a non-empty 'fields' list.")
@@ -579,27 +638,38 @@ def ocr(payload: OcrRequest) -> dict:
     device = _get_device()
     eos_id = entry["eos_id"]
 
-    results = []
-    for field in payload.fields:
-        name = field.name
+    # Decode every crop first. A broken one becomes an error row, so it can't
+    # fail the batch it would have been read in.
+    results = [None] * len(payload.fields)
+    images = []  # (position in the request, image)
+    for index, field in enumerate(payload.fields):
         try:
-            image = _decode_data_url(field.image)
-            pixel_values = processor(images=image, return_tensors="pt").pixel_values.to(device)
-            with torch.no_grad():
-                gen_output = model.generate(
-                    pixel_values,
-                    max_new_tokens=MAX_NEW_TOKENS,
-                    output_scores=True,
-                    return_dict_in_generate=True,
-                )
-            text = processor.batch_decode(
-                gen_output.sequences, skip_special_tokens=True
-            )[0].strip()
-            conf = _sequence_confidence(model, gen_output, eos_id)
-            results.append({"name": name, "text": text, "confidence": conf})
+            images.append((index, _decode_data_url(field.image)))
         except Exception as e:
-            # One bad crop must not fail the whole batch.
-            results.append({"name": name, "text": "", "confidence": 0.0, "error": str(e)})
+            results[index] = _ocr_error(field.name, e)
+
+    for start in range(0, len(images), OCR_BATCH_SIZE):
+        chunk = images[start:start + OCR_BATCH_SIZE]
+        try:
+            readings = _read_crops(model, processor, device, eos_id, [image for _, image in chunk])
+        except Exception as e:
+            # For example out of GPU memory. Read this chunk one crop at a time,
+            # so only a crop that also fails on its own gets an error row.
+            logger.warning("Reading %d crops together failed (%s); reading them one at a time.", len(chunk), e)
+            readings = []
+            for _, image in chunk:
+                try:
+                    readings.append(_read_crops(model, processor, device, eos_id, [image])[0])
+                except Exception as single:
+                    readings.append(single)
+
+        for (index, _), reading in zip(chunk, readings):
+            name = payload.fields[index].name
+            if isinstance(reading, Exception):
+                results[index] = _ocr_error(name, reading)
+            else:
+                text, conf = reading
+                results[index] = {"name": name, "text": text, "confidence": conf}
 
     return {"results": results, "model": entry["label"], "modelKey": key}
 
@@ -611,11 +681,112 @@ _ALLOWED_MODEL_FILES = {
     "tokenizer.json", "tokenizer_config.json",
     "special_tokens_map.json", "added_tokens.json",
     "vocab.json", "merges.txt", "sentencepiece.bpe.model", "spm.model",
-    "model.safetensors", "pytorch_model.bin",
+    "model.safetensors", "pytorch_model.bin", EVALUATION_REPORT_FILE,
 }
 _ALLOWED_MODEL_EXTS = {".json", ".safetensors", ".bin", ".txt", ".model"}
 
 _WEIGHT_FILES = {"model.safetensors", "pytorch_model.bin"}
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        while chunk := source.read(UPLOAD_CHUNK_BYTES):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _read_evaluation_report(model_dir, strict=False):
+    """Return a normalized, artifact-bound benchmark report.
+
+    Reports are optional, but a report included in a new upload must be valid.
+    The weights digest prevents metrics from one Kaggle run being attached to a
+    different checkpoint by accidentally mixing files before upload.
+    """
+    path = os.path.join(model_dir, EVALUATION_REPORT_FILE)
+    if not os.path.isfile(path):
+        _evaluation_cache.pop(model_dir, None)
+        return None
+
+    try:
+        if os.path.getsize(path) > MAX_EVALUATION_REPORT_BYTES:
+            raise ValueError("the report is larger than 1 MB")
+        with open(path, "r", encoding="utf-8") as source:
+            report = json.load(source)
+
+        if not isinstance(report, dict) or report.get("schema_version") != 1:
+            raise ValueError("schema_version must be 1")
+        if report.get("split") != "test":
+            raise ValueError("split must be 'test'")
+
+        sample_count = int(report.get("sample_count", 0))
+        if sample_count < 1:
+            raise ValueError("sample_count must be positive")
+
+        dataset = str(report.get("dataset", "")).strip()
+        manifest_sha256 = str(report.get("manifest_sha256", "")).lower()
+        weights_file = os.path.basename(str(report.get("weights_file", "")))
+        expected_weights_sha256 = str(report.get("weights_sha256", "")).lower()
+        evaluated_at = str(report.get("evaluated_at", "")).strip()
+        if not dataset:
+            raise ValueError("dataset is required")
+        if len(manifest_sha256) != 64 or any(c not in "0123456789abcdef" for c in manifest_sha256):
+            raise ValueError("manifest_sha256 must be a SHA-256 digest")
+        if weights_file not in _WEIGHT_FILES:
+            raise ValueError("weights_file must name the model weights")
+        if len(expected_weights_sha256) != 64 or any(c not in "0123456789abcdef" for c in expected_weights_sha256):
+            raise ValueError("weights_sha256 must be a SHA-256 digest")
+        weights_path = os.path.join(model_dir, weights_file)
+        if not os.path.isfile(weights_path):
+            raise ValueError(f"{weights_file} is missing")
+
+        signature = (
+            os.stat(path).st_mtime_ns, os.path.getsize(path),
+            os.stat(weights_path).st_mtime_ns, os.path.getsize(weights_path),
+            expected_weights_sha256,
+        )
+        cached = _evaluation_cache.get(model_dir)
+        if not strict and cached is not None and cached["signature"] == signature:
+            return cached["report"]
+        if not hmac.compare_digest(_sha256_file(weights_path), expected_weights_sha256):
+            raise ValueError("weights_sha256 does not match the uploaded checkpoint")
+
+        parsed_time = datetime.fromisoformat(evaluated_at.replace("Z", "+00:00"))
+        if parsed_time.tzinfo is None:
+            raise ValueError("evaluated_at must include a timezone")
+
+        metrics = report.get("metrics")
+        if not isinstance(metrics, dict):
+            raise ValueError("metrics is required")
+        cer = float(metrics["cer"])
+        wer = float(metrics["wer"])
+        exact_match = float(metrics["exact_match"])
+        if not all(math.isfinite(value) and value >= 0 for value in (cer, wer)):
+            raise ValueError("CER and WER must be finite non-negative rates")
+        if not math.isfinite(exact_match) or not 0 <= exact_match <= 1:
+            raise ValueError("exact_match must be between 0 and 1")
+
+        normalized = {
+            "schema_version": 1,
+            "model_key": str(report.get("model_key", "")).strip(),
+            "dataset": dataset,
+            "manifest_sha256": manifest_sha256,
+            "split": "test",
+            "sample_count": sample_count,
+            "metrics": {"cer": cer, "wer": wer, "exact_match": exact_match},
+            "evaluated_at": parsed_time.isoformat(),
+            "weights_file": weights_file,
+            "weights_sha256": expected_weights_sha256,
+        }
+        _evaluation_cache[model_dir] = {"signature": signature, "report": normalized}
+        return normalized
+    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as error:
+        if strict:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid {EVALUATION_REPORT_FILE}: {error}.",
+            )
+        return None
 
 # A model folder is a dozen small files plus one big weights file. An archive with
 # thousands of members is not a model, and walking it would be the expensive part of
@@ -854,6 +1025,10 @@ def add_model(
                     os.remove(staged)
                 except OSError:
                     pass
+
+        # Optional, but never silently accept a malformed or mismatched report.
+        # A valid report is exposed through /models for Laravel to persist.
+        _read_evaluation_report(target, strict=True)
     except HTTPException:
         shutil.rmtree(target, ignore_errors=True)  # never leave a half-written model
         raise
@@ -861,11 +1036,11 @@ def add_model(
         shutil.rmtree(target, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"Failed to save files: {e}")
 
-    print(f"[ocr-api] Added model '{safe_name}' with {len(saved)} files.")
+    logger.info(f"Added model '{safe_name}' with {len(saved)} files.")
     return {"ok": True, "name": safe_name, "saved": saved}
 
 
-@app.post("/delete_model", response_model=DeleteModelResponse)
+@app.post("/delete_model", response_model=DeleteModelResponse, dependencies=[Depends(require_service_key)])
 def delete_model(payload: DeleteModelRequest) -> dict:
     """Delete a model folder from Models/. Body: { "model": "<key>" }.
 
@@ -898,11 +1073,11 @@ def delete_model(payload: DeleteModelRequest) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not delete: {e}")
 
-    print(f"[ocr-api] Deleted model '{key}'.")
+    logger.info(f"Deleted model '{key}'.")
     return {"ok": True, "deleted": key}
 
 
-@app.post("/rename_model", response_model=RenameModelResponse)
+@app.post("/rename_model", response_model=RenameModelResponse, dependencies=[Depends(require_service_key)])
 def rename_model(payload: RenameModelRequest) -> dict:
     """Rename a model folder in Models/. Body: { "model": "<key>", "newName": "<name>" }.
 
@@ -947,7 +1122,7 @@ def rename_model(payload: RenameModelRequest) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not rename: {e}")
 
-    print(f"[ocr-api] Renamed model '{key}' -> '{new_name}'.")
+    logger.info(f"Renamed model '{key}' -> '{new_name}'.")
     return {"ok": True, "name": new_name}
 
 

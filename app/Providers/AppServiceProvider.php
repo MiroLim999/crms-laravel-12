@@ -13,6 +13,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(OcrClient::class, fn () => new OcrClient(
             config('services.ocr.url'),
             (int) config('services.ocr.timeout'),
+            config('services.ocr.upload_secret'),
         ));
     }
 
