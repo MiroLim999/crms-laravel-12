@@ -15,10 +15,13 @@ ENV PIP_NO_CACHE_DIR=1 \
     PIP_RETRIES=10 \
     PYTHONUNBUFFERED=1
 
-# torch 2.6, the version the service runs on Windows, as a CPU build: Docker
-# cannot use an Apple GPU, and a Mac has no NVIDIA card.
+# torch 2.6, the version the service runs on Windows. A CPU build unless told
+# otherwise: Docker cannot use an Apple GPU, and a Mac has no NVIDIA card.
+# docker-compose.gpu.yml builds it with TORCH_BUILD=cu124, the CUDA 12.4 build
+# the Windows environment uses, for computers with an NVIDIA card.
+ARG TORCH_BUILD=cpu
 RUN pip install torch==2.6.0 torchvision==0.21.0 \
-    --index-url https://download.pytorch.org/whl/cpu
+    --index-url https://download.pytorch.org/whl/${TORCH_BUILD}
 
 COPY docker/ocr/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt

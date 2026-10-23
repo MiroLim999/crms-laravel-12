@@ -1,0 +1,29 @@
+# Optional: lets the handwriting reader (ocr) use an NVIDIA graphics card.
+#
+# Only for a computer with an NVIDIA card and a recent NVIDIA driver (see
+# DOCKER.md). Leave this file out everywhere else; docker-compose.yml alone
+# runs on the processor and works on every computer.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# Use the same two -f flags for every later command that has to know about
+# the reader (up, build, ps, logs).
+#
+# It changes only ocr: Kraken, which finds the lines inside the worker, stays
+# on the processor. The GPU build of the reader is a separate image
+# (crms-ocr-gpu), so the processor image is left as it was.
+
+services:
+  ocr:
+    build:
+      args:
+        # CUDA 12.4 build of torch 2.6.0, the one the Windows environment uses.
+        TORCH_BUILD: cu124
+    image: crms-ocr-gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

@@ -6,7 +6,7 @@ Docker runs CRMS as five "boxes" (containers) on one computer: the website, the 
 - Only **this computer** can open CRMS. Phones and other computers on the same Wi-Fi cannot.
 - No graphics card is needed. Everything runs on the processor, so one page takes about 2 minutes.
 
-**Contents:** [What you need](#what-you-need) · [First-time setup](#first-time-setup) · [Every day](#every-day) · [Back up the records](#back-up-the-records) · [Update to a newer version](#update-to-a-newer-version) · [If something goes wrong](#if-something-goes-wrong)
+**Contents:** [What you need](#what-you-need) · [First-time setup](#first-time-setup) · [Every day](#every-day) · [NVIDIA graphics card](#optional-use-an-nvidia-graphics-card) · [Back up the records](#back-up-the-records) · [Update to a newer version](#update-to-a-newer-version) · [If something goes wrong](#if-something-goes-wrong)
 
 ---
 
@@ -154,6 +154,46 @@ Run these commands in the project folder (`cd crms-laravel-12` first).
 | `docker-data/backups` | the database backups you make (below) |
 | `ml/models` | the models |
 | Docker volume `crms_mysql-data` | the database itself |
+
+---
+
+## Optional: use an NVIDIA graphics card
+
+Only for a Windows or Linux computer with an **NVIDIA** card (for example a GeForce RTX; tested only on an RTX 4050). Everyone else skips this: AMD cards, Intel graphics and Macs cannot be used by Docker, and CRMS runs fine on the processor.
+
+Measured on an RTX 4050 laptop, reading 120 real line pictures: **38 seconds on the processor, 4 seconds on the card**, with the same text. A page then takes about 35 seconds instead of about 2 minutes, because finding the lines still uses the processor.
+
+**What you need**
+
+- An up-to-date NVIDIA driver. Tested with driver 617.14. Older drivers may not work.
+- **Linux only:** the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). On Windows, Docker Desktop needs nothing extra.
+- **About 9 GB more disk space.** The reader's image is 9 GB with the card's software in it, instead of 1.8 GB.
+
+**How to switch it on**
+
+Add `-f docker-compose.yml -f docker-compose.gpu.yml` right after `docker compose`, for the start command and for every later command that starts or builds CRMS:
+
+```
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
+
+The first build downloads several GB extra. Later starts take seconds.
+
+**How to check that it works**
+
+Open **http://127.0.0.1:8081/health** in the browser. Near the start it says `"device":"cuda"` when the card is used, and `"device":"cpu"` when it is not.
+
+**How to switch it off**
+
+Run the normal command, without the two `-f` parts:
+
+```
+docker compose up -d
+```
+
+The reader goes back to the processor. Nothing is lost.
+
+> If you start with the normal command by habit after switching it on, the reader quietly goes back to the processor. Check `/health` if scans suddenly feel slow.
 
 ---
 

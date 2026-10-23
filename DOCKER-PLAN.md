@@ -211,6 +211,21 @@ Do this list once per machine.
 
 ---
 
+## ✅ Optional NVIDIA GPU add-on (built 2026-10-23, not committed yet)
+
+Only for computers with an NVIDIA card. The normal files still run on the processor everywhere.
+
+- [x] **[Claude]** `docker-compose.gpu.yml` + a `TORCH_BUILD` option in `docker/ocr/Dockerfile` (default `cpu`, GPU build `cu124`)
+- [x] **[Claude]** Tested on my RTX 4050 laptop: 120 real crops read in **37.7 s on the processor, 4.3 s on the GPU**, same text (confidence differs by at most 0.1 point). Reader image 9 GB vs 1.8 GB.
+- [x] **[Claude]** Section added to `DOCKER.md`
+- [ ] **[You]** Real scan with the GPU file in Docker (expect about 35 s a page)
+- [ ] **[You]** Say OK to commit it on `docker-setup`
+- [ ] Not done, you declined: half precision (fp16). Not tested: RTX 2050 (4 GB), Linux with NVIDIA Container Toolkit.
+
+Switch on: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`. Switch off: `docker compose up -d`.
+
+---
+
 ## To-dos (any time)
 
 - [ ] **License:** choose an open-source license with the adviser.
