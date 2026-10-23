@@ -9,6 +9,8 @@
 /storage/*.key
 /storage/pail
 /vendor
+# Docker's scans and logs (docker-compose.yml): private records, never committed
+/docker-data
 .env
 .env.backup
 .env.production

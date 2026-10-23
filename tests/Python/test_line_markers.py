@@ -782,6 +782,57 @@ class OutlineWorkersTest(unittest.TestCase):
         self.assertEqual(["a", "b"], outlines)
         chunk.assert_called_once_with([(0, []), (1, [])], None, False, False)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux only: on Windows, stopping a page ends its helpers too")
+    def test_helpers_end_when_the_page_is_stopped(self):
+        """Cancelling a page stops line_markers.py with SIGTERM; its idle helpers must end with it."""
+        import signal
+        import subprocess
+        import time
+
+        def running(pid):
+            """Still alive: a helper that has ended is gone, or a zombie until reaped."""
+            try:
+                with open(f"/proc/{pid}/stat") as stat:
+                    return stat.read().rsplit(")", 1)[1].split()[0] != "Z"
+            except OSError:
+                return False
+
+        # line_markers.py mid-page: helpers started, then waiting for work.
+        # os.getpid stands in for the Kraken import, so no Kraken is needed, and
+        # a helper that has answered has run its start-up code.
+        script = "\n".join([
+            "import os, sys",
+            f"sys.path.insert(0, {os.path.dirname(os.path.abspath(lm.__file__))!r})",
+            "import line_markers as lm",
+            "lm._import_kraken_outlines = os.getpid",
+            "pool = lm._start_outline_pool(2)",
+            "helpers = set()",
+            "while len(helpers) < 2:",
+            "    helpers |= {f.result() for f in [pool.submit(os.getpid) for _ in range(8)]}",
+            "print(*helpers, flush=True)",
+            "sys.stdin.read()",
+        ])
+        helpers = []
+        with subprocess.Popen([sys.executable, "-c", script], stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as page:
+            try:
+                helpers = [int(pid) for pid in page.stdout.readline().split()]
+                self.assertEqual(2, len(helpers), page.stderr.read() if page.poll() is not None else "")
+                page.send_signal(signal.SIGTERM)  # what stopping a Laravel Process sends
+                page.wait(timeout=10)
+
+                deadline = time.monotonic() + 10
+                while any(map(running, helpers)) and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertEqual([], [pid for pid in helpers if running(pid)])
+            finally:
+                page.kill()
+                for pid in helpers:  # never leave them behind, even when the test fails
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+
     @unittest.skipUnless(importlib.util.find_spec("kraken"), "needs Kraken (ml/.venv-kraken)")
     def test_the_parallel_copy_finds_what_kraken_finds(self):
         """Guards the copy of blla.vec_lines: same baselines and outlines as Kraken's own."""

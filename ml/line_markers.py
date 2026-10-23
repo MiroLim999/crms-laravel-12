@@ -257,12 +257,33 @@ def _start_outline_pool(workers):
     """Helper processes for tracing outlines, all of them starting now."""
     from concurrent.futures import ProcessPoolExecutor
 
-    pool = ProcessPoolExecutor(max_workers=workers)
+    pool = ProcessPoolExecutor(max_workers=workers, initializer=_end_with_parent)
     # Helpers are started as work arrives; one import each starts them all
     # at once, and leaves Kraken loaded in each for the real work.
     for _ in range(workers):
         pool.submit(_import_kraken_outlines)
     return pool
+
+
+def _end_with_parent():
+    """Make this helper end when the process that started it ends, however it ends.
+
+    A cancelled or timed-out page stops this script with SIGTERM. On Windows
+    that ends the whole process tree (taskkill /T); on Linux, as in Docker, only
+    the main process ends, and the idle helpers would wait for work forever,
+    holding about 1.2 GB between them. Linux's parent-death signal ends them."""
+    if not sys.platform.startswith("linux"):
+        return
+    import ctypes
+    import signal
+
+    parent = os.getppid()
+    try:
+        ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL)  # 1 = PR_SET_PDEATHSIG
+    except (OSError, AttributeError):  # no prctl: nothing to set up
+        return
+    if os.getppid() != parent:  # the parent ended before prctl took hold
+        os._exit(0)
 
 
 def _import_kraken_outlines():

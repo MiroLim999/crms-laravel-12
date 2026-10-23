@@ -1,0 +1,56 @@
+# Files Docker leaves out when it builds an image (docker compose build).
+#
+# Everything listed here stays on this computer. Some of it is private, some is
+# rebuilt inside the image for Linux, and some is too large to copy on every build.
+
+# Secrets and this computer's settings. The containers read .env while they run
+# (docker-compose.yml mounts it); it must never be baked into an image.
+.env
+.env.*
+!.env.example
+
+# Git history, CI and editor folders
+.git
+.github
+.kiro
+.vscode
+.idea
+
+# Installed packages: Windows builds of these would not run on Linux, so the
+# image installs its own (composer install, npm ci, pip install).
+vendor
+node_modules
+.venv
+ml/.venv-kraken
+**/__pycache__
+*.py[cod]
+.phpunit.cache
+.phpunit.result.cache
+test-results
+
+# Built front-end files: the image runs npm run build itself.
+public/build
+public/hot
+public/storage
+public/vendor/pdfjs
+
+# Laravel's cache files from this computer. They hold Windows paths (and, after
+# php artisan optimize, this computer's settings); the image makes its own.
+bootstrap/cache
+
+# Scans, logs, model weights and training data. Private or large (2.6 GB of
+# models): docker-compose.yml shares these folders with the containers instead.
+storage
+docker-data
+ml/models
+ml/dataset
+ml/datasets
+ml/new_images
+
+# Guides and plans (README.md, DOCKER.md, DOCKER-PLAN.md): the app never reads
+# them, and leaving them out means editing a guide does not trigger a rebuild.
+*.md
+
+# Reference material the app does not use
+sneat-reference
+OCR-REDESIGN-VERSIONS

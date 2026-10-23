@@ -1,0 +1,160 @@
+# CRMS in Docker: five containers that together are the whole system.
+#
+#   web        the website            http://localhost:8080
+#   worker     outlines (Kraken) and reads (via ocr) aligned pages
+#   scheduler  deletes pages nobody submitted, every hour
+#   ocr        the TrOCR reading service, http://127.0.0.1:8081
+#   mysql      the database (no port: only the other containers reach it)
+#
+# The ports are 8080 and 8081, not the 8000 and 8001 that serve.ps1 uses, so a
+# Windows setup on the same computer can keep running beside this one.
+#
+# Everyday commands, run from this folder:
+#
+#   docker compose up -d --build   build what changed, then start everything
+#   docker compose ps              what is running
+#   docker compose logs -f worker  watch one container's messages (Ctrl+C stops watching)
+#   docker compose down            stop everything; data, scans and models stay
+#
+# The full guide, including moving to another computer, is DOCKER.md.
+
+name: crms
+
+# Settings the three PHP containers share. "x-app" is only a named block;
+# each service below copies it in with "<<: *app".
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/app/Dockerfile
+  image: crms-app
+  # A tiny init process that cleans up the Python processes Kraken starts.
+  init: true
+  restart: unless-stopped
+  volumes:
+    # Laravel's own .env, read while the app runs (never copied into the image).
+    # create_host_path: false makes a missing .env an error, instead of Docker
+    # quietly creating an empty folder called .env.
+    - type: bind
+      source: ./.env
+      target: /var/www/html/.env
+      bind:
+        create_host_path: false
+    # Scans, crops and logs, kept in docker-data/ in this project folder so they
+    # outlive the containers. Not storage/ itself: a Windows setup on the same
+    # computer has its own database, whose page numbers would collide with
+    # Docker's, and the two would overwrite each other's scan files.
+    - ./docker-data/storage/app:/var/www/html/storage/app
+    - ./docker-data/storage/logs:/var/www/html/storage/logs
+  # These win over the same names in .env, because inside Docker the database
+  # and the OCR service are other containers, reached by their service names.
+  environment: &app-env
+    DB_HOST: mysql
+    DB_PORT: "3306"
+    DB_DATABASE: crms
+    DB_USERNAME: crms
+    DB_PASSWORD: ${CRMS_DB_PASSWORD:-crms-local}
+    OCR_API_URL: http://ocr:8001
+    # The browser is not inside Docker, so it cannot use the name "ocr": it
+    # uploads models to the port published below. Without this line Laravel
+    # would hand the browser OCR_API_URL (config/services.php).
+    OCR_BROWSER_API_URL: http://127.0.0.1:8081
+    # Browsers keep one set of cookies per host name, whatever the port, so
+    # localhost:8080 and a Windows setup on localhost:8000 would share the login
+    # cookie, and signing in to one would sign you out of the other.
+    SESSION_COOKIE: crms_docker_session
+  depends_on:
+    mysql:
+      condition: service_healthy
+
+services:
+  web:
+    <<: *app
+    command: php artisan serve --host=0.0.0.0 --port=8000 --no-reload
+    environment:
+      <<: *app-env
+      # Four PHP processes answer requests at once (Linux can; Windows could not).
+      PHP_CLI_SERVER_WORKERS: "4"
+    ports:
+      # 127.0.0.1: only this computer can open the site; phones and other
+      # computers on the same network cannot.
+      - "127.0.0.1:8080:8000"
+
+  worker:
+    <<: *app
+    # Same flags as serve.ps1. If it stops (php artisan queue:restart, a crash),
+    # Docker starts it again, as serve.ps1's restart loop does on Windows.
+    command: php artisan queue:work --timeout=900 --tries=1
+    # Time to finish the page it is working on before "docker compose down"
+    # stops it: a page takes about 2 minutes on the processor. A page cut off
+    # halfway is stuck until the queue gives up on it (retry_after, 16 minutes)
+    # and marks it failed.
+    stop_grace_period: 3m
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ocr:
+        condition: service_started
+
+  scheduler:
+    <<: *app
+    command: php artisan schedule:work
+
+  ocr:
+    build:
+      context: .
+      dockerfile: docker/ocr/Dockerfile
+    image: crms-ocr
+    init: true
+    restart: unless-stopped
+    volumes:
+      # Read for APP_KEY (or OCR_UPLOAD_SECRET), which signs model uploads.
+      - type: bind
+        source: ./.env
+        target: /app/.env
+        read_only: true
+        bind:
+          create_host_path: false
+      # The model folders (about 1.3 GB each), shared rather than copied.
+      - ./ml/models:/app/ml/models
+    ports:
+      # The browser uploads models straight to the service (OCR_BROWSER_API_URL).
+      - "127.0.0.1:8081:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  mysql:
+    image: mysql:9.7
+    # Philippine time (+08:00), like the MySQL service on Windows (time_zone
+    # SYSTEM). Every date column is a TIMESTAMP, which MySQL converts by this
+    # setting: on UTC, all existing dates would show 8 hours off.
+    command: --default-time-zone=+08:00
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: crms
+      MYSQL_USER: crms
+      MYSQL_PASSWORD: ${CRMS_DB_PASSWORD:-crms-local}
+      MYSQL_ROOT_PASSWORD: ${CRMS_DB_ROOT_PASSWORD:-crms-root-local}
+    volumes:
+      # The database files, in a Docker volume that survives "docker compose down".
+      # Only "docker compose down -v" deletes it - do not use -v.
+      - mysql-data:/var/lib/mysql
+      # Runs once on the first start: creates crms_test for the tests.
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+      # Database backups and imports: a .sql file in docker-data/backups on this
+      # computer is /backups inside the container (DOCKER.md has the commands).
+      - ./docker-data/backups:/backups
+    # No ports: nothing outside Docker can reach the database, only the other
+    # containers. Backups go through docker-data/backups above.
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  mysql-data:
