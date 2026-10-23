@@ -135,7 +135,7 @@ Set CRMS up again from zero, using **only** `DOCKER.md`, like someone who has ne
   ```powershell
   git status
   ```
-- [ ] **[You]** Upload the branch:
+- [x] **[You]** Upload the branch (done 2026-10-23, GitHub has `e08b397`):
   ```powershell
   git push -u origin docker-setup
   ```
@@ -211,7 +211,7 @@ Do this list once per machine.
 
 ---
 
-## ✅ Optional NVIDIA GPU add-on (built 2026-10-23, not committed yet)
+## ✅ Optional NVIDIA GPU add-on (built and committed 2026-10-23, `e08b397`)
 
 Only for computers with an NVIDIA card. The normal files still run on the processor everywhere.
 
@@ -219,7 +219,7 @@ Only for computers with an NVIDIA card. The normal files still run on the proces
 - [x] **[Claude]** Tested on my RTX 4050 laptop: 120 real crops read in **37.7 s on the processor, 4.3 s on the GPU**, same text (confidence differs by at most 0.1 point). Reader image 9 GB vs 1.8 GB.
 - [x] **[Claude]** Section added to `DOCKER.md`
 - [ ] **[You]** Real scan with the GPU file in Docker (expect about 35 s a page)
-- [ ] **[You]** Say OK to commit it on `docker-setup`
+- [x] **[You]** Say OK to commit it on `docker-setup` (done)
 - [ ] Not done, you declined: half precision (fp16). Not tested: RTX 2050 (4 GB), Linux with NVIDIA Container Toolkit.
 
 Switch on: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`. Switch off: `docker compose up -d`.

@@ -6,6 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.6%2B-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![Transformers](https://img.shields.io/badge/Hugging%20Face-TrOCR-FFD21E?style=flat&logo=huggingface&logoColor=black)](https://huggingface.co/microsoft/trocr-base-handwritten)
+[![Docker](https://img.shields.io/badge/Docker-Windows%20%C2%B7%20Linux%20%C2%B7%20Mac-2496ED?style=flat&logo=docker&logoColor=white)](#running-with-docker)
 [![Tests](https://img.shields.io/badge/Tests-467%20passed%20(PHP%20312%20%C2%B7%20JS%2086%20%C2%B7%20Python%2069)-success)](#testing--quality-assurance)
 
 An enterprise-grade, AI-assisted civil registry digitisation and archival platform built with **Laravel 12**, **Bootstrap 5 (SNEAT design system)**, **FastAPI**, and a fine-tuned **Microsoft TrOCR** (Transformer-based Optical Character Recognition) handwriting engine.
@@ -22,6 +23,7 @@ Everything runs locally. Page images and their text are never sent to an externa
 - [Key Features](#key-features)
 - [Role-Based Access Control & Capability Matrix](#role-based-access-control--capability-matrix)
 - [Project Directory Structure](#project-directory-structure)
+- [Running with Docker](#running-with-docker)
 - [Prerequisites & Requirements](#prerequisites--requirements)
 - [Installation & Setup](#installation--setup)
 - [Running the Application](#running-the-application)
@@ -220,6 +222,11 @@ crms-laravel-12/
 │   └── Support/                        # LocalTime (Philippine time), Limits (450 fields), MarkerBounds, Navigation
 ├── bootstrap/                          # Application bootstrap and middleware pipeline configuration
 ├── config/                             # Configuration files (crms.php, services.php, database.php)
+├── docker/                             # Docker images (see Running with Docker)
+│   ├── app/                            # Dockerfile, php.ini, Kraken pins: website, queue worker, scheduler
+│   ├── ocr/                            # Dockerfile + pins: the TrOCR service (CPU, or CUDA with the GPU add-on)
+│   └── mysql/init/                     # Creates crms_test on the first start
+├── docker-data/                        # (Docker only, gitignored) scans, crops, logs and database backups
 ├── database/
 │   ├── factories/                      # Model factories for testing and seeding
 │   ├── migrations/                     # Database migrations (records, templates, audit logs, OCR)
@@ -266,6 +273,11 @@ crms-laravel-12/
 │   ├── copy-pdf-worker.mjs             # Copies the PDF.js worker into public/vendor/pdfjs (runs before build and dev)
 │   └── subset-icons.mjs                # Builds and checks the Boxicons subset
 ├── serve.ps1                           # Starts the web app, queue worker, scheduler and OCR service (see Running)
+├── docker-compose.yml                  # The five Docker containers (CPU, every computer)
+├── docker-compose.gpu.yml              # Optional: lets the OCR container use an NVIDIA card
+├── .dockerignore                       # Keeps .env, records, models and Windows builds out of the images
+├── SETUP.md                            # Short step-by-step Docker setup for a Windows PC or a Mac
+├── DOCKER.md                           # Full Docker guide: daily use, backups, troubleshooting
 ├── vite.config.js                      # Vite asset bundler configuration
 ├── composer.json                       # PHP dependencies
 └── package.json                        # Node.js frontend dependencies
@@ -273,7 +285,61 @@ crms-laravel-12/
 
 ---
 
+## Running with Docker
+
+The simplest way to run CRMS on another computer. Docker runs the whole system in five containers, from one set of files that works on **Windows 10/11, Linux and Macs with Apple silicon**. Nothing else needs installing: no PHP, Python, MySQL or Node.
+
+| Container | What it does | Address on the computer |
+| :--- | :--- | :--- |
+| `web` | The website (`php artisan serve`, 4 workers) | [localhost:8080](http://localhost:8080) |
+| `worker` | Queue worker: outlines pages with Kraken, reads them through `ocr` | – |
+| `scheduler` | Deletes unsubmitted pages every hour (`documents:prune-pages`) | – |
+| `ocr` | The FastAPI TrOCR service | [127.0.0.1:8081](http://127.0.0.1:8081/health) (browser model uploads) |
+| `mysql` | MySQL 9.7 on Philippine time (+08:00) | none: only the other containers reach it |
+
+### Quick Start
+
+Install **Docker Desktop** (Windows, Mac) or **Docker Engine** (Linux), and **Git**. Then:
+
+```bash
+git clone -b docker-setup https://github.com/MiroLim999/crms-laravel-12.git
+cd crms-laravel-12
+cp .env.example .env              # Windows PowerShell: Copy-Item .env.example .env
+mkdir ml/models                   # then copy the model folder(s) into it
+docker compose up -d --build      # first build: 10-30 minutes
+docker compose exec web php artisan key:generate
+docker compose exec web php artisan migrate --seed
+docker compose restart
+```
+
+Open [http://localhost:8080](http://localhost:8080), sign in with the [default credentials](#default-credentials), change the password, and choose the model under **System → OCR Workspace → Scanning policy**.
+
+- **Step-by-step guides:** [SETUP.md](SETUP.md) (short, for a Windows PC or a Mac) and [DOCKER.md](DOCKER.md) (everything: daily use, backups, updates, troubleshooting).
+- **Models are not included** in the repository or the images (1.3 GB each). Copy a model folder, such as `TrOcr-50k-broken-samples/`, into `ml/models/` by hand.
+- **Records stay on that computer.** The database lives in the Docker volume `crms_mysql-data`, and scans and logs in `docker-data/` (gitignored). Every port listens on `127.0.0.1` only, so other devices on the network cannot open CRMS.
+- **Runs beside the manual setup.** Ports 8080/8081 differ from 8000/8001, and the two use separate databases, so a developer can keep both running.
+- **The code is built into the images.** After changing code, run `docker compose up -d --build` to see it in Docker. The manual setup shows changes immediately.
+- **Never run `docker compose down -v`** on a computer with real records: `-v` deletes the database.
+
+### Optional: NVIDIA GPU
+
+Docker runs everything on the processor by default. On a Windows or Linux computer with an **NVIDIA** card, the OCR container can use the card instead:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
+
+Measured on an RTX 4050 laptop, reading 120 real line crops: **37.7 s on the processor, 4.3 s on the GPU**, with identical text. Kraken line detection stays on the processor. The GPU image is about 9 GB, against 1.8 GB. Docker cannot use AMD cards on Windows or the Apple GPU, so those computers use the default command.
+
+### Status
+
+The Docker files are on the `docker-setup` branch. Tested on a Windows 11 laptop: 312 PHP, 66 Kraken and 9 OCR tests pass inside the containers. The Mac (ARM) build was checked under emulation only. Windows 10, Linux and a real Apple-silicon Mac are not tested yet.
+
+---
+
 ## Prerequisites & Requirements
+
+These are for the **manual setup** described below. With [Docker](#running-with-docker), you need only Docker and Git.
 
 Before setting up CRMS, ensure your environment meets the following requirements:
 
@@ -378,7 +444,7 @@ Before building, this copies the PDF.js worker from `node_modules` into `public/
 | :--- | :--- | :--- | :--- |
 | **Bootstrap Super Admin** | `superadmin@admin.com` | `superadmin@admin.com` | Super Admin |
 
-> **Security Warning**: You will be forced to change this password on your first login. To customize default bootstrap credentials before running seeders, specify `CRMS_SUPER_ADMIN_EMAIL` and `CRMS_SUPER_ADMIN_PASSWORD` in your `.env`.
+> **Security Warning**: This password is public (it is written here). Change it right after the first login: initials badge at the top right → **Account Settings**. CRMS does not force the change for this account. To customize default bootstrap credentials before running seeders, specify `CRMS_SUPER_ADMIN_EMAIL` and `CRMS_SUPER_ADMIN_PASSWORD` in your `.env`.
 
 #### Optional Demo Accounts
 For development evaluation, you can seed demo Staff and Admin accounts:
@@ -907,7 +973,8 @@ These items from the code review of 2026-10-02 were deliberately left for after 
 - **Charts & Visuals**: [ApexCharts](https://apexcharts.com/)
 - **Document Viewing**: [PDF.js](https://mozilla.github.io/pdf.js/) (its worker is served by the app, so it works offline)
 - **Icons**: [Boxicons](https://boxicons.com/) (Optimized and subsetted via `@iconify/utils`)
-- **Database**: MySQL 8.0+ / MariaDB
+- **Database**: MySQL 8.0+ / MariaDB (MySQL 9.7 in Docker)
+- **Containers**: [Docker](https://www.docker.com/) and Docker Compose (optional NVIDIA GPU add-on)
 
 ---
 
