@@ -72,10 +72,14 @@ Now go to **step 3**.
 
 ## 3. Start CRMS (Windows and Mac)
 
-Run these one by one, in the same PowerShell or Terminal window. The first one takes 10–30 minutes.
+In the same PowerShell or Terminal window, first run the start script. It takes 10–30 minutes the first time.
+
+- Windows: `powershell -ExecutionPolicy Bypass -File .\docker-start.ps1`
+- Mac: `sh docker-start.sh`
+
+Then run these one by one:
 
 ```
-docker compose up -d --build
 docker compose exec web php artisan key:generate
 docker compose exec web php artisan migrate --seed
 docker compose restart
@@ -85,7 +89,7 @@ What each one does:
 
 | Command | What it does |
 |---|---|
-| `docker compose up -d --build` | Builds the 5 boxes (website, worker, scheduler, handwriting reader, database) and starts them. Only slow the first time. |
+| The start script | Builds the 5 boxes (website, worker, scheduler, handwriting reader, database) and starts them. It uses an NVIDIA graphics card if the computer has one that works, and the processor otherwise. Only slow the first time. |
 | `docker compose exec web php artisan key:generate` | Creates this computer's secret key and saves it in `.env`. Run it only once. |
 | `docker compose exec web php artisan migrate --seed` | Creates the empty database tables, the Super Admin account and the 3 default templates. |
 | `docker compose restart` | Restarts the boxes so all of them use the new secret key. |
@@ -116,35 +120,29 @@ Open PowerShell (Windows) or Terminal (Mac) and go to the project folder:
 - Windows: `cd C:\crms-laravel-12`
 - Mac: `cd ~/crms-laravel-12`
 
-Then:
+Then, one by one:
 
-```
-git pull
-docker compose up -d --build
-docker compose exec web php artisan migrate
-```
+1. `git pull`
+2. The start script again: Windows `powershell -ExecutionPolicy Bypass -File .\docker-start.ps1`, Mac `sh docker-start.sh`
+3. `docker compose exec web php artisan migrate`
 
 What each one does:
 
 | Command | What it does |
 |---|---|
 | `git pull` | Downloads the newest code from GitHub. Records and models are not touched. |
-| `docker compose up -d --build` | Rebuilds the boxes with the new code and starts them. Takes a few minutes, not the full first-time wait. |
+| The start script | Rebuilds the boxes with the new code and starts them. Takes a few minutes, not the full first-time wait. |
 | `docker compose exec web php artisan migrate` | Adds any new database tables or columns the new code needs. Existing records stay. |
 
 ## Never run
 
 `docker compose down -v`: it deletes all records.
 
-## Only with an NVIDIA graphics card (Windows)
+## NVIDIA graphics card
 
-Start with this instead, for faster reading:
+Nothing to do: the start script uses an NVIDIA card by itself when the computer has one that works, and it says so at the end ("The reader reads on the NVIDIA card"). If the card fails, the reader switches to the processor by itself.
 
-```
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
-```
-
-Not for Macs, AMD cards (like the RX 6600) or PCs without a graphics card.
+Macs, AMD cards (like the RX 6600) and PCs without a graphics card always use the processor.
 
 ## Problem?
 

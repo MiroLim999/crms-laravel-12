@@ -275,6 +275,7 @@ crms-laravel-12/
 ├── serve.ps1                           # Starts the web app, queue worker, scheduler and OCR service (see Running)
 ├── docker-compose.yml                  # The five Docker containers (CPU, every computer)
 ├── docker-compose.gpu.yml              # Optional: lets the OCR container use an NVIDIA card
+├── docker-start.ps1 / docker-start.sh  # Build and start in Docker, on the NVIDIA card when one works
 ├── .dockerignore                       # Keeps .env, records, models and Windows builds out of the images
 ├── SETUP.md                            # Short step-by-step Docker setup for a Windows PC or a Mac
 ├── DOCKER.md                           # Full Docker guide: daily use, backups, troubleshooting
@@ -323,11 +324,14 @@ Open [http://localhost:8080](http://localhost:8080), sign in with the [default c
 
 ### Optional: NVIDIA GPU
 
-Docker runs everything on the processor by default. On a Windows or Linux computer with an **NVIDIA** card, the OCR container can use the card instead:
+Docker runs everything on the processor by default. On a Windows or Linux computer with an **NVIDIA** card (any model with a recent driver), the OCR container can use the card instead. The start scripts decide by themselves, and start on the processor when there is no working card:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+powershell -ExecutionPolicy Bypass -File .\docker-start.ps1     # Windows
+sh docker-start.sh                                              # Linux, Mac
 ```
+
+By hand: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`. If the card fails at the first scan (a driver too old, a card the CUDA 12.4 build does not support, out of memory), the OCR service switches to the processor by itself and logs why; `OCR_DEVICE` forces one or the other.
 
 Measured on an RTX 4050 laptop, reading 120 real line crops: **37.7 s on the processor, 4.3 s on the GPU**, with identical text. Kraken line detection stays on the processor. The GPU image is about 9 GB, against 1.8 GB. Docker cannot use AMD cards on Windows or the Apple GPU, so those computers use the default command.
 
@@ -936,6 +940,7 @@ vendor\bin\pint --test                   # Verify PHP code style
 | `OCR_API_URL` | `http://127.0.0.1:8001` | Private address for Laravel-to-FastAPI server calls. |
 | `OCR_BROWSER_API_URL` | `http://127.0.0.1:8001` | Browser-resolvable URL for direct multipart model uploads. |
 | `OCR_API_TIMEOUT` | `120` | HTTP request timeout (seconds) for OCR inference operations. |
+| `OCR_DEVICE` | `auto` | Where the OCR service reads: `auto` (the NVIDIA card when there is one, else the CPU), `cuda`, or `cpu`. If the card fails (a driver too old, a card the CUDA build does not support, out of memory), the service switches to the CPU by itself and logs why. Read when the service starts. |
 | `OCR_UPLOAD_SECRET` | *(Empty / Falls back to `APP_KEY`)* | Secret shared by Laravel and the OCR service: signs direct model-upload tickets and is the `X-CRMS-Service-Key` sent on every other call. Both sides read it from `.env`. |
 | `OCR_UPLOAD_TICKET_TTL` | `900` | Validity lifetime in seconds for model upload tickets (max 3600). |
 | `QUEUE_CONNECTION` | `database` | Queue for the page job (Detect / outline / read). A worker must be running. |

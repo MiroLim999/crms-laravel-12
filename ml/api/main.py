@@ -156,10 +156,49 @@ def _get_device():
     if _device is None:
         with _model_lock:
             if _device is None:
+                # OCR_DEVICE: auto (the NVIDIA card when there is one), cuda, or cpu.
+                wanted = (_env_value("OCR_DEVICE") or "auto").strip().lower()
                 # A driver capability query, not a CUDA context init, so this is
-                # safe to call from /health while a job owns the card.
-                _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                # safe to call from /health while a job owns the card. Whether
+                # the card really works shows when a model is put on it
+                # (_load_model), and the service falls back to the CPU then.
+                gpu = wanted != "cpu" and torch.cuda.is_available()
+                if wanted == "cuda" and not gpu:
+                    logger.warning("OCR_DEVICE=cuda, but no NVIDIA card is usable here; reading on the CPU.")
+                _device = torch.device("cuda" if gpu else "cpu")
     return _device
+
+
+def _on_gpu(device):
+    return str(device).startswith("cuda")
+
+
+def _check_gpu(device):
+    """One small calculation on the card.
+
+    torch.cuda.is_available() only asks the driver. A driver too old for this
+    build of torch, or a card newer than its CUDA version, fails here instead,
+    at the first real work."""
+    x = torch.ones(64, 64, device=device)
+    (x @ x).sum().item()
+
+
+def _stop_using_gpu(reason):
+    """Read on the CPU from now on, after the card failed.
+
+    Every cached model is dropped, since its weights are on the card; the next
+    _load_model() loads it again on the CPU. Scans keep working, only slower."""
+    global _device
+    with _model_lock:
+        if _device is not None and not _on_gpu(_device):
+            return
+        logger.warning("The GPU failed (%s); reading on the CPU from now on.", reason)
+        _device = torch.device("cpu")
+        _models.clear()
+        try:
+            torch.cuda.empty_cache()
+        except Exception:  # a card in a bad state may refuse even this
+            pass
 
 
 def _looks_like_model(path):
@@ -265,8 +304,6 @@ def _model_info():
 
 def _load_model(key):
     """Load (and cache) the model for `key`. Returns its cache entry."""
-    device = _get_device()
-
     if key == BASE_MODEL_KEY:
         model_src = BASE_MODEL_DIR if _looks_like_model(BASE_MODEL_DIR) else FALLBACK_MODEL
         label, cache_key = BASE_MODEL_LABEL, BASE_MODEL_KEY
@@ -291,9 +328,22 @@ def _load_model(key):
         if entry is not None:
             return entry
 
+        # Read inside the lock: another thread may have just given up on the card.
+        device = _get_device()
         logger.info(f"Loading model: {label}  ({model_src})  on  {device}")
         processor, model = load_model(model_src)
-        model.to(device)
+        try:
+            model.to(device)
+            if _on_gpu(device):
+                _check_gpu(device)
+        except Exception as e:  # out of memory, a card or driver torch cannot use
+            if not _on_gpu(device):
+                raise
+            _stop_using_gpu(e)
+            device = _get_device()
+            # A fresh copy: some of the weights may already be on the card.
+            processor, model = load_model(model_src)
+            model.to(device)
         model.eval()
 
         eos_id = eos_token_id(model, processor)
@@ -661,7 +711,19 @@ def ocr(payload: OcrRequest) -> dict:
                 try:
                     readings.append(_read_crops(model, processor, device, eos_id, [image])[0])
                 except Exception as single:
-                    readings.append(single)
+                    if not _on_gpu(device):
+                        readings.append(single)
+                        continue
+                    # Fails on the card even on its own: a broken card or driver,
+                    # or too little memory. This crop and the rest go to the CPU.
+                    _stop_using_gpu(single)
+                    entry = _load_model(key)
+                    model, processor, eos_id = entry["model"], entry["processor"], entry["eos_id"]
+                    device = _get_device()
+                    try:
+                        readings.append(_read_crops(model, processor, device, eos_id, [image])[0])
+                    except Exception as on_cpu:
+                        readings.append(on_cpu)
 
         for (index, _), reading in zip(chunk, readings):
             name = payload.fields[index].name

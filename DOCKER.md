@@ -171,7 +171,14 @@ Measured on an RTX 4050 laptop, reading 120 real line pictures: **38 seconds on 
 
 **How to switch it on**
 
-Add `-f docker-compose.yml -f docker-compose.gpu.yml` right after `docker compose`, for the start command and for every later command that starts or builds CRMS:
+The easy way: start CRMS with the start script. It checks for a working NVIDIA card and adds the GPU file only when there is one. If Docker cannot start the reader on the card, it starts again on the processor. It tells you at the end where the reader reads.
+
+- Windows: `powershell -ExecutionPolicy Bypass -File .\docker-start.ps1` (add `-Cpu` to never use the card)
+- Linux and Mac: `sh docker-start.sh` (add `--cpu` to never use the card)
+
+The reader also falls back by itself: if the card fails at the first scan (a driver too old, a card too new for its CUDA version, too little memory), it switches to the processor, logs why, and `/health` then shows `cpu`. `OCR_DEVICE=cpu` in `.env` keeps it on the processor for good.
+
+By hand instead: add `-f docker-compose.yml -f docker-compose.gpu.yml` right after `docker compose`, for the start command and for every later command that starts or builds CRMS:
 
 ```
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build

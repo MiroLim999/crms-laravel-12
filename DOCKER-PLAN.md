@@ -220,6 +220,7 @@ Only for computers with an NVIDIA card. The normal files still run on the proces
 - [x] **[Claude]** Section added to `DOCKER.md`
 - [ ] **[You]** Real scan with the GPU file in Docker (expect about 35 s a page)
 - [x] **[You]** Say OK to commit it on `docker-setup` (done)
+- [x] **[Claude]** Works on any NVIDIA model, with fallback (2026-10-24): the reader tests the card when it loads a model and switches to the processor if the card fails (old driver, unsupported card, out of memory); `OCR_DEVICE=auto|cuda|cpu`; start scripts `docker-start.ps1` / `docker-start.sh` pick GPU or processor by themselves. 4 new tests (fail on the old code). Tested on my laptop; not on another NVIDIA model, Linux or a Mac.
 - [ ] Not done, you declined: half precision (fp16). Not tested: RTX 2050 (4 GB), Linux with NVIDIA Container Toolkit.
 
 Switch on: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`. Switch off: `docker compose up -d`.
