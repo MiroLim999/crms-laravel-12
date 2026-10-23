@@ -89,7 +89,9 @@ It is done when the prompt comes back. Check that all five boxes are running:
 docker compose ps
 ```
 
-You should see `crms-web-1`, `crms-worker-1`, `crms-scheduler-1`, `crms-ocr-1` and `crms-mysql-1`, each `Up`. `crms-ocr-1` and `crms-mysql-1` should also say `(healthy)`. The reader can take a minute to get there.
+You should see `crms-web-1`, `crms-worker-1`, `crms-scheduler-1`, `crms-ocr-1` and `crms-mysql-1`. `crms-ocr-1` and `crms-mysql-1` should say `Up` and `(healthy)`. The reader can take a minute to get there.
+
+`crms-worker-1` (and sometimes `crms-scheduler-1`) may say **`Restarting`** for now. That is normal: the database has no tables yet. Step 6 creates them, and then they stay `Up`.
 
 ### 5. Create the secret key
 
