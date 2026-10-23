@@ -10,15 +10,9 @@
 
         <div class="mb-6">
             <label for="email" class="form-label">Email</label>
-            <input type="email"
-                   id="email"
-                   name="email"
-                   value="{{ old('email') }}"
-                   class="form-control @error('email') is-invalid @enderror"
-                   placeholder="you@example.com"
-                   required
-                   autofocus
-                   autocomplete="username">
+            <input type="email" id="email" name="email" value="{{ old('email') }}"
+                class="form-control @error('email') is-invalid @enderror" placeholder="you@example.com" required autofocus
+                autocomplete="username">
             @error('email')
                 <div class="invalid-feedback">{{ $message }}</div>
             @enderror
@@ -28,14 +22,9 @@
         <div class="mb-6 form-password-toggle">
             <label class="form-label" for="password">Password</label>
             <div class="input-group input-group-merge @error('password') is-invalid @enderror">
-                <input type="password"
-                       id="password"
-                       name="password"
-                       class="form-control"
-                       placeholder="&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;"
-                       aria-describedby="password"
-                       required
-                       autocomplete="current-password">
+                <input type="password" id="password" name="password" class="form-control"
+                    placeholder="&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;"
+                    aria-describedby="password" required autocomplete="current-password">
                 <span class="input-group-text cursor-pointer">
                     <i class="icon-base bx bx-hide"></i>
                 </span>
@@ -48,7 +37,7 @@
         <div class="mb-8">
             <div class="form-check mb-0">
                 <input class="form-check-input" type="checkbox" id="remember" name="remember" value="1"
-                       @checked(old('remember'))>
+                    @checked(old('remember'))>
                 <label class="form-check-label" for="remember">Remember me</label>
             </div>
         </div>
