@@ -1,6 +1,6 @@
 # CRMS Developer Guide
 
-The detailed reference for developers and maintainers. For the overview, see the [README](../README.md). To set CRMS up with Docker, see [SETUP.md](../SETUP.md) (step by step) and [DOCKER.md](../DOCKER.md) (everything about Docker).
+The detailed reference for developers and maintainers. For the overview, see the [README](../README.md). To set CRMS up with Docker, see [DOCKER.md](DOCKER.md).
 
 ## Contents
 
@@ -212,7 +212,8 @@ crms-laravel-12/
 │   └── mysql/init/                     # Creates crms_test on the first start
 ├── docker-data/                        # (Docker only, gitignored) scans, crops, logs and database backups
 ├── docs/
-│   └── DEVELOPER-GUIDE.md              # This guide
+│   ├── DEVELOPER-GUIDE.md              # This guide
+│   └── DOCKER.md                       # Docker setup step by step, daily use, backups, troubleshooting
 ├── database/
 │   ├── factories/                      # Model factories for testing and seeding
 │   ├── migrations/                     # Database migrations (records, templates, audit logs, OCR)
@@ -263,8 +264,6 @@ crms-laravel-12/
 ├── docker-compose.gpu.yml              # Optional: lets the OCR container use an NVIDIA card
 ├── docker-start.ps1 / docker-start.sh  # Build and start in Docker, on the NVIDIA card when one works
 ├── .dockerignore                       # Keeps .env, records, models and Windows builds out of the images
-├── SETUP.md                            # Short step-by-step Docker setup for a Windows PC or a Mac
-├── DOCKER.md                           # Full Docker guide: daily use, backups, troubleshooting
 ├── vite.config.js                      # Vite asset bundler configuration
 ├── composer.json                       # PHP dependencies
 └── package.json                        # Node.js frontend dependencies
@@ -766,7 +765,7 @@ CRMS maintains a comprehensive test suite across PHP, JavaScript, and Python lay
 | Python: line detection | 66 | `ml\.venv-kraken\Scripts\python.exe` (one test runs on Linux only, so Windows skips it) |
 | Python: OCR service | 13 | `.venv\Scripts\python.exe` |
 
-The same suites also pass inside the Docker containers (see [DOCKER.md](../DOCKER.md)).
+The same suites also pass inside the Docker containers (see [DOCKER.md](DOCKER.md)).
 
 ```
 tests/

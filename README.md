@@ -74,7 +74,7 @@ docker compose restart
 
 Then open **http://localhost:8080**.
 
-- **Step by step:** [SETUP.md](SETUP.md). **Backups, updates and problems:** [DOCKER.md](DOCKER.md).
+- **Step by step, plus backups, updates and problems:** [docs/DOCKER.md](docs/DOCKER.md).
 - **The models are not in the repository** (1.3 GB each). Copy a model folder, such as `TrOcr-50k-broken-samples/`, into `ml/models/` by hand.
 - **Only this computer can open CRMS**, and the records stay on it.
 - The start script uses an NVIDIA card when the computer has one that works. AMD cards and Macs use the processor.
@@ -130,8 +130,7 @@ Run them all with `.\tools\test-all.ps1`. MySQL must be running; the PHP tests u
 
 | File | Read it for |
 | :--- | :--- |
-| [SETUP.md](SETUP.md) | Setting CRMS up on another computer, step by step (Windows or Mac) |
-| [DOCKER.md](DOCKER.md) | Docker in full: daily use, backups, updates, the NVIDIA GPU, troubleshooting |
+| [docs/DOCKER.md](docs/DOCKER.md) | Setting CRMS up on another computer with Docker, step by step (Windows, Mac or Linux), then daily use, updates, backups, the NVIDIA GPU and troubleshooting |
 | [docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md) | Developers: architecture, every feature in detail, roles, commands, `.env` settings, the ML pipeline, the OCR API, production, tests, known limitations |
 
 ## Technology

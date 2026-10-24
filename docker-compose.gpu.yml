@@ -1,7 +1,7 @@
 # Optional: lets the handwriting reader (ocr) use an NVIDIA graphics card.
 #
 # Only for a computer with an NVIDIA card and a recent NVIDIA driver (see
-# DOCKER.md). Leave this file out everywhere else; docker-compose.yml alone
+# docs/DOCKER.md). Leave this file out everywhere else; docker-compose.yml alone
 # runs on the processor and works on every computer.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build

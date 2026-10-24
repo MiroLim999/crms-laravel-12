@@ -67,7 +67,7 @@ Claude explains each file **before** writing it. Nothing goes to GitHub in this 
 - [x] **[Claude]** `docker-compose.yml`: the "menu" that starts all 5 boxes together
 - [x] **[Claude]** Kraken clean-up fix in `ml/line_markers.py`: a cancelled scan no longer leaves helpers holding 1.2 GB of memory (+ a Linux-only test that fails without the fix)
 - [x] **[Claude]** `.gitignore`: add `/docker-data` (each machine's scans stay off GitHub)
-- [x] **[Claude]** `DOCKER.md`: click-by-click guide for Windows, Mac and Linux
+- [x] **[Claude]** `docs/DOCKER.md`: click-by-click guide for Windows, Mac and Linux
 - [x] **[You]** Read each explanation and say OK before the next file
 - [x] **[Claude]** Saved in a commit on `docker-setup` (local only, not on GitHub). `DOCKER-PLAN.md` left out on purpose.
 
@@ -101,7 +101,7 @@ Claude explains each file **before** writing it. Nothing goes to GitHub in this 
 
 ## Step 2b: "Stranger test" on my laptop [You, Claude guides]
 
-Set CRMS up again from zero, using **only** `DOCKER.md`, like someone who has never seen it.
+Set CRMS up again from zero, using **only** `docs/DOCKER.md`, like someone who has never seen it.
 
 - [ ] **[You]** Remove the Step 2 test copy so the laptop acts like a new machine.
   ⚠️ `-v` deletes the Docker test database. That's fine here because it's test data only. **Never do this on the client's machine.**
@@ -114,11 +114,11 @@ Set CRMS up again from zero, using **only** `DOCKER.md`, like someone who has ne
   git clone -b docker-setup C:\xampp\htdocs\crms-laravel-12 C:\crms-stranger-test
   cd C:\crms-stranger-test
   ```
-- [ ] **[You]** Follow `DOCKER.md` word for word. Don't use anything that isn't written there.
+- [ ] **[You]** Follow `docs/DOCKER.md` word for word. Don't use anything that isn't written there.
 - [ ] **[You]** Copy the models in from the zip, as practice for the real handover
 - [ ] **[You]** Log in and do a real scan
 - [ ] **[You]** Write down every part of the guide that was unclear: ____________________
-- [ ] **[Claude]** Fix `DOCKER.md` based on your notes
+- [ ] **[Claude]** Fix `docs/DOCKER.md` based on your notes
 - [ ] **[You]** Clean up the test copy:
   ```powershell
   cd C:\crms-stranger-test
@@ -158,7 +158,7 @@ Other machines then **download** ready-made boxes instead of building them. Do i
 ## Before visiting the other machines
 
 - [ ] The `docker-setup` branch is on GitHub
-- [ ] `DOCKER.md` is finished (Step 2b passed)
+- [ ] `docs/DOCKER.md` is finished (Step 2b passed)
 - [ ] The model zip is ready on Drive or USB (see the to-dos below)
 - [ ] The machine owners installed Docker in advance:
   - Windows 10: version **22H2** (press Win+R, type `winver`), and **virtualization ON** in the BIOS
@@ -177,7 +177,7 @@ Do this list once per machine.
   git clone -b docker-setup https://github.com/MiroLim999/crms-laravel-12.git
   cd crms-laravel-12
   ```
-- [ ] **[You]** Follow `DOCKER.md`
+- [ ] **[You]** Follow `docs/DOCKER.md`
 - [ ] **[You]** Copy the model zip into `ml/models` and set the fine-tuned model to **Active**
 - [ ] **[You]** Log in and do a real scan
 - [ ] **[You]** Time for one scan: ______ (on the processor, so slower than my laptop with its graphics card; that's expected)
@@ -190,7 +190,7 @@ Do this list once per machine.
 
 - [ ] **[You]** Docker Desktop for Mac (**Apple silicon**) is installed. If the adviser says the trial isn't covered by Docker Desktop's free use, use **Colima** instead.
 - [ ] **[You]** In Docker Desktop: **Settings → Resources → Memory**, check that it's at least **8 GB**
-- [ ] **[You]** Get the project and follow `DOCKER.md` (same as Step 3)
+- [ ] **[You]** Get the project and follow `docs/DOCKER.md` (same as Step 3)
 - [ ] **[You]** Copy the model zip into `ml/models` and set the fine-tuned model to **Active**
 - [ ] **[You]** Real scan works. Time for one scan: ______ (compare: about 2 min on my laptop in Docker)
 - [ ] **[You]** Privacy check: on a phone connected to the same Wi-Fi, open the Mac's address. CRMS must **not** open.
@@ -207,7 +207,7 @@ Do this list once per machine.
   git push origin main --tags
   ```
 - [ ] **[Claude]** Update `README.md`: Docker section and license
-- [ ] **[Claude]** In `DOCKER.md`, remove `-b docker-setup` from the `git clone` command (the Docker files are on `main` by then)
+- [ ] **[Claude]** In `docs/DOCKER.md`, remove `-b docker-setup` from the `git clone` command (the Docker files are on `main` by then)
 
 ---
 
@@ -217,7 +217,7 @@ Only for computers with an NVIDIA card. The normal files still run on the proces
 
 - [x] **[Claude]** `docker-compose.gpu.yml` + a `TORCH_BUILD` option in `docker/ocr/Dockerfile` (default `cpu`, GPU build `cu124`)
 - [x] **[Claude]** Tested on my RTX 4050 laptop: 120 real crops read in **37.7 s on the processor, 4.3 s on the GPU**, same text (confidence differs by at most 0.1 point). Reader image 9 GB vs 1.8 GB.
-- [x] **[Claude]** Section added to `DOCKER.md`
+- [x] **[Claude]** Section added to `docs/DOCKER.md`
 - [ ] **[You]** Real scan with the GPU file in Docker (expect about 35 s a page)
 - [x] **[You]** Say OK to commit it on `docker-setup` (done)
 - [x] **[Claude]** Works on any NVIDIA model, with fallback (2026-10-24): the reader tests the card when it loads a model and switches to the processor if the card fails (old driver, unsupported card, out of memory); `OCR_DEVICE=auto|cuda|cpu`; start scripts `docker-start.ps1` / `docker-start.sh` pick GPU or processor by themselves. 4 new tests (fail on the old code). Tested on my laptop; not on another NVIDIA model, Linux or a Mac.

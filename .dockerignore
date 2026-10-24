@@ -47,7 +47,7 @@ ml/dataset
 ml/datasets
 ml/new_images
 
-# Guides and plans (README.md, DOCKER.md, DOCKER-PLAN.md): the app never reads
+# Guides and plans (README.md, docs/, DOCKER-PLAN.md): the app never reads
 # them, and leaving them out means editing a guide does not trigger a rebuild.
 *.md
 
