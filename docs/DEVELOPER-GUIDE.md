@@ -1,6 +1,6 @@
 # CRMS Developer Guide
 
-The detailed reference for developers and maintainers. For the overview, see the [README](../README.md). To set CRMS up with Docker, see [DOCKER.md](DOCKER.md).
+The detailed reference for developers and maintainers. For the overview, see the [README](../README.md). To set CRMS up with Docker, see [DOCKER-SETUP.md](DOCKER-SETUP.md).
 
 ## Contents
 
@@ -213,7 +213,7 @@ crms-laravel-12/
 ├── docker-data/                        # (Docker only, gitignored) scans, crops, logs and database backups
 ├── docs/
 │   ├── DEVELOPER-GUIDE.md              # This guide
-│   └── DOCKER.md                       # Docker setup step by step, daily use, backups, troubleshooting
+│   └── DOCKER-SETUP.md                 # Docker setup step by step, daily use, backups, troubleshooting
 ├── database/
 │   ├── factories/                      # Model factories for testing and seeding
 │   ├── migrations/                     # Database migrations (records, templates, audit logs, OCR)
@@ -765,7 +765,7 @@ CRMS maintains a comprehensive test suite across PHP, JavaScript, and Python lay
 | Python: line detection | 66 | `ml\.venv-kraken\Scripts\python.exe` (one test runs on Linux only, so Windows skips it) |
 | Python: OCR service | 13 | `.venv\Scripts\python.exe` |
 
-The same suites also pass inside the Docker containers (see [DOCKER.md](DOCKER.md)).
+The same suites also pass inside the Docker containers (see [DOCKER-SETUP.md](DOCKER-SETUP.md)).
 
 ```
 tests/

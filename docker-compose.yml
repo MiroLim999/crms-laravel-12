@@ -16,7 +16,7 @@
 #   docker compose logs -f worker  watch one container's messages (Ctrl+C stops watching)
 #   docker compose down            stop everything; data, scans and models stay
 #
-# The full guide, including moving to another computer, is docs/DOCKER.md.
+# The full guide, including moving to another computer, is docs/DOCKER-SETUP.md.
 
 name: crms
 
@@ -145,7 +145,7 @@ services:
       # Runs once on the first start: creates crms_test for the tests.
       - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
       # Database backups and imports: a .sql file in docker-data/backups on this
-      # computer is /backups inside the container (docs/DOCKER.md has the commands).
+      # computer is /backups inside the container (docs/DOCKER-SETUP.md has the commands).
       - ./docker-data/backups:/backups
     # No ports: nothing outside Docker can reach the database, only the other
     # containers. Backups go through docker-data/backups above.
