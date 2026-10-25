@@ -12,9 +12,11 @@ Docker runs CRMS as five "boxes" (containers) on one computer: the website, the 
 
 ## 1. Before you go
 
-The models are not on GitHub, so bring them yourself. Copy this folder from your laptop to a USB stick:
+The models are not on GitHub, so bring them yourself. Copy one of these model folders from your laptop to a USB stick:
 
 `C:\xampp\htdocs\crms-laravel-12\ml\models\TrOcr-50k-broken-samples`
+
+For a quick installation, the original TrOCR base model can also be downloaded into `ml\models\base` by running `python ml\download_trocr.py` from the project folder. The base model works with CRMS, but the fine-tuned `TrOcr-50k-broken-samples` model is recommended for better handwriting accuracy.
 
 (Or bring the zip from Drive: `TrOcr-50k-broken-samples.zip`, 1.3 GB. `base.zip`, the original model for comparison, is optional.)
 
@@ -55,7 +57,7 @@ mkdir ml\models
 Copy the **TrOcr-50k-broken-samples** folder from the USB into `C:\crms-laravel-12\ml\models`.
 (From a zip: right-click it → **Extract All...** → **Browse...** → choose `C:\crms-laravel-12\ml\models` → **Extract**.)
 
-**Check:** the file `ml\models\TrOcr-50k-broken-samples\config.json` must exist. If there is an extra folder level (`...\TrOcr-50k-broken-samples\TrOcr-50k-broken-samples\config.json`), move the inner folder up one level.
+**Check:** the file `ml\models\TrOcr-50k-broken-samples\config.json` must exist for the fine-tuned model, or `ml\models\base\config.json` must exist for the base model. If there is an extra folder level (`...\TrOcr-50k-broken-samples\TrOcr-50k-broken-samples\config.json`), move the inner folder up one level.
 
 Now go to **step 3**.
 
@@ -81,11 +83,11 @@ cp .env.example .env
 mkdir ml/models
 ```
 
-Copy the **TrOcr-50k-broken-samples** folder from the USB into the models folder:
+Copy the **TrOcr-50k-broken-samples** or **base** folder from the USB into the models folder:
 Finder → **Go** → **Home** → `crms-laravel-12` → `ml` → `models`.
 (From a zip: double-click it, then drag the folder it makes into `models`.)
 
-**Check:** the file `ml/models/TrOcr-50k-broken-samples/config.json` must exist. If there is an extra folder level, move the inner folder up one level.
+**Check:** the file `ml/models/TrOcr-50k-broken-samples/config.json` must exist for the fine-tuned model, or `ml/models/base/config.json` must exist for the base model. If there is an extra folder level, move the inner folder up one level.
 
 Now go to **step 3**.
 
@@ -106,7 +108,7 @@ Now go to **step 3**.
    unzip TrOcr-50k-broken-samples.zip -d ml/models
    ```
 
-   (Or copy the folder from the USB into `ml/models`.) The file `ml/models/TrOcr-50k-broken-samples/config.json` must exist.
+   (Or copy the folder from the USB into `ml/models`.) The file `ml/models/TrOcr-50k-broken-samples/config.json` must exist for the fine-tuned model, or `ml/models/base/config.json` must exist for the base model.
 
 Now go to **step 3**.
 
@@ -145,7 +147,7 @@ To check the boxes, run `docker compose ps`. You should see `crms-web-1`, `crms-
 1. Open **http://localhost:8080**.
 2. Log in: `superadmin@admin.com` / `superadmin@admin.com`.
 3. Change the password right away (it is written here and in the public code): initials badge (top right) → **Account Settings**.
-4. **System → OCR Workspace** → **Approved model**: `TrOcr-50k-broken-samples` → **Save policy**. The model now shows **Active**.
+4. **System → OCR Workspace** → **Approved model**: select the model folder you installed, either `TrOcr-50k-broken-samples` or `base` → **Save policy**. The model now shows **Active**.
    If it says **OCR service offline**, wait a minute and reload the page. The reader takes a moment to start.
 
 CRMS is ready. Make the accounts for the staff under **User Accounts**.
