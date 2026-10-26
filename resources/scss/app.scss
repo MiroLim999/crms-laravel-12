@@ -4,6 +4,7 @@
 // _custom-variables/ and pages/ was harvested from the SNEAT template and is
 // treated as vendor code - avoid editing it directly. Put CRMS overrides in
 // _crms.scss so an asset refresh stays painless.
+@import url('https://fonts.googleapis.com/css?family=Rubik:300,400,500,600,700%7CIBM+Plex+Sans:300,400,500,600,700&display=swap');
 
 @import 'core';
 @import 'libs/perfect-scrollbar';

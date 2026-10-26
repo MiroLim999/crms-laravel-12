@@ -1,18 +1,14 @@
 {{--
-    Unauthenticated shell: sign-in and the forced password change.
+Unauthenticated shell: sign-in and the forced password change.
 
-    Structure mirrors SNEAT's auth-login-basic page. The
-    authentication-wrapper / authentication-basic / authentication-inner nesting is
-    what page-auth.scss hooks into to centre the card and draw the corner shapes —
-    changing those class names flattens the page back to full width.
+Structure mirrors SNEAT's auth-login-basic page. The
+authentication-wrapper / authentication-basic / authentication-inner nesting is
+what page-auth.scss hooks into to centre the card and draw the corner shapes —
+changing those class names flattens the page back to full width.
 --}}
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}"
-      class="layout-wide"
-      dir="ltr"
-      data-skin="default"
-      data-bs-theme="light"
-      data-template="vertical-menu-template">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="layout-wide" dir="ltr" data-skin="default"
+    data-bs-theme="light" data-template="vertical-menu-template">
 
 <head>
     <meta charset="utf-8">
@@ -30,8 +26,12 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap"
-          rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap"
+        rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css?family=Rubik:300,400,500,600,700%7CIBM+Plex+Sans:300,400,500,600,700&display=swap"
+        rel="stylesheet">
 
     @vite([
         'resources/fonts/iconify/iconify.css',
@@ -52,8 +52,9 @@
                         <div class="app-brand justify-content-center mb-6">
                             <span class="app-brand-link gap-2">
                                 <span class="app-brand-logo demo">
-                                    <img src="{{ asset('assets/img/crms-logo.png') }}" alt="{{ config('app.name') }} logo"
-                                         width="40" height="40" class="d-block rounded">
+                                    <img src="{{ asset('assets/img/crms-logo.png') }}"
+                                        alt="{{ config('app.name') }} logo" width="40" height="40"
+                                        class="d-block rounded">
                                 </span>
                                 <span class="app-brand-text demo text-heading fw-bold ms-2 fs-4">CRMS</span>
                             </span>
@@ -71,4 +72,5 @@
         </div>
     </div>
 </body>
+
 </html>
