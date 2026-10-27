@@ -4,3 +4,8 @@ $secondary: #64748b;
 $danger: #dc2626;
 $success: #16a34a;
 
+// Thin, crisp 1px focus highlight matching modern flat input styling
+$input-focus-border-width: 1px;
+$input-focus-box-shadow: none;
+$form-select-focus-box-shadow: none;
+
