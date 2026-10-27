@@ -159,43 +159,73 @@
                     or remove rows and columns here. The template is not changed.
                 --}}
                 @if (count($ruledYs) >= 2)
-                    <x-card title="Ledger grid" class="mb-4 document-grid-card">
-                        <x-slot:actions>
-                            <span class="badge bg-label-info" id="gridRowsBadge">0 rows</span>
-                        </x-slot:actions>
-
-                        <p class="document-grid-card__summary" id="gridSummary"></p>
-                        <p class="document-grid-card__source d-none" id="gridSource" aria-live="polite"></p>
-                        {{-- Why a row or column could not be added: here, where the buttons are. --}}
-                        <p class="document-grid-card__message text-danger small d-none" id="gridMessage" role="alert"></p>
-
-                        <div class="document-grid-card__tools">
-                            <button type="button" class="btn btn-sm btn-outline-primary" id="addRowBtn"
-                                    title="Add a row line under the selected one, or a row at the bottom">
-                                <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add row
-                            </button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" id="removeRowBtn"
-                                    title="Remove the last row">
-                                <i class="icon-base bx bx-minus icon-sm me-1" aria-hidden="true"></i>Remove row
-                            </button>
+                    {{--
+                        Closed at first: a click anywhere on the header but the ?
+                        opens and closes it (the title button, for the keyboard).
+                        The ? sits by the title, away from the arrow.
+                    --}}
+                    <div class="card mb-4 document-grid-card">
+                        <div class="card-header d-flex align-items-center gap-1 document-grid-card__header" id="gridCardHeader">
+                            <h5 class="card-title mb-0">
+                                <button type="button" class="btn btn-link document-grid-card__toggle" id="gridCardToggle"
+                                        aria-expanded="false" aria-controls="gridCardBody">
+                                    Rows and Columns
+                                </button>
+                            </h5>
+                            {{-- Shown on hover, and on focus for the keyboard and a tap. --}}
+                            <div class="document-grid-card__help">
+                                <button type="button" class="btn btn-link document-grid-card__help-toggle"
+                                        aria-label="Rows and Columns tips" aria-describedby="gridTips">
+                                    <i class="icon-base bx bx-help-circle" aria-hidden="true"></i>
+                                </button>
+                                <div class="document-grid-card__tips" id="gridTips" role="tooltip">
+                                    <strong>Tips</strong>
+                                    <ul>
+                                        <li>Drag a row line by the dot at either end. Hold <kbd>Shift</kbd> to move all lines.</li>
+                                        <li>To remove a column, select it and press <kbd>Delete</kbd>.</li>
+                                        <li>Stretch a new field down two or more rows, between columns, to read it as a column.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <i class="icon-base bx bx-chevron-down document-grid-card__chevron" aria-hidden="true"></i>
                         </div>
 
-                        <label class="form-label small fw-medium" for="newColumnName">Add a column</label>
-                        <div class="input-group input-group-sm">
-                            <input type="text" id="newColumnName" class="form-control" placeholder="Column name"
-                                   maxlength="500">
-                            <button class="btn btn-outline-primary" type="button" id="addColumnBtn"
-                                    title="Splits the selected column in two, or adds one at the right of the table">
-                                <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add
-                            </button>
-                        </div>
+                        <div class="document-grid-card__body" id="gridCardBody" hidden>
+                            <div class="card-body">
+                                <div class="document-grid-card__line">
+                                    <span class="document-grid-card__label" id="gridRowsLabel">Rows</span>
+                                    <div class="btn-group btn-group-sm" role="group" aria-labelledby="gridRowsLabel">
+                                        <button type="button" class="btn btn-outline-secondary" id="removeRowBtn"
+                                                title="Remove the last row" aria-label="Remove a row">
+                                            <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i>
+                                        </button>
+                                        <span class="document-grid-card__count" id="gridRowCount" aria-live="polite">0</span>
+                                        <button type="button" class="btn btn-outline-secondary" id="addRowBtn"
+                                                title="Add a row line under the selected one, or a row at the bottom"
+                                                aria-label="Add a row">
+                                            <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
+                                        </button>
+                                    </div>
+                                </div>
 
-                        <p class="document-grid-card__hint">
-                            Drag a row line by its handle at either end (<kbd>Shift</kbd>: all lines).
-                            A field stretched down two or more rows, in a gap between the columns, becomes a column, read row by row.
-                            To remove a column, select it and press <kbd>Delete</kbd>.
-                        </p>
-                    </x-card>
+                                <div class="document-grid-card__line">
+                                    <label class="document-grid-card__label" for="newColumnName">Column</label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="text" id="newColumnName" class="form-control" placeholder="New column name"
+                                               maxlength="500">
+                                        <button class="btn btn-outline-primary" type="button" id="addColumnBtn"
+                                                title="Splits the selected column in two, or adds one at the right of the table">
+                                            Add
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <p class="document-grid-card__source d-none" id="gridSource" aria-live="polite"></p>
+                                {{-- Why a row or column could not be added: here, where the buttons are. --}}
+                                <p class="document-grid-card__message text-danger small d-none" id="gridMessage" role="alert"></p>
+                            </div>
+                        </div>
+                    </div>
                 @endif
 
                 <x-card title="Fields" class="mb-4 document-fields-card">
@@ -703,7 +733,6 @@
         columnBand,
         fieldsToColumns,
         followFirstAndLastLine,
-        gridSummary,
         insertRuledY,
         remapRuledYs,
         sameBand,
@@ -879,7 +908,7 @@
     // start as the template's and go with the columns when the table is moved
     // or stretched; Snap to table takes them from the page; Staff can move,
     // add or remove them. Nothing here changes the template.
-    // As the Ledger grid card is shown: the template has columns and row lines.
+    // As the Rows and Columns card is shown: the template has columns and row lines.
     const isLedger = config.ruledYs.length >= 2;
     const templateRows = config.ruledYs.map(Number);
     let gridRows = [...templateRows];
@@ -1064,7 +1093,7 @@
     }
 
     /**
-     * Why a row or column could not be added, in the Ledger grid card beside
+     * Why a row or column could not be added, in the Rows and Columns card beside
      * its buttons: below the Fields card, it was out of sight, and the button
      * seemed to do nothing. null clears it.
      */
@@ -1137,16 +1166,14 @@
         showGridMessage(null);
     }
 
-    /** The Ledger grid card: how many columns and rows, and where the rows came from. */
+    /** The Rows and Columns card: how many rows, and where they came from. */
     function updateGridCard(boxes = marker.toJSON()) {
         if (!isLedger) return;
         const columns = ledgerColumns(boxes).length;
-        const rows = Math.max(0, gridRows.length - 1);
-        el('gridRowsBadge').textContent = `${rows} row${rows === 1 ? '' : 's'}`;
-        el('gridSummary').textContent = gridSummary(columns, gridRows, templateRows.length - 1);
+        el('gridRowCount').textContent = String(Math.max(0, gridRows.length - 1));
 
         const message = rowsByHand
-            ? `Row lines set by hand: Detect keeps them as they are.${estimatedRows.size > 0
+            ? `Rows set by hand: Detect keeps them.${estimatedRows.size > 0
                 ? ` ${estimatedRows.size} amber ${estimatedRows.size === 1 ? 'line has' : 'lines have'} no printed line under ${estimatedRows.size === 1 ? 'it' : 'them'}.` : ''}`
             // Compared with the template itself, not the grid Snap was sent.
             : snapRowsMessage(rowsSource && { ...rowsSource, template: templateRows.length - 1 }, estimatedRows.size);
@@ -2605,6 +2632,15 @@
     });
 
     if (isLedger) {
+        // The Rows and Columns card starts closed; its header slides it open and
+        // shut (the title button's click arrives here too). The ? only shows tips.
+        el('gridCardHeader').addEventListener('click', (event) => {
+            if (event.target.closest('.document-grid-card__help')) return;
+            const expanded = el('gridCardToggle').getAttribute('aria-expanded') !== 'true';
+            el('gridCardToggle').setAttribute('aria-expanded', String(expanded));
+            el('gridCardHeader').classList.toggle('is-expanded', expanded);
+            setDisclosureExpanded(el('gridCardBody'), expanded);
+        });
         el('addRowBtn').addEventListener('click', () => addRow());
         el('removeRowBtn').addEventListener('click', () => removeRow());
         el('addColumnBtn').addEventListener('click', () => addLedgerColumn());

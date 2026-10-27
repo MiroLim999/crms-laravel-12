@@ -3106,38 +3106,182 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// The Align step's Ledger grid card.
+// The Align step's Rows and Columns card.
+// One line per tool: a label, then its control.
 .document-grid-card {
-  .document-grid-card__summary {
-    margin-block: 0 .35rem;
+  // Its two header buttons are btn-link, without the link look.
+  .document-grid-card__toggle,
+  .document-grid-card__help-toggle {
+    --bs-btn-color: inherit;
+    --bs-btn-hover-color: inherit;
+    --bs-btn-active-color: inherit;
+    --bs-btn-focus-box-shadow: none;
+    border: 0;
+    text-decoration: none;
+  }
+
+  // The header opens and closes the card: title, ?, then the arrow at the far end.
+  .document-grid-card__header {
+    cursor: pointer;
+
+    // Not while over the ?: that only shows tips.
+    &:hover:not(:has(.document-grid-card__help:hover)) .document-grid-card__chevron,
+    &:has(.document-grid-card__toggle:focus-visible) .document-grid-card__chevron {
+      color: var(--bs-primary);
+    }
+
+    &.is-expanded .document-grid-card__chevron {
+      transform: rotate(180deg);
+    }
+  }
+
+  .document-grid-card__toggle {
+    padding: 0;
+    font: inherit;
+    text-align: start;
+  }
+
+  .document-grid-card__chevron {
+    margin-inline-start: auto;
+    color: var(--bs-secondary-color);
+    font-size: 1.25rem;
+    transition: color .15s ease, transform .22s cubic-bezier(.2, .72, .2, 1);
+  }
+
+  // The slide wrapper sits between header and body, so the theme's
+  // ".card-header + .card-body" spacing is set here instead.
+  .document-grid-card__body > .card-body {
+    padding-block-start: 0;
+  }
+
+  .document-grid-card__line {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    margin-block-end: .75rem;
+
+    .input-group {
+      flex: 1;
+      min-width: 0;
+    }
+  }
+
+  .document-grid-card__label {
+    flex: 0 0 3.75rem;
+    margin: 0;
     color: var(--bs-heading-color);
     font-size: .8125rem;
     font-weight: 500;
   }
 
-  .document-grid-card__source {
+  // The row count, between the − and + buttons.
+  .document-grid-card__count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.75rem;
+    padding-inline: .5rem;
+    border-block: 1px solid var(--bs-border-color);
+    color: var(--bs-heading-color);
+    font-size: .8125rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+
+  .document-grid-card__source,
+  .document-grid-card__message {
     margin-block: 0 .5rem;
-    color: var(--bs-secondary-color);
     font-size: .75rem;
     line-height: 1.4;
   }
 
-  .document-grid-card__tools {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .5rem;
-    margin-block: .5rem 1rem;
+  .document-grid-card__source {
+    color: var(--bs-secondary-color);
   }
 
-  .document-grid-card__hint {
-    margin-block: .75rem 0;
-    color: var(--bs-secondary-color);
+  // The ? beside the title, and the tips it shows on hover or focus.
+  .document-grid-card__help {
+    position: relative;
+  }
+
+  .document-grid-card__help-toggle {
+    --bs-btn-color: var(--bs-secondary-color);
+    --bs-btn-hover-color: var(--bs-primary);
+    --bs-btn-active-color: var(--bs-primary);
+    padding: .2rem;
+    border-radius: 50%;
+    cursor: help;
+    font-size: 1.1rem;
+    line-height: 1;
+
+    &:focus-visible {
+      color: var(--bs-primary);
+    }
+  }
+
+  .document-grid-card__tips {
+    position: absolute;
+    z-index: 10;
+    // Centred under the ?, so it stays inside the side panel.
+    inset-block-start: calc(100% + .5rem);
+    inset-inline-start: 50%;
+    width: 17rem;
+    padding: .75rem .9rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius-lg);
+    background: var(--bs-paper-bg, var(--bs-body-bg));
+    box-shadow: var(--bs-box-shadow);
+    color: var(--bs-body-color);
     font-size: .75rem;
     line-height: 1.45;
+    opacity: 0;
+    transform: translate(-50%, -.35rem);
+    visibility: hidden;
+    // Hidden after a short pause, so the pointer can cross to the panel.
+    transition: opacity .18s ease .1s, transform .18s ease .1s, visibility 0s linear .28s;
+
+    // Bridges the gap to the ?, so the panel stays open on the way over.
+    &::before {
+      position: absolute;
+      inset-block-end: 100%;
+      inset-inline: 0;
+      height: .5rem;
+      content: "";
+    }
+
+    strong {
+      display: block;
+      margin-block-end: .35rem;
+      color: var(--bs-heading-color);
+      font-size: .8125rem;
+    }
+
+    ul {
+      margin: 0;
+      padding-inline-start: 1.1rem;
+    }
+
+    li + li {
+      margin-block-start: .25rem;
+    }
 
     kbd {
       padding: .05rem .3rem;
       font-size: .6875rem;
+    }
+  }
+
+  .document-grid-card__help:hover .document-grid-card__tips,
+  .document-grid-card__help:focus-within .document-grid-card__tips {
+    opacity: 1;
+    transform: translateX(-50%);
+    visibility: visible;
+    transition: opacity .18s ease, transform .18s ease, visibility 0s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .document-grid-card__tips {
+      transform: translateX(-50%);
     }
   }
 }

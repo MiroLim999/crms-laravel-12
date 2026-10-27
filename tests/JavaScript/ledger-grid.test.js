@@ -9,7 +9,6 @@ import {
     fieldsOverLedger,
     fieldsToColumns,
     followFirstAndLastLine,
-    gridSummary,
     insertRuledY,
     ledgerGridProblems,
     MIN_ROW_GAP,
@@ -167,11 +166,6 @@ test('a field stays a field off the table, over a column, across one row, or whe
 
     const kept = [...table, { ...field(0.22, 0.2, 0.3), name: 'Remarks' }];
     assert.equal(fieldsToColumns(kept, ys, (box) => box.name === 'Remarks'), kept, 'the template\'s own field');
-});
-
-test('the grid summary names the template\'s rows only when the page differs', () => {
-    assert.equal(gridSummary(11, [0.1, 0.2, 0.3], 2), '11 columns · 2 rows');
-    assert.equal(gridSummary(1, [0.1, 0.2, 0.3, 0.4, 0.5], 2), '1 column · 4 rows (template: 2)');
 });
 
 test('nothing moves when the first and last lines stay', () => {

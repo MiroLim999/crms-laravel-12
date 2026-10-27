@@ -83,15 +83,14 @@ export function alignedGeometry(aligned, ruledYs, { keepRows = false } = {}) {
 export function snapRowsMessage(rows, estimated = Array.isArray(rows?.estimated) ? rows.estimated.length : 0) {
     const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
     const check = estimated > 0
-        ? ` ${plural(estimated, 'row line')} ${estimated === 1 ? 'has' : 'have'} no printed line under ${estimated === 1 ? 'it' : 'them'} (amber): check against the page.`
+        ? ` ${plural(estimated, 'amber line')} ${estimated === 1 ? 'has' : 'have'} no printed line under ${estimated === 1 ? 'it' : 'them'}: check against the page.`
         : '';
     if (!rows || typeof rows !== 'object') return check.trim();
 
     if (rows.from_page) {
         const count = Number(rows.count) || 0;
         const template = Number(rows.template) || 0;
-        const compared = count === template ? 'the same as the template' : `the template has ${template}`;
-        return `Rows taken from the page: ${plural(count, 'row')}, ${compared}.${check}`;
+        return `Rows found on the page${count === template ? '' : ` (template: ${template})`}.${check}`;
     }
 
     const reasons = {

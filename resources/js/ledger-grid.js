@@ -273,17 +273,6 @@ export function fieldsToColumns(boxes, ys, keep = () => false) {
 }
 
 /**
- * The Align step's grid in a few words: "11 columns · 25 rows (template: 20)",
- * the template's row count only when this page differs from it.
- */
-export function gridSummary(columnCount, ys, templateRows) {
-    const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
-    const rows = Math.max(0, ys.length - 1);
-    return `${plural(columnCount, 'column')} · ${plural(rows, 'row')}`
-        + (rows !== templateRows ? ` (template: ${templateRows})` : '');
-}
-
-/**
  * Fields that cover the middle of a ledger cell. Line detection takes the
  * handwriting under a field as the field's, so those cells go missing from
  * the table's rows. Returns the fields' indexes.
