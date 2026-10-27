@@ -498,6 +498,12 @@ html.layout-navbar-fixed {
     z-index: 1020;
   }
 
+  // Sneat narrows a fixed navbar by the collapsed menu's width, but this bar
+  // already sits beside the menu, so keep Sneat's regular detached width.
+  &.layout-menu-collapsed #layout-navbar.navbar-detached {
+    inline-size: calc(100% - 1.625rem * 2);
+  }
+
   // Opaque strip above the bar so content does not show through the gap.
   #layout-navbar.navbar-detached::before {
     content: "";
