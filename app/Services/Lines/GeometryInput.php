@@ -34,6 +34,7 @@ final class GeometryInput
                 'columns' => $geometry['columns'] ?? [],
                 'ruled_ys' => $geometry['ruled_ys'] ?? [],
                 'fields' => $geometry['fields'] ?? [],
+                ...(array_key_exists('keep_rows', $geometry) ? ['keep_rows' => $geometry['keep_rows']] : []),
             ]]);
         }
     }
@@ -50,6 +51,9 @@ final class GeometryInput
             'geometry.columns.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
             'geometry.ruled_ys' => ['present', 'array', 'max:400'],
             'geometry.ruled_ys.*' => ['required', 'numeric', 'min:0', 'max:1'],
+            // Staff set the row lines by hand in Align: Detect keeps them
+            // instead of taking the page's rows.
+            'geometry.keep_rows' => ['sometimes', 'boolean'],
             'geometry.fields' => ['present', 'array', 'max:'.Limits::MAX_FIELDS],
             'geometry.fields.*.name' => ['required', 'string', 'max:500'],
             'geometry.fields.*.box' => ['required', 'array', 'size:4'],
@@ -114,6 +118,7 @@ final class GeometryInput
                 'person_field_order' => isset($f['person_field_order']) ? (int) $f['person_field_order'] : null,
                 ...($angle($f) != 0.0 ? ['angle' => $angle($f)] : []),
             ], $fields),
+            ...(filter_var($geometry['keep_rows'] ?? false, FILTER_VALIDATE_BOOLEAN) ? ['keep_rows' => true] : []),
         ];
     }
 }

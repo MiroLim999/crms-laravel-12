@@ -1,13 +1,13 @@
 /**
- * Ledger grid helpers for the Template Builder.
+ * Ledger grid helpers for the Template Builder and the Align step.
  *
  * A ruled register is described by its column markers and the y of every
- * printed row line (page fractions, top to bottom). The Align step reads the
- * row lines relative to the columns' band - the median top and bottom of the
- * columns - and stretches them to wherever Staff put the columns
- * (alignedGeometry() in line-geometry.js). So a template is only right when
- * its row lines sit where they belong inside that band. These helpers keep
- * the two together while an admin edits them.
+ * printed row line (page fractions, top to bottom). The Align step starts
+ * from the template's row lines and carries them along when Staff move or
+ * stretch the columns' band - the median top and bottom of the columns. So a
+ * template is only right when its row lines sit where they belong inside
+ * that band. These helpers keep the two together while an admin, or Staff
+ * on one page, edit them.
  *
  * Pure functions, so they are unit-tested without a browser.
  */
@@ -144,9 +144,11 @@ export function nearestLine(y, lines, reach) {
 /**
  * Columns that sat on the first or last row line keep sitting on it when the
  * lines change: the table's top is its first line, its bottom its last.
+ * `attached` is how close a column's edge must be to count as on the line;
+ * the Align step allows half a row, as Staff's columns are aligned by hand.
  * Returns the same array when no column moves.
  */
-export function followFirstAndLastLine(boxes, before, after) {
+export function followFirstAndLastLine(boxes, before, after, attached = ATTACHED) {
     if (before.length < 2 || after.length < 2) return boxes;
 
     const [oldTop, oldBottom] = [before[0], before[before.length - 1]];
@@ -156,8 +158,8 @@ export function followFirstAndLastLine(boxes, before, after) {
     let moved = false;
     const next = boxes.map((box) => {
         if (!isColumn(box)) return box;
-        const onTop = Math.abs(box.y - oldTop) < ATTACHED;
-        const onBottom = Math.abs(box.y + box.h - oldBottom) < ATTACHED;
+        const onTop = Math.abs(box.y - oldTop) < attached;
+        const onBottom = Math.abs(box.y + box.h - oldBottom) < attached;
         if (!onTop && !onBottom) return box;
 
         const top = onTop ? newTop : box.y;
@@ -168,6 +170,63 @@ export function followFirstAndLastLine(boxes, before, after) {
     });
 
     return moved ? next : boxes;
+}
+
+/** A column narrower than this (fraction of the page width) holds no writing. */
+export const MIN_COLUMN_WIDTH = 0.01;
+
+/**
+ * A column added in the Align step, among all the markers. The selected
+ * column gives it its right half (keeping its left half). With none selected
+ * it goes a typical column's width to the right of the table, or takes the
+ * last column's right half when the page has no room there.
+ *
+ * @param {object[]} boxes  Every marker (FieldMarker#toJSON()).
+ * @param {object} column   The new column's own properties: name, kind, columnIndex.
+ * @param {number|null} selected  Index of the selected column, if one is.
+ * @returns {{boxes: object[], index: number}|null} the markers with the new
+ *          column last, and its index; null when it would be too narrow
+ */
+export function addColumn(boxes, column, selected = null) {
+    const columns = boxes.flatMap((box, index) => (isColumn(box) ? [index] : []));
+    if (columns.length === 0) return null;
+
+    let split = Number.isInteger(selected) && isColumn(boxes[selected]) ? selected : null;
+    let place = null;
+    if (split === null) {
+        const band = columnBand(columns.map((index) => boxes[index]));
+        const width = median(columns.map((index) => boxes[index].w));
+        const right = Math.max(...columns.map((index) => boxes[index].x + boxes[index].w));
+        if (right + width <= 1 + 1e-9) {
+            place = { x: right, y: band.top, w: width, h: band.bottom - band.top };
+        } else {
+            split = columns.reduce((last, index) => (
+                boxes[index].x + boxes[index].w > boxes[last].x + boxes[last].w ? index : last
+            ));
+        }
+    }
+
+    const next = [...boxes];
+    if (place === null) {
+        const old = boxes[split];
+        const half = old.w / 2;
+        if (half < MIN_COLUMN_WIDTH) return null;
+        next[split] = { ...old, w: half };
+        place = { x: old.x + half, y: old.y, w: old.w - half, h: old.h, ...(old.angle ? { angle: old.angle } : {}) };
+    }
+    next.push({ ...place, ...column });
+    return { boxes: next, index: next.length - 1 };
+}
+
+/**
+ * The Align step's grid in a few words: "11 columns · 25 rows (template: 20)",
+ * the template's row count only when this page differs from it.
+ */
+export function gridSummary(columnCount, ys, templateRows) {
+    const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+    const rows = Math.max(0, ys.length - 1);
+    return `${plural(columnCount, 'column')} · ${plural(rows, 'row')}`
+        + (rows !== templateRows ? ` (template: ${templateRows})` : '');
 }
 
 /**

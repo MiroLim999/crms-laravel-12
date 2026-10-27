@@ -35,6 +35,10 @@ export default defineConfig({
                 // SVG overlay, imported by the scanning workspace's inline module.
                 'resources/js/line-geometry.js',
                 'resources/js/line-overlay.js',
+                // The Align step's ledger row lines: the grid helpers it shares
+                // with the Template Builder, and the layer drawn over the page.
+                'resources/js/ledger-grid.js',
+                'resources/js/row-lines.js',
                 // The value checks Verify runs from each template field's settings.
                 'resources/js/value-types.js',
                 // Template Builder interaction shell. It shares FieldMarker with

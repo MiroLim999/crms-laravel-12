@@ -153,6 +153,48 @@
             </div>
 
             <div class="document-side-panel field-marker-controls-pane">
+                {{--
+                    A ledger's grid on this page: the rows start as the template's,
+                    Snap to table takes them from the page, and Staff can add, move
+                    or remove rows and columns here. The template is not changed.
+                --}}
+                @if (count($ruledYs) >= 2)
+                    <x-card title="Ledger grid" class="mb-4 document-grid-card">
+                        <x-slot:actions>
+                            <span class="badge bg-label-info" id="gridRowsBadge">0 rows</span>
+                        </x-slot:actions>
+
+                        <p class="document-grid-card__summary" id="gridSummary"></p>
+                        <p class="document-grid-card__source d-none" id="gridSource" aria-live="polite"></p>
+
+                        <div class="document-grid-card__tools">
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="addRowBtn"
+                                    title="Add a row line under the selected one, or a row at the bottom">
+                                <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add row
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="removeRowBtn"
+                                    title="Remove the last row">
+                                <i class="icon-base bx bx-minus icon-sm me-1" aria-hidden="true"></i>Remove row
+                            </button>
+                        </div>
+
+                        <label class="form-label small fw-medium" for="newColumnName">Add a column</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" id="newColumnName" class="form-control" placeholder="Column name"
+                                   maxlength="500">
+                            <button class="btn btn-outline-primary" type="button" id="addColumnBtn"
+                                    title="Splits the selected column in two, or adds one at the right of the table">
+                                <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add
+                            </button>
+                        </div>
+
+                        <p class="document-grid-card__hint">
+                            Drag a row line by its handle at either end (<kbd>Shift</kbd>: all lines).
+                            To remove a column, select it and press <kbd>Delete</kbd>.
+                        </p>
+                    </x-card>
+                @endif
+
                 <x-card title="Fields" class="mb-4 document-fields-card">
                     <x-slot:actions>
                         <span class="badge bg-label-primary" id="fieldCount">0 fields</span>
@@ -531,10 +573,10 @@
 
                 <div class="modal-body">
                     <p class="mb-2" id="resetFieldsModalDescription">
-                        Restore all field markers to the positions and sizes configured in the original template?
+                        Restore all field markers and row lines to the positions and sizes configured in the original template?
                     </p>
                     <p class="small text-muted mb-0">
-                        Added or copied fields will be removed, and deleted fields will be restored.
+                        Added or copied fields, columns and rows will be removed, and deleted ones will be restored.
                     </p>
                 </div>
 
@@ -648,9 +690,21 @@
         FLAG_NO_ROW,
         geometryMarkers,
         gridNotes,
+        snapRowsMessage,
         verificationItems,
     } from '{{ Vite::asset('resources/js/line-geometry.js') }}';
     import { LineOverlay, polygonBounds } from '{{ Vite::asset('resources/js/line-overlay.js') }}';
+    import {
+        addColumn,
+        clampRuledY,
+        columnBand,
+        followFirstAndLastLine,
+        gridSummary,
+        insertRuledY,
+        remapRuledYs,
+        sameBand,
+    } from '{{ Vite::asset('resources/js/ledger-grid.js') }}';
+    import { RowLineLayer, rowKey } from '{{ Vite::asset('resources/js/row-lines.js') }}';
     import { valueProblem } from '{{ Vite::asset('resources/js/value-types.js') }}';
 
     const config = {
@@ -737,6 +791,8 @@
         onChange: handleMarkerChange,
         onSelectionChange: updateSelectionUI,
         onZoomChange: updateZoomUI,
+        // While the table is dragged, its row lines are drawn moving with it.
+        onDrag: (boxes) => previewRowsFollow(boxes),
     });
 
     attachMarqueeSelection({
@@ -812,8 +868,277 @@
     const templateSettings = new Map(config.boxes.map((box) => [nameKey(box.name), box]));
     const settingsFor = (index) => templateSettings.get(nameKey(cropped[index]?.label)) ?? null;
 
+    // ------------------------------------------------------------ ledger rows
+    // The ledger's row lines on this page (page fractions, top to bottom). They
+    // start as the template's and go with the columns when the table is moved
+    // or stretched; Snap to table takes them from the page; Staff can move,
+    // add or remove them. Nothing here changes the template.
+    // As the Ledger grid card is shown: the template has columns and row lines.
+    const isLedger = config.ruledYs.length >= 2;
+    const templateRows = config.ruledYs.map(Number);
+    let gridRows = [...templateRows];
+    // Row lines with no printed line under them (rowKey), drawn amber.
+    let estimatedRows = new Set();
+    // Staff moved, added or removed a row line themselves: Detect keeps theirs.
+    let rowsByHand = false;
+    // What the last Snap to table said about where the rows came from.
+    let rowsSource = null;
+    let selectedRow = null;
+    // The columns' band and count the rows were last placed in.
+    let gridBand = null;
+    let gridColumnCount = 0;
+    // Markers and rows are being set together: the rows are not carried along again.
+    let settingGrid = false;
+
+    const rowLines = new RowLineLayer({
+        overlay: markerOverlay,
+        printedLines: () => marker.snapLines,
+        onSelect: (index) => selectRow(index),
+        onMove: (rows, change) => moveRows(rows, change),
+        onRemove: (index) => removeRow(index),
+    });
+
+    const ledgerColumns = (boxes) => boxes.filter((box) => box.kind === 'column');
+
     function fieldsMatchTemplate() {
-        return JSON.stringify(marker.toJSON()) === JSON.stringify(templateBoxes);
+        return JSON.stringify(marker.toJSON()) === JSON.stringify(templateBoxes)
+            && JSON.stringify(gridRows) === JSON.stringify(templateRows);
+    }
+
+    /** Markers and row lines, as one undoable state. */
+    function gridState() {
+        return {
+            boxes: cloneBoxes(marker.toJSON()),
+            rows: [...gridRows],
+            estimated: [...estimatedRows],
+            byHand: rowsByHand,
+        };
+    }
+
+    /** The markers and row lines as one string, to tell one grid from another. */
+    function gridSnapshot() {
+        return JSON.stringify({ boxes: marker.toJSON(), rows: gridRows });
+    }
+
+    function rememberBand(boxes) {
+        const columns = ledgerColumns(boxes);
+        gridBand = columnBand(columns);
+        gridColumnCount = columns.length;
+    }
+
+    /**
+     * The columns were moved or stretched as a table (their band changed): the
+     * row lines go with them. A column added or removed only resets the band.
+     */
+    function followColumns(boxes) {
+        const columns = ledgerColumns(boxes);
+        const band = columnBand(columns);
+        if (gridBand && band && columns.length === gridColumnCount && gridRows.length >= 2
+            && !sameBand(band, gridBand)) {
+            const from = gridBand;
+            gridRows = remapRuledYs(gridRows, from, band);
+            estimatedRows = new Set([...estimatedRows].map((key) => rowKey(remapRuledYs([Number(key)], from, band)[0])));
+        }
+        rememberBand(boxes);
+    }
+
+    function previewRowsFollow(boxes) {
+        const columns = ledgerColumns(boxes);
+        const band = columnBand(columns);
+        if (!gridBand || !band || columns.length !== gridColumnCount || gridRows.length < 2 || sameBand(band, gridBand)) return;
+        const moved = (ys) => remapRuledYs(ys, gridBand, band);
+        renderRows(boxes, moved(gridRows), new Set([...estimatedRows].map((key) => rowKey(moved([Number(key)])[0]))));
+    }
+
+    function renderRows(boxes = marker.toJSON(), rows = gridRows, estimated = estimatedRows) {
+        const columns = ledgerColumns(boxes);
+        if (!isLedger || columns.length === 0 || rows.length < 2) {
+            rowLines.render({ rows: [] });
+            return;
+        }
+        rowLines.render({
+            rows,
+            left: Math.min(...columns.map((column) => column.x)),
+            right: Math.max(...columns.map((column) => column.x + column.w)),
+            selected: selectedRow,
+            estimated,
+            locked: lineEditing,
+        });
+    }
+
+    /**
+     * Markers and row lines set together, as one change: on a new page, by
+     * Snap to table and Detect, by Reset, and by undo.
+     */
+    function setGrid(boxes, rows, { estimated = [], byHand = false } = {}) {
+        gridRows = [...rows];
+        estimatedRows = new Set(estimated);
+        rowsByHand = byHand;
+        selectedRow = null;
+        settingGrid = true;
+        try {
+            marker.setBoxes(cloneBoxes(boxes));
+        } finally {
+            settingGrid = false;
+        }
+    }
+
+    /** Record the grid as it now stands, so Ctrl+Z can return to the one before. */
+    function recordGridChange() {
+        const next = gridState();
+        if (!restoringFieldHistory && currentFieldSnapshot !== null
+            && JSON.stringify(next) !== JSON.stringify(currentFieldSnapshot)) {
+            fieldHistory.push(currentFieldSnapshot);
+            if (fieldHistory.length > 100) fieldHistory.shift();
+        }
+        currentFieldSnapshot = next;
+    }
+
+    /** After the row lines alone changed. */
+    function rowsChanged() {
+        recordGridChange();
+        renderRows();
+        updateGridCard();
+        updateResetUI();
+        syncDetection();
+    }
+
+    /**
+     * Row lines changed by hand, as one undoable change. Columns on the first or
+     * last line follow it, so the table's top and bottom stay on its lines.
+     */
+    function applyRows(next, { estimated = estimatedRows } = {}) {
+        const rows = next.filter((y, index, all) => index === 0 || y - all[index - 1] > 0.0005);
+        const boxes = marker.toJSON();
+        const halfRow = rows.length >= 2 ? (rows[rows.length - 1] - rows[0]) / (rows.length - 1) / 2 : 0.01;
+        const followed = followFirstAndLastLine(boxes, gridRows, rows, halfRow);
+        gridRows = rows;
+        estimatedRows = new Set([...estimated].filter((key) => rows.some((y) => rowKey(y) === key)));
+        rowsByHand = true;
+        if (selectedRow !== null && selectedRow >= rows.length) selectedRow = null;
+
+        if (followed === boxes) {
+            rowsChanged();
+            return;
+        }
+        const selected = selectedRow;
+        settingGrid = true;
+        try {
+            marker.setBoxes(cloneBoxes(followed));
+        } finally {
+            settingGrid = false;
+        }
+        selectedRow = selected;
+        renderRows();
+        updateGridCard();
+    }
+
+    function moveRows(rows, { index, together }) {
+        const dy = rows[0] - gridRows[0];
+        // A line placed by hand is no longer an estimate.
+        const estimated = together
+            ? new Set([...estimatedRows].map((key) => rowKey(Number(key) + dy)))
+            : new Set([...estimatedRows].filter((key) => key !== rowKey(gridRows[index])));
+        applyRows(rows, { estimated });
+    }
+
+    /** The row line the arrow keys and Delete act on (null: none). Never together with markers. */
+    function selectRow(index) {
+        selectedRow = Number.isInteger(index) && index >= 0 && index < gridRows.length ? index : null;
+        if (selectedRow !== null) marker.clearSelection();
+        renderRows();
+        updateGridCard();
+    }
+
+    /** Remove a row line: the selected one, else the last. A ledger keeps at least two. */
+    function removeRow(index = selectedRow ?? gridRows.length - 1) {
+        if (!isLedger || gridRows.length <= 2 || !Number.isInteger(index) || index < 0 || index >= gridRows.length) return;
+        selectedRow = null;
+        applyRows(gridRows.filter((_, candidate) => candidate !== index));
+    }
+
+    /** A row line under the selected one (half way to the next), or a row at the bottom. */
+    function addRow() {
+        const inserted = insertRuledY(gridRows, selectedRow);
+        if (!inserted) {
+            showOcrError('There is no room for another row there. Make room on the page first.');
+            return;
+        }
+        applyRows(inserted.ys);
+        selectRow(inserted.index);
+    }
+
+    function nudgeRow(pixels) {
+        if (selectedRow === null) return;
+        const index = selectedRow;
+        const height = Math.max(1, markerOverlay.getBoundingClientRect().height);
+        const y = clampRuledY(gridRows, index, gridRows[index] + pixels / height);
+        if (Math.abs(y - gridRows[index]) < 1e-9) return;
+        moveRows(gridRows.map((value, i) => (i === index ? y : value)), { index, together: false });
+    }
+
+    /**
+     * A column Staff add for this page: it splits the selected column, or goes
+     * at the right of the table. Its cells are read under the name they give it.
+     */
+    function addLedgerColumn() {
+        const input = el('newColumnName');
+        const name = input.value.trim();
+        const boxes = marker.toJSON();
+        if (!name) {
+            showOcrError('Type the new column’s name first.');
+            input.focus();
+            return;
+        }
+        if (name.length > config.maxFieldNameLength) {
+            showOcrError(`Column names must not exceed ${config.maxFieldNameLength} characters.`);
+            return;
+        }
+        if (boxes.some((box) => box.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+            showOcrError('Every field and column needs its own name. Choose a different name.');
+            return;
+        }
+        if (boxes.length >= config.maxFields) {
+            showOcrError(`You can use at most ${config.maxFields} fields. Delete a marker before adding a column.`);
+            return;
+        }
+
+        const indexes = ledgerColumns(boxes).map((box) => Number(box.columnIndex)).filter(Number.isInteger);
+        const selected = marker.selectedIndexes();
+        const added = addColumn(boxes, { name, kind: 'column', columnIndex: Math.max(-1, ...indexes) + 1 },
+            selected.length === 1 ? selected[0] : null);
+        if (!added) {
+            showOcrError('That column is too narrow to split. Select a wider column, or make room at the right of the table.');
+            return;
+        }
+
+        marker.setBoxes(cloneBoxes(added.boxes));
+        marker.selectBox(added.index);
+        input.value = '';
+        clearOcrError();
+    }
+
+    /** The Ledger grid card: how many columns and rows, and where the rows came from. */
+    function updateGridCard(boxes = marker.toJSON()) {
+        if (!isLedger) return;
+        const columns = ledgerColumns(boxes).length;
+        const rows = Math.max(0, gridRows.length - 1);
+        el('gridRowsBadge').textContent = `${rows} row${rows === 1 ? '' : 's'}`;
+        el('gridSummary').textContent = gridSummary(columns, gridRows, templateRows.length - 1);
+
+        const message = rowsByHand
+            ? `Row lines set by hand: Detect keeps them as they are.${estimatedRows.size > 0
+                ? ` ${estimatedRows.size} amber ${estimatedRows.size === 1 ? 'line has' : 'lines have'} no printed line under ${estimatedRows.size === 1 ? 'it' : 'them'}.` : ''}`
+            // Compared with the template itself, not the grid Snap was sent.
+            : snapRowsMessage(rowsSource && { ...rowsSource, template: templateRows.length - 1 }, estimatedRows.size);
+        el('gridSource').textContent = message;
+        el('gridSource').classList.toggle('d-none', message === '');
+
+        el('addRowBtn').disabled = columns === 0;
+        el('removeRowBtn').disabled = columns === 0 || gridRows.length <= 2;
+        el('removeRowBtn').title = selectedRow !== null
+            ? `Remove row line ${selectedRow + 1} (Delete)`
+            : 'Remove the last row';
     }
 
     function updateResetUI() {
@@ -823,16 +1148,14 @@
     }
 
     function handleMarkerChange(boxes) {
-        const next = cloneBoxes(boxes);
+        // The rows go with the table, unless they were just set with the markers.
+        if (settingGrid) rememberBand(boxes);
+        else followColumns(boxes);
 
-        if (!restoringFieldHistory && currentFieldSnapshot !== null
-            && JSON.stringify(next) !== JSON.stringify(currentFieldSnapshot)) {
-            fieldHistory.push(currentFieldSnapshot);
-            if (fieldHistory.length > 100) fieldHistory.shift();
-        }
-
-        currentFieldSnapshot = next;
+        recordGridChange();
         renderFieldList(boxes);
+        renderRows(boxes);
+        updateGridCard(boxes);
         updateResetUI();
         syncDetection();
     }
@@ -844,13 +1167,12 @@
     // line adjustments included. `stale` is for good: the detected page can no
     // longer be read (a failed read, a cancelled run).
     function detectionIsCurrent() {
-        return detection !== null && !detection.stale
-            && JSON.stringify(marker.toJSON()) === detection.snapshot;
+        return detection !== null && !detection.stale && gridSnapshot() === detection.snapshot;
     }
 
     function syncDetection() {
         if (!detection || detection.stale) return;
-        const current = JSON.stringify(marker.toJSON()) === detection.snapshot;
+        const current = gridSnapshot() === detection.snapshot;
         if (!current && !detection.setAside) setDetectionAside();
         else if (current && detection.setAside) restoreDetection();
     }
@@ -861,7 +1183,7 @@
         detection.setAside = true;
         alignPreview.setVisible(false);
         el('lineEditToggle').disabled = true;
-        el('detectSummaryTitle').textContent = 'Markers moved after Detect';
+        el('detectSummaryTitle').textContent = 'Markers or rows moved after Detect';
         // Outlining again reuses the lines Detect found on this page, so it
         // takes seconds; only the adjusted outlines cannot come with it.
         el('detectSummaryText').textContent = 'Scan with OCR will outline the page again from your markers, '
@@ -910,32 +1232,31 @@
         await marker.loadFromUrl(page.imageUrl);
         updatePaperMatchWarning();
         fetchSnapLines();
-        const fitted = cloneBoxes(geometryMarkers(page.geometry, page));
-        marker.setBoxes(fitted);
+        // The markers and row lines Detect fitted (the page's own rows, unless
+        // Staff set theirs by hand), as one change Ctrl+Z can take back.
+        const rows = page.geometry?.ruled_ys ?? gridRows;
+        rowsSource = null;
+        setGrid(geometryMarkers(page.geometry, page), rows, {
+            estimated: (page.geometry?.estimated_rows ?? []).filter((index) => rows[index] !== undefined)
+                .map((index) => rowKey(rows[index])),
+            byHand: rowsByHand,
+        });
         window.requestAnimationFrame(() => marker.resetZoom());
 
         setLineEditing(false);
         detection = {
             page,
-            snapshot: JSON.stringify(marker.toJSON()),
+            snapshot: gridSnapshot(),
             stale: false,
             setAside: false,
-            columns: fitted.filter((box) => box.kind === 'column'),
             // The detector's outlines, for Reset line.
             originalOutlines: new Map(page.lines.map((line) => [line.id, line.polygon.map((point) => [...point])])),
         };
         resetLineHistory();
 
         alignPreview.setLines(page, verificationItems(page.lines, page));
-        const columns = page.geometry?.columns ?? [];
-        if (columns.length > 0) {
-            const left = Math.min(...columns.map((column) => column.box[0])) * page.width;
-            const right = Math.max(...columns.map((column) => column.box[0] + column.box[2])) * page.width;
-            alignPreview.setGuides((page.geometry?.ruled_ys ?? [])
-                .map((y) => [left, y * page.height, right, y * page.height]));
-        } else {
-            alignPreview.setGuides([]);
-        }
+        // The row lines are drawn, and can be moved, by the row layer.
+        alignPreview.setGuides([]);
         alignPreview.setVisible(true);
 
         el('detectSummary').classList.remove('d-none', 'is-stale');
@@ -1138,6 +1459,9 @@
         updateAddLineButton();
         alignPreview.setInteractive(allowed);
         markerOverlay.classList.toggle('is-editing-lines', allowed);
+        // Like the markers, the row lines stay put while lines are edited.
+        if (allowed) selectedRow = null;
+        renderRows();
         if (allowed) {
             // Editing needs the outlines on screen.
             alignPreview.setVisible(true);
@@ -1773,8 +2097,11 @@
         if (!previous) return;
 
         restoringFieldHistory = true;
-        marker.setBoxes(cloneBoxes(previous));
-        restoringFieldHistory = false;
+        try {
+            setGrid(previous.boxes, previous.rows, { estimated: previous.estimated, byHand: previous.byHand });
+        } finally {
+            restoringFieldHistory = false;
+        }
     }
 
     function copySelectedFields() {
@@ -1909,7 +2236,8 @@
             el('selectedFileName').textContent = file.name;
             showStep('mark');
             resetFieldHistory();
-            marker.setBoxes(cloneBoxes(templateBoxes));
+            rowsSource = null;
+            setGrid(templateBoxes, templateRows);
             fetchSnapLines();
 
             // The marking section was hidden while the file loaded, so fit only
@@ -2065,6 +2393,8 @@
     }
 
     function updateSelectionUI(indexes, context = {}) {
+        // A marker and a row line are never selected together.
+        if (indexes.length > 0 && selectedRow !== null) selectRow(null);
         const selected = new Set(indexes);
         document.querySelectorAll('#fieldList .field-list-item').forEach((item) => {
             item.classList.toggle('is-selected', selected.has(Number(item.dataset.fieldIndex)));
@@ -2106,7 +2436,8 @@
     el('validationZoomResetBtn').addEventListener('click', () => validationMarker.resetZoom());
 
     function restoreTemplateFields() {
-        marker.setBoxes(cloneBoxes(templateBoxes));
+        rowsSource = null;
+        setGrid(templateBoxes, templateRows);
         marker.resetZoom();
         el('docViewport').scrollTo({ top: 0, left: 0 });
         clearOcrError();
@@ -2156,6 +2487,25 @@
 
         const commandPressed = event.ctrlKey || event.metaKey;
         const key = event.key.toLowerCase();
+
+        // A selected row line: the arrow keys move it (Shift: 10 px), Delete
+        // removes it, Esc lets go of it.
+        if (selectedRow !== null && !commandPressed && !event.altKey) {
+            if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                event.preventDefault();
+                nudgeRow((event.key === 'ArrowUp' ? -1 : 1) * (event.shiftKey ? 10 : 1));
+                return;
+            }
+            if (event.key === 'Delete' || event.key === 'Backspace') {
+                event.preventDefault();
+                removeRow(selectedRow);
+                return;
+            }
+            if (event.key === 'Escape') {
+                selectRow(null);
+                return;
+            }
+        }
 
         if (commandPressed && !event.shiftKey && key === 'c' && marker.selectedIndexes().length > 0) {
             event.preventDefault();
@@ -2221,6 +2571,22 @@
             el('addFieldBtn').click();
         }
     });
+
+    if (isLedger) {
+        el('addRowBtn').addEventListener('click', () => addRow());
+        el('removeRowBtn').addEventListener('click', () => removeRow());
+        el('addColumnBtn').addEventListener('click', () => addLedgerColumn());
+        el('newColumnName').addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addLedgerColumn();
+            }
+        });
+        // A click on the page around the markers lets go of the row line.
+        markerOverlay.addEventListener('pointerdown', (event) => {
+            if (event.target === markerOverlay && selectedRow !== null) selectRow(null);
+        });
+    }
 
     el('backToUpload').addEventListener('click', () => {
         scanFileInput.value = '';
@@ -2393,14 +2759,12 @@
         await new Promise((resolve) => window.setTimeout(resolve, 420));
     }
 
-    /** The markers as they stand, as the geometry the server works with. */
+    /**
+     * The markers and row lines as they stand, as the geometry the server
+     * works with. Rows Staff set by hand are marked, so Detect keeps them.
+     */
     function currentGeometry() {
-        // After Detect, small marker edits are measured from what Detect fitted
-        // rather than from the template's own positions.
-        const base = detection
-            ? { columns: detection.columns, ruledYs: detection.page.geometry?.ruled_ys ?? config.ruledYs }
-            : { columns: templateColumns, ruledYs: config.ruledYs };
-        return alignedGeometry(marker.toJSON(), base.columns, base.ruledYs);
+        return alignedGeometry(marker.toJSON(), gridRows, { keepRows: rowsByHand });
     }
 
     // ------------------------------------------------------- snap to table
@@ -2472,8 +2836,14 @@
                 showOcrError(payload.reason || 'No printed table matching these markers was found on this page.');
                 return;
             }
-            // One undoable change (Ctrl+Z) like any marker edit.
-            marker.setBoxes(cloneBoxes(geometryMarkers(payload.geometry, null)));
+            // The columns fitted to the table and the page's own row lines, as
+            // one undoable change (Ctrl+Z) like any marker edit.
+            const rows = payload.geometry?.ruled_ys ?? gridRows;
+            rowsSource = payload.rows ?? null;
+            setGrid(geometryMarkers(payload.geometry, null), rows, {
+                estimated: (payload.rows?.estimated ?? []).filter((index) => rows[index] !== undefined)
+                    .map((index) => rowKey(rows[index])),
+            });
         } catch (error) {
             showOcrError(error.name === 'AbortError'
                 ? 'Snap to table timed out. Check that the web app is running, then try again.'
@@ -2748,7 +3118,7 @@
             // outlining it; show that page so the outlines sit on their writing.
             if (!readingDetectedPage && Math.abs(Number(page.deskew) || 0) >= 0.05) {
                 await marker.loadFromUrl(page.imageUrl);
-                marker.setBoxes(cloneBoxes(geometryMarkers(page.geometry, page)));
+                setGrid(geometryMarkers(page.geometry, page), page.geometry?.ruled_ys ?? gridRows, { byHand: rowsByHand });
             }
 
             if (!Array.isArray(page.lines) || page.lines.length === 0) {
@@ -3961,7 +4331,11 @@
             .filter((box) => box.kind !== 'column' && box.required !== false && !checkedNames.has(nameKey(box.name)))
             .map((box) => box.name);
 
-        const requiredColumns = config.boxes.filter((box) => box.kind === 'column' && box.required !== false);
+        // Only the columns on this page's grid: one Staff removed in Align is
+        // not asked for in every row (the removal goes to the audit log).
+        const pageColumns = new Set((processedPage?.geometry?.columns ?? []).map((column) => nameKey(column.name)));
+        const requiredColumns = config.boxes.filter((box) => box.kind === 'column' && box.required !== false
+            && (pageColumns.size === 0 || pageColumns.has(nameKey(box.name))));
         const untouchedRows = [];
         validationGroups.forEach((group) => {
             const ledgerRow = group.kind === 'person'

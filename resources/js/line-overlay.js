@@ -8,8 +8,9 @@
  * thin however far the reviewer zooms in.
  *
  * Colours follow the existing markers: orange for every line in the selected
- * person's row, green for the selected field, and red with a "Needs review"
- * label for lines flagged no_row or shared_cell.
+ * person's row, and green for the selected field. A line flagged no_row or
+ * shared_cell looks like any other here: the field list beside the page says
+ * what to check, and every line is reviewed there anyway.
  *
  * Also hosts manual correction: drag a polygon's points, draw a rectangle
  * that replaces the outline, or stretch the outline by the handles round its
@@ -477,11 +478,9 @@ export class LineOverlay {
         const group = this.groups[index];
         if (!line || !group) return;
 
-        group.classList.toggle('needs-review', Boolean(line.needsReview));
         group.classList.toggle('is-adjusted', Boolean(line.adjusted));
         group.classList.toggle('is-unsaved', Boolean(line.unsaved));
         group.querySelector('.line-marker__shape').setAttribute('points', polygonPoints(line.polygon));
-        group.querySelector('.line-review-label')?.remove();
         group.querySelector('.line-adjusted-mark')?.remove();
 
         if (line.adjusted) {
@@ -498,27 +497,6 @@ export class LineOverlay {
             });
             mark.textContent = '✎';
             group.appendChild(mark);
-        }
-
-        if (line.needsReview) {
-            const bounds = polygonBounds(line.polygon);
-            const size = Math.max(9, this.height / 95);
-            const label = svg('g', { class: 'line-review-label', 'aria-hidden': 'true' });
-            const text = svg('text', {
-                x: bounds.left + size * 0.35,
-                y: Math.max(size, bounds.top - size * 0.35),
-                'font-size': size,
-            });
-            text.textContent = 'Needs review';
-            const background = svg('rect', {
-                x: bounds.left,
-                y: Math.max(0, bounds.top - size * 1.35),
-                width: size * 6.4,
-                height: size * 1.25,
-                rx: size * 0.2,
-            });
-            label.append(background, text);
-            group.appendChild(label);
         }
     }
 

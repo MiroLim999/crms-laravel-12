@@ -2851,38 +2851,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     stroke-width: 2.2px;
   }
 
-  // Flagged lines stay red whatever else is selected; selection shows in the fill.
-  &.needs-review .line-marker__shape {
-    fill: rgba(255, 62, 29, .1);
-    stroke: var(--bs-danger);
-    stroke-width: 1.8px;
-    stroke-dasharray: 5 3;
-  }
-
-  &.needs-review.is-selected .line-marker__shape {
-    fill: rgba(255, 171, 0, .2);
-  }
-
-  &.needs-review.is-selected.is-current .line-marker__shape {
-    fill: rgba(40, 199, 111, .26);
-  }
-
   &.is-editing {
     opacity: .25;
-  }
-}
-
-.line-review-label {
-  pointer-events: none;
-
-  rect {
-    fill: var(--bs-danger);
-  }
-
-  text {
-    fill: #fff;
-    font-family: var(--bs-body-font-family);
-    font-weight: 600;
   }
 }
 
@@ -3021,6 +2991,130 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .template-builder-field-group.is-column {
   color: var(--crms-info-text);
   background: rgba(14, 154, 167, .12);
+}
+
+// The Align step's row lines (row-lines.js): dashed like the builder's, with a
+// grip on the table's left and right edges. Only the grips take the pointer,
+// so the columns under the lines can still be dragged.
+.row-line-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+
+  // Locked while line crops are adjusted after Detect, like the markers.
+  &.is-locked {
+    opacity: .45;
+
+    .row-line__grip {
+      display: none;
+    }
+  }
+}
+
+.row-line {
+  position: absolute;
+  block-size: 0;
+
+  .row-line__rule {
+    position: absolute;
+    inset-inline: 0;
+    inset-block-start: 0;
+    border-block-start: 1.5px dashed #0e9aa7;
+    transform: translateY(-50%);
+  }
+
+  .row-line__grip {
+    position: absolute;
+    inset-block-start: 0;
+    inline-size: .8rem;
+    block-size: .55rem;
+    background-color: #0e9aa7;
+    border: 1.5px solid var(--bs-paper-bg);
+    border-radius: 50rem;
+    box-shadow: 0 1px 2px rgba(var(--crms-shadow-rgb), .3);
+    cursor: ns-resize;
+    pointer-events: auto;
+    touch-action: none;
+    transform: translate(-50%, -50%);
+
+    &.is-start {
+      inset-inline-start: 0;
+    }
+
+    &.is-end {
+      inset-inline-start: 100%;
+    }
+  }
+
+  // No printed line under it: amber until checked, as in the builder.
+  &.is-estimated {
+    .row-line__rule {
+      border-block-start-color: #e59500;
+      border-block-start-style: dotted;
+    }
+
+    .row-line__grip {
+      background-color: #e59500;
+    }
+  }
+
+  &.is-selected {
+    .row-line__rule {
+      border-block-start: 2px solid var(--bs-primary);
+    }
+
+    .row-line__grip {
+      background-color: var(--bs-primary);
+    }
+  }
+
+  &:hover,
+  &.is-dragging {
+    .row-line__rule {
+      border-block-start: 2px solid var(--bs-danger);
+    }
+
+    .row-line__grip {
+      background-color: var(--bs-danger);
+    }
+  }
+}
+
+// The Align step's Ledger grid card.
+.document-grid-card {
+  .document-grid-card__summary {
+    margin-block: 0 .35rem;
+    color: var(--bs-heading-color);
+    font-size: .8125rem;
+    font-weight: 500;
+  }
+
+  .document-grid-card__source {
+    margin-block: 0 .5rem;
+    color: var(--bs-secondary-color);
+    font-size: .75rem;
+    line-height: 1.4;
+  }
+
+  .document-grid-card__tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    margin-block: .5rem 1rem;
+  }
+
+  .document-grid-card__hint {
+    margin-block: .75rem 0;
+    color: var(--bs-secondary-color);
+    font-size: .75rem;
+    line-height: 1.45;
+
+    kbd {
+      padding: .05rem .3rem;
+      font-size: .6875rem;
+    }
+  }
 }
 
 .template-ledger-card__intro,

@@ -123,6 +123,9 @@ class DocumentPageController extends Controller
             'fitted' => (bool) ($result['fit']['fitted'] ?? false),
             'reason' => $result['fit']['reason'] ?? null,
             'geometry' => $result['geometry'] ?? $geometry,
+            // Where the row lines came from: the page's printed rows, or
+            // (with a reason) the template's; and which have no printed line.
+            'rows' => $result['fit']['rows'] ?? null,
             'lines' => $result['lines'] ?? ['vertical' => [], 'horizontal' => []],
         ]);
     }

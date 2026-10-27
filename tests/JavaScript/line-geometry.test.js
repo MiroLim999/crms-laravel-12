@@ -8,6 +8,7 @@ import {
     flagExplanation,
     geometryMarkers,
     gridNotes,
+    snapRowsMessage,
     verificationItems,
 } from '../../resources/js/line-geometry.js';
 import {
@@ -26,37 +27,43 @@ const templateColumns = [
 ];
 const ruledYs = [0.2, 0.4, 0.6, 0.8];
 
-test('ruled row lines follow the columns Staff aligned', () => {
-    // Staff moved both columns down by 0.05 and stretched them 10% taller.
+test('the row lines go as the Align step holds them, with the columns as aligned', () => {
+    // Snap to table took 5 rows from a page whose template has 3.
     const aligned = templateColumns.map((column) => ({ ...column, y: 0.25, h: 0.66 }));
-    const geometry = alignedGeometry(aligned, templateColumns, ruledYs);
+    const rows = [0.25, 0.38, 0.51, 0.64, 0.77, 0.91];
+    const geometry = alignedGeometry(aligned, rows);
 
     assert.deepEqual(geometry.columns.map((c) => c.name), ['Name', 'Date']);
     assert.deepEqual(geometry.columns[0].box, [0.1, 0.25, 0.3, 0.66]);
-    assert.deepEqual(geometry.ruled_ys.map((y) => Number(y.toFixed(4))), [0.25, 0.47, 0.69, 0.91]);
+    assert.deepEqual(geometry.ruled_ys, rows);
     assert.deepEqual(geometry.fields, []);
+    assert.equal(geometry.keep_rows, undefined, 'rows nobody set by hand may be taken from the page');
+});
+
+test('rows Staff set by hand are marked, so Detect keeps them', () => {
+    assert.equal(alignedGeometry(templateColumns, ruledYs, { keepRows: true }).keep_rows, true);
+    // Without columns there are no rows to keep.
+    assert.equal(alignedGeometry([], ruledYs, { keepRows: true }).keep_rows, undefined);
 });
 
 test('rectangle fields pass straight through with their person grouping', () => {
     const geometry = alignedGeometry([
         { name: 'Registry number', x: 0.1, y: 0.05, w: 0.2, h: 0.04 },
         { name: 'Child', x: 0.4, y: 0.05, w: 0.2, h: 0.04, personGroup: 1, personFieldOrder: 0 },
-    ], [], []);
+    ], ruledYs);
 
     assert.deepEqual(geometry.columns, []);
-    assert.deepEqual(geometry.ruled_ys, []);
+    assert.deepEqual(geometry.ruled_ys, [], 'row lines without columns are not a ledger');
     assert.deepEqual(geometry.fields, [
         { name: 'Registry number', box: [0.1, 0.05, 0.2, 0.04], person_group: null, person_field_order: null },
         { name: 'Child', box: [0.4, 0.05, 0.2, 0.04], person_group: 1, person_field_order: 0 },
     ]);
 });
 
-test('ruled lines pushed past the page edge are clamped and kept in order', () => {
-    const aligned = templateColumns.map((column) => ({ ...column, y: 0.5, h: 0.6 }));
-    const geometry = alignedGeometry(aligned, templateColumns, ruledYs);
+test('row lines past the page edge are clamped and kept in order', () => {
+    const geometry = alignedGeometry(templateColumns, [0.5, 0.8, 1.1, 1.4, 0.65]);
 
-    assert.equal(geometry.ruled_ys[geometry.ruled_ys.length - 1], 1);
-    geometry.ruled_ys.slice(1).forEach((y, index) => assert.ok(y > geometry.ruled_ys[index]));
+    assert.deepEqual(geometry.ruled_ys, [0.5, 0.65, 0.8, 1]);
 });
 
 const page = { width: 1000, height: 500 };
@@ -162,8 +169,7 @@ test('Detect\'s fitted geometry becomes markers, and round-trips through aligned
         ['Name', 'column', 0],
         ['Date', 'column', 1],
     ]);
-    const columns = markers.filter((m) => m.kind === 'column');
-    const again = alignedGeometry(markers, columns, fitted.ruled_ys);
+    const again = alignedGeometry(markers, fitted.ruled_ys);
     assert.deepEqual(again.columns, fitted.columns);
     assert.deepEqual(again.ruled_ys, fitted.ruled_ys);
 });
@@ -173,7 +179,7 @@ test('tilted markers send their angle; upright ones send none', () => {
         { name: 'Remarks', x: 0.1, y: 0.05, w: 0.2, h: 0.04, angle: -4.26 },
         { name: 'Child', x: 0.4, y: 0.05, w: 0.2, h: 0.04 },
         ...templateColumns.map((column) => ({ ...column, angle: 2 })),
-    ], templateColumns, ruledYs);
+    ], ruledYs);
 
     assert.deepEqual(geometry.fields.map((field) => field.angle), [-4.3, undefined]);
     assert.deepEqual(geometry.columns.map((column) => column.angle), [2, 2]);
@@ -198,10 +204,30 @@ test('a column that runs past the page is cut at its edge before it is sent back
     // Detect can end a grid below the page when the template has more rows than the page; the server refuses a
     // marker that extends beyond the page, which would fail the next Detect, Scan or Snap.
     const aligned = templateColumns.map((column) => ({ ...column, y: 0.3, h: 0.9 }));
-    const geometry = alignedGeometry(aligned, templateColumns, ruledYs);
+    const geometry = alignedGeometry(aligned, ruledYs);
 
     geometry.columns.forEach((column) => assert.ok(column.box[1] + column.box[3] <= 1 + 1e-9));
     assert.ok(Math.abs(geometry.columns[0].box[3] - 0.7) < 1e-9);
+});
+
+test('Snap to table says where the rows came from, in plain words', () => {
+    assert.equal(snapRowsMessage(null), '');
+    assert.equal(
+        snapRowsMessage({ from_page: true, count: 25, template: 20, estimated: [] }),
+        'Rows taken from the page: 25 rows, the template has 20.',
+    );
+    assert.equal(
+        snapRowsMessage({ from_page: true, count: 20, template: 20, estimated: [20] }),
+        'Rows taken from the page: 20 rows, the same as the template. '
+            + '1 row line has no printed line under it (amber): check against the page.',
+    );
+    assert.equal(
+        snapRowsMessage({ from_page: false, count: 20, template: 20, estimated: [], reason: 'no_rows' }),
+        'Rows kept from the template: no evenly ruled rows were found on this page.',
+    );
+    // The amber count as it stands now (lines checked by hand are no longer amber).
+    assert.equal(snapRowsMessage(null, 2), '2 row lines have no printed line under them (amber): check against the page.');
+    assert.equal(snapRowsMessage({ from_page: false, reason: 'something_new', estimated: [] }), '');
 });
 
 test('grid notes are worded as questions for Staff', () => {

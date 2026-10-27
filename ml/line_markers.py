@@ -2128,8 +2128,9 @@ def place_outline(polygon, lines_json):
 def detect_grid(page):
     """Printed rules on a page: a template sample, or a document being scanned.
 
-    Suggests ruled_ys (the longest run of evenly spaced row rules) and
-    columns (the spans between vertical rules inside that run), all as page
+    Suggests ruled_ys (the longest run of evenly spaced row rules), columns
+    (the spans between vertical rules inside that run) and frame_bottom
+    (where those column rules end: the bottom of the table), all as page
     fractions. `page` is a path or a PIL image.
     """
     image = (Image.open(page) if isinstance(page, str) else page).convert("L")
@@ -2201,12 +2202,15 @@ def detect_grid(page):
             lo_x = min(r["lo"] for r in run_rules)
             hi_x = max(r["hi"] for r in run_rules)
             middle = (top + bottom) / 2
-            xs = sorted(
-                r["a"] + r["b"] * middle for r in v_rules
+            crossing = [
+                (r["a"] + r["b"] * middle, r) for r in v_rules
                 if r["lo"] <= top + 0.5 * span and r["hi"] >= top + 0.5 * span
                 and r["hi"] - r["lo"] >= 0.5 * span
-            )
-            xs = [x for x in xs if lo_x - 6 <= x <= hi_x + 6]
+            ]
+            crossing = [(x, r) for x, r in crossing if lo_x - 6 <= x <= hi_x + 6]
+            xs = sorted(x for x, _ in crossing)
+            if crossing:
+                suggestion["frame_bottom"] = round(float(np.median([r["hi"] for _, r in crossing])) / height, 5)
             deduped = []
             for x in xs:
                 if not deduped or x - deduped[-1] > 8:
@@ -2549,6 +2553,9 @@ def _snapped_geometry(result, fitted):
     centre_x = (left + right) / 2
     centre_y = (top + bottom) / 2
     ruled = [(r["a"] + r["b"] * centre_x) / height for r in grid["rules"]]
+    # Row lines no printed rule was found for: the Align step draws them
+    # amber, for Staff to check against the page.
+    unprinted = {round(y, 5) for y, rule in zip(ruled, grid["rules"]) if not rule.get("matched")}
     # A page can have fewer rows than the template: the rules estimated below
     # its last printed one then fall past the page's edge. Rows off the page
     # hold nothing, and a marker that extends beyond the page is refused when
@@ -2563,7 +2570,160 @@ def _snapped_geometry(result, fitted):
             "name": column["name"],
             "box": [round(x0 / width, 5), round(ruled[0], 5), round((x1 - x0) / width, 5), round(ruled[-1] - ruled[0], 5)],
         })
-    return {"columns": columns, "ruled_ys": [round(y, 5) for y in ruled], "fields": fitted.get("fields") or []}
+    return {
+        "columns": columns,
+        "ruled_ys": [round(y, 5) for y in ruled],
+        "fields": fitted.get("fields") or [],
+        "estimated_rows": [k for k, y in enumerate(ruled) if round(y, 5) in unprinted],
+    }
+
+
+# ============================================================ rows from the page
+#
+# Snap to table and Detect take a page's row lines from the page itself, as
+# the Template Builder's "Detect from sample" does: a page with more rows than
+# the template has every row read, and one with fewer does not carry empty
+# rows past its table. The template still says where the table starts and
+# what its columns are.
+
+# Rows whose heights differ more than this (tallest / shortest) cannot be
+# described by a page's evenly ruled run, so the template's rows are kept.
+UNEVEN_TEMPLATE_ROWS = 1.35
+
+# The page's run stands in for the template's rows only when its row height
+# is within this share of the grid's.
+PAGE_ROW_HEIGHT = 0.15
+
+
+def _row_pitch(ys):
+    return float(np.median(np.diff(ys))) if len(ys) >= 2 else 0.0
+
+
+def _estimated_rows(ruled, horizontal):
+    """Indexes of the row lines with no printed rule under them (page fractions)."""
+    reach = 0.2 * _row_pitch(ruled)
+    return [k for k, y in enumerate(ruled) if not any(abs(h - y) <= reach for h in horizontal)]
+
+
+def _rows_summary(ruled, horizontal, template_rows, reason=None):
+    """Where a grid's rows came from: the page, or (with a reason) the template."""
+    return {
+        "from_page": reason is None,
+        "count": max(0, len(ruled) - 1),
+        "template": template_rows,
+        "estimated": _estimated_rows(ruled, horizontal),
+        **({"reason": reason} if reason else {}),
+    }
+
+
+def _rows_from_page(fitted, found, writing=None, template_rows=None):
+    """The fitted grid with its row lines taken from the page's printed rows.
+
+    The fit has already put the grid's first row line on the page (the top of
+    the table, or where Staff put it when that is as good). From there the
+    rows follow the page's evenly ruled run (detect_grid) to its end, rows
+    estimated below the last printed rule included as long as they lie
+    within the table's column lines.
+
+    Where the run does not reach, the grid's own lines stay: above it when a
+    faded rule cut it short at the top, and below it while they still sit on
+    printed rules, lie inside the table's column lines, or - when `writing`
+    is given - have writing in their row. `writing` is a callable returning
+    the written lines' (x, y) as page fractions; it is only called when a row
+    below the run might be kept for its writing.
+
+    The grid's rows are kept as they are, with a reason, when the page's run
+    cannot stand in for them: rows of different heights, a run of another row
+    height, or no run at all.
+
+    `template_rows` is how many rows the grid had as it was sent, before the
+    fit cut it at the page's edge (by default, the fitted grid's).
+
+    Returns (geometry, rows), rows saying where the rows came from.
+    """
+    ruled = [float(y) for y in fitted.get("ruled_ys") or []]
+    horizontal = [float(y) for y in found.get("horizontal") or []]
+    suggestion = found.get("suggestion") or {}
+    run = [float(y) for y in suggestion.get("ruled_ys") or []]
+    columns = fitted.get("columns") or []
+    if template_rows is None:
+        template_rows = max(0, len(ruled) - 1)
+
+    def kept(reason):
+        return fitted, _rows_summary(ruled, horizontal, template_rows, reason)
+
+    if len(ruled) < 2 or not columns:
+        return kept("no_grid")
+    if len(run) < 3:
+        return kept("no_rows")
+    # A row cut off by the page's edge is short only because the page ends there.
+    gaps = [b - a for a, b in zip(ruled, ruled[1:])]
+    if ruled[-1] >= 1.0 - 1e-6 and len(gaps) > 1:
+        gaps = gaps[:-1]
+    if ruled[0] <= 1e-6 and len(gaps) > 1:
+        gaps = gaps[1:]
+    if min(gaps) <= 0 or max(gaps) > UNEVEN_TEMPLATE_ROWS * min(gaps):
+        return kept("uneven_rows")
+    pitch = float(np.median(gaps))
+    if abs(_row_pitch(run) - pitch) > PAGE_ROW_HEIGHT * pitch:
+        return kept("row_height")
+
+    # Rows estimated down to the next printed rule end at the table's column
+    # lines: below them is paper, a footer or a signature line, not rows.
+    estimated = int(suggestion.get("estimated_ys", 0))
+    frame = suggestion.get("frame_bottom")
+    frame = float(frame) if frame is not None else None
+    if estimated and frame is not None:
+        run = run[:len(run) - estimated] + [y for y in run[len(run) - estimated:] if y <= frame + 0.5 * pitch]
+
+    reach = 0.35 * pitch
+    if ruled[0] < run[0] - reach:
+        head, body = [y for y in ruled if y < run[0] - reach], run
+    else:
+        start = min(range(len(run)), key=lambda k: abs(run[k] - ruled[0]))
+        if abs(run[start] - ruled[0]) > reach or len(run) - start < 2:
+            return kept("no_match")
+        head, body = [], run[start:]
+
+    left = min(c["box"][0] for c in columns)
+    right = max(c["box"][0] + c["box"][2] for c in columns)
+    tail = []
+    written = None
+    for y in ruled:
+        above = tail[-1] if tail else body[-1]
+        if y <= above + reach:
+            continue
+        keep = any(abs(h - y) <= 0.2 * pitch for h in horizontal) \
+            or (frame is not None and y <= frame + 0.25 * pitch)
+        if not keep and writing is not None:
+            if written is None:
+                written = [spot for spot in writing() if left <= spot[0] <= right]
+            # Writing sits on or just above its row's bottom line.
+            keep = any(above + 0.25 * pitch < spot[1] <= y + 0.15 * pitch for spot in written)
+        if not keep:
+            break
+        tail.append(y)
+
+    rows = _within_page(head + body + tail)
+    top, bottom = rows[0], rows[-1]
+    geometry = {
+        **fitted,
+        "columns": [{**column, "box": [column["box"][0], round(top, 5), column["box"][2], round(bottom - top, 5)]}
+                    for column in columns],
+        "ruled_ys": [round(y, 5) for y in rows],
+    }
+    return geometry, _rows_summary(rows, horizontal, template_rows)
+
+
+def _writing_at(image, page_path, detector, cache_path):
+    """Where each written line sits (its baseline's middle), as page fractions."""
+    raw, _ = detected_lines(image, page_path, detector, cache_path)
+    width, height = image.size
+    spots = []
+    for entry in raw:
+        baseline = np.asarray(entry["baseline"], float)
+        spots.append((float(baseline[:, 0].mean()) / width, float(np.median(baseline[:, 1])) / height))
+    return spots
 
 
 def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None, cache_path=None):
@@ -2587,7 +2747,13 @@ def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None,
     else:
         degrees = 0.0
 
-    fitted, fit = fit_geometry(image, geometry)
+    found = detect_grid(image)
+    fitted, fit = fit_geometry(image, geometry, found=found)
+    # The rows come from the page, unless Staff set them by hand in Align.
+    if fit["fitted"] and not geometry.get("keep_rows"):
+        fitted, fit["rows"] = _rows_from_page(
+            fitted, found, writing=lambda: _writing_at(image, page_path, detector, cache_path),
+            template_rows=max(0, len(geometry.get("ruled_ys") or []) - 1))
     result = process_page(page_path, fitted, out_dir, detector=detector, debug=debug,
                           row_reach=FITTED_ROW_REACH if fit["fitted"] else ROW_REACH,
                           cache_path=cache_path)
@@ -2642,14 +2808,17 @@ def snap_page(page_path, geometry):
 
     The column-and-row fit Detect makes, without straightening the page or
     finding any handwriting, so it takes a moment rather than a Kraken pass.
-    Also returns every printed rule found (page fractions), for the markers'
-    magnetic edges while Staff drag them.
+    The row lines are the page's own (see _rows_from_page), and fit["rows"]
+    says where they came from. Also returns every printed rule found (page
+    fractions), for the markers' magnetic edges while Staff drag them.
     """
     image = Image.open(page_path).convert("RGB")
     found = detect_grid(image)
     fitted, fit = fit_geometry(image, geometry, found=found)
     if fit["fitted"]:
         fitted = _snap_to_lines(fitted, found["vertical"], found["horizontal"])
+        fitted, fit["rows"] = _rows_from_page(fitted, found,
+                                              template_rows=max(0, len(geometry.get("ruled_ys") or []) - 1))
     return {
         "size": list(image.size),
         "fit": fit,

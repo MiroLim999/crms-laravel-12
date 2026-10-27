@@ -326,6 +326,140 @@ class WrittenWordIsNotARuleTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
+class RowsFromThePageTest(unittest.TestCase):
+    """Snap to table and Detect take the rows from the page, not the template's count.
+
+    The template's grid on copies of the real sample page kept 20 rows over a
+    table of 25 (the last 5 entries never read) and over one of 15 (5 rows past
+    the table).
+    """
+
+    def snap(self, ledger):
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "page.png")
+        ledger.image.save(path)
+        return lm.snap_page(path, ledger.geometry)
+
+    def rows(self, geometry):
+        return len(geometry["ruled_ys"]) - 1
+
+    def page_rules(self, ledger):
+        """Page pixels of the printed row rules (template drawn on the page, rows as printed)."""
+        return [y * ledger.image.height for y in ledger.geometry["ruled_ys"]]
+
+    def erase_rule(self, ledger, y):
+        columns = ledger.geometry["columns"]
+        left = columns[0]["box"][0] * ledger.image.width
+        right = (columns[-1]["box"][0] + columns[-1]["box"][2]) * ledger.image.width
+        ImageDraw.Draw(ledger.image).line([(left + 2, y), (right - 2, y)], fill=(PAPER,) * 3, width=3)
+
+    def test_a_page_with_more_rows_than_the_template_is_read_row_for_row(self):
+        ledger = Ledger(cols=4, rows=14, header=1.3, tpl_rows=10)
+
+        snapped = self.snap(ledger)
+        self.assertEqual(14, self.rows(snapped["geometry"]))
+        self.assertEqual({"from_page": True, "count": 14, "template": 10, "estimated": []}, snapped["fit"]["rows"])
+
+        result = ledger.run("detect")
+        self.assertEqual(14, self.rows(result["geometry"]))
+        self.assertEqual((14 * 4, 0, 0, 0), ledger.rows_of(result))
+        self.assertNotIn(lm.NOTE_LINES_BELOW, [note["code"] for note in result["notes"]])
+
+    def test_a_page_with_fewer_rows_ends_the_grid_at_its_table(self):
+        ledger = Ledger(cols=4, rows=8, header=1.3, tpl_rows=12)
+
+        snapped = self.snap(ledger)
+        self.assertEqual(8, self.rows(snapped["geometry"]))
+        bottom = snapped["geometry"]["ruled_ys"][-1]
+        for column in snapped["geometry"]["columns"]:
+            self.assertAlmostEqual(bottom, column["box"][1] + column["box"][3], places=4)
+
+        result = ledger.run("detect")
+        self.assertEqual(8, self.rows(result["geometry"]))
+        self.assertEqual((8 * 4, 0, 0, 0), ledger.rows_of(result))
+
+    def test_rows_staff_set_by_hand_are_kept_by_detect(self):
+        ledger = Ledger(cols=4, rows=14, header=1.3, tpl_rows=10)
+        ledger.geometry["keep_rows"] = True
+
+        result = ledger.run("detect")
+
+        self.assertEqual(10, self.rows(result["geometry"]))
+        self.assertIn(lm.NOTE_LINES_BELOW, [note["code"] for note in result["notes"]])
+        # Snap to table is asked for: it always takes the page's rows.
+        self.assertEqual(14, self.rows(self.snap(ledger)["geometry"]))
+
+    def test_a_faded_rule_keeps_its_row_and_is_marked_estimated(self):
+        for faded in (2, 9):  # near the top: the page's run starts below it; near the bottom: it ends above it
+            with self.subTest(faded=faded):
+                ledger = Ledger(cols=4, rows=12, header=1.3)
+                rules = self.page_rules(ledger)
+                self.erase_rule(ledger, rules[faded])
+
+                snapped = self.snap(ledger)
+                self.assertEqual(12, self.rows(snapped["geometry"]))
+                for y, expected in zip(snapped["geometry"]["ruled_ys"], rules):
+                    self.assertAlmostEqual(expected, y * ledger.image.height, delta=2)
+                self.assertEqual([faded], snapped["fit"]["rows"]["estimated"])
+
+                result = ledger.run("detect")
+                self.assertEqual((12 * 4, 0, 0, 0), ledger.rows_of(result))
+                self.assertEqual([faded], result["geometry"]["estimated_rows"])
+
+    def test_rows_guessed_down_to_a_footer_line_stop_at_the_table(self):
+        # A signature line well below the table: the rows the page's run guesses down to it lie
+        # outside the table's column lines, so they are not rows.
+        ledger = Ledger(cols=4, rows=8, header=1.3)
+        rules = self.page_rules(ledger)
+        pitch = rules[1] - rules[0]
+        footer = rules[-1] + 4.6 * pitch
+        canvas = Image.new("RGB", (ledger.image.width, int(footer + 2 * pitch)), (PAPER,) * 3)
+        canvas.paste(ledger.image, (0, 0))
+        ImageDraw.Draw(canvas).line([(60, footer), (canvas.width - 60, footer)], fill=(RULE,) * 3, width=1)
+        scale = ledger.image.height / canvas.height
+        ledger.image = canvas
+        ledger.geometry = {
+            **ledger.geometry,
+            "columns": [{**c, "box": [c["box"][0], c["box"][1] * scale, c["box"][2], c["box"][3] * scale]}
+                        for c in ledger.geometry["columns"]],
+            "ruled_ys": [y * scale for y in ledger.geometry["ruled_ys"]],
+        }
+
+        self.assertGreater(lm.detect_grid(canvas)["suggestion"]["estimated_ys"], 0, "the run guesses rows")
+        self.assertEqual(8, self.rows(self.snap(ledger)["geometry"]))
+
+    def test_unruled_rows_with_writing_are_kept_by_detect(self):
+        # The last two rows have no printed lines at all. Detect sees their writing and keeps the
+        # template's rows there; Snap cannot see writing, and leaves those rows for Staff to add.
+        ledger = Ledger(unruled_bottom=2)
+
+        self.assertEqual(10, self.rows(ledger.run("detect")["geometry"]))
+        self.assertEqual(8, self.rows(self.snap(ledger)["geometry"]))
+
+    def test_rows_of_different_heights_keep_the_template_rows(self):
+        ledger = Ledger(header=1.3, cycle=[1.0, 1.6, 1.0, 1.0, 1.4], tpl_rows=12)
+
+        rows = self.snap(ledger)["fit"]["rows"]
+
+        self.assertEqual(("uneven_rows", False, 12), (rows["reason"], rows["from_page"], rows["count"]))
+
+    def test_a_template_of_another_row_height_keeps_its_rows(self):
+        fitted = {"columns": [{"name": "C1", "box": [0.1, 0.2, 0.8, 0.5]}], "ruled_ys": [0.2, 0.3, 0.4, 0.5, 0.6, 0.7]}
+        found = {"horizontal": [0.2, 0.25, 0.3], "suggestion": {"ruled_ys": [0.2, 0.25, 0.3, 0.35], "estimated_ys": 0}}
+
+        geometry, rows = lm._rows_from_page(fitted, found)
+
+        self.assertIs(fitted, geometry)
+        self.assertEqual("row_height", rows["reason"])
+
+    def test_the_table_frame_is_found(self):
+        ledger = Ledger(cols=4, rows=8, header=1.3)
+        frame = lm.detect_grid(ledger.image)["suggestion"]["frame_bottom"]
+
+        self.assertAlmostEqual(self.page_rules(ledger)[-1], frame * ledger.image.height, delta=2)
+
+
+@unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
 class GridPastThePageTest(unittest.TestCase):
     def test_the_geometry_detect_saves_ends_where_the_page_does(self):
         # The template has 4 more rows than the page, so rules are estimated past its bottom edge.

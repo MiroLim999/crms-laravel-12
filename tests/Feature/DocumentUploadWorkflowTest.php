@@ -549,6 +549,82 @@ class DocumentUploadWorkflowTest extends TestCase
             ->assertCreated();
     }
 
+    public function test_a_column_removed_in_align_is_not_asked_for_in_every_row_and_is_logged(): void
+    {
+        Storage::fake('local');
+        [$template, $page, $staff] = $this->registerPage();
+        // Staff removed the required Date column in Align, so the page was outlined without it.
+        $page->lines()->where('column_name', 'Date')->forceDelete();
+        $page->update(['geometry' => [
+            'columns' => [['name' => 'Name', 'box' => [0.05, 0.1, 0.45, 0.8]]],
+            'ruled_ys' => [0.1, 0.26, 0.42, 0.58, 0.74, 0.9],
+            'fields' => [],
+        ]]);
+        $page = $page->fresh('lines');
+
+        $this->actingAs($staff)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, array_map(
+                    fn (int $row) => $this->cellField($page, $row, 'Name'),
+                    range(1, 5),
+                )),
+                'document_page_id' => $page->getKey(),
+            ])
+            ->assertCreated();
+
+        $audit = AuditLog::where('action', 'record.submitted')->sole();
+        $this->assertSame(['columns_removed' => ['Date']], $audit->new_values['grid_changes']);
+        $this->assertArrayNotHasKey('missing_required_fields', $audit->new_values);
+    }
+
+    public function test_rows_and_columns_added_in_align_are_read_and_logged(): void
+    {
+        Storage::fake('local');
+        [$template, $page, $staff] = $this->registerPage();
+        // The page has two more rows than the template, and Staff added a Remarks column.
+        $page->update(['geometry' => [
+            'columns' => [
+                ['name' => 'Name', 'box' => [0.05, 0.1, 0.45, 0.85]],
+                ['name' => 'Date', 'box' => [0.5, 0.1, 0.3, 0.85]],
+                ['name' => 'Remarks', 'box' => [0.8, 0.1, 0.15, 0.85]],
+            ],
+            'ruled_ys' => [0.1, 0.22, 0.34, 0.46, 0.58, 0.7, 0.82, 0.95],
+            'fields' => [],
+        ]]);
+        foreach ([6, 7] as $row) {
+            foreach (['Name', 'Date'] as $columnIndex => $column) {
+                $this->pageLine($page, ['column_index' => $columnIndex, 'column_name' => $column, 'row' => $row]);
+            }
+        }
+        $this->pageLine($page, ['column_index' => 2, 'column_name' => 'Remarks', 'row' => 3]);
+        $page = $page->fresh('lines');
+
+        $fields = [$this->cellField($page, 3, 'Remarks')];
+        foreach (range(1, 7) as $row) {
+            $fields[] = $this->cellField($page, $row, 'Name');
+            $fields[] = $this->cellField($page, $row, 'Date');
+        }
+
+        $this->actingAs($staff)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, $fields),
+                'document_page_id' => $page->getKey(),
+            ])
+            ->assertCreated();
+
+        $record = CivilRecord::with('fields')->sole();
+        $this->assertSame(15, $record->fields->count());
+        $this->assertSame([3], $record->fields->where('line_column', 'Remarks')->pluck('line_row')->all());
+        // MySQL keeps JSON keys in its own order, so the keys are compared as a set.
+        $audit = AuditLog::where('action', 'record.submitted')->sole();
+        $this->assertEquals(
+            ['rows' => 7, 'template_rows' => 5, 'columns_added' => ['Remarks']],
+            $audit->new_values['grid_changes'],
+        );
+    }
+
     public function test_custom_document_type_can_complete_the_staff_submission_flow(): void
     {
         Storage::fake('local');

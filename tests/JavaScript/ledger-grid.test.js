@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    addColumn,
     clampRuledY,
     columnBand,
     distributeRuledYs,
     fieldsOverLedger,
     followFirstAndLastLine,
+    gridSummary,
     insertRuledY,
     ledgerGridProblems,
     MIN_ROW_GAP,
@@ -84,6 +86,46 @@ test('columns sitting on the first and last line follow those lines', () => {
     assert.equal(moved[1], boxes[1]);
     // A column that was not on the lines is left where the admin put it.
     assert.equal(moved[2], boxes[2]);
+});
+
+test('in the Align step a column within half a row of the first or last line follows it', () => {
+    // Staff align columns by hand, so their edges sit near the lines, not exactly on them.
+    const boxes = [column('A', 0.1, 0.203, 0.594), column('B', 0.2, 0.2, 0.6)];
+    const next = followFirstAndLastLine(boxes, [0.2, 0.5, 0.8], [0.2, 0.5, 0.8, 0.95], 0.15 / 2);
+
+    // Both now sit on the first and the new last line.
+    close([next[0].y, next[0].y + next[0].h], [0.2, 0.95]);
+    close([next[1].y, next[1].y + next[1].h], [0.2, 0.95]);
+    // The builder's own (exact) reach leaves the hand-aligned column alone.
+    assert.equal(followFirstAndLastLine(boxes, [0.2, 0.5, 0.8], [0.2, 0.5, 0.8, 0.95])[0], boxes[0]);
+});
+
+test('an added column splits the selected one, or goes at the right of the table', () => {
+    const boxes = [{ name: 'Field', x: 0.05, y: 0.05, w: 0.2, h: 0.04 }, column('A', 0.1), column('B', 0.2)];
+    const named = { name: 'Remarks', kind: 'column', columnIndex: 2 };
+
+    const split = addColumn(boxes, named, 1);
+    assert.equal(split.index, 3);
+    close([split.boxes[1].x, split.boxes[1].w], [0.1, 0.05]);
+    assert.deepEqual(split.boxes[3], { x: 0.15000000000000002, y: 0.2, w: 0.05, h: 0.6, ...named });
+
+    const appended = addColumn(boxes, named);
+    close([appended.boxes[3].x, appended.boxes[3].w, appended.boxes[3].y, appended.boxes[3].h], [0.3, 0.1, 0.2, 0.6]);
+    assert.equal(appended.boxes[2], boxes[2], 'the other columns are left as they are');
+});
+
+test('with no room at the right, an added column takes half of the last column', () => {
+    const boxes = [column('A', 0.5, 0.2, 0.6, 0.25), column('B', 0.75, 0.2, 0.6, 0.24)];
+    const added = addColumn(boxes, { name: 'C', kind: 'column' });
+
+    close([added.boxes[1].x, added.boxes[1].w, added.boxes[2].x, added.boxes[2].w], [0.75, 0.12, 0.87, 0.12]);
+    assert.equal(addColumn([column('A', 0.5, 0.2, 0.6, 0.015)], { name: 'B', kind: 'column' }, 0), null, 'too narrow to split');
+    assert.equal(addColumn([{ name: 'Field', x: 0.1, y: 0.1, w: 0.2, h: 0.1 }], { name: 'C' }), null, 'no table');
+});
+
+test('the grid summary names the template\'s rows only when the page differs', () => {
+    assert.equal(gridSummary(11, [0.1, 0.2, 0.3], 2), '11 columns · 2 rows');
+    assert.equal(gridSummary(1, [0.1, 0.2, 0.3, 0.4, 0.5], 2), '1 column · 4 rows (template: 2)');
 });
 
 test('nothing moves when the first and last lines stay', () => {

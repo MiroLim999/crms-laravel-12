@@ -286,6 +286,9 @@ class LineOutlinePipelineTest extends TestCase
             ->assertOk()
             ->assertJsonPath('fitted', true)
             ->assertJsonPath('geometry.columns.0.box', [0.06, 0.11, 0.44, 0.3])
+            // The rows are the page's: four printed rows where the template has three.
+            ->assertJsonPath('geometry.ruled_ys', [0.11, 0.21, 0.31, 0.41, 0.51])
+            ->assertJsonPath('rows', ['from_page' => true, 'count' => 4, 'template' => 3, 'estimated' => [4]])
             ->assertJsonPath('lines.vertical', [0.06, 0.5, 0.8]);
 
         $this->assertSame(0, DocumentPage::count());
@@ -312,6 +315,28 @@ class LineOutlinePipelineTest extends TestCase
             ->assertAccepted();
 
         Queue::assertPushed(ProcessDocumentPage::class, fn ($job) => $job->mode === ProcessDocumentPage::MODE_DETECT);
+    }
+
+    public function test_row_lines_set_by_hand_are_marked_so_detect_keeps_them(): void
+    {
+        Queue::fake();
+        $staff = User::factory()->staff()->create();
+        $send = fn (array $geometry) => $this->actingAs($staff)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.store'), [
+                'document_template_id' => $this->ledgerTemplate()->getKey(),
+                'page' => UploadedFile::fake()->image('page.png', 800, 600),
+                'geometry_json' => json_encode($geometry, JSON_THROW_ON_ERROR),
+                'detect' => '1',
+            ])
+            ->assertAccepted()
+            ->json('id');
+
+        $edited = DocumentPage::findOrFail($send([...$this->geometry(), 'keep_rows' => true]));
+        $untouched = DocumentPage::findOrFail($send($this->geometry()));
+
+        $this->assertTrue($edited->geometry['keep_rows']);
+        $this->assertArrayNotHasKey('keep_rows', $untouched->geometry);
     }
 
     public function test_detect_straightens_fits_and_outlines_without_reading(): void
@@ -1376,10 +1401,14 @@ class LineOutlinePipelineTest extends TestCase
 
             public function snap(string $imagePath, array $geometry): array
             {
+                // Fitted to the page's table, whose rows go one further than the
+                // template's; the last line has no printed rule (estimated).
                 $fitted = $geometry;
                 $fitted['columns'][0]['box'] = [0.06, 0.11, 0.44, 0.3];
+                $fitted['ruled_ys'] = [0.11, 0.21, 0.31, 0.41, 0.51];
+                $rows = ['from_page' => true, 'count' => 4, 'template' => 3, 'estimated' => [4]];
 
-                return ['fit' => ['fitted' => true], 'geometry' => $fitted, 'size' => [800, 600],
+                return ['fit' => ['fitted' => true, 'rows' => $rows], 'geometry' => $fitted, 'size' => [800, 600],
                     'lines' => ['vertical' => [0.06, 0.5, 0.8], 'horizontal' => [0.11, 0.21, 0.31, 0.41]]];
             }
 

@@ -209,9 +209,10 @@ class DocumentScanController extends Controller
 
         $path = $scan->store('scans', 'local');
         $copiedFiles = [];
+        $gridChanges = $this->gridChanges($template, $page);
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, &$copiedFiles) {
+            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, &$copiedFiles) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -277,6 +278,9 @@ class DocumentScanController extends Controller
                         'ocr_model' => $validated['ocr_model_key'],
                         // Left out on purpose: Staff confirmed with "Submit anyway".
                         ...($missingRequired !== [] ? ['missing_required_fields' => $missingRequired] : []),
+                        // This page's grid against the template's: rows, and
+                        // columns Staff added or removed in Align.
+                        ...($gridChanges !== [] ? ['grid_changes' => $gridChanges] : []),
                     ],
                     description: "Submitted and locked a {$record->typeShortLabel()} record.",
                 );
@@ -427,6 +431,11 @@ class DocumentScanController extends Controller
      * nothing submitted at all. The page is removed once the record is saved,
      * so those rows would have to be scanned again.
      *
+     * Only the columns on this page's grid count. A column Staff removed in
+     * Align is not on the page, so it is not asked for in every row (the
+     * removal is in the audit log instead), and a column they added has
+     * cells like any other.
+     *
      * Rows are named as Verify names its people; the workspace makes the
      * same list before sending.
      *
@@ -441,11 +450,13 @@ class DocumentScanController extends Controller
         }
 
         $columns = [];
+        foreach ($this->pageColumnNames($template, $page) as $name) {
+            $columns[mb_strtolower($name)] = true;
+        }
         $required = [];
         foreach ($template->columns as $column) {
             $key = mb_strtolower(trim((string) $column['name']));
-            $columns[$key] = true;
-            if (DocumentTemplate::columnSettings($column)['required']) {
+            if (isset($columns[$key]) && DocumentTemplate::columnSettings($column)['required']) {
                 $required[$key] = (string) $column['name'];
             }
         }
@@ -495,6 +506,61 @@ class DocumentScanController extends Controller
         }
 
         return $missing;
+    }
+
+    /**
+     * The ledger columns on this page's grid, as Staff left them in Align (and
+     * Detect fitted them). A page without a grid of its own has the template's.
+     *
+     * @return list<string>
+     */
+    private function pageColumnNames(DocumentTemplate $template, DocumentPage $page): array
+    {
+        $columns = $page->geometry['columns'] ?? null;
+        if (! is_array($columns) || $columns === []) {
+            $columns = $template->columns ?? [];
+        }
+
+        return collect($columns)
+            ->map(fn ($column) => trim((string) ($column['name'] ?? '')))
+            ->filter(fn (string $name) => $name !== '')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * How this page's ledger grid differs from its template's, for the audit
+     * log: its rows, and the columns Staff added or removed in Align. Empty
+     * when they match. The template itself is never changed.
+     *
+     * @return array{rows?: int, template_rows?: int, columns_added?: list<string>, columns_removed?: list<string>}
+     */
+    private function gridChanges(DocumentTemplate $template, ?DocumentPage $page): array
+    {
+        if ($page === null || ! $template->isLedger()) {
+            return [];
+        }
+
+        $pageColumns = $this->pageColumnNames($template, $page);
+        $templateColumns = collect($template->columns ?? [])
+            ->map(fn ($column) => trim((string) ($column['name'] ?? '')))
+            ->filter(fn (string $name) => $name !== '')
+            ->values()
+            ->all();
+        $keys = fn (array $names) => array_map('mb_strtolower', $names);
+        $added = array_values(array_filter($pageColumns, fn ($name) => ! in_array(mb_strtolower($name), $keys($templateColumns), true)));
+        $removed = array_values(array_filter($templateColumns, fn ($name) => ! in_array(mb_strtolower($name), $keys($pageColumns), true)));
+
+        // A page without row lines of its own says nothing about its rows.
+        $pageLines = count($page->geometry['ruled_ys'] ?? []);
+        $rows = max(0, $pageLines - 1);
+        $templateRows = max(0, count($template->ruled_ys ?? []) - 1);
+
+        return [
+            ...($pageLines >= 2 && $rows !== $templateRows ? ['rows' => $rows, 'template_rows' => $templateRows] : []),
+            ...($added !== [] ? ['columns_added' => $added] : []),
+            ...($removed !== [] ? ['columns_removed' => $removed] : []),
+        ];
     }
 
     /** A ledger row as Verify names it: one person per row. */

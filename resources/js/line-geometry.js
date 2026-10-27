@@ -3,11 +3,12 @@
  *
  * Pure functions, so they are unit-tested without a browser:
  *
- * - alignedGeometry(): turns the markers Staff aligned on the page into the
- *   geometry line detection runs on. Rectangle fields pass straight through;
- *   ledger columns keep their aligned boxes, and the template's ruled row lines
- *   are stretched to wherever Staff put the columns' top and bottom edges. The
- *   Python side then snaps every line to the rules actually printed on the page.
+ * - alignedGeometry(): turns the markers and row lines Staff aligned on the
+ *   page into the geometry line detection runs on. Rectangle fields pass
+ *   straight through; ledger columns keep their aligned boxes, and the row
+ *   lines go as the Align step holds them (they follow the columns when the
+ *   table is moved, and Snap to table takes them from the page). The Python
+ *   side then snaps every line to the rules actually printed on the page.
  * - verificationItems(): turns the stored page lines into the field list the
  *   Verify step renders, with one person group per ledger row.
  */
@@ -28,46 +29,22 @@ function angleOf(marker) {
     return Number.isFinite(angle) && angle !== 0 ? { angle } : {};
 }
 
-function median(values) {
-    if (values.length === 0) return null;
-    const sorted = [...values].sort((a, b) => a - b);
-    const middle = Math.floor(sorted.length / 2);
-    return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
-}
-
 /**
  * @param {Array<{name: string, x: number, y: number, w: number, h: number, kind?: string, columnIndex?: number, personGroup?: number, personFieldOrder?: number}>} aligned
  *        Markers as Staff left them (FieldMarker#toJSON()).
- * @param {Array<{columnIndex: number, y: number, h: number}>} templateColumns
- *        The template's own column markers, before alignment.
- * @param {number[]} ruledYs The template's ruled row lines, page fractions.
+ * @param {number[]} ruledYs The row lines as the Align step holds them, page fractions.
+ * @param {{keepRows?: boolean}} [options] keepRows: Staff set the row lines by
+ *        hand, so Detect keeps them instead of taking the page's rows.
  */
-export function alignedGeometry(aligned, templateColumns, ruledYs) {
+export function alignedGeometry(aligned, ruledYs, { keepRows = false } = {}) {
     const columns = aligned.filter((box) => box.kind === 'column');
     const fields = aligned.filter((box) => box.kind !== 'column');
 
     let ruled = [];
     if (columns.length > 0 && ruledYs.length >= 2) {
-        const originals = new Map(templateColumns.map((column) => [column.columnIndex, column]));
-        const pairs = columns
-            .map((column) => [originals.get(column.columnIndex), column])
-            .filter(([original]) => original);
-
-        const templateTop = median(pairs.map(([original]) => original.y));
-        const templateBottom = median(pairs.map(([original]) => original.y + original.h));
-        const alignedTop = median(pairs.map(([, column]) => column.y));
-        const alignedBottom = median(pairs.map(([, column]) => column.y + column.h));
-
-        if (templateTop === null) {
-            ruled = [...ruledYs];
-        } else {
-            const span = templateBottom - templateTop;
-            const scale = span > 0 ? (alignedBottom - alignedTop) / span : 1;
-            ruled = ruledYs.map((y) => clamp01(alignedTop + (y - templateTop) * scale));
-        }
-
-        // Keep strictly increasing after clamping at the page edge.
-        ruled = ruled.filter((y, index) => index === 0 || y > ruled[index - 1] + 1e-6);
+        // On the page and strictly increasing, as the server requires.
+        const sorted = ruledYs.map((y) => clamp01(Number(y))).sort((a, b) => a - b);
+        ruled = sorted.filter((y, index) => index === 0 || y > sorted[index - 1] + 1e-6);
     }
 
     return {
@@ -89,7 +66,42 @@ export function alignedGeometry(aligned, templateColumns, ruledYs) {
             person_field_order: Number.isInteger(field.personFieldOrder) ? field.personFieldOrder : null,
             ...angleOf(field),
         })),
+        ...(keepRows && ruled.length >= 2 ? { keep_rows: true } : {}),
     };
+}
+
+/**
+ * Where Snap to table took the row lines from, as a sentence for the Align
+ * step, or '' when there is nothing to say. `rows` is the server's summary,
+ * {from_page, count, template, estimated: [indexes], reason?}, or null when
+ * the rows did not come from Snap (the template's, or Detect's). `estimated`
+ * is how many row lines have no printed line under them now.
+ *
+ * @param {{from_page?: boolean, count?: number, template?: number, estimated?: number[], reason?: string}|null|undefined} rows
+ * @param {number} [estimated]
+ */
+export function snapRowsMessage(rows, estimated = Array.isArray(rows?.estimated) ? rows.estimated.length : 0) {
+    const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+    const check = estimated > 0
+        ? ` ${plural(estimated, 'row line')} ${estimated === 1 ? 'has' : 'have'} no printed line under ${estimated === 1 ? 'it' : 'them'} (amber): check against the page.`
+        : '';
+    if (!rows || typeof rows !== 'object') return check.trim();
+
+    if (rows.from_page) {
+        const count = Number(rows.count) || 0;
+        const template = Number(rows.template) || 0;
+        const compared = count === template ? 'the same as the template' : `the template has ${template}`;
+        return `Rows taken from the page: ${plural(count, 'row')}, ${compared}.${check}`;
+    }
+
+    const reasons = {
+        no_rows: 'no evenly ruled rows were found on this page',
+        uneven_rows: 'its rows differ in height',
+        row_height: 'this page’s rows are a different height',
+        no_match: 'the page’s rows do not line up with the grid',
+    };
+    const reason = reasons[rows.reason];
+    return reason ? `Rows kept from the template: ${reason}.${check}` : check.trim();
 }
 
 /**
