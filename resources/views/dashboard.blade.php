@@ -19,61 +19,52 @@
                 default => 'Top '.number_format($throughputCount).' accounts by records submitted',
             };
 
-            $typeSlices = collect($analytics['type_slices'])
-                ->filter(fn (array $slice): bool => (int) $slice['total'] > 0)
-                ->values();
-            $typeTotal = (int) $typeSlices->sum('total');
-            $typeSlices = $typeSlices->map(fn (array $slice): array => [
-                ...$slice,
-                'share' => $typeTotal > 0 ? round((int) $slice['total'] / $typeTotal * 100, 1) : 0.0,
-            ]);
-            $inactiveTypeCount = $analytics['by_document_type']->where('total', 0)->count();
-
             $accountActive = (int) $analytics['accounts']['active'];
             $accountInactive = (int) $analytics['accounts']['inactive'];
             $accountTotal = $accountActive + $accountInactive;
             $accountActiveRate = $accountTotal > 0 ? round($accountActive / $accountTotal * 100, 1) : 0.0;
 
-            // A compact, truthful sparkline for the total card. It uses the
-            // same buckets and period as the volume chart below.
-            $recordSparkSource = collect($trend['totals'])->map(fn ($value): int => (int) $value)->values();
-            $recordSparkValues = $recordSparkSource->count() > 12
-                ? $recordSparkSource
-                    ->chunk((int) ceil($recordSparkSource->count() / 12))
-                    ->map(fn ($bucket): int => (int) $bucket->sum())
-                    ->values()
-                : $recordSparkSource;
-            if ($recordSparkValues->count() < 2) {
-                $onlyValue = (int) ($recordSparkValues->first() ?? 0);
-                $recordSparkValues = collect([$onlyValue, $onlyValue]);
-            }
-            $recordSparkPeak = max(1, (int) $recordSparkValues->max());
-            $recordSparkLastIndex = max(1, $recordSparkValues->count() - 1);
-            $recordSparkCoordinates = $recordSparkValues->map(fn (int $value, int $index): array => [
-                'x' => $index / $recordSparkLastIndex * 100,
-                'y' => 31 - ($value / $recordSparkPeak * 25),
-            ]);
-            $recordSparkPath = $recordSparkCoordinates
-                ->map(fn (array $point): string => number_format($point['x'], 2, '.', '').' '.number_format($point['y'], 2, '.', ''))
-                ->implode(' L ');
-            $recordSparkLine = 'M '.$recordSparkPath;
-            $recordSparkArea = $recordSparkLine.' L 100 36 L 0 36 Z';
-            $recordSparkLast = $recordSparkCoordinates->last();
+            // What the archive holds, all time: the total card's breakdown. The
+            // trend chart beside it shows the chosen period, over time.
+            $archiveTypes = collect($analytics['archive_types']);
+            $archiveTotal = (int) $archiveTypes->sum('total');
+            $archiveShare = fn (int $total): float => $archiveTotal > 0 ? round($total / $archiveTotal * 100, 1) : 0.0;
 
             // Each panel keeps its own reporting period.
             $trendScope = $scopes['trend'];
-            $typesScope = $scopes['types'];
             $staffScope = $scopes['staff'];
             $percent = fn (int|float|null $value): string => $value === null ? '—' : number_format($value, 1).'%';
             $comparisonNote = number_format($headline['period_records']).' in '.$trendScope['label']
                 .' · '.number_format($headline['previous_records']).' in '.$trendScope['previous_label'];
+            $belowNoun = $quality['below_threshold'] === 1 ? 'field' : 'fields';
+
+            // OCR Performance sets the model in use against TrOCR Base, on the
+            // scores each earned on the locked test set. A model with no scores
+            // is named but never drawn, so the chart shows only measured numbers.
+            $perfModels = collect($modelPerformance['models'] ?? []);
+            $perfInUse = $perfModels->firstWhere('is_active', true);
+            $perfBase = ($perfInUse['key'] ?? null) === 'base' ? null : $perfModels->firstWhere('key', 'base');
+            $perfSeries = collect([
+                $perfInUse && $perfInUse['has_data']
+                    ? ['role' => 'model', 'name' => $perfInUse['display_label'], 'scores' => $perfInUse['scores']]
+                    : null,
+                $perfBase && $perfBase['has_data']
+                    ? ['role' => 'base', 'name' => 'TrOCR Base', 'scores' => $perfBase['scores']]
+                    : null,
+            ])->filter()->values();
+            $perfSummary = $perfSeries
+                ->map(fn (array $series): string => $series['name']
+                    .': characters '.$percent($series['scores']['character_accuracy'])
+                    .', words '.$percent($series['scores']['word_accuracy'])
+                    .', exact match '.$percent($series['scores']['exact_match']))
+                ->implode('; ');
+
             $chartData = [
                 'volume' => [
                     'labels' => $trend['labels'],
                     'titles' => $trend['titles'],
                     'series' => $trend['series'],
                 ],
-                'documentTypes' => $analytics['type_slices'],
                 'quality' => [
                     'averageConfidence' => $quality['average_confidence'],
                     'correctionRate' => $quality['correction_rate'],
@@ -82,124 +73,123 @@
                     'labels' => $throughput->pluck('name')->values(),
                     'totals' => $throughput->pluck('total')->values(),
                 ],
-                'ocrPerformance' => $modelPerformance ?? null,
+                'ocrPerformance' => ['series' => $perfSeries->all()],
             ];
 
-            $activePerfProfile = collect($modelPerformance['models'] ?? [])->firstWhere('is_active', true)
-                ?? collect($modelPerformance['models'] ?? [])->firstWhere('has_data', true)
-                ?? collect($modelPerformance['models'] ?? [])->first();
+            // The New document card, for those who can scan (not Admin).
+            $canScan = $scanTypes !== null;
+            $scanTypeCount = $canScan ? count($scanTypes) : 0;
+            $readyTypeCount = $canScan ? collect($scanTypes)->where('ready', true)->count() : 0;
         @endphp
 
-        {{-- Desktop keeps the unified 3-card top row and 8/4 analytics grid matching the wireframe. --}}
+        {{--
+            New document, OCR Quality and OCR Performance on top; the trend
+            beside the record and account totals; throughput below. Admin
+            cannot scan, so for Admin the two OCR cards share the top row.
+        --}}
         <section class="row g-4 mb-4" aria-label="CRMS performance summary">
-            {{-- Combined KPI Card: Total Digitized Records + Active Accounts --}}
-            <div class="col-12 col-md-6 col-lg-4 dashboard-reveal" style="--dashboard-reveal: 0">
-                <div id="summary-total" class="dashboard-kpi dashboard-kpi--combined card h-100" data-dashboard-summary>
-                    <div class="card-body p-3 d-flex flex-column">
-                        {{-- Top Half: Total Digitized Records --}}
-                        <div class="dashboard-kpi-subcard">
-                            <div class="d-flex align-items-center justify-content-between mb-1">
-                                <div class="d-flex align-items-center gap-2">
-                                    <span class="dashboard-kpi__mini-icon bg-label-primary">
-                                        <i class="icon-base bx bx-archive" aria-hidden="true"></i>
-                                    </span>
-                                    <span class="dashboard-kpi__label mb-0 fw-semibold text-truncate">Total digitized records</span>
-                                </div>
-                                <a href="{{ route('reports.index', ['status' => 'submitted']) }}" class="badge bg-label-primary text-decoration-none" title="View submitted records report">
-                                    All time <i class="icon-base bx bx-chevron-right ms-0.5" aria-hidden="true"></i>
-                                </a>
-                            </div>
-
-                            <div class="d-flex align-items-center justify-content-between mt-1">
-                                <div class="dashboard-kpi__metric">
-                                    <strong class="dashboard-kpi__value" data-dashboard-count>{{ number_format($headline['records']) }}</strong>
-                                    <span class="dashboard-kpi__meta">
-                                        {{ number_format($headline['period_records']) }} submitted in {{ $trendScope['phrase'] }}
-                                    </span>
-                                </div>
-
-                                <div class="d-flex flex-column align-items-end flex-shrink-0 ms-2">
-                                    <div class="dashboard-kpi__insight-head mb-1">
-                                        @if ($headline['change'] !== null)
-                                            <span @class([
-                                                'dashboard-kpi__delta',
-                                                'dashboard-kpi__delta--up' => $headline['change'] >= 0,
-                                                'dashboard-kpi__delta--down' => $headline['change'] < 0,
-                                            ])>
-                                                @if ($headline['change'] >= 0)
-                                                    <i class="icon-base bx bx-trending-up" aria-hidden="true"></i>
-                                                @else
-                                                    <i class="icon-base bx bx-trending-down" aria-hidden="true"></i>
-                                                @endif
-                                                {{ $headline['change'] >= 0 ? '+' : '' }}{{ $percent($headline['change']) }}
-                                            </span>
-                                        @elseif ($headline['period_records'] > 0)
-                                            <span class="dashboard-kpi__delta">New activity</span>
-                                        @else
-                                            <span class="dashboard-kpi__delta">No activity</span>
-                                        @endif
-                                    </div>
-
-                                    <svg class="dashboard-kpi__sparkline" viewBox="0 0 100 36"
-                                         preserveAspectRatio="none" aria-hidden="true" focusable="false">
-                                        <line class="dashboard-kpi__sparkline-baseline" x1="0" y1="35" x2="100" y2="35" />
-                                        <path class="dashboard-kpi__sparkline-area" d="{{ $recordSparkArea }}" />
-                                        <path class="dashboard-kpi__sparkline-line" d="{{ $recordSparkLine }}" />
-                                        <circle class="dashboard-kpi__sparkline-point"
-                                                cx="{{ number_format($recordSparkLast['x'], 2, '.', '') }}"
-                                                cy="{{ number_format($recordSparkLast['y'], 2, '.', '') }}" r="2" />
-                                    </svg>
-                                </div>
-                            </div>
+            @if ($canScan)
+                {{-- Card 1: the whole card opens the New Document page. --}}
+                <div class="col-12 col-md-6 col-lg-4 dashboard-reveal" style="--dashboard-reveal: 0">
+                    <a href="{{ route('documents.create') }}" id="dashboard-new-document"
+                       class="card dashboard-panel dashboard-scan h-100 text-reset"
+                       aria-labelledby="dashboard-scan-title" aria-describedby="dashboard-scan-text dashboard-scan-types">
+                        <div class="card-header">
+                            <span class="dashboard-kpi__mini-icon bg-label-primary">
+                                <i class="icon-base bx bx-scan" aria-hidden="true"></i>
+                            </span>
+                            <h5 id="dashboard-scan-title" class="card-title mb-0">New document</h5>
+                            @if ($scanTypeCount === 0)
+                                <span class="badge bg-label-warning">No document types</span>
+                            @elseif ($readyTypeCount === $scanTypeCount)
+                                <span class="badge bg-label-success">
+                                    {{ $readyTypeCount }} {{ $readyTypeCount === 1 ? 'type' : 'types' }} ready
+                                </span>
+                            @else
+                                <span class="badge bg-label-warning">{{ $readyTypeCount }} of {{ $scanTypeCount }} ready</span>
+                            @endif
                         </div>
 
-                        {{-- Divider --}}
-                        <div class="dashboard-kpi__divider"></div>
+                        <div class="card-body">
+                            {{-- Paper in, fields marked and checked, record archived. --}}
+                            <div class="dashboard-scan__stage" aria-hidden="true">
+                                <svg class="dashboard-scan__art" viewBox="0 0 240 120" focusable="false">
+                                    <defs>
+                                        <linearGradient id="dashboard-scan-glow" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0" class="dashboard-scan__glow-edge" />
+                                            <stop offset=".5" class="dashboard-scan__glow-core" />
+                                            <stop offset="1" class="dashboard-scan__glow-edge" />
+                                        </linearGradient>
+                                    </defs>
 
-                        {{-- Bottom Half: Active Accounts --}}
-                        <div class="dashboard-kpi-subcard">
-                            <div class="d-flex align-items-center justify-content-between mb-1">
-                                <div class="d-flex align-items-center gap-2">
-                                    <span class="dashboard-kpi__mini-icon bg-label-success">
-                                        <i class="icon-base bx bx-user-check" aria-hidden="true"></i>
-                                    </span>
-                                    <span class="dashboard-kpi__label mb-0 fw-semibold text-truncate">Active accounts</span>
-                                </div>
-                                <a href="{{ route('users.index') }}" class="badge bg-label-success text-decoration-none" title="Manage user accounts">
-                                    Current <i class="icon-base bx bx-chevron-right ms-0.5" aria-hidden="true"></i>
-                                </a>
+                                    <g class="dashboard-scan__step">
+                                        <circle cx="34" cy="60" r="15" />
+                                        <path d="M34 64V52.5m-4.5 4.5 4.5-4.5 4.5 4.5M27 61.5v3a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-3" />
+                                    </g>
+                                    <path class="dashboard-scan__link" d="M53 60h17" />
+                                    <path class="dashboard-scan__arrow" d="m69 57 3 3-3 3" />
+
+                                    <rect class="dashboard-scan__sheet dashboard-scan__sheet--back"
+                                          x="94" y="13" width="62" height="96" rx="5" transform="rotate(7 125 61)" />
+                                    <g class="dashboard-scan__page">
+                                        <rect class="dashboard-scan__sheet" x="88" y="10" width="64" height="100" rx="5" />
+                                        <rect class="dashboard-scan__ink dashboard-scan__ink--strong" x="96" y="18" width="30" height="4" rx="2" />
+                                        <circle class="dashboard-scan__seal" cx="142" cy="20.5" r="5" />
+                                        <rect class="dashboard-scan__field" x="94" y="30" width="52" height="15" rx="2.5" />
+                                        <path class="dashboard-scan__hand" d="M98 39.5q2.5-5 5 0t5 0 5 0 5 0 5 0 5 0 5 0 5 0" />
+                                        <rect class="dashboard-scan__ink" x="96" y="51" width="44" height="2.5" rx="1.25" />
+                                        <rect class="dashboard-scan__ink" x="96" y="58" width="32" height="2.5" rx="1.25" />
+                                        <rect class="dashboard-scan__field" x="94" y="66" width="52" height="15" rx="2.5" />
+                                        <path class="dashboard-scan__hand" d="M98 75.5q2-4.5 4 0t4 0 4 0 4 0 4 0 4 0 4 0 4 0 4 0" />
+                                        <rect class="dashboard-scan__ink" x="96" y="88" width="40" height="2.5" rx="1.25" />
+                                        <rect class="dashboard-scan__ink" x="96" y="95" width="26" height="2.5" rx="1.25" />
+                                    </g>
+                                    <path class="dashboard-scan__corner" d="M80 17V4h13M147 4h13v13M160 103v13h-13M93 116H80v-13" />
+                                    <g class="dashboard-scan__beam">
+                                        <rect x="82" y="-10" width="76" height="20" fill="url(#dashboard-scan-glow)" />
+                                        <rect class="dashboard-scan__line" x="82" y="-1" width="76" height="2" rx="1" />
+                                    </g>
+                                    <g class="dashboard-scan__check">
+                                        <circle cx="152" cy="94" r="8.5" />
+                                        <path d="m148.2 94.2 2.6 2.6 5-5.3" />
+                                    </g>
+
+                                    <path class="dashboard-scan__link" d="M168 60h17" />
+                                    <path class="dashboard-scan__arrow" d="m184 57 3 3-3 3" />
+                                    <g class="dashboard-scan__step dashboard-scan__step--done">
+                                        <circle cx="206" cy="60" r="15" />
+                                        <path d="M197 52h18v4.5h-18zm1.5 4.5h15V66a1.5 1.5 0 0 1-1.5 1.5h-12a1.5 1.5 0 0 1-1.5-1.5zm5 4h5" />
+                                    </g>
+                                </svg>
                             </div>
 
-                            <div class="d-flex align-items-center justify-content-between mt-1">
-                                <div class="dashboard-kpi__metric">
-                                    <strong class="dashboard-kpi__value" data-dashboard-count>{{ number_format($accountActive) }}</strong>
-                                    <div class="dashboard-kpi__health-details">
-                                        <span>{{ number_format($accountTotal) }} total</span>
-                                        <span>
-                                            <i aria-hidden="true"></i>
-                                            {{ number_format($accountInactive) }} inactive
-                                        </span>
-                                    </div>
-                                </div>
+                            <p id="dashboard-scan-text" class="dashboard-scan__text">
+                                Scan a paper certificate, check what was read, and save it to the archive.
+                            </p>
 
-                                <div class="dashboard-kpi__health d-flex flex-column align-items-end flex-shrink-0 ms-2">
-                                    <div class="d-flex align-items-center gap-1 mb-1">
-                                        <span class="dashboard-kpi__health-label text-muted">Availability</span>
-                                        <strong class="dashboard-kpi__health-rate">{{ $percent($accountActiveRate) }}</strong>
-                                    </div>
-                                    <div class="dashboard-kpi__health-track w-100" aria-hidden="true"
-                                         style="--dashboard-kpi-health: {{ number_format($accountActiveRate, 1, '.', '') }}%">
-                                        <span></span>
-                                    </div>
-                                </div>
-                            </div>
+                            <ul id="dashboard-scan-types" class="dashboard-scan__types" aria-label="Document types">
+                                @foreach ($scanTypes as $type)
+                                    <li @class(['dashboard-scan__type', 'dashboard-scan__type--off' => ! $type['ready']])>
+                                        <i class="icon-base bx {{ $type['icon'] }}" aria-hidden="true"></i>
+                                        <span class="text-truncate">{{ $type['label'] }}</span>
+                                        @unless ($type['ready'])
+                                            <small>no template</small>
+                                        @endunless
+                                    </li>
+                                @endforeach
+                            </ul>
+
+                            <span class="btn btn-primary dashboard-scan__action">
+                                Start scanning
+                                <i class="icon-base bx bx-right-arrow-alt" aria-hidden="true"></i>
+                            </span>
                         </div>
-                    </div>
+                    </a>
                 </div>
-            </div>
+            @endif
 
             {{-- Card 2: OCR Quality / Accuracy (Radial Gauge) --}}
-            <div class="col-12 col-md-6 col-lg-4 dashboard-reveal" style="--dashboard-reveal: 1">
+            <div @class(['col-12 col-md-6 dashboard-reveal', 'col-lg-4' => $canScan]) style="--dashboard-reveal: 1">
                 <x-dashboard.panel panel="ocr" title="OCR Quality" class="dashboard-panel--quality h-100">
                     <x-slot:tools>
                         <x-dashboard.period-filter panel="ocr" label="OCR confidence and corrections"
@@ -211,7 +201,7 @@
                         <div class="dashboard-quality__visual"
                              title="Average OCR confidence across {{ number_format($quality['confidence_fields']) }} scored fields">
                             <div id="dashboard-quality-chart" class="dashboard-chart dashboard-chart--radial" role="img"
-                                 aria-label="Average OCR confidence {{ $percent($quality['average_confidence']) }}, human correction rate {{ $percent($quality['correction_rate']) }}, {{ number_format($quality['below_threshold']) }} below {{ $quality['threshold'] }}%"></div>
+                                 aria-label="Average OCR confidence {{ $percent($quality['average_confidence']) }}, human correction rate {{ $percent($quality['correction_rate']) }}, {{ number_format($quality['below_threshold']) }} {{ $belowNoun }} below {{ $quality['threshold'] }}%"></div>
                             <div class="dashboard-quality__center" aria-hidden="true">
                                 <span>Confidence</span>
                                 <strong data-dashboard-count>{{ $percent($quality['average_confidence']) }}</strong>
@@ -225,9 +215,9 @@
                                 Corrected <strong>{{ $percent($quality['correction_rate']) }}</strong>
                             </span>
                             <span class="dashboard-quality__chip"
-                                  title="{{ number_format($quality['below_threshold']) }} {{ $quality['below_threshold'] === 1 ? 'field' : 'fields' }} below the {{ $quality['threshold'] }}% confidence floor">
+                                  title="{{ number_format($quality['below_threshold']) }} {{ $belowNoun }} below the {{ $quality['threshold'] }}% confidence floor">
                                 <i class="icon-base bx bx-target-lock text-info"></i>
-                                <strong>{{ number_format($quality['below_threshold']) }}</strong> below {{ $quality['threshold'] }}%
+                                <strong>{{ number_format($quality['below_threshold']) }}</strong> {{ $belowNoun }} below {{ $quality['threshold'] }}%
                             </span>
                         </div>
                     </div>
@@ -235,14 +225,14 @@
             </div>
 
             {{-- Card 3: OCR Performance Mini Radar (Direct from OCR Workspace - Sneat Radar Template) --}}
-            <div class="col-12 col-lg-4 dashboard-reveal" style="--dashboard-reveal: 2">
+            <div @class(['col-12 dashboard-reveal', 'col-lg-4' => $canScan, 'col-md-6' => ! $canScan]) style="--dashboard-reveal: 2">
                 <div class="card h-100 dashboard-panel dashboard-panel--performance" id="panel-ocr-performance">
                     <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-1 pb-1">
                         <div class="d-flex align-items-center gap-1.5">
                             <span class="dashboard-kpi__mini-icon bg-label-info">
                                 <i class="icon-base bx bx-radar" aria-hidden="true"></i>
                             </span>
-                            <h6 class="card-title mb-0 fw-semibold" style="font-size: 0.875rem;">OCR Performance</h6>
+                            <h5 class="card-title mb-0">OCR Performance</h5>
                         </div>
 
                         <div class="d-flex align-items-center gap-1">
@@ -258,21 +248,41 @@
                     </div>
 
                     <div class="card-body d-flex flex-column pt-0 pb-2 px-3">
-                        {{-- ApexCharts Radar Container; scores sit on the axis labels. --}}
-                        <div id="dashboard-ocr-radar-chart" class="dashboard-chart dashboard-chart--radar" role="img"
-                             aria-label="OCR accuracy radar. Characters {{ isset($activePerfProfile['scores']['character_accuracy']) ? $percent($activePerfProfile['scores']['character_accuracy']) : 'n/a' }}, words {{ isset($activePerfProfile['scores']['word_accuracy']) ? $percent($activePerfProfile['scores']['word_accuracy']) : 'n/a' }}, exact match {{ isset($activePerfProfile['scores']['exact_match']) ? $percent($activePerfProfile['scores']['exact_match']) : 'n/a' }}."></div>
+                        @if ($perfSeries->isEmpty())
+                            {{-- Nothing measured, so nothing is drawn. --}}
+                            <div class="my-auto">
+                                <x-empty-state icon="bx-radar" title="No test scores yet"
+                                               :message="$perfInUse ? $perfInUse['display_label'].' has no test results yet.' : 'No OCR model is in use yet.'" />
+                            </div>
+                        @else
+                            {{-- ApexCharts radar; the first model's scores sit on the axis labels. --}}
+                            <div id="dashboard-ocr-radar-chart" class="dashboard-chart dashboard-chart--radar" role="img"
+                                 aria-label="OCR test scores. {{ $perfSummary }}."></div>
 
-                        {{-- Legend chips: same style and baseline as the OCR Quality chips. --}}
-                        <div class="dashboard-quality__chips" id="dashboard-radar-legend">
-                            <span class="dashboard-quality__chip" title="Active fine-tuned model">
-                                <span class="dashboard-quality__dot" style="background-color: #ff6384;" aria-hidden="true"></span>
-                                <strong class="text-truncate" id="dashboard-radar-model-label">{{ $activePerfProfile['display_label'] ?? $activePerfProfile['label'] ?? 'Fine-tuned' }}</strong>
-                            </span>
-                            <span class="dashboard-quality__chip" title="TrOCR Base">
-                                <span class="dashboard-quality__dot" style="background-color: #696cff;" aria-hidden="true"></span>
-                                Base
-                            </span>
-                        </div>
+                            {{-- Legend chips: same style and baseline as the OCR Quality chips.
+                                 A model in use without scores is named, without a dot. --}}
+                            <div class="dashboard-quality__chips">
+                                @if ($perfInUse)
+                                    <span class="dashboard-quality__chip" title="The model in use">
+                                        @if ($perfInUse['has_data'])
+                                            <span class="dashboard-quality__dot" style="background-color: #ff6384;" aria-hidden="true"></span>
+                                        @endif
+                                        <strong class="text-truncate">{{ $perfInUse['display_label'] }}</strong>
+                                        @unless ($perfInUse['has_data'])
+                                            no test scores
+                                        @endunless
+                                    </span>
+                                @else
+                                    <span class="dashboard-quality__chip">No model in use</span>
+                                @endif
+                                @if ($perfSeries->contains('role', 'base'))
+                                    <span class="dashboard-quality__chip" title="TrOCR Base">
+                                        <span class="dashboard-quality__dot" style="background-color: #696cff;" aria-hidden="true"></span>
+                                        Base
+                                    </span>
+                                @endif
+                            </div>
+                        @endif
                     </div>
                 </div>
             </div>
@@ -300,7 +310,10 @@
                         @endif
                     </x-slot:badge>
                     <x-slot:meta>
-                        {{ $trend['mode'] === 'day' ? 'Daily' : 'Monthly' }} submissions · {{ $trendScope['short_label'] }}
+                        <span>
+                            <strong>{{ number_format($headline['period_records']) }}</strong> submitted
+                            · {{ $trend['mode'] === 'day' ? 'by day' : 'by month' }} · {{ $trendScope['short_label'] }}
+                        </span>
                     </x-slot:meta>
                     <x-slot:tools>
                         @if ($trend['series'] !== [])
@@ -374,43 +387,90 @@
                 </x-dashboard.panel>
             </div>
 
+            {{-- What CRMS holds now: the archive by document type, and the
+                 accounts. Nothing here follows a period; the trend beside it
+                 shows change over time. --}}
             <div class="col-12 col-lg-4 dashboard-reveal" style="--dashboard-reveal: 4">
-                <x-dashboard.panel panel="types" title="Document Type Distribution" class="dashboard-panel--types">
-                    <x-slot:meta>{{ $typesScope['short_label'] }}</x-slot:meta>
-                    <x-slot:tools>
-                        <x-dashboard.period-filter panel="types" label="document type distribution"
-                                                   :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
-                    </x-slot:tools>
-
-                    @if ($typeSlices->isNotEmpty())
-                        {{-- The bars carry each type's count and share; the total sits above. --}}
-                        <div class="dashboard-types-sneat">
-                            <div class="dashboard-types__total">
-                                <strong data-dashboard-count>{{ number_format($typeTotal) }}</strong>
-                                <span>{{ $typeTotal === 1 ? 'record' : 'records' }}</span>
-                                <span class="badge bg-label-primary ms-auto">
-                                    {{ $typeSlices->count() }} {{ $typeSlices->count() === 1 ? 'type' : 'types' }}
+                <div id="summary-total" class="dashboard-kpi dashboard-kpi--combined card h-100">
+                    <div class="card-body">
+                        <div class="dashboard-kpi-subcard">
+                            <div class="dashboard-kpi__head">
+                                <span class="dashboard-kpi__mini-icon bg-label-primary">
+                                    <i class="icon-base bx bx-archive" aria-hidden="true"></i>
                                 </span>
+                                <span class="dashboard-kpi__label">Total digitized records</span>
+                                <a href="{{ route('reports.index', ['status' => 'submitted']) }}" class="btn btn-xs btn-label-primary px-2" title="Open the report of submitted records">
+                                    <span>View report</span>
+                                    <i class="icon-base bx bx-right-arrow-alt ms-1" aria-hidden="true"></i>
+                                </a>
                             </div>
 
-                            <div class="dashboard-types__chart-shell">
-                                <div id="dashboard-type-chart" class="dashboard-chart dashboard-chart--bars" role="img"
-                                     aria-label="Document type distribution across {{ number_format($typeTotal) }} records: {{ $typeSlices->map(fn ($slice) => $slice['label'].' '.number_format($slice['total']).' ('.$percent($slice['share']).')')->implode(', ') }}"></div>
-                            </div>
+                            <div class="dashboard-kpi__group">
+                                <span class="dashboard-kpi__number">
+                                    <strong class="dashboard-kpi__value" data-dashboard-count>{{ number_format($headline['records']) }}</strong>
+                                    <span>all time</span>
+                                </span>
 
-                            @if ($inactiveTypeCount > 0)
-                                <p class="dashboard-types__inactive mb-0"
-                                   title="{{ number_format($inactiveTypeCount) }} configured {{ $inactiveTypeCount === 1 ? 'type has' : 'types have' }} no submissions in this period">
-                                    <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
-                                    +{{ number_format($inactiveTypeCount) }} with no records
-                                </p>
-                            @endif
+                                @if ($archiveTypes->isNotEmpty())
+                                    {{-- One bar split by document type, then each type with its count and share. --}}
+                                    <div class="dashboard-archive__bar" aria-hidden="true">
+                                        @foreach ($archiveTypes as $type)
+                                            <span style="flex-grow: {{ $type['total'] }}; --dashboard-type-color: {{ $type['color'] }}"
+                                                  title="{{ $type['name'] }}: {{ number_format($type['total']) }}"></span>
+                                        @endforeach
+                                    </div>
+                                    <ul class="dashboard-archive__types" aria-label="Records by document type">
+                                        @foreach ($archiveTypes as $type)
+                                            <li>
+                                                <span class="dashboard-legend__dot" style="--dashboard-type-color: {{ $type['color'] }}" aria-hidden="true"></span>
+                                                <span class="dashboard-archive__name" title="{{ $type['name'] }}">{{ $type['name'] }}</span>
+                                                <strong>{{ number_format($type['total']) }}</strong>
+                                                <span class="dashboard-archive__share">{{ $percent($archiveShare($type['total'])) }}</span>
+                                            </li>
+                                        @endforeach
+                                    </ul>
+                                @else
+                                    <p class="dashboard-kpi__meta">Nothing has been archived yet.</p>
+                                @endif
+                            </div>
                         </div>
-                    @else
-                        <x-empty-state icon="bx-bar-chart-alt-2" title="No submissions in this period"
-                                       message="Choose a longer period to see document type shares." />
-                    @endif
-                </x-dashboard.panel>
+
+                        <div class="dashboard-kpi__divider"></div>
+
+                        <div class="dashboard-kpi-subcard">
+                            <div class="dashboard-kpi__head">
+                                <span class="dashboard-kpi__mini-icon bg-label-success">
+                                    <i class="icon-base bx bx-user-check" aria-hidden="true"></i>
+                                </span>
+                                <span class="dashboard-kpi__label">Active accounts</span>
+                                <a href="{{ route('users.index') }}" class="btn btn-xs btn-label-success px-2" title="Open User Accounts">
+                                    <span>Manage users</span>
+                                    <i class="icon-base bx bx-right-arrow-alt ms-1" aria-hidden="true"></i>
+                                </a>
+                            </div>
+
+                            <div class="dashboard-kpi__group">
+                                <div class="dashboard-kpi__figure">
+                                    <strong class="dashboard-kpi__value" data-dashboard-count>{{ number_format($accountActive) }}</strong>
+                                    <span class="dashboard-kpi__health-label">
+                                        <strong class="dashboard-kpi__health-rate">{{ $percent($accountActiveRate) }}</strong> active
+                                    </span>
+                                </div>
+                                <div class="dashboard-kpi__health-details">
+                                    <span>{{ number_format($accountTotal) }} total</span>
+                                    <span>
+                                        <i aria-hidden="true"></i>
+                                        {{ number_format($accountInactive) }} inactive
+                                    </span>
+                                </div>
+                                <div class="dashboard-kpi__health-track" aria-hidden="true"
+                                     style="--dashboard-kpi-health: {{ number_format($accountActiveRate, 1, '.', '') }}%">
+                                    <span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 

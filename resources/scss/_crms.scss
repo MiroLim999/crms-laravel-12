@@ -4681,6 +4681,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   color: var(--bs-secondary-color);
   font-size: .8125rem;
   line-height: 1.45;
+
+  strong {
+    color: var(--bs-heading-color);
+    font-weight: 600;
+  }
 }
 
 .dashboard-panel__tools {
@@ -4711,8 +4716,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.dashboard-legend__dot,
-.dashboard-type-legend__dot {
+.dashboard-legend__dot {
   flex: 0 0 auto;
   inline-size: .625rem;
   block-size: .625rem;
@@ -4947,50 +4951,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-radius: 50%;
 }
 
-// The donut's key: each type, its records and its share, as "11 / 45.0%".
-.dashboard-type-legend {
-  display: grid;
-  gap: .15rem;
-  margin: 1rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.dashboard-type-legend__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding-block: .45rem;
-  font-size: .875rem;
-
-  // Listed, so a type with nothing this period is seen to have nothing.
-  &.is-empty {
-    opacity: .55;
-  }
-}
-
-.dashboard-type-legend__name {
-  display: inline-flex;
-  align-items: center;
-  gap: .65rem;
-  min-inline-size: 0;
-  color: var(--bs-heading-color);
-  font-weight: 500;
-}
-
-.dashboard-type-legend__value {
-  flex: 0 0 auto;
-  color: var(--bs-secondary-color);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-
-  strong {
-    color: var(--bs-heading-color);
-    font-weight: 600;
-  }
-}
-
 .dashboard-metric {
   overflow: hidden;
   border: 1px solid transparent;
@@ -5057,7 +5017,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   min-block-size: 18.75rem;
 }
 
-.dashboard-chart--donut,
 .dashboard-chart--radial {
   min-block-size: 15rem;
 }
@@ -5312,104 +5271,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   line-height: 1.1;
 }
 
-.dashboard-kpi__metric {
-  min-inline-size: 0;
-}
-
-.dashboard-kpi__insight {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  justify-content: flex-end;
-  min-block-size: 7rem;
-  margin-block-start: .85rem;
-  padding-block-start: .75rem;
-  border-block-start: 1px solid rgba(var(--crms-ink-rgb), .09);
-}
-
-.dashboard-kpi__insight-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .5rem;
-  min-inline-size: 0;
-  color: var(--bs-secondary-color);
-  font-size: .6875rem;
-  font-weight: 600;
-  letter-spacing: .02em;
-
-  >span:first-child {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-
-.dashboard-kpi__delta {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: .2rem;
-  padding: .1rem .4rem;
-  color: var(--bs-secondary-color);
-  background: rgba(var(--crms-ink-rgb), .07);
-  border-radius: 999px;
-  font-size: .6875rem;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  letter-spacing: 0;
-  white-space: nowrap;
-
-  i {
-    font-size: .8rem;
-  }
-}
-
-.dashboard-kpi__delta--up {
-  color: var(--bs-success);
-  background: rgba(var(--bs-success-rgb), .11);
-}
-
-.dashboard-kpi__delta--down {
-  color: var(--bs-danger);
-  background: rgba(var(--bs-danger-rgb), .1);
-}
-
-.dashboard-kpi__sparkline {
-  display: block;
-  inline-size: 100%;
-  block-size: 3.5rem;
-  margin-block: .35rem .1rem;
-  overflow: visible;
-}
-
-.dashboard-kpi__sparkline-baseline {
-  stroke: rgba(var(--crms-ink-rgb), .1);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.dashboard-kpi__sparkline-area {
-  fill: rgba(var(--bs-primary-rgb), .1);
-  stroke: none;
-}
-
-.dashboard-kpi__sparkline-line {
-  fill: none;
-  stroke: var(--bs-primary);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-}
-
-.dashboard-kpi__sparkline-point {
-  fill: var(--bs-card-bg, var(--bs-paper-bg));
-  stroke: var(--bs-primary);
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-}
-
 .dashboard-kpi__meta {
   display: block;
   margin-block-start: .15rem;
@@ -5479,15 +5340,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   min-block-size: 21.875rem;
 }
 
-.dashboard-chart--donut,
-.dashboard-chart--bars,
 .dashboard-chart--radar,
 .dashboard-chart--throughput {
   min-block-size: 0;
 }
 
-.dashboard-chart--donut,
-.dashboard-chart--bars,
 .dashboard-chart--radar {
   inline-size: 100%;
 
@@ -5496,122 +5353,462 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// Total records over active accounts, in the tall card beside the trend
+// chart. The two parts share the card's height 3:2: the records line grows
+// into the larger part, and the account figures sit centred in theirs.
 .dashboard-kpi--combined {
   >.card-body {
-    min-block-size: 0 !important;
-    padding: .75rem 1.15rem !important;
+    min-block-size: 0;
+    padding: 1rem 1.25rem 1.15rem;
   }
 
-  // Each half takes an equal share of the card: header on top, the number
-  // and its visual centred in the space below, so a tall row has no gaps.
   .dashboard-kpi-subcard {
     display: flex;
-    flex: 1 1 0;
+    flex: 2 1 0;
     flex-direction: column;
-    text-decoration: none;
-    border-radius: .5rem;
+    gap: .35rem;
     min-inline-size: 0;
 
-    // Header row: the title may shorten with an ellipsis, the badge never does,
-    // so the two can no longer run into each other on a narrow card.
-    > :first-child {
-      gap: .5rem;
-      min-inline-size: 0;
-
-      > :first-child {
-        flex: 1 1 auto;
-        min-inline-size: 0;
-      }
-
-      >.badge {
-        flex: 0 0 auto;
-      }
-    }
-
-    // Number row: wraps under the figure when the card cannot fit both side by
-    // side, instead of letting the visual overlap the figure's caption.
-    > :last-child {
-      flex: 1 1 auto;
-      flex-wrap: wrap;
-      align-items: center !important;
-      gap: .5rem .75rem;
-      margin-block-start: .5rem !important;
-
-      >.dashboard-kpi__metric {
-        flex: 1 1 7rem;
-      }
-
-      >.ms-2 {
-        margin-inline-start: auto !important;
-      }
+    &:first-child {
+      flex-grow: 3;
     }
   }
 
-  // Titles wrap rather than being cut to an ellipsis on narrow cards.
+  .dashboard-kpi__group {
+    display: flex;
+    flex-direction: column;
+    gap: .35rem;
+    margin-block: auto;
+  }
+
+  // Icon and title, then the link. On a narrow card the link drops below
+  // the title, as the badge does in the New document card, so the title
+  // stays on one line.
+  .dashboard-kpi__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .35rem .5rem;
+    min-inline-size: 0;
+    margin-block-end: .4rem;
+
+    >.btn {
+      flex: 0 0 auto;
+      margin-inline-start: auto;
+    }
+  }
+
   .dashboard-kpi__label {
-    overflow: visible !important;
-    text-overflow: clip !important;
-    white-space: normal !important;
-    line-height: 1.25;
-    font-size: .875rem;
+    flex: 1 1 auto;
+    margin: 0;
     color: var(--bs-heading-color);
+    font-size: .875rem;
+    font-weight: 600;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+
+  // The number, with its rate at the far end of the line.
+  .dashboard-kpi__figure {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .35rem .75rem;
   }
 
   .dashboard-kpi__value {
-    display: block;
     font-size: 2.25rem;
     font-variant-numeric: tabular-nums;
     font-weight: 700;
     letter-spacing: -.03em;
     line-height: 1;
-    margin-block-end: 0;
+  }
+
+  // The number, and what it counts over ("all time") in plain words.
+  .dashboard-kpi__number {
+    display: inline-flex;
+    align-items: baseline;
+    gap: .45rem;
+    min-inline-size: 0;
+
+    >span {
+      color: var(--bs-secondary-color);
+      font-size: .8125rem;
+    }
   }
 
   .dashboard-kpi__meta {
-    display: block;
+    margin: 0;
     font-size: .75rem;
     line-height: 1.3;
-    margin-block-start: .35rem;
   }
 
-  .dashboard-kpi__sparkline {
-    inline-size: min(8.5rem, 100%);
-    block-size: 3rem;
-    margin-block: 0;
+  // What the archive holds: one bar split by document type, in the trend
+  // chart's colours, then a row per type with its count and share.
+  .dashboard-archive__bar {
+    display: flex;
+    gap: 2px;
+    block-size: .625rem;
+    margin-block: .6rem .25rem;
+    overflow: hidden;
+    border-radius: 999px;
+
+    // Each part's flex-grow is its record count (set in the view).
+    span {
+      flex: 1 1 0%;
+      min-inline-size: .25rem;
+      background: var(--dashboard-type-color);
+    }
   }
 
-  .dashboard-kpi__health {
-    inline-size: min(8.5rem, 100%);
-    gap: .4rem;
+  .dashboard-archive__types {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+
+    li {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto 3.25rem;
+      align-items: center;
+      gap: .6rem;
+      padding-block: .4rem;
+      font-size: .8125rem;
+    }
+
+    li+li {
+      border-block-start: 1px solid rgba(var(--crms-ink-rgb), .07);
+    }
+
+    strong {
+      color: var(--bs-heading-color);
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+    }
+  }
+
+  .dashboard-archive__name {
+    overflow: hidden;
+    color: var(--bs-heading-color);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dashboard-archive__share {
+    color: var(--bs-secondary-color);
+    font-size: .75rem;
+    font-variant-numeric: tabular-nums;
+    text-align: end;
   }
 
   .dashboard-kpi__health-label {
+    color: var(--bs-secondary-color);
     font-size: .75rem;
-  }
-
-  .dashboard-kpi__health-details {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    font-size: .75rem;
-    gap: .15rem .6rem;
-    margin-block-start: .35rem;
-  }
-
-  .dashboard-kpi__health-track {
-    block-size: .5rem;
-    margin-block: 0;
+    white-space: nowrap;
   }
 
   .dashboard-kpi__health-rate {
     font-size: .875rem;
   }
 
+  .dashboard-kpi__health-details {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: .15rem .6rem;
+    font-size: .75rem;
+  }
+
+  .dashboard-kpi__health-track {
+    block-size: .5rem;
+    margin-block: .5rem 0;
+  }
+
   .dashboard-kpi__divider {
     flex: 0 0 auto;
-    inline-size: 100%;
     block-size: 1px;
+    margin-block: 1rem;
     background-color: rgba(var(--crms-ink-rgb), .08);
-    margin-block: .75rem;
+  }
+}
+
+// The three top-row cards share one header height, so their header lines
+// meet across the row whatever each header holds.
+.dashboard-scan,
+.dashboard-panel--quality,
+.dashboard-panel--performance {
+  >.card-header {
+    min-block-size: 3.125rem;
+  }
+}
+
+// New document: the whole card is one link to the New Document page.
+.dashboard-scan {
+  text-decoration: none;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+
+  &:hover,
+  &:focus-visible {
+    border-color: rgba(var(--bs-primary-rgb), .28);
+    box-shadow: 0 .5rem 1.25rem rgba(var(--crms-shadow-rgb), .12);
+    transform: translateY(-2px);
+  }
+
+  &:focus-visible {
+    outline: 0;
+    box-shadow: 0 0 0 .2rem rgba(var(--bs-primary-rgb), .18),
+      0 .5rem 1.25rem rgba(var(--crms-shadow-rgb), .12);
+  }
+
+  // On a narrow card the badge drops below the title, as the period menu and
+  // the Workspace link do in the cards beside it, instead of breaking the title.
+  >.card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .35rem .6rem;
+    padding: .65rem 1.15rem .35rem;
+
+    .card-title {
+      white-space: nowrap;
+    }
+
+    >.badge {
+      flex: 0 0 auto;
+      margin-inline-start: auto;
+    }
+  }
+
+  // The template drops the top padding of a body that follows a header.
+  >.card-header + .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+    padding: .85rem 1.15rem 1rem;
+  }
+}
+
+// A scanner bed: faint dots on a primary tint. The picture grows with the row.
+.dashboard-scan__stage {
+  position: relative;
+  flex: 1 1 7rem;
+  min-block-size: 7rem;
+  max-block-size: 11rem;
+  background:
+    radial-gradient(circle, rgba(var(--bs-primary-rgb), .16) 1px, transparent 1.5px) 0 0 / .875rem .875rem,
+    linear-gradient(135deg, rgba(var(--bs-primary-rgb), .07), rgba(var(--bs-primary-rgb), .02));
+  border: 1px solid rgba(var(--bs-primary-rgb), .1);
+  border-radius: .625rem;
+}
+
+.dashboard-scan__art {
+  position: absolute;
+  inset: .4rem;
+  inline-size: calc(100% - .8rem);
+  block-size: calc(100% - .8rem);
+  overflow: visible;
+}
+
+.dashboard-scan__step {
+  circle {
+    fill: rgba(var(--bs-primary-rgb), .1);
+    stroke: rgba(var(--bs-primary-rgb), .28);
+  }
+
+  path {
+    fill: none;
+    stroke: var(--bs-primary);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.6;
+  }
+}
+
+.dashboard-scan__step--done {
+  circle {
+    fill: rgba(var(--bs-success-rgb), .12);
+    stroke: rgba(var(--bs-success-rgb), .32);
+  }
+
+  path {
+    stroke: var(--bs-success);
+  }
+}
+
+.dashboard-scan__link,
+.dashboard-scan__arrow {
+  fill: none;
+  stroke: rgba(var(--crms-ink-rgb), .4);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.4;
+}
+
+.dashboard-scan__link {
+  stroke-dasharray: 2.5 3;
+}
+
+.dashboard-scan__sheet {
+  fill: var(--bs-card-bg, var(--bs-paper-bg));
+  stroke: rgba(var(--crms-ink-rgb), .2);
+}
+
+.dashboard-scan__sheet--back {
+  fill: rgba(var(--bs-primary-rgb), .08);
+  stroke: rgba(var(--bs-primary-rgb), .2);
+}
+
+.dashboard-scan__page {
+  filter: drop-shadow(0 .25rem .5rem rgba(var(--crms-shadow-rgb), .12));
+}
+
+.dashboard-scan__ink {
+  fill: rgba(var(--crms-ink-rgb), .22);
+}
+
+.dashboard-scan__ink--strong {
+  fill: rgba(var(--crms-ink-rgb), .45);
+}
+
+.dashboard-scan__seal {
+  fill: rgba(var(--bs-warning-rgb), .18);
+  stroke: var(--bs-warning);
+  stroke-width: 1.2;
+}
+
+// A marked field: dashed, as on the field-marking step.
+.dashboard-scan__field {
+  fill: rgba(var(--bs-primary-rgb), .06);
+  stroke: var(--bs-primary);
+  stroke-dasharray: 3 2;
+  stroke-width: 1;
+}
+
+.dashboard-scan__hand {
+  fill: none;
+  stroke: var(--bs-heading-color);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-opacity: .7;
+  stroke-width: 1.5;
+}
+
+.dashboard-scan__corner {
+  fill: none;
+  stroke: var(--bs-primary);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.dashboard-scan__glow-edge,
+.dashboard-scan__glow-core {
+  stop-color: var(--bs-primary);
+}
+
+.dashboard-scan__glow-edge {
+  stop-opacity: 0;
+}
+
+.dashboard-scan__glow-core {
+  stop-opacity: .22;
+}
+
+.dashboard-scan__line {
+  fill: var(--bs-primary);
+}
+
+.dashboard-scan__check {
+  circle {
+    fill: var(--bs-success);
+    stroke: var(--bs-card-bg, var(--bs-paper-bg));
+    stroke-width: 2;
+  }
+
+  path {
+    fill: none;
+    stroke: #fff;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+  }
+}
+
+.dashboard-scan__text {
+  margin: 0;
+  color: var(--bs-secondary-color);
+  font-size: .8125rem;
+  line-height: 1.45;
+}
+
+// The types the New Document page lists; one without a template is greyed.
+.dashboard-scan__types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-scan__type {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  padding: .2rem .6rem .2rem .45rem;
+  color: var(--bs-heading-color);
+  background: rgba(var(--crms-ink-rgb), .05);
+  border-radius: 50rem;
+  font-size: .75rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+
+  i {
+    flex: 0 0 auto;
+    color: var(--bs-primary);
+    font-size: .9rem;
+  }
+
+  small {
+    flex: 0 0 auto;
+    color: var(--crms-warning-text);
+    font-size: inherit;
+    font-weight: 400;
+  }
+}
+
+.dashboard-scan__type--off {
+  color: var(--bs-secondary-color);
+
+  i {
+    color: inherit;
+  }
+}
+
+// Looks like a button; the card around it is the link.
+.dashboard-scan__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .35rem;
+  inline-size: 100%;
+
+  i {
+    font-size: 1.1rem;
+    transition: transform .18s ease;
+  }
+}
+
+.dashboard-scan:hover .dashboard-scan__action,
+.dashboard-scan:focus-visible .dashboard-scan__action {
+  color: var(--bs-btn-hover-color);
+  background-color: var(--bs-btn-hover-bg);
+  border-color: var(--bs-btn-hover-border-color);
+
+  i {
+    transform: translateX(3px);
   }
 }
 
@@ -5904,159 +6101,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     color: var(--bs-heading-color);
     font-weight: 600;
   }
-}
-
-// Donut and legend follow the panel's own width.
-.dashboard-types {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: center;
-  gap: 1rem 2rem;
-  min-inline-size: 0;
-}
-
-.dashboard-types__visual {
-  min-inline-size: 0;
-  padding: .55rem;
-  background: rgba(var(--crms-ink-rgb), .025);
-  border: 1px solid rgba(var(--crms-ink-rgb), .09);
-  border-radius: .75rem;
-}
-
-// The bar chart keeps a fixed row height per type (see renderDocumentTypes)
-// and sits centred in whatever height the row gives the panel.
-.dashboard-panel--types {
-  >.dashboard-panel__body {
-    display: flex;
-    flex-direction: column;
-  }
-}
-
-.dashboard-types-sneat {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: .75rem;
-  min-block-size: 0;
-}
-
-.dashboard-types__total {
-  display: flex;
-  align-items: baseline;
-  gap: .45rem;
-
-  strong {
-    color: var(--bs-heading-color);
-    font-size: 2.25rem;
-    font-variant-numeric: tabular-nums;
-    font-weight: 700;
-    letter-spacing: -.03em;
-    line-height: 1;
-  }
-
-  >span:not(.badge) {
-    color: var(--bs-secondary-color);
-    font-size: .875rem;
-  }
-
-  .badge {
-    align-self: center;
-  }
-}
-
-.dashboard-types__chart-shell {
-  flex: 0 0 auto;
-  min-inline-size: 0;
-  margin-block: auto;
-}
-
-.dashboard-types__center {
-  position: absolute;
-  inset: 50% auto auto 50%;
-  display: grid;
-  gap: .08rem;
-  place-items: center;
-  pointer-events: none;
-  text-align: center;
-  transform: translate(-50%, -50%);
-  z-index: 2;
-
-  span {
-    color: var(--bs-secondary-color);
-    font-size: .6875rem;
-    font-weight: 600;
-    letter-spacing: .04em;
-    text-transform: uppercase;
-  }
-
-  strong {
-    color: var(--bs-heading-color);
-    font-size: 1.55rem;
-    font-variant-numeric: tabular-nums;
-    font-weight: 700;
-    letter-spacing: -.035em;
-    line-height: 1.1;
-  }
-}
-
-.dashboard-types__inactive {
-  display: flex;
-  align-items: center;
-  gap: .4rem;
-  padding-block-start: .65rem;
-  color: var(--bs-secondary-color);
-  border-block-start: 1px solid rgba(var(--crms-ink-rgb), .09);
-  font-size: .6875rem;
-
-  i {
-    flex: 0 0 auto;
-    font-size: .875rem;
-  }
-}
-
-@container (min-width: 38rem) {
-  .dashboard-types {
-    grid-template-columns: minmax(14rem, .9fr) minmax(17rem, 1.1fr);
-  }
-}
-
-.dashboard-tooltip--donut {
-  min-inline-size: 10.5rem;
-  padding: .65rem .75rem;
-  text-align: start;
-}
-
-.dashboard-tooltip__type,
-.dashboard-tooltip__type-value {
-  display: flex;
-  align-items: center;
-  gap: .45rem;
-}
-
-.dashboard-tooltip__type {
-  min-inline-size: 0;
-  color: var(--bs-heading-color);
-  font-weight: 600;
-}
-
-.dashboard-tooltip__type-value {
-  margin-block-start: .45rem;
-  padding-block-start: .45rem;
-  color: var(--bs-secondary-color);
-  border-block-start: 1px solid var(--bs-border-color);
-
-  strong {
-    color: var(--bs-heading-color);
-    font-size: 1.05rem;
-  }
-}
-
-.dashboard-tooltip__share {
-  margin-inline-start: auto;
-  padding: .1rem .35rem;
-  background: rgba(var(--crms-ink-rgb), .07);
-  border-radius: 999px;
-  font-weight: 600;
 }
 
 // Native chart-data disclosure with a bounded data surface.
@@ -6600,19 +6644,46 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
-// The sparkline draws left to right once its card has arrived.
-.dashboard-reveal .dashboard-kpi__sparkline {
-  animation: dashboard-sparkline-in .55s $dashboard-ease backwards;
+// The archive's type bar fills left to right once its card has arrived.
+.dashboard-reveal .dashboard-archive__bar {
+  animation: dashboard-wipe-in .55s $dashboard-ease backwards;
   animation-delay: calc(var(--dashboard-reveal, 0) * #{$dashboard-reveal-step} + 150ms);
 }
 
-@keyframes dashboard-sparkline-in {
+@keyframes dashboard-wipe-in {
   from {
     clip-path: inset(0 100% 0 0);
   }
 
   to {
-    clip-path: inset(0 0 0 0);
+    clip-path: inset(0);
+  }
+}
+
+// The New document card's scan line rests on the page and sweeps it only
+// while the card is pointed at or focused, so nothing moves on its own.
+.dashboard-scan__beam {
+  transform: translateY(42px);
+  animation: dashboard-scan-sweep 2.6s ease-in-out infinite paused;
+}
+
+.dashboard-scan:hover .dashboard-scan__beam,
+.dashboard-scan:focus-visible .dashboard-scan__beam {
+  animation-play-state: running;
+}
+
+@keyframes dashboard-scan-sweep {
+  0%,
+  100% {
+    transform: translateY(42px);
+  }
+
+  40% {
+    transform: translateY(108px);
+  }
+
+  75% {
+    transform: translateY(12px);
   }
 }
 
@@ -6628,9 +6699,8 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
-// Chips and the inactive-type note settle in after their chart.
-.dashboard-reveal .dashboard-quality__chips,
-.dashboard-reveal .dashboard-types__inactive {
+// Chips settle in after their chart.
+.dashboard-reveal .dashboard-quality__chips {
   animation: dashboard-fade-in .25s $dashboard-ease backwards;
   animation-delay: calc(var(--dashboard-reveal, 0) * #{$dashboard-reveal-step} + 400ms);
 }
@@ -6644,6 +6714,8 @@ $dashboard-reveal-step: 40ms;
 @media (prefers-reduced-motion: reduce) {
 
   .dashboard-kpi,
+  .dashboard-scan,
+  .dashboard-scan__action i,
   .dashboard-panel--loading,
   .dashboard-chart-data>summary,
   .dashboard-chart-data__chevron {
@@ -6652,15 +6724,19 @@ $dashboard-reveal-step: 40ms;
 
   .dashboard-reveal,
   .dashboard-panel--refreshed,
-  .dashboard-reveal .dashboard-kpi__sparkline,
+  .dashboard-reveal .dashboard-archive__bar,
   .dashboard-reveal .dashboard-kpi__health-track span,
   .dashboard-reveal .dashboard-quality__chips,
-  .dashboard-reveal .dashboard-types__inactive {
+  .dashboard-scan__beam {
     animation: none;
   }
 
   .dashboard-kpi[href]:hover,
-  .dashboard-kpi[href]:focus-visible {
+  .dashboard-kpi[href]:focus-visible,
+  .dashboard-scan:hover,
+  .dashboard-scan:focus-visible,
+  .dashboard-scan:hover .dashboard-scan__action i,
+  .dashboard-scan:focus-visible .dashboard-scan__action i {
     transform: none;
   }
 }

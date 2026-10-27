@@ -5,11 +5,15 @@ namespace Tests\Feature;
 use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
+use App\Models\DocumentTemplate;
+use App\Models\OcrModel;
 use App\Models\User;
 use App\Services\ChangeRequestService;
 use App\Services\DashboardAnalytics;
+use Database\Seeders\DocumentTemplateSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
@@ -57,9 +61,11 @@ class AnalyticsDashboardTest extends TestCase
                 ->assertSee('Reporting period')
                 ->assertSee('Total digitized records')
                 ->assertSee('Digitization Volume &amp; Trend', escape: false)
-                ->assertSee('Document Type Distribution')
                 ->assertSee('OCR Quality')
-                ->assertSee('Processing &amp; Throughput', escape: false);
+                ->assertSee('Processing &amp; Throughput', escape: false)
+                // The total card's links say where they go.
+                ->assertSee('View report')
+                ->assertSee('Manage users');
 
             $this->assertNotNull($response->viewData('analytics'));
         }
@@ -88,6 +94,8 @@ class AnalyticsDashboardTest extends TestCase
         $analytics = $this->actingAs(User::factory()->admin()->create())
             ->get(route('dashboard'))
             ->assertOk()
+            // The chip says what it counts.
+            ->assertSee('<strong>1</strong> field below 80%', escape: false)
             ->viewData('analytics');
 
         $this->assertSame(1, $analytics['headline']['records']);
@@ -111,7 +119,8 @@ class AnalyticsDashboardTest extends TestCase
             ->get(route('dashboard'))
             ->assertOk()
             ->assertSee('Showing <strong>1 Sep 2025 – 11 Aug 2026</strong>', escape: false)
-            ->assertSee('1 submitted in the last 12 months');
+            ->assertSee('<strong>1</strong> submitted', escape: false)
+            ->assertSee('· by month ·');
 
         $scope = $response->viewData('scopes')['trend'];
         $analytics = $response->viewData('analytics');
@@ -125,6 +134,31 @@ class AnalyticsDashboardTest extends TestCase
         $this->assertSame('Sep 2025', $analytics['trend']['labels'][0]);
         $this->assertSame('Aug 2026', $analytics['trend']['labels'][11]);
         $this->assertNull($analytics['trend']['starts_at']);
+    }
+
+    public function test_the_total_card_shows_what_the_archive_holds_by_type(): void
+    {
+        Carbon::setTestNow('2026-08-11 04:00:00');
+        $staff = User::factory()->staff()->create();
+
+        $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
+        $this->record($staff, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-08-06 02:00:00')]);
+        // Long before the trend's period, and still in the archive.
+        $this->record($staff, DocumentType::Death, ['submitted_at' => Carbon::parse('2024-03-01 02:00:00')]);
+
+        $response = $this->actingAs(User::factory()->admin()->create())
+            ->get(route('dashboard', ['trend_period' => '30']))
+            ->assertOk()
+            ->assertSee('66.7%')
+            ->assertSee('33.3%');
+
+        // All time, largest first; each type keeps its fixed colour, not its rank's.
+        $types = $response->viewData('analytics')['archive_types'];
+        $this->assertSame([['Death', 2], ['Birth', 1]], array_map(fn (array $type) => [$type['name'], $type['total']], $types));
+        $this->assertSame('#2563eb', $types[1]['color']);
+
+        // The trend card counts only its own period.
+        $response->assertSee('<strong>2</strong> submitted', escape: false);
     }
 
     public function test_the_period_filter_scopes_every_period_chart(): void
@@ -155,13 +189,13 @@ class AnalyticsDashboardTest extends TestCase
             ->get(route('dashboard', $this->everyPanel(['period' => '30'])))
             ->assertOk()
             ->assertSee('Showing <strong>13 Jul 2026 – 11 Aug 2026</strong>', escape: false)
-            ->assertSee('1 submitted in the last 30 days');
+            ->assertSee('<strong>1</strong> submitted', escape: false)
+            ->assertSee('· by day ·');
 
         $analytics = $response->viewData('analytics');
         $this->assertSame('Last 30 days', $response->viewData('scopes')['trend']['badge']);
         $this->assertSame(2, $analytics['headline']['records']);
         $this->assertSame(1, $analytics['headline']['period_records']);
-        $this->assertSame(['Birth'], $this->typesWithRecords($analytics));
         $this->assertSame([$recentStaff->name], $analytics['throughput']->pluck('name')->all());
         $this->assertSame(95.0, $analytics['ocr_quality']['average_confidence']);
         $this->assertSame(0.0, $analytics['ocr_quality']['correction_rate']);
@@ -173,12 +207,12 @@ class AnalyticsDashboardTest extends TestCase
         $response = $this->actingAs($admin)
             ->get(route('dashboard', $this->everyPanel(['period' => 'custom', 'from' => '2026-05-01', 'to' => '2026-06-30'])))
             ->assertOk()
-            ->assertSee('1 submitted in the selected period');
+            ->assertSee('<strong>1</strong> submitted', escape: false);
 
         $analytics = $response->viewData('analytics');
         $this->assertSame('1 May 2026 – 30 Jun 2026', $response->viewData('scopes')['trend']['badge']);
         $this->assertSame(1, $analytics['headline']['period_records']);
-        $this->assertSame(['Death'], $this->typesWithRecords($analytics));
+        $this->assertSame(['Death'], array_column($analytics['trend']['series'], 'name'));
         $this->assertSame([$olderStaff->name], $analytics['throughput']->pluck('name')->all());
         $this->assertSame(40.0, $analytics['ocr_quality']['average_confidence']);
         $this->assertSame(100.0, $analytics['ocr_quality']['correction_rate']);
@@ -256,7 +290,7 @@ class AnalyticsDashboardTest extends TestCase
         $this->assertSame(25.0, $quality['correction_rate']);
     }
 
-    public function test_each_document_type_keeps_its_colour_on_every_chart(): void
+    public function test_each_document_type_keeps_its_own_colour(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
         $staff = User::factory()->staff()->create();
@@ -267,24 +301,12 @@ class AnalyticsDashboardTest extends TestCase
         }
 
         $response = $this->actingAs(User::factory()->admin()->create())->get(route('dashboard'));
-        $analytics = $response->viewData('analytics');
+        $line = fn (string $type) => collect($response->viewData('analytics')['trend']['series'])
+            ->firstWhere('name', $type)['color'];
 
-        $line = fn (string $type) => collect($analytics['trend']['series'])->firstWhere('name', $type)['color'];
-        $slice = fn (string $type) => collect($analytics['type_slices'])->firstWhere('label', $type)['color'];
-        $row = fn (string $type) => $analytics['by_document_type']
-            ->first(fn (array $row) => $row['type']->shortLabel() === $type)['color'];
-
-        // Death has the most records, so it leads the donut and the list...
-        $this->assertSame('Death', $analytics['type_slices'][0]['label']);
-        $this->assertSame('Death', $analytics['by_document_type'][0]['type']->shortLabel());
-
-        // ...but every type keeps one colour, taken from its fixed place in the
-        // type list (Birth is first), not from its rank.
+        // Death has the most records, but every type keeps one colour, taken
+        // from its fixed place in the type list (Birth is first), not its rank.
         $this->assertSame('#2563eb', $line('Birth'));
-        foreach (['Birth', 'Death'] as $type) {
-            $this->assertSame($line($type), $slice($type));
-            $this->assertSame($line($type), $row($type));
-        }
         $this->assertNotSame($line('Birth'), $line('Death'));
         $response->assertSee('--dashboard-type-color: '.$line('Death'), escape: false);
     }
@@ -353,7 +375,7 @@ class AnalyticsDashboardTest extends TestCase
         $this->record($recentStaff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
         $this->record($olderStaff, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-06-01 02:00:00')]);
 
-        // Only the throughput panel is narrowed; the type panel stays on 12 months.
+        // Only the throughput panel is narrowed; the trend stays on 12 months.
         $response = $this->actingAs(User::factory()->admin()->create())
             ->get(route('dashboard', ['staff_period' => '30']))
             ->assertOk();
@@ -361,9 +383,9 @@ class AnalyticsDashboardTest extends TestCase
         $scopes = $response->viewData('scopes');
         $analytics = $response->viewData('analytics');
 
-        $this->assertSame(['30', '365', '365', '365'], [$scopes['staff']['period'], $scopes['trend']['period'], $scopes['types']['period'], $scopes['ocr']['period']]);
+        $this->assertSame(['30', '365', '365'], [$scopes['staff']['period'], $scopes['trend']['period'], $scopes['ocr']['period']]);
         $this->assertSame([$recentStaff->name], $analytics['throughput']->pluck('name')->all());
-        $this->assertSame(['Birth', 'Death'], collect($this->typesWithRecords($analytics))->sort()->values()->all());
+        $this->assertSame(['Birth', 'Death'], array_column($analytics['trend']['series'], 'name'));
         $this->assertSame(2, $analytics['headline']['period_records']);
 
         // A panel's form keeps the other panels' choices and returns to itself.
@@ -372,25 +394,103 @@ class AnalyticsDashboardTest extends TestCase
             ->assertSee('/dashboard#panel-ocr', escape: false);
 
         $this->actingAs(User::factory()->admin()->create())
-            ->get(route('dashboard', ['staff_period' => '30', 'types_period' => '90']))
+            ->get(route('dashboard', ['staff_period' => '30', 'ocr_period' => '90']))
             ->assertSee('<input type="hidden" name="staff_period" value="30">', escape: false)
-            ->assertSee('<input type="hidden" name="types_period" value="90">', escape: false);
+            ->assertSee('<input type="hidden" name="ocr_period" value="90">', escape: false);
 
         // One panel's bad period leaves the others as chosen.
         $response = $this->actingAs(User::factory()->admin()->create())
-            ->get(route('dashboard', ['types_period' => '7', 'ocr_period' => '30']))
+            ->get(route('dashboard', ['trend_period' => '7', 'ocr_period' => '30']))
             ->assertSee('Choose one of the listed periods.');
-        $this->assertSame(['365', '30'], [$response->viewData('scopes')['types']['period'], $response->viewData('scopes')['ocr']['period']]);
+        $this->assertSame(['365', '30'], [$response->viewData('scopes')['trend']['period'], $response->viewData('scopes')['ocr']['period']]);
+    }
+
+    public function test_super_admin_starts_a_new_document_from_the_dashboard(): void
+    {
+        $this->seed(DocumentTemplateSeeder::class);
+        // Marriage loses its template, so the New Document page cannot start one.
+        DocumentTemplate::activeFor(DocumentType::Marriage)->update(['is_active' => false]);
+
+        $response = $this->actingAs(User::factory()->superAdmin()->create())
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertSee('href="'.route('documents.create').'" id="dashboard-new-document"', escape: false)
+            ->assertSee('Start scanning')
+            ->assertSee('2 of 3 ready')
+            ->assertSee('no template');
+
+        $this->assertSame(
+            [['Birth', true], ['Death', true], ['Marriage', false]],
+            array_map(fn (array $type) => [$type['label'], $type['ready']], $response->viewData('scanTypes')),
+        );
+    }
+
+    public function test_admin_gets_no_new_document_card_because_admin_cannot_scan(): void
+    {
+        $response = $this->actingAs(User::factory()->admin()->create())
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertDontSee('dashboard-new-document')
+            ->assertDontSee(route('documents.create'));
+
+        $this->assertNull($response->viewData('scanTypes'));
     }
     public function test_super_admin_uses_the_same_focused_crm_dashboard(): void
     {
+        User::factory()->staff()->create(['is_active' => false]);
+
         $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard'))
             ->assertOk()
             ->assertSee('Average OCR confidence')
             ->assertSee('Human correction rate')
             ->assertSee('Active accounts')
+            // One of the two accounts is active.
+            ->assertSee('50.0%</strong> active', escape: false)
             ->assertDontSee('Template usage and OCR review signals');
+    }
+
+    public function test_ocr_performance_sets_the_model_in_use_against_base(): void
+    {
+        $this->evaluatedModel(['key' => 'finetuned-v2', 'label' => 'Finetuned v2', 'is_active' => true], 0.1, 0.3, 0.5);
+        $this->evaluatedModel(['key' => 'base', 'label' => 'base'], 0.2, 0.6, 0.25);
+        // Scored too, but not in use, so it stays off the chart.
+        $this->evaluatedModel(['key' => 'finetuned-v1', 'label' => 'Finetuned v1'], 0.05, 0.1, 0.9);
+
+        $response = $this->actingAs(User::factory()->superAdmin()->create())
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertSee('Finetuned v2: characters 90.0%, words 70.0%, exact match 50.0%; TrOCR Base: characters 80.0%, words 40.0%, exact match 25.0%');
+
+        $series = $this->chartData($response)['ocrPerformance']['series'];
+        $this->assertSame(
+            [['model', 'Finetuned v2'], ['base', 'TrOCR Base']],
+            array_map(fn (array $item) => [$item['role'], $item['name']], $series),
+        );
+        $this->assertEquals(['character_accuracy' => 90.0, 'word_accuracy' => 70.0, 'exact_match' => 50.0], $series[0]['scores']);
+    }
+
+    public function test_ocr_performance_never_draws_a_score_nobody_measured(): void
+    {
+        // The model in use has no test results; Base does.
+        OcrModel::create(['key' => 'finetuned-v3', 'label' => 'Finetuned v3', 'is_active' => true]);
+        $base = $this->evaluatedModel(['key' => 'base', 'label' => 'base'], 0.2, 0.6, 0.25);
+        $admin = User::factory()->admin()->create();
+
+        $response = $this->actingAs($admin)
+            ->get(route('dashboard'))
+            ->assertSee('Finetuned v3</strong>', escape: false)
+            ->assertSee('no test scores');
+        $this->assertSame(['base'], array_column($this->chartData($response)['ocrPerformance']['series'], 'role'));
+
+        // With nothing measured, the card says so and draws no chart at all.
+        $base->delete();
+        $response = $this->actingAs($admin)
+            ->get(route('dashboard'))
+            ->assertSee('No test scores yet')
+            ->assertSee('Finetuned v3 has no test results yet.')
+            ->assertDontSee('id="dashboard-ocr-radar-chart"', escape: false);
+        $this->assertSame([], $this->chartData($response)['ocrPerformance']['series']);
     }
 
     public function test_analytics_is_removed_from_the_sidebar(): void
@@ -435,16 +535,36 @@ class AnalyticsDashboardTest extends TestCase
     }
 
     /**
-     * @param  array<string, mixed>  $analytics
-     * @return list<string>
+     * What the dashboard hands its chart script.
+     *
+     * @return array<string, mixed>
      */
-    private function typesWithRecords(array $analytics): array
+    private function chartData(TestResponse $response): array
     {
-        return $analytics['by_document_type']
-            ->where('total', '>', 0)
-            ->map(fn (array $row) => $row['type']->shortLabel())
-            ->values()
-            ->all();
+        preg_match('#<script id="dashboard-chart-data" type="application/json">(.*?)</script>#s', $response->getContent(), $match);
+
+        return json_decode($match[1] ?? 'null', true, flags: JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * An OCR model with complete results from the locked test set.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function evaluatedModel(array $attributes, float $cer, float $wer, float $exactMatch): OcrModel
+    {
+        return OcrModel::create([
+            ...$attributes,
+            'cer' => $cer,
+            'wer' => $wer,
+            'exact_match' => $exactMatch,
+            'evaluation_dataset' => 'civil-records-v1',
+            'evaluation_split' => 'test',
+            'evaluation_sample_count' => 5000,
+            'evaluation_manifest_sha256' => str_repeat('a', 64),
+            'evaluation_weights_sha256' => str_repeat('b', 64),
+            'evaluated_at' => '2026-10-13 10:00:00',
+        ]);
     }
 
     /**

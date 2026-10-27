@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
+use App\Models\DocumentTypeDefinition;
 use App\Services\DashboardAnalytics;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
@@ -69,11 +70,33 @@ class DashboardController extends Controller
             'scopes' => $scopes,
             'analytics' => $overview,
             'modelPerformance' => $modelPerformance,
+            // The New document card. Admin cannot scan, so Admin gets none.
+            'scanTypes' => $user->hasOversight() && $user->can('documents.process') ? $this->scanTypes() : null,
             'staffOverview' => $user->hasOversight() ? null : $this->analytics->staff($user),
             'recentActivity' => $user->hasOversight()
                 ? collect()
                 : AuditLog::where('user_id', $user->getKey())->latest('created_at')->limit(6)->get(),
         ]);
+    }
+
+    /**
+     * The document types a new scan can start from, in the New Document page's
+     * order, and whether each has an active template. That page offers "Start
+     * scanning" only for a type that has one.
+     *
+     * @return list<array{label: string, icon: string, ready: bool}>
+     */
+    private function scanTypes(): array
+    {
+        return DocumentTypeDefinition::ordered(activeOnly: true)
+            ->loadExists(['templates as has_active_template' => fn ($query) => $query->where('is_active', true)])
+            ->map(fn (DocumentTypeDefinition $type) => [
+                'label' => $type->shortLabel(),
+                'icon' => $type->icon(),
+                'ready' => (bool) $type->has_active_template,
+            ])
+            ->values()
+            ->all();
     }
 
     /**

@@ -33,7 +33,7 @@ class DashboardAnalytics
      *
      * @var list<string>
      */
-    public const PANELS = ['trend', 'types', 'ocr', 'staff'];
+    public const PANELS = ['trend', 'ocr', 'staff'];
 
     /** @var array<string, string> */
     public const PERIODS = [
@@ -114,8 +114,6 @@ class DashboardAnalytics
         return [
             'period' => $period,
             'period_label' => self::PERIODS[$period],
-            // Ends the sentence "... submitted in ___".
-            'phrase' => $period === 'custom' ? 'the selected period' : 'the '.strtolower(self::PERIODS[$period]),
             // A card badge: the preset's name, or the dates themselves.
             'badge' => $period === 'custom' ? $this->rangeLabel($start, $end) : self::PERIODS[$period],
             // The period menu's button and the panel headers, where room is short.
@@ -139,21 +137,19 @@ class DashboardAnalytics
 
     /**
      * Every panel that depends on a period has its own, so each is given its
-     * own scope: trend, types, ocr and staff.
+     * own scope: trend, ocr and staff.
      *
-     * @param  array{trend: array<string, mixed>, types: array<string, mixed>, ocr: array<string, mixed>, staff: array<string, mixed>}  $scopes
+     * @param  array{trend: array<string, mixed>, ocr: array<string, mixed>, staff: array<string, mixed>}  $scopes
      * @return array<string, mixed>
      */
     public function oversight(array $scopes): array
     {
         $entries = $this->typeEntries(DocumentTypeDefinition::ordered()->values());
-        $byType = $this->recordsByDocumentType($this->records($scopes['types']), $entries);
 
         return [
             'headline' => $this->headline($scopes['trend']),
+            'archive_types' => $this->archiveByType($entries),
             'trend' => $this->recordTrend($scopes['trend'], $entries),
-            'by_document_type' => $byType,
-            'type_slices' => $this->typeSlices($byType),
             'ocr_quality' => $this->ocrQuality($scopes['ocr']),
             'throughput' => $this->submissionsByAccount($this->records($scopes['staff'])),
             'accounts' => $this->accountHealth(),
@@ -216,6 +212,43 @@ class DashboardAnalytics
     }
 
     /**
+     * What the archive holds: submitted records by document type, all time,
+     * largest first. Each type keeps its colour from the trend chart; types
+     * past the palette, or no longer listed, share the grey "Other types".
+     *
+     * @param  array<int, array{key: string, name: string, color: string, type: DocumentTypeDefinition}>  $entries
+     * @return list<array{name: string, color: string, total: int}>
+     */
+    private function archiveByType(array $entries): array
+    {
+        $counts = CivilRecord::query()
+            ->where('status', RecordStatus::Submitted->value)
+            ->selectRaw('document_type_id, COUNT(*) as total')
+            ->groupBy('document_type_id')
+            ->pluck('total', 'document_type_id');
+
+        $groups = [];
+        $add = function (array $entry, int $total) use (&$groups): void {
+            $groups[$entry['key']] ??= ['name' => $entry['name'], 'color' => $entry['color'], 'total' => 0];
+            $groups[$entry['key']]['total'] += $total;
+        };
+
+        foreach ($entries as $typeId => $entry) {
+            if (isset($counts[$typeId])) {
+                $add($entry, (int) $counts[$typeId]);
+            }
+        }
+
+        $unlisted = (int) $counts->except(array_keys($entries))->sum();
+        if ($unlisted > 0) {
+            $add($this->otherEntry(), $unlisted);
+        }
+
+        // The sort is stable, so equal counts keep the type list's order.
+        return collect($groups)->sortByDesc('total')->values()->all();
+    }
+
+    /**
      * @param  array<string, mixed>  $scope
      */
     private function records(array $scope): Builder
@@ -259,59 +292,6 @@ class DashboardAnalytics
     private function otherEntry(): array
     {
         return ['key' => 'other', 'name' => 'Other types', 'color' => self::OTHER_TYPES_COLOR];
-    }
-
-    /**
-     * @param  Builder<CivilRecord>  $records
-     * @param  array<int, array{key: string, name: string, color: string, type: DocumentTypeDefinition}>  $entries
-     * @return Collection<int, array{type: DocumentTypeDefinition, total: int, share: float, color: string, group: string}>
-     */
-    private function recordsByDocumentType(Builder $records, array $entries): Collection
-    {
-        $counts = (clone $records)
-            ->select('document_type_id')
-            ->selectRaw('COUNT(*) as total')
-            ->groupBy('document_type_id')
-            ->pluck('total', 'document_type_id');
-
-        $total = (int) $counts->sum();
-
-        return collect($entries)
-            ->map(function (array $entry, int $typeId) use ($counts, $total) {
-                $count = (int) ($counts[$typeId] ?? 0);
-
-                return [
-                    'type' => $entry['type'],
-                    'total' => $count,
-                    'share' => $total > 0 ? round($count / $total * 100, 1) : 0.0,
-                    'color' => $entry['color'],
-                    'group' => $entry['key'],
-                ];
-            })
-            // Stable, so types with equal counts keep their fixed order.
-            ->sortByDesc('total')
-            ->values();
-    }
-
-    /**
-     * The donut's slices: one per type with records, largest first, with the
-     * types past the palette folded together.
-     *
-     * @param  Collection<int, array{type: DocumentTypeDefinition, total: int, share: float, color: string, group: string}>  $byType
-     * @return list<array{label: string, total: int, color: string}>
-     */
-    private function typeSlices(Collection $byType): array
-    {
-        return $byType
-            ->where('total', '>', 0)
-            ->groupBy('group')
-            ->map(fn (Collection $rows, string $group) => [
-                'label' => $group === 'other' ? $this->otherEntry()['name'] : $rows->first()['type']->shortLabel(),
-                'total' => (int) $rows->sum('total'),
-                'color' => $rows->first()['color'],
-            ])
-            ->values()
-            ->all();
     }
 
     /**
