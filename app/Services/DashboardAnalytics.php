@@ -185,11 +185,11 @@ class DashboardAnalytics
     }
 
     /**
-     * The all-time and this-month totals, and the trend panel's period
-     * measured against the one before it.
+     * The all-time and this-month totals, when the newest record came in, and
+     * the trend panel's period measured against the one before it.
      *
      * @param  array<string, mixed>  $scope  the trend panel's
-     * @return array<string, int|float|null>
+     * @return array<string, int|float|CarbonInterface|null>
      */
     private function headline(array $scope): array
     {
@@ -205,6 +205,11 @@ class DashboardAnalytics
                 CarbonImmutable::now($timezone)->startOfMonth()->utc(),
                 CarbonImmutable::now($timezone)->endOfDay()->utc(),
             )->count(),
+            'last_submitted_at' => CivilRecord::query()
+                ->where('status', RecordStatus::Submitted->value)
+                ->latest('submitted_at')
+                ->value('submitted_at')
+                ?->setTimezone($timezone),
             'period_records' => $current,
             'previous_records' => $previous,
             'change' => $previous > 0 ? round(($current - $previous) / $previous * 100, 1) : null,

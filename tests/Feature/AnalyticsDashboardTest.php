@@ -408,21 +408,51 @@ class AnalyticsDashboardTest extends TestCase
     public function test_super_admin_starts_a_new_document_from_the_dashboard(): void
     {
         $this->seed(DocumentTemplateSeeder::class);
-        // Marriage loses its template, so the New Document page cannot start one.
-        DocumentTemplate::activeFor(DocumentType::Marriage)->update(['is_active' => false]);
+        $superAdmin = User::factory()->superAdmin()->create();
 
-        $response = $this->actingAs(User::factory()->superAdmin()->create())
+        // With every type ready, the card names none of them.
+        $this->actingAs($superAdmin)
             ->get(route('dashboard'))
             ->assertOk()
             ->assertSee('href="'.route('documents.create').'" id="dashboard-new-document"', escape: false)
             ->assertSee('Start scanning')
+            ->assertSee('3 types ready')
+            ->assertDontSee('dashboard-scan-note');
+
+        // Marriage loses its template, so the New Document page cannot start one.
+        DocumentTemplate::activeFor(DocumentType::Marriage)->update(['is_active' => false]);
+
+        $response = $this->actingAs($superAdmin)
+            ->get(route('dashboard'))
+            ->assertOk()
             ->assertSee('2 of 3 ready')
-            ->assertSee('no template');
+            ->assertSee('Marriage has no template yet.');
 
         $this->assertSame(
             [['Birth', true], ['Death', true], ['Marriage', false]],
             array_map(fn (array $type) => [$type['label'], $type['ready']], $response->viewData('scanTypes')),
         );
+    }
+
+    public function test_the_new_document_card_shows_what_came_in_lately(): void
+    {
+        Carbon::setTestNow('2026-08-11 04:00:00');
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->actingAs($superAdmin)
+            ->get(route('dashboard'))
+            ->assertSeeInOrder(['<dt>added this month</dt>', '<dd>0</dd>', '<dt>last added</dt>', 'None yet'], escape: false);
+
+        $staff = User::factory()->staff()->create();
+        $this->record($staff, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-07-20 04:00:00')]);
+        $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-08 04:00:00')]);
+
+        // Only August's record counts this month. The newest is three days old,
+        // and its exact time is given in Manila.
+        $this->actingAs($superAdmin)
+            ->get(route('dashboard'))
+            ->assertSeeInOrder(['<dt>added this month</dt>', '<dd>1</dd>', '<dt>last added</dt>'], escape: false)
+            ->assertSee('title="8 Aug 2026, 12:00 PM">3 days ago</time>', escape: false);
     }
 
     public function test_admin_gets_no_new_document_card_because_admin_cannot_scan(): void

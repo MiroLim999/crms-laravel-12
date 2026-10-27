@@ -5587,12 +5587,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// A scanner bed: faint dots on a primary tint. The picture grows with the row.
+// A scanner bed: faint dots on a primary tint. It takes whatever height the
+// row leaves, so the button always sits on the card's bottom edge.
 .dashboard-scan__stage {
   position: relative;
   flex: 1 1 7rem;
   min-block-size: 7rem;
-  max-block-size: 11rem;
   background:
     radial-gradient(circle, rgba(var(--bs-primary-rgb), .16) 1px, transparent 1.5px) 0 0 / .875rem .875rem,
     linear-gradient(135deg, rgba(var(--bs-primary-rgb), .07), rgba(var(--bs-primary-rgb), .02));
@@ -5733,57 +5733,61 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.dashboard-scan__text {
+// Two small figures, each value above its label (the label comes first in the
+// markup, so it is read first).
+.dashboard-scan__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin: 0;
-  color: var(--bs-secondary-color);
-  font-size: .8125rem;
-  line-height: 1.45;
+  text-align: center;
+
+  >div {
+    display: flex;
+    flex-direction: column-reverse;
+    min-inline-size: 0;
+    padding-inline: .5rem;
+  }
+
+  >div + div {
+    border-inline-start: 1px solid rgba(var(--crms-ink-rgb), .08);
+  }
+
+  dt {
+    color: var(--bs-secondary-color);
+    font-size: .75rem;
+    font-weight: 400;
+    line-height: 1.35;
+  }
+
+  dd {
+    overflow: hidden;
+    margin: 0;
+    color: var(--bs-heading-color);
+    font-size: 1rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
-// The types the New Document page lists; one without a template is greyed.
-.dashboard-scan__types {
+// Shown only while a type has no template, so it cannot be scanned.
+.dashboard-scan__note {
   display: flex;
-  flex-wrap: wrap;
+  align-items: flex-start;
   gap: .4rem;
   margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.dashboard-scan__type {
-  display: inline-flex;
-  align-items: center;
-  gap: .35rem;
-  max-inline-size: 100%;
-  min-inline-size: 0;
-  padding: .2rem .6rem .2rem .45rem;
-  color: var(--bs-heading-color);
-  background: rgba(var(--crms-ink-rgb), .05);
-  border-radius: 50rem;
+  padding: .45rem .65rem;
+  color: var(--crms-warning-text);
+  background: rgba(var(--bs-warning-rgb), .1);
+  border-radius: .5rem;
   font-size: .75rem;
-  font-weight: 500;
-  line-height: 1.3;
-  white-space: nowrap;
+  line-height: 1.4;
 
   i {
     flex: 0 0 auto;
-    color: var(--bs-primary);
-    font-size: .9rem;
-  }
-
-  small {
-    flex: 0 0 auto;
-    color: var(--crms-warning-text);
-    font-size: inherit;
-    font-weight: 400;
-  }
-}
-
-.dashboard-scan__type--off {
-  color: var(--bs-secondary-color);
-
-  i {
-    color: inherit;
+    font-size: 1rem;
   }
 }
 

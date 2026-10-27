@@ -84,7 +84,7 @@ class DashboardController extends Controller
      * order, and whether each has an active template. That page offers "Start
      * scanning" only for a type that has one.
      *
-     * @return list<array{label: string, icon: string, ready: bool}>
+     * @return list<array{label: string, ready: bool}>
      */
     private function scanTypes(): array
     {
@@ -92,7 +92,6 @@ class DashboardController extends Controller
             ->loadExists(['templates as has_active_template' => fn ($query) => $query->where('is_active', true)])
             ->map(fn (DocumentTypeDefinition $type) => [
                 'label' => $type->shortLabel(),
-                'icon' => $type->icon(),
                 'ready' => (bool) $type->has_active_template,
             ])
             ->values()

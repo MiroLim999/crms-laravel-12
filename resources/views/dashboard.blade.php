@@ -79,7 +79,9 @@
             // The New document card, for those who can scan (not Admin).
             $canScan = $scanTypes !== null;
             $scanTypeCount = $canScan ? count($scanTypes) : 0;
-            $readyTypeCount = $canScan ? collect($scanTypes)->where('ready', true)->count() : 0;
+            $unreadyTypes = collect($scanTypes ?? [])->reject(fn (array $type) => $type['ready'])->pluck('label');
+            $readyTypeCount = $scanTypeCount - $unreadyTypes->count();
+            $lastAdded = $headline['last_submitted_at'];
         @endphp
 
         {{--
@@ -93,20 +95,21 @@
                 <div class="col-12 col-md-6 col-lg-4 dashboard-reveal" style="--dashboard-reveal: 0">
                     <a href="{{ route('documents.create') }}" id="dashboard-new-document"
                        class="card dashboard-panel dashboard-scan h-100 text-reset"
-                       aria-labelledby="dashboard-scan-title" aria-describedby="dashboard-scan-text dashboard-scan-types">
+                       aria-labelledby="dashboard-scan-title"
+                       aria-describedby="dashboard-scan-status{{ $unreadyTypes->isNotEmpty() ? ' dashboard-scan-note' : '' }}">
                         <div class="card-header">
                             <span class="dashboard-kpi__mini-icon bg-label-primary">
                                 <i class="icon-base bx bx-scan" aria-hidden="true"></i>
                             </span>
                             <h5 id="dashboard-scan-title" class="card-title mb-0">New document</h5>
                             @if ($scanTypeCount === 0)
-                                <span class="badge bg-label-warning">No document types</span>
+                                <span id="dashboard-scan-status" class="badge bg-label-warning">No document types</span>
                             @elseif ($readyTypeCount === $scanTypeCount)
-                                <span class="badge bg-label-success">
+                                <span id="dashboard-scan-status" class="badge bg-label-success">
                                     {{ $readyTypeCount }} {{ $readyTypeCount === 1 ? 'type' : 'types' }} ready
                                 </span>
                             @else
-                                <span class="badge bg-label-warning">{{ $readyTypeCount }} of {{ $scanTypeCount }} ready</span>
+                                <span id="dashboard-scan-status" class="badge bg-label-warning">{{ $readyTypeCount }} of {{ $scanTypeCount }} ready</span>
                             @endif
                         </div>
 
@@ -163,21 +166,32 @@
                                 </svg>
                             </div>
 
-                            <p id="dashboard-scan-text" class="dashboard-scan__text">
-                                Scan a paper certificate, check what was read, and save it to the archive.
-                            </p>
+                            {{-- What came in lately: this month's records and the newest one. --}}
+                            <dl class="dashboard-scan__stats">
+                                <div>
+                                    <dt>added this month</dt>
+                                    <dd>{{ number_format($headline['month_records']) }}</dd>
+                                </div>
+                                <div>
+                                    <dt>last added</dt>
+                                    <dd>
+                                        @if ($lastAdded)
+                                            <time datetime="{{ $lastAdded->toIso8601String() }}" title="{{ $lastAdded->format('j M Y, g:i A') }}">{{ $lastAdded->diffForHumans() }}</time>
+                                        @else
+                                            None yet
+                                        @endif
+                                    </dd>
+                                </div>
+                            </dl>
 
-                            <ul id="dashboard-scan-types" class="dashboard-scan__types" aria-label="Document types">
-                                @foreach ($scanTypes as $type)
-                                    <li @class(['dashboard-scan__type', 'dashboard-scan__type--off' => ! $type['ready']])>
-                                        <i class="icon-base bx {{ $type['icon'] }}" aria-hidden="true"></i>
-                                        <span class="text-truncate">{{ $type['label'] }}</span>
-                                        @unless ($type['ready'])
-                                            <small>no template</small>
-                                        @endunless
-                                    </li>
-                                @endforeach
-                            </ul>
+                            {{-- The New Document page lists every type; here a type is
+                                 named only when it cannot be scanned yet. --}}
+                            @if ($unreadyTypes->isNotEmpty())
+                                <p id="dashboard-scan-note" class="dashboard-scan__note">
+                                    <i class="icon-base bx bx-error-circle" aria-hidden="true"></i>
+                                    <span>{{ $unreadyTypes->join(', ', ' and ') }} {{ $unreadyTypes->count() === 1 ? 'has' : 'have' }} no template yet.</span>
+                                </p>
+                            @endif
 
                             <span class="btn btn-primary dashboard-scan__action">
                                 Start scanning
