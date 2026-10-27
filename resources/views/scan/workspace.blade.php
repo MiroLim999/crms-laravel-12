@@ -2642,21 +2642,36 @@
         if (note) el('scanningNote').textContent = note;
     }
 
-    // The ring creeps toward the current phase's ceiling, then waits for the
-    // page's real status to open the next phase.
-    let ocrProgressCeiling = 12;
+    // Each phase of a run has a share of the ring: from where it starts to its
+    // ceiling, which the ring nears but never reaches. Each tick it closes part
+    // of the gap left, so it moves quickly as a phase opens and slows towards
+    // the ceiling, but never stands still: a ring stopped at a ceiling while
+    // Kraken still works (20-50 s) looked stuck. The page's real status opens
+    // the next phase, and the ring jumps ahead to its start.
+    const OCR_PROGRESS_TICK = 200;
+    let ocrProgressCeiling = 15;
+    // Seconds in which the ring covers about two thirds of the phase's gap:
+    // roughly how long the phase takes.
+    let ocrProgressPace = 2;
+
+    function setOcrPhase(start, ceiling, seconds, title = null, note = null) {
+        ocrProgressCeiling = ceiling;
+        ocrProgressPace = seconds;
+        setOcrProgress(Math.max(ocrProgress, start), title, note);
+    }
 
     function beginOcrProgress(markerCount) {
         if (ocrProgressTimer !== null) window.clearInterval(ocrProgressTimer);
 
         el('ocrProgressFields').textContent = `${markerCount} marker${markerCount === 1 ? '' : 's'} aligned`;
-        ocrProgressCeiling = 12;
-        setOcrProgress(4, 'Preparing document', 'Saving the aligned page for line detection.');
+        ocrProgress = 0;
+        setOcrPhase(4, 15, 2, 'Preparing document', 'Saving the aligned page for line detection.');
 
         ocrProgressTimer = window.setInterval(() => {
-            if (ocrProgress >= ocrProgressCeiling) return;
-            setOcrProgress(Math.min(ocrProgressCeiling, ocrProgress + 0.6));
-        }, 400);
+            const gap = ocrProgressCeiling - ocrProgress;
+            if (gap <= 0) return;
+            setOcrProgress(ocrProgress + gap * (1 - Math.exp(-OCR_PROGRESS_TICK / 1000 / ocrProgressPace)));
+        }, OCR_PROGRESS_TICK);
     }
 
     /**
@@ -2688,27 +2703,24 @@
 
     function showPageStatus(page, waitedMs, mode = 'scan') {
         if (page.status === 'detecting' && mode === 'detect') {
-            ocrProgressCeiling = 92;
-            setOcrProgress(Math.max(ocrProgress, 18), 'Detecting fields and ink',
+            setOcrPhase(18, 95, 20, 'Detecting fields and ink',
                 'Straightening the page, fitting the columns and rows to its table, and outlining every handwritten line.');
             return;
         }
         if (page.status === 'queued') {
-            ocrProgressCeiling = 18;
-            setOcrProgress(
-                Math.max(ocrProgress, 12),
+            setOcrPhase(
+                15, 18, 3,
                 'Waiting for the line detector',
                 waitedMs > 20000
                     ? 'No background worker has picked this page up. Start one with: php artisan queue:work (serve.ps1 starts it for you).'
                     : 'The page is queued for line detection.',
             );
         } else if (page.status === 'detecting') {
-            ocrProgressCeiling = 60;
-            setOcrProgress(Math.max(ocrProgress, 18), 'Finding handwritten lines',
+            // Most of a scan's time (20-50 s), so most of the ring.
+            setOcrPhase(18, 72, 20, 'Finding handwritten lines',
                 'Outlining every handwritten line, including capitals and tails that cross the ruled lines.');
         } else if (page.status === 'reading') {
-            ocrProgressCeiling = 92;
-            setOcrProgress(Math.max(ocrProgress, 60), 'Reading handwriting',
+            setOcrPhase(72, 95, 6, 'Reading handwriting',
                 'The selected TrOCR model is reading each outlined line.');
         }
     }
@@ -2747,7 +2759,9 @@
                 throw new Error(page.error || 'The page could not be processed. Please scan again.');
             }
 
-            await wait(1500, signal);
+            // Often enough that a finished phase shows at once; the status is a
+            // small read, and the results come only with the last one.
+            await wait(700, signal);
             const response = await fetch(page.statusUrl, {
                 headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                 credentials: 'same-origin',
@@ -2771,9 +2785,9 @@
 
     async function completeOcrProgress(title = 'Scan complete', note = 'Opening the validation results.') {
         stopOcrProgress();
-        await new Promise((resolve) => window.setTimeout(resolve, 180));
         setOcrProgress(100, title, note);
-        await new Promise((resolve) => window.setTimeout(resolve, 420));
+        // Long enough to see the ring fill, no longer.
+        await new Promise((resolve) => window.setTimeout(resolve, 350));
     }
 
     /**
@@ -3110,7 +3124,7 @@
                 await lineSaveQueue;
                 setLineEditing(false);
                 // The outlines Staff just checked are the ones read.
-                setOcrProgress(Math.max(ocrProgress, 60), 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
+                setOcrPhase(72, 95, 6, 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
                 payload = await readDetectedPage(controller.signal);
             } else if (canReoutline()) {
                 // The markers moved after Detect. That page is already here and
@@ -3118,7 +3132,7 @@
                 // lines are reused rather than found again.
                 run.pageId = detection.page.id;
                 setLineEditing(false);
-                setOcrProgress(Math.max(ocrProgress, 30), 'Outlining from your markers',
+                setOcrPhase(30, 72, 4, 'Outlining from your markers',
                     'Reusing the lines Detect found on this page.');
                 payload = await reoutlineDetectedPage(controller.signal);
             } else {

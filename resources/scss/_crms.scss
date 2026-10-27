@@ -971,7 +971,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   &.is-selected {
     border-color: var(--bs-info);
     background-color: rgba(3, 195, 236, 0.18);
-    box-shadow: 0 0 0 1px rgba(3, 195, 236, 0.3);
+    box-shadow: 0 0 0 2px rgba(3, 195, 236, 0.65);
   }
 
   // Above the Align step's row lines (z-index 4): their grips sit on the
@@ -2147,7 +2147,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
       rgba(105, 108, 255, .12) 0);
   border-radius: 50%;
   box-shadow: 0 0 0 .45rem rgba(105, 108, 255, .05);
-  transition: --ocr-progress .3s ease;
+  // Linear, a little longer than a tick (200 ms): the ring glides on without
+  // pausing between ticks.
+  transition: --ocr-progress .25s linear;
 
   &::before {
     position: absolute;
@@ -3263,8 +3265,13 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     background-color: #0e9aa7;
   }
 
+  // The clicked column stands out from the dashed ones around it: a solid
+  // border and a ring outside it, which covers none of the writing inside.
   &.is-selected {
-    border-style: dashed;
+    border-style: solid;
+    border-color: var(--bs-info);
+    background-color: rgba(3, 195, 236, .1);
+    box-shadow: 0 0 0 2px rgba(3, 195, 236, .65);
   }
 }
 
