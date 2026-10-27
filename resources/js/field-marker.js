@@ -29,6 +29,12 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
 
 const HANDLE_SIZE = 10;
 const MIN_FRACTION = 0.01;
+// A resize stops at this many screen pixels too: smaller, the handles cover the
+// whole marker and it can no longer be grabbed to move.
+const MIN_PIXELS = 24;
+// Narrower (or shorter) than this on screen, the top and bottom (or left and
+// right) side handles would sit on the corner handles, so they are hidden.
+const COMPACT_PIXELS = 32;
 // Holding Shift while turning a marker snaps it to this many degrees.
 const ROTATE_SNAP_DEGREES = 5;
 // A turning arrow for the tilt knob. Inline, not from the subset icon font.
@@ -821,6 +827,12 @@ export class FieldMarker {
             box.el.style.top = `${box.y * height}px`;
             box.el.style.width = `${box.w * width}px`;
             box.el.style.height = `${box.h * height}px`;
+            // Small on screen, the handles would cover the marker: fewer of them.
+            // Smaller than a resize allows (shrunk at a higher zoom), one corner
+            // handle outside it, so the marker itself can still be grabbed.
+            box.el.classList.toggle('is-narrow', box.w * width < COMPACT_PIXELS);
+            box.el.classList.toggle('is-short', box.h * height < COMPACT_PIXELS);
+            box.el.classList.toggle('is-tiny', Math.min(box.w * width, box.h * height) < MIN_PIXELS);
 
             const angle = normaliseAngle(box.angle);
             if (angle === 0) {
@@ -1011,7 +1023,9 @@ export class FieldMarker {
                 }
 
                 origins.forEach((origin) => {
-                    const rect = resizeRect(origin.w, origin.h, direction, sx, sy, MIN_FRACTION, MIN_FRACTION);
+                    const minW = smallestSide(origin.w, width);
+                    const minH = smallestSide(origin.h, height);
+                    const rect = resizeRect(origin.w, origin.h, direction, sx, sy, minW, minH);
                     // The page's edges stop a side; the opposite side stays where it was.
                     const left = Math.max(0, origin.x + rect.left);
                     const top = Math.max(0, origin.y + rect.top);
@@ -1019,8 +1033,8 @@ export class FieldMarker {
                     const bottom = Math.min(1, origin.y + rect.bottom);
                     origin.box.x = left;
                     origin.box.y = top;
-                    origin.box.w = Math.max(MIN_FRACTION, right - left);
-                    origin.box.h = Math.max(MIN_FRACTION, bottom - top);
+                    origin.box.w = Math.max(minW, right - left);
+                    origin.box.h = Math.max(minH, bottom - top);
                 });
             }
 
@@ -1088,9 +1102,11 @@ export class FieldMarker {
             const local = turnPoint(pixelDx, pixelDy, -angle);
             const ow = origin.w * width;
             const oh = origin.h * height;
-            const rect = resizeRect(ow, oh, handle, local.x, local.y, MIN_FRACTION * width, MIN_FRACTION * height);
-            const w = clamp((rect.right - rect.left) / width, MIN_FRACTION, 1);
-            const h = clamp((rect.bottom - rect.top) / height, MIN_FRACTION, 1);
+            const minW = smallestSide(origin.w, width);
+            const minH = smallestSide(origin.h, height);
+            const rect = resizeRect(ow, oh, handle, local.x, local.y, minW * width, minH * height);
+            const w = clamp((rect.right - rect.left) / width, minW, 1);
+            const h = clamp((rect.bottom - rect.top) / height, minH, 1);
             // The untouched sides stay put: the centre moves by how far the new
             // box's centre is from the old one, turned into the page's frame.
             const shift = turnPoint((rect.left + rect.right - ow) / 2, (rect.top + rect.bottom - oh) / 2, angle);
@@ -1162,6 +1178,16 @@ export class FieldMarker {
 
 function clamp(value, min, max) {
     return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
+/**
+ * How small a resize may make one side of a marker (a page fraction): the
+ * larger of MIN_FRACTION and MIN_PIXELS on screen, but never more than the side
+ * already is, so a marker that starts smaller only stops shrinking, and never
+ * jumps bigger when its handle is touched.
+ */
+function smallestSide(side, pixels) {
+    return Math.min(side, Math.max(MIN_FRACTION, MIN_PIXELS / Math.max(1, pixels)));
 }
 
 export {

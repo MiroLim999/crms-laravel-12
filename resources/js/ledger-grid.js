@@ -218,6 +218,56 @@ export function addColumn(boxes, column, selected = null) {
     return { boxes: next, index: next.length - 1 };
 }
 
+/** How much of a field's width may lie over the table's columns for it to become one. */
+const COLUMN_OVERLAP = 0.25;
+
+/**
+ * Fields Staff added over the ledger's table and stretched down two or more of
+ * its rows, turned into columns. Such a box is meant to be read row by row,
+ * one cell per person, the way the table's own columns are, not as lines of
+ * free text (which also runs neighbouring rows' short values together).
+ *
+ * The column spans the table's rows, from its first row line to its last.
+ * A field whose middle lies off the table stays a field, as does one that
+ * covers more than a sliver of the table's columns (it would read their cells
+ * a second time: only a gap between columns becomes one), and any field
+ * `keep` names (the template's own). Returns the same array when nothing
+ * changes.
+ *
+ * @param {object[]} boxes  Every marker (FieldMarker#toJSON()).
+ * @param {number[]} ys     The row lines, page fractions, top to bottom.
+ * @param {(box: object) => boolean} [keep]
+ */
+export function fieldsToColumns(boxes, ys, keep = () => false) {
+    const columns = boxes.filter(isColumn);
+    if (columns.length === 0 || ys.length < 3) return boxes;
+
+    const left = Math.min(...columns.map((column) => column.x));
+    const right = Math.max(...columns.map((column) => column.x + column.w));
+    const middles = ys.slice(1).map((y, index) => (ys[index] + y) / 2);
+    const indexes = columns.map((column) => Number(column.columnIndex)).filter(Number.isInteger);
+    let columnIndex = Math.max(-1, ...indexes) + 1;
+    let next = boxes;
+
+    boxes.forEach((box, index) => {
+        if (isColumn(box) || keep(box)) return;
+        const centre = box.x + box.w / 2;
+        if (centre < left || centre > right) return;
+        const covered = columns.reduce((sum, column) => (
+            sum + Math.max(0, Math.min(box.x + box.w, column.x + column.w) - Math.max(box.x, column.x))
+        ), 0);
+        if (covered > box.w * COLUMN_OVERLAP) return;
+        if (middles.filter((middle) => middle >= box.y && middle <= box.y + box.h).length < 2) return;
+
+        const { personGroup, personFieldOrder, ...field } = box;
+        if (next === boxes) next = [...boxes];
+        next[index] = { ...field, y: ys[0], h: ys[ys.length - 1] - ys[0], kind: 'column', columnIndex };
+        columnIndex += 1;
+    });
+
+    return next;
+}
+
 /**
  * The Align step's grid in a few words: "11 columns · 25 rows (template: 20)",
  * the template's row count only when this page differs from it.

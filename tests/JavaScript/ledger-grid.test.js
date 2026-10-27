@@ -7,6 +7,7 @@ import {
     columnBand,
     distributeRuledYs,
     fieldsOverLedger,
+    fieldsToColumns,
     followFirstAndLastLine,
     gridSummary,
     insertRuledY,
@@ -121,6 +122,44 @@ test('with no room at the right, an added column takes half of the last column',
     close([added.boxes[1].x, added.boxes[1].w, added.boxes[2].x, added.boxes[2].w], [0.75, 0.12, 0.87, 0.12]);
     assert.equal(addColumn([column('A', 0.5, 0.2, 0.6, 0.015)], { name: 'B', kind: 'column' }, 0), null, 'too narrow to split');
     assert.equal(addColumn([{ name: 'Field', x: 0.1, y: 0.1, w: 0.2, h: 0.1 }], { name: 'C' }), null, 'no table');
+});
+
+test('a field stretched down the table\'s rows becomes a column read by row', () => {
+    // Two columns with a gap between them (the Age column the template lacks); rows every 0.1.
+    const ys = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
+    const boxes = [
+        { ...column('Sex', 0.1), columnIndex: 0 },
+        { ...column('Date', 0.3), columnIndex: 1 },
+        { name: 'Age', x: 0.205, y: 0.22, w: 0.09, h: 0.5, personGroup: 1, personFieldOrder: 0 },
+    ];
+
+    const next = fieldsToColumns(boxes, ys);
+
+    assert.deepEqual(next[2], { name: 'Age', x: 0.205, y: 0.2, w: 0.09, h: 0.6000000000000001, kind: 'column', columnIndex: 2 });
+    assert.equal(next[0], boxes[0], 'the table\'s own columns are left as they are');
+});
+
+test('a field stays a field off the table, over a column, across one row, or when kept', () => {
+    const ys = [0.2, 0.3, 0.4, 0.5];
+    const table = [column('Sex', 0.1, 0.2, 0.3), column('Date', 0.3, 0.2, 0.3)];
+    const field = (x, y, h) => ({ name: 'Box', x, y, w: 0.05, h });
+
+    for (const box of [
+        field(0.6, 0.2, 0.3),    // right of the table
+        field(0.12, 0.2, 0.3),   // over the Sex column: it would take that column's cells
+        { name: 'Box', x: 0.15, y: 0.2, w: 0.2, h: 0.3 }, // middle in the gap, but over both columns
+        field(0.22, 0.31, 0.08), // one row only
+        field(0.22, 0.05, 0.1),  // above the table
+    ]) {
+        const boxes = [...table, box];
+        assert.equal(fieldsToColumns(boxes, ys), boxes, JSON.stringify(box));
+    }
+    // A little over a column's edge, as a box placed by hand often is, still fits the gap.
+    const sloppy = [...table, { name: 'Box', x: 0.19, y: 0.2, w: 0.1, h: 0.3 }];
+    assert.equal(fieldsToColumns(sloppy, ys)[2].kind, 'column', 'a sliver over the Sex column');
+
+    const kept = [...table, { ...field(0.22, 0.2, 0.3), name: 'Remarks' }];
+    assert.equal(fieldsToColumns(kept, ys, (box) => box.name === 'Remarks'), kept, 'the template\'s own field');
 });
 
 test('the grid summary names the template\'s rows only when the page differs', () => {

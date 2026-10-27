@@ -190,6 +190,7 @@
 
                         <p class="document-grid-card__hint">
                             Drag a row line by its handle at either end (<kbd>Shift</kbd>: all lines).
+                            A field stretched down two or more rows, in a gap between the columns, becomes a column, read row by row.
                             To remove a column, select it and press <kbd>Delete</kbd>.
                         </p>
                     </x-card>
@@ -698,6 +699,7 @@
         addColumn,
         clampRuledY,
         columnBand,
+        fieldsToColumns,
         followFirstAndLastLine,
         gridSummary,
         insertRuledY,
@@ -867,6 +869,8 @@
     const nameKey = (name) => String(name ?? '').trim().toLowerCase();
     const templateSettings = new Map(config.boxes.map((box) => [nameKey(box.name), box]));
     const settingsFor = (index) => templateSettings.get(nameKey(cropped[index]?.label)) ?? null;
+    // The template's own rectangle fields: never turned into columns.
+    const templateFieldNames = new Set(config.boxes.filter((box) => box.kind !== 'column').map((box) => nameKey(box.name)));
 
     // ------------------------------------------------------------ ledger rows
     // The ledger's row lines on this page (page fractions, top to bottom). They
@@ -1148,6 +1152,19 @@
     }
 
     function handleMarkerChange(boxes) {
+        // A field Staff stretched down two or more rows of the table is read row
+        // by row, as a column. Setting the markers again runs this once more,
+        // with the columns, so the move and the change are one undo step.
+        if (!settingGrid && isLedger) {
+            const asColumns = fieldsToColumns(boxes, gridRows, (box) => templateFieldNames.has(nameKey(box.name)));
+            if (asColumns !== boxes) {
+                const selected = marker.selectedIndexes();
+                marker.setBoxes(cloneBoxes(asColumns));
+                marker.selectIndexes(selected);
+                return;
+            }
+        }
+
         // The rows go with the table, unless they were just set with the markers.
         if (settingGrid) rememberBand(boxes);
         else followColumns(boxes);

@@ -973,6 +973,14 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     background-color: rgba(3, 195, 236, 0.18);
     box-shadow: 0 0 0 1px rgba(3, 195, 236, 0.3);
   }
+
+  // Above the Align step's row lines (z-index 4): their grips sit on the
+  // table's left and right edges, on the first and last columns' handles, and
+  // a drag there moved a row line instead of resizing the column.
+  &.is-selected,
+  &.is-active {
+    z-index: 5;
+  }
 }
 
 .field-box-label {
@@ -1079,6 +1087,20 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   >.field-box-handle {
     visibility: visible;
   }
+}
+
+// A small marker keeps room to be grabbed (field-marker.js sets these): no side
+// handles on top of the corner ones, and below the smallest size a resize
+// allows, one corner handle outside the marker.
+.field-box.is-narrow > .field-box-handle:is(.is-n, .is-s),
+.field-box.is-short > .field-box-handle:is(.is-e, .is-w),
+.field-box.is-tiny > .field-box-handle:not(.is-se) {
+  display: none;
+}
+
+.field-box.is-tiny > .field-box-handle.is-se {
+  right: -14px;
+  bottom: -14px;
 }
 
 // Tilt knob: a round button with a turning arrow on a stem below the bottom
@@ -2594,7 +2616,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 // The printed line a dragged marker's edge snapped to.
 .marker-snap-guide {
   position: absolute;
-  z-index: 4;
+  // Over the marker being dragged (z-index 5).
+  z-index: 6;
   pointer-events: none;
 
   &.is-vertical {
