@@ -64,6 +64,13 @@ test('a line is inserted half way below the chosen line, or one row below the la
 test('no line is inserted where there is no room', () => {
     assert.equal(insertRuledY([0.2, 0.2 + MIN_ROW_GAP], 0), null);
     assert.equal(insertRuledY([0.9, 0.99]), null);
+    assert.equal(insertRuledY([0.8, 0.9, 0.97]), null, 'under half a row left above the page edge');
+});
+
+test('a last row cut off by the page edge is added on that edge', () => {
+    // Rows 0.05 tall; the scan ends 0.035 under the last line.
+    assert.deepEqual(insertRuledY([0.865, 0.915, 0.965]), { ys: [0.865, 0.915, 0.965, 1], index: 3 });
+    assert.deepEqual(insertRuledY([0.865, 0.915, 0.965], 2).ys.at(-1), 1, 'with the last line selected');
 });
 
 test('rows are spaced evenly between the first and the last line', () => {

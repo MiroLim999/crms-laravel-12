@@ -92,6 +92,11 @@ export function shiftRuledYs(ys, dy) {
  * A new row line under line `after` (half way to the next line), or one
  * typical row below the last line. `after` null: at the bottom.
  *
+ * A scan often ends on the table's last row, its bottom rule cut off or on the
+ * page's edge (Snap then finds one row fewer). A full row no longer fits under
+ * the last line there, so the new line goes on the page's bottom edge, as long
+ * as half a row fits.
+ *
  * @returns {{ys: number[], index: number}|null} null when there is no room
  */
 export function insertRuledY(ys, after = null, minGap = MIN_ROW_GAP) {
@@ -100,11 +105,10 @@ export function insertRuledY(ys, after = null, minGap = MIN_ROW_GAP) {
 
     const index = after === null || after >= ys.length - 1 ? ys.length - 1 : Math.max(0, after);
     const below = ys[index + 1];
-    const y = below === undefined
-        ? ys[index] + (ys.length > 1 ? typicalGap(ys) : 0.05)
-        : (ys[index] + below) / 2;
+    const row = ys.length > 1 ? typicalGap(ys) : 0.05;
+    const y = below === undefined ? Math.min(1, ys[index] + row) : (ys[index] + below) / 2;
     const room = below === undefined ? 1 - ys[index] : below - ys[index];
-    if (y > 1 || room < 2 * minGap) return null;
+    if (room < 2 * minGap || (below === undefined && room < row / 2)) return null;
 
     const next = [...ys.slice(0, index + 1), y, ...ys.slice(index + 1)];
     return { ys: next, index: index + 1 };

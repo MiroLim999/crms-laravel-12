@@ -166,6 +166,8 @@
 
                         <p class="document-grid-card__summary" id="gridSummary"></p>
                         <p class="document-grid-card__source d-none" id="gridSource" aria-live="polite"></p>
+                        {{-- Why a row or column could not be added: here, where the buttons are. --}}
+                        <p class="document-grid-card__message text-danger small d-none" id="gridMessage" role="alert"></p>
 
                         <div class="document-grid-card__tools">
                             <button type="button" class="btn btn-sm btn-outline-primary" id="addRowBtn"
@@ -1061,13 +1063,26 @@
         applyRows(gridRows.filter((_, candidate) => candidate !== index));
     }
 
+    /**
+     * Why a row or column could not be added, in the Ledger grid card beside
+     * its buttons: below the Fields card, it was out of sight, and the button
+     * seemed to do nothing. null clears it.
+     */
+    function showGridMessage(message) {
+        el('gridMessage').textContent = message ?? '';
+        el('gridMessage').classList.toggle('d-none', !message);
+    }
+
     /** A row line under the selected one (half way to the next), or a row at the bottom. */
     function addRow() {
         const inserted = insertRuledY(gridRows, selectedRow);
         if (!inserted) {
-            showOcrError('There is no room for another row there. Make room on the page first.');
+            showGridMessage(selectedRow === null || selectedRow >= gridRows.length - 1
+                ? 'There is no room for another row below the last line: the page ends there.'
+                : 'There is no room for another row between these two lines.');
             return;
         }
+        showGridMessage(null);
         applyRows(inserted.ys);
         selectRow(inserted.index);
     }
@@ -1090,20 +1105,20 @@
         const name = input.value.trim();
         const boxes = marker.toJSON();
         if (!name) {
-            showOcrError('Type the new column’s name first.');
+            showGridMessage('Type the new column’s name first.');
             input.focus();
             return;
         }
         if (name.length > config.maxFieldNameLength) {
-            showOcrError(`Column names must not exceed ${config.maxFieldNameLength} characters.`);
+            showGridMessage(`Column names must not exceed ${config.maxFieldNameLength} characters.`);
             return;
         }
         if (boxes.some((box) => box.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
-            showOcrError('Every field and column needs its own name. Choose a different name.');
+            showGridMessage('Every field and column needs its own name. Choose a different name.');
             return;
         }
         if (boxes.length >= config.maxFields) {
-            showOcrError(`You can use at most ${config.maxFields} fields. Delete a marker before adding a column.`);
+            showGridMessage(`You can use at most ${config.maxFields} fields. Delete a marker before adding a column.`);
             return;
         }
 
@@ -1112,14 +1127,14 @@
         const added = addColumn(boxes, { name, kind: 'column', columnIndex: Math.max(-1, ...indexes) + 1 },
             selected.length === 1 ? selected[0] : null);
         if (!added) {
-            showOcrError('That column is too narrow to split. Select a wider column, or make room at the right of the table.');
+            showGridMessage('That column is too narrow to split. Select a wider column, or make room at the right of the table.');
             return;
         }
 
         marker.setBoxes(cloneBoxes(added.boxes));
         marker.selectBox(added.index);
         input.value = '';
-        clearOcrError();
+        showGridMessage(null);
     }
 
     /** The Ledger grid card: how many columns and rows, and where the rows came from. */
