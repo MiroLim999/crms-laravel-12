@@ -62,17 +62,10 @@
                 'ocrPerformance' => ['series' => $perfSeries->all()],
             ];
 
-            // Change requests: the queue now, and how long decisions took.
+            // Change requests: the queue now, and the decisions in the period.
             $requests = $analytics['change_requests'];
             $requestsWaiting = $requests['waiting'];
             $oldestWaiting = $requests['oldest_waiting_at'];
-            $waitLabel = fn (?int $seconds): string => match (true) {
-                $seconds === null => '—',
-                $seconds < 60 => 'Under a minute',
-                $seconds < 3600 => floor($seconds / 60).' min',
-                $seconds < 172800 => round($seconds / 3600).' h',
-                default => round($seconds / 86400).' days',
-            };
 
             // Recent changes: an icon for the kind of thing that was changed.
             $recentChanges = $analytics['recent_changes'];
@@ -366,9 +359,11 @@
                         </p>
                     @endif
 
+                    {{-- The table drops down below the bar and floats over what is
+                         under the card, so this card and its neighbours keep their size. --}}
                     @if ($trend['series'] !== [])
-                        <details class="dashboard-chart-data mt-2">
-                            <summary>
+                        <details class="dashboard-chart-data">
+                            <summary aria-controls="dashboard-trend-table">
                                 <span class="dashboard-chart-data__identity">
                                     <i class="icon-base bx bx-data" aria-hidden="true"></i>
                                     <span>Chart data</span>
@@ -382,8 +377,10 @@
                                     <i class="icon-base bx bx-chevron-down dashboard-chart-data__chevron"></i>
                                 </span>
                             </summary>
-                            <div class="dashboard-chart-data__surface">
-                                <table class="table table-sm mb-0">
+                            <div id="dashboard-trend-table" class="dashboard-chart-data__surface"
+                                 role="region" tabindex="0"
+                                 aria-label="{{ $trend['mode'] === 'day' ? 'Daily' : 'Monthly' }} digitization volume table">
+                                <table class="table table-sm table-hover mb-0">
                                     <thead>
                                         <tr>
                                             <th scope="col">{{ $trend['mode'] === 'day' ? 'Day' : 'Month' }}</th>
@@ -404,6 +401,17 @@
                                             </tr>
                                         @endforeach
                                     </tbody>
+                                    @if (count($trend['labels']) > 1)
+                                        <tfoot>
+                                            <tr>
+                                                <th scope="row">Total</th>
+                                                @foreach ($trend['series'] as $series)
+                                                    <td class="text-end">{{ number_format(array_sum($series['data'])) }}</td>
+                                                @endforeach
+                                                <td class="text-end">{{ number_format(array_sum($trend['totals'])) }}</td>
+                                            </tr>
+                                        </tfoot>
+                                    @endif
                                 </table>
                             </div>
                         </details>
@@ -549,10 +557,6 @@
                             <div>
                                 <dt>Withdrawn</dt>
                                 <dd>{{ number_format($requests['withdrawn']) }}</dd>
-                            </div>
-                            <div>
-                                <dt>Average wait</dt>
-                                <dd title="Time from a request being opened to its decision">{{ $waitLabel($requests['average_wait_seconds']) }}</dd>
                             </div>
                         </dl>
                     </div>

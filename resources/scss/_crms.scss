@@ -6453,19 +6453,23 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// Native chart-data disclosure with a bounded data surface.
+// Native chart-data disclosure. The summary bar sits under the chart; when
+// open, the table drops down below the bar as a floating panel instead of
+// adding height, so the card and its row neighbours keep their size.
 .dashboard-chart-data {
+  position: relative;
+  margin-block-start: .5rem;
   color: var(--bs-secondary-color);
   font-size: .8125rem;
 
   >summary {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: .5rem .8rem;
+    gap: .8rem;
     min-inline-size: 0;
-    padding: .45rem .6rem;
+    block-size: 2.375rem;
+    padding: 0 .6rem;
     background: rgba(var(--crms-ink-rgb), .025);
     border: 1px solid rgba(var(--crms-ink-rgb), .1);
     border-radius: .5rem;
@@ -6491,6 +6495,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   &[open] {
+    >summary {
+      background: rgba(var(--bs-primary-rgb), .06);
+      border-color: rgba(var(--bs-primary-rgb), .32);
+    }
+
     .dashboard-chart-data__view {
       display: none;
     }
@@ -6514,8 +6523,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .dashboard-chart-data__identity {
   gap: .45rem;
   min-inline-size: 0;
+  overflow: hidden;
   color: var(--bs-heading-color);
   font-weight: 600;
+  white-space: nowrap;
 
   >i {
     color: var(--bs-primary);
@@ -6534,6 +6545,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .dashboard-chart-data__action {
+  flex: 0 0 auto;
   gap: .25rem;
   margin-inline-start: auto;
   color: var(--bs-secondary-color);
@@ -6550,42 +6562,117 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   transition: transform .18s ease;
 }
 
+// The card clips its content to its rounded corners; while the table is open
+// it must reach past the card's bottom edge, and sit above the cards below.
+.dashboard-panel:has(> .dashboard-panel__body > .dashboard-chart-data[open]) {
+  position: relative;
+  z-index: 6;
+  overflow: visible;
+}
+
+// Drops down from just below the bar, floats over the content beneath, and
+// scrolls inside its own box.
 .dashboard-chart-data__surface {
+  position: absolute;
+  inset-block-start: calc(100% + .375rem);
+  inset-inline: 0;
+  z-index: 6;
   overflow: auto;
-  max-block-size: 18rem;
-  margin-block-start: .6rem;
-  background: rgba(var(--crms-ink-rgb), .022);
-  border: 1px solid rgba(var(--crms-ink-rgb), .1);
+  max-block-size: min(20rem, 60vh);
+  background: var(--bs-card-bg, var(--bs-paper-bg));
+  border: 1px solid rgba(var(--crms-ink-rgb), .12);
   border-radius: .55rem;
+  box-shadow: 0 .75rem 2rem rgba(var(--crms-ink-rgb), .16), 0 .125rem .375rem rgba(var(--crms-ink-rgb), .06);
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  transform-origin: top center;
+  animation: dashboard-chart-data-in .2s ease-out;
+
+  &:focus-visible {
+    outline: 0;
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 .2rem rgba(var(--bs-primary-rgb), .17);
+  }
 
   table {
+    --bs-table-bg: var(--bs-card-bg, var(--bs-paper-bg));
+
     min-inline-size: 32rem;
+    border-collapse: separate;
+    border-spacing: 0;
     font-variant-numeric: tabular-nums;
   }
 
   th,
   td {
-    padding: .5rem .65rem;
+    padding: .55rem .75rem;
     white-space: nowrap;
   }
 
   thead th {
     position: sticky;
     inset-block-start: 0;
+    z-index: 1;
     color: var(--bs-heading-color);
     background: var(--bs-card-bg, var(--bs-paper-bg));
-    border-block-end-color: var(--bs-border-color);
+    border-block-end: 1px solid var(--bs-border-color);
     font-size: .6875rem;
     font-weight: 600;
     letter-spacing: .02em;
     text-transform: uppercase;
+  }
+
+  // The period stays in view while wide tables scroll sideways.
+  th:first-child {
+    position: sticky;
+    inset-inline-start: 0;
     z-index: 1;
+    background: var(--bs-card-bg, var(--bs-paper-bg));
+  }
+
+  thead th:first-child {
+    z-index: 2;
   }
 
   tbody th {
     color: var(--bs-heading-color);
     font-weight: 500;
+  }
+
+  tbody tr:last-child> * {
+    border-block-end: 0;
+  }
+
+  tfoot th,
+  tfoot td {
+    position: sticky;
+    inset-block-end: 0;
+    color: var(--bs-heading-color);
+    background: var(--bs-card-bg, var(--bs-paper-bg));
+    border-block-start: 1px solid var(--bs-border-color);
+    border-block-end: 0;
+    font-weight: 600;
+  }
+
+  tfoot th:first-child {
+    z-index: 2;
+  }
+}
+
+// Slides down from the bar: revealed top to bottom as it settles. The clip
+// stays 2rem outside the box on every side, so the shadow is never cut and
+// nothing jumps when the animation ends and the clip is dropped.
+@keyframes dashboard-chart-data-in {
+  from {
+    opacity: 0;
+    transform: translateY(-.5rem);
+    clip-path: inset(-2rem -2rem 100% -2rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+    clip-path: inset(-2rem);
   }
 }
 
@@ -6669,7 +6756,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .dashboard-requests__stats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 0;
   background: rgba(var(--crms-ink-rgb), .025);
   border: 1px solid rgba(var(--crms-ink-rgb), .09);
@@ -6680,6 +6767,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     gap: .15rem;
     min-inline-size: 0;
     padding: .7rem .85rem;
+  }
+
+  >div+div {
+    border-inline-start: 1px solid rgba(var(--crms-ink-rgb), .1);
   }
 
   dt {
@@ -6700,14 +6791,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// Two by two while the card is narrow, then one row of four.
-@container (min-width: 30rem) {
-  .dashboard-requests__stats {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-
-    >div+div {
-      border-inline-start: 1px solid rgba(var(--crms-ink-rgb), .1);
-    }
+// On a phone-width card, tighter cells keep "Withdrawn" from being cut off.
+@container (max-width: 22rem) {
+  .dashboard-requests__stats>div {
+    padding: .6rem .55rem;
   }
 }
 
@@ -6957,7 +7044,8 @@ $dashboard-reveal-step: 40ms;
   .dashboard-reveal .dashboard-archive__bar,
   .dashboard-reveal .dashboard-kpi__health-track span,
   .dashboard-reveal .dashboard-quality__chips,
-  .dashboard-scan__beam {
+  .dashboard-scan__beam,
+  .dashboard-chart-data__surface {
     animation: none;
   }
 

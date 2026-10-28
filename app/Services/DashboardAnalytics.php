@@ -466,7 +466,7 @@ class DashboardAnalytics
      * withdrawal itself, since nothing can change a withdrawn request) is its day.
      *
      * @param  array<string, mixed>  $scope  the requests panel's
-     * @return array{waiting: int, oldest_waiting_at: CarbonInterface|null, approved: int, rejected: int, withdrawn: int, average_wait_seconds: int|null}
+     * @return array{waiting: int, oldest_waiting_at: CarbonInterface|null, approved: int, rejected: int, withdrawn: int}
      */
     private function changeRequestSummary(array $scope): array
     {
@@ -475,11 +475,7 @@ class DashboardAnalytics
         $decided = ChangeRequest::query()
             ->whereIn('status', [ChangeRequestStatus::Approved->value, ChangeRequestStatus::Rejected->value])
             ->whereBetween('reviewed_at', [$scope['db_start'], $scope['db_end']])
-            ->get(['status', 'created_at', 'reviewed_at']);
-
-        // Time from the request being opened to its decision. Few requests are
-        // ever decided, so the mean is worked out here, not per database engine.
-        $waits = $decided->map(fn (ChangeRequest $request) => max(0, $request->created_at->diffInSeconds($request->reviewed_at, true)));
+            ->get(['status']);
 
         return [
             'waiting' => (clone $pending)->count(),
@@ -490,7 +486,6 @@ class DashboardAnalytics
                 ->where('status', ChangeRequestStatus::Withdrawn->value)
                 ->whereBetween('updated_at', [$scope['db_start'], $scope['db_end']])
                 ->count(),
-            'average_wait_seconds' => $waits->isEmpty() ? null : (int) round($waits->avg()),
         ];
     }
 

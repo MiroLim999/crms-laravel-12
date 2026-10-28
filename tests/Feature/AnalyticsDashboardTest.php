@@ -443,18 +443,17 @@ class AnalyticsDashboardTest extends TestCase
 
         Carbon::setTestNow('2026-08-11 04:00:00');
 
-        // Twelve months holds all three decisions: (3 h + 10 min + 1 day) / 3.
+        // Twelve months holds all three decisions.
         $response = $this->actingAs($admin)->get(route('dashboard'))->assertOk();
         $requests = $response->viewData('analytics')['change_requests'];
 
         $this->assertSame(1, $requests['waiting']);
         $this->assertSame('2026-08-07 02:00:00', $requests['oldest_waiting_at']->format('Y-m-d H:i:s'));
         $this->assertSame([2, 1, 1], [$requests['approved'], $requests['rejected'], $requests['withdrawn']]);
-        $this->assertSame(32600, $requests['average_wait_seconds']);
         $response->assertSee('waiting for a decision')
             ->assertSee('The oldest has waited 4 days.')
             ->assertSee(route('change-requests.index', ['status' => 'pending']))
-            ->assertSeeInOrder(['Average wait', '9 h']);
+            ->assertDontSee('Average wait');
 
         // The last 30 days leave out E, but not the queue, which has no period.
         $requests = $this->actingAs($admin)
@@ -463,7 +462,6 @@ class AnalyticsDashboardTest extends TestCase
 
         $this->assertSame(1, $requests['waiting']);
         $this->assertSame([1, 1, 1], [$requests['approved'], $requests['rejected'], $requests['withdrawn']]);
-        $this->assertSame(5700, $requests['average_wait_seconds']);
     }
 
     public function test_change_requests_say_so_when_nothing_is_waiting_or_decided(): void
@@ -477,8 +475,8 @@ class AnalyticsDashboardTest extends TestCase
 
         $requests = $response->viewData('analytics')['change_requests'];
         $this->assertSame(
-            [0, 0, 0, 0, null],
-            [$requests['waiting'], $requests['approved'], $requests['rejected'], $requests['withdrawn'], $requests['average_wait_seconds']],
+            [0, 0, 0, 0],
+            [$requests['waiting'], $requests['approved'], $requests['rejected'], $requests['withdrawn']],
         );
     }
 

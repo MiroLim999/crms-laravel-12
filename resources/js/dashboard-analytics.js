@@ -596,8 +596,51 @@ function setupPeriodFilters() {
   });
 }
 
+// The chart-data table floats over the content below its card, so it behaves
+// like a popover: Escape, a click elsewhere or tabbing away closes it, and on
+// opening it is scrolled into view if it would drop past the bottom of the
+// window. Delegated, so it survives a panel swap.
+function setupChartData() {
+  const selector = 'details.dashboard-chart-data[open]';
+
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+
+    document.querySelectorAll(selector).forEach(disclosure => {
+      const hadFocus = disclosure.contains(document.activeElement);
+      disclosure.open = false;
+      if (hadFocus) disclosure.querySelector('summary')?.focus();
+    });
+  });
+
+  document.addEventListener('click', event => {
+    document.querySelectorAll(selector).forEach(disclosure => {
+      if (!disclosure.contains(event.target)) disclosure.open = false;
+    });
+  });
+
+  // Keyboard focus moving out closes it. A null relatedTarget (switching
+  // window or tab, a click on nothing focusable) is left to the click handler.
+  document.addEventListener('focusout', event => {
+    const disclosure = event.target.closest?.(selector);
+    const next = event.relatedTarget;
+    if (disclosure && next && !disclosure.contains(next)) disclosure.open = false;
+  });
+
+  // toggle does not bubble, so listen in the capture phase.
+  document.addEventListener('toggle', event => {
+    const disclosure = event.target;
+    if (!disclosure.matches?.(selector)) return;
+
+    const surface = disclosure.querySelector('.dashboard-chart-data__surface');
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    surface?.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+  }, true);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   setupPeriodFilters();
+  setupChartData();
   countUp();
 
   const data = readChartData();
