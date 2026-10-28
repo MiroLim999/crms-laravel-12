@@ -19,14 +19,13 @@ use Illuminate\View\View;
  * Two management responsibilities:
  *
  *   1. Manage the model folders the service can serve - install, rename, delete.
- *   2. Save which of them Staff scan with, alongside the two settings that
- *      decision implies.
+ *   2. Activate one of them, which is the model Staff scan with.
  *
  * The index also presents read-only performance evidence. Evaluation itself
  * remains command-line work; this controller never starts a model evaluation.
  *
- * Installing a model is housekeeping. Saving the settings is the load-bearing
- * action: until it runs, a newly installed model is just a folder on disk.
+ * Installing a model is housekeeping. Activating one is the load-bearing action:
+ * until it runs, a newly installed model is just a folder on disk.
  */
 class OcrModelController extends Controller
 {
@@ -39,8 +38,6 @@ class OcrModelController extends Controller
 
     public function index(Request $request): View
     {
-        $settings = OcrSetting::current();
-
         // Keep the registry honest with disk on every visit, so a folder removed by
         // hand stops showing as "Missing" without the Super Admin having to click
         // Rescan. Silently skipped when the service is down; overview() below
@@ -57,19 +54,37 @@ class OcrModelController extends Controller
             'overview' => $overview,
             'modelPerformance' => $this->performance->summary($overview['models']),
             'activeModel' => OcrModel::active(),
-            'settings' => $settings,
-            // Rendered into the form, so an empty override shows the value actually
-            // in force rather than a blank box.
-            'threshold' => OcrSetting::threshold(),
-            'configThreshold' => (float) config('crms.confidence_review_threshold', 80.0),
         ]);
     }
 
     /**
-     * The Save settings button.
+     * Make one installed model the one Staff scan with.
      *
-     * One submit covers the model choice and the settings around it, because they
-     * are one decision: this model, and whether Staff may deviate from it.
+     * Deliberately not routed through saveSettings(): that action rewrites the
+     * Staff-choice flag and the review threshold from whatever the request
+     * carries, so a request with only a model would switch the flag off and clear
+     * the threshold. Activating a model must leave both alone.
+     */
+    public function activate(Request $request, string $key): RedirectResponse
+    {
+        try {
+            // Refuses a model the service cannot serve, demotes the previous one,
+            // and writes no audit entry when the model was already active.
+            $this->manager->activate($key, $request->user());
+        } catch (OcrServiceException $e) {
+            return $this->back()->with('error', $e->getMessage());
+        }
+
+        return $this->back()->with('success', "Staff now scan with '{$key}'.");
+    }
+
+    /**
+     * Save the scanning settings, and the model if one is submitted.
+     *
+     * No screen posts here since the Scanning policy dialog was removed, so the
+     * Staff-choice flag and the review threshold keep their stored values. One
+     * submit still covers all three, because they were one decision: this model,
+     * and whether Staff may deviate from it.
      */
     public function saveSettings(Request $request): RedirectResponse
     {

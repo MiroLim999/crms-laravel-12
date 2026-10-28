@@ -82,6 +82,7 @@ class OcrWorkspaceTest extends TestCase
             ['get', route('ocr.index')],
             ['post', route('ocr.rescan')],
             ['post', route('ocr.settings')],
+            ['post', route('ocr.models.activate', 'trocr-v1')],
             ['get', route('ocr.engine.status')],
             ['post', route('ocr.uploads.authorize')],
             ['post', route('ocr.register')],
@@ -123,8 +124,8 @@ class OcrWorkspaceTest extends TestCase
     // ---------------------------------------------------------------- graceful degradation
 
     /**
-     * The page has to render with the service down: that is exactly when a Super
-     * Admin is looking for the command to start it.
+     * The page has to render with the service down, and say that it is down:
+     * that is exactly when a Super Admin opens it to find out why scans fail.
      */
     public function test_the_workspace_renders_when_the_service_is_unreachable(): void
     {
@@ -134,13 +135,12 @@ class OcrWorkspaceTest extends TestCase
             ->get(route('ocr.index'))
             ->assertOk()
             ->assertSee('OCR service offline')
-            ->assertSee('python -m uvicorn ml.api.main:app', escape: false)
             // Process control is gone, not hidden behind a flag.
             ->assertDontSee('Start FastAPI')
             ->assertDontSee('Stop FastAPI');
     }
 
-    public function test_the_workspace_shows_the_model_picker_when_the_service_is_up(): void
+    public function test_the_workspace_lets_the_super_admin_activate_a_model_when_the_service_is_up(): void
     {
         $this->fakeHealthyService();
 
@@ -148,38 +148,32 @@ class OcrWorkspaceTest extends TestCase
             ->get(route('ocr.index'))
             ->assertOk()
             ->assertSee('OCR service online')
-            ->assertSee('Approved model')
-            ->assertSee('Save policy')
             ->assertSee('TrOCR v1')
-            // Nothing promoted yet, so the picker has to offer an explicit empty
-            // state; otherwise the first model is silently chosen and the form can
-            // never become dirty by selecting it.
-            ->assertSee('Select a model')
-            ->assertSee('Action needed')
-            ->assertSee('PowerShell setup')
-            ->assertSee('Activate virtual environment')
-            ->assertSee('.\.venv\Scripts\Activate.ps1', escape: false)
-            ->assertSee('Start OCR service')
-            ->assertSee('Copy command')
-            ->assertSee('python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001', escape: false)
-            // The stripped tabs must not come back.
+            ->assertSee('Activate model')
+            ->assertSee('Rescan models')
+            // Nothing activated yet, so the panel has to say Staff cannot scan.
+            ->assertSee('No model is active yet')
+            // The removed panels, the stripped tabs and the old PowerShell setup
+            // panel must not come back.
+            ->assertDontSee('Scanning policy')
+            ->assertDontSee('Benchmark Audit')
+            ->assertDontSee('PowerShell setup')
             ->assertDontSee('Fine-tuning')
             ->assertDontSee('Datasets')
             ->assertDontSee('Predict');
     }
 
-    public function test_the_placeholder_option_disappears_once_a_model_is_in_use(): void
+    public function test_the_activation_notice_disappears_once_a_model_is_in_use(): void
     {
         $this->fakeHealthyService();
         $actor = $this->superAdmin();
 
-        $this->actingAs($actor)->post(route('ocr.settings'), ['model' => 'trocr-v1']);
+        $this->actingAs($actor)->post(route('ocr.models.activate', 'trocr-v1'));
 
         $this->actingAs($actor)
             ->get(route('ocr.index'))
             ->assertOk()
-            ->assertDontSee('Select a model')
-            ->assertDontSee('Action needed')
+            ->assertDontSee('No model is active yet')
             ->assertSee('Active');
     }
 

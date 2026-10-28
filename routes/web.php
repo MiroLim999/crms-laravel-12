@@ -270,8 +270,10 @@ Route::middleware('auth')->group(function () {
         Route::get('/', [OcrModelController::class, 'index'])->name('index');
         Route::post('rescan', [OcrModelController::class, 'rescan'])->name('rescan');
 
-        // The Save settings button: which model Staff scan with, plus the two
-        // scanning settings that go with that decision.
+        // The scanning settings: Staff model choice and the review threshold (it
+        // can still set the model too). The workspace has no form that posts here
+        // since the Scanning policy dialog was removed; activating a model goes
+        // through models/{key}/activate below.
         Route::post('settings', [OcrModelController::class, 'saveSettings'])->name('settings');
 
         // Read-only. The workspace polls it so the page notices the service coming
@@ -285,7 +287,9 @@ Route::middleware('auth')->group(function () {
         Route::post('models/register', [OcrUploadController::class, 'register'])
             ->name('register');
 
-        // Models on disk.
+        // Models on disk. Not named `ocr.activate`: the tests keep that name on the
+        // list of routes that were removed.
+        Route::post('models/{key}/activate', [OcrModelController::class, 'activate'])->name('models.activate');
         Route::post('models/{key}/rename', [OcrModelController::class, 'rename'])->name('rename');
         Route::delete('models/{key}', [OcrModelController::class, 'destroy'])->name('destroy');
     });

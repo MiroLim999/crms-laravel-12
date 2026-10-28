@@ -78,7 +78,7 @@ The first start takes **10 to 45 minutes** (Docker downloads several GB). Run `k
 
 Go to **http://localhost:8080** and log in (see [First login](#first-login)).
 
-Then go to **System → OCR Workspace → Approved model**, pick your model, and click **Save policy**. If it says *OCR service offline*, wait a minute and reload.
+Then go to **System → OCR Workspace**, click **Activate** next to your model in the **Models** panel, and confirm. If it says *OCR service offline*, wait a minute and reload.
 
 ### Daily use
 

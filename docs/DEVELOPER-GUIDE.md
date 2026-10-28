@@ -129,7 +129,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Multi-Model Registry**: Live model scanning from `ml/models/`, support for custom checkpoints and the baseline `microsoft/trocr-base-handwritten`.
 - **Benchmark Provenance Radar**: Visualizes Character Error Rate (CER), Word Error Rate (WER), and Exact Match metrics strictly from locked test-split reports (`evaluation-report.json`) verified against model weight SHA-256 hashes. CRMS never fabricates benchmark statistics from operational scans.
 - **Base Model Comparison**: The base model gets benchmark figures too, when `ml/models/base/` holds its own `evaluation-report.json`, so the OCR Workspace and the Dashboard can compare the active model with the unmodified Microsoft model.
-- **Operator Selection Flexibility**: Global model assignment with an optional Super Admin toggle allowing Staff to select approved alternative models during digitisation.
+- **Operator Selection Flexibility**: Global model assignment from the Models panel. A stored setting (`ocr_settings.allow_staff_model_choice`) can let Staff select another installed model during digitisation; the OCR Workspace has no screen for that setting at present.
 
 ### 6. Tamper-Evident Audit Trail
 - **Append-Only Logging**: Comprehensive activity logs recording actor ID, name, role, IP address, user agent, action verb, and before/after diffs.
@@ -646,7 +646,7 @@ It hashes the real weights file, but it **does not measure anything**: the metri
 ### 6. Installing Models into the Web Application
 1. Log in as **Super Admin** and navigate to the **OCR Workspace**.
 2. Click **Add model** and upload either a `.zip` archive or the loose files: `config.json`, `model.safetensors` (or `pytorch_model.bin`), the tokenizer files, and optionally `evaluation-report.json`.
-3. Under **Scanning policy**, choose it as the **Approved model** and click **Save policy**. Turn on **Allow Staff model choice** to let Staff pick another installed model for a single document.
+3. In the **Models** panel, click **Activate** next to it and confirm. Staff scan with the active model from then on. Use **Rescan models** after copying a model folder into `ml/models/` by hand.
 
 ---
 

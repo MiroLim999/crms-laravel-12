@@ -14,17 +14,19 @@
 <section class="card ocr-performance-card mb-4"
          aria-labelledby="ocr-performance-title">
     <div class="card-header border-bottom">
-        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
-            <div class="d-flex align-items-center gap-3">
+        {{-- Same columns as the body below, so the picker sits above the Models panel. --}}
+        <div class="ocr-performance-head">
+            <div class="d-flex align-items-center gap-3 min-w-0">
                 <span class="ocr-section-icon bg-label-primary" aria-hidden="true">
                     <i class="icon-base bx bx-radar"></i>
                 </span>
-                <div>
+                <div class="min-w-0">
                     <div class="d-flex flex-wrap align-items-center gap-2">
                         <h2 class="h5 card-title mb-0" id="ocr-performance-title">OCR model performance</h2>
                         <span class="badge bg-label-{{ $sourceTone }}" id="ocr-performance-source">
                             {{ $selectedPerformance['source_label'] ?? 'No data' }}
                         </span>
+                        @include('ocr.partials.engine')
                     </div>
                     <p class="text-muted small mb-0 mt-1">
                         Locked test-set evaluation (CER, WER, Exact Match) comparing fine-tuned weights against baseline.
@@ -142,85 +144,8 @@
                 </div>
             </div>
 
-            {{-- Right: Minimal, Direct Benchmark Audit Panel --}}
-            <div class="ocr-performance-summary" aria-live="polite">
-                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3 pb-2 border-bottom">
-                    <div class="min-w-0">
-                        <div class="text-muted small text-uppercase fw-semibold tracking-wider">Benchmark Audit</div>
-                        <div class="ocr-performance-model-name text-truncate" id="ocr-performance-model-name">
-                            {{ $selectedPerformance['display_label'] ?? $selectedPerformance['label'] ?? 'No model selected' }}
-                        </div>
-                    </div>
-                    <div class="d-flex align-items-center gap-1.5">
-                        <span class="badge bg-label-success {{ ($selectedPerformance['is_active'] ?? false) ? '' : 'd-none' }}"
-                              id="ocr-performance-active">Active</span>
-                        <span class="badge bg-label-primary" id="ocr-audit-tag">
-                            {{ ($selectedPerformance['key'] ?? '') === 'base' ? 'Baseline' : 'Fine-tuned' }}
-                        </span>
-                    </div>
-                </div>
-
-                {{-- Minimal, Direct Metric Rows (No walls of text) --}}
-                <div class="ocr-audit-list d-flex flex-column gap-2 mb-3" id="ocr-audit-cards">
-                    {{-- Word Error Rate (WER) --}}
-                    <div class="ocr-audit-row p-2.5 rounded border d-flex align-items-center justify-content-between gap-2">
-                        <div>
-                            <div class="fw-semibold text-heading small">Word Error Rate (WER)</div>
-                            <div class="text-muted small">Baseline: <span id="ocr-audit-wer-base">51.5%</span></div>
-                        </div>
-                        <div class="text-end">
-                            <span class="fw-bold fs-6 text-primary" id="ocr-audit-wer-val">24.0%</span>
-                            <span class="badge bg-label-success ms-1.5" id="ocr-audit-wer-delta">-53.4%</span>
-                        </div>
-                    </div>
-
-                    {{-- Character Error Rate (CER) --}}
-                    <div class="ocr-audit-row p-2.5 rounded border d-flex align-items-center justify-content-between gap-2">
-                        <div>
-                            <div class="fw-semibold text-heading small">Character Error Rate (CER)</div>
-                            <div class="text-muted small">Baseline: <span id="ocr-audit-cer-base">12.0%</span></div>
-                        </div>
-                        <div class="text-end">
-                            <span class="fw-bold fs-6 text-primary" id="ocr-audit-cer-val">8.0%</span>
-                            <span class="badge bg-label-success ms-1.5" id="ocr-audit-cer-delta">-33.3%</span>
-                        </div>
-                    </div>
-
-                    {{-- Exact Line Match --}}
-                    <div class="ocr-audit-row p-2.5 rounded border d-flex align-items-center justify-content-between gap-2">
-                        <div>
-                            <div class="fw-semibold text-heading small">Exact Line Match</div>
-                            <div class="text-muted small">Baseline: <span id="ocr-audit-exact-base">33.2%</span></div>
-                        </div>
-                        <div class="text-end">
-                            <span class="fw-bold fs-6 text-primary" id="ocr-audit-exact-val">48.0%</span>
-                            <span class="badge bg-label-success ms-1.5" id="ocr-audit-exact-delta">+14.8%</span>
-                        </div>
-                    </div>
-                </div>
-
-                {{-- Direct 1-Line Key Takeaway --}}
-                <div class="ocr-audit-verdict p-2.5 rounded mb-3 bg-label-success border border-success-subtle d-flex align-items-center gap-2" id="ocr-audit-verdict-box">
-                    <i class="icon-base bx bx-check-circle text-success fs-5 flex-shrink-0" id="ocr-audit-verdict-icon"></i>
-                    <div class="small fw-medium text-heading" id="ocr-audit-verdict-text">
-                        Word error rate reduced by 53.4% on degraded handwriting vs baseline.
-                    </div>
-                </div>
-
-                {{-- Dataset Provenance & Metadata with valid icons --}}
-                <div class="ocr-performance-evidence mt-auto pt-3 border-top">
-                    <div class="d-flex flex-column gap-1 text-muted small">
-                        <div class="d-flex align-items-center gap-1.5">
-                            <i class="icon-base bx bx-data text-primary" aria-hidden="true"></i>
-                            <span>Dataset: <strong class="text-body" id="ocr-audit-dataset">{{ $selectedPerformance['dataset'] ?? ($selectedHasData ? 'synthetic-broken-handwritten-samples50k' : 'None') }}</strong> (<span id="ocr-audit-split">{{ $selectedPerformance['split'] ?? ($selectedHasData ? 'locked test' : 'no evaluation') }}</span>)</span>
-                        </div>
-                        <div class="d-flex align-items-center gap-1.5">
-                            <i class="icon-base bx bx-file-find text-info" aria-hidden="true"></i>
-                            <span>Volume: <strong class="text-body" id="ocr-audit-samples">{{ $selectedHasData ? number_format($selectedPerformance['sample_count'] ?? 5000).' samples' : '0 samples' }}</strong> · Evaluated <span id="ocr-audit-date">{{ $selectedPerformance['evaluated_at'] ?? 'Not evaluated' }}</span></span>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            {{-- Right: the models, with the actions that apply to them --}}
+            @include('ocr.partials.models')
         </div>
     </div>
 

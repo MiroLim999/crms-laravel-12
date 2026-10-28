@@ -12,93 +12,42 @@
     min-width: 0;
   }
 
-  .ocr-workspace-grid {
-    display: grid;
-    gap: 1.5rem;
-    align-items: start;
-  }
-
-  .ocr-engine-card,
   .ocr-performance-card,
-  .ocr-models-card,
-  .ocr-policy-card {
+  .ocr-models-card {
     overflow: hidden;
   }
 
   // ----------------------------------------------------------- service status
 
-  .ocr-engine-card {
-    border: 1px solid var(--ocr-soft-border);
-  }
+  // Pill in the performance card header. Tinted like Sneat's bg-label-* badges,
+  // green while the service answers and red while it does not.
+  .ocr-service-status {
+    --ocr-service-color: var(--bs-success);
 
-  .ocr-engine-icon {
-    position: relative;
-    display: grid;
-    flex: 0 0 auto;
-    width: 2.75rem;
-    height: 2.75rem;
-    place-items: center;
-    color: var(--bs-primary);
-    background: rgba(var(--bs-primary-rgb), 0.1);
-    border-radius: 0.625rem;
-
-    > i {
-      font-size: 1.35rem;
-    }
-  }
-
-  .ocr-status-dot {
-    position: absolute;
-    right: -0.1rem;
-    bottom: -0.1rem;
-    width: 0.7rem;
-    height: 0.7rem;
-    border: 2px solid var(--bs-card-bg, #fff);
-    border-radius: 50%;
-
-    &.is-online {
-      background: var(--bs-success);
-    }
-
-    &.is-offline {
-      background: var(--bs-danger);
-    }
-  }
-
-  .ocr-meta-pill {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    min-height: 2rem;
-    padding: 0.35rem 0.65rem;
-    color: var(--bs-secondary-color);
+    gap: 0.45rem;
+    padding: 0.2rem 0.65rem;
+    color: var(--ocr-service-color);
     font-size: 0.8125rem;
-    background: var(--bs-tertiary-bg);
-    border: 1px solid var(--ocr-soft-border);
-    border-radius: 2rem;
-    transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+    font-weight: 500;
+    line-height: 1.5;
+    white-space: nowrap;
+    background: color-mix(in sRGB, var(--bs-paper-bg) var(--bs-bg-label-tint-amount), var(--ocr-service-color));
+    border-radius: 50rem;
 
-    #engine-device {
-      text-transform: uppercase;
+    &.is-offline {
+      --ocr-service-color: var(--bs-danger);
     }
   }
 
-  .ocr-engine-card.is-online .ocr-meta-pill {
-    color: var(--bs-body-color);
-    background: rgba(var(--bs-primary-rgb), 0.06);
-    border-color: rgba(var(--bs-primary-rgb), 0.2);
-  }
-
-  .ocr-command-line {
-    padding: 0.75rem 0.875rem;
-    overflow-x: auto;
-    color: var(--bs-body-color);
-    font-family: var(--bs-font-monospace);
-    font-size: 0.8125rem;
-    white-space: nowrap;
-    background: var(--bs-tertiary-bg);
-    border: 1px solid var(--ocr-soft-border);
-    border-radius: var(--bs-border-radius);
+  .ocr-service-dot {
+    flex: 0 0 auto;
+    width: 0.5rem;
+    height: 0.5rem;
+    background: var(--ocr-service-color);
+    border-radius: 50%;
+    box-shadow: 0 0 0 0.2rem color-mix(in sRGB, var(--ocr-service-color) 22%, transparent);
   }
 
   // -------------------------------------------------------------- card icons
@@ -131,47 +80,38 @@
 
   // ------------------------------------------------------------- model list
 
+  // Nested in the performance card's right column, so it is drawn as a bordered
+  // panel like the chart beside it, with a 1.25rem inset. It keeps its own height
+  // (the chart column may be taller) and may shrink below its content's width.
   .ocr-models-card {
+    --bs-card-cap-padding-x: 1.25rem;
+    --bs-card-cap-padding-y: 1.25rem;
+    --bs-card-spacer-x: 1.25rem;
+
     align-self: start;
-    min-height: 0;
+    min-width: 0;
+    border: 1px solid var(--ocr-soft-border);
+    border-radius: var(--bs-border-radius-lg);
+    box-shadow: none;
   }
 
-  .ocr-models-toggle > i {
-    transition: transform 0.2s ease;
+  // Add model and Rescan models, under the title. Not part of the collapsible
+  // list, so both stay reachable while the models are hidden.
+  .ocr-models-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
   }
 
-  .ocr-models-toggle[aria-expanded='true'] > i {
-    transform: rotate(180deg);
-  }
-
-  .ocr-models-panel {
-    display: grid;
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: 0;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    transition:
-      grid-template-rows 0.3s ease,
-      max-height 0.3s ease,
-      opacity 0.2s ease;
-
-    &.is-expanded {
-      max-height: 32rem;
-      grid-template-rows: 1fr;
-      opacity: 1;
-    }
-  }
-
+  // About four and a half rows, then the list scrolls, so a long inventory
+  // does not stretch the card far past the chart beside it.
   .ocr-models-scroll {
-    min-height: 0;
-    overflow: hidden;
+    max-height: 22rem;
+    overflow-y: auto;
     scrollbar-color: var(--bs-secondary-bg) transparent;
     scrollbar-width: thin;
-  }
-
-  .ocr-models-panel.is-expanded .ocr-models-scroll {
-    overflow-y: auto;
   }
 
   .ocr-model-list {
@@ -186,7 +126,7 @@
     justify-content: space-between;
     gap: 1rem;
     min-height: 4.875rem;
-    padding: 0.875rem 1.5rem;
+    padding: 0.875rem 1.25rem;
     border-bottom: 1px solid var(--ocr-soft-border);
     transition: background-color 0.15s ease;
 
@@ -264,25 +204,24 @@
     }
   }
 
+  // Wraps instead of truncating: in the narrow column an ellipsis would hide the
+  // difference between models named alike, such as "-samples" and "-samples-v2".
   .ocr-model-name {
     max-width: 34rem;
-    overflow: hidden;
     color: var(--bs-heading-color);
     font-size: 0.9375rem;
     font-weight: 600;
     line-height: 1.35;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
+  // Wraps like the name above it, so the whole folder name stays readable.
   .ocr-model-key {
     margin-top: 0.15rem;
-    overflow: hidden;
     color: var(--bs-secondary-color);
     font-family: var(--bs-font-monospace);
     font-size: 0.75rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
   .ocr-model-meta {
@@ -325,40 +264,15 @@
     }
   }
 
-  // ---------------------------------------------------------- scanning policy
-
-  .ocr-policy-card .card-body {
-    padding-block: 0 0.25rem;
-  }
-
-  .ocr-policy-model {
-    padding-block: 1.25rem;
-    border-bottom: 1px solid var(--ocr-soft-border);
-  }
-
-  .ocr-setting-block {
-    padding-block: 1.25rem;
-    background: transparent;
-    border-bottom: 1px solid var(--ocr-soft-border);
-
-    &:last-child {
-      border-bottom: 0;
-    }
-  }
-
-  .ocr-threshold-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 7.5rem;
-    align-items: end;
-    gap: 1rem;
-  }
-
-  .ocr-threshold-control {
-    flex: 0 0 7.5rem;
-    width: 7.5rem;
-  }
-
   // ------------------------------------------------------- model performance
+
+  .ocr-performance-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem 1.5rem;
+  }
 
   .ocr-performance-picker {
     flex: 0 1 19rem;
@@ -448,38 +362,6 @@
     text-align: center;
   }
 
-  .ocr-performance-summary {
-    display: flex;
-    min-width: 0;
-    padding: 1.25rem;
-    flex-direction: column;
-    background: var(--bs-card-bg, #fff);
-    border: 1px solid var(--ocr-soft-border);
-    border-radius: var(--bs-border-radius-lg);
-  }
-
-  .ocr-performance-model-name {
-    margin-top: 0.15rem;
-    color: var(--bs-heading-color);
-    font-size: 1.125rem;
-    font-weight: 700;
-  }
-
-  .ocr-audit-row {
-    background: rgba(var(--bs-primary-rgb), 0.02);
-    border-color: var(--ocr-soft-border) !important;
-    transition: background 0.15s ease, border-color 0.15s ease;
-
-    &:hover {
-      background: rgba(var(--bs-primary-rgb), 0.04);
-      border-color: rgba(var(--bs-primary-rgb), 0.25) !important;
-    }
-  }
-
-  .ocr-audit-verdict {
-    line-height: 1.35;
-  }
-
   .ocr-apex-tooltip {
     padding: 0.75rem 0.9rem;
     background: var(--bs-card-bg, #fff);
@@ -543,24 +425,6 @@
   .apexcharts-tooltip:empty {
     display: none !important;
     opacity: 0 !important;
-  }
-
-  .ocr-performance-evidence {
-    display: flex;
-    gap: 0.5rem;
-    align-items: flex-start;
-    margin-top: auto;
-    padding-top: 1rem;
-    color: var(--bs-secondary-color);
-    border-top: 1px solid var(--ocr-soft-border);
-    font-size: 0.8125rem;
-    line-height: 1.45;
-
-    > i {
-      flex: 0 0 auto;
-      margin-top: 0.1rem;
-      color: var(--ocr-metric-word);
-    }
   }
 
   // --------------------------------------------------------------- modals
@@ -653,6 +517,135 @@
     border-radius: var(--bs-border-radius);
   }
 
+  // ------------------------------------------------------- activate dialog
+
+  // Two cards, "active now" above "will be active", joined by a small arrow chip.
+  // With no model active yet there is only the second card.
+  .ocr-activate-swap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .ocr-activate-card {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    padding: 0.875rem 1rem;
+    border: 1px solid var(--ocr-soft-border);
+    border-radius: var(--bs-border-radius-lg);
+
+    &.is-from {
+      background: var(--bs-tertiary-bg);
+    }
+
+    // The card that is about to become active takes the green "Active" colour.
+    &.is-to {
+      background: rgba(var(--bs-success-rgb), 0.07);
+      border-color: rgba(var(--bs-success-rgb), 0.4);
+
+      .ocr-activate-card__icon {
+        color: var(--bs-success);
+        border-color: rgba(var(--bs-success-rgb), 0.45);
+      }
+
+      .ocr-activate-card__caption {
+        color: var(--bs-success);
+      }
+
+      .ocr-activate-card__name {
+        color: var(--bs-heading-color);
+        font-size: 1.0625rem;
+        font-weight: 700;
+      }
+    }
+  }
+
+  .ocr-activate-card__icon {
+    display: inline-grid;
+    flex: 0 0 auto;
+    width: 2.5rem;
+    height: 2.5rem;
+    place-items: center;
+    color: var(--bs-secondary-color);
+    background: var(--bs-paper-bg, #fff);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 50%;
+
+    > i {
+      font-size: 1.2rem;
+    }
+  }
+
+  .ocr-activate-card__caption {
+    color: var(--bs-secondary-color);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+
+  .ocr-activate-card__name {
+    color: var(--bs-body-color);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .ocr-activate-card__key {
+    margin-top: 0.1rem;
+    color: var(--bs-secondary-color);
+    font-family: var(--bs-font-monospace);
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+  }
+
+  // Pulled over the gap so it sits on the edge between the two cards.
+  .ocr-activate-arrow {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    align-self: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    margin-block: -0.9rem;
+    place-items: center;
+    color: var(--bs-success);
+    background: var(--bs-paper-bg, #fff);
+    border: 1px solid var(--ocr-soft-border);
+    border-radius: 50%;
+
+    > i {
+      font-size: 1.1rem;
+    }
+  }
+
+  .ocr-activate-points {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 1.25rem 0 0;
+    padding: 0;
+    color: var(--bs-body-color);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    list-style: none;
+
+    li {
+      display: flex;
+      gap: 0.5rem;
+      align-items: flex-start;
+    }
+
+    > li > i {
+      flex: 0 0 auto;
+      margin-top: 0.1rem;
+      color: var(--bs-success);
+      font-size: 1rem;
+    }
+  }
+
   .ocr-delete-icon {
     display: inline-grid;
     width: 4rem;
@@ -668,25 +661,17 @@
   }
 }
 
-@media (min-width: 1200px) {
-  .ocr-workspace .ocr-workspace-grid {
-    align-items: stretch;
-    grid-template-columns: minmax(0, 1.45fr) minmax(24rem, 0.95fr);
-  }
-
-  .ocr-workspace .ocr-models-card.has-expanded-models {
-    align-self: stretch;
-    contain: size;
-  }
-
-  .ocr-workspace .ocr-models-panel.is-expanded {
-    max-height: 100%;
-  }
-}
-
 @media (min-width: 992px) {
+  // The header uses the body's columns, so the Model picker lines up with the
+  // Models panel beneath it.
+  .ocr-workspace .ocr-performance-head,
   .ocr-workspace .ocr-performance-layout {
+    display: grid;
     grid-template-columns: minmax(0, 1.3fr) minmax(23rem, 0.7fr);
+  }
+
+  .ocr-workspace .ocr-performance-picker {
+    width: 100%;
   }
 }
 
@@ -715,15 +700,6 @@
       }
     }
 
-    .ocr-threshold-control {
-      flex-basis: 100%;
-      width: 100%;
-    }
-
-    .ocr-threshold-row {
-      grid-template-columns: 1fr;
-    }
-
     .ocr-performance-picker {
       flex-basis: 100%;
       width: 100%;
@@ -736,10 +712,6 @@
 
     .ocr-performance-chart {
       min-height: 21.875rem;
-    }
-
-    .ocr-performance-summary {
-      padding: 1rem;
     }
   }
 }

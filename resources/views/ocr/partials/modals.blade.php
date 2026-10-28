@@ -95,6 +95,89 @@
     </div>
 </div>
 
+{{-- Make the selected model the one Staff scan with. --}}
+@php
+    $currentModel = $overview['models']->firstWhere('is_active', true);
+@endphp
+<div class="modal fade" id="activateModal" tabindex="-1"
+     aria-labelledby="activateModelTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form class="modal-content" method="POST" action="" id="activateForm">
+            @csrf
+            <div class="modal-header">
+                <div class="d-flex align-items-center gap-3">
+                    <span class="ocr-modal-icon bg-label-success" aria-hidden="true">
+                        <i class="icon-base bx bx-check-circle"></i>
+                    </span>
+                    <div>
+                        <h2 class="modal-title h5 mb-0" id="activateModelTitle">Activate this model?</h2>
+                        <p class="text-muted small mb-0 mt-1">Staff will scan with it from now on.</p>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                {{-- The change at a glance: what is active now, and what will be. --}}
+                <div class="ocr-activate-swap">
+                    @if ($currentModel)
+                        <div class="ocr-activate-card is-from">
+                            <span class="ocr-activate-card__icon" aria-hidden="true">
+                                <i class="icon-base bx bx-brain"></i>
+                            </span>
+                            <div class="min-w-0">
+                                <div class="ocr-activate-card__caption">Active now</div>
+                                <div class="ocr-activate-card__name">{{ $currentModel['label'] }}</div>
+                            </div>
+                        </div>
+
+                        <span class="ocr-activate-arrow" aria-hidden="true">
+                            <i class="icon-base bx bx-chevron-down"></i>
+                        </span>
+                    @endif
+
+                    <div class="ocr-activate-card is-to">
+                        <span class="ocr-activate-card__icon" aria-hidden="true">
+                            <i class="icon-base bx bx-brain"></i>
+                        </span>
+                        <div class="min-w-0">
+                            <div class="ocr-activate-card__caption">{{ $currentModel ? 'Will be active' : 'Will become active' }}</div>
+                            <div class="ocr-activate-card__name" id="activateLabel"></div>
+                            <div class="ocr-activate-card__key d-none" id="activateKey"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <ul class="ocr-activate-points">
+                    <li>
+                        <i class="icon-base bx bx-check-circle" aria-hidden="true"></i>
+                        <span>New scans use this model.</span>
+                    </li>
+                    <li>
+                        <i class="icon-base bx bx-check-circle" aria-hidden="true"></i>
+                        <span>Documents already scanned keep the model they were read with.</span>
+                    </li>
+                    @if ($currentModel)
+                        <li>
+                            <i class="icon-base bx bx-check-circle" aria-hidden="true"></i>
+                            <span>
+                                <strong class="text-break">{{ $currentModel['label'] }}</strong> stays installed,
+                                so you can switch back at any time.
+                            </span>
+                        </li>
+                    @endif
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-success" id="activate-submit">
+                    <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                    <span>Activate model</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 {{-- Rename the selected model folder. --}}
 <div class="modal fade" id="renameModal" tabindex="-1"
      aria-labelledby="renameModelTitle" aria-hidden="true">

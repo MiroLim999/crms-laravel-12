@@ -3,8 +3,8 @@ import ApexCharts from 'apexcharts';
 /**
  * OCR Workspace front end (Super Admin only).
  *
- * This page owns direct model uploads, model-action modals, dirty settings state,
- * and service-status polling. Application URLs and server limits come from
+ * This page owns direct model uploads, model-action modals (activate, rename,
+ * delete), and service-status polling. Application URLs and server limits come from
  * window.crmsOcr, rendered by the Blade view.
  */
 
@@ -74,68 +74,6 @@ const setButtonBusy = (button, busy, busyLabel) => {
 };
 
 // --------------------------------------------------------------- model list
-
-function initModelList() {
-    const toggle = $('[data-models-toggle]');
-    const list = $('#installed-models-list');
-    const card = toggle?.closest('.ocr-models-card');
-    const header = $('.card-header', card);
-    const policyCard = $('.ocr-policy-card');
-    const desktopLayout = window.matchMedia('(min-width: 1200px)');
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let cardAnimation;
-
-    if (!toggle || !list || !card || !header) return;
-
-    toggle.addEventListener('click', () => {
-        const expanded = toggle.getAttribute('aria-expanded') !== 'true';
-        const startHeight = card.getBoundingClientRect().height;
-
-        cardAnimation?.cancel();
-
-        if (expanded) {
-            card.classList.add('has-expanded-models');
-        }
-
-        list.classList.toggle('is-expanded', expanded);
-        list.setAttribute('aria-hidden', expanded ? 'false' : 'true');
-        list.inert = !expanded;
-        toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-        toggle.setAttribute('aria-label', expanded ? 'Hide models' : 'Show models');
-        toggle.setAttribute('title', expanded ? 'Hide models' : 'Show models');
-
-        const label = $('span', toggle);
-        if (label) label.textContent = expanded ? 'Hide models' : 'Show models';
-
-        if (!desktopLayout.matches || reducedMotion.matches) {
-            if (!expanded) card.classList.remove('has-expanded-models');
-            return;
-        }
-
-        const endHeight = expanded
-            ? (policyCard?.getBoundingClientRect().height ?? card.getBoundingClientRect().height)
-            : header.getBoundingClientRect().height;
-
-        cardAnimation = card.animate(
-            [
-                { height: `${startHeight}px` },
-                { height: `${endHeight}px` },
-            ],
-            {
-                duration: 300,
-                easing: 'cubic-bezier(.4, 0, .2, 1)',
-            },
-        );
-
-        cardAnimation.addEventListener('finish', () => {
-            if (toggle.getAttribute('aria-expanded') === 'false') {
-                card.classList.remove('has-expanded-models');
-            }
-
-            cardAnimation = null;
-        }, { once: true });
-    });
-}
 
 // -------------------------------------------------------------- direct upload
 
@@ -617,94 +555,13 @@ function initModelUpload() {
     refreshSubmit();
 }
 
-// ----------------------------------------------------------------- settings form
-
-function initSettingsForm() {
-    const form = $('#ocrSettingsForm');
-    if (!form) return;
-
-    const save = $('#settings-save');
-    const discard = $('#settings-discard');
-    const dirtyNote = $('#settings-dirty');
-    const cleanNote = $('#settings-clean');
-    const fields = [$('#model-select'), $('#allow-staff-choice'), $('#threshold-input')].filter(Boolean);
-
-    const valueOf = (field) => (field.type === 'checkbox' ? field.checked : field.value.trim());
-    const baseline = new Map(fields.map((field) => [field, valueOf(field)]));
-
-    const refresh = () => {
-        const dirty = fields.some((field) => valueOf(field) !== baseline.get(field));
-        save.disabled = !dirty;
-        discard.disabled = !dirty;
-        dirtyNote.classList.toggle('d-none', !dirty);
-        cleanNote.classList.toggle('d-none', dirty);
-    };
-
-    fields.forEach((field) => {
-        field.addEventListener('input', refresh);
-        field.addEventListener('change', refresh);
-    });
-
-    discard.addEventListener('click', () => {
-        fields.forEach((field) => {
-            const original = baseline.get(field);
-            if (field.type === 'checkbox') {
-                field.checked = original;
-            } else {
-                field.value = original;
-            }
-        });
-        refresh();
-    });
-
-    form.addEventListener('submit', () => {
-        setButtonBusy(save, true, 'Saving…');
-        discard.disabled = true;
-    });
-
-    refresh();
-}
-
 // ----------------------------------------------------------------- engine status
 
-async function copyToClipboard(text) {
-    if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        return;
-    }
-
-    const field = document.createElement('textarea');
-    field.value = text;
-    field.style.position = 'fixed';
-    field.style.opacity = '0';
-    document.body.appendChild(field);
-    field.select();
-    document.execCommand('copy');
-    field.remove();
-}
-
 function initEngineStatus() {
-    if (!$('#engine-card')) return;
+    const status = $('#engine-status');
+    if (!status) return;
 
-    document.querySelectorAll('.js-copy-command').forEach((copy) => {
-        copy.addEventListener('click', async () => {
-            const label = $('span', copy);
-            const target = document.getElementById(copy.dataset.copyTarget);
-            if (!label || !target) return;
-
-            const idle = label.textContent;
-
-            try {
-                await copyToClipboard(target.textContent.trim());
-                label.textContent = 'Copied';
-            } catch {
-                label.textContent = 'Copy failed';
-            }
-
-            window.setTimeout(() => { label.textContent = idle; }, 1600);
-        });
-    });
-
+    const state = $('#engine-state', status);
     let lastReachable = config.engineReachable;
     const FAST_MS = 15_000;
     const SLOW_MS = 30_000;
@@ -714,21 +571,23 @@ function initEngineStatus() {
 
         try {
             const engine = await getJson(config.urls.engineStatus);
-            $('#engine-dot').className = `ocr-status-dot ${engine.reachable ? 'is-online' : 'is-offline'}`;
-            $('#engine-state').textContent = engine.reachable
-                ? 'OCR service online'
-                : 'OCR service offline';
-            $('#engine-device').textContent = engine.device || 'not loaded';
+            const reachable = engine?.reachable === true;
 
-            // A transition changes controls, model discovery, and recovery content;
-            // reload once instead of leaving a partially patched page.
-            if (engine.reachable !== lastReachable) {
-                lastReachable = engine.reachable;
+            status.classList.toggle('is-online', reachable);
+            status.classList.toggle('is-offline', !reachable);
+            if (state) {
+                state.textContent = reachable ? 'OCR service online' : 'OCR service offline';
+            }
+
+            // A transition changes controls and model discovery; reload once
+            // instead of leaving a partially patched page.
+            if (reachable !== lastReachable) {
+                lastReachable = reachable;
                 window.location.reload();
                 return;
             }
 
-            next = engine.reachable ? FAST_MS : SLOW_MS;
+            next = reachable ? FAST_MS : SLOW_MS;
         } catch {
             next = SLOW_MS;
         }
@@ -742,6 +601,24 @@ function initEngineStatus() {
 // ---------------------------------------------------------------- model actions
 
 function initModelActions() {
+    const activateModal = $('#activateModal');
+    const activateForm = $('#activateForm');
+    const activateSubmit = $('#activate-submit');
+
+    // The Activate button on a row names the model; the dialog posts to its URL.
+    activateModal?.addEventListener('show.bs.modal', (event) => {
+        const trigger = event.relatedTarget;
+        const key = trigger?.dataset.key ?? '';
+        const label = trigger?.dataset.label ?? key;
+
+        activateForm.action = url(config.urls.modelActivate, key);
+        $('#activateLabel').textContent = label;
+        $('#activateKey').textContent = key;
+        $('#activateKey').classList.toggle('d-none', label === key);
+    });
+
+    activateForm?.addEventListener('submit', () => setButtonBusy(activateSubmit, true, 'Activating…'));
+
     const renameModal = $('#renameModal');
     const renameForm = $('#renameForm');
     const renameInput = $('#rename-input');
@@ -817,9 +694,6 @@ function initModelPerformance() {
     const empty = $('#ocr-performance-empty');
     const emptyCopy = $('#ocr-performance-empty-copy');
     const source = $('#ocr-performance-source');
-    const modelName = $('#ocr-performance-model-name');
-    const active = $('#ocr-performance-active');
-    const auditTag = $('#ocr-audit-tag');
     const btnRadar = $('#ocr-btn-view-radar');
     const btnBars = $('#ocr-btn-view-bars');
     const compareToggle = $('#ocr-compare-toggle');
@@ -828,31 +702,6 @@ function initModelPerformance() {
     const toolbarModelName = $('#ocr-toolbar-model-name');
     const toolbarBasePill = $('#ocr-toolbar-base-pill');
     const kpiWrap = $('#ocr-performance-kpis');
-
-    // Diagnostic audit DOM nodes
-    const auditWerVal = $('#ocr-audit-wer-val');
-    const auditWerBase = $('#ocr-audit-wer-base');
-    const auditWerDelta = $('#ocr-audit-wer-delta');
-    const auditWerDesc = $('#ocr-audit-wer-desc');
-
-    const auditCerVal = $('#ocr-audit-cer-val');
-    const auditCerBase = $('#ocr-audit-cer-base');
-    const auditCerDelta = $('#ocr-audit-cer-delta');
-    const auditCerDesc = $('#ocr-audit-cer-desc');
-
-    const auditExactVal = $('#ocr-audit-exact-val');
-    const auditExactBase = $('#ocr-audit-exact-base');
-    const auditExactDelta = $('#ocr-audit-exact-delta');
-    const auditExactDesc = $('#ocr-audit-exact-desc');
-
-    const verdictText = $('#ocr-audit-verdict-text');
-    const verdictIcon = $('#ocr-audit-verdict-icon');
-    const verdictBox = $('#ocr-audit-verdict-box');
-
-    const auditDataset = $('#ocr-audit-dataset');
-    const auditSplit = $('#ocr-audit-split');
-    const auditSamples = $('#ocr-audit-samples');
-    const auditDate = $('#ocr-audit-date');
 
     let chart = null;
     let currentView = 'radar';
@@ -893,30 +742,12 @@ function initModelPerformance() {
 
     const updateSummary = (profile) => {
         const friendlyName = profile?.display_label || profile?.label || 'No model selected';
-        if (modelName) modelName.textContent = friendlyName;
         if (toolbarModelName) toolbarModelName.textContent = friendlyName;
-        if (active) active.classList.toggle('d-none', !profile?.is_active);
 
         const isBase = profile?.key === 'base';
         const baseProfile = !isBase ? profiles.get('base') : null;
         const baseHasData = Boolean(baseProfile?.has_data);
         const isComparing = baseHasData && overlayBase && !isBase;
-
-        if (auditTag) {
-            if (!profile) {
-                auditTag.textContent = 'No model';
-                auditTag.className = 'badge bg-label-secondary';
-            } else if (isBase) {
-                auditTag.textContent = 'Baseline';
-                auditTag.className = 'badge bg-label-warning';
-            } else if (!profile.has_data) {
-                auditTag.textContent = profile.is_active ? 'Active (No Data)' : 'No Benchmark';
-                auditTag.className = 'badge bg-label-secondary';
-            } else {
-                auditTag.textContent = profile.is_active ? 'Active Fine-tuned' : 'Fine-tuned';
-                auditTag.className = `badge ${profile.is_active ? 'bg-label-success' : 'bg-label-primary'}`;
-            }
-        }
 
         if (source) {
             const tone = profile?.source === 'evaluation'
@@ -975,150 +806,6 @@ function initModelPerformance() {
                 }
             }
         });
-
-        // Update Diagnostic Audit & Error Reduction Panel
-        if (profile?.has_data) {
-            const charAcc = scoreValue(profile, 'character_accuracy') ?? 0;
-            const wordAcc = scoreValue(profile, 'word_accuracy') ?? 0;
-            const exactAcc = scoreValue(profile, 'exact_match') ?? 0;
-
-            const cer = profile.cer ?? Math.max(0, 100 - charAcc);
-            const wer = profile.wer ?? Math.max(0, 100 - wordAcc);
-
-            if (isComparing && baseHasData) {
-                const bCharAcc = scoreValue(baseProfile, 'character_accuracy') ?? 0;
-                const bWordAcc = scoreValue(baseProfile, 'word_accuracy') ?? 0;
-                const bExactAcc = scoreValue(baseProfile, 'exact_match') ?? 0;
-
-                const bCer = baseProfile.cer ?? Math.max(0, 100 - bCharAcc);
-                const bWer = baseProfile.wer ?? Math.max(0, 100 - bWordAcc);
-
-                // Relative error reduction: ((base - model) / base) * 100
-                const werReduction = bWer > 0 ? ((bWer - wer) / bWer * 100) : 0;
-                const cerReduction = bCer > 0 ? ((bCer - cer) / bCer * 100) : 0;
-                const exactRelGain = bExactAcc > 0 ? ((exactAcc - bExactAcc) / bExactAcc * 100) : 0;
-                const exactDiff = exactAcc - bExactAcc;
-
-                if (auditWerVal) auditWerVal.textContent = `${wer.toFixed(1)}%`;
-                if (auditWerBase) auditWerBase.textContent = `${bWer.toFixed(1)}%`;
-                if (auditWerDelta) {
-                    const sign = werReduction >= 0 ? '-' : '+';
-                    auditWerDelta.textContent = `${sign}${Math.abs(werReduction).toFixed(1)}%`;
-                    auditWerDelta.className = `badge ${werReduction >= 0 ? 'bg-label-success' : 'bg-label-danger'} ms-1.5`;
-                }
-
-                if (auditCerVal) auditCerVal.textContent = `${cer.toFixed(1)}%`;
-                if (auditCerBase) auditCerBase.textContent = `${bCer.toFixed(1)}%`;
-                if (auditCerDelta) {
-                    const sign = cerReduction >= 0 ? '-' : '+';
-                    auditCerDelta.textContent = `${sign}${Math.abs(cerReduction).toFixed(1)}%`;
-                    auditCerDelta.className = `badge ${cerReduction >= 0 ? 'bg-label-success' : 'bg-label-danger'} ms-1.5`;
-                }
-
-                if (auditExactVal) auditExactVal.textContent = `${exactAcc.toFixed(1)}%`;
-                if (auditExactBase) auditExactBase.textContent = `${bExactAcc.toFixed(1)}%`;
-                if (auditExactDelta) {
-                    const sign = exactDiff >= 0 ? '+' : '';
-                    auditExactDelta.textContent = `${sign}${exactDiff.toFixed(1)}%`;
-                    auditExactDelta.className = `badge ${exactDiff >= 0 ? 'bg-label-success' : 'bg-label-danger'} ms-1.5`;
-                }
-
-                if (verdictText) {
-                    verdictText.textContent = `Word errors cut by ${Math.abs(werReduction).toFixed(1)}% vs baseline, reaching ${exactAcc.toFixed(1)}% exact lines.`;
-                }
-                if (verdictIcon) verdictIcon.className = 'icon-base bx bx-check-circle text-success fs-5 flex-shrink-0';
-                if (verdictBox) verdictBox.className = 'ocr-audit-verdict p-2.5 rounded mb-3 bg-label-success border border-success-subtle d-flex align-items-center gap-2';
-            } else if (isBase) {
-                if (auditWerVal) auditWerVal.textContent = `${wer.toFixed(1)}%`;
-                if (auditWerBase) auditWerBase.textContent = 'Reference';
-                if (auditWerDelta) {
-                    auditWerDelta.textContent = 'Base Ref';
-                    auditWerDelta.className = 'badge bg-label-warning ms-1.5';
-                }
-
-                if (auditCerVal) auditCerVal.textContent = `${cer.toFixed(1)}%`;
-                if (auditCerBase) auditCerBase.textContent = 'Reference';
-                if (auditCerDelta) {
-                    auditCerDelta.textContent = 'Base Ref';
-                    auditCerDelta.className = 'badge bg-label-warning ms-1.5';
-                }
-
-                if (auditExactVal) auditExactVal.textContent = `${exactAcc.toFixed(1)}%`;
-                if (auditExactBase) auditExactBase.textContent = 'Reference';
-                if (auditExactDelta) {
-                    auditExactDelta.textContent = 'Base Ref';
-                    auditExactDelta.className = 'badge bg-label-warning ms-1.5';
-                }
-
-                if (verdictText) {
-                    verdictText.textContent = 'Pre-trained TrOCR base model serving as the reference comparison floor.';
-                }
-                if (verdictIcon) verdictIcon.className = 'icon-base bx bx-info-circle text-warning fs-5 flex-shrink-0';
-                if (verdictBox) verdictBox.className = 'ocr-audit-verdict p-2.5 rounded mb-3 bg-label-warning border border-warning-subtle d-flex align-items-center gap-2';
-            } else {
-                if (auditWerVal) auditWerVal.textContent = `${wer.toFixed(1)}%`;
-                if (auditWerBase) auditWerBase.textContent = 'Solo test';
-                if (auditWerDelta) {
-                    auditWerDelta.textContent = `${(100 - wer).toFixed(1)}% acc`;
-                    auditWerDelta.className = 'badge bg-label-primary ms-1.5';
-                }
-
-                if (auditCerVal) auditCerVal.textContent = `${cer.toFixed(1)}%`;
-                if (auditCerBase) auditCerBase.textContent = 'Solo test';
-                if (auditCerDelta) {
-                    auditCerDelta.textContent = `${(100 - cer).toFixed(1)}% acc`;
-                    auditCerDelta.className = 'badge bg-label-primary ms-1.5';
-                }
-
-                if (auditExactVal) auditExactVal.textContent = `${exactAcc.toFixed(1)}%`;
-                if (auditExactBase) auditExactBase.textContent = 'Solo test';
-                if (auditExactDelta) {
-                    auditExactDelta.textContent = `${exactAcc.toFixed(1)}% match`;
-                    auditExactDelta.className = 'badge bg-label-primary ms-1.5';
-                }
-
-                if (verdictText) {
-                    verdictText.textContent = `Evaluated: ${charAcc.toFixed(1)}% chars, ${wordAcc.toFixed(1)}% words, ${exactAcc.toFixed(1)}% exact match.`;
-                }
-                if (verdictIcon) verdictIcon.className = 'icon-base bx bx-check-circle text-primary fs-5 flex-shrink-0';
-                if (verdictBox) verdictBox.className = 'ocr-audit-verdict p-2.5 rounded mb-3 bg-label-primary border border-primary-subtle d-flex align-items-center gap-2';
-            }
-
-            if (auditDataset) auditDataset.textContent = profile.dataset || 'synthetic-broken-handwritten-samples50k';
-            if (auditSplit) auditSplit.textContent = profile.split || 'locked test';
-            if (auditSamples) auditSamples.textContent = `${Number(profile.sample_count ?? 5000).toLocaleString()} samples`;
-            if (auditDate) auditDate.textContent = profile.evaluated_at || 'Oct 13, 2026';
-        } else {
-            if (auditWerVal) auditWerVal.textContent = '—';
-            if (auditWerBase) auditWerBase.textContent = 'No data';
-            if (auditWerDelta) {
-                auditWerDelta.textContent = '—';
-                auditWerDelta.className = 'badge bg-label-secondary ms-1.5';
-            }
-            if (auditCerVal) auditCerVal.textContent = '—';
-            if (auditCerBase) auditCerBase.textContent = 'No data';
-            if (auditCerDelta) {
-                auditCerDelta.textContent = '—';
-                auditCerDelta.className = 'badge bg-label-secondary ms-1.5';
-            }
-            if (auditExactVal) auditExactVal.textContent = '—';
-            if (auditExactBase) auditExactBase.textContent = 'No data';
-            if (auditExactDelta) {
-                auditExactDelta.textContent = '—';
-                auditExactDelta.className = 'badge bg-label-secondary ms-1.5';
-            }
-            if (verdictText) {
-                verdictText.textContent = profile
-                    ? 'No benchmark evaluation report found for this model.'
-                    : 'No models available to evaluate.';
-            }
-            if (verdictIcon) verdictIcon.className = 'icon-base bx bx-info-circle text-secondary fs-5 flex-shrink-0';
-            if (verdictBox) verdictBox.className = 'ocr-audit-verdict p-2.5 rounded mb-3 bg-label-secondary border border-secondary-subtle d-flex align-items-center gap-2';
-            if (auditDataset) auditDataset.textContent = 'None';
-            if (auditSplit) auditSplit.textContent = 'no evaluation';
-            if (auditSamples) auditSamples.textContent = '0 samples';
-            if (auditDate) auditDate.textContent = 'Not evaluated';
-        }
     };
 
     const makeTooltipHtml = (profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex, w) => {
@@ -1523,9 +1210,7 @@ function initModelPerformance() {
 // ----------------------------------------------------------------------- bootstrap
 
 document.addEventListener('DOMContentLoaded', () => {
-    initModelList();
     initModelUpload();
-    initSettingsForm();
     initModelActions();
     initEngineStatus();
     initModelPerformance();

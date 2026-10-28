@@ -1,6 +1,7 @@
 {{--
-    OCR Workspace: manage the service-facing model folders and the policy Staff
-    scan with. Training, evaluation, and process control remain command-line work.
+    OCR Workspace: model performance, and the models Staff scan with. One card
+    holds the service status, the benchmark chart, and the Models panel. Training,
+    evaluation, and process control remain command-line work.
 --}}
 @extends('layouts.app')
 
@@ -8,24 +9,7 @@
 
 @section('content')
     <div class="ocr-workspace">
-        <x-page-header title="OCR Workspace"
-                       subtitle="Manage handwriting models and review behavior.">
-            <form method="POST" action="{{ route('ocr.rescan') }}">
-                @csrf
-                <button class="btn btn-label-secondary" type="submit"
-                        @disabled(! $engine['reachable'])
-                        title="{{ $engine['reachable']
-                            ? 'Re-read ml/models/ and reconcile the registry.'
-                            : 'The OCR service must be online before models can be rescanned.' }}">
-                    <i class="icon-base bx bx-refresh icon-sm me-1"></i>
-                    Rescan models
-                </button>
-            </form>
-        </x-page-header>
-
-        @include('ocr.partials.engine')
         @include('ocr.partials.performance')
-        @include('ocr.partials.models')
         @include('ocr.partials.modals')
     </div>
 @endsection
@@ -44,6 +28,7 @@
                 authorizeUpload: @json(route('ocr.uploads.authorize')),
                 registerModel: @json(route('ocr.register')),
                 engineStatus: @json(route('ocr.engine.status')),
+                modelActivate: @json(route('ocr.models.activate', '__KEY__')),
                 modelRename: @json(route('ocr.rename', '__KEY__')),
                 modelDestroy: @json(route('ocr.destroy', '__KEY__')),
             },
