@@ -727,6 +727,8 @@ function initModelPerformance() {
     const emptyCopy = $('#ocr-performance-empty-copy');
     const emptyCommand = $('#ocr-empty-command');
     const inspectedModelBadge = $('#ocr-inspected-model-name');
+    const evidenceEl = $('#ocr-performance-evidence');
+    const sourceEl = $('#ocr-performance-source');
     const btnRadar = $('#ocr-btn-view-radar');
     const btnBars = $('#ocr-btn-view-bars');
     const compareToggle = $('#ocr-compare-toggle');
@@ -776,6 +778,17 @@ function initModelPerformance() {
         const friendlyName = profile?.display_label || profile?.label || 'No model selected';
         if (inspectedModelBadge) {
             inspectedModelBadge.textContent = `${friendlyName}${profile?.is_active ? ' (active)' : ''}`;
+        }
+        if (evidenceEl) {
+            evidenceEl.textContent = profile?.evidence
+                || 'Locked test-set evaluation (CER, WER, Exact Match) comparing fine-tuned weights against baseline.';
+        }
+        if (sourceEl) {
+            const tone = profile?.source === 'evaluation'
+                ? 'primary'
+                : 'secondary';
+            sourceEl.className = `badge bg-label-${tone}`;
+            sourceEl.textContent = profile?.source_label || 'No data';
         }
         if (emptyCommand && profile?.key) {
             emptyCommand.textContent = `php artisan ocr:evaluate ${profile.key}`;

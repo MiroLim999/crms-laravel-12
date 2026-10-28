@@ -13,6 +13,7 @@
     $availableCount = $selectable->count();
     // A fresh install has models on disk but none activated, so Staff cannot scan.
     $needsActivation = $activeModel === null && $selectable->isNotEmpty();
+    $selectedKey = $modelPerformance['selected'] ?? ($activeModel?->key ?? null);
 @endphp
 
 <section class="card ocr-models-card h-100" aria-labelledby="installed-models-title">
@@ -43,7 +44,7 @@
                     class="btn btn-sm btn-primary"
                     data-bs-toggle="modal"
                     data-bs-target="#addModelModal"
-                    @disabled(! $engine['reachable'])
+                    {{ ! $engine['reachable'] ? 'disabled' : '' }}
                     title="{{ $engine['reachable'] ? 'Install a model' : 'The OCR service must be online.' }}">
                 <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add model
             </button>
@@ -53,7 +54,7 @@
                 <button type="submit"
                         class="btn btn-sm btn-outline-secondary"
                         id="ocr-rescan-btn"
-                        @disabled(! $engine['reachable'])
+                        {{ ! $engine['reachable'] ? 'disabled' : '' }}
                         title="{{ $engine['reachable'] ? 'Re-read ml/models/ and reconcile the registry.' : 'The OCR service must be online before models can be rescanned.' }}">
                     <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
                     <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
@@ -129,7 +130,7 @@
                         }
                     @endphp
 
-                    <article class="ocr-model-row {{ $model['is_active'] ? 'is-active' : '' }}"
+                    <article class="ocr-model-row {{ $model['is_active'] ? 'is-active' : '' }} {{ $model['key'] === $selectedKey ? 'is-inspected' : '' }}"
                              role="button"
                              tabindex="0"
                              data-model-key="{{ $model['key'] }}"
@@ -185,7 +186,7 @@
                                         data-key="{{ $model['key'] }}"
                                         data-label="{{ $model['label'] }}"
                                         aria-label="Activate {{ $model['label'] }}"
-                                        @disabled(! $engine['reachable'])
+                                        {{ ! $engine['reachable'] ? 'disabled' : '' }}
                                         title="{{ $engine['reachable'] ? 'Make this the model Staff scan with' : 'The OCR service must be online.' }}">
                                     Activate
                                 </button>

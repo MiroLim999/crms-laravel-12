@@ -1,11 +1,12 @@
 {{--
-    Flash message renderer. Controllers set ->with('success'|'warning'|'error'|'info').
+    Dismissible session alerts and unhandled validation errors.
+    Expected on every authenticated page, beneath the navbar.
 --}}
 @php
     $levels = [
         'success' => ['alert-success', 'bx-check-circle'],
+        'error' => ['alert-danger', 'bx-error-circle'],
         'warning' => ['alert-warning', 'bx-error'],
-        'error' => ['alert-danger', 'bx-x-circle'],
         'info' => ['alert-info', 'bx-info-circle'],
     ];
 @endphp
@@ -30,31 +31,4 @@
         </ul>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
-@endif
-
-{{-- Auto-dismiss success alert after 4 seconds --}}
-@if (session()->has('success'))
-    <script>
-        (function () {
-            function autoDismissAlert() {
-                const alerts = document.querySelectorAll('.alert-dismissible.alert-success');
-                alerts.forEach(function (alertEl) {
-                    setTimeout(function () {
-                        if (window.bootstrap && window.bootstrap.Alert) {
-                            const bsAlert = window.bootstrap.Alert.getOrCreateInstance(alertEl);
-                            bsAlert.close();
-                        } else {
-                            alertEl.classList.remove('show');
-                            setTimeout(function () { alertEl.remove(); }, 150);
-                        }
-                    }, 4000);
-                });
-            }
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', autoDismissAlert);
-            } else {
-                autoDismissAlert();
-            }
-        })();
-    </script>
 @endif

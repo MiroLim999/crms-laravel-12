@@ -9,12 +9,22 @@
 <section class="card ocr-performance-card h-100"
          aria-labelledby="ocr-performance-title">
     <div class="card-header border-bottom">
-        <div class="d-flex align-items-center justify-content-between gap-3">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
             <div class="d-flex align-items-center gap-3 min-w-0">
                 <span class="ocr-section-icon bg-label-primary" aria-hidden="true">
                     <i class="icon-base bx bx-bar-chart-alt-2"></i>
                 </span>
-                <h2 class="h5 card-title mb-0" id="ocr-performance-title">OCR model performance</h2>
+                <div class="min-w-0">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <h2 class="h5 card-title mb-0" id="ocr-performance-title">OCR model performance</h2>
+                        <span class="badge bg-label-{{ ($selectedPerformance['source'] ?? null) === 'evaluation' ? 'primary' : 'secondary' }}" id="ocr-performance-source">
+                            {{ $selectedPerformance['source_label'] ?? 'No data' }}
+                        </span>
+                    </div>
+                    <p class="text-muted small mb-0 mt-1" id="ocr-performance-evidence">
+                        {{ $selectedPerformance['evidence'] ?? 'Locked test-set evaluation (CER, WER, Exact Match) comparing fine-tuned weights against baseline.' }}
+                    </p>
+                </div>
             </div>
 
             <div class="ocr-inspected-indicator d-flex align-items-center gap-2 flex-shrink-0">
