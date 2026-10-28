@@ -100,6 +100,7 @@
                                     <div><span><kbd>Ctrl</kbd> + scroll</span><small>Zoom document</small></div>
                                     <div><span><kbd>Ctrl</kbd> + drag</span><small>Move document</small></div>
                                     <div><span><kbd>Shift</kbd> + click</span><small>Select multiple</small></div>
+                                    <div><span><kbd>Ctrl</kbd> + <kbd>A</kbd></span><small>Select all fields</small></div>
                                     <div><span>Drag empty document area</span><small>Select fields in a rectangle</small></div>
                                     <div><span><kbd>Shift</kbd> + drag</span><small>Add fields to selection</small></div>
                                     <div><span>Drag selection</span><small>Move selected fields</small></div>
@@ -178,7 +179,7 @@
                         The ? sits by the title, away from the arrow.
                     --}}
                     <div class="card mb-4 document-grid-card">
-                        <div class="card-header d-flex align-items-center gap-1 document-grid-card__header" id="gridCardHeader">
+                        <div class="card-header d-flex align-items-center gap-1 position-relative document-grid-card__header" id="gridCardHeader">
                             <h5 class="card-title mb-0">
                                 <button type="button" class="btn btn-link document-grid-card__toggle" id="gridCardToggle"
                                         aria-expanded="false" aria-controls="gridCardBody">
@@ -186,12 +187,12 @@
                                 </button>
                             </h5>
                             {{-- Shown on hover, and on focus for the keyboard and a tap. --}}
-                            <div class="document-grid-card__help">
-                                <button type="button" class="btn btn-link document-grid-card__help-toggle"
+                            <div class="card-help">
+                                <button type="button" class="btn btn-link card-help__toggle"
                                         aria-label="Rows and Columns tips" aria-describedby="gridTips">
                                     <i class="icon-base bx bx-help-circle" aria-hidden="true"></i>
                                 </button>
-                                <div class="document-grid-card__tips" id="gridTips" role="tooltip">
+                                <div class="card-help__tips" id="gridTips" role="tooltip">
                                     <strong>Tips</strong>
                                     <ul>
                                         <li>Drag a row line by the dot at either end. Hold <kbd>Shift</kbd> to move all lines.</li>
@@ -222,13 +223,14 @@
                                 </div>
 
                                 <div class="document-grid-card__line">
-                                    <label class="document-grid-card__label" for="newColumnName">Column</label>
+                                    {{-- The button says "Add column": the box can use the label's room. --}}
+                                    <label class="visually-hidden" for="newColumnName">New column name</label>
                                     <div class="input-group input-group-sm">
-                                        <input type="text" id="newColumnName" class="form-control" placeholder="New column name"
+                                        <input type="text" id="newColumnName" class="form-control" placeholder="e.g. Remarks"
                                                maxlength="500">
                                         <button class="btn btn-outline-primary" type="button" id="addColumnBtn"
-                                                title="Splits the selected column in two, or adds one at the right of the table">
-                                            Add
+                                                title="A column down the table, read once per row. It splits the selected column in two, or goes at the right of the table">
+                                            Add column
                                         </button>
                                     </div>
                                 </div>
@@ -241,39 +243,55 @@
                     </div>
                 @endif
 
-                <x-card title="Fields" class="mb-4 document-fields-card">
-                    <x-slot:actions>
-                        <span class="badge bg-label-primary" id="fieldCount">0 fields</span>
-                    </x-slot:actions>
-
-                    <div class="marker-field-bulk-actions">
-                        <div class="form-check mb-0">
-                            <input class="form-check-input" type="checkbox" id="selectAllFields">
-                            <label class="form-check-label" for="selectAllFields">Select all</label>
+                {{--
+                    The fields to read, in order. The tip is behind the ?, as on
+                    the Rows and Columns card.
+                --}}
+                <div class="card mb-4 document-fields-card">
+                    <div class="card-header d-flex align-items-center gap-1 position-relative">
+                        <h5 class="card-title mb-0">Fields</h5>
+                        <div class="card-help">
+                            <button type="button" class="btn btn-link card-help__toggle"
+                                    aria-label="Fields tips" aria-describedby="fieldTips">
+                                <i class="icon-base bx bx-help-circle" aria-hidden="true"></i>
+                            </button>
+                            <div class="card-help__tips" id="fieldTips" role="tooltip">
+                                <strong>Tips</strong>
+                                <ul>
+                                    <li>Keep each box tight around the handwriting. Loose boxes pick up neighbouring text and read badly.</li>
+                                    <li>Click a name to select its box on the page. <kbd>Ctrl</kbd> + <kbd>A</kbd> selects them all.</li>
+                                    @if (count($ruledYs) >= 2)
+                                        <li>A field is read once. For something on every row of the table, use Add column in Rows and Columns.</li>
+                                    @endif
+                                </ul>
+                            </div>
                         </div>
-                        <button type="button" class="btn btn-sm btn-outline-danger marker-field-delete" id="deleteFieldsBtn" disabled>
-                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
-                            <span>Delete</span>
-                        </button>
+                        <span class="badge bg-label-primary ms-auto" id="fieldCount">0 fields</span>
                     </div>
 
-                    <ul class="list-unstyled marker-field-list mb-3" id="fieldList"></ul>
+                    <div class="card-body">
+                        <div class="marker-field-bulk-actions">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="selectAllFields">
+                                <label class="form-check-label" for="selectAllFields">Select all</label>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-danger marker-field-delete" id="deleteFieldsBtn" disabled>
+                                <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
+                                <span>Delete</span>
+                            </button>
+                        </div>
 
-                    <label class="form-label small fw-medium" for="newFieldName">Add another field</label>
-                    <div class="input-group">
-                        <input type="text" id="newFieldName" class="form-control" placeholder="Field name"
-                               maxlength="500">
-                        <button class="btn btn-outline-primary" type="button" id="addFieldBtn">
-                            <i class="icon-base bx bx-plus me-1"></i>Add
-                        </button>
+                        <ul class="list-unstyled marker-field-list" id="fieldList"></ul>
+
+                        <label class="visually-hidden" for="newFieldName">New field name</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" id="newFieldName" class="form-control" placeholder="e.g. Page No."
+                                   maxlength="500">
+                            <button class="btn btn-outline-primary" type="button" id="addFieldBtn"
+                                    title="One box, read once. Drag it onto the value on the page">Add field</button>
+                        </div>
                     </div>
-
-                    <p class="document-tip mt-3 mb-0">
-                        <i class="icon-base bx bx-info-circle"></i>
-                        <span>Position each box tightly around the handwriting. Loose boxes pick up
-                        neighbouring text and read badly.</span>
-                    </p>
-                </x-card>
+                </div>
 
                 {{--
                     Only rendered when a Super Admin has allowed Staff to choose.
@@ -400,9 +418,6 @@
                     </button>
                     <button class="btn btn-primary btn-lg" type="button" id="scanNowBtn">
                         <i class="icon-base bx bx-scan icon-sm me-1"></i> Scan with OCR
-                    </button>
-                    <button class="btn btn-outline-secondary" type="button" id="backToUpload">
-                        <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Choose another file
                     </button>
                 </div>
             </div>
@@ -2352,15 +2367,19 @@
 
         boxes.forEach((box, index) => {
             const li = document.createElement('li');
-            li.className = 'field-list-item d-flex align-items-center gap-2 py-1 px-2 rounded';
+            li.className = 'field-list-item';
             li.dataset.fieldIndex = String(index);
             li.innerHTML = `
-                <span class="badge bg-label-primary">${index + 1}</span>
-                <span class="flex-grow-1 small"></span>
-                <button type="button" class="btn btn-sm btn-icon btn-outline-danger rounded-pill" aria-label="Remove field">
-                    <i class="icon-base bx bx-x icon-sm"></i>
+                <span class="badge bg-label-primary field-list-item__number">${index + 1}</span>
+                <span class="field-list-item__name"></span>
+                <button type="button" class="btn btn-sm btn-icon btn-outline-danger rounded-pill field-list-item__remove" title="Remove this field">
+                    <i class="icon-base bx bx-x icon-sm" aria-hidden="true"></i>
                 </button>`;
-            li.querySelector('span.flex-grow-1').textContent = box.name;
+            const name = li.querySelector('.field-list-item__name');
+            name.textContent = box.name;
+            // A long name is cut short with "…": the whole name shows on hover.
+            name.title = box.name;
+            li.querySelector('button').setAttribute('aria-label', `Remove ${box.name}`);
             li.addEventListener('click', (event) => marker.selectBox(index, {
                 additive: event.shiftKey,
                 toggle: event.shiftKey,
@@ -2566,6 +2585,12 @@
             }
         }
 
+        if (commandPressed && !event.shiftKey && key === 'a' && marker.toJSON().length > 0) {
+            event.preventDefault();
+            marker.selectAll();
+            return;
+        }
+
         if (commandPressed && !event.shiftKey && key === 'c' && marker.selectedIndexes().length > 0) {
             event.preventDefault();
             copySelectedFields();
@@ -2635,7 +2660,7 @@
         // The Rows and Columns card starts closed; its header slides it open and
         // shut (the title button's click arrives here too). The ? only shows tips.
         el('gridCardHeader').addEventListener('click', (event) => {
-            if (event.target.closest('.document-grid-card__help')) return;
+            if (event.target.closest('.card-help')) return;
             const expanded = el('gridCardToggle').getAttribute('aria-expanded') !== 'true';
             el('gridCardToggle').setAttribute('aria-expanded', String(expanded));
             el('gridCardHeader').classList.toggle('is-expanded', expanded);
@@ -2656,10 +2681,6 @@
         });
     }
 
-    el('backToUpload').addEventListener('click', () => {
-        scanFileInput.value = '';
-        showStep('upload');
-    });
     el('backToMark').addEventListener('click', () => {
         cancelOutlineEdit();
         clearValidationSubmitError();

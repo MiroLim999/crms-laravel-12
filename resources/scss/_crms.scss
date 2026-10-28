@@ -1767,12 +1767,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   scrollbar-width: thin;
 }
 
-// At least 27rem, and never shorter than its own content: a paper-size warning
-// or a long tip makes the card taller (the panel scrolls) instead of spilling
-// over the Detect summary below it. Only the field list scrolls inside.
+// The free height of the side panel, at least 18rem (about five rows), so
+// the Detect summary and the buttons below still fit. Only the field list
+// scrolls inside.
 #step-mark .document-fields-card {
   display: flex;
-  flex: 1 0 27rem;
+  flex: 1 0 18rem;
   flex-direction: column;
 
   .card-header {
@@ -1784,12 +1784,90 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     min-block-size: 0;
     flex: 1 1 auto;
     flex-direction: column;
+    gap: .75rem;
   }
 
+  // A soft shadow at the top or bottom while rows are hidden there: the
+  // covers scroll with the rows (local) and hide it at either end. The
+  // shadows start 1px in and the covers 1px out: with Windows scaling the
+  // scrolling layer is rounded to whole pixels and the shadow is not. The
+  // shadows also stop short of the scrollbar's strip, which the covers
+  // cannot reach.
   .marker-field-list {
     min-block-size: 5rem;
     max-block-size: none;
     flex: 1 1 0;
+    margin: 0;
+    padding-inline-end: .25rem;
+    background:
+      linear-gradient(var(--bs-card-bg) 50%, transparent) center -1px / 100% 1.5rem no-repeat local,
+      linear-gradient(transparent, var(--bs-card-bg) 50%) center calc(100% + 1px) / 100% 1.5rem no-repeat local,
+      linear-gradient(rgba(var(--crms-ink-rgb), .12), transparent) left 1px / calc(100% - .75rem) .5rem no-repeat scroll,
+      linear-gradient(transparent, rgba(var(--crms-ink-rgb), .12)) left calc(100% - 1px) / calc(100% - .75rem) .5rem no-repeat scroll;
+  }
+
+  // Chromium draws the thin ::-webkit-scrollbar (no arrow buttons) only
+  // while scrollbar-width and -color are auto. Firefox keeps them.
+  @supports selector(::-webkit-scrollbar) {
+    .marker-field-list {
+      scrollbar-color: auto;
+      scrollbar-width: auto;
+
+      &::-webkit-scrollbar {
+        width: .375rem;
+      }
+    }
+  }
+
+  // The card body's gap spaces the Select all bar from the list.
+  .marker-field-bulk-actions {
+    margin-block-end: 0;
+  }
+
+  // One slim row per field: number badge, name, and the remove button.
+  .field-list-item {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    min-block-size: 2.25rem;
+    margin-block-end: .125rem;
+    padding: .125rem .25rem .125rem .375rem;
+    border: 0;
+    border-radius: .375rem;
+    transition: background-color .12s ease;
+
+    &:hover {
+      background: rgba(var(--crms-ink-rgb), .06);
+      transform: none;
+    }
+
+    &.is-selected {
+      background: rgba(3, 195, 236, .1);
+      box-shadow: inset 0 0 0 1px rgba(3, 195, 236, .3);
+    }
+  }
+
+  // One width up to two digits, so every name starts at the same place.
+  .field-list-item__number {
+    flex: 0 0 auto;
+    min-inline-size: 2rem;
+    padding-inline: .25rem;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+  }
+
+  .field-list-item__name {
+    min-inline-size: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    color: var(--bs-heading-color);
+    font-size: .8125rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .field-list-item__remove {
+    flex: 0 0 auto;
   }
 }
 
@@ -3074,9 +3152,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 // The Align step's Rows and Columns card.
 // One line per tool: a label, then its control.
 .document-grid-card {
-  // Its two header buttons are btn-link, without the link look.
-  .document-grid-card__toggle,
-  .document-grid-card__help-toggle {
+  // The title is a btn-link, without the link look.
+  .document-grid-card__toggle {
     --bs-btn-color: inherit;
     --bs-btn-hover-color: inherit;
     --bs-btn-active-color: inherit;
@@ -3087,10 +3164,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   // The header opens and closes the card: title, ?, then the arrow at the far end.
   .document-grid-card__header {
+    padding-block: 1rem;
     cursor: pointer;
 
     // Not while over the ?: that only shows tips.
-    &:hover:not(:has(.document-grid-card__help:hover)) .document-grid-card__chevron,
+    &:hover:not(:has(.card-help:hover)) .document-grid-card__chevron,
     &:has(.document-grid-card__toggle:focus-visible) .document-grid-card__chevron {
       color: var(--bs-primary);
     }
@@ -3116,14 +3194,18 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   // The slide wrapper sits between header and body, so the theme's
   // ".card-header + .card-body" spacing is set here instead.
   .document-grid-card__body > .card-body {
-    padding-block-start: 0;
+    padding-block: 0 1rem;
   }
 
   .document-grid-card__line {
     display: flex;
     align-items: center;
     gap: .75rem;
-    margin-block-end: .75rem;
+    margin-block-end: .5rem;
+
+    &:last-of-type {
+      margin-block-end: 0;
+    }
 
     .input-group {
       flex: 1;
@@ -3155,7 +3237,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   .document-grid-card__source,
   .document-grid-card__message {
-    margin-block: 0 .5rem;
+    margin-block: .5rem 0;
     font-size: .75rem;
     line-height: 1.4;
   }
@@ -3163,91 +3245,92 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .document-grid-card__source {
     color: var(--bs-secondary-color);
   }
+}
 
-  // The ? beside the title, and the tips it shows on hover or focus.
-  .document-grid-card__help {
-    position: relative;
+// A ? beside a card's title, and the tips it shows on hover or focus (the
+// Align step's Rows and Columns and Fields cards). The tips are placed by the
+// card header (position-relative): as wide as the header's content, so they
+// never stick out of the side panel, and just below the ?.
+.card-help__toggle {
+  --bs-btn-color: var(--bs-secondary-color);
+  --bs-btn-hover-color: var(--bs-primary);
+  --bs-btn-active-color: var(--bs-primary);
+  --bs-btn-focus-box-shadow: none;
+  padding: .2rem;
+  border: 0;
+  border-radius: 50%;
+  cursor: help;
+  font-size: 1.1rem;
+  line-height: 1;
+  text-decoration: none;
+
+  &:focus-visible {
+    color: var(--bs-primary);
   }
+}
 
-  .document-grid-card__help-toggle {
-    --bs-btn-color: var(--bs-secondary-color);
-    --bs-btn-hover-color: var(--bs-primary);
-    --bs-btn-active-color: var(--bs-primary);
-    padding: .2rem;
-    border-radius: 50%;
-    cursor: help;
-    font-size: 1.1rem;
-    line-height: 1;
+.card-help__tips {
+  position: absolute;
+  z-index: 10;
+  // No top: it stays where the flow puts it, under the ?.
+  inset-inline: var(--bs-card-cap-padding-x, 1.5rem);
+  margin-block-start: .5rem;
+  padding: .75rem .9rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  background: var(--bs-paper-bg, var(--bs-body-bg));
+  box-shadow: var(--bs-box-shadow);
+  color: var(--bs-body-color);
+  font-size: .75rem;
+  line-height: 1.45;
+  opacity: 0;
+  transform: translateY(-.35rem);
+  visibility: hidden;
+  // Hidden after a short pause, so the pointer can cross to the panel.
+  transition: opacity .18s ease .1s, transform .18s ease .1s, visibility 0s linear .28s;
 
-    &:focus-visible {
-      color: var(--bs-primary);
-    }
-  }
-
-  .document-grid-card__tips {
+  // Bridges the gap to the ?, so the panel stays open on the way over.
+  &::before {
     position: absolute;
-    z-index: 10;
-    // Centred under the ?, so it stays inside the side panel.
-    inset-block-start: calc(100% + .5rem);
-    inset-inline-start: 50%;
-    width: 17rem;
-    padding: .75rem .9rem;
-    border: 1px solid var(--bs-border-color);
-    border-radius: var(--bs-border-radius-lg);
-    background: var(--bs-paper-bg, var(--bs-body-bg));
-    box-shadow: var(--bs-box-shadow);
-    color: var(--bs-body-color);
-    font-size: .75rem;
-    line-height: 1.45;
-    opacity: 0;
-    transform: translate(-50%, -.35rem);
-    visibility: hidden;
-    // Hidden after a short pause, so the pointer can cross to the panel.
-    transition: opacity .18s ease .1s, transform .18s ease .1s, visibility 0s linear .28s;
-
-    // Bridges the gap to the ?, so the panel stays open on the way over.
-    &::before {
-      position: absolute;
-      inset-block-end: 100%;
-      inset-inline: 0;
-      height: .5rem;
-      content: "";
-    }
-
-    strong {
-      display: block;
-      margin-block-end: .35rem;
-      color: var(--bs-heading-color);
-      font-size: .8125rem;
-    }
-
-    ul {
-      margin: 0;
-      padding-inline-start: 1.1rem;
-    }
-
-    li + li {
-      margin-block-start: .25rem;
-    }
-
-    kbd {
-      padding: .05rem .3rem;
-      font-size: .6875rem;
-    }
+    inset-block-end: 100%;
+    inset-inline: 0;
+    height: .5rem;
+    content: "";
   }
 
-  .document-grid-card__help:hover .document-grid-card__tips,
-  .document-grid-card__help:focus-within .document-grid-card__tips {
-    opacity: 1;
-    transform: translateX(-50%);
-    visibility: visible;
-    transition: opacity .18s ease, transform .18s ease, visibility 0s;
+  strong {
+    display: block;
+    margin-block-end: .35rem;
+    color: var(--bs-heading-color);
+    font-size: .8125rem;
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .document-grid-card__tips {
-      transform: translateX(-50%);
-    }
+  ul {
+    margin: 0;
+    padding-inline-start: 1.1rem;
+  }
+
+  li + li {
+    margin-block-start: .25rem;
+  }
+
+  kbd {
+    padding: .05rem .3rem;
+    font-size: .6875rem;
+  }
+}
+
+.card-help:hover .card-help__tips,
+.card-help:focus-within .card-help__tips {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  transition: opacity .18s ease, transform .18s ease, visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-help__tips {
+    transform: none;
   }
 }
 

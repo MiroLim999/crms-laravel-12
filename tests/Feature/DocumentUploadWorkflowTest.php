@@ -48,6 +48,11 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('id="deleteSelectedBtn"', escape: false)
                 ->assertSee('id="selectAllFields"', escape: false)
                 ->assertSee('id="deleteFieldsBtn"', escape: false)
+                ->assertSee('<kbd>Ctrl</kbd> + <kbd>A</kbd>', escape: false)
+                ->assertSee('id="fieldList"', escape: false)
+                ->assertSee('id="fieldTips"', escape: false)
+                // Cancel, at the top, already leaves the scan.
+                ->assertDontSee('Choose another file')
                 // No paper label; only notes about the scan, shown when they apply.
                 ->assertDontSee('Short / Letter')
                 ->assertSee('id="scanSidewaysNotice"', escape: false)
