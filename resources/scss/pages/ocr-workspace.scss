@@ -80,19 +80,19 @@
 
   // ------------------------------------------------------------- model list
 
-  // Nested in the performance card's right column, so it is drawn as a bordered
-  // panel like the chart beside it, with a 1.25rem inset. It keeps its own height
-  // (the chart column may be taller) and may shrink below its content's width.
   .ocr-models-card {
-    --bs-card-cap-padding-x: 1.25rem;
-    --bs-card-cap-padding-y: 1.25rem;
-    --bs-card-spacer-x: 1.25rem;
-
-    align-self: start;
     min-width: 0;
-    border: 1px solid var(--ocr-soft-border);
-    border-radius: var(--bs-border-radius-lg);
-    box-shadow: none;
+  }
+
+  .ocr-model-lock {
+    display: inline-grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--bs-border-radius);
+    color: var(--bs-secondary-color);
+    background: color-mix(in sRGB, var(--bs-secondary-bg) 60%, transparent);
+    flex-shrink: 0;
   }
 
   // Add model and Rescan models, under the title. Not part of the collapsible
@@ -108,7 +108,7 @@
   // About four and a half rows, then the list scrolls, so a long inventory
   // does not stretch the card far past the chart beside it.
   .ocr-models-scroll {
-    max-height: 22rem;
+    max-height: 28rem;
     overflow-y: auto;
     scrollbar-color: var(--bs-secondary-bg) transparent;
     scrollbar-width: thin;
@@ -128,7 +128,8 @@
     min-height: 4.875rem;
     padding: 0.875rem 1.25rem;
     border-bottom: 1px solid var(--ocr-soft-border);
-    transition: background-color 0.15s ease;
+    cursor: pointer;
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
 
     &::before {
       position: absolute;
@@ -148,15 +149,18 @@
       background: var(--bs-tertiary-bg);
     }
 
-    &.is-active {
-      background: transparent;
-
-      &::before {
-        background: var(--bs-success);
-      }
+    &.is-inspected {
+      background: color-mix(in sRGB, var(--bs-primary) 7%, transparent);
+      box-shadow: inset 0 0 0 1.5px color-mix(in sRGB, var(--bs-primary) 35%, transparent);
 
       &:hover {
-        background: var(--bs-tertiary-bg);
+        background: color-mix(in sRGB, var(--bs-primary) 11%, transparent);
+      }
+    }
+
+    &.is-active {
+      &::before {
+        background: var(--bs-success);
       }
     }
   }
@@ -279,21 +283,11 @@
     width: min(19rem, 100%);
   }
 
-  .ocr-performance-layout {
-    display: grid;
-    gap: 1.5rem;
-    align-items: stretch;
-  }
-
   .ocr-performance-visual {
     display: flex;
     flex-direction: column;
     min-width: 0;
-    min-height: 32rem;
-    padding: 1.25rem;
-    background: var(--bs-card-bg, #fff);
-    border: 1px solid var(--ocr-soft-border);
-    border-radius: var(--bs-border-radius-lg);
+    min-height: 28rem;
   }
 
   .ocr-performance-toolbar {
@@ -661,19 +655,7 @@
   }
 }
 
-@media (min-width: 992px) {
-  // The header uses the body's columns, so the Model picker lines up with the
-  // Models panel beneath it.
-  .ocr-workspace .ocr-performance-head,
-  .ocr-workspace .ocr-performance-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(23rem, 0.7fr);
-  }
 
-  .ocr-workspace .ocr-performance-picker {
-    width: 100%;
-  }
-}
 
 @media (max-width: 575.98px) {
   .ocr-workspace {

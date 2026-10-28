@@ -9,7 +9,14 @@
 
 @section('content')
     <div class="ocr-workspace">
-        @include('ocr.partials.performance')
+        <div class="row g-4 ocr-workspace-grid align-items-stretch">
+            <div class="col-12 col-xl-7">
+                @include('ocr.partials.performance')
+            </div>
+            <div class="col-12 col-xl-5">
+                @include('ocr.partials.models')
+            </div>
+        </div>
         @include('ocr.partials.modals')
     </div>
 @endsection

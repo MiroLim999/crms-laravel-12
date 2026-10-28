@@ -1,9 +1,9 @@
 {{--
-    Model inventory, shown in the right column of the performance card.
+    Model inventory: fleet management panel.
 
     Everything a Super Admin does with models lives here: activate one (the model
     Staff scan with, always through the confirmation dialog in ocr.partials.modals),
-    add one, and rescan ml/models/.
+    add one, rescan ml/models/, and click any model row to inspect its benchmark.
 --}}
 @php
     $models = $overview['models'];
@@ -15,20 +15,26 @@
     $needsActivation = $activeModel === null && $selectable->isNotEmpty();
 @endphp
 
-<section class="card ocr-models-card" aria-labelledby="installed-models-title">
+<section class="card ocr-models-card h-100" aria-labelledby="installed-models-title">
     <div class="card-header border-bottom">
-        <div class="d-flex align-items-center gap-3 min-w-0">
-            <span class="ocr-section-icon bg-label-primary" aria-hidden="true">
-                <i class="icon-base bx bx-brain"></i>
-            </span>
-            <div class="min-w-0">
-                <div class="d-flex flex-wrap align-items-center gap-2">
-                    <h3 class="h5 card-title mb-0" id="installed-models-title">Models</h3>
-                    <span class="badge bg-label-secondary">
-                        {{ $availableCount }} available
-                    </span>
+        <div class="d-flex align-items-center justify-content-between gap-3">
+            <div class="d-flex align-items-center gap-3 min-w-0">
+                <span class="ocr-section-icon bg-label-primary" aria-hidden="true">
+                    <i class="icon-base bx bx-brain"></i>
+                </span>
+                <div class="min-w-0">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <h3 class="h5 card-title mb-0" id="installed-models-title">Models</h3>
+                        <span class="badge bg-label-secondary">
+                            {{ $availableCount }} available
+                        </span>
+                    </div>
+                    <p class="text-muted small mb-0 mt-1">Choose the model Staff scan with or click to inspect.</p>
                 </div>
-                <p class="text-muted small mb-0 mt-1">Choose the model Staff scan with.</p>
+            </div>
+
+            <div class="flex-shrink-0">
+                @include('ocr.partials.engine')
             </div>
         </div>
 
@@ -42,15 +48,16 @@
                 <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add model
             </button>
 
-            <form method="POST" action="{{ route('ocr.rescan') }}">
+            <form method="POST" action="{{ route('ocr.rescan') }}" id="ocr-rescan-form" class="d-inline">
                 @csrf
                 <button type="submit"
                         class="btn btn-sm btn-outline-secondary"
+                        id="ocr-rescan-btn"
                         @disabled(! $engine['reachable'])
-                        title="{{ $engine['reachable']
-                            ? 'Re-read ml/models/ and reconcile the registry.'
-                            : 'The OCR service must be online before models can be rescanned.' }}">
-                    <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>Rescan models
+                        title="{{ $engine['reachable'] ? 'Re-read ml/models/ and reconcile the registry.' : 'The OCR service must be online before models can be rescanned.' }}">
+                    <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                    <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
+                    <span>Rescan models</span>
                 </button>
             </form>
         </div>
@@ -63,7 +70,7 @@
         @endif
     </div>
 
-    <div class="ocr-models-scroll">
+    <div class="ocr-models-scroll flex-grow-1">
         @if ($models->isEmpty())
             <div class="card-body">
                 <div class="ocr-empty-state">
@@ -123,8 +130,10 @@
                     @endphp
 
                     <article class="ocr-model-row {{ $model['is_active'] ? 'is-active' : '' }}"
-                             role="listitem"
-                             data-model-key="{{ $model['key'] }}">
+                             role="button"
+                             tabindex="0"
+                             data-model-key="{{ $model['key'] }}"
+                             title="Click to inspect this model's benchmark performance">
                         <div class="ocr-model-main">
                             <span class="ocr-model-icon {{ $model['is_active'] ? 'is-active' : ($model['is_base'] ? 'is-base' : '') }}"
                                   aria-hidden="true">
@@ -136,6 +145,13 @@
                                     <h4 class="ocr-model-name mb-0">{{ $model['label'] }}</h4>
                                     @if ($model['is_base'])
                                         <span class="badge bg-label-secondary">Base</span>
+                                    @endif
+                                    @if ($model['loaded'])
+                                        <span class="badge bg-label-info py-0 px-1.5 text-xs d-inline-flex align-items-center gap-1"
+                                              title="Held in the OCR service's memory">
+                                            <i class="icon-base bx bx-chip icon-xs"></i>
+                                            <span>RAM</span>
+                                        </span>
                                     @endif
                                 </div>
 
@@ -153,17 +169,10 @@
                                         <span>Discovered on disk</span>
                                     @endif
                                 </div>
-
-                                @if ($model['loaded'])
-                                    <div class="ocr-model-meta" title="Held in the OCR service's memory">
-                                        <i class="icon-base bx bx-chip icon-xs" aria-hidden="true"></i>
-                                        <span>Loaded in memory</span>
-                                    </div>
-                                @endif
                             </div>
                         </div>
 
-                        <div class="ocr-model-controls">
+                        <div class="ocr-model-controls d-flex align-items-center gap-2">
                             @if ($stateLabel)
                                 <span class="badge bg-label-{{ $stateColor }} ocr-model-state">
                                     <i class="icon-base bx {{ $stateIcon }} icon-xs me-1" aria-hidden="true"></i>{{ $stateLabel }}
@@ -182,25 +191,25 @@
                                 </button>
                             @endif
 
-                            {{-- Fixed positioning lets the menu overflow the short, scrolling list. --}}
-                            <div class="dropdown">
-                                <button type="button"
-                                        class="btn p-0 dropdown-toggle hide-arrow"
-                                        data-bs-toggle="dropdown"
-                                        data-bs-popper-config='{"strategy":"fixed"}'
-                                        aria-expanded="false"
-                                        aria-label="Manage {{ $model['label'] }}">
-                                    <i class="icon-base bx bx-dots-vertical-rounded"></i>
-                                </button>
-                                <div class="dropdown-menu dropdown-menu-end ocr-model-menu">
-                                    <div class="px-3 py-2 border-bottom">
-                                        <div class="fw-medium text-truncate">{{ $model['label'] }}</div>
-                                        @if ($showKey)
-                                            <div class="text-muted small font-monospace text-truncate">{{ $model['key'] }}</div>
-                                        @endif
-                                    </div>
+                            @if ($canManage)
+                                {{-- Fixed positioning lets the menu overflow the short, scrolling list. --}}
+                                <div class="dropdown">
+                                    <button type="button"
+                                            class="btn p-0 dropdown-toggle hide-arrow"
+                                            data-bs-toggle="dropdown"
+                                            data-bs-popper-config='{"strategy":"fixed"}'
+                                            aria-expanded="false"
+                                            aria-label="Manage {{ $model['label'] }}">
+                                        <i class="icon-base bx bx-dots-vertical-rounded"></i>
+                                    </button>
+                                    <div class="dropdown-menu dropdown-menu-end ocr-model-menu">
+                                        <div class="px-3 py-2 border-bottom">
+                                            <div class="fw-medium text-truncate">{{ $model['label'] }}</div>
+                                            @if ($showKey)
+                                                <div class="text-muted small font-monospace text-truncate">{{ $model['key'] }}</div>
+                                            @endif
+                                        </div>
 
-                                    @if ($canManage)
                                         <button type="button"
                                                 class="dropdown-item model-rename-trigger"
                                                 data-key="{{ $model['key'] }}"
@@ -218,14 +227,16 @@
                                                 data-bs-target="#deleteModal">
                                             <i class="icon-base bx bx-trash icon-sm me-2"></i>Delete
                                         </button>
-                                    @else
-                                        <div class="dropdown-item-text d-flex gap-2 py-3 text-muted small">
-                                            <i class="icon-base bx bx-lock-alt icon-sm flex-shrink-0 mt-1"></i>
-                                            <span>{{ $blockedReason }}</span>
-                                        </div>
-                                    @endif
+                                    </div>
                                 </div>
-                            </div>
+                            @else
+                                <span class="ocr-model-lock text-muted"
+                                      data-bs-toggle="tooltip"
+                                      data-bs-placement="top"
+                                      title="{{ $blockedReason }}">
+                                    <i class="icon-base bx bx-lock-alt icon-xs"></i>
+                                </span>
+                            @endif
                         </div>
                     </article>
                 @endforeach

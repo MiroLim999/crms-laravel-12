@@ -680,12 +680,44 @@ function readModelPerformance() {
     }
 }
 
+function initRescanForm() {
+    const rescanForm = $('#ocr-rescan-form');
+    if (!rescanForm) return;
+
+    rescanForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = $('#ocr-rescan-btn') || $('button[type="submit"]', rescanForm);
+        setButtonBusy(btn, true, 'Rescanning...');
+
+        try {
+            const response = await fetch(rescanForm.action, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': config.csrf,
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null);
+                throw new Error(payload?.message || `HTTP ${response.status}`);
+            }
+
+            window.location.reload();
+        } catch (err) {
+            alert(`Failed to rescan models: ${err.message}`);
+            setButtonBusy(btn, false);
+        }
+    });
+}
+
 function initModelPerformance() {
     let data = readModelPerformance();
     const target = $('#ocr-model-radar');
     const selector = $('#ocr-performance-model');
 
-    if (!data || !target || !selector) return;
+    if (!data || !target) return;
 
     let metrics = Array.isArray(data.metrics) ? data.metrics : [];
     let profiles = new Map(
@@ -693,19 +725,19 @@ function initModelPerformance() {
     );
     const empty = $('#ocr-performance-empty');
     const emptyCopy = $('#ocr-performance-empty-copy');
-    const source = $('#ocr-performance-source');
+    const emptyCommand = $('#ocr-empty-command');
+    const inspectedModelBadge = $('#ocr-inspected-model-name');
     const btnRadar = $('#ocr-btn-view-radar');
     const btnBars = $('#ocr-btn-view-bars');
     const compareToggle = $('#ocr-compare-toggle');
     const compareToggleWrap = $('#ocr-compare-toggle-wrap');
     const toolbar = $('#ocr-performance-toolbar');
-    const toolbarModelName = $('#ocr-toolbar-model-name');
-    const toolbarBasePill = $('#ocr-toolbar-base-pill');
     const kpiWrap = $('#ocr-performance-kpis');
 
     let chart = null;
-    let currentView = 'radar';
+    let currentView = 'bars';
     let overlayBase = true;
+    let currentProfileKey = String(data.selected ?? '');
 
     const kpiVals = new Map(
         Array.from(document.querySelectorAll('[data-kpi-val]')).map((n) => [n.dataset.kpiVal, n]),
@@ -742,22 +774,19 @@ function initModelPerformance() {
 
     const updateSummary = (profile) => {
         const friendlyName = profile?.display_label || profile?.label || 'No model selected';
-        if (toolbarModelName) toolbarModelName.textContent = friendlyName;
+        if (inspectedModelBadge) {
+            inspectedModelBadge.textContent = `${friendlyName}${profile?.is_active ? ' (active)' : ''}`;
+        }
+        if (emptyCommand && profile?.key) {
+            emptyCommand.textContent = `php artisan ocr:evaluate ${profile.key}`;
+        }
 
         const isBase = profile?.key === 'base';
         const baseProfile = !isBase ? profiles.get('base') : null;
         const baseHasData = Boolean(baseProfile?.has_data);
         const isComparing = baseHasData && overlayBase && !isBase;
 
-        if (source) {
-            const tone = profile?.source === 'evaluation'
-                ? 'primary'
-                : 'secondary';
-            source.className = `badge bg-label-${tone}`;
-            source.textContent = profile?.source_label || 'No data';
-        }
 
-        if (toolbarBasePill) toolbarBasePill.classList.toggle('d-none', !isComparing);
         if (compareToggleWrap) compareToggleWrap.classList.toggle('d-none', isBase || !baseHasData);
         // Keep KPI cards and toolbar visible whenever the selected model has evaluation data
         if (kpiWrap) kpiWrap.classList.toggle('d-none', !profile?.has_data);
@@ -783,7 +812,19 @@ function initModelPerformance() {
                     kpiDeltaNode.className = `badge ${diff >= 0 ? 'bg-label-success' : 'bg-label-danger'} ocr-kpi-delta`;
                     kpiDeltaNode.classList.remove('d-none');
                 }
-                if (kpiSubNode) kpiSubNode.textContent = `vs ${baseValue.toFixed(1)}% Base`;
+                if (kpiSubNode) {
+                    if (metric.key === 'character_accuracy') {
+                        const cer = (100 - value).toFixed(1);
+                        const baseCer = (100 - baseValue).toFixed(1);
+                        kpiSubNode.textContent = `${cer}% CER · vs ${baseCer}% Base`;
+                    } else if (metric.key === 'word_accuracy') {
+                        const wer = (100 - value).toFixed(1);
+                        const baseWer = (100 - baseValue).toFixed(1);
+                        kpiSubNode.textContent = `${wer}% WER · vs ${baseWer}% Base`;
+                    } else {
+                        kpiSubNode.textContent = `vs ${baseValue.toFixed(1)}% Base`;
+                    }
+                }
             } else if (isBase && value !== null) {
                 if (kpiDeltaNode) {
                     kpiDeltaNode.textContent = 'Baseline';
@@ -794,15 +835,16 @@ function initModelPerformance() {
                     const cerVal = profile.cer ?? (100 - value);
                     const werVal = profile.wer ?? (100 - value);
                     kpiSubNode.textContent = metric.key === 'character_accuracy'
-                        ? `${cerVal.toFixed(1)}% CER`
-                        : (metric.key === 'word_accuracy' ? `${werVal.toFixed(1)}% WER` : 'Reference floor');
+                        ? `${cerVal.toFixed(1)}% CER (floor)`
+                        : (metric.key === 'word_accuracy' ? `${werVal.toFixed(1)}% WER (floor)` : 'Reference floor');
                 }
             } else {
                 if (kpiDeltaNode) kpiDeltaNode.classList.add('d-none');
                 if (kpiSubNode) {
+                    const cer = value !== null ? (100 - value).toFixed(1) : null;
                     kpiSubNode.textContent = metric.key === 'character_accuracy'
-                        ? '1 minus CER'
-                        : (metric.key === 'word_accuracy' ? '1 minus WER' : 'Exact lines');
+                        ? (cer !== null ? `${cer}% CER` : '1 minus CER')
+                        : (metric.key === 'word_accuracy' ? (cer !== null ? `${cer}% WER` : '1 minus WER') : 'Exact lines');
                 }
             }
         });
@@ -1123,6 +1165,47 @@ function initModelPerformance() {
         chart.render();
     };
 
+    const highlightModelRow = (key) => {
+        document.querySelectorAll('.ocr-model-row').forEach((row) => {
+            const isMatch = row.dataset.modelKey === key;
+            row.classList.toggle('is-inspected', isMatch);
+        });
+    };
+
+    const inspectModel = (key) => {
+        if (!key) return;
+        currentProfileKey = key;
+        if (selector) selector.value = key;
+        const profile = profiles.get(key);
+        if (profile) {
+            render(profile);
+            highlightModelRow(key);
+        }
+    };
+
+    const bindModelRowInteractions = () => {
+        document.querySelectorAll('.ocr-model-row').forEach((row) => {
+            row.addEventListener('click', (e) => {
+                if (e.target.closest('button, form, a, input, .dropdown, .dropdown-menu')) {
+                    return;
+                }
+                const key = row.dataset.modelKey;
+                if (key) inspectModel(key);
+            });
+
+            row.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    if (e.target.closest('button, form, a, input, .dropdown, .dropdown-menu')) return;
+                    e.preventDefault();
+                    const key = row.dataset.modelKey;
+                    if (key) inspectModel(key);
+                }
+            });
+        });
+    };
+
+    bindModelRowInteractions();
+
     if (btnRadar && btnBars) {
         btnRadar.addEventListener('click', () => {
             if (currentView === 'radar') return;
@@ -1131,7 +1214,7 @@ function initModelPerformance() {
             btnRadar.classList.add('btn-primary');
             btnBars.classList.remove('btn-primary');
             btnBars.classList.add('btn-label-secondary');
-            render(profiles.get(selector.value));
+            render(profiles.get(currentProfileKey));
         });
 
         btnBars.addEventListener('click', () => {
@@ -1141,20 +1224,23 @@ function initModelPerformance() {
             btnBars.classList.add('btn-primary');
             btnRadar.classList.remove('btn-primary');
             btnRadar.classList.add('btn-label-secondary');
-            render(profiles.get(selector.value));
+            render(profiles.get(currentProfileKey));
         });
     }
 
     if (compareToggle) {
         compareToggle.addEventListener('change', () => {
             overlayBase = compareToggle.checked;
-            render(profiles.get(selector.value));
+            render(profiles.get(currentProfileKey));
         });
     }
 
-    selector.addEventListener('change', () => render(profiles.get(selector.value)));
+    if (selector) {
+        selector.addEventListener('change', () => inspectModel(selector.value));
+    }
+
     // Chart colours are read when it is drawn; redraw after a colour-mode switch.
-    window.addEventListener('crms:themechange', () => render(profiles.get(selector.value)));
+    window.addEventListener('crms:themechange', () => render(profiles.get(currentProfileKey)));
 
     function updatePerformanceDataset(nextData) {
         if (!nextData || typeof nextData !== 'object') return;
@@ -1165,33 +1251,37 @@ function initModelPerformance() {
             (Array.isArray(data.models) ? data.models : []).map((p) => [String(p.key), p]),
         );
 
-        const prevVal = selector.value;
-        selector.innerHTML = '';
-        if (profiles.size === 0) {
-            const opt = document.createElement('option');
-            opt.value = '';
-            opt.textContent = 'No models available';
-            selector.appendChild(opt);
-            selector.disabled = true;
-        } else {
-            profiles.forEach((p) => {
+        if (selector) {
+            const prevVal = selector.value;
+            selector.innerHTML = '';
+            if (profiles.size === 0) {
                 const opt = document.createElement('option');
-                opt.value = p.key;
-                opt.textContent = `${p.display_label || p.label}${p.is_active ? ' (active)' : ''}`;
+                opt.value = '';
+                opt.textContent = 'No models available';
                 selector.appendChild(opt);
-            });
-            selector.disabled = profiles.size < 2;
+                selector.disabled = true;
+            } else {
+                profiles.forEach((p) => {
+                    const opt = document.createElement('option');
+                    opt.value = p.key;
+                    opt.textContent = `${p.display_label || p.label}${p.is_active ? ' (active)' : ''}`;
+                    selector.appendChild(opt);
+                });
+                selector.disabled = profiles.size < 2;
+            }
         }
 
-        const nextProfile = profiles.get(prevVal)
+        const nextProfile = profiles.get(currentProfileKey)
             ?? profiles.get(String(data.selected))
             ?? profiles.values().next().value
             ?? null;
 
         if (nextProfile) {
-            selector.value = nextProfile.key;
+            currentProfileKey = nextProfile.key;
+            if (selector) selector.value = nextProfile.key;
+            render(nextProfile);
+            highlightModelRow(nextProfile.key);
         }
-        render(nextProfile);
     }
 
     window.crmsUpdateModelPerformance = updatePerformanceDataset;
@@ -1199,12 +1289,17 @@ function initModelPerformance() {
         if (event.detail) updatePerformanceDataset(event.detail);
     });
 
-    const initial = profiles.get(String(data.selected ?? selector.value))
-        ?? profiles.get(selector.value)
+    const initial = profiles.get(String(data.selected ?? currentProfileKey))
+        ?? profiles.get(currentProfileKey)
+        ?? (selector ? profiles.get(selector.value) : null)
         ?? profiles.values().next().value;
 
-    if (initial) selector.value = initial.key;
-    render(initial);
+    if (initial) {
+        currentProfileKey = initial.key;
+        if (selector) selector.value = initial.key;
+        render(initial);
+        highlightModelRow(initial.key);
+    }
 }
 
 // ----------------------------------------------------------------------- bootstrap
@@ -1213,5 +1308,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initModelUpload();
     initModelActions();
     initEngineStatus();
+    initRescanForm();
     initModelPerformance();
 });

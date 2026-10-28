@@ -9,6 +9,7 @@ use App\Services\Ocr\EngineStatus;
 use App\Services\Ocr\OcrModelManager;
 use App\Services\Ocr\OcrModelPerformance;
 use App\Services\Ocr\OcrServiceException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -151,10 +152,19 @@ class OcrModelController extends Controller
      * Reconcile the registry with what is on disk, which is the documented fallback
      * for a model folder copied into ml/models/ by hand.
      */
-    public function rescan(Request $request): RedirectResponse
+    public function rescan(Request $request): RedirectResponse|JsonResponse
     {
         try {
             $counts = $this->manager->reconcile($request->user());
+
+            if ($request->wantsJson() || $request->ajax()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => "Rescanned {$counts['remote']} model(s): registered {$counts['registered']}, "
+                        ."restored {$counts['restored']}, marked missing {$counts['tombstoned']}.",
+                    'counts' => $counts,
+                ]);
+            }
 
             return $this->back()->with(
                 'success',
@@ -162,6 +172,13 @@ class OcrModelController extends Controller
                 ."restored {$counts['restored']}, marked missing {$counts['tombstoned']}.",
             );
         } catch (OcrServiceException $e) {
+            if ($request->wantsJson() || $request->ajax()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $e->getMessage(),
+                ], 422);
+            }
+
             return $this->back()->with('error', $e->getMessage());
         }
     }
