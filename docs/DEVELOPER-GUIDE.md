@@ -104,7 +104,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 
 ### 3. Dynamic Document Template Builder & Type Management
 - **Visual Template Designer**: Create and publish document layouts with real-time coordinate calibration.
-- **Paper Specification Support**: Supports standard paper dimensions (A4, Letter, Legal, Folio) as well as arbitrary custom millimeter dimensions in Portrait or Landscape orientations.
+- **Any Paper Size**: There is no paper size or orientation to set. Markers are saved as fractions of the page, so they land on every scan's own shape: Letter, Long bond, Legal, A4, A3 or any other size, wide or tall. The builder draws on the sample's own page (without a sample, on a wide Short / Letter sheet) and saves that page's shape (`page_ratio`, width : height). The server uses it to check that tilted markers stay on the page, and the Align step uses it to tell Staff when a scan looks **sideways** (tall where the layout's pages are wide, or the other way round). A PDF with more than one page is read from page 1 only; the builder and the Align step both say so.
 - **Sample Document Upload**: Direct upload of a PDF, PNG, JPG, WEBP or BMP sample, rendered with PDF.js for canvas alignment.
 - **Custom Document Types**: Super Admins can define custom certificate classifications with distinct icons, validation rules, and active states.
 - **Archiving a Document Type**: A type that is no longer used can be archived from its menu in the Template Builder (**Archive (hide from Staff)**). Staff can no longer start a scan of it, and the builder stops offering new layouts for it, but its records and layouts are kept. A scan Staff already started can still be submitted, so no work is lost. The type stays in the list marked **Archived**, with **Restore for Staff** to bring it back. Archiving and restoring are written to the audit log.
@@ -192,7 +192,7 @@ crms-laravel-12/
 ├── .vscode/tasks.json                  # (local, gitignored) Kiro / VS Code tasks that start the four processes
 ├── app/                                # Core Laravel application logic
 │   ├── Console/Commands/               # crms:export-training, documents:prune-pages
-│   ├── Enums/                          # RoleSlug, DocumentType, RecordStatus, PaperSize, etc.
+│   ├── Enums/                          # RoleSlug, DocumentType, RecordStatus, etc.
 │   ├── Exceptions/                     # ChangeRequestException (a refused change request, shown to the user)
 │   ├── Http/
 │   │   ├── Controllers/                # Gated web controllers (Scan, Record, ChangeRequest, etc.)

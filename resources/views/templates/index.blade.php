@@ -163,11 +163,6 @@
                                                 @if ($layout->parent)
                                                     <small class="d-block text-muted mt-1">Based on “{{ $layout->parent->name }}”</small>
                                                 @endif
-                                                <small class="d-block text-muted mt-1">
-                                                    {{ $layout->paper_size->label() }}
-                                                    ({{ $layout->paperDimensionsLabel() }})
-                                                    &middot; {{ $layout->orientation->label() }}
-                                                </small>
                                                 @if ($layout->sample_path)
                                                     <a class="d-inline-flex align-items-center gap-1 small mt-1"
                                                        href="{{ route('templates.sample', $layout) }}" target="_blank"

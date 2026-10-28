@@ -48,10 +48,10 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('id="deleteSelectedBtn"', escape: false)
                 ->assertSee('id="selectAllFields"', escape: false)
                 ->assertSee('id="deleteFieldsBtn"', escape: false)
-                ->assertSee('id="paperMismatchWarning"', escape: false)
-                ->assertSee('id="paperMismatchMessage"', escape: false)
-                ->assertSeeText('Short / Letter (8.5 × 11 in) · Portrait')
-                ->assertSee('"orientation":"portrait"', escape: false)
+                // No paper label; only notes about the scan, shown when they apply.
+                ->assertDontSee('Short / Letter')
+                ->assertSee('id="scanSidewaysNotice"', escape: false)
+                ->assertSee('id="scanPagesNotice"', escape: false)
                 ->assertSee('id="ocrActionStatus"', escape: false)
                 ->assertSee('maxlength="500"', escape: false)
                 ->assertSee('maxFields: 450', escape: false)
@@ -84,23 +84,16 @@ class DocumentUploadWorkflowTest extends TestCase
         }
     }
 
-    public function test_staff_workspace_uses_the_published_custom_page_dimensions(): void
+    public function test_staff_workspace_knows_the_layouts_page_shape_for_the_sideways_check(): void
     {
         $this->seed(DocumentTemplateSeeder::class);
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
-        $template->update([
-            'paper_size' => 'custom',
-            'orientation' => 'landscape',
-            'custom_width_mm' => 240.5,
-            'custom_height_mm' => 355.6,
-        ]);
+        $template->update(['page_ratio' => 1.47817]);
 
         $this->actingAs(User::factory()->staff()->create())
             ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
             ->assertOk()
-            ->assertSeeText('Custom size')
-            ->assertSeeText('240.5 × 355.6 mm expected')
-            ->assertSee('"aspectRatio":1.478', escape: false);
+            ->assertSee('pageRatio: 1.47817', escape: false);
     }
 
     public function test_staff_workspace_emits_custom_grouping_and_person_box_metadata(): void
@@ -641,8 +634,7 @@ class DocumentUploadWorkflowTest extends TestCase
             'name' => 'Local registry layout',
             'doc_type' => DocumentType::Custom->value,
             'document_type_id' => $type->getKey(),
-            'paper_size' => 'a4',
-            'orientation' => 'portrait',
+            'page_ratio' => 210 / 297,
             'is_active' => true,
             'created_by' => User::factory()->superAdmin()->create()->getKey(),
         ]);

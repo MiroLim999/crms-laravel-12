@@ -35,8 +35,7 @@ class LedgerTemplateAndExportTest extends TestCase
         $this->actingAs(User::factory()->superAdmin()->create())->post(route('templates.store'), [
             'name' => 'Register of births 1950s',
             'doc_type' => DocumentType::Birth->value,
-            'paper_size' => 'letter',
-            'orientation' => 'landscape',
+            'page_ratio' => 11 / 8.5,
             'grouping_mode' => 'auto',
             'fields_json' => json_encode([], JSON_THROW_ON_ERROR),
             'columns_json' => json_encode(self::COLUMNS, JSON_THROW_ON_ERROR),
@@ -59,8 +58,7 @@ class LedgerTemplateAndExportTest extends TestCase
         $this->actingAs(User::factory()->superAdmin()->create())->post(route('templates.store'), [
             'name' => 'Tilted register',
             'doc_type' => DocumentType::Birth->value,
-            'paper_size' => 'letter',
-            'orientation' => 'landscape',
+            'page_ratio' => 11 / 8.5,
             'grouping_mode' => 'auto',
             'fields_json' => json_encode([
                 ['name' => 'Remarks', 'x' => 0.1, 'y' => 0.05, 'width' => 0.3, 'height' => 0.05, 'angle' => -4.26],
@@ -87,8 +85,7 @@ class LedgerTemplateAndExportTest extends TestCase
         $this->actingAs(User::factory()->superAdmin()->create())->post(route('templates.store'), [
             'name' => 'Over-turned',
             'doc_type' => DocumentType::Birth->value,
-            'paper_size' => 'letter',
-            'orientation' => 'landscape',
+            'page_ratio' => 11 / 8.5,
             'grouping_mode' => 'auto',
             'fields_json' => json_encode([['name' => 'A', 'x' => 0.1, 'y' => 0.1, 'width' => 0.2, 'height' => 0.1, 'angle' => 200]], JSON_THROW_ON_ERROR),
         ])->assertSessionHasErrors('fields.0.angle');
@@ -100,8 +97,7 @@ class LedgerTemplateAndExportTest extends TestCase
         $payload = [
             'name' => 'Broken ledger',
             'doc_type' => DocumentType::Birth->value,
-            'paper_size' => 'letter',
-            'orientation' => 'portrait',
+            'page_ratio' => 8.5 / 11,
             'fields_json' => json_encode([], JSON_THROW_ON_ERROR),
             'columns_json' => json_encode(self::COLUMNS, JSON_THROW_ON_ERROR),
         ];
@@ -118,8 +114,7 @@ class LedgerTemplateAndExportTest extends TestCase
         $this->actingAs(User::factory()->superAdmin()->create())->post(route('templates.store'), [
             'name' => 'Clashing names',
             'doc_type' => DocumentType::Birth->value,
-            'paper_size' => 'letter',
-            'orientation' => 'portrait',
+            'page_ratio' => 8.5 / 11,
             'fields_json' => json_encode([[
                 'name' => "child's name", 'x' => 0.1, 'y' => 0.05, 'width' => 0.2, 'height' => 0.05,
             ]], JSON_THROW_ON_ERROR),

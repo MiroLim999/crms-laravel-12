@@ -40,8 +40,7 @@ class TemplateVersioningTest extends TestCase
         return [
             'name' => 'Birth register',
             'doc_type' => DocumentType::Birth->value,
-            'paper_size' => 'letter',
-            'orientation' => 'landscape',
+            'page_ratio' => 11 / 8.5,
             'grouping_mode' => 'auto',
             'fields_json' => json_encode([
                 ['name' => 'Page number', 'x' => 0.6, 'y' => 0.05, 'width' => 0.1, 'height' => 0.05],

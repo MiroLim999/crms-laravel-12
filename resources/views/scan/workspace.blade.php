@@ -8,7 +8,7 @@
          id="layout-navbar" aria-label="Document workspace">
         <div class="document-workspace-topbar__context">
             <strong>Scan: {{ $docType->label() }}</strong>
-            <small>{{ $template->name }} · {{ $template->paper_size->label() }} ({{ $template->paperDimensionsLabel() }}) · {{ $template->orientation->label() }}</small>
+            <small>{{ $template->name }}</small>
         </div>
 
         <nav class="document-flow-steps" id="documentFlowSteps" aria-label="Document processing progress">
@@ -154,6 +154,19 @@
 
             <div class="document-side-panel field-marker-controls-pane">
                 {{--
+                    What Staff should know about the scan itself, shown only when
+                    it applies: it may be sideways, or only its first page is read.
+                --}}
+                <div class="document-scan-notice d-none" id="scanSidewaysNotice" role="alert">
+                    <i class="icon-base bx bx-error" aria-hidden="true"></i>
+                    <span id="scanSidewaysMessage"></span>
+                </div>
+                <div class="document-scan-notice d-none" id="scanPagesNotice" role="status">
+                    <i class="icon-base bx bx-file" aria-hidden="true"></i>
+                    <span id="scanPagesMessage"></span>
+                </div>
+
+                {{--
                     A ledger's grid on this page: the rows start as the template's,
                     Snap to table takes them from the page, and Staff can add, move
                     or remove rows and columns here. The template is not changed.
@@ -232,20 +245,6 @@
                     <x-slot:actions>
                         <span class="badge bg-label-primary" id="fieldCount">0 fields</span>
                     </x-slot:actions>
-
-                    <div class="document-paper-spec">
-                        <i class="icon-base bx bx-file" aria-hidden="true"></i>
-                        <div>
-                            <strong>{{ $template->paper_size->label() }} &middot; {{ $template->orientation->label() }}</strong>
-                            <span>{{ $template->paperDimensionsLabel() }} expected</span>
-                        </div>
-                    </div>
-
-                    <div class="document-paper-warning d-none" id="paperMismatchWarning"
-                         role="alert" aria-live="polite">
-                        <i class="icon-base bx bx-error" aria-hidden="true"></i>
-                        <span id="paperMismatchMessage"></span>
-                    </div>
 
                     <div class="marker-field-bulk-actions">
                         <div class="form-check mb-0">
@@ -761,13 +760,8 @@
         lineStoreUrl: @json(route('documents.pages.lines.store', ['page' => '__PAGE__'])),
         pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
         csrf: @json(csrf_token()),
-        paper: {!! Illuminate\Support\Js::encode([
-            'sizeLabel' => $template->paper_size->label(),
-            'dimensionsLabel' => $template->paperDimensionsLabel(),
-            'orientation' => $template->orientation->value,
-            'orientationLabel' => $template->orientation->label(),
-            'aspectRatio' => $template->paperAspectRatio(),
-        ]) !!},
+        // The layout's page shape (width : height), from its sample.
+        pageRatio: @json($template->page_ratio),
     };
 
     const el = (id) => {
@@ -1289,7 +1283,7 @@
     async function applyDetection(page) {
         // The same pixels the outlines were found on, and that go on to TrOCR.
         await marker.loadFromUrl(page.imageUrl);
-        updatePaperMatchWarning();
+        updateScanNotices();
         fetchSnapLines();
         // The markers and row lines Detect fitted (the page's own rows, unless
         // Staff set theirs by hand), as one change Ctrl+Z can take back.
@@ -2255,24 +2249,29 @@
     }
 
     // ---------------------------------------------------------------- step 1
-    function updatePaperMatchWarning() {
-        const warning = el('paperMismatchWarning');
-        const message = el('paperMismatchMessage');
-        const actualRatio = marker.canvas.width / marker.canvas.height;
-        const actualOrientation = actualRatio >= 1 ? 'landscape' : 'portrait';
-        const orientationMismatch = actualOrientation !== config.paper.orientation;
-        const ratioDifference = Math.abs(actualRatio - config.paper.aspectRatio) / config.paper.aspectRatio;
+    // How many pages the opened file has: only the first is read.
+    let scanPageCount = 1;
 
-        if (!orientationMismatch && ratioDifference <= 0.1) {
-            warning.classList.add('d-none');
-            message.textContent = '';
-            return;
-        }
+    /**
+     * What Staff should know about the scan itself. Any paper size is fine
+     * (markers are page fractions), but a tall scan of wide pages, or the
+     * other way round, is likely sideways; and of a PDF only page 1 is read.
+     */
+    function updateScanNotices() {
+        // Clearly one way or the other: a near-square page is neither.
+        const shape = (ratio) => (ratio > 1.05 ? 'wide' : ratio < 0.95 ? 'tall' : null);
+        const scan = shape(marker.canvas.width / marker.canvas.height);
+        const layout = Number(config.pageRatio) > 0 ? shape(Number(config.pageRatio)) : null;
+        const sideways = scan !== null && layout !== null && scan !== layout;
+        el('scanSidewaysMessage').textContent = sideways
+            ? `This scan is ${scan}, but pages for this layout are ${layout}. It may be sideways: turn it upright and upload it again.`
+            : '';
+        el('scanSidewaysNotice').classList.toggle('d-none', !sideways);
 
-        message.textContent = orientationMismatch
-            ? `This scan looks ${actualOrientation}, but the published template expects ${config.paper.orientation}. The image is not stretched; align the markers carefully or choose an upright scan.`
-            : `This scan's proportions differ from ${config.paper.sizeLabel} (${config.paper.dimensionsLabel}). Check that the correct template and paper size were selected.`;
-        warning.classList.remove('d-none');
+        el('scanPagesMessage').textContent = scanPageCount > 1
+            ? `This PDF has ${scanPageCount} pages. Only page 1 is read; save each page as its own file to read the others.`
+            : '';
+        el('scanPagesNotice').classList.toggle('d-none', scanPageCount <= 1);
     }
 
     async function openDocument(file) {
@@ -2290,8 +2289,9 @@
         try {
             scanFile = file;
             clearDetection();
-            await marker.load(file);
-            updatePaperMatchWarning();
+            const measurement = await marker.load(file);
+            scanPageCount = Number(measurement?.pageCount) || 1;
+            updateScanNotices();
             el('selectedFileName').textContent = file.name;
             showStep('mark');
             resetFieldHistory();

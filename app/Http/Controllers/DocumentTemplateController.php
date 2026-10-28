@@ -3,8 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Enums\DocumentType;
-use App\Enums\PageOrientation;
-use App\Enums\PaperSize;
 use App\Jobs\TestTemplateLayout;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTemplateField;
@@ -74,8 +72,6 @@ class DocumentTemplateController extends Controller
             'fields' => $type->defaultFields(),
             'columns' => [],
             'ruledYs' => [],
-            'paperSizes' => PaperSize::cases(),
-            'orientations' => PageOrientation::cases(),
         ]);
     }
 
@@ -221,8 +217,6 @@ class DocumentTemplateController extends Controller
             'parent' => $template->parent()->first(['id', 'name']),
             'columns' => array_values($template->columns ?? []),
             'ruledYs' => array_values($template->ruled_ys ?? []),
-            'paperSizes' => PaperSize::cases(),
-            'orientations' => PageOrientation::cases(),
         ]);
     }
 
@@ -254,10 +248,7 @@ class DocumentTemplateController extends Controller
                 'name' => $validated['name'],
                 'doc_type' => $documentType->legacyType()->value,
                 'document_type_id' => $documentType->getKey(),
-                'paper_size' => $validated['paper_size'],
-                'orientation' => $validated['orientation'],
-                'custom_width_mm' => $validated['custom_width_mm'],
-                'custom_height_mm' => $validated['custom_height_mm'],
+                'page_ratio' => $validated['page_ratio'],
                 'description' => $validated['description'] ?? null,
                 'grouping_mode' => $validated['grouping_mode'],
                 'columns' => $validated['columns'],
@@ -453,8 +444,6 @@ class DocumentTemplateController extends Controller
                 old: [
                     'name' => $template->name,
                     'document_type' => $template->documentTypeDefinition?->key ?? $template->doc_type->value,
-                    'paper_size' => $template->paper_size->value,
-                    'orientation' => $template->orientation->value,
                     'was_published' => $wasPublished,
                     'sample_document' => $template->sample_original_name,
                 ],
@@ -517,10 +506,8 @@ class DocumentTemplateController extends Controller
                 File::types(['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp'])
                     ->max(20 * 1024),
             ],
-            'paper_size' => ['required', Rule::enum(PaperSize::class)],
-            'orientation' => ['required', Rule::enum(PageOrientation::class)],
-            'custom_width_mm' => ['nullable', 'required_if:paper_size,custom', 'numeric', 'min:50', 'max:2000'],
-            'custom_height_mm' => ['nullable', 'required_if:paper_size,custom', 'numeric', 'min:50', 'max:2000'],
+            // The page's width : height as the builder drew it: its sample's shape.
+            'page_ratio' => ['nullable', 'numeric', 'min:0.1', 'max:10'],
             'grouping_mode' => ['required', Rule::in(['auto', 'custom'])],
             'publish' => ['sometimes', 'boolean'],
             // A ruled register may be described entirely by its ledger grid.
@@ -563,21 +550,17 @@ class DocumentTemplateController extends Controller
             'sample_document.mimes' => 'The sample must be a PDF, PNG, JPG, WEBP or BMP file.',
         ]);
 
-        $validated['custom_width_mm'] ??= null;
-        $validated['custom_height_mm'] ??= null;
+        // Without one (an older form or an API call), the shape it had stays.
+        $validated['page_ratio'] = round((float) ($validated['page_ratio']
+            ?? $template?->page_ratio ?? DocumentTemplate::DEFAULT_PAGE_RATIO), 5);
+        $ratio = $validated['page_ratio'];
         $validated['fields'] = array_values($validated['fields'] ?? []);
-        $ratio = $this->pageRatio($validated);
         [$validated['columns'], $validated['ruled_ys']] = $this->checkedLedgerGrid(
             $validated['columns'] ?? [],
             $validated['ruled_ys'] ?? [],
             $validated['fields'],
             $ratio,
         );
-
-        if ($validated['paper_size'] !== PaperSize::Custom->value) {
-            $validated['custom_width_mm'] = null;
-            $validated['custom_height_mm'] = null;
-        }
 
         $fieldErrors = [];
         foreach ($validated['fields'] as $index => $field) {
@@ -666,27 +649,6 @@ class DocumentTemplateController extends Controller
             }
             $request->merge([$key => is_array($value) ? $value : []]);
         }
-    }
-
-    /**
-     * The page's width : height, from its paper size and orientation.
-     *
-     * @param  array<string, mixed>  $validated
-     */
-    private function pageRatio(array $validated): float
-    {
-        $paper = PaperSize::from($validated['paper_size']);
-        $orientation = PageOrientation::from($validated['orientation']);
-
-        if ($paper !== PaperSize::Custom) {
-            return $paper->aspectRatio($orientation);
-        }
-
-        // Custom sizes are entered upright; landscape swaps them.
-        $width = max(1.0, (float) ($validated['custom_width_mm'] ?? 210));
-        $height = max(1.0, (float) ($validated['custom_height_mm'] ?? 297));
-
-        return $orientation === PageOrientation::Portrait ? $width / $height : $height / $width;
     }
 
     /**
@@ -908,11 +870,7 @@ class DocumentTemplateController extends Controller
             'template.activated',
             $template,
             old: ['previous_active' => $previous->pluck('name')->values()->all()],
-            new: [
-                'active' => $template->name,
-                'paper_size' => $template->paper_size->value,
-                'orientation' => $template->orientation->value,
-            ],
+            new: ['active' => $template->name],
             description: "Published template '{$template->name}' for {$template->typeLabel()}.",
         );
     }
@@ -964,10 +922,7 @@ class DocumentTemplateController extends Controller
             'name' => $validated['name'],
             'doc_type' => $documentType->legacyType()->value,
             'document_type_id' => $documentType->getKey(),
-            'paper_size' => $validated['paper_size'],
-            'orientation' => $validated['orientation'],
-            'custom_width_mm' => $validated['custom_width_mm'],
-            'custom_height_mm' => $validated['custom_height_mm'],
+            'page_ratio' => $validated['page_ratio'],
             'description' => $validated['description'] ?? null,
             'grouping_mode' => $validated['grouping_mode'],
             'columns' => $validated['columns'],
@@ -991,9 +946,6 @@ class DocumentTemplateController extends Controller
             $parent ? 'template.versioned' : 'template.created',
             $template,
             new: ['name' => $template->name, 'document_type' => $documentType->key,
-                'paper_size' => $validated['paper_size'], 'orientation' => $validated['orientation'],
-                'custom_width_mm' => $validated['custom_width_mm'],
-                'custom_height_mm' => $validated['custom_height_mm'],
                 'field_count' => count($validated['fields']),
                 'column_count' => count($validated['columns'] ?? []),
                 'ruled_line_count' => count($validated['ruled_ys'] ?? []),
@@ -1061,8 +1013,8 @@ class DocumentTemplateController extends Controller
 
     /**
      * Whether a save changes what Staff read with the layout: its markers,
-     * field settings, row lines, paper or person rows. Name, notes and sample
-     * only describe it.
+     * field settings, row lines or person rows. Name, notes and sample (with
+     * its page shape) only describe it.
      *
      * @param  array<string, mixed>  $validated
      */
@@ -1071,10 +1023,6 @@ class DocumentTemplateController extends Controller
         $template->loadMissing('fields');
 
         $saved = $this->layoutSignature(
-            $template->paper_size->value,
-            $template->orientation->value,
-            $template->custom_width_mm,
-            $template->custom_height_mm,
             $template->grouping_mode,
             $template->columns ?? [],
             $template->ruled_ys ?? [],
@@ -1092,10 +1040,6 @@ class DocumentTemplateController extends Controller
         );
 
         return $saved !== $this->layoutSignature(
-            $validated['paper_size'],
-            $validated['orientation'],
-            $validated['custom_width_mm'],
-            $validated['custom_height_mm'],
             $validated['grouping_mode'],
             $validated['columns'] ?? [],
             $validated['ruled_ys'] ?? [],
@@ -1109,10 +1053,6 @@ class DocumentTemplateController extends Controller
      * @param  list<array<string, mixed>>  $fields
      */
     private function layoutSignature(
-        string $paper,
-        string $orientation,
-        ?float $width,
-        ?float $height,
         string $grouping,
         array $columns,
         array $ruled,
@@ -1122,7 +1062,6 @@ class DocumentTemplateController extends Controller
         $angle = fn ($value) => round((float) ($value ?? 0), 1);
 
         return json_encode([
-            'paper' => [$paper, $orientation, $paper === PaperSize::Custom->value ? [$round($width), $round($height)] : null],
             'grouping' => $grouping,
             'columns' => array_map(fn (array $column) => [
                 trim((string) $column['name']),

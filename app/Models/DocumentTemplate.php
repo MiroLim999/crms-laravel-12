@@ -3,8 +3,6 @@
 namespace App\Models;
 
 use App\Enums\DocumentType;
-use App\Enums\PageOrientation;
-use App\Enums\PaperSize;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -12,10 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property DocumentType $doc_type
- * @property PaperSize $paper_size
- * @property PageOrientation $orientation
- * @property float|null $custom_width_mm
- * @property float|null $custom_height_mm
+ * @property float|null $page_ratio
  * @property string $grouping_mode
  * @property bool $is_active
  * @property int|null $document_type_id
@@ -32,12 +27,18 @@ class DocumentTemplate extends Model
 {
     use HasFactory;
 
+    /**
+     * The page shape (width : height) a layout without one is drawn on: a
+     * Short / Letter sheet lying wide, as most registers are scanned.
+     */
+    public const DEFAULT_PAGE_RATIO = 11 / 8.5;
+
     protected $attributes = [
         'grouping_mode' => 'auto',
     ];
 
     protected $fillable = [
-        'name', 'doc_type', 'document_type_id', 'paper_size', 'orientation', 'custom_width_mm', 'custom_height_mm', 'description',
+        'name', 'doc_type', 'document_type_id', 'page_ratio', 'description',
         'grouping_mode', 'columns', 'ruled_ys',
         'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
         'is_active', 'created_by', 'parent_id',
@@ -47,10 +48,7 @@ class DocumentTemplate extends Model
     {
         return [
             'doc_type' => DocumentType::class,
-            'paper_size' => PaperSize::class,
-            'orientation' => PageOrientation::class,
-            'custom_width_mm' => 'float',
-            'custom_height_mm' => 'float',
+            'page_ratio' => 'float',
             'grouping_mode' => 'string',
             'columns' => 'array',
             'ruled_ys' => 'array',
@@ -189,43 +187,6 @@ class DocumentTemplate extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
-    }
-
-    /** @return array{width: float, height: float} */
-    public function paperDimensions(): array
-    {
-        $portrait = $this->paper_size === PaperSize::Custom
-            ? [
-                'width' => $this->custom_width_mm ?? 210.0,
-                'height' => $this->custom_height_mm ?? 297.0,
-            ]
-            : $this->paper_size->portraitDimensions();
-
-        return $this->orientation === PageOrientation::Portrait
-            ? $portrait
-            : ['width' => $portrait['height'], 'height' => $portrait['width']];
-    }
-
-    public function paperDimensionsLabel(): string
-    {
-        if ($this->paper_size !== PaperSize::Custom) {
-            return $this->paper_size->dimensionsLabel();
-        }
-
-        return $this->formatMillimetres($this->custom_width_mm ?? 210.0)
-            .' × '.$this->formatMillimetres($this->custom_height_mm ?? 297.0).' mm';
-    }
-
-    public function paperAspectRatio(): float
-    {
-        $dimensions = $this->paperDimensions();
-
-        return $dimensions['width'] / $dimensions['height'];
-    }
-
-    private function formatMillimetres(float $value): string
-    {
-        return rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.');
     }
 
     public function typeLabel(): string

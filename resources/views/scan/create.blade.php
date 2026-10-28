@@ -42,9 +42,7 @@
 
                         @if ($template)
                             <p class="text-muted small flex-grow-1">
-                                {{ $template->name }} &middot; {{ $template->fields->count() }} fields<br>
-                                {{ $template->paper_size->label() }} &middot; {{ $template->orientation->label() }}
-                                <span class="text-muted">&middot; {{ $template->paperDimensionsLabel() }}</span>
+                                {{ $template->name }} &middot; {{ $template->fields->count() }} fields
                             </p>
                             <a href="{{ route('documents.workspace', ['type' => $type->value]) }}"
                                class="btn btn-primary">

@@ -41,8 +41,7 @@ class TemplateBuilderGridChecksTest extends TestCase
         return [
             'name' => 'Checked ledger',
             'doc_type' => DocumentType::Birth->value,
-            'paper_size' => 'letter',
-            'orientation' => 'landscape',
+            'page_ratio' => 11 / 8.5,
             'fields_json' => json_encode([], JSON_THROW_ON_ERROR),
             'columns_json' => json_encode(self::COLUMNS, JSON_THROW_ON_ERROR),
             'ruled_ys_json' => json_encode([0.2, 0.35, 0.5, 0.65, 0.8], JSON_THROW_ON_ERROR),

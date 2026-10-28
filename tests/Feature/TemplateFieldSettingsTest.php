@@ -38,8 +38,7 @@ class TemplateFieldSettingsTest extends TestCase
         return [
             'name' => 'Death register',
             'doc_type' => DocumentType::Death->value,
-            'paper_size' => 'letter',
-            'orientation' => 'landscape',
+            'page_ratio' => 11 / 8.5,
             'grouping_mode' => 'auto',
             'fields_json' => json_encode([[
                 'name' => 'Registrar', 'x' => 0.6, 'y' => 0.05, 'width' => 0.2, 'height' => 0.05,
@@ -201,7 +200,7 @@ class TemplateFieldSettingsTest extends TestCase
     {
         $template = DocumentTemplate::create([
             'name' => 'Old ledger', 'doc_type' => DocumentType::Death->value,
-            'paper_size' => 'letter', 'orientation' => 'landscape',
+            'page_ratio' => 11 / 8.5,
             'columns' => [
                 ['name' => 'No.', 'box' => [0.05, 0.2, 0.05, 0.6], 'role' => 'entry'],
                 ['name' => 'Deceased', 'box' => [0.1, 0.2, 0.2, 0.6], 'role' => 'name'],
