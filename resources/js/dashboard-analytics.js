@@ -189,11 +189,23 @@ function volumeTooltip(titles) {
   };
 }
 
+// A pressed legend button is the one document type being inspected. With no
+// pressed button the complete chart is shown.
+function focusedVolumeSeries() {
+  const button = document.querySelector('#panel-trend [data-dashboard-series][aria-pressed="true"]');
+  if (!button) return null;
+
+  const index = Number(button.dataset.dashboardSeries);
+  return Number.isInteger(index) ? index : null;
+}
+
 function renderVolume(data) {
   const target = document.getElementById('dashboard-volume-chart');
   if (!target || !data) return;
 
-  const series = Array.isArray(data.series) ? data.series : [];
+  const focused = focusedVolumeSeries();
+  const allSeries = Array.isArray(data.series) ? data.series : [];
+  const series = focused === null ? allSeries : allSeries.filter((item, index) => index === focused);
   const labels = Array.isArray(data.labels) ? data.labels : [];
   const titles = Array.isArray(data.titles) ? data.titles : labels;
   const peak = Math.max(0, ...series.flatMap(item => (item.data || []).map(Number)));
@@ -207,7 +219,7 @@ function renderVolume(data) {
   draw(target, {
     chart: {
       type: 'area',
-      height: portraitDesk ? 380 : 350,
+      height: portraitDesk ? 340 : 300,
       fontFamily: theme.font,
       foreColor: theme.text,
       parentHeightOffset: 0,
@@ -231,7 +243,9 @@ function renderVolume(data) {
       strokeDashArray: 0,
       xaxis: { lines: { show: false } },
       yaxis: { lines: { show: true } },
-      padding: { top: -10, left: 6, right: 10, bottom: 0 },
+      // Left keeps a small gap between the y-axis numbers and the plot. None
+      // on the right: ApexCharts already leaves room there for the last label.
+      padding: { top: -10, left: 6, right: 0, bottom: 0 },
     },
     legend: { show: false },
     markers: {
@@ -511,6 +525,9 @@ async function refreshPanel(panel, query, trigger) {
 
   const hadFocus = card.contains(document.activeElement);
   const chartDataWasOpen = card.querySelector('details.dashboard-chart-data')?.open === true;
+  const focusedVolumeSeriesName = card
+    .querySelector('[data-dashboard-series][aria-pressed="true"]')
+    ?.dataset.dashboardSeriesName;
   closeMenu(trigger);
 
   pending.get(panel)?.abort();
@@ -537,6 +554,13 @@ async function refreshPanel(panel, query, trigger) {
       const freshDisclosure = freshCard.querySelector('details.dashboard-chart-data');
       if (freshDisclosure) freshDisclosure.open = true;
     }
+
+    if (focusedVolumeSeriesName) {
+      const matchingButton = [...freshCard.querySelectorAll('[data-dashboard-series]')]
+        .find(button => button.dataset.dashboardSeriesName === focusedVolumeSeriesName);
+      if (matchingButton) matchingButton.setAttribute('aria-pressed', 'true');
+    }
+    syncVolumeLegend(freshCard);
 
     const chartId = panels[panel].chart;
     waiting.get(chartId)?.();
@@ -638,9 +662,54 @@ function setupChartData() {
   }, true);
 }
 
+// Keep the toggle text accurate for pointer and keyboard users. This also
+// works on a freshly fetched trend panel before it replaces the old one.
+function syncVolumeLegend(root = document) {
+  const panel = root.matches?.('#panel-trend') ? root : root.querySelector?.('#panel-trend');
+  const buttons = [...(panel?.querySelectorAll('[data-dashboard-series]') || [])];
+  const focused = buttons.find(button => button.getAttribute('aria-pressed') === 'true');
+
+  buttons.forEach(button => {
+    const name = button.dataset.dashboardSeriesName || button.textContent.trim();
+    const isFocused = button === focused;
+    button.title = isFocused ? 'Show all document types' : `Focus on ${name}`;
+    button.setAttribute('aria-label', isFocused
+      ? `${name} is focused. Show all document types`
+      : `Focus chart on ${name}`);
+  });
+}
+
+// Selecting a document type isolates it and rescales the graph. Selecting the
+// focused type again restores all series. Delegation survives a panel swap.
+function setupVolumeLegend() {
+  syncVolumeLegend();
+
+  document.addEventListener('click', event => {
+    const button = event.target.closest?.('#panel-trend [data-dashboard-series]');
+    if (!button) return;
+
+    const wasFocused = button.getAttribute('aria-pressed') === 'true';
+    const buttons = [...document.querySelectorAll('#panel-trend [data-dashboard-series]')];
+    buttons.forEach(item => item.setAttribute('aria-pressed', 'false'));
+    if (!wasFocused) button.setAttribute('aria-pressed', 'true');
+
+    syncVolumeLegend();
+    renderVolume(readChartData()?.volume);
+
+    const status = document.querySelector('[data-dashboard-status]');
+    if (status) {
+      const name = button.dataset.dashboardSeriesName || button.textContent.trim();
+      status.textContent = wasFocused
+        ? 'The digitization chart now shows all document types.'
+        : `The digitization chart is focused on ${name}. Select it again to show all document types.`;
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   setupPeriodFilters();
   setupChartData();
+  setupVolumeLegend();
   countUp();
 
   const data = readChartData();

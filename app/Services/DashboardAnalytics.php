@@ -157,11 +157,12 @@ class DashboardAnalytics
     public function oversight(array $scopes): array
     {
         $entries = $this->typeEntries(DocumentTypeDefinition::ordered()->values());
+        $first = $this->firstSubmittedAt();
 
         return [
-            'headline' => $this->headline($scopes['trend']),
+            'headline' => $this->headline($scopes['trend'], $first),
             'archive_types' => $this->archiveByType($entries),
-            'trend' => $this->recordTrend($scopes['trend'], $entries),
+            'trend' => $this->recordTrend($scopes['trend'], $entries, $first),
             'ocr_quality' => $this->ocrQuality($scopes['ocr']),
             'change_requests' => $this->changeRequestSummary($scopes['requests']),
             'recent_changes' => $this->recentChanges(),
@@ -198,13 +199,29 @@ class DashboardAnalytics
     }
 
     /**
+     * When the first record was archived (UTC), or null for an empty archive.
+     */
+    private function firstSubmittedAt(): ?CarbonImmutable
+    {
+        $first = CivilRecord::query()
+            ->where('status', RecordStatus::Submitted->value)
+            ->min('submitted_at');
+
+        return $first === null ? null : CarbonImmutable::parse($first, 'UTC');
+    }
+
+    /**
      * The all-time and this-month totals, when the newest record came in, and
      * the trend panel's period measured against the one before it.
      *
+     * The comparison is only fair once the archive covers the whole earlier
+     * period: against a period the archive only partly covers, any period
+     * would look like growth. Until then `comparable` is false.
+     *
      * @param  array<string, mixed>  $scope  the trend panel's
-     * @return array<string, int|float|CarbonInterface|null>
+     * @return array<string, int|float|bool|CarbonInterface|null>
      */
-    private function headline(array $scope): array
+    private function headline(array $scope, ?CarbonImmutable $first): array
     {
         $current = $this->records($scope)->count();
         $previous = $this->submittedBetween($scope['previous_db_start'], $scope['previous_db_end'])->count();
@@ -226,6 +243,7 @@ class DashboardAnalytics
             'period_records' => $current,
             'previous_records' => $previous,
             'change' => $previous > 0 ? round(($current - $previous) / $previous * 100, 1) : null,
+            'comparable' => $first !== null && $first <= $scope['previous_db_start'],
         ];
     }
 
@@ -315,9 +333,9 @@ class DashboardAnalytics
     /**
      * @param  array<string, mixed>  $scope
      * @param  array<int, array{key: string, name: string, color: string, type: DocumentTypeDefinition}>  $entries
-     * @return array{mode: string, labels: list<string>, titles: list<string>, totals: list<int>, series: list<array{name: string, color: string, data: list<int>}>, starts_at: CarbonImmutable|null}
+     * @return array{mode: string, labels: list<string>, titles: list<string>, totals: list<int>, series: list<array{name: string, color: string, data: list<int>}>, starts_at: CarbonImmutable|null, range_label: string}
      */
-    private function recordTrend(array $scope, array $entries): array
+    private function recordTrend(array $scope, array $entries, ?CarbonImmutable $first): array
     {
         $daily = $scope['days'] <= self::DAILY_LIMIT_DAYS;
         $unit = $daily ? 'day' : 'month';
@@ -330,12 +348,9 @@ class DashboardAnalytics
         // Nothing was archived before the first record, so the chart starts at
         // its day or month instead of drawing a run of zeros.
         $startsAt = null;
-        $first = CivilRecord::query()
-            ->where('status', RecordStatus::Submitted->value)
-            ->min('submitted_at');
 
         if ($first !== null) {
-            $firstLocal = CarbonImmutable::parse($first, 'UTC')->setTimezone($scope['timezone']);
+            $firstLocal = $first->setTimezone($scope['timezone']);
 
             if ($firstLocal->startOf($unit) > $cursor) {
                 $cursor = $firstLocal->startOf($unit);
@@ -388,6 +403,12 @@ class DashboardAnalytics
             'totals' => array_column($values, 'total'),
             'series' => $series,
             'starts_at' => $values === [] ? null : $startsAt,
+            // The dates the chart covers: from the first record when the
+            // period opens before it, so the header matches the chart.
+            'range_label' => $this->shortRangeLabel(
+                $values !== [] && $startsAt ? $startsAt->startOfDay() : $scope['start'],
+                $scope['end'],
+            ),
         ];
     }
 

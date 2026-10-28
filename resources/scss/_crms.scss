@@ -5074,6 +5074,73 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-radius: 50%;
 }
 
+// The trend key doubles as a single-series focus control. A selected type is
+// highlighted; the remaining types stay available but recede until focus is cleared.
+.dashboard-legend__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  margin: -.2rem -.45rem;
+  padding: .2rem .45rem;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: .375rem;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color .16s ease, box-shadow .16s ease, color .16s ease, opacity .16s ease;
+
+  &:hover {
+    background: rgba(var(--crms-ink-rgb), .05);
+  }
+
+  &:focus-visible {
+    outline: 0;
+    box-shadow: 0 0 0 .2rem rgba(var(--bs-primary-rgb), .2);
+  }
+
+  &[aria-pressed="true"] {
+    color: var(--bs-heading-color);
+    background: rgba(var(--bs-primary-rgb), .09);
+    box-shadow: inset 0 0 0 1px rgba(var(--bs-primary-rgb), .14);
+    font-weight: 600;
+  }
+}
+
+.dashboard-legend:has(.dashboard-legend__toggle[aria-pressed="true"])
+.dashboard-legend__toggle[aria-pressed="false"] {
+  color: var(--bs-secondary-color);
+  opacity: .52;
+
+  &:hover {
+    opacity: .85;
+  }
+
+  .dashboard-legend__dot {
+    background: transparent;
+    box-shadow: inset 0 0 0 2px var(--dashboard-type-color, var(--bs-primary));
+  }
+}
+
+// The trend's total for the period, read before the chart.
+#panel-trend .dashboard-panel__meta {
+  align-items: baseline;
+}
+
+.dashboard-trend-total {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .4rem;
+
+  strong {
+    color: var(--bs-heading-color);
+    font-size: 1.5rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+}
+
 // The trend's change against the period before it.
 .dashboard-delta {
   display: inline-flex;
@@ -5686,8 +5753,13 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   max-inline-size: 100%;
 }
 
+// Keep equal to the volume chart's height in dashboard-analytics.js.
+// The chart reaches part way into the card's side padding, so the plot is
+// wider while the labels at either end stay clear of the card's edge.
 .dashboard-chart--volume {
-  min-block-size: 21.875rem;
+  min-block-size: 18.75rem;
+  max-inline-size: none;
+  margin-inline: -.75rem;
 }
 
 .dashboard-chart--radar {
@@ -6305,12 +6377,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   margin-inline: auto;
 }
 
-.dashboard-chart-note {
-  margin-block-start: .5rem;
-  color: var(--bs-secondary-color);
-  font-size: .75rem;
-}
-
 // OCR gauge and direct quality signals.
 .dashboard-quality {
   display: grid;
@@ -6858,7 +6924,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 @media (min-width: 992px) and (orientation: portrait) {
   .dashboard-chart--volume {
-    min-block-size: 23.75rem;
+    min-block-size: 21.25rem;
   }
 }
 
@@ -6888,8 +6954,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     min-block-size: 0;
   }
 
+  // The card's padding is narrower here, so the chart reaches less far into it.
   .dashboard-chart--volume {
     min-block-size: 18.5rem;
+    margin-inline: -.5rem;
   }
 
   .dashboard-chart--radial {
@@ -7035,7 +7103,8 @@ $dashboard-reveal-step: 40ms;
   .dashboard-scan__action i,
   .dashboard-panel--loading,
   .dashboard-chart-data>summary,
-  .dashboard-chart-data__chevron {
+  .dashboard-chart-data__chevron,
+  .dashboard-legend__toggle {
     transition: none;
   }
 

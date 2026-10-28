@@ -309,8 +309,10 @@
             <div class="col-12 col-lg-8 dashboard-reveal" style="--dashboard-reveal: 3">
                 <x-dashboard.panel panel="trend" title="Digitization Volume & Trend">
                     <x-slot:badge>
-                        {{-- Compare periods of equal length. --}}
-                        @if ($headline['change'] !== null)
+                        {{-- Compare periods of equal length, and only once the archive
+                             covers all of the earlier one; before that any period would
+                             look like growth. --}}
+                        @if ($headline['comparable'] && $headline['change'] !== null)
                             <span class="dashboard-delta dashboard-delta--{{ $headline['change'] >= 0 ? 'up' : 'down' }}"
                                   title="{{ $comparisonNote }}">
                                 @if ($headline['change'] >= 0)
@@ -320,26 +322,34 @@
                                 @endif
                                 {{ $headline['change'] >= 0 ? '+' : '' }}{{ $percent($headline['change']) }} vs {{ $trendScope['comparison'] }}
                             </span>
-                        @elseif ($headline['period_records'] > 0)
+                        @elseif ($headline['comparable'] && $headline['period_records'] > 0)
                             <span class="dashboard-delta" title="{{ $comparisonNote }}">
                                 None in {{ $trendScope['comparison'] }}
                             </span>
                         @endif
                     </x-slot:badge>
                     <x-slot:meta>
-                        <span>
-                            <strong>{{ number_format($headline['period_records']) }}</strong> submitted
-                            · {{ $trend['mode'] === 'day' ? 'by day' : 'by month' }} · {{ $trendScope['short_label'] }}
-                        </span>
+                        <span class="dashboard-trend-total"><strong data-dashboard-count>{{ number_format($headline['period_records']) }}</strong> {{ $headline['period_records'] === 1 ? 'record' : 'records' }} submitted</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{{ $trend['range_label'] }}</span>
                     </x-slot:meta>
                     <x-slot:tools>
                         @if ($trend['series'] !== [])
-                            <ul class="dashboard-legend" aria-label="Document types on the chart">
+                            {{-- Selecting a type isolates its graph. Selecting it again
+                                 restores the complete chart. --}}
+                            <ul class="dashboard-legend"
+                                aria-label="Chart series. Select a document type to focus its graph.">
                                 @foreach ($trend['series'] as $series)
                                     <li>
-                                        <span class="dashboard-legend__dot" aria-hidden="true"
-                                              style="--dashboard-type-color: {{ $series['color'] }}"></span>
-                                        {{ $series['name'] }}
+                                        <button type="button" class="dashboard-legend__toggle"
+                                                aria-pressed="false"
+                                                data-dashboard-series="{{ $loop->index }}"
+                                                data-dashboard-series-name="{{ $series['name'] }}"
+                                                title="Focus on {{ $series['name'] }}">
+                                            <span class="dashboard-legend__dot" aria-hidden="true"
+                                                  style="--dashboard-type-color: {{ $series['color'] }}"></span>
+                                            {{ $series['name'] }}
+                                        </button>
                                     </li>
                                 @endforeach
                             </ul>
@@ -352,13 +362,6 @@
                     <div id="dashboard-volume-chart" class="dashboard-chart dashboard-chart--volume"
                          aria-label="{{ $trend['mode'] === 'day' ? 'Daily' : 'Monthly' }} digitization volume by document type"></div>
 
-                    @if ($trend['starts_at'])
-                        <p class="dashboard-chart-note mb-0">
-                            The first archived record is from {{ $trend['starts_at']->format('j M Y') }},
-                            so the chart starts there.
-                        </p>
-                    @endif
-
                     {{-- The table drops down below the bar and floats over what is
                          under the card, so this card and its neighbours keep their size. --}}
                     @if ($trend['series'] !== [])
@@ -368,7 +371,7 @@
                                     <i class="icon-base bx bx-data" aria-hidden="true"></i>
                                     <span>Chart data</span>
                                     <span class="dashboard-chart-data__count">
-                                        {{ number_format(count($trend['labels'])) }} {{ count($trend['labels']) === 1 ? 'point' : 'points' }}
+                                        {{ number_format(count($trend['labels'])) }} {{ str($trend['mode'])->plural(count($trend['labels'])) }}
                                     </span>
                                 </span>
                                 <span class="dashboard-chart-data__action" aria-hidden="true">

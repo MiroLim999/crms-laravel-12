@@ -121,11 +121,13 @@ class AnalyticsDashboardTest extends TestCase
             ->get(route('dashboard'))
             ->assertOk()
             ->assertSee('Showing <strong>1 Sep 2025 – 11 Aug 2026</strong>', escape: false)
-            ->assertSee('<strong>1</strong> submitted', escape: false)
-            ->assertSee('· by month ·');
+            ->assertSee('1</strong> record submitted', escape: false)
+            ->assertDontSee('by month');
 
         $scope = $response->viewData('scopes')['trend'];
         $analytics = $response->viewData('analytics');
+        // The archive is older than the period, so the chart covers all of it.
+        $this->assertSame('1 Sep 2025 – 11 Aug 2026', $analytics['trend']['range_label']);
 
         $this->assertSame('365', $scope['period']);
         $this->assertSame('Last 12 months', $scope['badge']);
@@ -160,7 +162,7 @@ class AnalyticsDashboardTest extends TestCase
         $this->assertSame('#2563eb', $types[1]['color']);
 
         // The trend card counts only its own period.
-        $response->assertSee('<strong>2</strong> submitted', escape: false);
+        $response->assertSee('2</strong> records submitted', escape: false);
     }
 
     public function test_the_period_filter_scopes_every_period_chart(): void
@@ -191,8 +193,9 @@ class AnalyticsDashboardTest extends TestCase
             ->get(route('dashboard', $this->everyPanel(['period' => '30'])))
             ->assertOk()
             ->assertSee('Showing <strong>13 Jul 2026 – 11 Aug 2026</strong>', escape: false)
-            ->assertSee('<strong>1</strong> submitted', escape: false)
-            ->assertSee('· by day ·');
+            ->assertSee('1</strong> record submitted', escape: false)
+            ->assertSee('13 Jul – 11 Aug 2026')
+            ->assertDontSee('by day');
 
         $analytics = $response->viewData('analytics');
         $this->assertSame('Last 30 days', $response->viewData('scopes')['trend']['badge']);
@@ -208,7 +211,7 @@ class AnalyticsDashboardTest extends TestCase
         $response = $this->actingAs($admin)
             ->get(route('dashboard', $this->everyPanel(['period' => 'custom', 'from' => '2026-05-01', 'to' => '2026-06-30'])))
             ->assertOk()
-            ->assertSee('<strong>1</strong> submitted', escape: false);
+            ->assertSee('1</strong> record submitted', escape: false);
 
         $analytics = $response->viewData('analytics');
         $this->assertSame('1 May 2026 – 30 Jun 2026', $response->viewData('scopes')['trend']['badge']);
@@ -230,7 +233,8 @@ class AnalyticsDashboardTest extends TestCase
         $staff = User::factory()->staff()->create();
         $admin = User::factory()->admin()->create();
 
-        foreach (['2026-08-01', '2026-08-10', '2026-07-01', '2026-06-05', '2025-06-15'] as $day) {
+        // The archive opens on 1 Aug 2024, before every earlier period below.
+        foreach (['2026-08-01', '2026-08-10', '2026-07-01', '2026-06-05', '2025-06-15', '2024-08-01'] as $day) {
             $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse($day.' 02:00:00')]);
         }
 
@@ -250,6 +254,28 @@ class AnalyticsDashboardTest extends TestCase
         $this->actingAs($admin)
             ->get(route('dashboard', ['trend_period' => 'custom', 'trend_from' => '2025-06-01', 'trend_to' => '2025-06-30']))
             ->assertSee('None in the previous 30 days');
+    }
+
+    public function test_the_trend_badge_waits_until_the_archive_covers_the_earlier_period(): void
+    {
+        Carbon::setTestNow('2026-08-11 04:00:00');
+        $staff = User::factory()->staff()->create();
+        $admin = User::factory()->admin()->create();
+
+        // The archive opens on 20 Jul 2026, inside the last 30 days.
+        foreach (['2026-07-20', '2026-08-05'] as $day) {
+            $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse($day.' 02:00:00')]);
+        }
+
+        // Against a year the archive never saw, a comparison says nothing.
+        $response = $this->actingAs($admin)->get(route('dashboard'))->assertOk();
+        $this->assertFalse($response->viewData('analytics')['headline']['comparable']);
+        $response->assertDontSee('the same dates last year');
+
+        // The same for the 30 days before 13 Jul, which all predate the archive.
+        $response = $this->actingAs($admin)->get(route('dashboard', ['trend_period' => '30']))->assertOk();
+        $this->assertFalse($response->viewData('analytics')['headline']['comparable']);
+        $response->assertDontSee('the previous 30 days');
     }
 
     public function test_the_correction_rate_counts_only_changes_made_while_verifying(): void
@@ -317,11 +343,14 @@ class AnalyticsDashboardTest extends TestCase
         $staff = User::factory()->staff()->create();
         $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-06-15 02:00:00')]);
 
+        // The header gives the dates the chart covers, not the period's.
         $trend = $this->actingAs(User::factory()->admin()->create())
             ->get(route('dashboard'))
-            ->assertSee('The first archived record is from 15 Jun 2026')
+            ->assertSee('15 Jun – 11 Aug 2026')
+            ->assertDontSee('The first archived record')
             ->viewData('analytics')['trend'];
 
+        $this->assertSame('15 Jun – 11 Aug 2026', $trend['range_label']);
         $this->assertSame(['Jun 2026', 'Jul 2026', 'Aug 2026'], $trend['labels']);
         // Death and Marriage have no records, so they get no flat line at zero.
         $this->assertSame(['Birth'], array_column($trend['series'], 'name'));
