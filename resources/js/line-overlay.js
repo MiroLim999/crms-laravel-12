@@ -610,7 +610,7 @@ export class LineOverlay {
     _bindEditEvents() {
         this._onPointerDown = (event) => {
             const editing = this.editing;
-            if (!editing || event.button !== 0 || event.ctrlKey) return;
+            if (!editing || event.button !== 0 || event.ctrlKey || event.metaKey) return;
 
             if (editing.mode === 'draw') {
                 const point = this._pagePoint(event);

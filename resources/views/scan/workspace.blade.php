@@ -96,23 +96,41 @@
                                     <span>Shortcuts</span>
                                 </button>
                                 <div class="dropdown-menu dropdown-menu-end marker-shortcuts-menu">
-                                    <div class="marker-shortcuts-menu__title">Editor shortcuts</div>
-                                    <div><span><kbd>Ctrl</kbd> + scroll</span><small>Zoom document</small></div>
-                                    <div><span><kbd>Ctrl</kbd> + drag</span><small>Move document</small></div>
+                                    <div class="marker-shortcuts-menu__title">Page and fields</div>
+                                    {{-- Mac keys beside the Windows ones: ⌘ Command for Ctrl, ⌥ Option for Alt. --}}
+                                    <p class="marker-shortcuts-menu__note">On a Mac, <kbd>⌘</kbd> is Command, <kbd>⌥</kbd> is Option, and Backspace is the delete key.</p>
+                                    <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + scroll</span><small>Zoom document (or pinch the trackpad)</small></div>
+                                    <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + drag</span><small>Move document</small></div>
                                     <div><span><kbd>Shift</kbd> + click</span><small>Select multiple</small></div>
-                                    <div><span><kbd>Ctrl</kbd> + <kbd>A</kbd></span><small>Select all fields</small></div>
+                                    <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>A</kbd></span><small>Select all fields</small></div>
                                     <div><span>Drag empty document area</span><small>Select fields in a rectangle</small></div>
                                     <div><span><kbd>Shift</kbd> + drag</span><small>Add fields to selection</small></div>
                                     <div><span>Drag selection</span><small>Move selected fields</small></div>
                                     <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
-                                    <div><span><kbd>Alt</kbd> + drag</span><small>Place without snapping to printed lines</small></div>
+                                    <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + drag</span><small>Place without snapping to printed lines</small></div>
                                     <div><span>Drag the rotate knob below a field</span><small>Tilt that field (<kbd>Shift</kbd>: 5° steps)</small></div>
                                     <div><span><kbd>[</kbd> or <kbd>]</kbd></span><small>Tilt selected 0.5° (<kbd>Shift</kbd>: 5°)</small></div>
                                     <div><span>Double-click the knob</span><small>Straighten</small></div>
-                                    <div><span><kbd>Ctrl</kbd> + <kbd>C</kbd></span><small>Copy selected</small></div>
-                                    <div><span><kbd>Ctrl</kbd> + <kbd>V</kbd></span><small>Paste fields</small></div>
+                                    <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>C</kbd> / <kbd>V</kbd></span><small>Copy / paste selected</small></div>
                                     <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Delete selected</small></div>
-                                    <div><span><kbd>Ctrl</kbd> + <kbd>Z</kbd></span><small>Undo last change</small></div>
+                                    <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>Z</kbd></span><small>Undo last change</small></div>
+
+                                    @if (count($ruledYs) >= 2)
+                                        <div class="marker-shortcuts-menu__title">Row lines</div>
+                                        <div><span>Drag the dot at a line's end</span><small>Move that line (<kbd>Shift</kbd>: all lines)</small></div>
+                                        <div><span>Click a dot, then <kbd>↑</kbd> or <kbd>↓</kbd></span><small>Nudge it (<kbd>Shift</kbd>: 10 px)</small></div>
+                                        <div><span><kbd>Del</kbd> or double-click a dot</span><small>Remove that line</small></div>
+                                        <div><span><kbd>Esc</kbd></span><small>Let go of the line</small></div>
+                                    @endif
+
+                                    <div class="marker-shortcuts-menu__title">Line crops, after Detect</div>
+                                    <div><span><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd></span><small>Next / previous line</small></div>
+                                    <div><span><kbd>+</kbd> or <kbd>−</kbd></span><small>Grow / shrink the outline</small></div>
+                                    <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>S</kbd></span><small>Save the crop</small></div>
+                                    <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>Z</kbd> / <kbd>Y</kbd></span><small>Undo / redo</small></div>
+                                    <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Remove the line (in Points: a corner)</small></div>
+                                    <div><span><kbd>Enter</kbd></span><small>Finish a drawn outline</small></div>
+                                    <div><span><kbd>Esc</kbd></span><small>Step back</small></div>
                                 </div>
                             </div>
 
@@ -259,7 +277,7 @@
                                 <strong>Tips</strong>
                                 <ul>
                                     <li>Keep each box tight around the handwriting. Loose boxes pick up neighbouring text and read badly.</li>
-                                    <li>Click a name to select its box on the page. <kbd>Ctrl</kbd> + <kbd>A</kbd> selects them all.</li>
+                                    <li>Click a name to select its box on the page. <kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>A</kbd> selects them all.</li>
                                     @if (count($ruledYs) >= 2)
                                         <li>A field is read once. For something on every row of the table, use Add column in Rows and Columns.</li>
                                     @endif
@@ -521,7 +539,7 @@
                             <i class="icon-base bx bx-scan" aria-hidden="true"></i>
                             Orange shows the complete person row; green identifies the exact field;
                             red outlines need review.
-                            Hold <kbd>Ctrl</kbd> and scroll to zoom or drag to move.
+                            Hold <kbd>Ctrl</kbd> (<kbd>⌘</kbd> on a Mac) and scroll to zoom or drag to move.
                         </footer>
                     </section>
 
@@ -3639,6 +3657,16 @@
     }
 
     /**
+     * The template's ledger columns on this page's grid. A column Staff removed
+     * in Align is not expected in any row (the removal goes to the audit log).
+     */
+    function columnsOnThisPage() {
+        const pageColumns = new Set((processedPage?.geometry?.columns ?? []).map((column) => nameKey(column.name)));
+        return config.boxes.filter((box) => box.kind === 'column'
+            && (pageColumns.size === 0 || pageColumns.has(nameKey(box.name))));
+    }
+
+    /**
      * Required fields of this person that nothing was read for: the ledger
      * columns missing from a row, or a person's template fields.
      */
@@ -3649,7 +3677,7 @@
         const ledgerRow = group.indexes.some((index) => settingsFor(index)?.kind === 'column');
         const personGroup = Number(cropped[group.indexes[0]]?.personGroup);
         const expected = ledgerRow
-            ? config.boxes.filter((box) => box.kind === 'column')
+            ? columnsOnThisPage()
             : config.boxes.filter((box) => box.kind !== 'column' && Number(box.personGroup) === personGroup);
 
         return expected
@@ -4434,11 +4462,7 @@
             .filter((box) => box.kind !== 'column' && box.required !== false && !checkedNames.has(nameKey(box.name)))
             .map((box) => box.name);
 
-        // Only the columns on this page's grid: one Staff removed in Align is
-        // not asked for in every row (the removal goes to the audit log).
-        const pageColumns = new Set((processedPage?.geometry?.columns ?? []).map((column) => nameKey(column.name)));
-        const requiredColumns = config.boxes.filter((box) => box.kind === 'column' && box.required !== false
-            && (pageColumns.size === 0 || pageColumns.has(nameKey(box.name))));
+        const requiredColumns = columnsOnThisPage().filter((box) => box.required !== false);
         const untouchedRows = [];
         validationGroups.forEach((group) => {
             const ledgerRow = group.kind === 'person'

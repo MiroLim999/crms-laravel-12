@@ -1481,7 +1481,7 @@ function nudgeRule(pixels) {
 // (Alt: place freely).
 ledgerLayer.addEventListener('pointerdown', (event) => {
     const group = event.target instanceof Element ? event.target.closest('.ledger-rule') : null;
-    if (!group || event.button !== 0 || event.ctrlKey) return;
+    if (!group || event.button !== 0 || event.ctrlKey || event.metaKey) return;
     event.preventDefault();
     event.stopPropagation();
 

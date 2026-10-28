@@ -89,7 +89,7 @@ export class RowLineLayer {
 
     drag(event) {
         const grip = gripOf(event);
-        if (!grip || event.button !== 0 || event.ctrlKey || this.state.locked) return;
+        if (!grip || event.button !== 0 || event.ctrlKey || event.metaKey || this.state.locked) return;
         event.preventDefault();
         event.stopPropagation();
 

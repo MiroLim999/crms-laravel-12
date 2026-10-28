@@ -267,19 +267,23 @@ export class FieldMarker {
 
         // Boxes are positioned in display pixels, so a resize has to reposition them.
         this._onResize = () => this.viewport ? this._applyZoom() : this.layout();
+        // On a Mac, Ctrl + click is a right click: its menu would cover a Ctrl + drag.
+        this._onContextMenu = (event) => {
+            if (event.ctrlKey) event.preventDefault();
+        };
         this._onWheel = (event) => {
-            if (!event.ctrlKey || !this.viewport) return;
+            if (!(event.ctrlKey || event.metaKey) || !this.viewport) return;
 
             event.preventDefault();
             this.zoomBy(event.deltaY < 0 ? 0.1 : -0.1, event);
         };
         this._onOverlayPointerDown = (event) => {
-            if (event.ctrlKey) return;
+            if (event.ctrlKey || event.metaKey) return;
             if (event.target === this.overlay) this.clearSelection();
         };
 
         this._onViewportPointerDown = (event) => {
-            if (!event.ctrlKey || event.button !== 0) return;
+            if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return;
 
             event.preventDefault();
             this._panning = true;
@@ -340,6 +344,7 @@ export class FieldMarker {
             this.viewport.addEventListener('pointerup', this._onViewportPointerFinish);
             this.viewport.addEventListener('pointercancel', this._onViewportPointerFinish);
             this.viewport.addEventListener('click', this._onViewportClick, true);
+            this.viewport.addEventListener('contextmenu', this._onContextMenu);
         }
         this.overlay.addEventListener('pointerdown', this._onOverlayPointerDown);
     }
@@ -353,6 +358,7 @@ export class FieldMarker {
             this.viewport.removeEventListener('pointerup', this._onViewportPointerFinish);
             this.viewport.removeEventListener('pointercancel', this._onViewportPointerFinish);
             this.viewport.removeEventListener('click', this._onViewportClick, true);
+            this.viewport.removeEventListener('contextmenu', this._onContextMenu);
         }
         this.overlay.removeEventListener('pointerdown', this._onOverlayPointerDown);
     }
@@ -1052,19 +1058,19 @@ export class FieldMarker {
         };
 
         el.addEventListener('pointerdown', (e) => {
-            if (e.ctrlKey) return;
+            if (e.ctrlKey || e.metaKey) return;
             if (handles.includes(e.target) || e.target === rotator) return;
             begin(e, 'move');
         });
         handles.forEach((handle) => {
             handle.addEventListener('pointerdown', (e) => {
-                if (e.ctrlKey) return;
+                if (e.ctrlKey || e.metaKey) return;
                 direction = handle.dataset.handle || 'se';
                 begin(e, 'resize');
             });
         });
         rotator?.addEventListener('pointerdown', (e) => {
-            if (e.ctrlKey) return;
+            if (e.ctrlKey || e.metaKey) return;
             begin(e, 'rotate');
         });
         rotator?.addEventListener('dblclick', (e) => {

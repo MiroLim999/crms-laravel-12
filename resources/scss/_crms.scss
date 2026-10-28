@@ -1645,6 +1645,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .marker-shortcuts-menu {
   z-index: 1080;
   min-inline-size: 19rem;
+  // Three groups do not fit a laptop screen: the list scrolls.
+  max-block-size: calc(100vh - 12rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin-block-start: .45rem !important;
   padding: .65rem;
   border-color: rgba(var(--crms-ink-rgb), .12);
@@ -1684,6 +1688,36 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   color: var(--bs-heading-color);
   font-size: .75rem;
   font-weight: 600;
+
+  // A later group: space and a line above its title.
+  &:not(:first-child) {
+    margin-block-start: .5rem;
+    padding-block-start: .75rem;
+    border-block-start: 1px solid var(--bs-border-color);
+  }
+}
+
+// The Align step's menu shows the Mac keys too: wide enough for
+// "Ctrl / ⌘ + C / V" on one line.
+#step-mark .marker-shortcuts-menu {
+  min-inline-size: 23rem;
+
+  // The keys keep their room; the description wraps first.
+  >div>span {
+    flex: 0 0 auto;
+    max-inline-size: 55%;
+  }
+}
+
+// Which keys a Mac uses, under the first title.
+.marker-shortcuts-menu__note {
+  margin: 0 .4rem .35rem;
+  padding: .4rem .55rem;
+  color: var(--bs-secondary-color);
+  background: rgba(var(--crms-ink-rgb), .05);
+  border-radius: .4rem;
+  font-size: .6875rem;
+  line-height: 1.5;
 }
 
 .document-canvas-card .doc-viewport {
