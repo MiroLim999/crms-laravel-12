@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
+use App\Models\AuditLog;
 use App\Models\CivilRecord;
 use App\Models\DocumentTemplate;
 use App\Models\OcrModel;
@@ -62,7 +63,8 @@ class AnalyticsDashboardTest extends TestCase
                 ->assertSee('Total digitized records')
                 ->assertSee('Digitization Volume &amp; Trend', escape: false)
                 ->assertSee('OCR Quality')
-                ->assertSee('Processing &amp; Throughput', escape: false)
+                ->assertSee('Change requests')
+                ->assertSee('Recent changes')
                 // The total card's links say where they go.
                 ->assertSee('View report')
                 ->assertSee('Manage users');
@@ -196,7 +198,6 @@ class AnalyticsDashboardTest extends TestCase
         $this->assertSame('Last 30 days', $response->viewData('scopes')['trend']['badge']);
         $this->assertSame(2, $analytics['headline']['records']);
         $this->assertSame(1, $analytics['headline']['period_records']);
-        $this->assertSame([$recentStaff->name], $analytics['throughput']->pluck('name')->all());
         $this->assertSame(95.0, $analytics['ocr_quality']['average_confidence']);
         $this->assertSame(0.0, $analytics['ocr_quality']['correction_rate']);
         $this->assertSame('day', $analytics['trend']['mode']);
@@ -213,7 +214,6 @@ class AnalyticsDashboardTest extends TestCase
         $this->assertSame('1 May 2026 – 30 Jun 2026', $response->viewData('scopes')['trend']['badge']);
         $this->assertSame(1, $analytics['headline']['period_records']);
         $this->assertSame(['Death'], array_column($analytics['trend']['series'], 'name'));
-        $this->assertSame([$olderStaff->name], $analytics['throughput']->pluck('name')->all());
         $this->assertSame(40.0, $analytics['ocr_quality']['average_confidence']);
         $this->assertSame(100.0, $analytics['ocr_quality']['correction_rate']);
 
@@ -375,27 +375,26 @@ class AnalyticsDashboardTest extends TestCase
         $this->record($recentStaff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
         $this->record($olderStaff, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-06-01 02:00:00')]);
 
-        // Only the throughput panel is narrowed; the trend stays on 12 months.
+        // Only the change requests panel is narrowed; the trend stays on 12 months.
         $response = $this->actingAs(User::factory()->admin()->create())
-            ->get(route('dashboard', ['staff_period' => '30']))
+            ->get(route('dashboard', ['requests_period' => '30']))
             ->assertOk();
 
         $scopes = $response->viewData('scopes');
         $analytics = $response->viewData('analytics');
 
-        $this->assertSame(['30', '365', '365'], [$scopes['staff']['period'], $scopes['trend']['period'], $scopes['ocr']['period']]);
-        $this->assertSame([$recentStaff->name], $analytics['throughput']->pluck('name')->all());
+        $this->assertSame(['30', '365', '365'], [$scopes['requests']['period'], $scopes['trend']['period'], $scopes['ocr']['period']]);
         $this->assertSame(['Birth', 'Death'], array_column($analytics['trend']['series'], 'name'));
         $this->assertSame(2, $analytics['headline']['period_records']);
 
         // A panel's form keeps the other panels' choices and returns to itself.
-        $response->assertSee('name="staff_period"', escape: false)
-            ->assertSee('/dashboard#panel-staff', escape: false)
+        $response->assertSee('name="requests_period"', escape: false)
+            ->assertSee('/dashboard#panel-requests', escape: false)
             ->assertSee('/dashboard#panel-ocr', escape: false);
 
         $this->actingAs(User::factory()->admin()->create())
-            ->get(route('dashboard', ['staff_period' => '30', 'ocr_period' => '90']))
-            ->assertSee('<input type="hidden" name="staff_period" value="30">', escape: false)
+            ->get(route('dashboard', ['requests_period' => '30', 'ocr_period' => '90']))
+            ->assertSee('<input type="hidden" name="requests_period" value="30">', escape: false)
             ->assertSee('<input type="hidden" name="ocr_period" value="90">', escape: false);
 
         // One panel's bad period leaves the others as chosen.
@@ -403,6 +402,128 @@ class AnalyticsDashboardTest extends TestCase
             ->get(route('dashboard', ['trend_period' => '7', 'ocr_period' => '30']))
             ->assertSee('Choose one of the listed periods.');
         $this->assertSame(['365', '30'], [$response->viewData('scopes')['trend']['period'], $response->viewData('scopes')['ocr']['period']]);
+    }
+
+    public function test_change_requests_show_the_queue_now_and_the_decisions_in_the_period(): void
+    {
+        Carbon::setTestNow('2026-08-11 04:00:00');
+        $staff = User::factory()->staff()->create();
+        $admin = User::factory()->admin()->create();
+        $service = app(ChangeRequestService::class);
+
+        // Opened at a set time. A is approved after 3 hours, B rejected after
+        // 10 minutes and E, long ago, after a day. C is withdrawn and D is
+        // still waiting.
+        $open = function (string $openedAt) use ($staff, $service) {
+            Carbon::setTestNow($openedAt);
+            $record = $this->record($staff, DocumentType::Birth);
+            $field = $record->fields()->create([
+                'name' => 'Child Full Name', 'ocr_text' => 'Ana Cruz', 'verified_value' => 'Ana Cruz', 'ocr_confidence' => 90.0,
+            ]);
+
+            return $service->open($record->load('fields'), [$field->getKey() => 'Anna Cruz'], 'A spelling fix.', $staff);
+        };
+
+        $a = $open('2026-08-01 02:00:00');
+        Carbon::setTestNow('2026-08-01 05:00:00');
+        $service->approve($a, $admin);
+
+        $b = $open('2026-08-05 02:00:00');
+        Carbon::setTestNow('2026-08-05 02:10:00');
+        $service->reject($b, $admin, 'Not what the register says.');
+
+        $c = $open('2026-08-06 02:00:00');
+        $service->withdraw($c, $staff);
+
+        $open('2026-08-07 02:00:00');
+
+        $e = $open('2026-05-01 02:00:00');
+        Carbon::setTestNow('2026-05-02 02:00:00');
+        $service->approve($e, $admin);
+
+        Carbon::setTestNow('2026-08-11 04:00:00');
+
+        // Twelve months holds all three decisions: (3 h + 10 min + 1 day) / 3.
+        $response = $this->actingAs($admin)->get(route('dashboard'))->assertOk();
+        $requests = $response->viewData('analytics')['change_requests'];
+
+        $this->assertSame(1, $requests['waiting']);
+        $this->assertSame('2026-08-07 02:00:00', $requests['oldest_waiting_at']->format('Y-m-d H:i:s'));
+        $this->assertSame([2, 1, 1], [$requests['approved'], $requests['rejected'], $requests['withdrawn']]);
+        $this->assertSame(32600, $requests['average_wait_seconds']);
+        $response->assertSee('waiting for a decision')
+            ->assertSee('The oldest has waited 4 days.')
+            ->assertSee(route('change-requests.index', ['status' => 'pending']))
+            ->assertSeeInOrder(['Average wait', '9 h']);
+
+        // The last 30 days leave out E, but not the queue, which has no period.
+        $requests = $this->actingAs($admin)
+            ->get(route('dashboard', ['requests_period' => '30']))
+            ->viewData('analytics')['change_requests'];
+
+        $this->assertSame(1, $requests['waiting']);
+        $this->assertSame([1, 1, 1], [$requests['approved'], $requests['rejected'], $requests['withdrawn']]);
+        $this->assertSame(5700, $requests['average_wait_seconds']);
+    }
+
+    public function test_change_requests_say_so_when_nothing_is_waiting_or_decided(): void
+    {
+        $response = $this->actingAs(User::factory()->superAdmin()->create())
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertSee('Nothing is waiting. You are all caught up.')
+            ->assertSee('All requests')
+            ->assertDontSee('The oldest has waited');
+
+        $requests = $response->viewData('analytics')['change_requests'];
+        $this->assertSame(
+            [0, 0, 0, 0, null],
+            [$requests['waiting'], $requests['approved'], $requests['rejected'], $requests['withdrawn'], $requests['average_wait_seconds']],
+        );
+    }
+
+    public function test_recent_changes_list_the_newest_setup_changes_and_skip_sign_ins(): void
+    {
+        $log = function (string $action, string $description, string $at): void {
+            (new AuditLog)->forceFill([
+                'actor_name' => 'Super Admin',
+                'actor_role' => 'super_admin',
+                'action' => $action,
+                'description' => $description,
+                'created_at' => $at,
+            ])->save();
+        };
+
+        // Eight changes, so only the newest five can be listed. Sign-ins and
+        // archived records come later still, but they are not changes.
+        foreach (range(1, 8) as $number) {
+            $log('template.updated', "Edited template number {$number}.", "2026-08-0{$number} 02:00:00");
+        }
+        $log('auth.login', 'Signed in as Super Admin.', '2026-08-09 02:00:00');
+        $log('record.submitted', 'Submitted and locked a Birth record.', '2026-08-09 03:00:00');
+
+        $response = $this->actingAs(User::factory()->admin()->create())
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertSee('Recent changes')
+            ->assertSee('Edited template number 8.')
+            ->assertSee('Edited template number 4.')
+            ->assertDontSee('Edited template number 3.')
+            ->assertDontSee('Signed in as Super Admin.')
+            ->assertDontSee('Submitted and locked a Birth record.')
+            ->assertSee(route('audit.index'));
+
+        $changes = $response->viewData('analytics')['recent_changes'];
+        $this->assertCount(5, $changes);
+        $this->assertSame('Edited template number 8.', $changes->first()->description);
+    }
+
+    public function test_recent_changes_have_an_empty_state(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create())
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertSee('No changes yet');
     }
 
     public function test_super_admin_starts_a_new_document_from_the_dashboard(): void

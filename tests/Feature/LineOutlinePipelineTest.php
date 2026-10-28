@@ -496,12 +496,14 @@ class LineOutlinePipelineTest extends TestCase
             ['code' => 'rows_uneven', 'count' => 9, 'rows' => [1, 2, 3, 4, 5, 6]],
             ['code' => 'grid_moved', 'rows' => -2],
             ['code' => 'lines_above_grid', 'count' => 0],
+            ['code' => 'rows_empty', 'count' => 1, 'rows' => [9]],
         ], DocumentPage::cleanNotes([
             ['code' => 'rows_uneven', 'count' => '9', 'rows' => [1, 2, 3, 4, 5, 6, 7, 8], 'text' => '<script>'],
             'nonsense',
             ['code' => 'made_up', 'count' => 1],
             ['code' => 'grid_moved', 'rows' => '-2'],
             ['code' => 'lines_above_grid', 'count' => -4],
+            ['code' => 'rows_empty', 'count' => 1, 'rows' => [9]],
         ]));
     }
 

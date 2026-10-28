@@ -246,6 +246,11 @@ test('grid notes are worded as questions for Staff', () => {
     assert.match(gridNotes([{ code: 'lines_below_grid', count: 1, rows: 1 }])[0], /^1 written line lies below .* and is not read \(about 1 more row\)/);
     assert.match(gridNotes([{ code: 'rows_do_not_fit', count: 1 }])[0], /^This page does not look like the ledger .* The column was read as free text/);
     assert.match(gridNotes([{ code: 'rows_do_not_fit', count: 3 }])[0], /3 columns were read as free text/);
+    assert.deepEqual(gridNotes([{ code: 'rows_empty', count: 1, rows: [9] }]), [
+        'Nothing was read in row 9, though later rows were. If the page has writing there, check that row before you submit.',
+    ]);
+    assert.match(gridNotes([{ code: 'rows_empty', count: 2, rows: [3, 9] }])[0], /^Nothing was read in rows 3 and 9, .* check those rows before/);
+    assert.deepEqual(gridNotes([{ code: 'rows_empty', count: 0, rows: [] }]), []);
     assert.deepEqual(gridNotes([{ code: 'lines_above_grid', count: 11 }]), [
         '11 written lines sit in the row directly above the first row. If that row holds entries, move the grid up one row.',
     ]);

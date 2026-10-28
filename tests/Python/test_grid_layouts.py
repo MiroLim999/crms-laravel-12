@@ -324,6 +324,170 @@ class WrittenWordIsNotARuleTest(unittest.TestCase):
         self.assertEqual(3, len(rules))
         self.assertTrue(kept[150, 100:800].all(), "the printed rule under the writing is still erased")
 
+    def test_writing_resting_on_a_rule_is_not_taken_for_a_piece_of_it(self):
+        # On the real pages the joins of "Legitimate" and "Salustiana" lay 7 px above
+        # their row's rule, 4 px thick over a 2 px rule, and were erased as a bent
+        # piece of it: "Legitimate" read "Ley t to".
+        image = Image.new("L", (900, 300), PAPER)
+        draw = ImageDraw.Draw(image)
+        for y in (100, 150, 200):
+            draw.line([(40, y), (860, y)], fill=RULE, width=1)
+        draw.rectangle([600, 142, 689, 145], fill=INK)  # the join, its middle 6.5 px above the rule
+        draw.line([(300, 155), (385, 155)], fill=RULE, width=1)  # a broken-off bit of print, 5 px off
+        writing = np.zeros((300, 900), bool)
+        writing[118:158, 290:700] = True
+        h_evidence, _ = lm._rule_pixels(np.asarray(image, dtype=np.uint8))
+
+        _, erased = lm._find_rules(h_evidence, "h", 300, max_thickness=6, writing=writing, near=8)
+
+        self.assertFalse(erased[142:146, 600:690].any(), "the join is kept as ink")
+        self.assertTrue(erased[155, 310:375].all(), "a thin bit of print beside its rule is still erased")
+
+    def test_a_tilted_stroke_is_not_joined_to_a_rule_far_from_it(self):
+        # A short stroke of writing tilted 2.5 degrees, carried along its own slope to
+        # the gap between it and a rule 200 px away, lands on that rule; it was merged
+        # with it and erased as print.
+        image = Image.new("L", (900, 300), PAPER)
+        draw = ImageDraw.Draw(image)
+        draw.line([(40, 100), (860, 100)], fill=RULE, width=1)
+        draw.line([(40, 150), (500, 150)], fill=RULE, width=1)  # broken off at 500
+        draw.line([(40, 200), (860, 200)], fill=RULE, width=1)
+        for x in range(700, 791):  # 4 px thick, rising 4 px over 90 px
+            y = 146 - round(0.044 * (x - 700))
+            draw.line([(x, y - 3), (x, y)], fill=INK)
+        writing = np.zeros((300, 900), bool)
+        writing[120:156, 690:800] = True
+        h_evidence, _ = lm._rule_pixels(np.asarray(image, dtype=np.uint8))
+
+        rules, erased = lm._find_rules(h_evidence, "h", 300, max_thickness=6, writing=writing, near=8)
+
+        self.assertFalse(erased[138:147, 700:791].any(), "the stroke is kept as ink")
+        self.assertEqual(3, len(rules))
+        self.assertTrue(erased[150, 60:480].all(), "the broken rule is still erased")
+
+
+@unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
+class StaffRemovedColumnsTest(unittest.TestCase):
+    """Staff may remove columns in Align and read only the rest.
+
+    The removed columns' printed rules are still on the page, and the detector
+    often runs one line from a removed column straight on into the kept column
+    beside it. On the real sample page with only Remarks kept, seven Remarks
+    read the Informant's name too ("Pedro P Villanueva, Leg text") and an
+    eighth ("None", beside a long name) was dropped without a word.
+    """
+
+    ROW = 2  # 0-based: row 3
+
+    def remarks_only(self, joined=None):
+        """4 columns, 6 rows, only the last column kept. `joined` = (first, last):
+        in row 3 the detector returns those columns' writing as one line."""
+        ledger = Ledger(cols=4, rows=6)
+        if joined:
+            first, last = joined
+            start = self.ROW * ledger.cols
+            cells = ledger.detected[start + first:start + last + 1]
+            x0, x1 = cells[0]["baseline"][0][0], cells[-1]["baseline"][-1][0]
+            base = cells[0]["baseline"][0][1]
+            top, bottom = cells[0]["boundary"][0][1], cells[0]["boundary"][2][1]
+            ledger.detected[start + first:start + last + 1] = [{
+                "baseline": [[x0, base], [x1, base]],
+                "boundary": [[x0 - 2, top], [x1 + 2, top], [x1 + 2, bottom], [x0 - 2, bottom]],
+            }]
+        ledger.geometry = dict(ledger.geometry, columns=ledger.geometry["columns"][3:])
+        return ledger
+
+    def kept(self, ledger, result):
+        width = ledger.image.width
+        x, _, w, _ = ledger.geometry["columns"][0]["box"]
+        lines = {line["row"]: line for line in result["lines"] if line["column"] == "C4"}
+        return lines, x * width, (x + w) * width
+
+    def assert_each_row_reads_its_own_cell(self, ledger):
+        result = ledger.run("scan")
+        lines, left, right = self.kept(ledger, result)
+        self.assertEqual(list(range(1, 7)), sorted(lines))
+        reach = lm.CROP_PADDING + 4
+        for row, line in lines.items():
+            x, _, w, _ = line["bbox"]
+            self.assertGreaterEqual(x, left - reach, f"row {row} reaches into the removed column")
+            self.assertLessEqual(x + w, right + reach, f"row {row}")
+        self.assertNotIn(lm.NOTE_ROWS_EMPTY, [note["code"] for note in result["notes"]])
+
+    def test_a_line_run_on_from_a_removed_column_is_cut_at_its_rule(self):
+        # Half of the joined line is in the kept column: it used to be read whole.
+        self.assert_each_row_reads_its_own_cell(self.remarks_only(joined=(2, 3)))
+
+    def test_an_entry_beside_a_longer_one_is_not_dropped(self):
+        # A third of the joined line is in the kept column: it used to be dropped.
+        self.assert_each_row_reads_its_own_cell(self.remarks_only(joined=(1, 3)))
+
+    def test_writing_into_the_margin_still_belongs_to_its_cell(self):
+        # Past the table's frame there is no column, removed or not: nothing to cut.
+        ledger = self.remarks_only()
+        line = ledger.detected[self.ROW * ledger.cols + 3]
+        x1, base = line["baseline"][-1]
+        reach = 0.5 * (ledger.image.width - x1)
+        draw = ImageDraw.Draw(ledger.image)
+        draw.line([(x1, base), (x1 + reach / 2, base - 8), (x1 + reach, base)], fill=(INK,) * 3, width=2)
+        line["baseline"][-1][0] = x1 + reach
+        for point in line["boundary"][1:3]:
+            point[0] = x1 + reach + 2
+
+        lines, _, right = self.kept(ledger, ledger.run("scan"))
+
+        x, _, w, _ = lines[self.ROW + 1]["bbox"]
+        self.assertGreater(x + w, right + 0.8 * (x1 + reach - right))
+
+    def test_the_joins_of_a_cursive_word_in_a_lone_narrow_column_are_kept(self):
+        # A printed rule must be long against the printed table, not against the one
+        # column kept: 20% of a 108 px Remarks column passed every cursive join as print.
+        ledger = self.remarks_only()
+        line = ledger.detected[self.ROW * ledger.cols + 3]
+        x0, base = line["baseline"][0]
+        join = (slice(int(base) - 2, int(base)), slice(int(x0) + 20, int(x0) + 110))
+        ImageDraw.Draw(ledger.image).rectangle([join[1].start, join[0].start, join[1].stop - 1, join[0].stop - 1],
+                                               fill=(INK,) * 3)
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "page.png")
+        ledger.image.save(path)
+        debug = {}
+
+        lm.process_page(path, ledger.geometry, os.path.join(folder, "out"), detector=ledger.detector, debug=debug)
+
+        owned = debug["owner"][join] > 0
+        self.assertGreater(owned.mean(), 0.9, "the join belongs to its line, not erased as print")
+
+    def test_a_row_nothing_was_read_in_is_reported(self):
+        # Nothing is written in row 3 of the kept column, and the detector found
+        # nothing there: the row has no reading, and would vanish from Verify.
+        ledger = self.remarks_only()
+        x, _, w, _ = ledger.geometry["columns"][0]["box"]
+        left, right = x * ledger.image.width, (x + w) * ledger.image.width
+        line = ledger.detected.pop(self.ROW * ledger.cols + 3)
+        top, bottom = line["boundary"][0][1], line["boundary"][2][1]
+        ImageDraw.Draw(ledger.image).rectangle([left + 3, top, right - 3, bottom - 2], fill=(PAPER,) * 3)
+
+        result = ledger.run("scan")
+
+        notes = {note["code"]: note for note in result["notes"]}
+        self.assertEqual({"code": lm.NOTE_ROWS_EMPTY, "count": 1, "rows": [self.ROW + 1]}, notes[lm.NOTE_ROWS_EMPTY])
+
+    def test_rows_after_the_last_entry_stay_quiet(self):
+        ledger = self.remarks_only()
+        x, _, w, _ = ledger.geometry["columns"][0]["box"]
+        left, right = x * ledger.image.width, (x + w) * ledger.image.width
+        for row in (4, 5):
+            line = ledger.detected[row * ledger.cols + 3]
+            top, bottom = line["boundary"][0][1], line["boundary"][2][1]
+            ImageDraw.Draw(ledger.image).rectangle([left + 3, top, right - 3, bottom - 2], fill=(PAPER,) * 3)
+        for row in (5, 4):
+            del ledger.detected[row * ledger.cols + 3]
+
+        result = ledger.run("scan")
+
+        self.assertNotIn(lm.NOTE_ROWS_EMPTY, [note["code"] for note in result["notes"]])
+
 
 @unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
 class RowsFromThePageTest(unittest.TestCase):

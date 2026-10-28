@@ -450,89 +450,11 @@ function renderQuality(data) {
   });
 }
 
-function throughputAxis(peak, narrow) {
-  const desired = Math.max(peak * 1.14, peak + 1);
-  const targetIntervals = narrow ? 3 : 5;
-  const rawStep = desired / targetIntervals;
-  const magnitude = Math.max(1, 10 ** Math.floor(Math.log10(Math.max(rawStep, 1))));
-  const step = [1, 2, 2.5, 5, 10]
-    .map(multiplier => multiplier * magnitude)
-    .find(candidate => candidate >= rawStep) || magnitude * 10;
-  const max = Math.ceil(desired / step) * step;
-
-  return { max, ticks: Math.max(1, Math.round(max / step)) };
-}
-
-function renderThroughput(data) {
-  // Sparse periods intentionally have no chart target.
-  const target = document.getElementById('dashboard-throughput-chart');
-  if (!target || !data || !Array.isArray(data.totals) || !data.totals.length) return;
-
-  const totals = data.totals.map(Number);
-  const theme = themeOptions(target);
-  const peak = Math.max(...totals);
-  const axis = throughputAxis(peak, target.clientWidth < 420);
-  const height = Math.max(196, totals.length * 54 + 34);
-
-  draw(target, {
-    chart: {
-      type: 'bar',
-      height,
-      fontFamily: theme.font,
-      foreColor: theme.text,
-      parentHeightOffset: 0,
-      toolbar: { show: false },
-    },
-    colors: [theme.primary],
-    dataLabels: {
-      enabled: true,
-      formatter: value => Number(value).toLocaleString(),
-      offsetX: 16,
-      style: { fontSize: '12px', fontWeight: 700, colors: [theme.heading] },
-    },
-    grid: {
-      borderColor: theme.border,
-      strokeDashArray: 4,
-      padding: { left: 6, right: 30, top: -8, bottom: -6 },
-    },
-    plotOptions: {
-      bar: {
-        borderRadius: 8,
-        borderRadiusApplication: 'end',
-        barHeight: '58%',
-        horizontal: true,
-        dataLabels: { position: 'top' },
-      },
-    },
-    series: [{ name: 'Submitted records', data: totals }],
-    tooltip: {
-      y: { formatter: value => `${Number(value).toLocaleString()} ${Number(value) === 1 ? 'record' : 'records'}` },
-    },
-    xaxis: {
-      categories: Array.isArray(data.labels) ? data.labels : [],
-      min: 0,
-      max: axis.max,
-      tickAmount: axis.ticks,
-      axisBorder: { show: false },
-      axisTicks: { show: false },
-      labels: {
-        formatter: value => Math.round(value).toLocaleString(),
-        style: { fontSize: '11px' },
-      },
-    },
-    yaxis: {
-      labels: {
-        maxWidth: Math.round(Math.min(150, Math.max(82, target.clientWidth * 0.27))),
-        style: { fontSize: '12px', fontWeight: 500 },
-      },
-    },
-  });
-}
-
 const panels = {
   trend: { chart: 'dashboard-volume-chart', key: 'volume', render: renderVolume },
   ocr: { chart: 'dashboard-quality-chart', key: 'quality', render: renderQuality },
-  staff: { chart: 'dashboard-throughput-chart', key: 'throughput', render: renderThroughput },
+  // No chart: a swapped card is all there is to redraw.
+  requests: { chart: '', key: 'requests', render: () => {} },
 };
 
 const pending = new Map();
@@ -683,7 +605,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   renderVolume(data.volume);
   renderQuality(data.quality);
-  renderThroughput(data.throughput);
   renderOcrPerformance(data.ocrPerformance);
 
   // Colours are read when a chart is drawn, so a colour-mode switch redraws them all.
@@ -691,7 +612,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const latest = readChartData() || data;
     renderVolume(latest.volume);
     renderQuality(latest.quality);
-    renderThroughput(latest.throughput);
     renderOcrPerformance(latest.ocrPerformance);
   });
 

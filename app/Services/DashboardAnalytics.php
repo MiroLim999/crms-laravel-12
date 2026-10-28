@@ -4,7 +4,7 @@ namespace App\Services;
 
 use App\Enums\ChangeRequestStatus;
 use App\Enums\RecordStatus;
-use App\Enums\RoleSlug;
+use App\Models\AuditLog;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
@@ -33,7 +33,7 @@ class DashboardAnalytics
      *
      * @var list<string>
      */
-    public const PANELS = ['trend', 'ocr', 'staff'];
+    public const PANELS = ['trend', 'ocr', 'requests'];
 
     /** @var array<string, string> */
     public const PERIODS = [
@@ -62,6 +62,18 @@ class DashboardAnalytics
 
     /** Past eight types the rest share one grey entry; a ninth hue would not stay distinct. */
     private const OTHER_TYPES_COLOR = '#8a8d93';
+
+    /**
+     * Audit entries that say a person signed in or a record was archived. The
+     * Recent changes card is about what was changed, and these are the bulk of
+     * the log.
+     *
+     * @var list<string>
+     */
+    private const ROUTINE_AUDIT_ACTIONS = ['auth.login', 'auth.logout', 'record.submitted'];
+
+    /** How many entries the Recent changes card lists. */
+    private const RECENT_CHANGES = 5;
 
     /** Periods up to this many days are charted day by day, longer ones by month. */
     private const DAILY_LIMIT_DAYS = 90;
@@ -137,9 +149,9 @@ class DashboardAnalytics
 
     /**
      * Every panel that depends on a period has its own, so each is given its
-     * own scope: trend, ocr and staff.
+     * own scope: trend, ocr and requests.
      *
-     * @param  array{trend: array<string, mixed>, ocr: array<string, mixed>, staff: array<string, mixed>}  $scopes
+     * @param  array{trend: array<string, mixed>, ocr: array<string, mixed>, requests: array<string, mixed>}  $scopes
      * @return array<string, mixed>
      */
     public function oversight(array $scopes): array
@@ -151,7 +163,8 @@ class DashboardAnalytics
             'archive_types' => $this->archiveByType($entries),
             'trend' => $this->recordTrend($scopes['trend'], $entries),
             'ocr_quality' => $this->ocrQuality($scopes['ocr']),
-            'throughput' => $this->submissionsByAccount($this->records($scopes['staff'])),
+            'change_requests' => $this->changeRequestSummary($scopes['requests']),
+            'recent_changes' => $this->recentChanges(),
             'accounts' => $this->accountHealth(),
         ];
     }
@@ -445,27 +458,57 @@ class DashboardAnalytics
     }
 
     /**
-     * @param  Builder<CivilRecord>  $records
-     * @return Collection<int, array{name: string, role: string, total: int}>
+     * The change-request queue now, and the decisions made in the period.
+     *
+     * The queue ignores the period: a request that is still waiting is
+     * waiting, however long ago it came in. The rest is counted on the day it
+     * was decided. A withdrawal has no reviewed_at, so its last update (the
+     * withdrawal itself, since nothing can change a withdrawn request) is its day.
+     *
+     * @param  array<string, mixed>  $scope  the requests panel's
+     * @return array{waiting: int, oldest_waiting_at: CarbonInterface|null, approved: int, rejected: int, withdrawn: int, average_wait_seconds: int|null}
      */
-    private function submissionsByAccount(Builder $records): Collection
+    private function changeRequestSummary(array $scope): array
     {
-        $rows = (clone $records)
-            ->select('submitted_by')
-            ->selectRaw('COUNT(*) as total')
-            ->whereNotNull('submitted_by')
-            ->groupBy('submitted_by')
-            ->orderByDesc('total')
-            ->orderBy('submitted_by')
-            ->limit(6)
-            ->with('submitter.role')
-            ->get();
+        $pending = ChangeRequest::query()->where('status', ChangeRequestStatus::Pending->value);
 
-        return $rows->map(fn (CivilRecord $row) => [
-            'name' => $row->submitter?->name ?? 'Removed account',
-            'role' => $row->submitter?->roleSlug()?->label() ?? RoleSlug::Staff->label(),
-            'total' => (int) $row->total,
-        ]);
+        $decided = ChangeRequest::query()
+            ->whereIn('status', [ChangeRequestStatus::Approved->value, ChangeRequestStatus::Rejected->value])
+            ->whereBetween('reviewed_at', [$scope['db_start'], $scope['db_end']])
+            ->get(['status', 'created_at', 'reviewed_at']);
+
+        // Time from the request being opened to its decision. Few requests are
+        // ever decided, so the mean is worked out here, not per database engine.
+        $waits = $decided->map(fn (ChangeRequest $request) => max(0, $request->created_at->diffInSeconds($request->reviewed_at, true)));
+
+        return [
+            'waiting' => (clone $pending)->count(),
+            'oldest_waiting_at' => (clone $pending)->oldest('created_at')->value('created_at'),
+            'approved' => $decided->where('status', ChangeRequestStatus::Approved)->count(),
+            'rejected' => $decided->where('status', ChangeRequestStatus::Rejected)->count(),
+            'withdrawn' => ChangeRequest::query()
+                ->where('status', ChangeRequestStatus::Withdrawn->value)
+                ->whereBetween('updated_at', [$scope['db_start'], $scope['db_end']])
+                ->count(),
+            'average_wait_seconds' => $waits->isEmpty() ? null : (int) round($waits->avg()),
+        ];
+    }
+
+    /**
+     * The newest changes to how CRMS is set up and who can use it, from the
+     * audit log: templates, OCR models, accounts, reports, corrections.
+     * Sign-ins and archived records are left out.
+     *
+     * @return Collection<int, AuditLog>
+     */
+    private function recentChanges(): Collection
+    {
+        return AuditLog::query()
+            ->whereNotIn('action', self::ROUTINE_AUDIT_ACTIONS)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(self::RECENT_CHANGES)
+            ->get(['id', 'actor_name', 'action', 'description', 'created_at']);
     }
 
     /**

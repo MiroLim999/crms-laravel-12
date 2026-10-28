@@ -40,7 +40,7 @@ class DocumentPage extends Model
     ];
 
     /** The grid notes the page job may report; anything else is dropped. */
-    public const NOTE_CODES = ['rows_uneven', 'lines_below_grid', 'lines_above_grid', 'grid_moved', 'rows_do_not_fit'];
+    public const NOTE_CODES = ['rows_uneven', 'lines_below_grid', 'lines_above_grid', 'grid_moved', 'rows_do_not_fit', 'rows_empty'];
 
     protected function casts(): array
     {

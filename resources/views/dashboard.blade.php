@@ -9,16 +9,6 @@
             $headline = $analytics['headline'];
             $quality = $analytics['ocr_quality'];
             $trend = $analytics['trend'];
-            $throughput = $analytics['throughput']->take(6)->values();
-            $throughputCount = $throughput->count();
-            $throughputTotal = (int) $throughput->sum('total');
-            $sparseThroughput = $throughputCount > 0 && $throughputCount <= 2;
-            $throughputMeta = match (true) {
-                $throughputCount === 0 => 'No contributing accounts',
-                $throughputCount <= 2 => number_format($throughputCount).' contributing '.($throughputCount === 1 ? 'account' : 'accounts'),
-                default => 'Top '.number_format($throughputCount).' accounts by records submitted',
-            };
-
             $accountActive = (int) $analytics['accounts']['active'];
             $accountInactive = (int) $analytics['accounts']['inactive'];
             $accountTotal = $accountActive + $accountInactive;
@@ -32,7 +22,7 @@
 
             // Each panel keeps its own reporting period.
             $trendScope = $scopes['trend'];
-            $staffScope = $scopes['staff'];
+            $requestsScope = $scopes['requests'];
             $percent = fn (int|float|null $value): string => $value === null ? '—' : number_format($value, 1).'%';
             $comparisonNote = number_format($headline['period_records']).' in '.$trendScope['label']
                 .' · '.number_format($headline['previous_records']).' in '.$trendScope['previous_label'];
@@ -69,12 +59,31 @@
                     'averageConfidence' => $quality['average_confidence'],
                     'correctionRate' => $quality['correction_rate'],
                 ],
-                'throughput' => [
-                    'labels' => $throughput->pluck('name')->values(),
-                    'totals' => $throughput->pluck('total')->values(),
-                ],
                 'ocrPerformance' => ['series' => $perfSeries->all()],
             ];
+
+            // Change requests: the queue now, and how long decisions took.
+            $requests = $analytics['change_requests'];
+            $requestsWaiting = $requests['waiting'];
+            $oldestWaiting = $requests['oldest_waiting_at'];
+            $waitLabel = fn (?int $seconds): string => match (true) {
+                $seconds === null => '—',
+                $seconds < 60 => 'Under a minute',
+                $seconds < 3600 => floor($seconds / 60).' min',
+                $seconds < 172800 => round($seconds / 3600).' h',
+                default => round($seconds / 86400).' days',
+            };
+
+            // Recent changes: an icon for the kind of thing that was changed.
+            $recentChanges = $analytics['recent_changes'];
+            $changeIcon = fn (string $action): string => match (str($action)->before('.')->toString()) {
+                'user' => 'bx-user',
+                'template', 'document-type' => 'bx-layout',
+                'ocr_model', 'ocr_settings' => 'bx-chip',
+                'change_request' => 'bx-git-pull-request',
+                'report' => 'bx-file',
+                default => 'bx-history',
+            };
 
             // The New document card, for those who can scan (not Admin).
             $canScan = $scanTypes !== null;
@@ -86,7 +95,8 @@
 
         {{--
             New document, OCR Quality and OCR Performance on top; the trend
-            beside the record and account totals; throughput below. Admin
+            beside the record and account totals; change requests and recent
+            changes below. Admin
             cannot scan, so for Admin the two OCR cards share the top row.
         --}}
         <section class="row g-4 mb-4" aria-label="CRMS performance summary">
@@ -488,103 +498,99 @@
             </div>
         </div>
 
+        {{--
+            The bottom row: what needs a decision, and what changed lately. The
+            first follows a period; the second is simply the newest entries.
+        --}}
         <div class="row g-4">
-            <div class="col-12 dashboard-reveal" style="--dashboard-reveal: 5">
-                <x-dashboard.panel panel="staff" title="Processing & Throughput">
-                    <x-slot:meta>{{ $throughputMeta }} · {{ $staffScope['short_label'] }}</x-slot:meta>
+            <div class="col-12 col-lg-6 dashboard-reveal" style="--dashboard-reveal: 5">
+                <x-dashboard.panel panel="requests" title="Change requests">
+                    <x-slot:meta>Decisions · {{ $requestsScope['short_label'] }}</x-slot:meta>
                     <x-slot:tools>
-                        <x-dashboard.period-filter panel="staff" label="processing and throughput"
+                        <x-dashboard.period-filter panel="requests" label="change request decisions"
                                                    :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
                     </x-slot:tools>
 
-                    @if ($sparseThroughput)
-                        <div class="dashboard-throughput-sparse">
-                            <dl class="dashboard-throughput-summary" aria-label="Displayed throughput summary">
-                                <div>
-                                    <dt>Records</dt>
-                                    <dd>{{ number_format($throughputTotal) }}</dd>
-                                </div>
-                                <div>
-                                    <dt>Accounts</dt>
-                                    <dd>{{ number_format($throughputCount) }}</dd>
-                                </div>
-                            </dl>
-
-                            <ol class="dashboard-contributors">
-                                @foreach ($throughput as $person)
-                                    @php
-                                        $share = $throughputTotal > 0 ? round((int) $person['total'] / $throughputTotal * 100, 1) : 0.0;
-                                    @endphp
-                                    <li class="dashboard-contributor" style="--dashboard-throughput-share: {{ number_format($share, 1, '.', '') }}%">
-                                        <div class="dashboard-contributor__topline">
-                                            <span class="dashboard-contributor__rank" aria-label="Rank {{ $loop->iteration }}">
-                                                #{{ $loop->iteration }}
-                                            </span>
-                                            <span class="dashboard-throughput-avatar" aria-hidden="true">
-                                                {{ str($person['name'])->substr(0, 1)->upper() }}
-                                            </span>
-                                            <span class="dashboard-contributor__identity">
-                                                <span class="dashboard-contributor__name" title="{{ $person['name'] }}">{{ $person['name'] }}</span>
-                                                <small title="{{ $person['role'] }}">{{ $person['role'] }}</small>
-                                            </span>
-                                            <span class="dashboard-contributor__total">
-                                                <strong>{{ number_format($person['total']) }}</strong>
-                                                <small>{{ $person['total'] === 1 ? 'record' : 'records' }}</small>
-                                            </span>
-                                        </div>
-                                        <div class="dashboard-contributor__share">
-                                            <div class="dashboard-contributor__track" role="progressbar"
-                                                 aria-label="{{ $person['name'] }} share of displayed output"
-                                                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ $share }}">
-                                                <span></span>
-                                            </div>
-                                            <small>{{ $percent($share) }} of displayed output</small>
-                                        </div>
-                                    </li>
-                                @endforeach
-                            </ol>
-                        </div>
-                    @elseif ($throughput->isNotEmpty())
-                        <div class="dashboard-throughput-layout">
-                            <div id="dashboard-throughput-chart" class="dashboard-chart dashboard-chart--throughput"
-                                 aria-label="Staff throughput comparison"></div>
-
-                            <div class="dashboard-throughput-table-wrap">
-                                <table class="table table-borderless align-middle dashboard-throughput-table mb-0">
-                                    <thead>
-                                        <tr>
-                                            <th scope="col" class="dashboard-throughput-table__rank">Rank</th>
-                                            <th scope="col">Account</th>
-                                            <th scope="col" class="text-end">Records</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach ($throughput as $person)
-                                            <tr>
-                                                <td class="dashboard-throughput-table__rank">
-                                                    <span>{{ $loop->iteration }}</span>
-                                                </td>
-                                                <td>
-                                                    <div class="d-flex align-items-center gap-2 min-w-0">
-                                                        <span class="dashboard-throughput-avatar" aria-hidden="true">
-                                                            {{ str($person['name'])->substr(0, 1)->upper() }}
-                                                        </span>
-                                                        <span class="min-w-0">
-                                                            <span class="d-block fw-medium text-truncate" title="{{ $person['name'] }}">{{ $person['name'] }}</span>
-                                                            <small class="d-block text-muted text-truncate" title="{{ $person['role'] }}">{{ $person['role'] }}</small>
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                <td class="text-end fw-semibold">{{ number_format($person['total']) }}</td>
-                                            </tr>
-                                        @endforeach
-                                    </tbody>
-                                </table>
+                    <div class="dashboard-requests">
+                        {{-- The queue is not a period figure: a request still waiting is waiting now. --}}
+                        <div @class(['dashboard-requests__queue', 'dashboard-requests__queue--clear' => $requestsWaiting === 0])>
+                            <span @class(['dashboard-requests__icon', 'bg-label-warning' => $requestsWaiting > 0, 'bg-label-success' => $requestsWaiting === 0])>
+                                <i class="icon-base bx {{ $requestsWaiting > 0 ? 'bx-git-pull-request' : 'bx-check-circle' }}" aria-hidden="true"></i>
+                            </span>
+                            <div class="dashboard-requests__figure">
+                                <span class="dashboard-requests__headline">
+                                    <strong data-dashboard-count>{{ number_format($requestsWaiting) }}</strong>
+                                    {{ $requestsWaiting === 1 ? 'request' : 'requests' }} waiting for a decision
+                                </span>
+                                <small>
+                                    @if ($oldestWaiting)
+                                        The oldest has waited {{ $oldestWaiting->diffForHumans(['syntax' => \Carbon\CarbonInterface::DIFF_ABSOLUTE, 'parts' => 1]) }}.
+                                    @else
+                                        Nothing is waiting. You are all caught up.
+                                    @endif
+                                </small>
                             </div>
+                            <a href="{{ route('change-requests.index', $requestsWaiting > 0 ? ['status' => 'pending'] : []) }}"
+                               class="btn btn-xs btn-label-primary px-2">
+                                <span>{{ $requestsWaiting > 0 ? 'Review' : 'All requests' }}</span>
+                                <i class="icon-base bx bx-right-arrow-alt ms-1" aria-hidden="true"></i>
+                            </a>
                         </div>
+
+                        <dl class="dashboard-requests__stats" aria-label="Decisions in {{ $requestsScope['short_label'] }}">
+                            <div>
+                                <dt>Approved</dt>
+                                <dd>{{ number_format($requests['approved']) }}</dd>
+                            </div>
+                            <div>
+                                <dt>Rejected</dt>
+                                <dd>{{ number_format($requests['rejected']) }}</dd>
+                            </div>
+                            <div>
+                                <dt>Withdrawn</dt>
+                                <dd>{{ number_format($requests['withdrawn']) }}</dd>
+                            </div>
+                            <div>
+                                <dt>Average wait</dt>
+                                <dd title="Time from a request being opened to its decision">{{ $waitLabel($requests['average_wait_seconds']) }}</dd>
+                            </div>
+                        </dl>
+                    </div>
+                </x-dashboard.panel>
+            </div>
+
+            <div class="col-12 col-lg-6 dashboard-reveal" style="--dashboard-reveal: 6">
+                <x-dashboard.panel panel="changes" title="Recent changes">
+                    <x-slot:meta>Templates, OCR models, accounts and corrections</x-slot:meta>
+                    <x-slot:tools>
+                        <a href="{{ route('audit.index') }}" class="btn btn-xs btn-label-primary px-2" title="Open the full audit log">
+                            <span>Audit log</span>
+                            <i class="icon-base bx bx-right-arrow-alt ms-1" aria-hidden="true"></i>
+                        </a>
+                    </x-slot:tools>
+
+                    @if ($recentChanges->isNotEmpty())
+                        <ol class="dashboard-changes">
+                            @foreach ($recentChanges as $entry)
+                                <li class="dashboard-changes__item">
+                                    <span class="dashboard-changes__icon" aria-hidden="true">
+                                        <i class="icon-base bx {{ $changeIcon($entry->action) }}"></i>
+                                    </span>
+                                    <span class="dashboard-changes__text">
+                                        <span class="dashboard-changes__what" title="{{ $entry->description }}">{{ $entry->description ?? str($entry->action)->replace(['.', '_', '-'], ' ')->ucfirst() }}</span>
+                                        <small>
+                                            {{ $entry->actor_name ?? 'System' }}
+                                            ·
+                                            <time datetime="{{ $entry->created_at->toIso8601String() }}"
+                                                  title="{{ \App\Support\LocalTime::format($entry->created_at, 'j M Y, g:i A') }}">{{ $entry->created_at->diffForHumans() }}</time>
+                                        </small>
+                                    </span>
+                                </li>
+                            @endforeach
+                        </ol>
                     @else
-                        <x-empty-state icon="bx-group" title="No submissions in this period"
-                                       message="Choose a longer period to compare accounts." />
+                        <x-empty-state icon="bx-history" title="No changes yet"
+                                       message="Changes to templates, models and accounts will appear here." />
                     @endif
                 </x-dashboard.panel>
             </div>

@@ -287,6 +287,11 @@ export function gridNotes(notes) {
             return [`${count} written ${plural(count, 'line lies', 'lines lie')} below the last row and ${plural(count, 'is', 'are')} not read `
                 + `(about ${rows} more ${plural(rows, 'row', 'rows')}). This page may have more rows than the template.`];
         }
+        if (note?.code === 'rows_empty' && Array.isArray(note.rows) && note.rows.length > 0) {
+            const total = Math.max(count, note.rows.length);
+            return [`Nothing was read in ${total > 1 ? 'rows' : 'row'} ${list(note.rows.map(Number), total)}, though later rows were. `
+                + `If the page has writing there, check ${total > 1 ? 'those rows' : 'that row'} before you submit.`];
+        }
         if (note?.code === 'lines_above_grid' && count > 0) {
             return [`${count} written ${plural(count, 'line sits', 'lines sit')} in the row directly above the first row. `
                 + 'If that row holds entries, move the grid up one row.'];

@@ -65,6 +65,7 @@ NOTE_LINES_BELOW = "lines_below_grid"
 NOTE_LINES_ABOVE = "lines_above_grid"
 NOTE_GRID_MOVED = "grid_moved"
 NOTE_ROWS_DO_NOT_FIT = "rows_do_not_fit"
+NOTE_ROWS_EMPTY = "rows_empty"
 
 SOURCE_DETECTED = "kraken"
 SOURCE_INK = "ink"
@@ -114,6 +115,17 @@ ROW_SIZED_BAND = 1.12
 # band by more than this share was distorted by the fit (a header taken for a
 # row, a rule missing from the page). Reported to Staff, not corrected.
 UNEVEN_BAND = 0.20
+
+# A printed column is at least this many rows wide (the narrowest on the real
+# ledgers, Entry No. and Sex, are 1.5 rows). A printed rule closer than that
+# past a kept column's outer edge is a frame line or the page's border, not a
+# column Staff removed (see _removed_columns).
+MIN_COLUMN_WIDTH = 0.75
+
+# A vertical rule this close to the image's left or right edge is the border
+# of the scan, not part of the printed table (0.5% is 7 px on a 1448-px page;
+# the real ledgers' outer frame lies 20 px in).
+SCAN_BORDER = 0.005
 
 # Masked crops are filled with the paper's own tone around the line, with a
 # margin. Measured with the project's fine-tuned TrOCR on two real register
@@ -645,8 +657,11 @@ def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near
     Such a stretch stands alone, inside a line of writing, away from every
     rule. So when `writing` (a mask of the detected lines of writing) is
     given, a fragment that joins no rule and lies mostly inside the writing
-    is kept as ink, unless it runs within `near` pixels of a rule: a piece of
-    a bent or broken rule stays with its rule and is erased.
+    is kept as ink, unless it runs within `near` pixels of a rule and is no
+    thicker than that rule: a piece of a bent or broken rule stays with its
+    rule and is erased. Writing resting on a rule is thicker than the print
+    (on every stored page, 4 px joins 7 px above 2 px rules, "Legitimate",
+    "Salustiana"), and erasing it cut "Legitimate" to "Ley t to".
     """
     from scipy import ndimage
 
@@ -665,13 +680,13 @@ def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near
         span = u.max() - u.min() + 1
         if span < 80:
             continue
-        if max_thickness is not None and span < 0.5 * extent:
-            across = np.bincount(u - u.min())
-            if float(np.median(across[across > 0])) > max_thickness:
-                continue
+        across = np.bincount(u - u.min())
+        thickness = float(np.median(across[across > 0]))
+        if max_thickness is not None and span < 0.5 * extent and thickness > max_thickness:
+            continue
         a, b = _fit(u.astype(float), v.astype(float))
         fragments.append({"a": a, "b": b, "lo": int(u.min()), "hi": int(u.max()), "u": u, "v": v,
-                          "window": window, "mask": mask})
+                          "window": window, "mask": mask, "thickness": thickness})
 
     # A rule broken by a crossing stroke, faded ink or a fold comes back as
     # several collinear fragments. Merge them and refit on all their pixels.
@@ -681,6 +696,14 @@ def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near
         if merged:
             last = merged[-1]
             probe = (max(last["lo"], fragment["lo"]) + min(last["hi"], fragment["hi"])) / 2
+            if fragment["lo"] > last["hi"] or last["lo"] > fragment["hi"]:
+                # Apart: compare them where the shorter one is. Out in the gap
+                # a short, tilted stroke of writing, carried a few hundred
+                # pixels along its own slope, can land on a rule it is nowhere
+                # near: a "Legitimate" joined the row rule 400 px to its left
+                # and was erased with it.
+                shorter = min(last, fragment, key=lambda f: f["hi"] - f["lo"])
+                probe = (shorter["lo"] + shorter["hi"]) / 2
             if abs((last["a"] + last["b"] * probe) - (fragment["a"] + fragment["b"] * probe)) <= 4:
                 last["u"] = np.concatenate([last["u"], fragment["u"]])
                 last["v"] = np.concatenate([last["v"], fragment["v"]])
@@ -692,11 +715,13 @@ def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near
         merged.append(dict(fragment, members=[fragment]))
 
     rules = []
+    thicknesses = []
     loose = []
     for rule in merged:
         covered = len(np.unique(rule["u"]))
         if covered >= min_span:
             rules.append({"a": rule["a"], "b": rule["b"], "lo": rule["lo"], "hi": rule["hi"]})
+            thicknesses.append(float(np.median([member["thickness"] for member in rule["members"]])))
             for member in rule["members"]:
                 pixels[member["window"]] |= member["mask"]
         else:
@@ -708,7 +733,9 @@ def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near
             u_mid = (fragment["lo"] + fragment["hi"]) / 2
             v_mid = fragment["a"] + fragment["b"] * u_mid
             by_a_rule = any(abs(rule["a"] + rule["b"] * u_mid - v_mid) <= near
-                            and rule["lo"] - near <= u_mid <= rule["hi"] + near for rule in rules)
+                            and rule["lo"] - near <= u_mid <= rule["hi"] + near
+                            and fragment["thickness"] <= thickness + 1
+                            for rule, thickness in zip(rules, thicknesses))
             if inside >= 0.5 and not by_a_rule:
                 continue  # the body of a written word, not print
         pixels[fragment["window"]] |= fragment["mask"]
@@ -959,19 +986,23 @@ def _column_edges(columns, y):
     return [(c["left_rule"].at(y), c["right_rule"].at(y)) for c in columns]
 
 
-def _split_at_columns(line, columns, ink, row_height):
+def _split_at_columns(line, columns, ink, row_height, removed=()):
     """Cut a detected line where it crosses a column rule.
 
     The cut goes through the emptiest ink column near the rule, so text that
     overflows its column by a letter or two is not sliced through.
+
+    `removed` are the printed columns Staff removed (_removed_columns). Their
+    rules are cut as well: the detector often runs one line from an Informant
+    straight on into the Remarks beside it, and with Informant removed that
+    line was either read whole as the Remarks or, mostly Informant, dropped
+    with the Remarks in it.
     """
     y = line.y
     edges = _column_edges(columns, y)
-    cuts = []
-    for k in range(len(edges) - 1):
-        boundary = (edges[k][1] + edges[k + 1][0]) / 2
-        if line.x0 + 6 < boundary < line.x1 - 6:
-            cuts.append(boundary)
+    boundaries = [(edges[k][1] + edges[k + 1][0]) / 2 for k in range(len(edges) - 1)]
+    boundaries += [rule.at(y) for span in removed for rule in span]
+    cuts = sorted(b for b in boundaries if line.x0 + 6 < b < line.x1 - 6)
     if not cuts:
         return [line]
 
@@ -991,7 +1022,7 @@ def _split_at_columns(line, columns, ink, row_height):
         profile += np.abs(xs - boundary) / (4.0 * window)
         refined.append(float(xs[int(np.argmin(profile))]))
 
-    bounds = [-1e6] + refined + [1e6]
+    bounds = [-1e6] + sorted(refined) + [1e6]
     pieces = []
     for lo, hi in zip(bounds[:-1], bounds[1:]):
         baseline = _clip_baseline(line.baseline, lo, hi)
@@ -1015,6 +1046,78 @@ def _column_for(line, columns):
     if best is None or best_overlap < 0.4 * max(1.0, line.width):
         return None
     return best
+
+
+def _printed_dividers(v_rules, top, bottom, width):
+    """The page's printed column rules: vertical rules down most of the table.
+
+    The scan's own border is left out (SCAN_BORDER).
+    """
+    border = SCAN_BORDER * width
+    middle = (top + bottom) / 2
+    return [Rule(r["a"], r["b"], True) for r in v_rules
+            if min(r["hi"], bottom) - max(r["lo"], top) >= 0.5 * (bottom - top)
+            and border <= r["a"] + r["b"] * middle <= width - border]
+
+
+def _removed_columns(columns, dividers, y, row_height):
+    """The printed columns beside or between the kept ones: those Staff removed.
+
+    Returns (left, right) Rule pairs. Past a kept column's outer edge the
+    printed table goes on when another printed rule stands at least
+    MIN_COLUMN_WIDTH rows further out; the span then runs to the last printed
+    rule that way. Beyond the table's own frame (the margin) nothing is
+    removed, so writing that runs into the margin still belongs to its cell.
+    Between two kept columns that do not touch, the space is a removed column
+    when printed rules bound it on both sides.
+    """
+    kept = sorted(columns, key=lambda c: c["left_rule"].at(y))
+    if not kept:
+        return []
+    least = MIN_COLUMN_WIDTH * row_height
+    spans = []
+    first = kept[0]["left_rule"]
+    outside = [d for d in dividers if d.at(y) <= first.at(y) - least]
+    if outside:
+        spans.append((min(outside, key=lambda d: d.at(y)), first))
+    for a, b in zip(kept, kept[1:]):
+        right, left = a["right_rule"], b["left_rule"]
+        if left.at(y) - right.at(y) >= least and right.matched and left.matched:
+            spans.append((right, left))
+    last = kept[-1]["right_rule"]
+    outside = [d for d in dividers if d.at(y) >= last.at(y) + least]
+    if outside:
+        spans.append((last, max(outside, key=lambda d: d.at(y))))
+    return spans
+
+
+def _without_removed(ink, spans, top, bottom, fields=()):
+    """Ink less every stroke that lies mostly inside a removed column.
+
+    Nothing reads a removed column, so its writing must not end up in a kept
+    line's outline: a name's last letter reaching across the rule would
+    otherwise be given whole to the Remarks beside it. A rectangle field
+    (`fields`, polygons) drawn over such a column still reads it, so its ink
+    stays.
+    """
+    from scipy import ndimage
+
+    if not spans:
+        return ink
+    canvas = Image.new("1", (ink.shape[1], ink.shape[0]), 0)
+    draw = ImageDraw.Draw(canvas)
+    for left, right in spans:
+        draw.polygon([(left.at(top), top), (right.at(top), top), (right.at(bottom), bottom),
+                      (left.at(bottom), bottom)], fill=1)
+    for polygon in fields:
+        draw.polygon([tuple(point) for point in polygon], fill=0)
+    area = np.asarray(canvas, dtype=bool)
+    labels, count = ndimage.label(ink, structure=np.ones((3, 3), bool))
+    inside = np.bincount(labels[area], minlength=count + 1)
+    total = np.bincount(labels.ravel(), minlength=count + 1)
+    drop = 2 * inside >= total
+    drop[0] = False
+    return ink & ~drop[labels]
 
 
 def _x_overlap(a, b):
@@ -1198,6 +1301,11 @@ def _grid_notes(rules, expected, h_rules, above, below, columns, row_height, cen
                         directly above the first row. A taller band is a
                         header (more than ROW_SIZED_BAND rows) stays quiet; a
                         band as tall as a row could be either, so Staff are asked.
+      rows_empty        rows above the last row read that nothing was read
+                        in at all; `rows` are the 1-based row numbers. A row
+                        left out this way has no reading to flag, so it would
+                        vanish from Verify without a word. Reported by
+                        process_page itself (see _empty_rows).
     """
     notes = []
     at = [rule.at(centre_x) for rule in rules]
@@ -1542,6 +1650,9 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
     grid = None
     detector_used = None
     has_table = bool(columns) and len(ruled) >= 2
+    # Printed columns Staff removed in Align (see _removed_columns), and the
+    # writing the detector found in them.
+    removed, in_removed = [], []
     # Every rectangle field is split into the written lines inside it, the same
     # on both paths: a box drawn over a list of eight diseases is eight crops,
     # and a box over one name is that one name, outlined tightly. A field the
@@ -1583,8 +1694,15 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
             centre_x = (table_left + table_right) / 2
             centre_y = (table_top + table_bottom) / 2
 
-            h_rules, h_pixels = _find_rules(h_evidence, "h", 0.2 * (table_right - table_left), max_thickness, writing, near)
             v_rules, v_pixels = _find_rules(v_evidence, "v", 0.2 * (table_bottom - table_top), max_thickness, writing, near)
+            # A printed row line runs across the whole printed table, not only
+            # the columns Staff kept. Measured against one kept 108-px Remarks
+            # column, "long enough to be print" fell to 22 px, and the joins of
+            # every cursive "Legitimate" were erased as print.
+            dividers = _printed_dividers(v_rules, table_top, table_bottom, width)
+            printed = [d.at(centre_y) for d in dividers]
+            table_width = max(table_right - table_left, max(printed) - min(printed) if printed else 0.0)
+            h_rules, h_pixels = _find_rules(h_evidence, "h", 0.2 * table_width, max_thickness, writing, near)
             # The first row line may move up to `row_reach` rows from where the
             # markers put it, and the row spacing may stretch by ROW_STRETCH
             # about that line. Never a whole row: see ROW_REACH.
@@ -1621,6 +1739,9 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
                 notes.append({"code": NOTE_ROWS_DO_NOT_FIT, "count": len(columns)})
                 columns, ruled, has_table, split_fields = [], [], False, True
 
+        if has_table:
+            removed = _removed_columns(columns, dividers, centre_y, row_height)
+
         if not has_table:
             # No table: any long printed line (a ruled notebook page, a form's
             # underlines) is still erased before strokes are read.
@@ -1635,6 +1756,8 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
         # that crosses them.
         rule_pixels = ndimage.binary_dilation(h_pixels | v_pixels, structure=np.ones((3, 3), bool)) & ~clean
         near_rule = ndimage.binary_dilation(h_band | v_band, structure=np.ones((5, 5), bool))
+        clean = _without_removed(clean, removed, table_top - row_height, table_bottom + row_height,
+                                 [f["polygon"] for f in fields]) if removed else clean
         timings["rules"] = time.time() - started
 
         field_polygons = [f["polygon"] for f in fields]
@@ -1659,10 +1782,12 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
                 ignored.append(line)
                 (above if line.y < top else below).append(line)
                 continue
-            for piece in _split_at_columns(line, columns, clean, row_height):
+            for piece in _split_at_columns(line, columns, clean, row_height, removed):
                 piece.column = _column_for(piece, columns)
                 if piece.column is None:
                     ignored.append(piece)
+                    if any(left.at(piece.y) <= piece.cx <= right.at(piece.y) for left, right in removed):
+                        in_removed.append(piece)
                 else:
                     pieces.append(piece)
 
@@ -1707,6 +1832,13 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
         # A row where the detector found no writing at all is an empty row; a
         # lone mark there is a stain or a stray stroke, not an entry.
         written_rows = {line.row for line in lines[:table_count] if line.source == SOURCE_DETECTED}
+        # Writing in a column Staff removed still shows the row holds an entry:
+        # with only a narrow Age column kept, a "36" the detector missed would
+        # otherwise be taken for a stain.
+        for piece in in_removed:
+            row, _ = _nearest_row(piece.y, piece.cx, rules, offset)
+            if row is not None:
+                written_rows.add(row)
         buckets = {}
 
         def bucket(ys, xs):
@@ -1820,6 +1952,10 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
             if len(occupants) > 1:
                 for line in occupants:
                     line.flags.append(FLAG_SHARED_CELL)
+        if has_table:
+            empty = _empty_rows(table_lines)
+            if empty:
+                notes.append({"code": NOTE_ROWS_EMPTY, "count": len(empty), "rows": empty[:6]})
         timings["outlines"] = time.time() - started
 
     if has_table:
@@ -1922,6 +2058,17 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
     with open(os.path.join(out_dir, "lines.json"), "w", encoding="utf-8") as handle:
         json.dump(result, handle)
     return result
+
+
+def _empty_rows(table_lines):
+    """1-based rows above the last row read that hold no reading at all.
+
+    Rows after the last one read are a page's unused rows, and stay quiet.
+    """
+    read = {line.row for line in table_lines if FLAG_NO_ROW not in line.flags and line.row is not None}
+    if not read:
+        return []
+    return [row + 1 for row in range(max(read)) if row not in read]
 
 
 def _merge_rows(members, row_height):
