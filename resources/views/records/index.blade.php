@@ -2,28 +2,36 @@
 
 @section('title', 'Records Archive')
 
+@php
+    // Every record has one status (Submitted), so there is no status filter or
+    // column here, same as Reports.
+    $hasFilters = collect($filters)->filter(fn ($value) => $value !== null && $value !== '')->isNotEmpty();
+@endphp
+
 @section('content')
     <x-page-header title="Records Archive"
-                   subtitle="Search submitted civil registry records. Read-only for every role.">
-        @can('documents.process')
-            <a href="{{ route('documents.create') }}" class="btn btn-primary">
-                <i class="icon-base bx bx-scan icon-sm me-1"></i> New Document
-            </a>
-        @endcan
-    </x-page-header>
+                   subtitle="Search submitted civil registry records by name or registry number." />
 
     <x-card>
-        <form method="GET" action="{{ route('records.index') }}" class="row g-3">
+        <form method="GET" action="{{ route('records.index') }}" class="row g-3 align-items-end">
             {{-- Values come from the validated filters, so a bad one is not echoed back. --}}
-            <div class="col-md-4">
+            <div class="col-sm-12 col-xl-6">
                 <label for="q" class="form-label">Search</label>
-                {{-- data-record-search: the "/" shortcut lands here, since the top bar's search is hidden on this page. --}}
-                <input type="search" id="q" name="q" value="{{ $filters['q'] ?? '' }}" maxlength="255"
-                       class="form-control @error('q') is-invalid @enderror" placeholder="Name or registry number"
-                       aria-keyshortcuts="/" data-record-search>
-                @error('q')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                <div class="d-flex gap-2">
+                    {{-- data-record-search: the "/" shortcut lands here, since the top bar's search is hidden on this page. --}}
+                    <input type="search" id="q" name="q" value="{{ $filters['q'] ?? '' }}" maxlength="255"
+                           class="form-control flex-grow-1 @error('q') is-invalid @enderror" placeholder="Name or registry number"
+                           aria-keyshortcuts="/" data-record-search>
+                    <button class="btn btn-primary" type="submit">
+                        <i class="icon-base bx bx-search icon-sm me-1" aria-hidden="true"></i> Search
+                    </button>
+                    @if ($hasFilters)
+                        <a href="{{ route('records.index') }}" class="btn btn-outline-secondary" title="Clear all filters">Reset</a>
+                    @endif
+                </div>
+                @error('q')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
             </div>
-            <div class="col-md-2">
+            <div class="col-sm-4 col-xl-2">
                 <label for="type" class="form-label">Type</label>
                 <select id="type" name="type" class="form-select @error('type') is-invalid @enderror">
                     <option value="">All</option>
@@ -35,40 +43,22 @@
                 </select>
                 @error('type')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
-            <div class="col-md-2">
-                <label for="status" class="form-label">Status</label>
-                <select id="status" name="status" class="form-select @error('status') is-invalid @enderror">
-                    <option value="">Any</option>
-                    @foreach ($statuses as $status)
-                        <option value="{{ $status->value }}" @selected(($filters['status'] ?? null) === $status->value)>
-                            {{ $status->label() }}
-                        </option>
-                    @endforeach
-                </select>
-                @error('status')<div class="invalid-feedback">{{ $message }}</div>@enderror
-            </div>
-            <div class="col-md-2">
+            <div class="col-sm-4 col-xl-2">
                 <label for="from" class="form-label">From</label>
                 <input type="date" id="from" name="from" value="{{ $filters['from'] ?? '' }}"
                        class="form-control @error('from') is-invalid @enderror">
                 @error('from')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
-            <div class="col-md-2">
+            <div class="col-sm-4 col-xl-2">
                 <label for="to" class="form-label">To</label>
                 <input type="date" id="to" name="to" value="{{ $filters['to'] ?? '' }}"
                        class="form-control @error('to') is-invalid @enderror">
                 @error('to')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
-            <div class="col-12 d-flex gap-2">
-                <button class="btn btn-primary" type="submit">
-                    <i class="icon-base bx bx-search icon-sm me-1"></i> Search
-                </button>
-                <a href="{{ route('records.index') }}" class="btn btn-outline-secondary">Reset</a>
-            </div>
         </form>
     </x-card>
 
-    <x-card class="mt-4" :subtitle="$records->total() . ' record(s)'">
+    <x-card class="mt-4" :title="number_format($records->total()).' '.($hasFilters ? 'matching ' : '').str('record')->plural($records->total())">
         @if ($records->isEmpty())
             <x-empty-state icon="bx-archive" title="No records match"
                            message="Adjust the search, or digitise a new certificate." />
@@ -79,7 +69,6 @@
                         <tr>
                             <th>Record</th>
                             <th>Type</th>
-                            <th>Status</th>
                             <th>Submitted</th>
                             <th class="text-end"></th>
                         </tr>
@@ -91,6 +80,10 @@
                                     <a href="{{ route('records.show', $record) }}" class="fw-medium">
                                         {{ $record->title() }}
                                     </a>
+                                    @if ($record->isLocked())
+                                        <i class="icon-base bx bx-lock-alt icon-sm text-muted ms-1"
+                                           title="Locked — changes need a change request"></i>
+                                    @endif
                                     <div>
                                         <small class="text-muted">
                                             {{ $record->registry_number ?? 'No registry number' }}
@@ -116,15 +109,6 @@
                                         <i class="icon-base bx {{ $record->typeIcon() }} icon-sm text-muted"></i>
                                         {{ $record->typeShortLabel() }}
                                     </span>
-                                </td>
-                                <td>
-                                    <span class="badge {{ $record->status->badgeClass() }}">
-                                        {{ $record->status->label() }}
-                                    </span>
-                                    @if ($record->isLocked())
-                                        <i class="icon-base bx bx-lock-alt icon-sm text-muted ms-1"
-                                           title="Locked — changes need a change request"></i>
-                                    @endif
                                 </td>
                                 <td class="text-muted">
                                     {{ \App\Support\LocalTime::format($record->submitted_at, 'j M Y') ?: '—' }}
