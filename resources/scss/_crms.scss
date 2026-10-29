@@ -7550,35 +7550,6 @@ $dashboard-reveal-step: 40ms;
 
 // ------------------------------------------------------------- template builder
 
-.template-library-note {
-  display: flex;
-  align-items: flex-start;
-  gap: .7rem;
-  margin-block-end: 1rem;
-  padding: .85rem 1rem;
-  color: var(--bs-body-color);
-  background: rgba(105, 108, 255, .06);
-  border: 1px solid rgba(105, 108, 255, .16);
-  border-radius: var(--bs-border-radius);
-  font-size: .8125rem;
-
-  >i {
-    flex: 0 0 auto;
-    margin-block-start: .1rem;
-    color: var(--bs-primary);
-  }
-
-  div {
-    display: flex;
-    flex-direction: column;
-    gap: .15rem;
-  }
-
-  span {
-    color: var(--bs-secondary-color);
-  }
-}
-
 .template-library-card {
   // Dropdown menus in the card header must be able to extend beyond the card.
   overflow: visible;

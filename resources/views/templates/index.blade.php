@@ -28,14 +28,6 @@
         </div>
     </x-page-header>
 
-    <div class="template-library-note" role="note">
-        <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
-        <div>
-            <strong>Published layouts are the Staff defaults.</strong>
-            <span>Drafts remain private until you publish them. Publishing a layout replaces the current one for that document type.</span>
-        </div>
-    </div>
-
     <div class="row g-4">
         @foreach ($documentTypes as $type)
             @php

@@ -27,8 +27,7 @@ class DocumentTemplateBuilderTest extends TestCase
             ->get(route('templates.index'))
             ->assertOk()
             ->assertSeeText('Template Builder')
-            ->assertDontSeeText('Document Templates')
-            ->assertSeeText('Published layouts are the Staff defaults.');
+            ->assertDontSeeText('Document Templates');
 
         $this->get(route('templates.index'))
             ->assertSee('class="template-library-layouts"', escape: false)
