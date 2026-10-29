@@ -143,6 +143,24 @@ textarea,
   outline-offset: 2px;
 }
 
+// Modal close (x). Sneat draws it as a white square lifted off the dialog's corner
+// by a drop shadow. The flat-actions rule above removes that shadow, which left
+// a white square on a white dialog with a pale grey cross. A thin border keeps
+// the square visible without bringing the shadow back, and the cross takes the
+// heading colour. Every modal in CRMS uses this button, so the rule is global.
+.modal .btn-close {
+  border: 1px solid var(--bs-border-color);
+
+  &::before {
+    background-color: var(--bs-heading-color);
+  }
+
+  &:hover::before,
+  &:focus-visible::before {
+    background-color: var(--bs-primary);
+  }
+}
+
 // Form inputs focus highlight: keep the border crisp and thin (1px) just like
 // modern clean inputs, without 2px expansion or heavy colored blur/shadow.
 .form-control:focus,
@@ -1405,10 +1423,14 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   animation: document-panel-in .2s ease-out;
 }
 
+// Fills the window below the top bar so the upload card sits centred, without
+// pushing the page past the window. 11.75rem covers what surrounds it: 108px
+// above (top bar and container padding) plus 24px padding and the 54px footer
+// below. At 10rem the page always ran 26px over and scrolled.
 .document-workspace-focused #step-upload {
   display: flex;
   align-items: center;
-  min-block-size: calc(100dvh - 10rem);
+  min-block-size: calc(100dvh - 11.75rem);
 }
 
 @keyframes document-panel-in {
@@ -1439,7 +1461,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-block-size: 24rem;
+  // Tall when the window allows, but never so tall that the upload step scrolls:
+  // the top bar, note, hint and footer around it take about 17.5rem.
+  min-block-size: clamp(18rem, 100dvh - 17.5rem, 30rem);
   padding: 3rem 2rem;
   flex-direction: column;
   text-align: center;
@@ -1514,6 +1538,31 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .document-dropzone__button {
   margin-block: 1.35rem 1.1rem;
   pointer-events: none;
+}
+
+// Short windows (a 1366x768 laptop leaves about 560px inside the browser): a
+// smaller icon and tighter spacing let the whole upload step fit without
+// scrolling. Phones keep their own rules further down.
+@media (min-width: 768px) and (max-height: 700px) {
+  .document-dropzone {
+    min-block-size: clamp(14rem, 100dvh - 19.5rem, 30rem);
+    padding-block: 1.25rem;
+  }
+
+  .document-dropzone__icon {
+    inline-size: 3.5rem;
+    block-size: 3.5rem;
+    margin-block-end: .75rem;
+    border-radius: 1rem;
+
+    i {
+      font-size: 1.75rem;
+    }
+  }
+
+  .document-dropzone__button {
+    margin-block: 1rem .75rem;
+  }
 }
 
 .document-dropzone__formats {
@@ -4347,7 +4396,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   .document-dropzone {
-    min-block-size: 20rem;
+    min-block-size: clamp(16rem, 100dvh - 17.5rem, 24rem);
     padding: 2rem 1rem;
   }
 

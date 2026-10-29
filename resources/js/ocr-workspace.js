@@ -891,6 +891,21 @@ function initModelPerformance() {
             && metrics.length >= 3
             && scores.every((score) => score !== null);
 
+        // Destroying the chart empties its container for a moment. The page gets
+        // shorter, the browser clamps the scroll position, and a reader at the
+        // bottom is thrown upward. Hold the old height and scroll position until
+        // the new chart has drawn.
+        const scrollY = window.scrollY;
+        if (chart && target.offsetHeight > 0) {
+            target.style.minHeight = `${target.offsetHeight}px`;
+        }
+        const releaseLayout = () => {
+            target.style.minHeight = '';
+            if (window.scrollY !== scrollY) {
+                window.scrollTo({ top: scrollY, behavior: 'instant' });
+            }
+        };
+
         chart?.destroy();
         chart = null;
 
@@ -898,6 +913,7 @@ function initModelPerformance() {
         empty?.classList.toggle('d-none', hasData);
 
         if (!hasData) {
+            releaseLayout();
             target.setAttribute('aria-label', 'No model performance data available');
             if (emptyCopy) {
                 emptyCopy.textContent = profile
@@ -1156,7 +1172,7 @@ function initModelPerformance() {
             });
         }
 
-        chart.render();
+        Promise.resolve(chart.render()).finally(releaseLayout);
     };
 
     const highlightModelRow = (key) => {

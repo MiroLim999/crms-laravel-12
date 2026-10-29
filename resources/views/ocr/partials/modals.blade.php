@@ -1,7 +1,8 @@
 {{-- Add a model: one archive or one model folder. --}}
 <div class="modal fade" id="addModelModal" tabindex="-1"
      aria-labelledby="addModelTitle" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-lg">
+    {{-- Default width (35rem), like the other OCR dialogs; the drop zone gives it height. --}}
+    <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content" id="addModelForm">
 
             <div class="modal-header">
@@ -101,7 +102,7 @@
 @endphp
 <div class="modal fade" id="activateModal" tabindex="-1"
      aria-labelledby="activateModelTitle" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered ocr-modal-compact">
         <form class="modal-content" method="POST" action="" id="activateForm">
             @csrf
             <div class="modal-header">

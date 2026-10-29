@@ -457,8 +457,10 @@
 
   // --------------------------------------------------------------- modals
 
+  // Taller than wide-and-flat: with the dialog at its default width, the extra
+  // block padding keeps the drop target easy to hit.
   .ocr-upload-zone {
-    padding: 2rem 1.25rem;
+    padding: 2.75rem 1.25rem;
     text-align: center;
     background: rgba(var(--bs-primary-rgb), 0.025);
     border: 1px dashed color-mix(in srgb, var(--bs-primary) 45%, var(--bs-border-color));
@@ -553,6 +555,12 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+  }
+
+  // Narrower than the default dialog, so its short content reads as a squarer
+  // card instead of a wide strip; the Add model dialog has the drop zone for height.
+  .ocr-modal-compact {
+    max-width: 25rem;
   }
 
   .ocr-activate-card {
