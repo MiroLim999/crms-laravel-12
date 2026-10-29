@@ -867,12 +867,12 @@ function initModelPerformance() {
             <div class="ocr-tooltip-title">${metric.label}</div>
             ${isModelVisible ? `
             <div class="ocr-tooltip-row">
-                <div><span class="ocr-tooltip-badge" style="background:#696cff"></span><strong>${profileLabel}</strong></div>
+                <div><span class="ocr-tooltip-badge" style="background:#ff6384"></span><strong>${profileLabel}</strong></div>
                 <span class="fw-bold text-primary">${val !== null && val !== undefined ? val.toFixed(1) + '%' : '—'}</span>
             </div>` : ''}
             ${isBaseVisible && bVal !== null && bVal !== undefined ? `
             <div class="ocr-tooltip-row">
-                <div><span class="ocr-tooltip-badge" style="background:#ff9f43"></span><span>TrOCR Base</span></div>
+                <div><span class="ocr-tooltip-badge" style="background:#696cff"></span><span>TrOCR Base</span></div>
                 <span class="text-muted">${bVal.toFixed(1)}%</span>
             </div>` : ''}
             ${isModelVisible && isBaseVisible && diff !== null ? `
@@ -955,7 +955,9 @@ function initModelPerformance() {
             });
         }
 
-        const comparisonColors = [colors.primary, '#ff9f43'];
+        // Same pink as the model triangle on the dashboard's OCR Performance card.
+        const modelColor = '#ff6384';
+        const comparisonColors = [modelColor, '#696cff'];
 
         if (currentView === 'radar') {
             const radarSeries = [
@@ -982,37 +984,11 @@ function initModelPerformance() {
                 },
                 colors: showBaseComparison
                     ? [...comparisonColors, 'transparent']
-                    : [colors.primary, 'transparent'],
+                    : [modelColor, 'transparent'],
                 dataLabels: { enabled: false },
                 fill: showBaseComparison
-                    ? {
-                        type: ['gradient', 'solid', 'solid'],
-                        opacity: [0.30, 0.12, 0],
-                        gradient: {
-                            type: 'horizontal',
-                            shadeIntensity: 0,
-                            inverseColors: false,
-                            colorStops: [
-                                { offset: 0, color: colors.exact, opacity: 0.30 },
-                                { offset: 50, color: colors.character, opacity: 0.32 },
-                                { offset: 100, color: colors.word, opacity: 0.30 },
-                            ],
-                        },
-                    }
-                    : {
-                        type: ['gradient', 'solid'],
-                        opacity: [0.28, 0],
-                        gradient: {
-                            type: 'horizontal',
-                            shadeIntensity: 0,
-                            inverseColors: false,
-                            colorStops: [
-                                { offset: 0, color: colors.exact, opacity: 0.28 },
-                                { offset: 50, color: colors.character, opacity: 0.28 },
-                                { offset: 100, color: colors.word, opacity: 0.25 },
-                            ],
-                        },
-                    },
+                    ? { type: 'solid', opacity: [0.32, 0.18, 0] }
+                    : { type: 'solid', opacity: [0.32, 0] },
                 grid: {
                     padding: { top: 12, right: 24, bottom: 8, left: 24 },
                 },
@@ -1029,7 +1005,7 @@ function initModelPerformance() {
                 markers: showBaseComparison
                     ? {
                         size: [7.5, 5.5, 0],
-                        strokeColors: [colors.card, '#ff9f43', 'transparent'],
+                        strokeColors: [colors.card, '#696cff', 'transparent'],
                         strokeWidth: [2.5, 2, 0],
                         hover: { size: 9 },
                     }
@@ -1037,13 +1013,6 @@ function initModelPerformance() {
                         size: [7, 0],
                         strokeColors: [colors.card, 'transparent'],
                         strokeWidth: [2.5, 0],
-                        discrete: metricColors.map((color, dataPointIndex) => ({
-                            seriesIndex: 0,
-                            dataPointIndex,
-                            fillColor: color,
-                            strokeColor: colors.card,
-                            size: 7.5,
-                        })),
                         hover: { size: 9 },
                     },
                 plotOptions: {
