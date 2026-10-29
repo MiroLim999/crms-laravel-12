@@ -132,8 +132,8 @@
                                         <circle cx="34" cy="60" r="15" />
                                         <path d="M34 64V52.5m-4.5 4.5 4.5-4.5 4.5 4.5M27 61.5v3a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-3" />
                                     </g>
-                                    <path class="dashboard-scan__link" d="M53 60h17" />
-                                    <path class="dashboard-scan__arrow" d="m69 57 3 3-3 3" />
+                                    <path class="dashboard-scan__link dashboard-scan__flow-in" d="M53 60h17" />
+                                    <path class="dashboard-scan__arrow dashboard-scan__flow-in" d="m69 57 3 3-3 3" />
 
                                     <rect class="dashboard-scan__sheet dashboard-scan__sheet--back"
                                           x="94" y="13" width="62" height="96" rx="5" transform="rotate(7 125 61)" />
@@ -160,8 +160,8 @@
                                         <path d="m148.2 94.2 2.6 2.6 5-5.3" />
                                     </g>
 
-                                    <path class="dashboard-scan__link" d="M168 60h17" />
-                                    <path class="dashboard-scan__arrow" d="m184 57 3 3-3 3" />
+                                    <path class="dashboard-scan__link dashboard-scan__flow-out" d="M168 60h17" />
+                                    <path class="dashboard-scan__arrow dashboard-scan__flow-out" d="m184 57 3 3-3 3" />
                                     <g class="dashboard-scan__step dashboard-scan__step--done">
                                         <circle cx="206" cy="60" r="15" />
                                         <path d="M197 52h18v4.5h-18zm1.5 4.5h15V66a1.5 1.5 0 0 1-1.5 1.5h-12a1.5 1.5 0 0 1-1.5-1.5zm5 4h5" />
@@ -173,7 +173,7 @@
                             <dl class="dashboard-scan__stats">
                                 <div>
                                     <dt>added this month</dt>
-                                    <dd>{{ number_format($headline['month_records']) }}</dd>
+                                    <dd data-dashboard-count>{{ number_format($headline['month_records']) }}</dd>
                                 </div>
                                 <div>
                                     <dt>last added</dt>

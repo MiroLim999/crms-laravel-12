@@ -7388,8 +7388,78 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
-// The New document card's scan line rests on the page and sweeps it only
-// while the card is pointed at or focused, so nothing moves on its own.
+// The New document card's picture plays its story once, after the card has
+// arrived: the upload step, the page rising into the scanner frame, its check
+// mark, then the archive. Opacity only where the SVG has its own transform
+// (the back sheet is rotated by an attribute that a CSS transform would undo).
+@mixin dashboard-scan-entrance($name, $offset, $duration: .35s) {
+  animation: $name $duration $dashboard-ease backwards;
+  animation-delay: calc(var(--dashboard-reveal, 0) * #{$dashboard-reveal-step} + #{$offset});
+}
+
+.dashboard-reveal {
+  .dashboard-scan__step,
+  .dashboard-scan__check {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  .dashboard-scan__step:not(.dashboard-scan__step--done) {
+    @include dashboard-scan-entrance(dashboard-scan-pop, 150ms);
+  }
+
+  .dashboard-scan__flow-in {
+    @include dashboard-scan-entrance(dashboard-fade-in, 260ms, .25s);
+  }
+
+  .dashboard-scan__sheet--back,
+  .dashboard-scan__corner {
+    @include dashboard-scan-entrance(dashboard-fade-in, 320ms, .3s);
+  }
+
+  .dashboard-scan__page {
+    @include dashboard-scan-entrance(dashboard-scan-rise, 320ms, .4s);
+  }
+
+  .dashboard-scan__check {
+    @include dashboard-scan-entrance(dashboard-scan-pop, 680ms);
+  }
+
+  .dashboard-scan__flow-out {
+    @include dashboard-scan-entrance(dashboard-fade-in, 780ms, .25s);
+  }
+
+  .dashboard-scan__step--done {
+    @include dashboard-scan-entrance(dashboard-scan-pop, 860ms);
+  }
+}
+
+@keyframes dashboard-scan-pop {
+  from {
+    opacity: 0;
+    transform: scale(.6);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dashboard-scan-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+// After that the scan line rests on the page and sweeps it only while the
+// card is pointed at or focused, so nothing moves on its own.
 .dashboard-scan__beam {
   transform: translateY(42px);
   animation: dashboard-scan-sweep 2.6s ease-in-out infinite paused;
@@ -7456,6 +7526,13 @@ $dashboard-reveal-step: 40ms;
   .dashboard-reveal .dashboard-archive__bar,
   .dashboard-reveal .dashboard-kpi__health-track span,
   .dashboard-reveal .dashboard-quality__chips,
+  .dashboard-reveal .dashboard-scan__step,
+  .dashboard-reveal .dashboard-scan__link,
+  .dashboard-reveal .dashboard-scan__arrow,
+  .dashboard-reveal .dashboard-scan__sheet--back,
+  .dashboard-reveal .dashboard-scan__corner,
+  .dashboard-reveal .dashboard-scan__page,
+  .dashboard-reveal .dashboard-scan__check,
   .dashboard-scan__beam,
   .dashboard-chart-data__surface {
     animation: none;

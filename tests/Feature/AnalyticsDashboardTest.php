@@ -589,7 +589,7 @@ class AnalyticsDashboardTest extends TestCase
 
         $this->actingAs($superAdmin)
             ->get(route('dashboard'))
-            ->assertSeeInOrder(['<dt>added this month</dt>', '<dd>0</dd>', '<dt>last added</dt>', 'None yet'], escape: false);
+            ->assertSeeInOrder(['<dt>added this month</dt>', '<dd data-dashboard-count>0</dd>', '<dt>last added</dt>', 'None yet'], escape: false);
 
         $staff = User::factory()->staff()->create();
         $this->record($staff, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-07-20 04:00:00')]);
@@ -599,7 +599,7 @@ class AnalyticsDashboardTest extends TestCase
         // and its exact time is given in Manila.
         $this->actingAs($superAdmin)
             ->get(route('dashboard'))
-            ->assertSeeInOrder(['<dt>added this month</dt>', '<dd>1</dd>', '<dt>last added</dt>'], escape: false)
+            ->assertSeeInOrder(['<dt>added this month</dt>', '<dd data-dashboard-count>1</dd>', '<dt>last added</dt>'], escape: false)
             ->assertSee('title="8 Aug 2026, 12:00 PM">3 days ago</time>', escape: false);
     }
 
