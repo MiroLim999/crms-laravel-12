@@ -132,25 +132,26 @@
                                 </a>
                             </div>
                         @else
+                            <div class="audit-diff-inner rounded-2 rounded-top-0 border border-top-0" style="margin:0 28px 24px">
                             <div class="table-responsive">
-                            <table class="table table-hover align-middle mb-0">
+                            <table class="table table-sm align-middle mb-0" style="border-collapse:separate">
                                 <thead>
-                                    <tr>
-                                        <th>Layout</th>
-                                        <th>Fields</th>
-                                        <th>Records</th>
-                                        <th>Status</th>
-                                        <th class="text-end">Actions</th>
+                                    <tr style="background:rgba(var(--crms-ink-rgb),.03)">
+                                        <th class="ps-3 text-uppercase fw-semibold small text-muted border-0" style="letter-spacing:.04em">Layout</th>
+                                        <th class="text-uppercase fw-semibold small text-muted border-0" style="letter-spacing:.04em">Fields</th>
+                                        <th class="text-uppercase fw-semibold small text-muted border-0" style="letter-spacing:.04em">Records</th>
+                                        <th class="text-uppercase fw-semibold small text-muted border-0" style="letter-spacing:.04em">Status</th>
+                                        <th class="pe-3 text-end text-uppercase fw-semibold small text-muted border-0" style="letter-spacing:.04em">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     @foreach ($group as $layout)
-                                        <tr>
-                                            <td>
+                                        <tr class="template-layout-row"
+                                            style="{{ $loop->last ? '' : 'border-bottom:1px solid rgba(var(--crms-ink-rgb),.1)' }}">
+                                            <td class="ps-3 py-2">
                                                 <div class="fw-medium text-heading">{{ $layout->name }}</div>
-                                                <small class="text-muted">
-                                                    {{ $layout->creator?->name ?? 'System' }}
-                                                    &middot; Updated {{ $layout->updated_at->diffForHumans() }}
+                                                <small class="text-muted" title="Created by {{ $layout->creator?->name ?? 'System' }}">
+                                                    Updated {{ $layout->updated_at->diffForHumans() }}
                                                 </small>
                                                 @if ($layout->parent)
                                                     <small class="d-block text-muted mt-1">Based on “{{ $layout->parent->name }}”</small>
@@ -162,11 +163,9 @@
                                                         <i class="icon-base bx bx-file icon-sm" aria-hidden="true"></i>
                                                         {{ $layout->sample_original_name }}
                                                     </a>
-                                                @else
-                                                    <small class="d-block text-muted mt-1">No sample stored</small>
                                                 @endif
                                             </td>
-                                            <td>
+                                            <td class="text-nowrap py-2">
                                                 @if ($layout->isLedger())
                                                     {{ count($layout->columns) }} {{ Str::plural('column', count($layout->columns)) }}
                                                     @if ($layout->fields_count > 0)
@@ -176,8 +175,8 @@
                                                     {{ $layout->fields_count }}
                                                 @endif
                                             </td>
-                                            <td>{{ $layout->records_count }}</td>
-                                            <td>
+                                            <td class="py-2">{{ $layout->records_count }}</td>
+                                            <td class="py-2">
                                                 @if ($layout->is_active)
                                                     <span class="badge bg-label-success template-status-badge--published">
                                                         <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
@@ -187,28 +186,12 @@
                                                     <span class="badge bg-label-secondary">Draft</span>
                                                 @endif
                                                 @if ($layout->is_active || $layout->records_count > 0 || $layout->pages_count > 0)
-                                                    <small class="d-block text-muted mt-1" title="Saving changed markers makes a new version, so records keep this one">
-                                                        <i class="icon-base bx bx-lock-alt icon-xs" aria-hidden="true"></i>
-                                                        Edits make a new version
-                                                    </small>
+                                                    <i class="icon-base bx bx-lock-alt icon-xs text-muted ms-1"
+                                                       title="Saving changed markers makes a new version, so records keep this one"
+                                                       aria-label="Edits make a new version"></i>
                                                 @endif
                                             </td>
-                                            <td class="text-end text-nowrap">
-                                                <a href="{{ route('templates.edit', $layout) }}"
-                                                   class="btn btn-sm btn-label-primary template-library-edit-btn">
-                                                    Edit layout
-                                                </a>
-
-                                                <form method="POST" action="{{ route('templates.duplicate', $layout) }}"
-                                                      class="d-inline">
-                                                    @csrf
-                                                    <button class="btn btn-sm btn-label-secondary" type="submit"
-                                                            title="Make a draft copy of this layout">
-                                                        <i class="icon-base bx bx-copy icon-sm me-1" aria-hidden="true"></i>
-                                                        Duplicate
-                                                    </button>
-                                                </form>
-
+                                            <td class="pe-3 py-2 text-end text-nowrap">
                                                 @unless ($layout->is_active)
                                                     <form method="POST" action="{{ route('templates.activate', $layout) }}"
                                                           class="d-inline">
@@ -219,17 +202,42 @@
                                                     </form>
                                                 @endunless
 
-                                                <button type="button" class="btn btn-sm btn-danger"
-                                                        data-bs-toggle="modal"
-                                                        data-bs-target="#deleteLayout{{ $layout->getKey() }}">
-                                                    <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
-                                                    Delete
-                                                </button>
+                                                <a href="{{ route('templates.edit', $layout) }}"
+                                                   class="btn btn-sm btn-label-primary template-library-edit-btn">
+                                                    Edit layout
+                                                </a>
+
+                                                <div class="dropdown d-inline-block">
+                                                    <button type="button" class="btn btn-sm btn-icon btn-text-secondary"
+                                                            data-bs-toggle="dropdown"
+                                                            data-bs-popper-config='{"strategy":"fixed"}'
+                                                            aria-expanded="false"
+                                                            aria-label="More actions for {{ $layout->name }}">
+                                                        <i class="icon-base bx bx-dots-vertical-rounded" aria-hidden="true"></i>
+                                                    </button>
+                                                    <div class="dropdown-menu dropdown-menu-end">
+                                                        <form method="POST" action="{{ route('templates.duplicate', $layout) }}">
+                                                            @csrf
+                                                            <button class="dropdown-item" type="submit">
+                                                                <i class="icon-base bx bx-copy icon-sm me-2" aria-hidden="true"></i>
+                                                                Duplicate as draft
+                                                            </button>
+                                                        </form>
+                                                        <div class="dropdown-divider"></div>
+                                                        <button type="button" class="dropdown-item text-danger"
+                                                                data-bs-toggle="modal"
+                                                                data-bs-target="#deleteLayout{{ $layout->getKey() }}">
+                                                            <i class="icon-base bx bx-trash icon-sm me-2" aria-hidden="true"></i>
+                                                            Delete
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </td>
                                         </tr>
                                     @endforeach
                                 </tbody>
                             </table>
+                            </div>
                             </div>
                         @endif
                     </div>
