@@ -4064,10 +4064,10 @@
                 <div class="validation-field__error d-none" role="alert"></div>
             </div>
             <div class="validation-field__check">
-                <label class="validation-verified-control" for="${checkboxId}">
+                <label class="validation-verified-control" for="${checkboxId}" title="Mark as verified">
                     <input class="form-check-input validation-verified" type="checkbox"
                            id="${checkboxId}">
-                    <span>Verified</span>
+                    <span class="visually-hidden">Verified</span>
                 </label>
             </div>`;
 

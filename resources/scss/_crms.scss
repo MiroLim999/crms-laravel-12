@@ -3906,10 +3906,14 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   align-items: center;
   gap: .6rem;
   min-inline-size: 0;
+  // One height whatever the crop's, so the number and the tick can sit level
+  // with the value box (see .validation-field__identity / __check).
+  min-block-size: calc(3.5rem + 2px);
 
   // A line with no picture gives its whole width to the value.
   &:not(:has(.validation-field__crop)) {
     grid-template-columns: minmax(0, 1fr);
+    min-block-size: 0;
   }
 
   .form-control {
@@ -3929,10 +3933,17 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-radius: .3rem;
 }
 
+// Same two columns as the entry above: "TrOCR read" starts under the picture
+// and "Adjust outline" under the left edge of the value box.
 .validation-field__reading {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 9fr) minmax(0, 11fr);
   align-items: center;
-  gap: .5rem;
+  gap: .6rem;
+}
+
+.validation-field__value:not(:has(.validation-field__crop)) .validation-field__reading {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .validation-field__reading .validation-field__reading-text {
@@ -3953,8 +3964,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
+  justify-self: start;
   gap: .2rem;
-  margin-inline-start: auto;
   padding: 0;
   color: var(--bs-primary);
   background: none;
@@ -4346,7 +4357,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .validation-record-group__bulk-action {
   display: flex;
   grid-column: 3;
-  justify-content: center;
+  justify-content: flex-end;
 }
 
 .validation-group-verified-control {
@@ -4361,6 +4372,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .validation-field {
   position: relative;
+  // The tick alone, so the value gets the room "Verified" used to take.
+  grid-template-columns: minmax(8rem, .55fr) minmax(13rem, 1.6fr) 2.25rem;
   align-items: center;
   padding: .8rem 1rem;
   background: var(--bs-paper-bg);
@@ -4394,6 +4407,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .validation-field__identity {
   display: flex;
   align-items: center;
+  align-self: start;
+  min-block-size: calc(3.5rem + 2px);
   gap: .65rem;
   min-inline-size: 0;
 }
@@ -4482,9 +4497,22 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   color: var(--bs-danger);
 }
 
+// No picture, so the value box is its own height: centre as before.
+.validation-field:not(:has(.validation-field__crop)) {
+  .validation-field__identity,
+  .validation-field__check {
+    align-self: center;
+    min-block-size: 0;
+  }
+}
+
 .validation-field__check {
   display: flex;
+  align-items: center;
+  align-self: start;
   justify-content: center;
+  // Level with the value box, not the middle of the whole row.
+  min-block-size: calc(3.5rem + 2px);
 }
 
 .validation-verified-control {
@@ -4718,6 +4746,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .validation-field__check {
     grid-column: 2;
     grid-row: 1;
+  }
+
+  .validation-field__identity,
+  .validation-field__check {
+    align-self: center;
+    min-block-size: 0;
   }
 
   .validation-submit-bar {
