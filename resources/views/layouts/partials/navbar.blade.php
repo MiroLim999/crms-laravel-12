@@ -7,18 +7,25 @@
 
     <div class="navbar-nav-right d-flex align-items-center" id="navbar-collapse">
 
-        {{-- Archive search. Every signed-in role may search records. --}}
+        {{-- Record search, for every signed-in role. Left off the Records Archive,
+             which has its own search beside its filters. Never filled in from the
+             address bar: other pages use ?q= for their own searches. The "/" key
+             and the empty-search check are in resources/js/record-search.js. --}}
         @can('records.view')
-            <div class="navbar-nav align-items-center">
-                <form action="{{ route('records.index') }}" method="GET"
-                      class="nav-item d-flex align-items-center" role="search">
-                    <i class="icon-base bx bx-search icon-md"></i>
-                    {{-- An edited URL can send ?q[]=x, an array, which can't be printed. --}}
-                    <input type="search" name="q" value="{{ is_string(request('q')) ? request('q') : '' }}"
-                           class="form-control border-0 shadow-none ps-1 ps-sm-2"
-                           placeholder="Search records..." aria-label="Search records">
-                </form>
-            </div>
+            @unless (request()->routeIs('records.index'))
+                <div class="navbar-nav align-items-center">
+                    <form action="{{ route('records.index') }}" method="GET"
+                          class="nav-item d-flex align-items-center" role="search" data-record-search-form>
+                        <button type="submit" class="btn btn-link navbar-search-submit" aria-label="Search records" title="Search">
+                            <i class="icon-base bx bx-search icon-md" aria-hidden="true"></i>
+                        </button>
+                        <input type="search" name="q" maxlength="255"
+                               class="form-control border-0 shadow-none ps-1 ps-sm-2"
+                               placeholder="Search records..." aria-label="Search records"
+                               aria-keyshortcuts="/" data-record-search>
+                    </form>
+                </div>
+            @endunless
         @endcan
 
         <ul class="navbar-nav flex-row align-items-center ms-auto">

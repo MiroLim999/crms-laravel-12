@@ -13,6 +13,7 @@ import './sneat/theme-config';
 import './sneat/menu';
 import './sneat/main';
 import './theme';
+import './record-search';
 
 // Auto-dismiss session alerts after 4 seconds
 document.addEventListener('DOMContentLoaded', () => {

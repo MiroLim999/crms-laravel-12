@@ -8,6 +8,7 @@ use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
 use App\Services\RecordFieldGrouper;
 use App\Support\LocalTime;
+use App\Support\SearchWords;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
@@ -45,17 +46,13 @@ class RecordController extends Controller
         }
 
         $filters = $validator->valid();
+        $words = SearchWords::from($filters['q'] ?? null);
 
         $records = CivilRecord::query()
             ->withTitleField()
             ->with(['submitter', 'documentTypeDefinition'])
-            ->when(filled($filters['q'] ?? null), function ($query) use ($filters) {
-                $term = '%'.$filters['q'].'%';
-                $query->where(function ($q) use ($term) {
-                    $q->where('registry_number', 'like', $term)
-                        ->orWhereHas('fields', fn ($f) => $f->where('verified_value', 'like', $term));
-                });
-            })
+            ->search($words)
+            ->withSearchMatches($words)
             ->when($filters['type'] ?? null, fn ($q, $type) => $q->whereHas(
                 'documentTypeDefinition',
                 fn ($typeQuery) => $typeQuery->where('key', $type),

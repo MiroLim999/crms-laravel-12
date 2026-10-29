@@ -17,8 +17,10 @@
             {{-- Values come from the validated filters, so a bad one is not echoed back. --}}
             <div class="col-md-4">
                 <label for="q" class="form-label">Search</label>
-                <input type="search" id="q" name="q" value="{{ $filters['q'] ?? '' }}"
-                       class="form-control @error('q') is-invalid @enderror" placeholder="Name or registry number">
+                {{-- data-record-search: the "/" shortcut lands here, since the top bar's search is hidden on this page. --}}
+                <input type="search" id="q" name="q" value="{{ $filters['q'] ?? '' }}" maxlength="255"
+                       class="form-control @error('q') is-invalid @enderror" placeholder="Name or registry number"
+                       aria-keyshortcuts="/" data-record-search>
                 @error('q')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
             <div class="col-md-2">
@@ -94,6 +96,20 @@
                                             {{ $record->registry_number ?? 'No registry number' }}
                                         </small>
                                     </div>
+                                    {{-- Why a search found this record, when the title above does not show it. --}}
+                                    @php($match = $record->searchMatch())
+                                    @if ($match)
+                                        @php($matchValue = (string) $match['field']->verified_value)
+                                        <div class="mt-1">
+                                            <small>
+                                                <span class="text-muted">{{ $match['field']->name }}:</span>
+                                                <span @if (mb_strlen($matchValue) > 80) title="{{ $matchValue }}" @endif>{{ str($matchValue)->limit(80) }}</span>
+                                                @if ($match['more'] > 0)
+                                                    <span class="text-muted">· {{ $match['more'] }} more {{ str('match')->plural($match['more']) }}</span>
+                                                @endif
+                                            </small>
+                                        </div>
+                                    @endif
                                 </td>
                                 <td>
                                     <span class="d-inline-flex align-items-center gap-1">

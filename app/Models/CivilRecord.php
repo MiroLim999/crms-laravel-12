@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\ChangeRequestStatus;
 use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
+use App\Support\SearchWords;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -44,6 +45,15 @@ class CivilRecord extends Model
     public function fields(): HasMany
     {
         return $this->hasMany(RecordField::class, 'record_id')->orderBy('sort_order');
+    }
+
+    /**
+     * The same fields under a second name, for loading the ones a search
+     * matched. Loading them as `fields` would replace the title field there.
+     */
+    public function matchedFields(): HasMany
+    {
+        return $this->hasMany(RecordField::class, 'record_id')->orderBy('sort_order')->orderBy('id');
     }
 
     public function template(): BelongsTo
@@ -145,6 +155,77 @@ class CivilRecord extends Model
         return $this->fields->filter(
             fn (RecordField $f) => $f->ocr_confidence !== null && $f->ocr_confidence < $threshold,
         );
+    }
+
+    // ------------------------------------------------------------------ search
+
+    /**
+     * Records with every word in the registry number, or every word in one
+     * verified field. The words can come in any order. No words, no filter.
+     *
+     * @param  Builder<self>  $query
+     * @param  list<string>  $words  From SearchWords::from().
+     */
+    public function scopeSearch(Builder $query, array $words): void
+    {
+        if ($words === []) {
+            return;
+        }
+
+        $query->where(fn (Builder $records) => $records
+            ->where(fn (Builder $record) => SearchWords::whereContainsAll($record, 'registry_number', $words))
+            ->orWhereHas('fields', fn (Builder $field) => SearchWords::whereContainsAll($field, 'verified_value', $words)));
+    }
+
+    /**
+     * For a results list: load the first fields each record matched, and count
+     * them all, so the list can show why a record is in the results. Two are
+     * loaded because one of them may be the title field.
+     *
+     * @param  Builder<self>  $query
+     * @param  list<string>  $words  The words given to search().
+     */
+    public function scopeWithSearchMatches(Builder $query, array $words): void
+    {
+        if ($words === []) {
+            return;
+        }
+
+        $query
+            ->with(['matchedFields' => function (HasMany $fields) use ($words) {
+                SearchWords::whereContainsAll($fields, 'verified_value', $words);
+                $fields->limit(2);
+            }])
+            ->withCount(['matchedFields as matched_fields_count' => fn (Builder $fields) => SearchWords::whereContainsAll($fields, 'verified_value', $words)]);
+    }
+
+    /**
+     * The first field the search matched other than the title field, and how
+     * many further fields matched. Null when nothing besides the title matched:
+     * then the title, or the registry number below it, shows the match.
+     * Needs withTitleField() and withSearchMatches().
+     *
+     * @return array{field: RecordField, more: int}|null
+     */
+    public function searchMatch(): ?array
+    {
+        if (! $this->relationLoaded('matchedFields') || ! $this->relationLoaded('fields')) {
+            return null;
+        }
+
+        $titleFieldId = $this->fields->first()?->getKey();
+        $shown = $this->matchedFields->first(fn (RecordField $field) => $field->getKey() !== $titleFieldId);
+
+        if ($shown === null) {
+            return null;
+        }
+
+        $titleMatched = $this->matchedFields->contains(fn (RecordField $field) => $field->getKey() === $titleFieldId);
+
+        return [
+            'field' => $shown,
+            'more' => max(0, (int) $this->matched_fields_count - 1 - ($titleMatched ? 1 : 0)),
+        ];
     }
 
     protected static function booted(): void

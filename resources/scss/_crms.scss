@@ -584,6 +584,38 @@ html.layout-navbar-fixed {
       padding-inline: 0 !important;
       background: transparent;
       line-height: 2.5rem;
+
+      // Chrome and Edge draw their own clear (x) button in search fields.
+      &::-webkit-search-cancel-button {
+        display: none;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+    }
+
+    // The magnifier submits the search. It keeps the size and place of the
+    // plain icon it replaced, like .card-help__toggle.
+    .navbar-search-submit {
+      --bs-btn-color: var(--bs-secondary-color);
+      --bs-btn-hover-color: var(--bs-primary);
+      --bs-btn-active-color: var(--bs-primary);
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      line-height: 1;
+      text-decoration: none;
+
+      .icon-base {
+        color: inherit;
+      }
+
+      &:focus-visible {
+        color: var(--bs-primary);
+      }
     }
   }
 
