@@ -8790,3 +8790,145 @@ $dashboard-reveal-step: 40ms;
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+// ------------------------------------------------------------ New Document
+// Minimal type picker: a one-line status strip, then one card per type. The
+// whole card is the link; colour is kept for the icon and the action.
+
+.scan-type-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem 1.5rem;
+  color: var(--bs-body-color);
+  font-size: .8125rem;
+}
+
+.scan-type-status__item {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+.scan-type-status__dot {
+  inline-size: .5rem;
+  block-size: .5rem;
+  border-radius: 50%;
+  background: var(--bs-secondary-color);
+
+  &.is-online {
+    background: var(--bs-success);
+  }
+
+  &.is-offline {
+    background: var(--bs-danger);
+  }
+}
+
+.scan-type-card {
+  color: inherit;
+  text-decoration: none;
+  border: 1px solid var(--bs-border-color);
+  box-shadow: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+
+  .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+    padding: 1.25rem;
+  }
+
+  &[href]:hover,
+  &[href]:focus-visible {
+    color: inherit;
+    border-color: rgba(var(--bs-primary-rgb), .45);
+    box-shadow: 0 .25rem .75rem rgba(var(--crms-shadow-rgb), .08);
+  }
+
+  &[href]:focus-visible {
+    outline: 0;
+    box-shadow: 0 0 0 .2rem rgba(var(--bs-primary-rgb), .18);
+  }
+
+  &.is-unavailable {
+    background: transparent;
+    border-style: dashed;
+
+    .scan-type-card__icon {
+      color: var(--bs-secondary-color);
+      background: rgba(var(--crms-ink-rgb), .05);
+    }
+  }
+}
+
+.scan-type-card__head {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  min-inline-size: 0;
+}
+
+.scan-type-card__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  inline-size: 2.25rem;
+  block-size: 2.25rem;
+  color: var(--bs-primary);
+  background: rgba(var(--bs-primary-rgb), .08);
+  border-radius: var(--bs-border-radius);
+  font-size: 1.15rem;
+}
+
+.scan-type-card__title {
+  margin: 0;
+  color: var(--bs-heading-color);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.scan-type-card__meta {
+  margin: 0;
+  color: var(--bs-secondary-color);
+  font-size: .8125rem;
+}
+
+// margin-top: auto keeps the action on the card's bottom edge, so actions
+// line up across a row whether or not a card has a details line.
+.scan-type-card__action {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: .3rem;
+  margin-block-start: auto;
+  padding-block-start: .75rem;
+  inline-size: 100%;
+  color: var(--bs-primary);
+  border-block-start: 1px solid var(--bs-border-color);
+  font-size: .875rem;
+  font-weight: 500;
+  text-decoration: none;
+
+  .bx-right-arrow-alt {
+    transition: transform .15s ease;
+  }
+}
+
+.scan-type-card[href]:hover .scan-type-card__action .bx-right-arrow-alt,
+.scan-type-card[href]:focus-visible .scan-type-card__action .bx-right-arrow-alt {
+  transform: translateX(3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-type-card,
+  .scan-type-card__action .bx-right-arrow-alt {
+    transition: none;
+  }
+
+  .scan-type-card[href]:hover .scan-type-card__action .bx-right-arrow-alt {
+    transform: none;
+  }
+}

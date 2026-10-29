@@ -2,13 +2,28 @@
 
 @section('title', 'New Document')
 
-@section('content')
-    <x-page-header title="New Document"
-                   subtitle="Choose a document type, then mark and verify its fields." />
+@php
+    $online = $health['reachable'];
+    $modelName = $activeModel ? ($activeModel->label ?: $activeModel->key) : null;
+@endphp
 
-    @unless ($health['reachable'])
+@section('content')
+    <x-page-header title="New Document" subtitle="Choose a document type." />
+
+    {{-- What scanning will use, in one quiet line. Problems get an alert below. --}}
+    <div class="scan-type-status mb-4" role="status">
+        <span class="scan-type-status__item">
+            <span class="scan-type-status__dot {{ $online ? 'is-online' : 'is-offline' }}" aria-hidden="true"></span>
+            OCR {{ $online ? 'online' : 'offline' }}
+        </span>
+        @if ($modelName)
+            <span class="scan-type-status__item text-muted" title="Active OCR model">{{ $modelName }}</span>
+        @endif
+    </div>
+
+    @unless ($online)
         <div class="alert alert-danger d-flex align-items-start" role="alert">
-            <i class="icon-base bx bx-plug icon-md me-2"></i>
+            <i class="icon-base bx bx-plug icon-md me-2" aria-hidden="true"></i>
             <div>
                 <h6 class="alert-heading mb-1">OCR service unavailable</h6>
                 <p class="mb-0">{{ $health['error'] }}</p>
@@ -19,53 +34,73 @@
 
     @if (! $activeModel)
         <div class="alert alert-warning d-flex align-items-center" role="alert">
-            <i class="icon-base bx bx-error icon-md me-2"></i>
+            <i class="icon-base bx bx-error icon-md me-2" aria-hidden="true"></i>
             <div>
-                No OCR model has been promoted yet. A Super Admin needs to activate one
-                before scanning will produce readings.
+                No OCR model is active. A Super Admin needs to activate one before scanning
+                produces readings.
             </div>
         </div>
     @endif
 
     <div class="row g-4">
         @foreach ($documentTypes as $type)
-            @php $template = $templates[$type->value]; @endphp
+            @php
+                $template = $templates[$type->value];
+                // The template's own name only when it says something the type does not.
+                $templateName = $template && strcasecmp(trim($template->name), trim($type->label())) !== 0
+                    ? $template->name
+                    : null;
+            @endphp
 
             <div class="col-sm-6 col-xl-4">
-                <div class="card h-100">
-                    <div class="card-body d-flex flex-column">
-                        <span class="badge bg-label-primary rounded p-2 lh-1 align-self-start mb-3">
-                            <i class="icon-base bx {{ $type->icon() }} icon-md"></i>
-                        </span>
+                @if ($template)
+                    <a href="{{ route('documents.workspace', ['type' => $type->value]) }}"
+                       class="card h-100 scan-type-card">
+                        <div class="card-body">
+                            <div class="scan-type-card__head">
+                                <span class="scan-type-card__icon" aria-hidden="true">
+                                    <i class="icon-base bx {{ $type->icon() }}"></i>
+                                </span>
+                                <h5 class="scan-type-card__title">{{ $type->label() }}</h5>
+                            </div>
 
-                        <h5 class="mb-1">{{ $type->label() }}</h5>
+                            @if ($templateName)
+                                <p class="scan-type-card__meta">{{ $templateName }}</p>
+                            @endif
 
-                        @if ($template)
-                            <p class="text-muted small flex-grow-1">
-                                {{ $template->name }} &middot; {{ $template->fields->count() }} fields
-                            </p>
-                            <a href="{{ route('documents.workspace', ['type' => $type->value]) }}"
-                               class="btn btn-primary">
+                            <span class="scan-type-card__action">
                                 Start scanning
-                            </a>
-                        @else
-                            <p class="text-muted small flex-grow-1">
-                                No active template. A Super Admin must publish one before this
-                                type can be captured.
-                            </p>
-                            <button class="btn btn-outline-secondary" disabled>Unavailable</button>
-                        @endif
+                                <i class="icon-base bx bx-right-arrow-alt" aria-hidden="true"></i>
+                            </span>
+                        </div>
+                    </a>
+                @else
+                    <div class="card h-100 scan-type-card is-unavailable">
+                        <div class="card-body">
+                            <div class="scan-type-card__head">
+                                <span class="scan-type-card__icon" aria-hidden="true">
+                                    <i class="icon-base bx {{ $type->icon() }}"></i>
+                                </span>
+                                <h5 class="scan-type-card__title">{{ $type->label() }}</h5>
+                            </div>
+
+                            <p class="scan-type-card__meta">No published template</p>
+
+                            @can('templates.manage')
+                                <a href="{{ route('templates.index') }}" class="scan-type-card__action">
+                                    Create template
+                                    <i class="icon-base bx bx-right-arrow-alt" aria-hidden="true"></i>
+                                </a>
+                            @else
+                                <span class="scan-type-card__action text-muted">
+                                    <i class="icon-base bx bx-lock-alt" aria-hidden="true"></i>
+                                    Unavailable
+                                </span>
+                            @endcan
+                        </div>
                     </div>
-                </div>
+                @endif
             </div>
         @endforeach
     </div>
-
-    @if ($activeModel)
-        <p class="text-muted small mt-4 mb-0">
-            Readings come from <code>{{ $activeModel->key }}</code>.
-            Confidence shown during review is the model's certainty in its own output,
-            not a measure of accuracy.
-        </p>
-    @endif
 @endsection
