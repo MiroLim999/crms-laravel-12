@@ -2656,6 +2656,19 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// The status text changes with every phase. Reserve room for the longest
+// (three lines) and a one-line title so the window never changes height.
+.ocr-progress-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 4.5em;
+}
+
+#ocrProgressTitle {
+  min-block-size: 1.5em;
+}
+
 .ocr-progress-fields {
   display: inline-flex;
   align-items: center;

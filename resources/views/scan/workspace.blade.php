@@ -696,7 +696,7 @@
                     </div>
 
                     <h5 class="mb-2" id="ocrProgressTitle">Preparing document</h5>
-                    <p class="small text-muted mb-3" id="scanningNote" aria-live="polite">
+                    <p class="small text-muted mb-3 ocr-progress-note" id="scanningNote" aria-live="polite">
                         Creating clear image crops for each marked field.
                     </p>
 
@@ -2867,7 +2867,7 @@
                 15, 18, 3,
                 'Waiting for the line detector',
                 waitedMs > 20000
-                    ? 'No background worker has picked this page up. Start one with: php artisan queue:work (serve.ps1 starts it for you).'
+                    ? 'No background worker has picked this page up. Run php artisan queue:work (serve.ps1 does it for you).'
                     : 'The page is queued for line detection.',
             );
         } else if (page.status === 'detecting') {
