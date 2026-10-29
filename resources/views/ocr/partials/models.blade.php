@@ -10,7 +10,6 @@
     $selectable = $models->filter(
         fn (array $model) => $model['on_disk'] && $model['disk_deleted_at'] === null
     );
-    $availableCount = $selectable->count();
     // A fresh install has models on disk but none activated, so Staff cannot scan.
     $needsActivation = $activeModel === null && $selectable->isNotEmpty();
     $selectedKey = $modelPerformance['selected'] ?? ($activeModel?->key ?? null);
@@ -24,13 +23,7 @@
                     <i class="icon-base bx bx-brain"></i>
                 </span>
                 <div class="min-w-0">
-                    <div class="d-flex flex-wrap align-items-center gap-2">
-                        <h3 class="h5 card-title mb-0" id="installed-models-title">Models</h3>
-                        <span class="badge bg-label-secondary">
-                            {{ $availableCount }} available
-                        </span>
-                    </div>
-                    <p class="text-muted small mb-0 mt-1">Choose the model Staff scan with or click to inspect.</p>
+                    <h3 class="h5 card-title mb-0" id="installed-models-title">Models</h3>
                 </div>
             </div>
 

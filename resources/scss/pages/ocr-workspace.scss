@@ -290,56 +290,90 @@
     min-height: 28rem;
   }
 
-  .ocr-performance-toolbar {
-    padding-bottom: 0.75rem;
-    border-bottom: 1px solid var(--ocr-soft-border);
-
-    .badge-dot {
-      display: inline-block;
-      width: 0.5rem;
-      height: 0.5rem;
-      border-radius: 50%;
-    }
+  // Sneat zeroes the top padding of a card body that follows a header. Here the
+  // header has a bottom border, so the KPI cards would sit right on that line.
+  .ocr-performance-card > .ocr-performance-body {
+    padding-top: 1.25rem;
   }
 
+  // Overlay toggle and chart type on the right, above a divider that separates
+  // the controls from the chart.
+  .ocr-performance-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--ocr-soft-border);
+  }
+
+  // Three equal columns with equal heights, on one shared grid so the values,
+  // badges and last lines of all three cards line up.
   .ocr-performance-kpis {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+
     .ocr-kpi-card {
-      padding: 0.65rem 0.85rem;
+      container-type: inline-size;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      min-width: 0;
+      padding: 0.75rem 1rem;
       background: rgba(var(--bs-primary-rgb), 0.025);
       border: 1px solid var(--ocr-soft-border);
-      border-radius: var(--bs-border-radius);
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
-
-      &:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(67, 89, 113, 0.06);
-      }
+      border-radius: var(--bs-border-radius-lg);
     }
 
     .ocr-kpi-label {
+      color: var(--bs-secondary-color);
       font-size: 0.75rem;
       font-weight: 600;
-      text-transform: uppercase;
       letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+
+    // Badge beside the value when there is room. The cards share one width, so
+    // the container query flips all three to "badge below" together; plain
+    // wrapping would break only the cards whose badge happens to be longer.
+    .ocr-kpi-figure {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem 0.5rem;
+    }
+
+    @container (max-width: 11rem) {
+      .ocr-kpi-figure {
+        flex-direction: column;
+        align-items: flex-start;
+      }
     }
 
     .ocr-kpi-val {
-      font-size: 1.2rem;
-      font-weight: 700;
       color: var(--bs-heading-color);
+      font-size: 1.375rem;
+      font-weight: 700;
       line-height: 1.2;
+      font-variant-numeric: tabular-nums;
     }
 
     .ocr-kpi-delta {
-      font-size: 0.7rem;
+      padding: 0.25rem 0.45rem;
+      font-size: 0.75rem;
       font-weight: 600;
-      padding: 0.2rem 0.45rem;
+      font-variant-numeric: tabular-nums;
     }
 
     .ocr-kpi-sub {
-      font-size: 0.7rem;
+      // Pinned to the bottom, so the last lines align even if a value wraps.
+      margin-top: auto;
       color: var(--bs-secondary-color);
-      margin-top: 0.15rem;
+      font-size: 0.75rem;
+      line-height: 1.4;
     }
   }
 
@@ -659,6 +693,11 @@
 
 @media (max-width: 575.98px) {
   .ocr-workspace {
+    // Three columns are too narrow on a phone; stack the KPI cards instead.
+    .ocr-performance-kpis {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
     .ocr-model-row {
       align-items: flex-start;
       padding: 1rem;

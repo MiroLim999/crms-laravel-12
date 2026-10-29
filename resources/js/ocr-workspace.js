@@ -735,7 +735,8 @@ function initModelPerformance() {
     const kpiWrap = $('#ocr-performance-kpis');
 
     let chart = null;
-    let currentView = 'bars';
+    // Radar first; the Side-by-side button switches to bars.
+    let currentView = 'radar';
     let overlayBase = true;
     let currentProfileKey = String(data.selected ?? '');
 
@@ -803,48 +804,41 @@ function initModelPerformance() {
 
             if (kpiValNode) kpiValNode.textContent = value === null ? '—' : `${value.toFixed(1)}%`;
 
+            // Error rate for the first two cards (accuracy is 100 minus it), so the
+            // last line carries the figure the evaluation report actually measured.
+            const errorRate = value === null ? null : ({
+                character_accuracy: `${(100 - value).toFixed(1)}% CER`,
+                word_accuracy: `${(100 - value).toFixed(1)}% WER`,
+            })[metric.key] ?? null;
+
             if (isComparing && value !== null && baseValue !== null) {
+                // Percentage points, not percent: 76.0% against 48.5% is 27.5 points.
                 const diff = value - baseValue;
-                const sign = diff >= 0 ? '+' : '';
+                const sign = diff > 0 ? '+' : (diff < 0 ? '−' : '±');
 
                 if (kpiDeltaNode) {
-                    kpiDeltaNode.textContent = `${sign}${diff.toFixed(1)}%`;
+                    kpiDeltaNode.textContent = `${sign}${Math.abs(diff).toFixed(1)} pts`;
                     kpiDeltaNode.className = `badge ${diff >= 0 ? 'bg-label-success' : 'bg-label-danger'} ocr-kpi-delta`;
-                    kpiDeltaNode.classList.remove('d-none');
+                    kpiDeltaNode.title = `${Math.abs(diff).toFixed(1)} percentage points ${diff >= 0 ? 'above' : 'below'} the base model`;
                 }
                 if (kpiSubNode) {
-                    if (metric.key === 'character_accuracy') {
-                        const cer = (100 - value).toFixed(1);
-                        const baseCer = (100 - baseValue).toFixed(1);
-                        kpiSubNode.textContent = `${cer}% CER · vs ${baseCer}% Base`;
-                    } else if (metric.key === 'word_accuracy') {
-                        const wer = (100 - value).toFixed(1);
-                        const baseWer = (100 - baseValue).toFixed(1);
-                        kpiSubNode.textContent = `${wer}% WER · vs ${baseWer}% Base`;
-                    } else {
-                        kpiSubNode.textContent = `vs ${baseValue.toFixed(1)}% Base`;
-                    }
+                    kpiSubNode.textContent = [`Base ${baseValue.toFixed(1)}%`, errorRate].filter(Boolean).join(' · ');
                 }
             } else if (isBase && value !== null) {
                 if (kpiDeltaNode) {
                     kpiDeltaNode.textContent = 'Baseline';
                     kpiDeltaNode.className = 'badge bg-label-warning ocr-kpi-delta';
-                    kpiDeltaNode.classList.remove('d-none');
+                    kpiDeltaNode.title = 'The base model is the reference the others are compared with';
                 }
-                if (kpiSubNode) {
-                    const cerVal = profile.cer ?? (100 - value);
-                    const werVal = profile.wer ?? (100 - value);
-                    kpiSubNode.textContent = metric.key === 'character_accuracy'
-                        ? `${cerVal.toFixed(1)}% CER (floor)`
-                        : (metric.key === 'word_accuracy' ? `${werVal.toFixed(1)}% WER (floor)` : 'Reference floor');
-                }
+                if (kpiSubNode) kpiSubNode.textContent = errorRate ?? 'Reference';
             } else {
-                if (kpiDeltaNode) kpiDeltaNode.classList.add('d-none');
+                if (kpiDeltaNode) {
+                    kpiDeltaNode.className = 'badge ocr-kpi-delta d-none';
+                    kpiDeltaNode.removeAttribute('title');
+                }
                 if (kpiSubNode) {
-                    const cer = value !== null ? (100 - value).toFixed(1) : null;
-                    kpiSubNode.textContent = metric.key === 'character_accuracy'
-                        ? (cer !== null ? `${cer}% CER` : '1 minus CER')
-                        : (metric.key === 'word_accuracy' ? (cer !== null ? `${cer}% WER` : '1 minus WER') : 'Exact lines');
+                    // A non-breaking space keeps the line, so card heights stay equal.
+                    kpiSubNode.textContent = errorRate ?? (value === null ? 'Not evaluated' : '\u00a0');
                 }
             }
         });
@@ -1103,7 +1097,7 @@ function initModelPerformance() {
                     bar: {
                         horizontal: true,
                         barHeight: '52%',
-                        borderRadius: 6,
+                        borderRadius: 0,
                         dataLabels: { position: 'center' },
                     },
                 },
@@ -1207,25 +1201,22 @@ function initModelPerformance() {
     bindModelRowInteractions();
 
     if (btnRadar && btnBars) {
-        btnRadar.addEventListener('click', () => {
-            if (currentView === 'radar') return;
-            currentView = 'radar';
-            btnRadar.classList.remove('btn-label-secondary');
-            btnRadar.classList.add('btn-primary');
-            btnBars.classList.remove('btn-primary');
-            btnBars.classList.add('btn-label-secondary');
-            render(profiles.get(currentProfileKey));
-        });
+        const setView = (view) => {
+            if (currentView === view) return;
+            currentView = view;
 
-        btnBars.addEventListener('click', () => {
-            if (currentView === 'bars') return;
-            currentView = 'bars';
-            btnBars.classList.remove('btn-label-secondary');
-            btnBars.classList.add('btn-primary');
-            btnRadar.classList.remove('btn-primary');
-            btnRadar.classList.add('btn-label-secondary');
+            [[btnRadar, 'radar'], [btnBars, 'bars']].forEach(([button, name]) => {
+                const on = name === view;
+                button.classList.toggle('btn-primary', on);
+                button.classList.toggle('btn-label-secondary', !on);
+                button.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
+
             render(profiles.get(currentProfileKey));
-        });
+        };
+
+        btnRadar.addEventListener('click', () => setView('radar'));
+        btnBars.addEventListener('click', () => setView('bars'));
     }
 
     if (compareToggle) {
