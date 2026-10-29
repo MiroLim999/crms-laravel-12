@@ -32,6 +32,7 @@ import {
 import { LayoutHistory } from './template-history';
 import { summariseTest, testFindings, testLineStatus } from './layout-test';
 import { gridNotes } from './line-geometry';
+import { setDisclosureExpanded } from './disclosure-motion';
 
 const configNode = document.getElementById('templateBuilderConfig');
 
@@ -326,20 +327,16 @@ function renderPersonGroups(boxes) {
     modeBadge.classList.toggle('bg-label-primary', custom);
     modeBadge.classList.toggle('bg-label-secondary', !custom);
     automaticButton.disabled = !custom;
+    automaticButton.classList.toggle('d-none', !custom);
     list.replaceChildren();
 
-    if (!custom) {
-        const note = document.createElement('p');
-        note.className = 'template-person-group-list__empty';
-        note.textContent = 'Staff validation will detect repeated rows from the marker positions.';
-        list.appendChild(note);
-        return;
-    }
+    // Automatic needs no list; the ? tips say how it works.
+    if (!custom) return;
 
     if (groups.length === 0) {
         const note = document.createElement('p');
         note.className = 'template-person-group-list__empty';
-        note.textContent = 'No person rows. All fields will appear under document details.';
+        note.textContent = 'No person rows: every field shows under document details.';
         list.appendChild(note);
         return;
     }
@@ -1053,6 +1050,28 @@ element('zoomInBtn', HTMLButtonElement).addEventListener('click', () => marker.z
 element('zoomResetBtn', HTMLButtonElement).addEventListener('click', () => marker.resetZoom());
 
 element('deleteSelectedBtn', HTMLButtonElement).addEventListener('click', () => marker.removeSelected());
+// Side panel cards that open and close, as on the Staff Align panel: a click
+// anywhere on the header but the ? (the title button, for the keyboard).
+function setCardOpen(toggle, open) {
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.closest('.card-disclosure__header')?.classList.toggle('is-expanded', open);
+    return setDisclosureExpanded(document.getElementById(toggle.getAttribute('aria-controls') ?? ''), open);
+}
+
+function openCard(toggleId) {
+    const toggle = element(toggleId, HTMLButtonElement);
+    if (toggle.getAttribute('aria-expanded') !== 'true') setCardOpen(toggle, true);
+}
+
+document.querySelectorAll('.template-builder-side-panel .card-disclosure__header').forEach((header) => {
+    const toggle = header.querySelector('.card-disclosure__toggle');
+    if (!(toggle instanceof HTMLButtonElement)) return;
+    header.addEventListener('click', (event) => {
+        if (event.target instanceof Element && event.target.closest('.card-help')) return;
+        setCardOpen(toggle, toggle.getAttribute('aria-expanded') !== 'true');
+    });
+});
+
 element('deleteFieldsBtn', HTMLButtonElement).addEventListener('click', () => marker.removeSelected());
 element('groupSelectedBtn', HTMLButtonElement).addEventListener('click', groupSelectedAsPerson);
 element('ungroupSelectedBtn', HTMLButtonElement).addEventListener('click', ungroupSelectedFields);
@@ -1234,6 +1253,7 @@ form.addEventListener('submit', (event) => {
     const blocking = updateLedgerChecks().find((problem) => problem.blocking);
     if (blocking) {
         event.preventDefault();
+        openCard('ledgerCardToggle');
         showBuilderError(blocking.message);
         return;
     }
@@ -1346,21 +1366,19 @@ function renderLedgerGrid() {
 
     const rows = Math.max(0, ruledYs.length - 1);
     const estimated = ruledYs.filter((y) => estimatedYs.has(ruleKey(y))).length;
-    const badge = element('ledgerGridBadge');
-    const ready = columns.length > 0 && ruledYs.length >= 2;
-    badge.textContent = ready ? 'Ledger' : 'None';
-    badge.className = `badge ${ready ? 'bg-label-info' : 'bg-label-secondary'}`;
-    element('ledgerGridSummary').textContent = columns.length === 0 && ruledYs.length === 0
-        ? 'No ledger grid. This layout reads each field as a rectangle.'
-        : `${columns.length} column${columns.length === 1 ? '' : 's'} · ${ruledYs.length} row line${ruledYs.length === 1 ? '' : 's'} (${rows} row${rows === 1 ? '' : 's'})`
-            + (estimated > 0
-                ? ` · ${estimated} estimated below the last printed rule (amber): check ${estimated === 1 ? 'it' : 'them'} against the page.`
-                : '');
+    // Only what the stepper and the page do not show already.
+    const summary = element('ledgerGridSummary');
+    summary.textContent = columns.length === 0 && ruledYs.length === 0
+        ? 'No grid yet: each field is read as one rectangle.'
+        : estimated > 0
+            ? `${estimated} line${estimated === 1 ? '' : 's'} below the last printed rule ${estimated === 1 ? 'is' : 'are'} estimated (amber): check ${estimated === 1 ? 'it' : 'them'} against the page.`
+            : '';
+    summary.classList.toggle('d-none', summary.textContent === '');
 
     const rowsInput = element('evenRowsInput', HTMLInputElement);
     if (document.activeElement !== rowsInput) rowsInput.value = rows > 0 ? String(rows) : '';
     element('evenRowsBtn', HTMLButtonElement).disabled = ruledYs.length < 2;
-    element('removeRuledLineBtn', HTMLButtonElement).disabled = selectedRule === null;
+    element('removeRuledLineBtn', HTMLButtonElement).disabled = selectedRule === null && ruledYs.length <= 2;
     element('clearGridBtn', HTMLButtonElement).disabled = columns.length === 0 && ruledYs.length === 0;
 }
 
@@ -1383,6 +1401,8 @@ function updateLedgerChecks(boxes = marker.toJSON()) {
         return item;
     }));
     element('ledgerProblems').classList.toggle('d-none', problems.length === 0);
+    // The card may be closed: a mark on its header says there is something to check.
+    element('ledgerCardAlert').classList.toggle('d-none', problems.length === 0 && coveredFieldIndexes.length === 0);
 
     return problems;
 }
@@ -1689,22 +1709,33 @@ async function detectLedgerGrid() {
     }
 }
 
+// Read as Field / Column in Field settings: the button for what the whole
+// selection already is shows pressed; a mixed selection presses neither.
 function updateLedgerButtons(indexes = marker.selectedIndexes()) {
     const boxes = marker.toJSON();
-    element('makeColumnsBtn', HTMLButtonElement).disabled = indexes.length === 0
-        || indexes.every((index) => isColumn(boxes[index]));
-    element('makeFieldsBtn', HTMLButtonElement).disabled = !indexes.some((index) => isColumn(boxes[index]));
+    const columns = indexes.filter((index) => isColumn(boxes[index])).length;
+    const pressed = {
+        makeColumnsBtn: indexes.length > 0 && columns === indexes.length,
+        makeFieldsBtn: indexes.length > 0 && columns === 0,
+    };
+    Object.entries(pressed).forEach(([id, on]) => {
+        const button = element(id, HTMLButtonElement);
+        button.classList.toggle('active', on);
+        button.setAttribute('aria-pressed', String(on));
+    });
 }
 
 element('detectGridBtn', HTMLButtonElement).addEventListener('click', detectLedgerGrid);
 
 element('makeColumnsBtn', HTMLButtonElement).addEventListener('click', () => {
-    const selected = new Set(marker.selectedIndexes());
-    if (selected.size === 0) return;
+    const indexes = marker.selectedIndexes();
+    const boxes = marker.toJSON();
+    if (indexes.every((index) => isColumn(boxes[index]))) return;
+    const selected = new Set(indexes);
     const top = ruledYs.length >= 2 ? ruledYs[0] : null;
     const bottom = ruledYs.length >= 2 ? ruledYs[ruledYs.length - 1] : null;
 
-    marker.setBoxes(cloneBoxes(marker.toJSON().map((box, index) => {
+    marker.setBoxes(cloneBoxes(boxes.map((box, index) => {
         if (!selected.has(index)) return box;
         return {
             ...box,
@@ -1714,6 +1745,8 @@ element('makeColumnsBtn', HTMLButtonElement).addEventListener('click', () => {
             ...(top !== null ? { y: top, h: bottom - top } : {}),
         };
     })));
+    // Keep them selected, so Field settings stays on them.
+    marker.selectIndexes(indexes);
 });
 
 // Back from a column to a field, read as one rectangle (Detect splits it
@@ -1741,7 +1774,10 @@ element('addRuledLineBtn', HTMLButtonElement).addEventListener('click', () => {
     selectRule(inserted.index);
 });
 
-element('removeRuledLineBtn', HTMLButtonElement).addEventListener('click', () => removeRule(selectedRule));
+// The selected line, or the last one, as long as a row is left.
+element('removeRuledLineBtn', HTMLButtonElement).addEventListener('click', () => {
+    removeRule(selectedRule ?? (ruledYs.length > 2 ? ruledYs.length - 1 : null));
+});
 
 element('evenRowsBtn', HTMLButtonElement).addEventListener('click', () => {
     const spaced = distributeRuledYs(ruledYs, element('evenRowsInput', HTMLInputElement).value);
@@ -1939,6 +1975,7 @@ async function testLayout() {
     }
     const blocking = updateLedgerChecks().find((problem) => problem.blocking);
     if (blocking) {
+        openCard('ledgerCardToggle');
         showBuilderError(blocking.message);
         return;
     }

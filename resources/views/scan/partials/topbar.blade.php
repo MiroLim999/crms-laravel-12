@@ -9,7 +9,6 @@
 <nav class="layout-navbar container-xxl navbar-detached navbar document-workspace-topbar"
      id="layout-navbar" aria-label="Document workspace">
     <div class="document-workspace-topbar__context">
-        <strong>New document</strong>
         <small id="workspaceContextDetail" class="d-none"></small>
     </div>
 

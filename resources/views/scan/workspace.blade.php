@@ -145,10 +145,10 @@
                         opens and closes it (the title button, for the keyboard).
                         The ? sits by the title, away from the arrow.
                     --}}
-                    <div class="card mb-4 document-grid-card">
-                        <div class="card-header d-flex align-items-center gap-1 position-relative document-grid-card__header" id="gridCardHeader">
+                    <div class="card mb-4 card-disclosure document-grid-card">
+                        <div class="card-header d-flex align-items-center gap-1 position-relative card-disclosure__header" id="gridCardHeader">
                             <h5 class="card-title mb-0">
-                                <button type="button" class="btn btn-link document-grid-card__toggle" id="gridCardToggle"
+                                <button type="button" class="btn btn-link card-disclosure__toggle" id="gridCardToggle"
                                         aria-expanded="false" aria-controls="gridCardBody">
                                     Rows and Columns
                                 </button>
@@ -168,10 +168,10 @@
                                     </ul>
                                 </div>
                             </div>
-                            <i class="icon-base bx bx-chevron-down document-grid-card__chevron" aria-hidden="true"></i>
+                            <i class="icon-base bx bx-chevron-down card-disclosure__chevron" aria-hidden="true"></i>
                         </div>
 
-                        <div class="document-grid-card__body" id="gridCardBody" hidden>
+                        <div class="card-disclosure__body" id="gridCardBody" hidden>
                             <div class="card-body">
                                 <div class="document-grid-card__line">
                                     <span class="document-grid-card__label" id="gridRowsLabel">Rows</span>

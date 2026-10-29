@@ -3580,54 +3580,66 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// The Align step's Rows and Columns card.
-// One line per tool: a label, then its control.
-.document-grid-card {
+// A card that opens and closes from its header (the Align step's Rows and
+// Columns, the Template Builder's side cards): title, ?, then the arrow at
+// the far end.
+.card-disclosure {
   // The title is a btn-link, without the link look.
-  .document-grid-card__toggle {
+  .card-disclosure__toggle {
     --bs-btn-color: inherit;
     --bs-btn-hover-color: inherit;
     --bs-btn-active-color: inherit;
     --bs-btn-focus-box-shadow: none;
+    padding: 0;
     border: 0;
+    font: inherit;
+    text-align: start;
     text-decoration: none;
   }
 
-  // The header opens and closes the card: title, ?, then the arrow at the far end.
-  .document-grid-card__header {
+  .card-disclosure__header {
     padding-block: 1rem;
     cursor: pointer;
 
     // Not while over the ?: that only shows tips.
-    &:hover:not(:has(.card-help:hover)) .document-grid-card__chevron,
-    &:has(.document-grid-card__toggle:focus-visible) .document-grid-card__chevron {
+    &:hover:not(:has(.card-help:hover)) .card-disclosure__chevron,
+    &:has(.card-disclosure__toggle:focus-visible) .card-disclosure__chevron {
       color: var(--bs-primary);
     }
 
-    &.is-expanded .document-grid-card__chevron {
+    &.is-expanded .card-disclosure__chevron {
       transform: rotate(180deg);
     }
   }
 
-  .document-grid-card__toggle {
-    padding: 0;
-    font: inherit;
-    text-align: start;
-  }
-
-  .document-grid-card__chevron {
+  .card-disclosure__chevron {
     margin-inline-start: auto;
     color: var(--bs-secondary-color);
     font-size: 1.25rem;
     transition: color .15s ease, transform .22s cubic-bezier(.2, .72, .2, 1);
   }
 
-  // The slide wrapper sits between header and body, so the theme's
-  // ".card-header + .card-body" spacing is set here instead.
-  .document-grid-card__body > .card-body {
-    padding-block: 0 1rem;
+  // A badge or mark before the arrow takes the far end instead.
+  .ms-auto ~ .card-disclosure__chevron,
+  .card-disclosure__alert:not(.d-none) ~ .card-disclosure__chevron {
+    margin-inline-start: .25rem;
   }
 
+  .card-disclosure__alert {
+    margin-inline-start: auto;
+    font-size: 1.1rem;
+  }
+
+  // The slide wrapper sits between header and body, so the theme's
+  // ".card-header + .card-body" spacing is set here instead.
+  .card-disclosure__body > .card-body {
+    padding-block: 0 1rem;
+  }
+}
+
+// The Align step's Rows and Columns card.
+// One line per tool: a label, then its control.
+.document-grid-card {
   .document-grid-card__line {
     display: flex;
     align-items: center;
@@ -3765,53 +3777,43 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.template-ledger-card__intro,
 .template-ledger-card__summary {
-  margin-block-end: .75rem;
+  margin-block: .5rem 0;
   color: var(--bs-secondary-color);
   font-size: .75rem;
   line-height: 1.4;
 }
 
-.template-ledger-card__summary {
-  margin-block: .75rem 0;
-  color: var(--bs-body-color);
-}
-
-.template-ledger-card__actions {
-  display: flex;
+// The Template Builder's Rows and Columns: the lines may wrap in the narrow panel.
+.template-ledger-card .document-grid-card__line {
   flex-wrap: wrap;
-  gap: .4rem;
+  gap: .5rem;
+
+  .document-grid-card__label {
+    flex-basis: auto;
+  }
 }
 
-// Row line tools: add, remove, and space N rows evenly.
-.template-ledger-rows {
-  margin-block-start: .75rem;
-}
-
-.template-ledger-rows__heading {
-  margin-block-end: .35rem;
-  color: var(--bs-secondary-color);
-  font-size: .6875rem;
-  font-weight: 600;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.template-ledger-rows__tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .4rem;
-}
-
-.template-ledger-rows__even {
-  flex: 1 1 9.5rem;
+// Rows: − [count] +. Typing a count and pressing Enter spaces them evenly.
+// (Outranks the Align card's stretched .input-group.)
+.template-ledger-card .document-grid-card__line .template-ledger-rows {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   inline-size: auto;
-  min-inline-size: 9.5rem;
 
   .form-control {
-    max-inline-size: 4.25rem;
+    flex: 0 0 3.25rem;
+    inline-size: 3.25rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    text-align: center;
+    appearance: textfield;
+
+    &::-webkit-inner-spin-button,
+    &::-webkit-outer-spin-button {
+      margin: 0;
+      appearance: none;
+    }
   }
 }
 
@@ -3866,15 +3868,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.template-ledger-card__footer {
-  display: flex;
-  flex-direction: column;
-  gap: .6rem;
+.template-ledger-card__clear {
   margin-block-start: .75rem;
-
-  .btn {
-    align-self: flex-start;
-  }
 }
 
 // Ledger column markers in the Align step: aligned like any field, but read
@@ -8715,36 +8710,20 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
-.template-builder-settings-card,
-.template-builder-fields-card {
+// The panel is narrow: every card keeps 1rem at the sides (the ? tips too).
+.template-builder-side-panel > .card {
+  --bs-card-cap-padding-x: 1rem;
+  --bs-card-spacer-x: 1rem;
   box-shadow: 0 .15rem .65rem rgba(var(--crms-shadow-rgb), .07);
+}
 
+.template-builder-fields-card {
   .card-header {
     padding: 1rem 1rem .6rem;
   }
 
   .card-body {
     padding: .75rem 1rem 1rem;
-  }
-}
-
-.template-builder-locked-value {
-  display: flex;
-  align-items: center;
-  gap: .55rem;
-  min-block-size: 2.4rem;
-  padding: .45rem .7rem;
-  color: var(--bs-body-color);
-  background: var(--bs-gray-100);
-  border: 1px solid var(--bs-border-color);
-  border-radius: var(--bs-border-radius);
-
-  >i:first-child {
-    color: var(--bs-primary);
-  }
-
-  >i:last-child {
-    color: var(--bs-secondary-color);
   }
 }
 
@@ -8765,31 +8744,14 @@ $dashboard-reveal-step: 40ms;
 }
 
 .template-builder-field-list {
-  max-block-size: min(27vh, 17rem);
+  max-block-size: min(40vh, 22rem);
   overscroll-behavior: contain;
 }
 
+// Person rows card body: the buttons, the groups, then Back to automatic.
 .template-person-builder {
   display: grid;
   gap: .65rem;
-  margin-block-end: .85rem;
-  padding: .7rem;
-  background: rgba(3, 195, 236, .045);
-  border: 1px solid rgba(3, 195, 236, .2);
-  border-radius: .55rem;
-}
-
-.template-person-builder__heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: .65rem;
-
-  p {
-    color: var(--bs-secondary-color);
-    font-size: .6875rem;
-    line-height: 1.4;
-  }
 }
 
 .template-person-builder__actions {
@@ -8880,9 +8842,9 @@ $dashboard-reveal-step: 40ms;
   grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: .45rem;
-  min-block-size: 2.8rem;
-  margin-block-end: .35rem;
-  padding: .25rem .3rem;
+  min-block-size: 2.25rem;
+  margin-block-end: .2rem;
+  padding: .15rem .3rem;
   border: 1px solid transparent;
   border-radius: .45rem;
   user-select: none;
@@ -9102,22 +9064,6 @@ $dashboard-reveal-step: 40ms;
   .form-text,
   .form-check-label {
     font-size: .6875rem;
-  }
-}
-
-.template-builder-live-note {
-  display: flex;
-  align-items: flex-start;
-  gap: .4rem;
-  margin: 0;
-  color: var(--bs-secondary-color);
-  font-size: .6875rem;
-  line-height: 1.4;
-
-  i {
-    flex: 0 0 auto;
-    margin-block-start: .05rem;
-    color: var(--bs-primary);
   }
 }
 

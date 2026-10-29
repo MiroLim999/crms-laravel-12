@@ -112,7 +112,7 @@
                             <div class="marker-toolbar__primary">
                                 <label for="sampleScan" class="btn btn-sm btn-outline-secondary template-sample-control"
                                        id="sampleScanLabel" tabindex="0" role="button"
-                                       title="{{ $template?->sample_path ? 'Replace the stored sample document' : 'Choose a sample document' }}">
+                                       title="{{ $template?->sample_path ? 'Replace the stored sample document' : 'Choose a sample document' }}. It is stored privately with this layout when you save.">
                                     <i class="icon-base bx bx-file" aria-hidden="true"></i>
                                     <span id="sampleFileName">{{ $template?->sample_original_name ?? 'Choose sample' }}</span>
                                 </label>
@@ -223,50 +223,159 @@
 
                 <div class="col-xl-3 col-lg-4">
                     <aside class="template-builder-side-panel">
-                        <section class="card template-builder-settings-card mb-3">
-                            <div class="card-header">
-                                <h2 class="card-title h5 mb-0">Layout details</h2>
+                        {{--
+                            Cards as on the Staff Align panel: the ones used now and then
+                            (details, rows and columns, person rows) start closed and open
+                            from their header; tips sit behind a ?. Details open for a new
+                            layout, or when the name or notes came back with an error.
+                        --}}
+                        @php
+                            $detailsOpen = ! $template || $errors->hasAny(['name', 'description']);
+                            $personRowsOpen = $currentGroupingMode === 'custom';
+                        @endphp
+                        <section class="card card-disclosure template-builder-details-card mb-3"
+                                 aria-labelledby="detailsCardToggle">
+                            <div class="card-header d-flex align-items-center gap-1 position-relative card-disclosure__header {{ $detailsOpen ? 'is-expanded' : '' }}">
+                                <h2 class="card-title h5 mb-0">
+                                    <button type="button" class="btn btn-link card-disclosure__toggle" id="detailsCardToggle"
+                                            aria-expanded="{{ $detailsOpen ? 'true' : 'false' }}" aria-controls="detailsCardBody">
+                                        Layout details
+                                    </button>
+                                </h2>
+                                <i class="icon-base bx bx-chevron-down card-disclosure__chevron" aria-hidden="true"></i>
                             </div>
-                            <div class="card-body">
-                                <div class="mb-3">
-                                    <label for="name" class="form-label">Layout name</label>
-                                    <input type="text" id="name" name="name" maxlength="120"
-                                           value="{{ old('name', $template?->name ?? $docType->label()) }}"
-                                           class="form-control @error('name') is-invalid @enderror" required>
-                                    @error('name')
-                                        <div class="invalid-feedback">{{ $message }}</div>
-                                    @enderror
-                                </div>
-
-                                <div class="mb-3">
-                                    <label class="form-label">Document type</label>
-                                    <div class="template-builder-locked-value">
-                                        <i class="icon-base bx {{ $docType->icon() }}" aria-hidden="true"></i>
-                                        <span>{{ $docType->label() }}</span>
-                                        <i class="icon-base bx bx-lock-alt ms-auto" aria-hidden="true"></i>
+                            <div class="card-disclosure__body" id="detailsCardBody" @if (! $detailsOpen) hidden @endif>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="name" class="form-label">Name</label>
+                                        <input type="text" id="name" name="name" maxlength="120"
+                                               value="{{ old('name', $template?->name ?? $docType->label()) }}"
+                                               class="form-control form-control-sm @error('name') is-invalid @enderror" required>
+                                        @error('name')
+                                            <div class="invalid-feedback">{{ $message }}</div>
+                                        @enderror
                                     </div>
-                                    <div class="form-text">The document type is fixed for this layout.</div>
-                                </div>
 
-                                <div>
-                                    <label for="description" class="form-label">Notes</label>
-                                    <textarea id="description" name="description" rows="2" maxlength="1000"
-                                              class="form-control @error('description') is-invalid @enderror"
-                                              placeholder="Form revision or internal note">{{ old('description', $template?->description) }}</textarea>
-                                    @error('description')
-                                        <div class="invalid-feedback">{{ $message }}</div>
-                                    @enderror
+                                    <div>
+                                        <label for="description" class="form-label">Notes</label>
+                                        <textarea id="description" name="description" rows="2" maxlength="1000"
+                                                  class="form-control form-control-sm @error('description') is-invalid @enderror"
+                                                  placeholder="Form revision or internal note">{{ old('description', $template?->description) }}</textarea>
+                                        @error('description')
+                                            <div class="invalid-feedback">{{ $message }}</div>
+                                        @enderror
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="card card-disclosure document-grid-card template-ledger-card mb-3"
+                                 aria-labelledby="ledgerCardToggle">
+                            <div class="card-header d-flex align-items-center gap-1 position-relative card-disclosure__header">
+                                <h2 class="card-title h5 mb-0">
+                                    <button type="button" class="btn btn-link card-disclosure__toggle" id="ledgerCardToggle"
+                                            aria-expanded="false" aria-controls="ledgerCardBody">
+                                        Rows and Columns
+                                    </button>
+                                </h2>
+                                <div class="card-help">
+                                    <button type="button" class="btn btn-link card-help__toggle"
+                                            aria-label="Rows and Columns tips" aria-describedby="ledgerTips">
+                                        <i class="icon-base bx bx-help-circle" aria-hidden="true"></i>
+                                    </button>
+                                    <div class="card-help__tips" id="ledgerTips" role="tooltip">
+                                        <strong>Tips</strong>
+                                        <ul>
+                                            <li>For ruled register books. Each row line is outlined on Staff scans, so writing that crosses a rule is still read whole.</li>
+                                            <li>Click a row line to select it, then drag it or press <kbd>↑</kbd> <kbd>↓</kbd>. <kbd>Shift</kbd> + drag moves every line.</li>
+                                            <li>Lines snap to the sample's printed rules. Hold <kbd>Alt</kbd> to place one freely.</li>
+                                            <li>Type a number of rows and press <kbd>Enter</kbd> to space them evenly.</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                {{-- Something to check inside while the card is closed. --}}
+                                <i class="icon-base bx bx-error-circle text-warning card-disclosure__alert d-none" id="ledgerCardAlert"
+                                   title="Check Rows and Columns" aria-hidden="true"></i>
+                                <i class="icon-base bx bx-chevron-down card-disclosure__chevron" aria-hidden="true"></i>
+                            </div>
+
+                            <div class="card-disclosure__body" id="ledgerCardBody" hidden>
+                                <div class="card-body">
+                                    <div class="document-grid-card__line">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" id="detectGridBtn"
+                                                title="Find the columns and row lines from the sample's printed rules">
+                                            <i class="icon-base bx bx-grid-alt icon-sm me-1" aria-hidden="true"></i>
+                                            Detect from sample
+                                        </button>
+                                    </div>
+
+                                    <div class="document-grid-card__line">
+                                        <span class="document-grid-card__label" id="ledgerRowsLabel">Rows</span>
+                                        <div class="input-group input-group-sm template-ledger-rows" role="group" aria-labelledby="ledgerRowsLabel">
+                                            <button type="button" class="btn btn-outline-secondary" id="removeRuledLineBtn" disabled
+                                                    title="Remove the selected row line, or the last one" aria-label="Remove a row line">
+                                                <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i>
+                                            </button>
+                                            <input type="number" class="form-control" id="evenRowsInput" min="1" max="399" step="1"
+                                                   inputmode="numeric" aria-label="Number of rows"
+                                                   title="Type a number and press Enter to space that many rows evenly">
+                                            <button type="button" class="btn btn-outline-secondary" id="addRuledLineBtn"
+                                                    title="Add a line under the selected one, or at the bottom" aria-label="Add a row line">
+                                                <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
+                                            </button>
+                                        </div>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="evenRowsBtn" disabled
+                                                title="Space this many rows evenly between the first and the last line">
+                                            Space evenly
+                                        </button>
+                                    </div>
+
+                                    <p class="template-ledger-card__summary d-none" id="ledgerGridSummary" aria-live="polite"></p>
+
+                                    <div class="template-ledger-card__problems d-none" id="ledgerProblems" role="status">
+                                        <i class="icon-base bx bx-error icon-sm" aria-hidden="true"></i>
+                                        <ul class="mb-0" id="ledgerProblemList"></ul>
+                                    </div>
+
+                                    <div class="template-ledger-card__covered d-none" id="ledgerCoveredNotice">
+                                        <span id="ledgerCoveredMessage"></span>
+                                        <span class="template-ledger-card__covered-actions">
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" id="selectCoveredFieldsBtn">
+                                                Select them
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" id="removeCoveredFieldsBtn">
+                                                Remove them
+                                            </button>
+                                        </span>
+                                    </div>
+
+                                    <button type="button" class="btn btn-sm btn-outline-danger template-ledger-card__clear" id="clearGridBtn" disabled>
+                                        <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
+                                        Remove grid
+                                    </button>
                                 </div>
                             </div>
                         </section>
 
                         <section class="card document-fields-card template-builder-fields-card mb-3">
-                            <div class="card-header d-flex align-items-center justify-content-between gap-2">
-                                <div>
-                                    <h2 class="card-title h5 mb-0">Fields</h2>
-                                    <small class="text-muted">This order is used during validation.</small>
+                            <div class="card-header d-flex align-items-center gap-1 position-relative">
+                                <h2 class="card-title h5 mb-0">Fields</h2>
+                                <div class="card-help">
+                                    <button type="button" class="btn btn-link card-help__toggle"
+                                            aria-label="Fields tips" aria-describedby="fieldTips">
+                                        <i class="icon-base bx bx-help-circle" aria-hidden="true"></i>
+                                    </button>
+                                    <div class="card-help__tips" id="fieldTips" role="tooltip">
+                                        <strong>Tips</strong>
+                                        <ul>
+                                            <li>Keep each marker tight around one handwritten value.</li>
+                                            <li>Staff check the fields in this order.</li>
+                                            <li>Click a name to select its marker. Its settings show below the list.</li>
+                                            <li>A field is read once. For something on every row of a table, select it and set Read as to Column.</li>
+                                        </ul>
+                                    </div>
                                 </div>
-                                <span class="badge bg-label-primary" id="fieldCount">0 fields</span>
+                                <span class="badge bg-label-primary ms-auto" id="fieldCount">0 fields</span>
                             </div>
                             <div class="card-body">
                                 <div class="marker-field-bulk-actions">
@@ -280,53 +389,16 @@
                                     </button>
                                 </div>
 
-                                <div class="template-person-builder" aria-labelledby="personGroupsHeading">
-                                    <div class="template-person-builder__heading">
-                                        <div>
-                                            <h3 class="h6 mb-1" id="personGroupsHeading">Person rows</h3>
-                                            <p class="mb-0">Select one person's fields. The selection count becomes that row's field count.</p>
-                                        </div>
-                                        <span class="badge bg-label-secondary" id="groupingModeBadge">Automatic</span>
-                                    </div>
-
-                                    <div class="template-person-builder__actions">
-                                        <button type="button" class="btn btn-sm btn-outline-primary"
-                                                id="groupSelectedBtn" disabled>
-                                            <i class="icon-base bx bx-group icon-sm me-1" aria-hidden="true"></i>
-                                            Group as person
-                                        </button>
-                                        <button type="button" class="btn btn-sm btn-outline-secondary"
-                                                id="ungroupSelectedBtn" disabled>
-                                            <i class="icon-base bx bx-x icon-sm me-1" aria-hidden="true"></i>
-                                            Ungroup selected
-                                        </button>
-                                    </div>
-
-                                    <div class="template-person-group-list" id="personGroupList"></div>
-
-                                    <button type="button" class="btn btn-sm btn-outline-secondary template-person-builder__automatic"
-                                            id="useAutomaticGroupsBtn" disabled>
-                                        <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
-                                        Use automatic row detection
-                                    </button>
-                                </div>
-
                                 <ul class="list-unstyled marker-field-list template-builder-field-list mb-3"
                                     id="fieldList"></ul>
 
-                                <label class="form-label small fw-medium" for="newFieldName">Add another field</label>
-                                <div class="input-group">
+                                <label class="visually-hidden" for="newFieldName">New field name</label>
+                                <div class="input-group input-group-sm">
                                     <input type="text" id="newFieldName" class="form-control"
-                                           maxlength="120" placeholder="Field name">
-                                    <button class="btn btn-outline-primary" type="button" id="addFieldBtn">
-                                        <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Add
-                                    </button>
+                                           maxlength="120" placeholder="e.g. Page No.">
+                                    <button class="btn btn-outline-primary" type="button" id="addFieldBtn"
+                                            title="One marker, read once. Drag it onto the value on the sample">Add field</button>
                                 </div>
-
-                                <p class="document-tip mt-3 mb-0">
-                                    <i class="icon-base bx bx-info-circle icon-xs" aria-hidden="true"></i>
-                                    <span>Keep each marker tight around one handwritten value. The sample is stored privately with this layout after you save.</span>
-                                </p>
                             </div>
                         </section>
 
@@ -337,6 +409,22 @@
                                 <small class="text-muted d-block text-truncate" id="fieldSettingsName"></small>
                             </div>
                             <div class="card-body">
+                                {{-- A field is read once; a column once per row of the ledger. --}}
+                                <div class="mb-2">
+                                    <span class="form-label d-block" id="fieldKindLabel">Read as</span>
+                                    <div class="btn-group btn-group-sm w-100" role="group" aria-labelledby="fieldKindLabel">
+                                        <button type="button" class="btn btn-outline-secondary" id="makeFieldsBtn"
+                                                aria-pressed="false" title="Read once, as one rectangle">
+                                            <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>
+                                            Field
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary" id="makeColumnsBtn"
+                                                aria-pressed="false" title="Read once per row of the ledger">
+                                            <i class="icon-base bx bx-columns icon-sm me-1" aria-hidden="true"></i>
+                                            Column
+                                        </button>
+                                    </div>
+                                </div>
                                 <div class="mb-2">
                                     <label class="form-label" for="fieldRole">Holds</label>
                                     <select class="form-select form-select-sm" id="fieldRole">
@@ -375,90 +463,54 @@
                             </div>
                         </section>
 
-                        <section class="card template-ledger-card mb-3" aria-labelledby="ledgerGridHeading">
-                            <div class="card-header d-flex align-items-center justify-content-between gap-2">
-                                <div>
-                                    <h2 class="card-title h5 mb-0" id="ledgerGridHeading">Ledger grid</h2>
-                                    <small class="text-muted">For ruled register books.</small>
-                                </div>
-                                <span class="badge bg-label-secondary" id="ledgerGridBadge">None</span>
-                            </div>
-                            <div class="card-body">
-                                <p class="template-ledger-card__intro">
-                                    Name each column and record every printed row line. Staff scans are then
-                                    outlined line by line, so handwriting that drifts across a rule, or a capital
-                                    that reaches into the next row, is read whole.
-                                </p>
-
-                                <div class="template-ledger-card__actions">
-                                    <button type="button" class="btn btn-sm btn-outline-primary" id="detectGridBtn">
-                                        <i class="icon-base bx bx-grid-alt icon-sm me-1" aria-hidden="true"></i>
-                                        Detect from sample
+                        {{-- Who each row of fields belongs to in Verify: found by position unless set by hand. --}}
+                        <section class="card card-disclosure template-person-card mb-3" aria-labelledby="personCardToggle">
+                            <div class="card-header d-flex align-items-center gap-1 position-relative card-disclosure__header {{ $personRowsOpen ? 'is-expanded' : '' }}">
+                                <h2 class="card-title h5 mb-0">
+                                    <button type="button" class="btn btn-link card-disclosure__toggle" id="personCardToggle"
+                                            aria-expanded="{{ $personRowsOpen ? 'true' : 'false' }}" aria-controls="personCardBody">
+                                        Person rows
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="makeColumnsBtn" disabled>
-                                        <i class="icon-base bx bx-columns icon-sm me-1" aria-hidden="true"></i>
-                                        Make selected columns
+                                </h2>
+                                <div class="card-help">
+                                    <button type="button" class="btn btn-link card-help__toggle"
+                                            aria-label="Person rows tips" aria-describedby="personTips">
+                                        <i class="icon-base bx bx-help-circle" aria-hidden="true"></i>
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="makeFieldsBtn" disabled
-                                            title="Turn the selected columns back into fields read as one rectangle">
-                                        <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>
-                                        Make selected fields
-                                    </button>
-                                </div>
-
-                                <div class="template-ledger-rows" role="group" aria-labelledby="ledgerRowsHeading">
-                                    <h3 class="template-ledger-rows__heading" id="ledgerRowsHeading">Row lines</h3>
-                                    <div class="template-ledger-rows__tools">
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="addRuledLineBtn"
-                                                title="Add a line under the selected one, or at the bottom">
-                                            <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>
-                                            Add
-                                        </button>
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="removeRuledLineBtn" disabled
-                                                title="Remove the selected row line">
-                                            <i class="icon-base bx bx-minus icon-sm me-1" aria-hidden="true"></i>
-                                            Remove
-                                        </button>
-                                        <div class="input-group input-group-sm template-ledger-rows__even">
-                                            <input type="number" class="form-control" id="evenRowsInput" min="1" max="399" step="1"
-                                                   inputmode="numeric" aria-label="Number of rows">
-                                            <button type="button" class="btn btn-outline-secondary" id="evenRowsBtn" disabled
-                                                    title="Space this many rows evenly between the first and the last line">
-                                                rows, evenly
-                                            </button>
-                                        </div>
+                                    <div class="card-help__tips" id="personTips" role="tooltip">
+                                        <strong>Tips</strong>
+                                        <ul>
+                                            <li>Automatic: Verify finds repeated rows from where the markers sit.</li>
+                                            <li>To set a row by hand, select one person's fields and click Group as person.</li>
+                                            <li>Ledger columns are always read once per row, so they need no group.</li>
+                                        </ul>
                                     </div>
                                 </div>
+                                <span class="badge bg-label-secondary ms-auto" id="groupingModeBadge">Automatic</span>
+                                <i class="icon-base bx bx-chevron-down card-disclosure__chevron" aria-hidden="true"></i>
+                            </div>
 
-                                <p class="template-ledger-card__summary" id="ledgerGridSummary" aria-live="polite"></p>
-
-                                <div class="template-ledger-card__problems d-none" id="ledgerProblems" role="status">
-                                    <i class="icon-base bx bx-error icon-sm" aria-hidden="true"></i>
-                                    <ul class="mb-0" id="ledgerProblemList"></ul>
-                                </div>
-
-                                <div class="template-ledger-card__covered d-none" id="ledgerCoveredNotice">
-                                    <span id="ledgerCoveredMessage"></span>
-                                    <span class="template-ledger-card__covered-actions">
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="selectCoveredFieldsBtn">
-                                            Select them
+                            <div class="card-disclosure__body" id="personCardBody" @if (! $personRowsOpen) hidden @endif>
+                                <div class="card-body template-person-builder">
+                                    <div class="template-person-builder__actions">
+                                        <button type="button" class="btn btn-sm btn-outline-primary"
+                                                id="groupSelectedBtn" disabled>
+                                            <i class="icon-base bx bx-group icon-sm me-1" aria-hidden="true"></i>
+                                            Group as person
                                         </button>
-                                        <button type="button" class="btn btn-sm btn-outline-danger" id="removeCoveredFieldsBtn">
-                                            Remove them
+                                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                id="ungroupSelectedBtn" disabled>
+                                            <i class="icon-base bx bx-x icon-sm me-1" aria-hidden="true"></i>
+                                            Ungroup
                                         </button>
-                                    </span>
-                                </div>
+                                    </div>
 
-                                <div class="template-ledger-card__footer">
-                                    <p class="document-tip mb-0">
-                                        <i class="icon-base bx bx-info-circle icon-xs" aria-hidden="true"></i>
-                                        <span>Click a row line to select it, then drag it or press the arrow keys.
-                                            <kbd>Shift</kbd> + drag moves every line; lines snap to the sample's printed
-                                            rules (<kbd>Alt</kbd>: place freely). Moving all the columns moves their rows.</span>
-                                    </p>
-                                    <button type="button" class="btn btn-sm btn-outline-danger" id="clearGridBtn" disabled>
-                                        <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
-                                        Remove grid
+                                    <div class="template-person-group-list" id="personGroupList"></div>
+
+                                    <button type="button" class="btn btn-sm btn-outline-secondary template-person-builder__automatic d-none"
+                                            id="useAutomaticGroupsBtn" disabled>
+                                        <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
+                                        Back to automatic
                                     </button>
                                 </div>
                             </div>
@@ -470,11 +522,8 @@
                         </div>
 
                         <div class="template-builder-save-panel">
+                            {{-- The "in use" banner at the top says what makes a new version. --}}
                             @if ($inUse)
-                                <p class="template-builder-live-note">
-                                    <i class="icon-base bx bx-info-circle icon-xs" aria-hidden="true"></i>
-                                    Changed markers are saved as a new version; this one stays as it is.
-                                </p>
                                 <button type="submit" class="btn btn-outline-secondary" data-publish="0">
                                     Save as new draft
                                 </button>
