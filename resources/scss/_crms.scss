@@ -2392,6 +2392,51 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-radius: var(--bs-border-radius-lg);
 }
 
+// Align and Verify: asks before leaving a scan that is not submitted.
+// A small centred card, not a wide banner.
+.leave-scan-dialog {
+  max-inline-size: min(21rem, calc(100% - 2rem));
+  margin-inline: auto;
+}
+
+.leave-scan-modal {
+  border-radius: var(--bs-border-radius-lg);
+  text-align: center;
+
+  .modal-body {
+    padding: 1.75rem 1.5rem 1.5rem;
+  }
+
+  .modal-title {
+    margin-block-end: .4rem;
+  }
+}
+
+.leave-scan-modal__icon {
+  display: inline-grid;
+  inline-size: 3rem;
+  block-size: 3rem;
+  margin-block-end: 1rem;
+  place-items: center;
+  border-radius: 50%;
+
+  >.bx {
+    font-size: 1.5rem;
+  }
+}
+
+.leave-scan-modal__text {
+  margin: 0 0 1.5rem;
+  color: var(--bs-secondary-color);
+  font-size: .875rem;
+}
+
+.leave-scan-modal__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+}
+
 // Verify: asks before a record is submitted without required fields.
 .missing-required-dialog {
   max-inline-size: 32rem;

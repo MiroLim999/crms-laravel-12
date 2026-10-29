@@ -75,7 +75,7 @@ class DocumentScanController extends Controller
         return view('scan.create', [
             'documentTypes' => $documentTypes,
             'templates' => $templates,
-            'health' => $this->ocr->health(),
+            'health' => $this->ocr->recentHealth(),
             'activeModel' => OcrModel::active(),
         ]);
     }
@@ -138,7 +138,7 @@ class DocumentScanController extends Controller
             // The Document step's type list, as on New Document.
             'documentTypes' => $documentTypes,
             'templates' => $this->activeTemplates($documentTypes),
-            'health' => $this->ocr->health(),
+            'health' => $this->ocr->recentHealth(),
             'docType' => $type,
             'template' => $template,
             // Rectangle fields, then ledger columns. Staff align both the same way.

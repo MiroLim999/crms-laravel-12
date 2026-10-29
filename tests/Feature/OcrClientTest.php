@@ -31,4 +31,15 @@ class OcrClientTest extends TestCase
         Http::assertSentCount(5);
         Http::assertNotSent(fn (Request $request) => ! $request->hasHeader('X-CRMS-Service-Key', 'shared-test-key'));
     }
+
+    public function test_recent_health_reuses_a_check_across_page_loads(): void
+    {
+        Http::fake(['*/health' => Http::response(['status' => 'ok', 'models' => []])]);
+
+        // A fresh client per page load, as the app builds one per request.
+        $this->assertTrue((new OcrClient('http://ocr.test'))->recentHealth()['reachable']);
+        $this->assertTrue((new OcrClient('http://ocr.test'))->recentHealth()['reachable']);
+
+        Http::assertSentCount(1);
+    }
 }

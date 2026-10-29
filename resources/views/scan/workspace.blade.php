@@ -651,6 +651,35 @@
         </div>
     </div>
 
+    {{-- Confirm leaving a scan that is not submitted (Cancel, or a link out) --}}
+    <div class="modal fade" id="leaveScanModal" tabindex="-1"
+         aria-labelledby="leaveScanModalTitle" aria-describedby="leaveScanModalDescription"
+         aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
+            <div class="modal-content leave-scan-modal">
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-warning" aria-hidden="true">
+                        <i class="icon-base bx bx-error"></i>
+                    </span>
+                    <h5 class="modal-title" id="leaveScanModalTitle">Leave this scan?</h5>
+                    <p class="leave-scan-modal__text" id="leaveScanModalDescription">
+                        Your markers and checked values are not saved yet.
+                    </p>
+
+                    <div class="leave-scan-modal__actions">
+                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal"
+                                id="leaveScanStayBtn">
+                            Stay
+                        </button>
+                        <button type="button" class="btn btn-danger" id="confirmLeaveScanBtn">
+                            Leave
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- OCR progress while the model runs --}}
     <div class="modal fade" id="scanningModal" tabindex="-1" data-bs-backdrop="static"
          data-bs-keyboard="false" aria-hidden="true">
@@ -2283,6 +2312,7 @@
             el('workspaceContextDetail').textContent = `${config.typeLabel} · ${file.name}`;
             el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
             showStep('mark');
+            guardBackButton();
             resetFieldHistory();
             rowsSource = null;
             setGrid(templateBoxes, templateRows);
@@ -2304,6 +2334,85 @@
     scanFileInput.addEventListener('change', (event) => {
         if (!(event.currentTarget instanceof HTMLInputElement)) return;
         openDocument(event.currentTarget.files?.[0]);
+    });
+
+    // Once a scan is open, leaving would lose the markers and the checked
+    // values, so Staff are asked first. Not while the record is being
+    // submitted, or after, when it opens the record.
+    let leaveTo = null;
+    let leaving = false;
+    const workInProgress = () => scanFile !== null && !recordSubmitting && !leaving;
+
+    // A link in the page (Cancel, the menu) asks with the page's own dialog.
+    document.addEventListener('click', (event) => {
+        if (!workInProgress() || event.defaultPrevented || event.button !== 0) return;
+        if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+        if (!(link instanceof HTMLAnchorElement) || link.target === '_blank' || link.hasAttribute('download')) return;
+        if (link.hasAttribute('data-bs-toggle') || !/^https?:$/.test(link.protocol)) return;
+        // A jump within this page leaves nothing.
+        if (link.hash && link.pathname === location.pathname && link.search === location.search) return;
+
+        event.preventDefault();
+        askToLeave(link.href);
+    });
+
+    // The browser's Back button: an open scan adds one history entry of its
+    // own, at the same address, so Back first returns to this page's entry
+    // and the page asks instead of leaving.
+    const BACK = 'back';
+    let backGuarded = false;
+    let backFallback = null;
+
+    function guardBackButton() {
+        if (backGuarded) return;
+        history.pushState({ scanGuard: true }, '');
+        backGuarded = true;
+    }
+
+    window.addEventListener('popstate', () => {
+        if (!backGuarded) return;
+        backGuarded = false;
+        if (workInProgress()) askToLeave(BACK);
+    });
+
+    function askToLeave(target) {
+        leaveTo = target;
+        window.bootstrap.Modal.getOrCreateInstance(el('leaveScanModal')).show();
+    }
+
+    // The safe choice has the focus, so Enter never leaves by accident.
+    el('leaveScanModal').addEventListener('shown.bs.modal', () => el('leaveScanStayBtn').focus());
+
+    // Staying after Back: put the entry back, so the next Back asks again.
+    el('leaveScanModal').addEventListener('hidden.bs.modal', () => {
+        if (workInProgress()) guardBackButton();
+    });
+
+    el('confirmLeaveScanBtn').addEventListener('click', () => {
+        if (!leaveTo) return;
+        leaving = true;
+        if (leaveTo !== BACK) {
+            window.location.assign(leaveTo);
+            return;
+        }
+
+        history.back();
+        // Opened in a new tab, there is nothing to go back to: start again.
+        backFallback = window.setTimeout(() => window.location.assign(el('workspaceCancel').href), 500);
+    });
+    window.addEventListener('pagehide', () => window.clearTimeout(backFallback));
+
+    // Closing the tab or reloading: only the browser's own dialog can ask.
+    window.addEventListener('beforeunload', (event) => {
+        if (!workInProgress()) return;
+        event.preventDefault();
+        event.returnValue = '';
+    });
+
+    // Back to this page from the browser's cache: it is not leaving any more.
+    window.addEventListener('pageshow', (event) => {
+        if (event.persisted) leaving = false;
     });
 
     const dropzone = el('documentDropzone');
