@@ -1067,9 +1067,10 @@ class DocumentTemplateBuilderTest extends TestCase
             ->assertSeeText('Residency Certificate')
             ->assertSee(route('documents.workspace', ['type' => $type->key]), escape: false);
 
+        // The type select on the Document step shows the type being scanned.
         $this->get(route('documents.workspace', ['type' => $type->key]))
             ->assertOk()
-            ->assertSeeText('Scan: Residency Certificate')
+            ->assertSee('<span class="document-type-select__value">Residency Certificate</span>', escape: false)
             ->assertSee('name="doc_type" value="'.$type->key.'"', escape: false);
     }
 

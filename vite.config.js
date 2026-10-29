@@ -44,6 +44,9 @@ export default defineConfig({
                 // Template Builder interaction shell. It shares FieldMarker with
                 // Staff scanning but is only loaded on Super Admin layout pages.
                 'resources/js/template-builder.js',
+                // The document type select on the first step of a new document,
+                // on New Document and in the scanning workspace.
+                'resources/js/document-type-picker.js',
                 // OCR workspace layout refinements. Loaded from the page's head
                 // stack to avoid a flash of the uncomposed cards before JS runs.
                 'resources/scss/pages/ocr-workspace.scss',

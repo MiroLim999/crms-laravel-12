@@ -1483,8 +1483,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   margin-inline: auto;
 }
 
+// Not overflow: hidden, so the type list can open over the drop area.
 .document-upload-card {
-  overflow: hidden;
   border: 1px solid rgba(105, 108, 255, .14);
   box-shadow: 0 .4rem 1.4rem rgba(var(--crms-shadow-rgb), .08);
 }
@@ -1493,10 +1493,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   display: flex;
   align-items: center;
   justify-content: center;
-  // Tall when the window allows, but never so tall that the upload step scrolls:
-  // the top bar, note, hint and footer around it take about 17.5rem.
-  min-block-size: clamp(18rem, 100dvh - 17.5rem, 30rem);
-  padding: 3rem 2rem;
+  // Tall when the window allows, but never so tall that the step scrolls: the
+  // top bar, type select, note and footer around it take about 22.5rem.
+  min-block-size: clamp(16rem, 100dvh - 22.5rem, 26rem);
+  // Inset by the card's padding, so its edges line up with the type select.
+  margin-inline: 1.25rem;
+  padding: 2.5rem 2rem;
   flex-direction: column;
   text-align: center;
   cursor: pointer;
@@ -1504,9 +1506,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     radial-gradient(circle at 50% 0%, rgba(105, 108, 255, .11), transparent 45%),
     var(--bs-paper-bg);
   border: 2px dashed rgba(105, 108, 255, .28);
-  border-radius: .75rem .75rem 0 0;
+  border-radius: .75rem;
   outline: 0;
-  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease, opacity .2s ease;
 
   &:hover,
   &:focus-visible,
@@ -1530,6 +1532,31 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
       animation: document-upload-pulse .8s ease-in-out infinite alternate;
     }
   }
+
+  // No type chosen yet: quiet, and a click opens the type list.
+  &.is-disabled,
+  &.is-disabled:hover {
+    background: rgba(var(--crms-ink-rgb), .015);
+    border-color: var(--bs-border-color);
+    box-shadow: none;
+
+    .document-dropzone__icon {
+      color: var(--bs-secondary-color);
+      background: rgba(var(--crms-ink-rgb), .05);
+    }
+
+    .document-dropzone__title {
+      color: var(--bs-secondary-color);
+      font-size: 1rem;
+      font-weight: 500;
+    }
+  }
+}
+
+// A type was chosen and its workspace is loading.
+.document-upload-card.is-switching .document-dropzone {
+  opacity: .5;
+  pointer-events: none;
 }
 
 @keyframes document-upload-pulse {
@@ -1562,13 +1589,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   font-weight: 600;
 }
 
-.document-dropzone__text {
-  margin-block-start: .35rem;
-  color: var(--bs-secondary-color);
-}
-
 .document-dropzone__button {
-  margin-block: 1.35rem 1.1rem;
+  margin-block: 1.25rem 0;
   pointer-events: none;
 }
 
@@ -1577,7 +1599,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 // scrolling. Phones keep their own rules further down.
 @media (min-width: 768px) and (max-height: 700px) {
   .document-dropzone {
-    min-block-size: clamp(14rem, 100dvh - 19.5rem, 30rem);
+    min-block-size: clamp(12rem, 100dvh - 24.5rem, 26rem);
     padding-block: 1.25rem;
   }
 
@@ -1593,7 +1615,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   .document-dropzone__button {
-    margin-block: 1rem .75rem;
+    margin-block: 1rem 0;
   }
 }
 
@@ -1602,6 +1624,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   flex-wrap: wrap;
   justify-content: center;
   gap: .4rem;
+  margin-block-start: 1rem;
 
   span {
     padding: .25rem .5rem;
@@ -1616,21 +1639,256 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .document-upload-note {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: .75rem 2rem;
-  padding: 1rem 1.25rem;
-  color: var(--bs-secondary-color);
-  background: var(--bs-gray-100);
-  font-size: .8125rem;
-}
-
-.document-upload-help {
-  margin: 1rem auto 0;
+  margin: 0;
+  padding: .85rem 1.25rem 1rem;
   color: var(--bs-secondary-color);
   font-size: .8125rem;
   text-align: center;
+}
+
+// OCR problems, above the card and as wide as it.
+.document-upload-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  padding: .75rem 1rem;
+  font-size: .8125rem;
+
+  >.icon-base {
+    flex: 0 0 auto;
+    margin-block-start: .1rem;
+    font-size: 1.1rem;
+  }
+}
+
+// ------------------------------------------------- Document step: type select
+// A select-like button over a list of links, one per type, in the card above
+// the drop area and as wide as it.
+
+.document-type-bar {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  padding: 1.25rem 1.25rem 1rem;
+}
+
+.document-type-bar__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .25rem 1rem;
+
+  .scan-type-status {
+    font-size: .75rem;
+  }
+}
+
+.document-type-bar__label {
+  color: var(--bs-heading-color);
+  font-size: .8125rem;
+  font-weight: 600;
+}
+
+.document-type-select {
+  position: relative;
+
+  .btn.document-type-select__toggle {
+    --bs-btn-color: var(--bs-heading-color);
+    --bs-btn-bg: var(--bs-paper-bg);
+    --bs-btn-border-color: var(--bs-border-color);
+    --bs-btn-hover-color: var(--bs-heading-color);
+    --bs-btn-hover-bg: var(--bs-paper-bg);
+    --bs-btn-hover-border-color: rgba(var(--bs-primary-rgb), .5);
+    --bs-btn-active-color: var(--bs-heading-color);
+    --bs-btn-active-bg: var(--bs-paper-bg);
+    --bs-btn-active-border-color: var(--bs-primary);
+    --bs-btn-box-shadow: none;
+    justify-content: flex-start;
+    gap: .75rem;
+    inline-size: 100%;
+    min-block-size: 3rem;
+    padding: .45rem .9rem .45rem .5rem;
+    border-radius: .5rem;
+    font-weight: 500;
+    text-align: start;
+    transition: border-color .15s ease, box-shadow .15s ease;
+
+    &:focus-visible,
+    &.show {
+      border-color: var(--bs-primary);
+      box-shadow: 0 0 0 .2rem rgba(var(--bs-primary-rgb), .15);
+    }
+
+    &.show .document-type-select__chevron {
+      rotate: 180deg;
+    }
+  }
+}
+
+.document-type-select__value {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &.is-placeholder {
+    color: var(--bs-secondary-color);
+    font-weight: 400;
+  }
+}
+
+.document-type-select__chevron {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  color: var(--bs-secondary-color);
+  font-size: 1.25rem;
+  transition: rotate .2s ease;
+}
+
+.document-type-select__menu {
+  inline-size: 100%;
+  padding: .35rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: .5rem;
+  transform-origin: top center;
+
+  // Popper places the list with transform, so the entrance uses translate.
+  &.show {
+    animation: document-type-menu-in .16s ease-out;
+  }
+}
+
+@keyframes document-type-menu-in {
+  from {
+    opacity: 0;
+    translate: 0 -.35rem;
+  }
+
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.document-type-select__search {
+  position: relative;
+  padding: .15rem .15rem .45rem;
+
+  >.icon-base {
+    position: absolute;
+    inset-block-start: calc(50% - .15rem);
+    inset-inline-start: .75rem;
+    color: var(--bs-secondary-color);
+    font-size: 1rem;
+    pointer-events: none;
+    translate: 0 -50%;
+  }
+
+  .form-control {
+    padding-inline-start: 2.1rem;
+  }
+}
+
+// Room for about six types; longer lists scroll inside the menu.
+.document-type-select__list {
+  max-block-size: min(20rem, 45vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.dropdown-item.document-type-option {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .45rem .55rem;
+  border-radius: .375rem;
+  white-space: normal;
+  transition: background-color .12s ease;
+
+  &.is-selected {
+    background-color: rgba(var(--bs-primary-rgb), .07);
+  }
+
+  &.disabled {
+    opacity: .6;
+  }
+}
+
+.document-type-option__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  inline-size: 2rem;
+  block-size: 2rem;
+  color: var(--bs-primary);
+  background: rgba(var(--bs-primary-rgb), .08);
+  border-radius: .4rem;
+  font-size: 1.05rem;
+
+  &.is-empty {
+    color: var(--bs-secondary-color);
+    background: rgba(var(--crms-ink-rgb), .05);
+  }
+}
+
+.document-type-option__copy {
+  display: flex;
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.document-type-option__name {
+  overflow: hidden;
+  color: var(--bs-heading-color);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-type-option__meta {
+  overflow: hidden;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-type-option__check {
+  flex: 0 0 auto;
+  color: var(--bs-primary);
+  font-size: 1.15rem;
+}
+
+.document-type-select__empty {
+  padding: .75rem;
+  color: var(--bs-secondary-color);
+  font-size: .8125rem;
+  text-align: center;
+}
+
+.dropdown-item.document-type-select__manage {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  color: var(--bs-primary);
+  font-size: .8125rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .document-type-select__menu.show {
+    animation: none;
+  }
+
+  .document-type-select__chevron,
+  .document-type-select .btn.document-type-select__toggle,
+  .dropdown-item.document-type-option {
+    transition: none;
+  }
 }
 
 .document-canvas-card {
@@ -4428,8 +4686,17 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   .document-dropzone {
-    min-block-size: clamp(16rem, 100dvh - 17.5rem, 24rem);
+    min-block-size: clamp(14rem, 100dvh - 22.5rem, 22rem);
+    margin-inline: 1rem;
     padding: 2rem 1rem;
+  }
+
+  .document-type-bar {
+    padding: 1rem 1rem .85rem;
+  }
+
+  .document-upload-note {
+    padding-inline: 1rem;
   }
 
   .marker-toolbar {
@@ -5042,11 +5309,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   .document-flow-step__copy strong {
     font-size: .625rem;
-  }
-
-  .document-upload-note {
-    align-items: center;
-    flex-direction: column;
   }
 
   .marker-toolbar__primary,
@@ -8791,9 +9053,8 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
-// ------------------------------------------------------------ New Document
-// Minimal type picker: a one-line status strip, then one card per type. The
-// whole card is the link; colour is kept for the icon and the action.
+// ------------------------------------------------------------ OCR status line
+// A dot and the active model, in the Document step's type bar.
 
 .scan-type-status {
   display: flex;
@@ -8822,113 +9083,5 @@ $dashboard-reveal-step: 40ms;
 
   &.is-offline {
     background: var(--bs-danger);
-  }
-}
-
-.scan-type-card {
-  color: inherit;
-  text-decoration: none;
-  border: 1px solid var(--bs-border-color);
-  box-shadow: none;
-  transition: border-color .15s ease, box-shadow .15s ease;
-
-  .card-body {
-    display: flex;
-    flex-direction: column;
-    gap: .75rem;
-    padding: 1.25rem;
-  }
-
-  &[href]:hover,
-  &[href]:focus-visible {
-    color: inherit;
-    border-color: rgba(var(--bs-primary-rgb), .45);
-    box-shadow: 0 .25rem .75rem rgba(var(--crms-shadow-rgb), .08);
-  }
-
-  &[href]:focus-visible {
-    outline: 0;
-    box-shadow: 0 0 0 .2rem rgba(var(--bs-primary-rgb), .18);
-  }
-
-  &.is-unavailable {
-    background: transparent;
-    border-style: dashed;
-
-    .scan-type-card__icon {
-      color: var(--bs-secondary-color);
-      background: rgba(var(--crms-ink-rgb), .05);
-    }
-  }
-}
-
-.scan-type-card__head {
-  display: flex;
-  align-items: center;
-  gap: .75rem;
-  min-inline-size: 0;
-}
-
-.scan-type-card__icon {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  inline-size: 2.25rem;
-  block-size: 2.25rem;
-  color: var(--bs-primary);
-  background: rgba(var(--bs-primary-rgb), .08);
-  border-radius: var(--bs-border-radius);
-  font-size: 1.15rem;
-}
-
-.scan-type-card__title {
-  margin: 0;
-  color: var(--bs-heading-color);
-  font-size: 1rem;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.scan-type-card__meta {
-  margin: 0;
-  color: var(--bs-secondary-color);
-  font-size: .8125rem;
-}
-
-// margin-top: auto keeps the action on the card's bottom edge, so actions
-// line up across a row whether or not a card has a details line.
-.scan-type-card__action {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: .3rem;
-  margin-block-start: auto;
-  padding-block-start: .75rem;
-  inline-size: 100%;
-  color: var(--bs-primary);
-  border-block-start: 1px solid var(--bs-border-color);
-  font-size: .875rem;
-  font-weight: 500;
-  text-decoration: none;
-
-  .bx-right-arrow-alt {
-    transition: transform .15s ease;
-  }
-}
-
-.scan-type-card[href]:hover .scan-type-card__action .bx-right-arrow-alt,
-.scan-type-card[href]:focus-visible .scan-type-card__action .bx-right-arrow-alt {
-  transform: translateX(3px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .scan-type-card,
-  .scan-type-card__action .bx-right-arrow-alt {
-    transition: none;
-  }
-
-  .scan-type-card[href]:hover .scan-type-card__action .bx-right-arrow-alt {
-    transform: none;
   }
 }

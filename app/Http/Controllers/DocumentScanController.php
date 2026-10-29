@@ -49,24 +49,57 @@ class DocumentScanController extends Controller
         private readonly ScanModelChoice $modelChoice,
     ) {}
 
-    /**
-     * Step 1: pick a certificate type. The scan itself is chosen in the workspace.
-     */
-    public function create(): View
-    {
-        $health = $this->ocr->health();
+    /** Session key: the type last opened in the workspace. */
+    private const LAST_TYPE = 'scan.last_type';
 
+    /**
+     * Step 1 with no type chosen: the workspace's first step, the drop area
+     * waiting for a type. Someone who has scanned before goes straight to the
+     * workspace for the type they used last, ready for the next page of the
+     * same book; the type list there still offers every other type.
+     */
+    public function create(Request $request): View|RedirectResponse
+    {
         $documentTypes = DocumentTypeDefinition::ordered(activeOnly: true);
-        $templates = $documentTypes
-            ->mapWithKeys(fn (DocumentTypeDefinition $type) => [
-                $type->key => DocumentTemplate::activeFor($type),
-            ]);
+        $templates = $this->activeTemplates($documentTypes);
+
+        $last = $request->session()->get(self::LAST_TYPE);
+        if (is_string($last) && ($templates[$last] ?? null) !== null) {
+            // Keep a message flashed for this page, such as why a type could
+            // not be opened, for the page it now goes on to.
+            $request->session()->reflash();
+
+            return redirect()->route('documents.workspace', ['type' => $last]);
+        }
 
         return view('scan.create', [
             'documentTypes' => $documentTypes,
             'templates' => $templates,
-            'health' => $health,
+            'health' => $this->ocr->health(),
             'activeModel' => OcrModel::active(),
+        ]);
+    }
+
+    /**
+     * The published template of each type, by type key, or null where there is
+     * none. One query for the whole list, which the type select shows on every
+     * Document step.
+     *
+     * @param  Collection<int, DocumentTypeDefinition>  $types
+     * @return Collection<string, DocumentTemplate|null>
+     */
+    private function activeTemplates(Collection $types): Collection
+    {
+        $active = DocumentTemplate::query()
+            ->where('is_active', true)
+            ->whereIn('document_type_id', $types->modelKeys())
+            ->orderBy('id')
+            ->get(['id', 'name', 'document_type_id'])
+            ->unique('document_type_id')
+            ->keyBy('document_type_id');
+
+        return $types->mapWithKeys(fn (DocumentTypeDefinition $type) => [
+            $type->key => $active->get($type->getKey()),
         ]);
     }
 
@@ -98,7 +131,14 @@ class DocumentScanController extends Controller
             );
         }
 
+        $request->session()->put(self::LAST_TYPE, $type->key);
+        $documentTypes = DocumentTypeDefinition::ordered(activeOnly: true);
+
         return view('scan.workspace', [
+            // The Document step's type list, as on New Document.
+            'documentTypes' => $documentTypes,
+            'templates' => $this->activeTemplates($documentTypes),
+            'health' => $this->ocr->health(),
             'docType' => $type,
             'template' => $template,
             // Rectangle fields, then ledger columns. Staff align both the same way.

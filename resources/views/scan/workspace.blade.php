@@ -4,63 +4,12 @@
 @section('body-class', 'document-workspace-focused')
 
 @section('workspace-navbar')
-    <nav class="layout-navbar container-xxl navbar-detached navbar document-workspace-topbar"
-         id="layout-navbar" aria-label="Document workspace">
-        <div class="document-workspace-topbar__context">
-            <strong>Scan: {{ $docType->label() }}</strong>
-            <small>{{ $template->name }}</small>
-        </div>
-
-        <nav class="document-flow-steps" id="documentFlowSteps" aria-label="Document processing progress">
-            <div class="document-flow-step is-active" data-flow-step="upload" aria-current="step">
-                <span class="document-flow-step__number">1</span>
-                <span class="document-flow-step__copy"><strong>Upload</strong><small>Choose a scan</small></span>
-            </div>
-            <div class="document-flow-step" data-flow-step="mark">
-                <span class="document-flow-step__number">2</span>
-                <span class="document-flow-step__copy"><strong>Align</strong><small>Check the markers</small></span>
-            </div>
-            <div class="document-flow-step" data-flow-step="verify">
-                <span class="document-flow-step__number">3</span>
-                <span class="document-flow-step__copy"><strong>Verify</strong><small>Review and submit</small></span>
-            </div>
-        </nav>
-
-        <a href="{{ route('documents.create') }}"
-           class="btn btn-sm btn-outline-secondary document-workspace-topbar__cancel">Cancel</a>
-    </nav>
+    @include('scan.partials.topbar', ['cancelable' => true])
 @endsection
 
 @section('content')
-    {{-- Step 1: upload --}}
-    <section id="step-upload" class="document-step-panel">
-        <div class="document-upload-wrap">
-            <x-card class="document-upload-card" bodyClass="p-0">
-                <label for="scanFile" class="document-dropzone" id="documentDropzone" tabindex="0">
-                    <span class="document-dropzone__icon" aria-hidden="true">
-                        <i class="icon-base bx bx-cloud-upload"></i>
-                    </span>
-                    <span class="document-dropzone__title">Drop a scanned document here</span>
-                    <span class="document-dropzone__text">or choose a file from your computer</span>
-                    <span class="btn btn-primary document-dropzone__button">Choose document</span>
-                    <span class="document-dropzone__formats">
-                        <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>BMP</span>
-                    </span>
-                </label>
-                <input type="file" id="scanFile" class="visually-hidden"
-                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp">
-
-                <div class="document-upload-note">
-                    <span><i class="icon-base bx bx-file me-1"></i> Maximum file size: 20 MB</span>
-                    <span><i class="icon-base bx bx-lock-alt me-1"></i> Stored only after validation</span>
-                </div>
-            </x-card>
-
-            <p class="document-upload-help">
-                For the best handwriting results, use a straight, well-lit scan with the full certificate visible.
-            </p>
-        </div>
-    </section>
+    {{-- Step 1: the document type and the scan --}}
+    @include('scan.partials.document-step', ['currentType' => $docType])
 
     {{-- Step 2: mark the fields --}}
     <section id="step-mark" class="document-step-panel d-none">
@@ -773,6 +722,7 @@
     import { valueProblem } from '{{ Vite::asset('resources/js/value-types.js') }}';
 
     const config = {
+        typeLabel: @json($docType->label()),
         boxes: @json($boxes),
         ruledYs: @json($ruledYs),
         templateId: @json($template->getKey()),
@@ -2264,6 +2214,10 @@
         el('layout-navbar').classList.remove('d-none');
         el('documentFlowSteps').classList.remove('d-none');
         document.querySelector('.content-footer')?.classList.toggle('d-none', focusedWorkspace);
+        // On the Document step the type list shows the type, and there is
+        // nothing to cancel yet; once a scan is open the top bar names both.
+        el('workspaceContextDetail').classList.toggle('d-none', !focusedWorkspace);
+        el('workspaceCancel').classList.toggle('d-none', !focusedWorkspace);
 
         const order = ['upload', 'mark', 'verify'];
         const activeIndex = order.indexOf(name);
@@ -2326,6 +2280,8 @@
             scanPageCount = Number(measurement?.pageCount) || 1;
             updateScanNotices();
             el('selectedFileName').textContent = file.name;
+            el('workspaceContextDetail').textContent = `${config.typeLabel} · ${file.name}`;
+            el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
             showStep('mark');
             resetFieldHistory();
             rowsSource = null;
