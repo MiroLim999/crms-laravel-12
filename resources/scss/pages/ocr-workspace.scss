@@ -450,6 +450,17 @@
     pointer-events: none !important;
   }
 
+  // Dark mode: a soft glow in each triangle's own colour lifts it off the black card.
+  [data-bs-theme='dark'] & #ocr-model-radar {
+    .apexcharts-series path[stroke='#ff6384' i] {
+      filter: drop-shadow(0 0 8px rgba(255, 99, 132, 0.55));
+    }
+
+    .apexcharts-series path[stroke='#696cff' i] {
+      filter: drop-shadow(0 0 6px rgba(105, 108, 255, 0.55));
+    }
+  }
+
   .apexcharts-tooltip:empty {
     display: none !important;
     opacity: 0 !important;
