@@ -3,26 +3,27 @@
 @section('title', 'Audit Log')
 
 @section('content')
-    <x-page-header title="Audit Log"
-                   subtitle="Every state change, with actor, target, and before/after values." />
+    @php
+        $hasFilters = collect($filters)->filter(fn ($value) => $value !== null && $value !== '')->isNotEmpty();
+    @endphp
 
-    <div class="alert alert-info d-flex align-items-center mb-4" role="alert">
-        <i class="icon-base bx bx-lock-alt icon-md me-2"></i>
-        <div>
-            This trail is append-only. Entries cannot be edited or removed by anyone,
-            including a Super Admin.
-        </div>
-    </div>
+    <x-page-header title="Audit Log"
+                   subtitle="Every state change, with actor, target, and before/after values.">
+        <span class="badge bg-label-info d-inline-flex align-items-center py-2 px-3"
+              title="Entries cannot be edited or removed by anyone, including a Super Admin.">
+            <i class="icon-base bx bx-lock-alt icon-sm me-1" aria-hidden="true"></i> Append-only
+        </span>
+    </x-page-header>
 
     {{-- Filters --}}
     <x-card class="mb-4">
-        <form method="GET" action="{{ route('audit.index') }}" class="row g-3">
-            <div class="col-md-4">
+        <form method="GET" action="{{ route('audit.index') }}" class="row g-3 align-items-end">
+            <div class="col-sm-6 col-xl-2">
                 <label for="q" class="form-label">Search</label>
                 <input type="search" id="q" name="q" value="{{ $filters['q'] ?? '' }}"
-                       class="form-control" placeholder="Description or actor name">
+                       class="form-control" placeholder="Description or actor">
             </div>
-            <div class="col-md-4">
+            <div class="col-sm-6 col-xl-2">
                 <label for="actor" class="form-label">Actor</label>
                 <select id="actor" name="actor" class="form-select">
                     <option value="">Anyone</option>
@@ -34,7 +35,7 @@
                     @endforeach
                 </select>
             </div>
-            <div class="col-md-4">
+            <div class="col-sm-6 col-xl-2">
                 <label for="action" class="form-label">Action</label>
                 <select id="action" name="action" class="form-select">
                     <option value="">All actions</option>
@@ -46,19 +47,26 @@
                     @endforeach
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-sm-6 col-xl-2">
                 <label for="from" class="form-label">From</label>
-                <input type="date" id="from" name="from" value="{{ $filters['from'] ?? '' }}" class="form-control">
+                <input type="date" id="from" name="from" value="{{ $filters['from'] ?? '' }}"
+                       class="form-control @error('from') is-invalid @enderror">
             </div>
-            <div class="col-md-3">
+            <div class="col-sm-6 col-xl-2">
                 <label for="to" class="form-label">To</label>
-                <input type="date" id="to" name="to" value="{{ $filters['to'] ?? '' }}" class="form-control">
+                <input type="date" id="to" name="to" value="{{ $filters['to'] ?? '' }}"
+                       class="form-control @error('to') is-invalid @enderror">
+                @error('to')
+                    <div class="invalid-feedback">{{ $message }}</div>
+                @enderror
             </div>
-            <div class="col-md-6 d-flex align-items-end gap-2">
-                <button class="btn btn-primary" type="submit">
-                    <i class="icon-base bx bx-filter-alt icon-sm me-1"></i> Filter
+            <div class="col-12 col-xl-2 d-flex gap-2">
+                <button class="btn btn-primary flex-grow-1" type="submit">
+                    <i class="icon-base bx bx-filter-alt icon-sm me-1" aria-hidden="true"></i> Apply
                 </button>
-                <a href="{{ route('audit.index') }}" class="btn btn-outline-secondary">Reset</a>
+                @if ($hasFilters)
+                    <a href="{{ route('audit.index') }}" class="btn btn-outline-secondary" title="Clear all filters">Reset</a>
+                @endif
             </div>
         </form>
     </x-card>
