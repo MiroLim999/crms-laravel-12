@@ -3841,7 +3841,10 @@
         revealValidationLines(group.indexes);
     }
 
+    // Resolves when the opening and closing animations are done, so a scroll
+    // can be aimed at the list's final layout rather than a half-open one.
     function setExpandedValidationGroup(groupId) {
+        const animations = [];
         el('verifyRows').querySelectorAll('.validation-record-group').forEach((section) => {
             const expanded = section.dataset.groupId === groupId;
             section.classList.toggle('is-expanded', expanded);
@@ -3849,8 +3852,9 @@
             const body = section.querySelector('.validation-record-group__body');
             button?.setAttribute('aria-expanded', String(expanded));
             button?.classList.toggle('collapsed', !expanded);
-            if (body instanceof HTMLElement) setDisclosureExpanded(body, expanded);
+            if (body instanceof HTMLElement) animations.push(setDisclosureExpanded(body, expanded));
         });
+        return Promise.all(animations);
     }
 
     function selectValidationGroupMarkers(group) {
@@ -3863,7 +3867,7 @@
 
         activeValidationGroupId = group.id;
         activeValidationIndex = null;
-        setExpandedValidationGroup(group.id);
+        const expansion = setExpandedValidationGroup(group.id);
         selectValidationGroupMarkers(group);
 
         el('verifyRows').querySelectorAll('.validation-record-group').forEach((section) => {
@@ -3877,7 +3881,11 @@
 
         if (source === 'group') revealValidationGroup(group);
         const section = el('verifyRows').querySelector(`[data-group-id="${group.id}"]`);
-        section?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        expansion.then(() => {
+            if (activeValidationGroupId === group.id) {
+                section?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+        });
     }
 
     function activateValidationField(index, source = 'row') {
@@ -3887,7 +3895,7 @@
 
         activeValidationIndex = index;
         activeValidationGroupId = group.id;
-        setExpandedValidationGroup(group.id);
+        const expansion = setExpandedValidationGroup(group.id);
 
         selectValidationGroupMarkers(group);
 
@@ -3902,7 +3910,14 @@
         });
         updateValidationMarkerStates();
 
-        if (source === 'marker') revealValidationRow(index);
+        // Wait for the person's rows to finish opening (and the previous person's
+        // to finish closing): measured earlier, the row's position is wrong and
+        // the list scrolls past it. Skip if another field was picked meanwhile.
+        if (source === 'marker') {
+            expansion.then(() => {
+                if (activeValidationIndex === index) revealValidationRow(index);
+            });
+        }
         if (source === 'row') revealValidationMarker(index);
     }
 
