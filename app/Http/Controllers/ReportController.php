@@ -6,7 +6,6 @@ use App\Enums\RecordStatus;
 use App\Enums\RoleSlug;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
-use App\Models\RecordField;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Support\LocalTime;
@@ -201,30 +200,15 @@ class ReportController extends Controller
 
     /**
      * @param  array<string, mixed>  $filters
-     * @return array<string, int|float|null>
+     * @return array{total: int}
      */
     private function summary(array $filters): array
     {
-        $matching = $this->query($filters);
-
+        // Every record is Submitted, so a separate submitted count would only
+        // repeat the total.
         return [
-            'total' => $matching->clone()->count(),
-            'submitted' => $matching->clone()->where('status', RecordStatus::Submitted->value)->count(),
-            'average_confidence' => $this->averageConfidence($filters),
+            'total' => $this->query($filters)->count(),
         ];
-    }
-
-    /**
-     * @param  array<string, mixed>  $filters
-     */
-    private function averageConfidence(array $filters): ?float
-    {
-        $average = RecordField::query()
-            ->whereNotNull('ocr_confidence')
-            ->whereIn('record_id', $this->query($filters)->select('records.id'))
-            ->avg('ocr_confidence');
-
-        return $average === null ? null : round((float) $average, 1);
     }
 
     /**

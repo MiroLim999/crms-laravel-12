@@ -39,7 +39,6 @@ class ReportExportTest extends TestCase
             ->viewData('summary');
 
         $this->assertSame(1, $summary['total']);
-        $this->assertSame(1, $summary['submitted']);
     }
 
     public function test_the_export_streams_csv_of_the_filtered_records(): void
