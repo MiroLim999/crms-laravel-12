@@ -758,6 +758,7 @@ function initModelPerformance() {
             character: styles.getPropertyValue('--ocr-metric-character').trim() || '#696cff',
             word: styles.getPropertyValue('--ocr-metric-word').trim() || '#03c3ec',
             exact: styles.getPropertyValue('--ocr-metric-exact').trim() || '#71dd37',
+            heading: styles.getPropertyValue('--bs-heading-color').trim() || '#384551',
             text: styles.getPropertyValue('--bs-secondary-color').trim() || '#8592a3',
             border: styles.getPropertyValue('--bs-border-color').trim() || 'rgba(67, 89, 113, .12)',
             card: styles.getPropertyValue('--bs-card-bg').trim() || '#fff',
@@ -971,7 +972,7 @@ function initModelPerformance() {
             chart = new ApexCharts(target, {
                 chart: {
                     type: 'radar',
-                    height: 420,
+                    height: 400,
                     fontFamily: colors.font,
                     foreColor: colors.text,
                     parentHeightOffset: 0,
@@ -1001,26 +1002,31 @@ function initModelPerformance() {
                     fontFamily: colors.font,
                     markers: { radius: 6, width: 10, height: 10 },
                     itemMargin: { horizontal: 16, vertical: 6 },
+                    offsetY: 8,
                 },
+                // Hollow dots like the dashboard card: card-coloured centre, series-coloured ring.
                 markers: showBaseComparison
                     ? {
-                        size: [7.5, 5.5, 0],
-                        strokeColors: [colors.card, '#696cff', 'transparent'],
-                        strokeWidth: [2.5, 2, 0],
-                        hover: { size: 9 },
+                        size: [5, 4, 0],
+                        colors: [colors.card, colors.card, 'transparent'],
+                        strokeColors: [modelColor, '#696cff', 'transparent'],
+                        strokeWidth: [2.5, 1.5, 0],
+                        hover: { size: 7 },
                     }
                     : {
-                        size: [7, 0],
-                        strokeColors: [colors.card, 'transparent'],
+                        size: [5, 0],
+                        colors: [colors.card, 'transparent'],
+                        strokeColors: [modelColor, 'transparent'],
                         strokeWidth: [2.5, 0],
-                        hover: { size: 9 },
+                        hover: { size: 7 },
                     },
                 plotOptions: {
                     radar: {
-                        size: 145,
+                        size: 185,
+                        offsetY: 45,
                         polygons: {
                             strokeColors: colors.border,
-                            strokeWidth: 1,
+                            strokeWidth: 1.5,
                             connectorColors: colors.border,
                             fill: { colors: ['rgba(67, 89, 113, 0.03)', 'transparent'] },
                         },
@@ -1028,16 +1034,26 @@ function initModelPerformance() {
                 },
                 series: radarSeries,
                 stroke: showBaseComparison
-                    ? { width: [3.5, 2.5, 0], dashArray: [0, 5, 0] }
-                    : { width: [3.5, 0], dashArray: [0, 0] },
+                    ? { width: [3, 1.5, 0], dashArray: [0, 4, 0] }
+                    : { width: [3, 0], dashArray: [0, 0] },
                 tooltip: {
                     custom: ({ dataPointIndex, w }) => makeTooltipHtml(profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex, w),
                 },
                 xaxis: {
                     categories: metrics.map((metric) => metric.axis || metric.label),
                     labels: {
+                        // Dashboard style: dark label with the model's score;
+                        // the top one stays on a line, the side ones stack.
+                        formatter: (label, opts) => {
+                            const index = opts?.dataPointIndex ?? 0;
+                            const score = Number.isFinite(scores[index]) ? `${Math.round(scores[index])}%` : '';
+
+                            if (!score) return label;
+
+                            return index === 0 ? `${label} ${score}` : [label, score];
+                        },
                         style: {
-                            colors: metricColors,
+                            colors: metrics.map(() => colors.heading),
                             fontSize: '12px',
                             fontWeight: 600,
                         },
@@ -1059,7 +1075,7 @@ function initModelPerformance() {
                             strokeWidth: showBaseComparison ? [2, 1.5, 0] : [2, 0],
                             hover: { size: 7 },
                         },
-                        plotOptions: { radar: { size: 105 } },
+                        plotOptions: { radar: { size: 105, offsetY: 0 } },
                     },
                 }],
             });
@@ -1115,6 +1131,7 @@ function initModelPerformance() {
                     fontFamily: colors.font,
                     markers: { radius: 6, width: 10, height: 10 },
                     itemMargin: { horizontal: 16, vertical: 6 },
+                    offsetY: 8,
                 },
                 series,
                 tooltip: {
