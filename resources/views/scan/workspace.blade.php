@@ -187,6 +187,11 @@
                                             <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
                                         </button>
                                     </div>
+                                    {{-- The printed row lines down the selected column, for the whole table. --}}
+                                    <button type="button" class="btn btn-sm btn-outline-primary ms-auto" id="detectRowsBtn"
+                                            title="Find the printed row lines down the selected column. Every column uses them">
+                                        Detect rows
+                                    </button>
                                 </div>
 
                                 <div class="document-grid-card__line">
@@ -196,7 +201,7 @@
                                         <input type="text" id="newColumnName" class="form-control" placeholder="e.g. Remarks"
                                                maxlength="500">
                                         <button class="btn btn-outline-primary" type="button" id="addColumnBtn"
-                                                title="A column down the table, read once per row. It splits the selected column in two, or goes at the right of the table">
+                                                title="A column down the table, read once per row. It splits the selected column in two, or goes at the right of the table (with no columns, over the table)">
                                             Add column
                                         </button>
                                     </div>
@@ -745,6 +750,7 @@
         followFirstAndLastLine,
         insertRuledY,
         remapRuledYs,
+        rowsInColumn,
         sameBand,
     } from '{{ Vite::asset('resources/js/ledger-grid.js') }}';
     import { RowLineLayer, rowKey } from '{{ Vite::asset('resources/js/row-lines.js') }}';
@@ -1160,7 +1166,7 @@
         const indexes = ledgerColumns(boxes).map((box) => Number(box.columnIndex)).filter(Number.isInteger);
         const selected = marker.selectedIndexes();
         const added = addColumn(boxes, { name, kind: 'column', columnIndex: Math.max(-1, ...indexes) + 1 },
-            selected.length === 1 ? selected[0] : null);
+            selected.length === 1 ? selected[0] : null, firstColumnPlace());
         if (!added) {
             showGridMessage('That column is too narrow to split. Select a wider column, or make room at the right of the table.');
             return;
@@ -1170,6 +1176,68 @@
         marker.selectBox(added.index);
         input.value = '';
         showGridMessage(null);
+    }
+
+    /**
+     * Where a column goes when the table has none left: over the table's rows,
+     * at the left of the template's table and a typical column wide. Staff
+     * then drag it into place, and add or detect its rows.
+     */
+    function firstColumnPlace() {
+        const top = gridRows[0];
+        const bottom = gridRows[gridRows.length - 1];
+        const x = templateColumns.length > 0 ? Math.min(...templateColumns.map((column) => column.x)) : 0.05;
+        const w = templateColumns.length > 0 ? median(templateColumns.map((column) => column.w)) : 0.15;
+        return { x, y: top, w: Math.min(w, 1 - x), h: bottom - top };
+    }
+
+    /**
+     * Detect rows: the printed row lines down the selected column (or the only
+     * one) become the table's rows, and every column spans them. Lines the page
+     * lost inside the rhythm are put back, drawn amber. Set by hand, so Detect
+     * keeps them; one undoable change.
+     */
+    async function detectRowsInColumn() {
+        const boxes = marker.toJSON();
+        const columns = boxes.flatMap((box, index) => (box.kind === 'column' ? [index] : []));
+        const selected = marker.selectedIndexes().filter((index) => columns.includes(index));
+        const index = selected.length === 1 ? selected[0] : (columns.length === 1 ? columns[0] : null);
+        if (index === null) {
+            showGridMessage(columns.length === 0
+                ? 'Add a column first, then Detect rows.'
+                : 'Select one column on the page first, then Detect rows.');
+            return;
+        }
+
+        const button = el('detectRowsBtn');
+        button.disabled = true;
+        let lines = marker.snapLines;
+        try {
+            if (!lines?.horizontal_spans) {
+                lines = (await requestSnap()).lines;
+                marker.setSnapLines(lines);
+            }
+        } catch (error) {
+            showGridMessage(error.message || 'The page’s printed lines could not be read. Try again.');
+            return;
+        } finally {
+            button.disabled = false;
+        }
+
+        // An older reply without spans: its rules taken as running across the page.
+        const spans = lines?.horizontal_spans ?? (lines?.horizontal ?? []).map((y) => [0, y, 1, y]);
+        const found = rowsInColumn(boxes[index], spans);
+        if (!found) {
+            showGridMessage('No printed row lines were found down this column. Set the rows with − and + instead.');
+            return;
+        }
+
+        showGridMessage(null);
+        const top = found.ys[0];
+        const bottom = found.ys[found.ys.length - 1];
+        const next = boxes.map((box) => (box.kind === 'column' ? { ...box, y: top, h: bottom - top } : box));
+        setGrid(next, found.ys, { estimated: found.estimated.map((row) => rowKey(found.ys[row])), byHand: true });
+        marker.selectBox(index);
     }
 
     /** The Rows and Columns card: how many rows, and where they came from. */
@@ -1187,6 +1255,7 @@
         el('gridSource').classList.toggle('d-none', message === '');
 
         el('addRowBtn').disabled = columns === 0;
+        el('detectRowsBtn').disabled = columns === 0;
         el('removeRowBtn').disabled = columns === 0 || gridRows.length <= 2;
         el('removeRowBtn').title = selectedRow !== null
             ? `Remove row line ${selectedRow + 1} (Delete)`
@@ -2752,6 +2821,7 @@
         el('addRowBtn').addEventListener('click', () => addRow());
         el('removeRowBtn').addEventListener('click', () => removeRow());
         el('addColumnBtn').addEventListener('click', () => addLedgerColumn());
+        el('detectRowsBtn').addEventListener('click', () => detectRowsInColumn());
         el('newColumnName').addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
                 event.preventDefault();
