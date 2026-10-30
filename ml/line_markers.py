@@ -585,6 +585,31 @@ def _rows_in_column(column, ruled):
     return None if len(rows) == len(ruled) - 1 else rows
 
 
+def _keep_shortened_columns(before, after):
+    """`after` (a fitted grid) with the columns Staff shortened in Align still shortened.
+
+    The fit and the rows taken from the page give every column the table's full
+    height. A column Staff cut to some rows keeps those same rows, at wherever
+    the fitted row lines now put them.
+    """
+    old, new = before.get("columns") or [], after.get("columns") or []
+    old_ruled = [float(y) for y in before.get("ruled_ys") or []]
+    new_ruled = [float(y) for y in after.get("ruled_ys") or []]
+    if len(old) != len(new) or len(old_ruled) < 2 or len(new_ruled) < 2:
+        return after
+
+    columns = []
+    for was, now in zip(old, new):
+        y, h = float(was["box"][1]), float(was["box"][3])
+        rows = _rows_in_column({"top": y, "bottom": y + h}, old_ruled)
+        reached = sorted(r for r in rows or () if r < len(new_ruled) - 1)
+        if rows is not None and reached:
+            top, bottom = new_ruled[reached[0]], new_ruled[reached[-1] + 1]
+            now = {**now, "box": [now["box"][0], round(top, 5), now["box"][2], round(bottom - top, 5)]}
+        columns.append(now)
+    return {**after, "columns": columns}
+
+
 # ============================================================ ink and rules
 
 def _ink_mask(gray):
@@ -2934,6 +2959,8 @@ def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None,
         fitted, fit["rows"] = _rows_from_page(
             fitted, found, writing=lambda: _writing_at(image, page_path, detector, cache_path),
             template_rows=max(0, len(geometry.get("ruled_ys") or []) - 1))
+    if fit["fitted"]:
+        fitted = _keep_shortened_columns(geometry, fitted)
     result = process_page(page_path, fitted, out_dir, detector=detector, debug=debug,
                           row_reach=FITTED_ROW_REACH if fit["fitted"] else ROW_REACH,
                           cache_path=cache_path)
@@ -2999,6 +3026,7 @@ def snap_page(page_path, geometry):
         fitted = _snap_to_lines(fitted, found["vertical"], found["horizontal"])
         fitted, fit["rows"] = _rows_from_page(fitted, found,
                                               template_rows=max(0, len(geometry.get("ruled_ys") or []) - 1))
+        fitted = _keep_shortened_columns(geometry, fitted)
     return {
         "size": list(image.size),
         "fit": fit,

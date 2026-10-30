@@ -144,6 +144,24 @@ class CropLineTest(unittest.TestCase):
             lm.crop_line(Image.new("RGB", (50, 50)), [[60, 60], [80, 60], [80, 80]])
 
 
+class ShortenedColumnTest(unittest.TestCase):
+    def test_a_fitted_grid_keeps_the_rows_a_shortened_column_reaches(self):
+        before = geometry()
+        before["columns"][1]["box"][1] = (RULED[2] + 4) / HEIGHT
+        before["columns"][1]["box"][3] = (RULED[5] - RULED[2] - 8) / HEIGHT
+        # The fit moved every row line down by 10 px and gave every column the full height.
+        after = geometry()
+        after["ruled_ys"] = [(y + 10) / HEIGHT for y in RULED]
+
+        kept = lm._keep_shortened_columns(before, after)
+
+        top, bottom = (RULED[2] + 10) / HEIGHT, (RULED[5] + 10) / HEIGHT
+        self.assertAlmostEqual(top, kept["columns"][1]["box"][1], places=4)
+        self.assertAlmostEqual(bottom - top, kept["columns"][1]["box"][3], places=4)
+        self.assertEqual(after["columns"][0], kept["columns"][0])
+        self.assertEqual(after["columns"][2], kept["columns"][2])
+
+
 class TemplateRectangleTest(unittest.TestCase):
     """A rectangle field: its written lines, or the whole box when it holds none."""
 
