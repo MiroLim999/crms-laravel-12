@@ -4718,35 +4718,31 @@
 
         const controls = document.createElement('div');
         controls.className = 'validation-field__place';
-        if (added) {
-            const badge = document.createElement('span');
-            badge.className = 'badge bg-label-primary validation-field__added';
-            badge.textContent = 'Added';
-            controls.append(badge);
-        }
 
-        const pick = (label, options, selected) => {
-            const wrap = document.createElement('label');
-            wrap.className = 'validation-field__pick';
-            const text = document.createElement('span');
-            text.textContent = label;
+        // Same two columns as the picture and value box above: Person under
+        // the picture, Column and Remove under the value box.
+        const pick = (label, options, selected, parent) => {
             const select = document.createElement('select');
             select.className = 'form-select form-select-sm';
-            select.append(new Option('Choose…', ''), ...options.map(([value, name]) => new Option(name, String(value))));
+            select.setAttribute('aria-label', `${label} of ${item.heading || item.label}`);
+            select.title = label;
+            select.append(new Option(label, ''), ...options.map(([value, name]) => new Option(name, String(value))));
             select.value = selected === null ? '' : String(selected);
             // Not placed yet: outlined red until one is chosen.
             select.classList.toggle('is-invalid', select.value === '');
             select.addEventListener('click', (event) => event.stopPropagation());
             select.addEventListener('change', () => select.classList.toggle('is-invalid', select.value === ''));
-            wrap.append(text, select);
-            controls.append(wrap);
+            parent.append(select);
             return select;
         };
 
+        const end = document.createElement('div');
+        end.className = 'validation-field__place-end';
+
         if (ledger) {
             const person = pick('Person',
-                Array.from({ length: rows }, (_, row) => [row + 1, String(row + 1).padStart(2, '0')]), item.gridRow);
-            const column = pick('Column', columns.map((candidate, columnIndex) => [columnIndex, candidate.name]), item.gridColumn);
+                Array.from({ length: rows }, (_, row) => [row + 1, String(row + 1).padStart(2, '0')]), item.gridRow, controls);
+            const column = pick('Column', columns.map((candidate, columnIndex) => [columnIndex, candidate.name]), item.gridColumn, end);
             const place = () => {
                 if (person.value === '' || column.value === '') return;
                 placeVerifyLine(index, Number(column.value), Number(person.value));
@@ -4754,10 +4750,11 @@
             person.addEventListener('change', place);
             column.addEventListener('change', place);
         }
+        controls.append(end);
 
         const remove = document.createElement('button');
         remove.type = 'button';
-        remove.className = 'btn btn-sm btn-link text-danger validation-field__remove';
+        remove.className = 'btn btn-sm btn-outline-danger validation-field__remove';
         remove.innerHTML = '<i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>Remove';
         remove.setAttribute('aria-label', `Remove ${item.heading || item.label}`);
         remove.addEventListener('click', (event) => {
@@ -4765,7 +4762,7 @@
             remove.disabled = true;
             removeVerifyLine(index);
         });
-        controls.append(remove);
+        end.append(remove);
         return controls;
     }
 

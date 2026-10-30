@@ -4042,45 +4042,42 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 // Under a field the reviewer added, or one between two rows: which person
 // and column it belongs to, and Remove.
+// Person under the picture, Column and Remove under the value box: the same
+// two columns as .validation-field__entry above.
 .validation-field__place {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 9fr) minmax(0, 11fr);
   align-items: center;
-  gap: .35rem .6rem;
+  gap: .6rem;
   margin-block-start: .4rem;
-  font-size: .6875rem;
+  font-size: .75rem;
 
-  .validation-field__added {
-    font-size: .625rem;
+  .form-select {
+    inline-size: 100%;
+    min-inline-size: 0;
+    padding-block: .15rem;
+    padding-inline: .5rem 1.6rem;
+    background-position: right .4rem center;
+    font-size: .75rem;
   }
 
-  .validation-field__pick {
-    display: inline-flex;
+  .validation-field__place-end {
+    display: flex;
     align-items: center;
-    gap: .3rem;
-    margin: 0;
-    color: var(--bs-secondary-color);
+    gap: .5rem;
+    min-inline-size: 0;
 
     .form-select {
-      inline-size: auto;
-      max-inline-size: 9rem;
-      padding-block: .1rem;
-      font-size: .6875rem;
+      flex: 1 1 0;
     }
   }
 
   .validation-field__remove {
+    flex: none;
     display: inline-flex;
     align-items: center;
-    margin-inline-start: auto;
-    padding: 0;
-    font-size: .6875rem;
-    text-decoration: none;
-
-    &:hover,
-    &:focus-visible {
-      text-decoration: underline;
-    }
+    padding: .15rem .5rem;
+    font-size: .75rem;
   }
 }
 
