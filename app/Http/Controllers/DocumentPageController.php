@@ -422,13 +422,30 @@ class DocumentPageController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
+        $placement = $this->drawnLinePlacement($page, $placed, $polygon);
+        $suggestion = null;
+        if (! $detected && $placement['source'] === PageLine::SOURCE_MANUAL) {
+            // Verify's Add missed field: the reviewer chooses its person and
+            // column, since the row or column it was missed in may be off the
+            // grid. Where it seems to sit is only suggested.
+            $suggestion = [
+                'row' => $placed['row'],
+                'column_index' => $placement['column_index'] ?? null,
+            ];
+            $placement = [
+                'source' => PageLine::SOURCE_MANUAL,
+                'column_name' => self::DRAWN_LINE,
+                'flags' => [PageLine::FLAG_NO_ROW],
+            ];
+        }
+
         $line = $page->lines()->create([
             'position' => $position,
             'polygon' => $polygon,
             'bbox' => $placed['bbox'],
             'crop_path' => $cropPath,
             'adjusted_at' => now(),
-            ...$this->drawnLinePlacement($page, $placed, $polygon),
+            ...$placement,
         ]);
         $this->refreshSharedCells($page);
 
@@ -448,6 +465,7 @@ class DocumentPageController extends Controller
         return response()->json([
             'message' => $message,
             'line' => $line->fresh()->toClient(),
+            'suggestion' => $suggestion,
             'flags' => $this->lineFlags($page),
         ], $status);
     }
@@ -630,15 +648,10 @@ class DocumentPageController extends Controller
 
         $field = $this->fieldAround($page, $polygon);
         if ($field === null) {
-            // No column under it (one removed in Align, say), but its row is
-            // known: it joins that person, under no column yet.
-            $row = $columns !== [] ? $placed['row'] : null;
-
             return [
                 'source' => PageLine::SOURCE_MANUAL,
                 'column_name' => self::DRAWN_LINE,
-                'row' => $row,
-                'flags' => $row === null ? [PageLine::FLAG_NO_ROW] : [],
+                'flags' => [PageLine::FLAG_NO_ROW],
             ];
         }
 

@@ -1186,8 +1186,12 @@ class LineOutlinePipelineTest extends TestCase
             ])
             ->assertCreated()
             ->assertJsonPath('line.source', PageLine::SOURCE_MANUAL)
-            ->assertJsonPath('line.column', 'Date')
-            ->assertJsonPath('line.row', 3);
+            // Not placed by itself: it waits for the reviewer to choose its
+            // person, with where it seems to sit only suggested.
+            ->assertJsonPath('line.column', 'Drawn line')
+            ->assertJsonPath('line.row', null)
+            ->assertJsonPath('line.flags', ['no_row'])
+            ->assertJsonPath('suggestion', ['row' => 3, 'column_index' => 1]);
 
         // Read on its own, with nothing else on the page read again.
         $this->assertCount(1, $this->ocrCalls);
@@ -1237,7 +1241,7 @@ class LineOutlinePipelineTest extends TestCase
             ->assertNotFound();
     }
 
-    public function test_a_missed_field_under_a_column_removed_in_align_joins_its_person(): void
+    public function test_a_missed_field_under_a_column_removed_in_align_can_join_a_person(): void
     {
         $page = $this->processedPage();
         // The template has a third column; Staff removed it in Align, so the
@@ -1248,7 +1252,7 @@ class LineOutlinePipelineTest extends TestCase
         ]]);
         $this->app->instance(LineMarkers::class, $this->stubMarkers(cropPlacement: ['column_index' => null, 'row' => 2]));
 
-        // No column under the box, but its row is known: it joins Person 02.
+        // No column under the box: its row is only suggested.
         $line = $this->actingAs($page->creator)
             ->postJson(route('documents.pages.lines.store', $page), [
                 'polygon' => [[650, 130], [760, 130], [760, 160], [650, 160]],
@@ -1256,8 +1260,8 @@ class LineOutlinePipelineTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('line.column', 'Drawn line')
             ->assertJsonPath('line.columnIndex', null)
-            ->assertJsonPath('line.row', 2)
-            ->assertJsonPath('line.flags', [])
+            ->assertJsonPath('line.row', null)
+            ->assertJsonPath('suggestion', ['row' => 2, 'column_index' => null])
             ->json('line');
         $route = route('documents.pages.lines.place', ['page' => $page, 'line' => $line['id']]);
 

@@ -4543,6 +4543,9 @@
 
     // Boxes drawn and waiting for Read (page pixels), in the order drawn.
     let pendingBoxes = [];
+    // Where each added field seems to sit, by line id: shown as "(suggested)"
+    // in its Person and Column lists, never applied by itself.
+    const placementSuggestions = new Map();
     let readingPendingBoxes = false;
 
     const ADD_MODE_HINTS = {
@@ -4636,6 +4639,7 @@
                 );
                 if (!payload?.line) throw new Error(responseErrorMessage(response, payload));
                 added.push(payload.line);
+                if (payload.suggestion) placementSuggestions.set(payload.line.id, payload.suggestion);
                 flags = payload.flags ?? flags;
                 if (!response.ok) warnings.push(payload.line.id);
             } catch (error) {
@@ -4817,11 +4821,14 @@
             const personNames = new Map(validationGroups
                 .filter((group) => group.kind === 'person')
                 .map((group) => [Number(cropped[group.indexes[0]]?.personGroup), groupIdentity(group)]));
+            const suggestion = placementSuggestions.get(item.lineId) ?? {};
+            const suggested = (text, isSuggested) => (isSuggested ? `${text} (suggested)` : text);
             const person = pick('Person', Array.from({ length: rows }, (_, offset) => {
                 const row = offset + 1;
                 const name = personNames.get(row);
                 const number = String(row).padStart(2, '0');
-                return new Option(name && !/^\d+ fields?$/.test(name) ? `${number} · ${name}` : number, String(row));
+                const text = name && !/^\d+ fields?$/.test(name) ? `${number} · ${name}` : number;
+                return new Option(suggested(text, suggestion.row === row), String(row));
             }), item.gridRow === null ? '' : String(item.gridRow), controls);
             // A person is needed; outlined red until one is chosen.
             person.classList.toggle('is-invalid', person.value === '');
@@ -4832,7 +4839,9 @@
             const removed = config.boxes
                 .filter((box) => box.kind === 'column' && !onPage.has(nameKey(box.name)))
                 .map((box) => String(box.name));
-            const columnOptions = columns.map((candidate, columnIndex) => new Option(candidate.name, `i:${columnIndex}`));
+            const columnOptions = columns.map((candidate, columnIndex) => new Option(
+                suggested(candidate.name, suggestion.column_index === columnIndex), `i:${columnIndex}`,
+            ));
             if (removed.length > 0) {
                 const group = document.createElement('optgroup');
                 group.label = 'Removed in Align';
