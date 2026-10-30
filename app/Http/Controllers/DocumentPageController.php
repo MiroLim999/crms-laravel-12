@@ -18,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -34,6 +35,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class DocumentPageController extends Controller
 {
+    /** The heading of a field added by hand that sits under no column. */
+    private const DRAWN_LINE = 'Drawn line';
+
     public function __construct(
         private readonly LineMarkers $markers,
         private readonly PageLineReader $reader,
@@ -468,18 +472,29 @@ class DocumentPageController extends Controller
 
         $columns = $page->geometry['columns'] ?? [];
         $rows = max(0, count($page->geometry['ruled_ys'] ?? []) - 1);
+        // A column removed in Align is not on the page's grid, but its name
+        // can still head a field added by hand.
+        $removedColumns = $this->columnsRemovedInAlign($page);
         $validated = $request->validate([
-            'column_index' => ['required', 'integer', 'min:0', 'max:'.max(0, count($columns) - 1)],
             'row' => ['required', 'integer', 'min:1', 'max:'.max(1, $rows)],
+            'column_index' => ['nullable', 'integer', 'min:0', 'max:'.max(0, count($columns) - 1)],
+            'column_name' => ['nullable', 'string', Rule::in($removedColumns), 'prohibits:column_index'],
         ]);
         if ($columns === [] || $rows === 0) {
             return response()->json(['message' => 'This page has no table to place the field in.'], 422);
         }
 
-        $column = (int) $validated['column_index'];
+        // A person alone is enough: the column can be chosen later, or never.
+        if (isset($validated['column_index'])) {
+            $column = (int) $validated['column_index'];
+            $placement = ['column_index' => $column, 'column_name' => (string) $columns[$column]['name']];
+        } else {
+            $placement = ['column_index' => null, 'column_name' => $validated['column_name'] ?? self::DRAWN_LINE];
+        }
+
         $line->forceFill([
-            'column_index' => $column,
-            'column_name' => mb_substr((string) $columns[$column]['name'], 0, 500),
+            'column_index' => $placement['column_index'],
+            'column_name' => mb_substr($placement['column_name'], 0, 500),
             'row' => (int) $validated['row'],
             'flags' => array_values(array_diff($line->flags ?? [], [PageLine::FLAG_NO_ROW])),
         ])->save();
@@ -539,7 +554,11 @@ class DocumentPageController extends Controller
         // The route's scopeBindings() already ensures this; checked again on purpose.
         abort_unless((int) $line->document_page_id === (int) $page->getKey(), 404);
 
-        if ($page->status !== DocumentPage::STATUS_DETECTED) {
+        // Once the page is read (Verify), only a field that could be removed
+        // there can come back: one added by hand, or one between two rows.
+        $restorableAfterReading = $page->status === DocumentPage::STATUS_READY
+            && ($line->source === PageLine::SOURCE_MANUAL || in_array(PageLine::FLAG_NO_ROW, $line->flags ?? [], true));
+        if ($page->status !== DocumentPage::STATUS_DETECTED && ! $restorableAfterReading) {
             return response()->json(['message' => 'This page is still being processed.'], 409);
         }
 
@@ -611,10 +630,15 @@ class DocumentPageController extends Controller
 
         $field = $this->fieldAround($page, $polygon);
         if ($field === null) {
+            // No column under it (one removed in Align, say), but its row is
+            // known: it joins that person, under no column yet.
+            $row = $columns !== [] ? $placed['row'] : null;
+
             return [
                 'source' => PageLine::SOURCE_MANUAL,
-                'column_name' => 'Drawn line',
-                'flags' => [PageLine::FLAG_NO_ROW],
+                'column_name' => self::DRAWN_LINE,
+                'row' => $row,
+                'flags' => $row === null ? [PageLine::FLAG_NO_ROW] : [],
             ];
         }
 
@@ -634,6 +658,26 @@ class DocumentPageController extends Controller
             'person_field_order' => $field['person_field_order'] ?? null,
             'flags' => [],
         ];
+    }
+
+    /**
+     * The template's ledger columns that are not on this page's grid: the ones
+     * Staff removed in Align.
+     *
+     * @return list<string>
+     */
+    private function columnsRemovedInAlign(DocumentPage $page): array
+    {
+        $onPage = collect($page->geometry['columns'] ?? [])
+            ->map(fn ($column) => mb_strtolower(trim((string) ($column['name'] ?? ''))))
+            ->flip();
+
+        return collect($page->template?->columns ?? [])
+            ->map(fn ($column) => trim((string) ($column['name'] ?? '')))
+            ->filter(fn (string $name) => $name !== '' && ! $onPage->has(mb_strtolower($name)))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
@@ -728,12 +772,12 @@ class DocumentPageController extends Controller
     {
         $lines = $page->lines()->get()->reject->belongsToField();
         $counts = $lines
-            ->filter(fn (PageLine $l) => $l->row !== null)
+            ->filter(fn (PageLine $l) => $l->row !== null && $l->column_index !== null)
             ->countBy(fn (PageLine $l) => $l->column_index.':'.$l->row);
 
         foreach ($lines as $line) {
             $flags = array_values(array_diff($line->flags ?? [], [PageLine::FLAG_SHARED_CELL]));
-            if ($line->row !== null && ($counts[$line->column_index.':'.$line->row] ?? 0) > 1) {
+            if ($line->row !== null && $line->column_index !== null && ($counts[$line->column_index.':'.$line->row] ?? 0) > 1) {
                 $flags[] = PageLine::FLAG_SHARED_CELL;
             }
             if ($flags !== ($line->flags ?? [])) {

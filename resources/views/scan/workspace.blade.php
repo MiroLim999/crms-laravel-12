@@ -3479,7 +3479,10 @@
             }
 
             if (!personGroups.has(personGroup)) personGroups.set(personGroup, []);
-            personGroups.get(personGroup).push({ index, order: personFieldOrder });
+            // A field added under no column goes before the column to its right,
+            // whose order it shares.
+            const betweenColumns = box.gridColumn === null && box.gridRow !== null;
+            personGroups.get(personGroup).push({ index, order: personFieldOrder - (betweenColumns ? 0.5 : 0) });
         });
 
         const groups = [];
@@ -4647,6 +4650,7 @@
         if (added.length > 0) {
             rebuildVerifyLines([...processedPage.lines, ...added], flags,
                 { focusLineId: added[0].id, freshLineId: null });
+            pushVerifyUndo({ kind: 'added', ids: added.map((line) => line.id) });
             warnings.forEach((id) => showOcrLineWarning(id, 'The box was added, but TrOCR could not read it. Type the value.'));
         }
 
@@ -4671,13 +4675,25 @@
             ? `${points} point${points === 1 ? '' : 's'}. At least 3 to make an outline.`
             : `${points} points. Enter or double-click closes it.`);
     }
-    /** Move a field to another person (row) or column. Its value and check stay. */
-    async function placeVerifyLine(index, columnIndex, row) {
+    /**
+     * Move a field to another person (row), and a column if one is chosen: one
+     * on the page ({ column_index }) or one removed in Align ({ column_name }).
+     * Its value and check stay.
+     */
+    async function placeVerifyLine(index, row, column = {}) {
         const item = cropped[index];
         if (!item) return;
+        // Where it was, for Ctrl+Z: its person, and its column if it had one.
+        const before = item.gridRow === null ? null : {
+            id: item.lineId,
+            row: item.gridRow,
+            column: item.gridColumn !== null
+                ? { column_index: item.gridColumn }
+                : (item.label === 'Drawn line' ? {} : { column_name: item.label }),
+        };
         try {
             const { response, payload } = await sendLineRequest(
-                verifyLineUrl(config.linePlaceUrl, item.lineId), 'PATCH', { column_index: columnIndex, row },
+                verifyLineUrl(config.linePlaceUrl, item.lineId), 'PATCH', { row, ...column },
             );
             if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
             rebuildVerifyLines(
@@ -4685,6 +4701,7 @@
                 payload.flags ?? {},
                 { focusLineId: payload.line.id },
             );
+            if (before) pushVerifyUndo({ kind: 'moved', ...before });
         } catch (error) {
             setValidationFieldError(index, error.message || 'The field could not be moved.');
         }
@@ -4698,10 +4715,69 @@
             const { response, payload } = await sendLineRequest(verifyLineUrl(config.lineDeleteUrl, item.lineId), 'DELETE');
             if (!response.ok) throw new Error(responseErrorMessage(response, payload));
             rebuildVerifyLines(processedPage.lines.filter((line) => line.id !== item.lineId), payload?.flags ?? {});
+            pushVerifyUndo({ kind: 'removed', id: item.lineId });
         } catch (error) {
             setValidationFieldError(index, error.message || 'The field could not be removed.');
         }
     }
+
+    // Ctrl+Z in Verify takes back the last change to the added fields: the
+    // fields just read, a removal, or a move to another person or column.
+    const verifyUndo = [];
+    let undoingVerifyChange = false;
+
+    function pushVerifyUndo(entry) {
+        verifyUndo.push({ ...entry, pageId: processedPage?.id });
+        if (verifyUndo.length > 30) verifyUndo.shift();
+    }
+
+    async function undoVerifyChange() {
+        if (undoingVerifyChange || !processedPage) return;
+        while (verifyUndo.length > 0 && verifyUndo[verifyUndo.length - 1].pageId !== processedPage.id) verifyUndo.pop();
+        const entry = verifyUndo.pop();
+        if (!entry) return;
+
+        undoingVerifyChange = true;
+        try {
+            if (entry.kind === 'added') {
+                let flags = {};
+                for (const id of entry.ids) {
+                    const { response, payload } = await sendLineRequest(verifyLineUrl(config.lineDeleteUrl, id), 'DELETE');
+                    if (response.ok) flags = payload?.flags ?? flags;
+                }
+                rebuildVerifyLines(processedPage.lines.filter((line) => !entry.ids.includes(line.id)), flags);
+            } else if (entry.kind === 'removed') {
+                const { response, payload } = await sendLineRequest(verifyLineUrl(config.lineRestoreUrl, entry.id), 'POST');
+                if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
+                rebuildVerifyLines([...processedPage.lines, payload.line].sort((a, b) => a.position - b.position),
+                    payload.flags ?? {}, { focusLineId: payload.line.id });
+            } else if (entry.kind === 'moved') {
+                const { response, payload } = await sendLineRequest(
+                    verifyLineUrl(config.linePlaceUrl, entry.id), 'PATCH', { row: entry.row, ...entry.column },
+                );
+                if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
+                rebuildVerifyLines(
+                    processedPage.lines.map((candidate) => (candidate.id === payload.line.id ? payload.line : candidate)),
+                    payload.flags ?? {}, { focusLineId: payload.line.id },
+                );
+            }
+        } catch (error) {
+            // The change can no longer be taken back; the field stays as it is.
+        } finally {
+            undoingVerifyChange = false;
+        }
+    }
+
+    document.addEventListener('keydown', (event) => {
+        if (addingMissedField || !processedPage || el('step-verify').classList.contains('d-none')) return;
+        if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'z') return;
+        const target = event.target;
+        // Typing keeps the browser's own undo.
+        if (target instanceof HTMLElement && (target.matches('input:not([type="checkbox"]):not([type="radio"]), textarea, select') || target.isContentEditable)) return;
+        if (lineOverlay.editing || verifyUndo.length === 0) return;
+        event.preventDefault();
+        undoVerifyChange();
+    });
 
     /**
      * Person, Column and Remove under a field the reviewer added, or one that
@@ -4726,12 +4802,9 @@
             select.className = 'form-select form-select-sm';
             select.setAttribute('aria-label', `${label} of ${item.heading || item.label}`);
             select.title = label;
-            select.append(new Option(label, ''), ...options.map(([value, name]) => new Option(name, String(value))));
-            select.value = selected === null ? '' : String(selected);
-            // Not placed yet: outlined red until one is chosen.
-            select.classList.toggle('is-invalid', select.value === '');
+            select.append(new Option(label, ''), ...options);
+            select.value = selected;
             select.addEventListener('click', (event) => event.stopPropagation());
-            select.addEventListener('change', () => select.classList.toggle('is-invalid', select.value === ''));
             parent.append(select);
             return select;
         };
@@ -4740,12 +4813,48 @@
         end.className = 'validation-field__place-end';
 
         if (ledger) {
-            const person = pick('Person',
-                Array.from({ length: rows }, (_, row) => [row + 1, String(row + 1).padStart(2, '0')]), item.gridRow, controls);
-            const column = pick('Column', columns.map((candidate, columnIndex) => [columnIndex, candidate.name]), item.gridColumn, end);
+            // "05 · Pedro P. Villanueva": the person's name as their group shows it.
+            const personNames = new Map(validationGroups
+                .filter((group) => group.kind === 'person')
+                .map((group) => [Number(cropped[group.indexes[0]]?.personGroup), groupIdentity(group)]));
+            const person = pick('Person', Array.from({ length: rows }, (_, offset) => {
+                const row = offset + 1;
+                const name = personNames.get(row);
+                const number = String(row).padStart(2, '0');
+                return new Option(name && !/^\d+ fields?$/.test(name) ? `${number} · ${name}` : number, String(row));
+            }), item.gridRow === null ? '' : String(item.gridRow), controls);
+            // A person is needed; outlined red until one is chosen.
+            person.classList.toggle('is-invalid', person.value === '');
+
+            // The page's columns, then the template's columns removed in Align:
+            // a field can still be filed under one of those.
+            const onPage = new Set(columns.map((candidate) => nameKey(candidate.name)));
+            const removed = config.boxes
+                .filter((box) => box.kind === 'column' && !onPage.has(nameKey(box.name)))
+                .map((box) => String(box.name));
+            const columnOptions = columns.map((candidate, columnIndex) => new Option(candidate.name, `i:${columnIndex}`));
+            if (removed.length > 0) {
+                const group = document.createElement('optgroup');
+                group.label = 'Removed in Align';
+                group.append(...removed.map((name) => new Option(name, `n:${name}`)));
+                columnOptions.push(group);
+            }
+            const selectedColumn = item.gridColumn !== null
+                ? `i:${item.gridColumn}`
+                : (removed.some((name) => nameKey(name) === nameKey(item.label)) ? `n:${item.label}` : '');
+            const column = pick('Column', columnOptions, selectedColumn, end);
+            column.title = 'Column (optional)';
+
             const place = () => {
-                if (person.value === '' || column.value === '') return;
-                placeVerifyLine(index, Number(column.value), Number(person.value));
+                person.classList.toggle('is-invalid', person.value === '');
+                if (person.value === '') {
+                    setValidationFieldError(index, 'Choose the Person first; the Column can wait.');
+                    return;
+                }
+                clearValidationFieldError(index);
+                const [kind, value] = [column.value.slice(0, 2), column.value.slice(2)];
+                placeVerifyLine(index, Number(person.value),
+                    kind === 'i:' ? { column_index: Number(value) } : kind === 'n:' ? { column_name: value } : {});
             };
             person.addEventListener('change', place);
             column.addEventListener('change', place);

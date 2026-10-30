@@ -125,6 +125,21 @@ test('each ledger line knows its cell, so Verify can move it to another person',
     assert.deepEqual([field.gridColumn, field.gridRow], [null, null]);
 });
 
+test('a field added under no column joins its person where it sits across the page', () => {
+    const grid = {
+        ...page,
+        geometry: { columns: [{ name: 'Name', box: [0, 0, 0.3, 1] }, { name: 'Date', box: [0.3, 0, 0.3, 1] }, { name: 'Sex', box: [0.8, 0, 0.2, 1] }] },
+    };
+    const [added] = verificationItems([
+        line({ source: 'manual', column: 'Drawn line', columnIndex: null, row: 4, bbox: [620, 100, 150, 40] }),
+    ], grid);
+
+    assert.equal(added.personGroup, 4);
+    // Right of Name and Date, left of Sex.
+    assert.equal(added.personFieldOrder, 2);
+    assert.deepEqual([added.gridColumn, added.gridRow], [null, 4]);
+});
+
 test('two lines sharing a cell keep distinct names', () => {
     const items = verificationItems([
         line({ id: 1, flags: [FLAG_SHARED_CELL] }),

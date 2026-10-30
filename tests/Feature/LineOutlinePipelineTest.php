@@ -1153,7 +1153,25 @@ class LineOutlinePipelineTest extends TestCase
                 ->deleteJson(route('documents.pages.lines.destroy', ['page' => $page, 'line' => $line]))
                 ->assertOk();
             $this->assertSoftDeleted('page_lines', ['id' => $line->getKey()]);
+
+            // Ctrl+Z in Verify puts it back.
+            $this->actingAs($page->creator)
+                ->postJson(route('documents.pages.lines.restore', ['page' => $page, 'line' => $line->getKey()]))
+                ->assertOk()
+                ->assertJsonPath('line.id', $line->getKey());
+            $this->assertNotSoftDeleted('page_lines', ['id' => $line->getKey()]);
         }
+    }
+
+    public function test_a_detected_line_stays_removed_once_the_page_has_been_read(): void
+    {
+        $page = $this->processedPage();
+        $detected = $page->lines->first(fn (PageLine $line) => $line->source === 'kraken' && ! in_array('no_row', $line->flags, true));
+        $detected->delete();
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.restore', ['page' => $page, 'line' => $detected->getKey()]))
+            ->assertStatus(409);
     }
 
     public function test_a_missed_field_added_in_verify_is_placed_and_read_at_once(): void
@@ -1217,6 +1235,57 @@ class LineOutlinePipelineTest extends TestCase
                 'row' => 2,
             ])
             ->assertNotFound();
+    }
+
+    public function test_a_missed_field_under_a_column_removed_in_align_joins_its_person(): void
+    {
+        $page = $this->processedPage();
+        // The template has a third column; Staff removed it in Align, so the
+        // page's grid has only Name and Date.
+        $page->template->update(['columns' => [
+            ...$page->template->columns,
+            ['name' => "Mother's Name", 'box' => [0.8, 0.1, 0.15, 0.3]],
+        ]]);
+        $this->app->instance(LineMarkers::class, $this->stubMarkers(cropPlacement: ['column_index' => null, 'row' => 2]));
+
+        // No column under the box, but its row is known: it joins Person 02.
+        $line = $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.store', $page), [
+                'polygon' => [[650, 130], [760, 130], [760, 160], [650, 160]],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('line.column', 'Drawn line')
+            ->assertJsonPath('line.columnIndex', null)
+            ->assertJsonPath('line.row', 2)
+            ->assertJsonPath('line.flags', [])
+            ->json('line');
+        $route = route('documents.pages.lines.place', ['page' => $page, 'line' => $line['id']]);
+
+        // Another person, with no column: allowed, and two such fields in one
+        // row are not one cell shared.
+        $this->actingAs($page->creator)->patchJson($route, ['row' => 1])
+            ->assertOk()
+            ->assertJsonPath('line.row', 1)
+            ->assertJsonPath('line.columnIndex', null)
+            ->assertJsonPath('line.flags', []);
+
+        // Filed under the removed column, by its name.
+        $this->actingAs($page->creator)->patchJson($route, ['row' => 1, 'column_name' => "Mother's Name"])
+            ->assertOk()
+            ->assertJsonPath('line.column', "Mother's Name")
+            ->assertJsonPath('line.columnIndex', null);
+
+        // Only a column the template has and the page does not, and not both ways at once.
+        $this->actingAs($page->creator)->patchJson($route, ['row' => 1, 'column_name' => 'Name'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('column_name');
+        $this->actingAs($page->creator)->patchJson($route, ['row' => 1, 'column_index' => 0, 'column_name' => "Mother's Name"])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('column_name');
+        // A person is still needed.
+        $this->actingAs($page->creator)->patchJson($route, ['column_index' => 0])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('row');
     }
 
     public function test_a_field_of_a_layout_box_is_not_moved_into_the_table(): void

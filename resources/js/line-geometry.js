@@ -117,6 +117,14 @@ export function snapRowsMessage(rows, estimated = Array.isArray(rows?.estimated)
  * @param {Array<object>} lines  PageLine#toClient() payloads.
  * @param {{width: number, height: number}} page
  */
+/** How many of the grid's columns have their middle left of x (a page fraction). */
+function columnsLeftOf(x, columns) {
+    return columns.filter((column) => {
+        const [left, , w] = Array.isArray(column.box) ? column.box.map(Number) : [];
+        return Number.isFinite(left) && Number.isFinite(w) && left + w / 2 < x;
+    }).length;
+}
+
 export function verificationItems(lines, page) {
     const width = Math.max(1, page.width);
     const height = Math.max(1, page.height);
@@ -158,7 +166,11 @@ export function verificationItems(lines, page) {
         } else {
             name = uniqueName(`${line.column} · row ${line.row}`);
             personGroup = line.row;
-            personFieldOrder = line.columnIndex;
+            // A field added by hand under no column sits among its person's
+            // fields where it sits across the page.
+            personFieldOrder = Number.isInteger(line.columnIndex)
+                ? line.columnIndex
+                : columnsLeftOf((bx + bw / 2) / width, page.geometry?.columns ?? []);
         }
 
         return {
