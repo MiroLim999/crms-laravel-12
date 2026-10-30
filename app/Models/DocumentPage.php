@@ -119,4 +119,41 @@ class DocumentPage extends Model
     {
         return in_array($this->status, [self::STATUS_DETECTED, self::STATUS_READY], true);
     }
+
+    /**
+     * The rows (1-based) each ledger column Staff shortened in Align reaches,
+     * by lower-cased name; a column reaching every row is left out. A row
+     * counts when its middle lies inside the marker, give or take a quarter
+     * row, as line_markers.py reads it (_rows_in_column), and the workspace
+     * asks for it (rowsInColumn).
+     *
+     * @return array<string, list<int>>
+     */
+    public function shortenedColumnRows(): array
+    {
+        $ruled = array_map('floatval', $this->geometry['ruled_ys'] ?? []);
+        $count = count($ruled) - 1;
+        if ($count < 1) {
+            return [];
+        }
+        $gaps = array_map(fn (int $r) => $ruled[$r + 1] - $ruled[$r], range(0, $count - 1));
+        sort($gaps);
+        $median = $count % 2 === 1 ? $gaps[intdiv($count, 2)] : ($gaps[$count / 2 - 1] + $gaps[$count / 2]) / 2;
+        $reach = 0.25 * $median;
+
+        $shortened = [];
+        foreach ($this->geometry['columns'] ?? [] as $column) {
+            [, $top, , $height] = array_map('floatval', $column['box'] ?? [0, 0, 0, 0]);
+            $rows = array_values(array_filter(range(1, $count), function (int $row) use ($ruled, $top, $height, $reach) {
+                $middle = ($ruled[$row - 1] + $ruled[$row]) / 2;
+
+                return $middle >= $top - $reach && $middle <= $top + $height + $reach;
+            }));
+            if (count($rows) < $count) {
+                $shortened[mb_strtolower(trim((string) $column['name']))] = $rows;
+            }
+        }
+
+        return $shortened;
+    }
 }

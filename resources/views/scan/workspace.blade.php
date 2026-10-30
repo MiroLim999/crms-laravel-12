@@ -5004,6 +5004,30 @@
      * checked (the page is removed after submitting, so they would have to be
      * scanned again). The server makes the same list.
      */
+    /**
+     * The rows (1-based) each ledger column shortened in Align reaches, by
+     * name key; a column reaching every row is left out. A row counts when its
+     * middle lies inside the marker, give or take a quarter row, as the
+     * server reads it (DocumentPage::shortenedColumnRows).
+     */
+    function shortenedColumnRows(geometry) {
+        const ruled = (geometry?.ruled_ys ?? []).map(Number);
+        const count = ruled.length - 1;
+        const shortened = new Map();
+        if (count < 1) return shortened;
+        const reach = 0.25 * median(ruled.slice(1).map((y, row) => y - ruled[row]));
+        (geometry?.columns ?? []).forEach((column) => {
+            const [, top, , height] = (column.box ?? []).map(Number);
+            const rows = new Set();
+            for (let row = 1; row <= count; row += 1) {
+                const middle = (ruled[row - 1] + ruled[row]) / 2;
+                if (middle >= top - reach && middle <= top + height + reach) rows.add(row);
+            }
+            if (rows.size < count) shortened.set(nameKey(column.name), rows);
+        });
+        return shortened;
+    }
+
     function requiredNotSubmitted(verifiedIndexes) {
         const checkedIndexes = new Set(verifiedIndexes);
         const checkedNames = new Set(verifiedIndexes.map((index) => nameKey(cropped[index]?.label)));
@@ -5014,6 +5038,7 @@
         const requiredColumns = columnsOnThisPage().filter((box) => box.required !== false);
         const untouchedRows = [];
         const tableRows = Math.max(0, (processedPage?.geometry?.ruled_ys?.length ?? 0) - 1);
+        const shortened = shortenedColumnRows(processedPage?.geometry);
         validationGroups.forEach((group) => {
             // A person started by hand (past the last row) has no register row to complete.
             const ledgerRow = group.kind === 'person'
@@ -5028,8 +5053,10 @@
             }
 
             const columnsHere = new Set(checkedHere.map((index) => nameKey(cropped[index]?.label)));
+            const row = Number(cropped[group.indexes[0]]?.personGroup);
+            // A column Staff shortened in Align is not asked for in the rows it leaves out.
             const left = requiredColumns
-                .filter((box) => !columnsHere.has(nameKey(box.name)))
+                .filter((box) => !columnsHere.has(nameKey(box.name)) && (shortened.get(nameKey(box.name))?.has(row) ?? true))
                 .map((box) => box.name);
             if (left.length > 0) missing.push(`${group.label}: ${left.join(', ')}`);
         });

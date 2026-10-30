@@ -589,6 +589,38 @@ class DocumentUploadWorkflowTest extends TestCase
         $this->assertArrayNotHasKey('missing_required_fields', $audit->new_values);
     }
 
+    public function test_a_column_shortened_in_align_is_asked_for_only_in_the_rows_it_reaches(): void
+    {
+        Storage::fake('local');
+        [$template, $page, $staff] = $this->registerPage();
+        // Staff shortened the required Date column to rows 3-5, so rows 1-2 have no Date.
+        $page->lines()->where('column_name', 'Date')->whereIn('row', [1, 2])->forceDelete();
+        $page->update(['geometry' => [
+            'columns' => [
+                ['name' => 'Name', 'box' => [0.05, 0.1, 0.45, 0.8]],
+                ['name' => 'Date', 'box' => [0.5, 0.42, 0.3, 0.48]],
+            ],
+            'ruled_ys' => [0.1, 0.26, 0.42, 0.58, 0.74, 0.9],
+            'fields' => [],
+        ]]);
+        $page = $page->fresh('lines');
+
+        $fields = array_map(fn (int $row) => $this->cellField($page, $row, 'Name'), range(1, 5));
+        // Row 4's Date is left out: inside the shortened column, so still asked for.
+        foreach ([3, 5] as $row) {
+            $fields[] = $this->cellField($page, $row, 'Date');
+        }
+
+        $this->actingAs($staff)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, $fields),
+                'document_page_id' => $page->getKey(),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.missing_required', ['Person 04: Date']);
+    }
+
     public function test_rows_and_columns_added_in_align_are_read_and_logged(): void
     {
         Storage::fake('local');

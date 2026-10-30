@@ -510,6 +510,7 @@ class DocumentScanController extends Controller
         // A person the reviewer started by hand sits past the table's last row;
         // there is no register row to complete for them.
         $tableRows = max(0, count($page->geometry['ruled_ys'] ?? []) - 1);
+        $shortened = $page->shortenedColumnRows();
 
         $rows = $page->lines
             ->filter(fn (PageLine $line) => $isCell($line) && isset($columns[$columnOf($line)]) && $line->row <= $tableRows)
@@ -535,7 +536,10 @@ class DocumentScanController extends Controller
                 continue;
             }
 
-            $left = array_values(array_diff_key($required, $submitted[$row]));
+            // A column Staff shortened in Align is not asked for in the rows it leaves out.
+            $askedHere = array_filter($required, fn (string $key) => ! isset($shortened[$key])
+                || in_array($row, $shortened[$key], true), ARRAY_FILTER_USE_KEY);
+            $left = array_values(array_diff_key($askedHere, $submitted[$row]));
             if ($left !== []) {
                 $missing[] = $this->personLabel($row).': '.implode(', ', $left);
             }

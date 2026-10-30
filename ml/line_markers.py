@@ -567,6 +567,24 @@ def _page_geometry(geometry, width, height):
     return columns, ruled, fields
 
 
+def _rows_in_column(column, ruled):
+    """The rows (0-based) a ledger column marker reaches, or None for all of them.
+
+    Staff can shorten a column in Align to read only some of its rows: a
+    stretch too faded or torn to read, or rows another hand filled in later.
+    A row counts when its middle lies inside the marker, give or take a
+    quarter row, so a marker stopping a little short of a row line still
+    reaches that row. Measured on the grid as sent, before the rows are
+    snapped to the page, so a snap of half a row moves no row in or out.
+    """
+    if len(ruled) < 2:
+        return None
+    reach = 0.25 * float(np.median(np.diff(ruled)))
+    rows = {r for r in range(len(ruled) - 1)
+            if column["top"] - reach <= (ruled[r] + ruled[r + 1]) / 2 <= column["bottom"] + reach}
+    return None if len(rows) == len(ruled) - 1 else rows
+
+
 # ============================================================ ink and rules
 
 def _ink_mask(gray):
@@ -1741,6 +1759,8 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
 
         if has_table:
             removed = _removed_columns(columns, dividers, centre_y, row_height)
+            for column in columns:
+                column["rows"] = _rows_in_column(column, ruled)
 
         if not has_table:
             # No table: any long printed line (a ruled notebook page, a form's
@@ -1803,6 +1823,11 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
         for column_index, members in by_column.items():
             members = _merge_rows(members, row_height)
             _assign_rows(members, rules, offset)
+            # A column Staff shortened in Align is read only in the rows it reaches.
+            reached = columns[column_index]["rows"]
+            if reached is not None:
+                ignored.extend(line for line in members if line.row not in reached)
+                members = [line for line in members if line.row in reached]
             cells = {}
             for line in members:
                 cells.setdefault(line.row, []).append(line)
@@ -1850,6 +1875,9 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
                 return
             tops, heights = _row_frame(rules, cx)
             row = int(np.searchsorted(tops + heights, cy))
+            reached = columns[column]["rows"]
+            if reached is not None and row not in reached:
+                return
             if 0 <= row < len(heights) and (column, row) not in occupied:
                 buckets.setdefault((column, row), []).append((ys, xs))
 
@@ -1967,6 +1995,8 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
                     "name": c["name"],
                     "left": c["left_rule"].to_json(),
                     "right": c["right_rule"].to_json(),
+                    # Only a column Staff shortened: the rows (0-based) it reaches.
+                    **({"rows": sorted(c["rows"])} if c.get("rows") is not None else {}),
                 }
                 for c in columns
             ],
@@ -2713,9 +2743,12 @@ def _snapped_geometry(result, fitted):
     for column in grid["columns"]:
         x0 = column["left"]["a"] + column["left"]["b"] * centre_y
         x1 = column["right"]["a"] + column["right"]["b"] * centre_y
+        # A column Staff shortened keeps to the rows it reaches.
+        reached = [r for r in column.get("rows") or [] if r < len(ruled) - 1]
+        y0, y1 = (ruled[reached[0]], ruled[reached[-1] + 1]) if reached else (ruled[0], ruled[-1])
         columns.append({
             "name": column["name"],
-            "box": [round(x0 / width, 5), round(ruled[0], 5), round((x1 - x0) / width, 5), round(ruled[-1] - ruled[0], 5)],
+            "box": [round(x0 / width, 5), round(y0, 5), round((x1 - x0) / width, 5), round(y1 - y0, 5)],
         })
     return {
         "columns": columns,

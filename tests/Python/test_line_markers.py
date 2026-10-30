@@ -272,6 +272,27 @@ class LedgerTest(unittest.TestCase):
             self.assertEqual(1, len(cells[("Date", row)]))
         self.assertTrue(all(not line["flags"] for line in result["lines"]))
 
+    def test_a_column_shortened_in_align_is_read_only_in_the_rows_it_reaches(self):
+        page = Page()
+        for row in range(1, 7):
+            page.word(f"name{row}", 70, 250, base_of(row))
+            # Row 1's date is missed by the detector: its ink must not come back
+            # as a cell of its own either.
+            page.word(f"date{row}", 320, 480, base_of(row), detect=row != 1)
+
+        shape = geometry()
+        # Date stops a little inside rows 3 and 5: it reaches rows 3 to 5.
+        shape["columns"][1]["box"][1] = (RULED[2] + 4) / HEIGHT
+        shape["columns"][1]["box"][3] = (RULED[5] - RULED[2] - 8) / HEIGHT
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "page.png")
+        page.image.save(path)
+        result = lm.process_page(path, shape, os.path.join(folder, "out"), detector=page.detector)
+        cells = by_cell(result)
+
+        self.assertEqual([3, 4, 5], sorted(row for column, row in cells if column == "Date"))
+        self.assertEqual([1, 2, 3, 4, 5, 6], sorted(row for column, row in cells if column == "Name"))
+
     def test_a_line_that_drifts_across_its_rule_stays_in_its_row(self):
         page = Page()
         for row in (1, 2, 3, 4):
