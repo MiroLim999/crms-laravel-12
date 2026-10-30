@@ -331,16 +331,17 @@ export class LineOverlay {
      * Start drawing an outline where there is no line yet, for writing the
      * detector missed. It edits nothing: `editing.index` stays null, and the
      * closed outline arrives through onEdit like any other, for the caller to
-     * make a line of.
+     * make a line of. `mode` is 'draw' (click round the writing) or
+     * 'rectangle' (drag a box over it; let go and it is done).
      */
-    beginDraw() {
+    beginDraw(mode = 'draw') {
         this.cancelEdit();
         this.editing = {
             index: null,
-            mode: 'draw',
+            mode,
             polygon: [],
             drag: null,
-            draft: [],
+            draft: mode === 'draw' ? [] : null,
             strokes: [],
             activePoint: null,
             cursor: null,
@@ -348,8 +349,13 @@ export class LineOverlay {
         this.root.classList.add('is-editing');
         this._bindEditEvents();
         this._drawEdit();
-        this.onModeChange?.('draw');
-        this._draftChanged();
+        this.onModeChange?.(mode);
+        if (mode === 'draw') this._draftChanged();
+    }
+
+    /** Whether a new outline (no line yet) is being drawn or dragged. */
+    isAddingNew() {
+        return Boolean(this.editing) && this.editing.index === null;
     }
 
     /** Whether the outline being drawn belongs to no line yet (see beginDraw). */
@@ -722,7 +728,25 @@ export class LineOverlay {
             // A click without a drag must not collapse the outline to a point.
             if (editing.drag.kind === 'rectangle') {
                 const bounds = polygonBounds(editing.polygon);
-                if (bounds.right - bounds.left < 3 || bounds.bottom - bounds.top < 3) {
+                const tooSmall = editing.polygon.length < 3
+                    || bounds.right - bounds.left < 3 || bounds.bottom - bounds.top < 3;
+                if (editing.index === null) {
+                    // A new box: done when the pointer lets go, or try again.
+                    editing.drag = null;
+                    this._justDragged = true;
+                    window.setTimeout(() => { this._justDragged = false; }, 0);
+                    if (this.root.hasPointerCapture?.(event.pointerId)) this.root.releasePointerCapture(event.pointerId);
+                    if (tooSmall) {
+                        editing.polygon = [];
+                        this._drawEdit();
+                        return;
+                    }
+                    const drawn = this.editedPolygon();
+                    this.cancelEdit();
+                    this.onEdit?.(drawn, true);
+                    return;
+                }
+                if (tooSmall) {
                     editing.polygon = (this.lines[editing.index]?.polygon ?? editing.polygon)
                         .map((point) => [...point]);
                 }

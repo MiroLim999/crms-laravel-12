@@ -379,12 +379,17 @@ class DocumentPageController extends Controller
      * Draw one line by hand, where the detector found none: writing it missed,
      * or a line removed and wanted back in another shape. The outline is
      * cropped and placed in the page's grid exactly as a redrawn one is.
+     *
+     * After Detect (the Align step) it is read later with all the others. On a
+     * read page (Verify, "Add missed field") TrOCR reads it at once, so the
+     * reviewer keeps everything already typed and ticked.
      */
     public function storeLine(Request $request, DocumentPage $page): JsonResponse
     {
         $this->authorizePage($request, $page);
 
-        if ($page->status !== DocumentPage::STATUS_DETECTED) {
+        $detected = $page->status === DocumentPage::STATUS_DETECTED;
+        if (! $detected && $page->status !== DocumentPage::STATUS_READY) {
             return response()->json(['message' => 'This page is still being processed.'], 409);
         }
 
@@ -423,10 +428,67 @@ class DocumentPageController extends Controller
         ]);
         $this->refreshSharedCells($page);
 
+        $status = 201;
+        $message = null;
+        if (! $detected) {
+            try {
+                $this->reader->read($page, collect([$line]));
+            } catch (OcrServiceException $e) {
+                // The line and its crop are kept; only the reading is missing.
+                $line->forceFill(['ocr_text' => '', 'ocr_confidence' => 0, 'ocr_error' => mb_substr($e->getMessage(), 0, 500)])->save();
+                $status = 503;
+                $message = $e->getMessage();
+            }
+        }
+
+        return response()->json([
+            'message' => $message,
+            'line' => $line->fresh()->toClient(),
+            'flags' => $this->lineFlags($page),
+        ], $status);
+    }
+
+    /**
+     * Put a ledger line in another person's row or another column (Verify):
+     * a field the reviewer added, or one that fell between two rows. Nothing
+     * is cropped or read again; only where it belongs changes.
+     */
+    public function placeLine(Request $request, DocumentPage $page, PageLine $line): JsonResponse
+    {
+        $this->authorizePage($request, $page);
+        // The route's scopeBindings() already ensures this; checked again on purpose.
+        abort_unless((int) $line->document_page_id === (int) $page->getKey(), 404);
+
+        if (! $page->hasLines()) {
+            return response()->json(['message' => 'This page is still being processed.'], 409);
+        }
+        if ($line->belongsToField()) {
+            return response()->json(['message' => 'This field belongs to a box of the layout, not to a row of the table.'], 422);
+        }
+
+        $columns = $page->geometry['columns'] ?? [];
+        $rows = max(0, count($page->geometry['ruled_ys'] ?? []) - 1);
+        $validated = $request->validate([
+            'column_index' => ['required', 'integer', 'min:0', 'max:'.max(0, count($columns) - 1)],
+            'row' => ['required', 'integer', 'min:1', 'max:'.max(1, $rows)],
+        ]);
+        if ($columns === [] || $rows === 0) {
+            return response()->json(['message' => 'This page has no table to place the field in.'], 422);
+        }
+
+        $column = (int) $validated['column_index'];
+        $line->forceFill([
+            'column_index' => $column,
+            'column_name' => mb_substr((string) $columns[$column]['name'], 0, 500),
+            'row' => (int) $validated['row'],
+            'flags' => array_values(array_diff($line->flags ?? [], [PageLine::FLAG_NO_ROW])),
+        ])->save();
+        $this->refreshSharedCells($page);
+
         return response()->json([
             'line' => $line->fresh()->toClient(),
             'flags' => $this->lineFlags($page),
-        ], 201);
+        ]);
     }
 
     /**
@@ -436,8 +498,9 @@ class DocumentPageController extends Controller
      * outlined again, so it can be put back (Ctrl+Z); nothing reads or
      * submits it meanwhile.
      *
-     * Only while the page still holds Detect's result - once a page is read,
-     * Verify and submission work from its lines.
+     * Any line while the page still holds Detect's result. Once a page is
+     * read, Verify and submission work from its lines, so only a field the
+     * reviewer added by hand, or one that fell between two rows, can go.
      */
     public function destroyLine(Request $request, DocumentPage $page, PageLine $line): JsonResponse
     {
@@ -445,8 +508,14 @@ class DocumentPageController extends Controller
         // The route's scopeBindings() already ensures this; checked again on purpose.
         abort_unless((int) $line->document_page_id === (int) $page->getKey(), 404);
 
-        if ($page->status !== DocumentPage::STATUS_DETECTED) {
-            return response()->json(['message' => 'This page is still being processed.'], 409);
+        $removableAfterReading = $page->status === DocumentPage::STATUS_READY
+            && ($line->source === PageLine::SOURCE_MANUAL || in_array(PageLine::FLAG_NO_ROW, $line->flags ?? [], true));
+        if ($page->status !== DocumentPage::STATUS_DETECTED && ! $removableAfterReading) {
+            return response()->json([
+                'message' => $page->status === DocumentPage::STATUS_READY
+                    ? 'Only a field you added, or one that needs review, can be removed. Leave this one unticked to skip it.'
+                    : 'This page is still being processed.',
+            ], 409);
         }
 
         $keptCell = ! $line->belongsToField();

@@ -109,6 +109,22 @@ test('a line with no row belongs to no person and needs review', () => {
     assert.match(flagExplanation(item.flags), /between two rows/);
 });
 
+test('each ledger line knows its cell, so Verify can move it to another person', () => {
+    const [placed, between, added, field] = verificationItems([
+        line({ id: 1, columnIndex: 2, row: 3 }),
+        line({ id: 2, columnIndex: 1, row: null, flags: [FLAG_NO_ROW] }),
+        line({ id: 3, source: 'manual', columnIndex: 0, row: 4 }),
+        line({ id: 4, source: 'template', column: 'Registry number', columnIndex: null, row: null }),
+    ], page);
+
+    assert.deepEqual([placed.gridColumn, placed.gridRow], [2, 3]);
+    // Between two rows: its column is known, its person is not.
+    assert.deepEqual([between.gridColumn, between.gridRow], [1, null]);
+    assert.equal(added.source, 'manual');
+    assert.equal(added.personGroup, 4);
+    assert.deepEqual([field.gridColumn, field.gridRow], [null, null]);
+});
+
 test('two lines sharing a cell keep distinct names', () => {
     const items = verificationItems([
         line({ id: 1, flags: [FLAG_SHARED_CELL] }),

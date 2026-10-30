@@ -17,6 +17,7 @@ export const FLAG_NO_ROW = 'no_row';
 export const FLAG_SHARED_CELL = 'shared_cell';
 export const SOURCE_TEMPLATE = 'template';
 export const SOURCE_FIELD = 'field';
+export const SOURCE_MANUAL = 'manual';
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 
@@ -176,6 +177,12 @@ export function verificationItems(lines, page) {
             needsReview: flags.length > 0,
             adjusted: Boolean(line.adjusted),
             flags,
+            // 'manual': added by hand (Verify's Add missed field, Align's Add line).
+            source: line.source,
+            // A ledger line's cell, for moving it to another person or column:
+            // its column, and its row (null between two rows).
+            gridColumn: inField || !Number.isInteger(line.columnIndex) ? null : line.columnIndex,
+            gridRow: inField || noRow || !Number.isInteger(line.row) ? null : line.row,
             polygon: line.polygon,
             cropUrl: line.cropUrl,
             reading: {
@@ -335,7 +342,7 @@ export function detectionSummary(page) {
  */
 export function flagExplanation(flags) {
     if (flags.includes(FLAG_NO_ROW)) {
-        return 'Needs review: this line sits between two rows. Check which person it belongs to.';
+        return 'Needs review: this line sits between two rows. Choose its person below, or remove it.';
     }
     if (flags.includes(FLAG_SHARED_CELL)) {
         return 'Needs review: this cell holds more than one line. Check the outline covers the right writing.';

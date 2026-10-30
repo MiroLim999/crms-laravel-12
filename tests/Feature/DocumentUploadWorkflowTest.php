@@ -45,9 +45,16 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('id="resetFieldsBtn"', escape: false)
                 ->assertSee('id="resetFieldsModal"', escape: false)
                 ->assertSee('id="confirmResetFieldsBtn"', escape: false)
-                ->assertSee('id="deleteSelectedBtn"', escape: false)
+                // Selecting and deleting is the Fields card's alone; the file
+                // name is in the top bar only.
+                ->assertDontSee('id="deleteSelectedBtn"', escape: false)
+                ->assertDontSee('id="selectedFileName"', escape: false)
                 ->assertSee('id="selectAllFields"', escape: false)
                 ->assertSee('id="deleteFieldsBtn"', escape: false)
+                // One name box for fields and columns, and Verify's tool for missed writing.
+                ->assertSee('id="fieldAddMessage"', escape: false)
+                ->assertDontSee('id="newColumnName"', escape: false)
+                ->assertSee('id="addMissedFieldBtn"', escape: false)
                 ->assertSee('<kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>A</kbd>', escape: false)
                 ->assertSee('id="fieldList"', escape: false)
                 ->assertSee('id="fieldTips"', escape: false)

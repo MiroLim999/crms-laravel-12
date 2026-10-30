@@ -1125,10 +1125,10 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertSame(0, $page->lines()->count());
     }
 
-    public function test_a_line_cannot_be_deleted_once_the_page_has_been_read(): void
+    public function test_a_detected_line_cannot_be_deleted_once_the_page_has_been_read(): void
     {
         $page = $this->processedPage();
-        $line = $page->lines->first();
+        $line = $page->lines->firstWhere('column_name', 'Name');
 
         $this->actingAs($page->creator)
             ->deleteJson(route('documents.pages.lines.destroy', ['page' => $page, 'line' => $line]))
@@ -1140,6 +1140,96 @@ class LineOutlinePipelineTest extends TestCase
         $this->actingAs($page->creator)
             ->postJson(route('documents.pages.lines.restore', ['page' => $page, 'line' => $line]))
             ->assertStatus(409);
+    }
+
+    public function test_an_added_field_or_one_between_rows_can_be_removed_in_verify(): void
+    {
+        $page = $this->processedPage();
+        $added = $this->makeLine($page, ['source' => PageLine::SOURCE_MANUAL, 'column_index' => 1, 'column_name' => 'Date', 'row' => 3]);
+        $between = $page->lines->first(fn (PageLine $line) => in_array('no_row', $line->flags, true));
+
+        foreach ([$added, $between] as $line) {
+            $this->actingAs($page->creator)
+                ->deleteJson(route('documents.pages.lines.destroy', ['page' => $page, 'line' => $line]))
+                ->assertOk();
+            $this->assertSoftDeleted('page_lines', ['id' => $line->getKey()]);
+        }
+    }
+
+    public function test_a_missed_field_added_in_verify_is_placed_and_read_at_once(): void
+    {
+        $page = $this->processedPage();
+        $this->app->instance(LineMarkers::class, $this->stubMarkers(cropPlacement: ['column_index' => 1, 'row' => 3]));
+        $this->ocrCalls = [];
+
+        $response = $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.store', $page), [
+                'polygon' => [[410, 180], [560, 180], [560, 210], [410, 210]],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('line.source', PageLine::SOURCE_MANUAL)
+            ->assertJsonPath('line.column', 'Date')
+            ->assertJsonPath('line.row', 3);
+
+        // Read on its own, with nothing else on the page read again.
+        $this->assertCount(1, $this->ocrCalls);
+        $this->assertSame(['line-'.$response->json('line.id')], array_column($this->ocrCalls[0]['fields'], 'name'));
+        $response->assertJsonPath('line.text', 'read line-'.$response->json('line.id'));
+    }
+
+    public function test_a_field_in_verify_can_be_moved_to_another_person_and_column(): void
+    {
+        $page = $this->processedPage();
+        $between = $page->lines->first(fn (PageLine $line) => in_array('no_row', $line->flags, true));
+
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.lines.place', ['page' => $page, 'line' => $between]), [
+                'column_index' => 0,
+                'row' => 3,
+            ])
+            ->assertOk()
+            ->assertJsonPath('line.column', 'Name')
+            ->assertJsonPath('line.row', 3)
+            ->assertJsonPath('line.flags', []);
+
+        // Into a cell that already holds a line: both are flagged to check.
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.lines.place', ['page' => $page, 'line' => $between]), [
+                'column_index' => 0,
+                'row' => 1,
+            ])
+            ->assertOk()
+            ->assertJsonPath('line.flags', ['shared_cell']);
+
+        // Only rows and columns the page's table has.
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.lines.place', ['page' => $page, 'line' => $between]), [
+                'column_index' => 2,
+                'row' => 4,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['column_index', 'row']);
+
+        // Not another Staff member's page.
+        $this->actingAs(User::factory()->staff()->create())
+            ->patchJson(route('documents.pages.lines.place', ['page' => $page, 'line' => $between]), [
+                'column_index' => 0,
+                'row' => 2,
+            ])
+            ->assertNotFound();
+    }
+
+    public function test_a_field_of_a_layout_box_is_not_moved_into_the_table(): void
+    {
+        $page = $this->processedPage();
+        $field = $this->makeLine($page, ['source' => PageLine::SOURCE_FIELD, 'column_index' => null, 'column_name' => 'Remarks', 'row' => 1]);
+
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.lines.place', ['page' => $page, 'line' => $field]), [
+                'column_index' => 0,
+                'row' => 1,
+            ])
+            ->assertUnprocessable();
     }
 
     public function test_a_hand_drawn_line_is_cropped_and_placed_in_its_ledger_cell(): void
@@ -1210,15 +1300,17 @@ class LineOutlinePipelineTest extends TestCase
             ->assertJsonPath('line.flags', ['no_row']);
     }
 
-    public function test_a_line_cannot_be_drawn_once_the_page_has_been_read(): void
+    public function test_a_line_cannot_be_drawn_while_the_page_is_processed_or_by_another_user(): void
     {
         $page = $this->processedPage();
 
+        $page->forceFill(['status' => DocumentPage::STATUS_READING])->save();
         $this->actingAs($page->creator)
             ->postJson(route('documents.pages.lines.store', $page), [
                 'polygon' => [[10, 10], [50, 10], [50, 30]],
             ])
             ->assertStatus(409);
+        $page->forceFill(['status' => DocumentPage::STATUS_READY])->save();
 
         $this->actingAs(User::factory()->staff()->create())
             ->postJson(route('documents.pages.lines.store', $page), [

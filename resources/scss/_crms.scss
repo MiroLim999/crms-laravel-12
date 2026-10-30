@@ -2252,6 +2252,21 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   padding-block-start: .5rem;
 }
 
+// One name box for + Field and + Column, and why one could not be added.
+.document-fields-card .field-add {
+  flex: 0 0 auto;
+
+  .btn {
+    white-space: nowrap;
+  }
+
+  .field-add__message {
+    margin: .4rem 0 0;
+    font-size: .75rem;
+    line-height: 1.4;
+  }
+}
+
 // The Align step's notes about the scan: it may be sideways, or only page 1 is read.
 .document-scan-notice {
   display: flex;
@@ -3649,8 +3664,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// The Align step's Rows and Columns card.
-// One line per tool: a label, then its control.
+// The Align step's Rows line (in the Fields card) and the Template Builder's
+// Rows and Columns card. One line per tool: a label, then its control.
 .document-grid-card {
   .document-grid-card__line {
     display: flex;
@@ -3982,6 +3997,69 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   &:hover,
   &:focus-visible {
     text-decoration: underline;
+  }
+}
+
+// Verify's Add missed field (beside the zoom) and the strip shown while a box
+// is drawn: blue, where the outline strip is green.
+.validation-pane__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .5rem;
+}
+
+.validation-add-field {
+  white-space: nowrap;
+}
+
+.add-field-toolbar {
+  background: rgba(var(--bs-primary-rgb), .07);
+  border-block-end-color: rgba(var(--bs-primary-rgb), .3);
+}
+
+// Under a field the reviewer added, or one between two rows: which person
+// and column it belongs to, and Remove.
+.validation-field__place {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem .6rem;
+  margin-block-start: .4rem;
+  font-size: .6875rem;
+
+  .validation-field__added {
+    font-size: .625rem;
+  }
+
+  .validation-field__pick {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    margin: 0;
+    color: var(--bs-secondary-color);
+
+    .form-select {
+      inline-size: auto;
+      max-inline-size: 9rem;
+      padding-block: .1rem;
+      font-size: .6875rem;
+    }
+  }
+
+  .validation-field__remove {
+    display: inline-flex;
+    align-items: center;
+    margin-inline-start: auto;
+    padding: 0;
+    font-size: .6875rem;
+    text-decoration: none;
+
+    &:hover,
+    &:focus-visible {
+      text-decoration: underline;
+    }
   }
 }
 

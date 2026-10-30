@@ -108,9 +108,14 @@ Route::middleware('auth')->group(function () {
         Route::put('documents/pages/{page}/lines/{line}', [DocumentPageController::class, 'updateLine'])
             ->scopeBindings()
             ->name('documents.pages.lines.update');
-        // Draw a line by hand where the detector found none.
+        // Draw a line by hand where the detector found none (Align after
+        // Detect, or Verify's "Add missed field", which reads it at once).
         Route::post('documents/pages/{page}/lines', [DocumentPageController::class, 'storeLine'])
             ->name('documents.pages.lines.store');
+        // Move a ledger line to another person's row or another column.
+        Route::patch('documents/pages/{page}/lines/{line}/place', [DocumentPageController::class, 'placeLine'])
+            ->scopeBindings()
+            ->name('documents.pages.lines.place');
         // Remove one line before it is read: a stray mark, a wrongly split
         // word, or one that does not belong. Only while Detect's result stands.
         // It is kept, with its crop, until the page is outlined again, so

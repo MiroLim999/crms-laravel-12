@@ -17,12 +17,8 @@
             <div class="field-marker-document-pane">
                 <x-card class="document-canvas-card" bodyClass="p-0">
                     <div class="marker-toolbar">
+                        {{-- The file's name is in the top bar, beside the document type. --}}
                         <div class="marker-toolbar__primary">
-                            <span class="document-file-chip" title="Current document">
-                                <i class="icon-base bx bx-file"></i>
-                                <span id="selectedFileName">Document</span>
-                            </span>
-                            <span class="marker-toolbar__divider" aria-hidden="true"></span>
                             <div class="btn-group marker-zoom-controls" role="group" aria-label="Document zoom controls">
                                 <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="zoomOutBtn"
                                         aria-label="Zoom out">
@@ -95,16 +91,7 @@
                                 <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
                                 <span>Reset</span>
                             </button>
-
-                            <span class="marker-selection-summary" id="selectionSummary">
-                                <i class="icon-base bx bx-check-circle"></i>
-                                <span>0 selected</span>
-                            </span>
-                            <button type="button" class="btn btn-sm btn-outline-danger marker-delete-button"
-                                    id="deleteSelectedBtn" disabled>
-                                <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
-                                <span>Delete</span>
-                            </button>
+                            {{-- Selecting and deleting fields: Select all and Delete in the Fields card. --}}
                         </div>
                     </div>
 
@@ -135,84 +122,11 @@
                 </div>
 
                 {{--
-                    A ledger's grid on this page: the rows start as the template's,
-                    Snap to table takes them from the page, and Staff can add, move
-                    or remove rows and columns here. The template is not changed.
-                --}}
-                @if (count($ruledYs) >= 2)
-                    {{--
-                        Closed at first: a click anywhere on the header but the ?
-                        opens and closes it (the title button, for the keyboard).
-                        The ? sits by the title, away from the arrow.
-                    --}}
-                    <div class="card mb-4 card-disclosure document-grid-card">
-                        <div class="card-header d-flex align-items-center gap-1 position-relative card-disclosure__header" id="gridCardHeader">
-                            <h5 class="card-title mb-0">
-                                <button type="button" class="btn btn-link card-disclosure__toggle" id="gridCardToggle"
-                                        aria-expanded="false" aria-controls="gridCardBody">
-                                    Rows and Columns
-                                </button>
-                            </h5>
-                            {{-- Shown on hover, and on focus for the keyboard and a tap. --}}
-                            <div class="card-help">
-                                <button type="button" class="btn btn-link card-help__toggle"
-                                        aria-label="Rows and Columns tips" aria-describedby="gridTips">
-                                    <i class="icon-base bx bx-help-circle" aria-hidden="true"></i>
-                                </button>
-                                <div class="card-help__tips" id="gridTips" role="tooltip">
-                                    <strong>Tips</strong>
-                                    <ul>
-                                        <li>Drag a row line by the dot at either end. Hold <kbd>Shift</kbd> to move all lines.</li>
-                                        <li>To remove a column, select it and press <kbd>Delete</kbd>.</li>
-                                        <li>Stretch a new field down two or more rows, between columns, to read it as a column.</li>
-                                    </ul>
-                                </div>
-                            </div>
-                            <i class="icon-base bx bx-chevron-down card-disclosure__chevron" aria-hidden="true"></i>
-                        </div>
-
-                        <div class="card-disclosure__body" id="gridCardBody" hidden>
-                            <div class="card-body">
-                                <div class="document-grid-card__line">
-                                    <span class="document-grid-card__label" id="gridRowsLabel">Rows</span>
-                                    <div class="btn-group btn-group-sm" role="group" aria-labelledby="gridRowsLabel">
-                                        <button type="button" class="btn btn-outline-secondary" id="removeRowBtn"
-                                                title="Remove the last row" aria-label="Remove a row">
-                                            <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i>
-                                        </button>
-                                        <span class="document-grid-card__count" id="gridRowCount" aria-live="polite">0</span>
-                                        <button type="button" class="btn btn-outline-secondary" id="addRowBtn"
-                                                title="Add a row line under the selected one, or a row at the bottom"
-                                                aria-label="Add a row">
-                                            <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="document-grid-card__line">
-                                    {{-- The button says "Add column": the box can use the label's room. --}}
-                                    <label class="visually-hidden" for="newColumnName">New column name</label>
-                                    <div class="input-group input-group-sm">
-                                        <input type="text" id="newColumnName" class="form-control" placeholder="e.g. Remarks"
-                                               maxlength="500">
-                                        <button class="btn btn-outline-primary" type="button" id="addColumnBtn"
-                                                title="A column down the table, read once per row. It splits the selected column in two, or goes at the right of the table (with no columns, over the table)">
-                                            Add column
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <p class="document-grid-card__source d-none" id="gridSource" aria-live="polite"></p>
-                                {{-- Why a row or column could not be added: here, where the buttons are. --}}
-                                <p class="document-grid-card__message text-danger small d-none" id="gridMessage" role="alert"></p>
-                            </div>
-                        </div>
-                    </div>
-                @endif
-
-                {{--
-                    The fields to read, in order. The tip is behind the ?, as on
-                    the Rows and Columns card.
+                    The fields to read, in order. On a ledger page the table's
+                    rows are set here too: they start as the template's, Snap
+                    to table takes them from the page, and Staff can add, move
+                    or remove rows and columns. The template is not changed.
+                    The tips are behind the ?.
                 --}}
                 <div class="card mb-4 document-fields-card">
                     <div class="card-header d-flex align-items-center gap-1 position-relative">
@@ -228,15 +142,38 @@
                                     <li>Keep each box tight around the handwriting. Loose boxes pick up neighbouring text and read badly.</li>
                                     <li>Click a name to select its box on the page. <kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>A</kbd> selects them all.</li>
                                     @if (count($ruledYs) >= 2)
-                                        <li>A field is read once. For something on every row of the table, use Add column in Rows and Columns.</li>
+                                        <li>+ Field is read once (e.g. Page No.). + Column is read on every row (e.g. Remarks).</li>
+                                        <li>Stretch a new field down two or more rows, between columns, to read it as a column.</li>
                                     @endif
                                 </ul>
                             </div>
                         </div>
-                        <span class="badge bg-label-primary ms-auto" id="fieldCount">0 fields</span>
+                        <span class="badge bg-label-primary ms-auto" id="fieldCount" aria-live="polite">0 fields</span>
                     </div>
 
                     <div class="card-body">
+                        @if (count($ruledYs) >= 2)
+                            <div class="document-grid-card document-rows-control">
+                                <div class="document-grid-card__line">
+                                    <span class="document-grid-card__label" id="gridRowsLabel">Rows</span>
+                                    <div class="btn-group btn-group-sm" role="group" aria-labelledby="gridRowsLabel">
+                                        <button type="button" class="btn btn-outline-secondary" id="removeRowBtn"
+                                                title="Remove the last row" aria-label="Remove a row">
+                                            <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i>
+                                        </button>
+                                        <span class="document-grid-card__count" id="gridRowCount" aria-live="polite">0</span>
+                                        <button type="button" class="btn btn-outline-secondary" id="addRowBtn"
+                                                title="Add a row line under the selected one, or a row at the bottom"
+                                                aria-label="Add a row">
+                                            <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                {{-- Only when a row line has no printed line under it. --}}
+                                <p class="document-grid-card__source d-none" id="gridSource" aria-live="polite"></p>
+                            </div>
+                        @endif
+
                         <div class="marker-field-bulk-actions">
                             <div class="form-check mb-0">
                                 <input class="form-check-input" type="checkbox" id="selectAllFields">
@@ -250,12 +187,26 @@
 
                         <ul class="list-unstyled marker-field-list" id="fieldList"></ul>
 
-                        <label class="visually-hidden" for="newFieldName">New field name</label>
-                        <div class="input-group input-group-sm">
-                            <input type="text" id="newFieldName" class="form-control" placeholder="e.g. Page No."
-                                   maxlength="500">
-                            <button class="btn btn-outline-primary" type="button" id="addFieldBtn"
-                                    title="One box, read once. Drag it onto the value on the page">Add field</button>
+                        {{-- One name box: + Field reads it once, + Column on every row of the table. --}}
+                        <div class="field-add">
+                            <label class="visually-hidden" for="newFieldName">New field or column name</label>
+                            <div class="input-group input-group-sm">
+                                <input type="text" id="newFieldName" class="form-control"
+                                       placeholder="{{ count($ruledYs) >= 2 ? 'New name' : 'e.g. Page No.' }}"
+                                       maxlength="500">
+                                <button class="btn btn-outline-primary" type="button" id="addFieldBtn"
+                                        title="A field: one box, read once (e.g. Page No.). Drag it onto the value on the page">
+                                    <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>Field
+                                </button>
+                                @if (count($ruledYs) >= 2)
+                                    <button class="btn btn-outline-primary" type="button" id="addColumnBtn"
+                                            title="A column down the table, read once per row (e.g. Remarks). It splits the selected column in two, or goes at the right of the table (with no columns, over the table)">
+                                        <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>Column
+                                    </button>
+                                @endif
+                            </div>
+                            {{-- Why a field, column or row could not be added: here, where the buttons are. --}}
+                            <p class="field-add__message text-danger small d-none" id="fieldAddMessage" role="alert"></p>
                         </div>
                     </div>
                 </div>
@@ -421,20 +372,41 @@
                                 <span class="validation-file-name" id="validationFileName">Document</span>
                             </div>
 
-                            <div class="btn-group marker-zoom-controls" role="group"
-                                 aria-label="Original document zoom controls">
-                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="validationZoomOutBtn"
-                                        aria-label="Zoom out">
-                                    <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i>
+                            <div class="validation-pane__tools">
+                                {{-- Writing the line detector missed: TrOCR reads a box drawn over it. --}}
+                                <button type="button" class="btn btn-sm btn-outline-primary validation-add-field"
+                                        id="addMissedFieldBtn" aria-pressed="false"
+                                        title="Drag a box over writing that has no reading. TrOCR reads that box alone.">
+                                    <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i><span>Add missed field</span>
                                 </button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary marker-tool-button marker-zoom-value"
-                                        id="validationZoomResetBtn" title="Fit document to panel">100%</button>
-                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="validationZoomInBtn"
-                                        aria-label="Zoom in">
-                                    <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
-                                </button>
+                                <div class="btn-group marker-zoom-controls" role="group"
+                                     aria-label="Original document zoom controls">
+                                    <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="validationZoomOutBtn"
+                                            aria-label="Zoom out">
+                                        <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary marker-tool-button marker-zoom-value"
+                                            id="validationZoomResetBtn" title="Fit document to panel">100%</button>
+                                    <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="validationZoomInBtn"
+                                            aria-label="Zoom in">
+                                        <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
+                                    </button>
+                                </div>
                             </div>
                         </header>
+
+                        {{-- Shown while a box is drawn for Add missed field. --}}
+                        <div class="line-edit-toolbar add-field-toolbar d-none" id="addFieldToolbar" role="toolbar"
+                             aria-label="Add missed field">
+                            <div class="line-edit-toolbar__copy">
+                                <strong>Add missed field</strong>
+                                <span>Drag a box over writing that has no reading.</span>
+                            </div>
+                            <div class="line-edit-toolbar__actions">
+                                <button type="button" class="btn btn-sm btn-label-secondary" id="addFieldCancel">Cancel</button>
+                            </div>
+                            <div class="line-edit-toolbar__status" id="addFieldStatus" role="status" aria-live="polite"></div>
+                        </div>
 
                         {{-- Shown while a reviewer redraws one line's outline. --}}
                         <div class="line-edit-toolbar d-none" id="lineEditToolbar" role="toolbar"
@@ -732,6 +704,7 @@
         flagExplanation,
         FLAG_NO_ROW,
         geometryMarkers,
+        SOURCE_MANUAL,
         gridNotes,
         snapRowsMessage,
         verificationItems,
@@ -770,6 +743,7 @@
         lineDeleteUrl: @json(route('documents.pages.lines.destroy', ['page' => '__PAGE__', 'line' => '__LINE__'])),
         lineRestoreUrl: @json(route('documents.pages.lines.restore', ['page' => '__PAGE__', 'line' => '__LINE__'])),
         lineStoreUrl: @json(route('documents.pages.lines.store', ['page' => '__PAGE__'])),
+        linePlaceUrl: @json(route('documents.pages.lines.place', ['page' => '__PAGE__', 'line' => '__LINE__'])),
         pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
         csrf: @json(csrf_token()),
         // The layout's page shape (width : height), from its sample.
@@ -808,6 +782,8 @@
     let readings = [];
     let processedPage = null;
     let editingLineIndex = null;
+    // Verify's Add missed field: a box is being drawn, or is being read.
+    let addingMissedField = false;
     let fieldHistory = [];
     let currentFieldSnapshot = null;
     let restoringFieldHistory = false;
@@ -856,6 +832,11 @@
         onSelect: (index) => activateValidationField(index, 'marker'),
         onModeChange: (mode) => showVerifyLineMode(mode),
         onDraftChange: (points) => showVerifyDraft(points),
+        // Only a new box (Add missed field) arrives here finished and with no
+        // line being edited; a redrawn outline is saved by Save and re-read.
+        onEdit: (polygon, final) => {
+            if (final && addingMissedField && !lineOverlay.editing) addMissedField(polygon);
+        },
     });
 
     // Detect's preview in the Align step: outlines and fitted row lines over
@@ -1099,13 +1080,13 @@
     }
 
     /**
-     * Why a row or column could not be added, in the Rows and Columns card beside
-     * its buttons: below the Fields card, it was out of sight, and the button
-     * seemed to do nothing. null clears it.
+     * Why a field, column or row could not be added, under the name box in the
+     * Fields card: further down, it was out of sight, and the button seemed to
+     * do nothing. null clears it.
      */
     function showGridMessage(message) {
-        el('gridMessage').textContent = message ?? '';
-        el('gridMessage').classList.toggle('d-none', !message);
+        el('fieldAddMessage').textContent = message ?? '';
+        el('fieldAddMessage').classList.toggle('d-none', !message);
     }
 
     /** A row line under the selected one (half way to the next), or a row at the bottom. */
@@ -1136,11 +1117,11 @@
      * at the right of the table. Its cells are read under the name they give it.
      */
     function addLedgerColumn() {
-        const input = el('newColumnName');
+        const input = el('newFieldName');
         const name = input.value.trim();
         const boxes = marker.toJSON();
         if (!name) {
-            showGridMessage('Type the new column’s name first.');
+            showGridMessage('Type the new column’s name in the box first.');
             input.focus();
             return;
         }
@@ -1185,17 +1166,19 @@
         return { x, y: top, w: Math.min(w, 1 - x), h: bottom - top };
     }
 
-    /** The Rows and Columns card: how many rows, and where they came from. */
+    /**
+     * The Rows line in the Fields card: how many rows, and a note only when
+     * there is something to check (amber lines, or Snap kept the template's rows).
+     */
     function updateGridCard(boxes = marker.toJSON()) {
         if (!isLedger) return;
         const columns = ledgerColumns(boxes).length;
         el('gridRowCount').textContent = String(Math.max(0, gridRows.length - 1));
 
-        const message = rowsByHand
-            ? `Rows set by hand: Detect keeps them.${estimatedRows.size > 0
-                ? ` ${estimatedRows.size} amber ${estimatedRows.size === 1 ? 'line has' : 'lines have'} no printed line under ${estimatedRows.size === 1 ? 'it' : 'them'}.` : ''}`
+        const message = !rowsByHand && rowsSource && !rowsSource.from_page
             // Compared with the template itself, not the grid Snap was sent.
-            : snapRowsMessage(rowsSource && { ...rowsSource, template: templateRows.length - 1 }, estimatedRows.size);
+            ? snapRowsMessage({ ...rowsSource, template: templateRows.length - 1 }, estimatedRows.size)
+            : snapRowsMessage(null, estimatedRows.size);
         el('gridSource').textContent = message;
         el('gridSource').classList.toggle('d-none', message === '');
 
@@ -2188,9 +2171,7 @@
         pasteSequence = 0;
 
         const count = markerClipboard.length;
-        if (count > 0) {
-            el('selectionSummary').querySelector('span').textContent = `${count} copied`;
-        }
+        if (count > 0) flashFieldCount(`${count} copied`);
     }
 
     function nextCopyName(name, takenNames) {
@@ -2321,7 +2302,6 @@
             const measurement = await marker.load(file);
             scanPageCount = Number(measurement?.pageCount) || 1;
             updateScanNotices();
-            el('selectedFileName').textContent = file.name;
             el('workspaceContextDetail').textContent = `${config.typeLabel} · ${file.name}`;
             el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
             showStep('mark');
@@ -2487,7 +2467,7 @@
             list.appendChild(li);
         });
 
-        el('fieldCount').textContent = `${boxes.length} field${boxes.length === 1 ? '' : 's'}`;
+        showFieldCount(boxes);
         selectAllFieldsInput.disabled = boxes.length === 0;
         const constraintMessage = markerSetValidationMessage(boxes);
         el('scanNowBtn').disabled = boxes.length === 0 || constraintMessage !== null;
@@ -2503,6 +2483,28 @@
             clearOcrError();
         }
         updateSelectionUI(marker.selectedIndexes());
+    }
+
+    /** "11 columns", "11 columns · 2 fields" or "3 fields" in the Fields header. */
+    function fieldCountText(boxes = marker.toJSON()) {
+        const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+        const columns = ledgerColumns(boxes).length;
+        const fields = boxes.length - columns;
+        if (columns === 0) return plural(fields, 'field');
+        return fields > 0 ? `${plural(columns, 'column')} · ${plural(fields, 'field')}` : plural(columns, 'column');
+    }
+
+    let fieldCountFlash = null;
+    function showFieldCount(boxes = marker.toJSON()) {
+        window.clearTimeout(fieldCountFlash);
+        el('fieldCount').textContent = fieldCountText(boxes);
+    }
+
+    /** A short note in the Fields header ("3 copied"), then the count again. */
+    function flashFieldCount(text) {
+        window.clearTimeout(fieldCountFlash);
+        el('fieldCount').textContent = text;
+        fieldCountFlash = window.setTimeout(() => showFieldCount(), 1600);
     }
 
     function markerSetValidationMessage(boxes) {
@@ -2576,12 +2578,8 @@
 
         const count = indexes.length;
         const total = marker.toJSON().length;
-        const summary = el('selectionSummary');
-        summary.querySelector('span').textContent = `${count} selected`;
-        summary.classList.toggle('is-active', count > 0);
         selectAllFieldsInput.checked = total > 0 && count === total;
         selectAllFieldsInput.indeterminate = count > 0 && count < total;
-        el('deleteSelectedBtn').disabled = count === 0;
         el('deleteFieldsBtn').disabled = count === 0;
 
         if (context.source === 'marker' && Number.isInteger(context.activeIndex)) {
@@ -2633,7 +2631,6 @@
         window.bootstrap.Modal.getInstance(el('resetFieldsModal'))?.hide();
         restoreTemplateFields();
     });
-    el('deleteSelectedBtn').addEventListener('click', () => marker.removeSelected());
     el('deleteFieldsBtn').addEventListener('click', () => marker.removeSelected());
     selectAllFieldsInput.addEventListener('change', (event) => {
         if (event.target.checked) {
@@ -2725,52 +2722,44 @@
     el('addFieldBtn').addEventListener('click', () => {
         const input = el('newFieldName');
         const name = input.value.trim();
-        if (!name) return;
+        if (!name) {
+            showGridMessage('Type the new field’s name in the box first.');
+            input.focus();
+            return;
+        }
 
         const boxes = marker.toJSON();
         if (boxes.length >= config.maxFields) {
-            showOcrError(`You can use at most ${config.maxFields} fields. Delete a marker before adding another one.`);
+            showGridMessage(`You can use at most ${config.maxFields} fields. Delete a marker before adding another one.`);
             return;
         }
         if (name.length > config.maxFieldNameLength) {
-            showOcrError(`Field names must not exceed ${config.maxFieldNameLength} characters.`);
+            showGridMessage(`Field names must not exceed ${config.maxFieldNameLength} characters.`);
             return;
         }
         if (boxes.some((box) => box.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
-            showOcrError('Field names must be unique. Choose a different name.');
+            showGridMessage('Every field and column needs its own name. Choose a different name.');
             return;
         }
 
+        showGridMessage(null);
         marker.addBox(name);
         input.value = '';
         input.focus();
     });
+    // Enter adds a field; on a ledger page, a column is added with its button.
     el('newFieldName').addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
             event.preventDefault();
             el('addFieldBtn').click();
         }
     });
+    el('newFieldName').addEventListener('input', () => showGridMessage(null));
 
     if (isLedger) {
-        // The Rows and Columns card starts closed; its header slides it open and
-        // shut (the title button's click arrives here too). The ? only shows tips.
-        el('gridCardHeader').addEventListener('click', (event) => {
-            if (event.target.closest('.card-help')) return;
-            const expanded = el('gridCardToggle').getAttribute('aria-expanded') !== 'true';
-            el('gridCardToggle').setAttribute('aria-expanded', String(expanded));
-            el('gridCardHeader').classList.toggle('is-expanded', expanded);
-            setDisclosureExpanded(el('gridCardBody'), expanded);
-        });
         el('addRowBtn').addEventListener('click', () => addRow());
         el('removeRowBtn').addEventListener('click', () => removeRow());
         el('addColumnBtn').addEventListener('click', () => addLedgerColumn());
-        el('newColumnName').addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                addLedgerColumn();
-            }
-        });
         // A click on the page around the markers lets go of the row line.
         markerOverlay.addEventListener('pointerdown', (event) => {
             if (event.target === markerOverlay && selectedRow !== null) selectRow(null);
@@ -2778,6 +2767,7 @@
     }
 
     el('backToMark').addEventListener('click', () => {
+        stopAddingMissedField();
         cancelOutlineEdit();
         clearValidationSubmitError();
         showStep('mark');
@@ -3773,6 +3763,7 @@
         }
 
         activeValidationIndex = null;
+        stopAddingMissedField();
         target.width = source.width;
         target.height = source.height;
         context.fillStyle = '#ffffff';
@@ -4127,6 +4118,10 @@
             startOutlineEdit(index);
         });
 
+        // A field the reviewer added, or one between two rows: its person, column, Remove.
+        const placement = fieldPlacementControls(index);
+        if (placement) requiredPart(row, '.validation-field__reading').after(placement);
+
         const explanation = flagExplanation(item.flags ?? []);
         if (explanation) {
             row.classList.add('has-line-flag');
@@ -4246,7 +4241,7 @@
             const note = document.createElement('div');
             note.className = 'validation-record-group__missing';
             note.textContent = `Nothing was read for ${missing.join(', ')}. If the page has ${missing.length === 1 ? 'it' : 'them'}, `
-                + 'go back to Align and check the outlines; if the register leaves it blank, carry on.';
+                + 'use Add missed field above the original document and drag a box over it; if the register leaves it blank, carry on.';
             body.appendChild(note);
         }
         if (group.kind === 'person') {
@@ -4350,6 +4345,7 @@
 
     function startOutlineEdit(index) {
         if (!processedPage || !cropped[index]) return;
+        stopAddingMissedField();
         cancelOutlineEdit();
 
         editingLineIndex = index;
@@ -4441,20 +4437,32 @@
      * Verify list, keeping every other field's typed value and check.
      */
     function applyLineUpdate(line, flagsById) {
+        rebuildVerifyLines(
+            processedPage.lines.map((candidate) => (candidate.id === line.id ? line : candidate)),
+            flagsById,
+            { focusLineId: line.id, freshLineId: line.id, focusFrom: 'row' },
+        );
+    }
+
+    /**
+     * Show the page's lines again after one was added, moved, re-read or
+     * removed. Every field keeps what the reviewer typed and checked, except
+     * `freshLineId`, which shows its new reading.
+     */
+    function rebuildVerifyLines(lines, flagsById = {}, { focusLineId = null, freshLineId = null, focusFrom = 'marker' } = {}) {
         const kept = new Map();
         cropped.forEach((item, index) => {
             const row = validationRow(index);
-            if (!row || item.lineId === line.id) return;
+            if (!row || item.lineId === freshLineId) return;
             kept.set(item.lineId, {
                 value: requiredInput(row, '.verified').value,
                 verified: requiredInput(row, '.validation-verified').checked,
             });
         });
 
-        processedPage.lines = processedPage.lines.map((candidate) => {
-            const next = candidate.id === line.id ? line : candidate;
-            const flags = flagsById[next.id];
-            return Array.isArray(flags) ? { ...next, flags } : next;
+        processedPage.lines = lines.map((candidate) => {
+            const flags = flagsById[candidate.id];
+            return Array.isArray(flags) ? { ...candidate, flags } : candidate;
         });
         cropped = verificationItems(processedPage.lines, processedPage);
         readings = cropped.map((item) => item.reading);
@@ -4471,9 +4479,195 @@
         lineOverlay.setLines(processedPage, cropped);
         updateVerificationSummary();
 
-        const index = cropped.findIndex((item) => item.lineId === line.id);
-        if (index >= 0) activateValidationField(index, 'row');
+        const index = cropped.findIndex((item) => item.lineId === focusLineId);
+        if (index >= 0) activateValidationField(index, focusFrom);
     }
+
+    // ------------------------------------------------------ add missed field
+    // Writing the line detector missed: the reviewer drags a box over it, the
+    // server crops that box, places it in its person's row and column, and
+    // TrOCR reads it alone. Nothing else on the page is read again.
+
+    function verifyLineUrl(template, lineId) {
+        return template
+            .replace('__PAGE__', String(processedPage?.id ?? ''))
+            .replace('__LINE__', String(lineId));
+    }
+
+    async function sendLineRequest(url, method, body = null) {
+        const response = await fetch(url, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        const payload = (response.headers.get('content-type') || '').includes('application/json')
+            ? await response.json()
+            : null;
+        return { response, payload };
+    }
+
+    function showAddFieldStatus(message, isError = false) {
+        const status = el('addFieldStatus');
+        status.textContent = message;
+        status.title = message;
+        status.classList.toggle('is-error', isError);
+    }
+
+    function startAddingMissedField() {
+        if (!processedPage || recordSubmitting) return;
+        cancelOutlineEdit();
+        addingMissedField = true;
+        el('addMissedFieldBtn').classList.add('active');
+        el('addMissedFieldBtn').setAttribute('aria-pressed', 'true');
+        el('addFieldToolbar').classList.remove('d-none');
+        showAddFieldStatus('TrOCR reads the box alone. Esc cancels.');
+        lineOverlay.beginDraw('rectangle');
+    }
+
+    function stopAddingMissedField() {
+        if (!addingMissedField) return;
+        addingMissedField = false;
+        if (lineOverlay.isAddingNew()) lineOverlay.cancelEdit();
+        el('addMissedFieldBtn').classList.remove('active');
+        el('addMissedFieldBtn').setAttribute('aria-pressed', 'false');
+        el('addMissedFieldBtn').disabled = false;
+        el('addFieldToolbar').classList.add('d-none');
+    }
+
+    async function addMissedField(polygon) {
+        el('addMissedFieldBtn').disabled = true;
+        showAddFieldStatus('Reading the box…');
+        try {
+            const { response, payload } = await sendLineRequest(
+                config.lineStoreUrl.replace('__PAGE__', String(processedPage.id)), 'POST', { polygon },
+            );
+            if (!payload?.line) throw new Error(responseErrorMessage(response, payload));
+
+            stopAddingMissedField();
+            rebuildVerifyLines([...processedPage.lines, payload.line], payload.flags ?? {},
+                { focusLineId: payload.line.id, freshLineId: payload.line.id });
+            if (!response.ok) {
+                showOcrLineWarning(payload.line.id, payload.message || 'The box was added, but TrOCR could not read it. Type the value.');
+            }
+            const index = cropped.findIndex((item) => item.lineId === payload.line.id);
+            const row = index >= 0 ? validationRow(index) : null;
+            if (row) requiredInput(row, '.verified').focus({ preventScroll: true });
+        } catch (error) {
+            // Keep drawing: the reviewer can try again, or press Esc.
+            el('addMissedFieldBtn').disabled = false;
+            showAddFieldStatus(error.message || 'The box could not be read. Try again.', true);
+            if (addingMissedField) lineOverlay.beginDraw('rectangle');
+        }
+    }
+
+    /** Move a field to another person (row) or column. Its value and check stay. */
+    async function placeVerifyLine(index, columnIndex, row) {
+        const item = cropped[index];
+        if (!item) return;
+        try {
+            const { response, payload } = await sendLineRequest(
+                verifyLineUrl(config.linePlaceUrl, item.lineId), 'PATCH', { column_index: columnIndex, row },
+            );
+            if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
+            rebuildVerifyLines(
+                processedPage.lines.map((candidate) => (candidate.id === payload.line.id ? payload.line : candidate)),
+                payload.flags ?? {},
+                { focusLineId: payload.line.id },
+            );
+        } catch (error) {
+            setValidationFieldError(index, error.message || 'The field could not be moved.');
+        }
+    }
+
+    /** Take out a field the reviewer added, or one that fell between two rows. */
+    async function removeVerifyLine(index) {
+        const item = cropped[index];
+        if (!item) return;
+        try {
+            const { response, payload } = await sendLineRequest(verifyLineUrl(config.lineDeleteUrl, item.lineId), 'DELETE');
+            if (!response.ok) throw new Error(responseErrorMessage(response, payload));
+            rebuildVerifyLines(processedPage.lines.filter((line) => line.id !== item.lineId), payload?.flags ?? {});
+        } catch (error) {
+            setValidationFieldError(index, error.message || 'The field could not be removed.');
+        }
+    }
+
+    /**
+     * Person, Column and Remove under a field the reviewer added, or one that
+     * fell between two rows. The others are moved with Adjust outline.
+     */
+    function fieldPlacementControls(index) {
+        const item = cropped[index];
+        const added = item?.source === SOURCE_MANUAL;
+        if (!item || !(added || item.flags.includes(FLAG_NO_ROW))) return null;
+
+        const columns = processedPage?.geometry?.columns ?? [];
+        const rows = Math.max(0, (processedPage?.geometry?.ruled_ys?.length ?? 0) - 1);
+        const ledger = columns.length > 0 && rows > 0 && !['template', 'field'].includes(item.source);
+
+        const controls = document.createElement('div');
+        controls.className = 'validation-field__place';
+        if (added) {
+            const badge = document.createElement('span');
+            badge.className = 'badge bg-label-primary validation-field__added';
+            badge.textContent = 'Added';
+            controls.append(badge);
+        }
+
+        const pick = (label, options, selected) => {
+            const wrap = document.createElement('label');
+            wrap.className = 'validation-field__pick';
+            const text = document.createElement('span');
+            text.textContent = label;
+            const select = document.createElement('select');
+            select.className = 'form-select form-select-sm';
+            select.append(new Option('Choose…', ''), ...options.map(([value, name]) => new Option(name, String(value))));
+            select.value = selected === null ? '' : String(selected);
+            select.addEventListener('click', (event) => event.stopPropagation());
+            wrap.append(text, select);
+            controls.append(wrap);
+            return select;
+        };
+
+        if (ledger) {
+            const person = pick('Person',
+                Array.from({ length: rows }, (_, row) => [row + 1, String(row + 1).padStart(2, '0')]), item.gridRow);
+            const column = pick('Column', columns.map((candidate, columnIndex) => [columnIndex, candidate.name]), item.gridColumn);
+            const place = () => {
+                if (person.value === '' || column.value === '') return;
+                placeVerifyLine(index, Number(column.value), Number(person.value));
+            };
+            person.addEventListener('change', place);
+            column.addEventListener('change', place);
+        }
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'btn btn-sm btn-link text-danger validation-field__remove';
+        remove.innerHTML = '<i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>Remove';
+        remove.setAttribute('aria-label', `Remove ${item.heading || item.label}`);
+        remove.addEventListener('click', (event) => {
+            event.stopPropagation();
+            remove.disabled = true;
+            removeVerifyLine(index);
+        });
+        controls.append(remove);
+        return controls;
+    }
+
+    el('addMissedFieldBtn').addEventListener('click', () => (addingMissedField ? stopAddingMissedField() : startAddingMissedField()));
+    el('addFieldCancel').addEventListener('click', stopAddingMissedField);
+    document.addEventListener('keydown', (event) => {
+        if (!addingMissedField || event.key !== 'Escape') return;
+        event.preventDefault();
+        stopAddingMissedField();
+    });
 
     document.querySelectorAll('input[name="verifyLineMode"]').forEach((input) => {
         input.addEventListener('change', () => {
