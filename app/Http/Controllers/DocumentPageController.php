@@ -126,7 +126,7 @@ class DocumentPageController extends Controller
             // Where the row lines came from: the page's printed rows, or
             // (with a reason) the template's; and which have no printed line.
             'rows' => $result['fit']['rows'] ?? null,
-            'lines' => $result['lines'] ?? ['vertical' => [], 'horizontal' => [], 'horizontal_spans' => []],
+            'lines' => $result['lines'] ?? ['vertical' => [], 'horizontal' => []],
         ]);
     }
 

@@ -2373,11 +2373,6 @@ def detect_grid(page):
     return {
         "size": [width, height],
         "horizontal": [round((r["a"] + r["b"] * centre) / height, 5) for r in h_rules],
-        # Where each horizontal rule runs, [x0, y0, x1, y1]: Detect rows takes
-        # only the rules that cross the selected column.
-        "horizontal_spans": [[round(r["lo"] / width, 5), round((r["a"] + r["b"] * r["lo"]) / height, 5),
-                              round(r["hi"] / width, 5), round((r["a"] + r["b"] * r["hi"]) / height, 5)]
-                             for r in h_rules],
         "vertical": [round((r["a"] + r["b"] * height / 2) / width, 5) for r in v_rules],
         "suggestion": suggestion,
     }
@@ -2975,8 +2970,7 @@ def snap_page(page_path, geometry):
         "size": list(image.size),
         "fit": fit,
         "geometry": fitted,
-        "lines": {"vertical": found["vertical"], "horizontal": found["horizontal"],
-                  "horizontal_spans": found["horizontal_spans"]},
+        "lines": {"vertical": found["vertical"], "horizontal": found["horizontal"]},
     }
 
 

@@ -229,54 +229,6 @@ export function addColumn(boxes, column, selected = null, first = null) {
     return { boxes: next, index: next.length - 1 };
 }
 
-/** How far short of a column a printed rule may stop and still be its row line. */
-const RULE_REACH = 0.1;
-
-/**
- * The row lines printed down one column: the horizontal rules that cross it,
- * from just above its top to just below its bottom. The rule finder loses a
- * faded rule's ends, most of all at the page's edges, so a rule that stops a
- * little short of the column (RULE_REACH) still counts, read on along its
- * slope. A rule the
- * page lost (faded, or never printed) is put back where the rhythm says it
- * was, when the gap is a whole number of rows; a taller gap that is not (a
- * header band) is left as it is.
- *
- * @param {object} column  {x, y, w, h}, page fractions.
- * @param {number[][]} spans  Printed rules as [x0, y0, x1, y1], page fractions.
- * @returns {{ys: number[], estimated: number[]}|null} the lines top to bottom,
- *          and the indexes of those put back; null with fewer than two lines
- */
-export function rowsInColumn(column, spans, reach = 0.01) {
-    const middle = column.x + column.w / 2;
-    const crossing = (spans ?? []).flatMap(([x0, y0, x1, y1]) => {
-        if (x0 > middle + RULE_REACH || x1 < middle - RULE_REACH) return [];
-        const y = x1 > x0 ? y0 + ((y1 - y0) * (middle - x0)) / (x1 - x0) : y0;
-        return y >= column.y - reach && y <= column.y + column.h + reach ? [y] : [];
-    });
-    const printed = tidy(crossing).filter((y, index, all) => index === 0 || y - all[index - 1] > 0.003);
-    if (printed.length < 2) return null;
-
-    // A row's height from the shortest gaps: lost rules and a header band only
-    // ever make a gap taller.
-    const gaps = printed.slice(1).map((y, index) => y - printed[index]);
-    const pitch = median(gaps.filter((gap) => gap <= 1.25 * Math.min(...gaps)));
-    const ys = [printed[0]];
-    const estimated = [];
-    printed.slice(1).forEach((y) => {
-        const above = ys[ys.length - 1];
-        const rows = Math.round((y - above) / pitch);
-        if (rows >= 2 && Math.abs(y - above - rows * pitch) <= 0.15 * pitch) {
-            for (let k = 1; k < rows; k += 1) {
-                estimated.push(ys.length);
-                ys.push(above + ((y - above) * k) / rows);
-            }
-        }
-        ys.push(y);
-    });
-    return { ys, estimated };
-}
-
 /** How much of a field's width may lie over the table's columns for it to become one. */
 const COLUMN_OVERLAP = 0.25;
 

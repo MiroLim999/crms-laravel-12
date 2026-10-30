@@ -14,7 +14,6 @@ import {
     MIN_ROW_GAP,
     nearestLine,
     remapRuledYs,
-    rowsInColumn,
     shiftRuledYs,
 } from '../../resources/js/ledger-grid.js';
 
@@ -138,36 +137,6 @@ test('with no columns left, the first one goes where it is told', () => {
     assert.equal(added.index, 1);
     assert.equal(added.boxes[0], field);
     assert.deepEqual(added.boxes[1], { x: 0.05, y: 0.2, w: 0.1, h: 0.6, name: 'Entry No.', kind: 'column' });
-});
-
-test('detect rows takes the printed rules that cross the column, inside its band', () => {
-    const across = (y) => [0.05, y, 0.95, y];
-    const spans = [
-        across(0.1), // the title rule, above the column
-        across(0.2), across(0.3), across(0.4), across(0.5),
-        [0.6, 0.35, 0.9, 0.35], // a rule beside the column, not across it
-        across(0.95), // the footer, below the column
-    ];
-    const found = rowsInColumn({ x: 0.1, y: 0.2, w: 0.1, h: 0.3 }, spans);
-
-    close(found.ys, [0.2, 0.3, 0.4, 0.5]);
-    assert.deepEqual(found.estimated, []);
-});
-
-test('detect rows reads a tilted rule where it crosses the column', () => {
-    const spans = [[0, 0.2, 1, 0.22], [0, 0.3, 1, 0.32]];
-    close(rowsInColumn({ x: 0.45, y: 0.2, w: 0.1, h: 0.12 }, spans).ys, [0.21, 0.31]);
-});
-
-test('detect rows puts back a lost rule, but not a header band', () => {
-    const across = (y) => [0, y, 1, y];
-    // 0.4 faded; the header band 0.05 to 0.2 is 1.5 rows tall.
-    const found = rowsInColumn({ x: 0.1, y: 0.05, w: 0.1, h: 0.55 },
-        [0.05, 0.2, 0.3, 0.5, 0.6].map(across));
-
-    close(found.ys, [0.05, 0.2, 0.3, 0.4, 0.5, 0.6]);
-    assert.deepEqual(found.estimated, [3]);
-    assert.equal(rowsInColumn({ x: 0.1, y: 0.2, w: 0.1, h: 0.3 }, [across(0.3)]), null, 'one rule is no rows');
 });
 
 test('a field stretched down the table\'s rows becomes a column read by row', () => {
