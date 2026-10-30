@@ -4684,6 +4684,8 @@
      * on the page ({ column_index }) or one removed in Align ({ column_name }).
      * Its value and check stay.
      */
+    const NEW_PERSON = 'new';
+
     async function placeVerifyLine(index, row, column = {}) {
         const item = cropped[index];
         if (!item) return;
@@ -4697,7 +4699,8 @@
         };
         try {
             const { response, payload } = await sendLineRequest(
-                verifyLineUrl(config.linePlaceUrl, item.lineId), 'PATCH', { row, ...column },
+                verifyLineUrl(config.linePlaceUrl, item.lineId), 'PATCH',
+                row === NEW_PERSON ? { new_person: true, ...column } : { row, ...column },
             );
             if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
             rebuildVerifyLines(
@@ -4823,13 +4826,18 @@
                 .map((group) => [Number(cropped[group.indexes[0]]?.personGroup), groupIdentity(group)]));
             const suggestion = placementSuggestions.get(item.lineId) ?? {};
             const suggested = (text, isSuggested) => (isSuggested ? `${text} (suggested)` : text);
-            const person = pick('Person', Array.from({ length: rows }, (_, offset) => {
-                const row = offset + 1;
-                const name = personNames.get(row);
-                const number = String(row).padStart(2, '0');
-                const text = name && !/^\d+ fields?$/.test(name) ? `${number} · ${name}` : number;
-                return new Option(suggested(text, suggestion.row === row), String(row));
-            }), item.gridRow === null ? '' : String(item.gridRow), controls);
+            // People started by hand sit past the table's last row; they stay in the list.
+            const lastRow = Math.max(rows, ...cropped.map((other) => other.gridRow ?? 0));
+            const person = pick('Person', [
+                new Option('+ New person', NEW_PERSON),
+                ...Array.from({ length: lastRow }, (_, offset) => {
+                    const row = offset + 1;
+                    const name = personNames.get(row);
+                    const number = String(row).padStart(2, '0');
+                    const text = name && !/^\d+ fields?$/.test(name) ? `${number} · ${name}` : number;
+                    return new Option(suggested(text, suggestion.row === row), String(row));
+                }),
+            ], item.gridRow === null ? '' : String(item.gridRow), controls);
             // A person is needed; outlined red until one is chosen.
             person.classList.toggle('is-invalid', person.value === '');
 
@@ -4862,7 +4870,7 @@
                 }
                 clearValidationFieldError(index);
                 const [kind, value] = [column.value.slice(0, 2), column.value.slice(2)];
-                placeVerifyLine(index, Number(person.value),
+                placeVerifyLine(index, person.value === NEW_PERSON ? NEW_PERSON : Number(person.value),
                     kind === 'i:' ? { column_index: Number(value) } : kind === 'n:' ? { column_name: value } : {});
             };
             person.addEventListener('change', place);
@@ -5005,8 +5013,11 @@
 
         const requiredColumns = columnsOnThisPage().filter((box) => box.required !== false);
         const untouchedRows = [];
+        const tableRows = Math.max(0, (processedPage?.geometry?.ruled_ys?.length ?? 0) - 1);
         validationGroups.forEach((group) => {
+            // A person started by hand (past the last row) has no register row to complete.
             const ledgerRow = group.kind === 'person'
+                && Number(cropped[group.indexes[0]]?.personGroup) <= tableRows
                 && group.indexes.some((index) => settingsFor(index)?.kind === 'column');
             if (!ledgerRow) return;
 

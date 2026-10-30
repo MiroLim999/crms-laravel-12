@@ -507,8 +507,12 @@ class DocumentScanController extends Controller
             && ! in_array(PageLine::FLAG_NO_ROW, $line->flags ?? [], true);
         $columnOf = fn (PageLine $line) => mb_strtolower(trim((string) $line->column_name));
 
+        // A person the reviewer started by hand sits past the table's last row;
+        // there is no register row to complete for them.
+        $tableRows = max(0, count($page->geometry['ruled_ys'] ?? []) - 1);
+
         $rows = $page->lines
-            ->filter(fn (PageLine $line) => $isCell($line) && isset($columns[$columnOf($line)]))
+            ->filter(fn (PageLine $line) => $isCell($line) && isset($columns[$columnOf($line)]) && $line->row <= $tableRows)
             ->pluck('row')
             ->unique()
             ->sort()

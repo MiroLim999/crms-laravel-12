@@ -13,6 +13,7 @@ use App\Services\Lines\LineMarkersException;
 use App\Services\Lines\PageLineReader;
 use App\Services\Ocr\OcrServiceException;
 use App\Services\Ocr\ScanModelChoice;
+use App\Support\Limits;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -493,13 +494,23 @@ class DocumentPageController extends Controller
         // A column removed in Align is not on the page's grid, but its name
         // can still head a field added by hand.
         $removedColumns = $this->columnsRemovedInAlign($page);
+        // A person started by hand sits past the table's last row. Those rows
+        // stay choosable for the lines already in them.
+        $lastRow = max($rows, (int) $page->lines()->max('row'));
         $validated = $request->validate([
-            'row' => ['required', 'integer', 'min:1', 'max:'.max(1, $rows)],
+            'row' => ['required_without:new_person', 'nullable', 'integer', 'min:1', 'max:'.max(1, $lastRow)],
+            'new_person' => ['nullable', 'boolean', 'prohibits:row'],
             'column_index' => ['nullable', 'integer', 'min:0', 'max:'.max(0, count($columns) - 1)],
             'column_name' => ['nullable', 'string', Rule::in($removedColumns), 'prohibits:column_index'],
         ]);
         if ($columns === [] || $rows === 0) {
             return response()->json(['message' => 'This page has no table to place the field in.'], 422);
+        }
+        if ($request->boolean('new_person')) {
+            if ($lastRow >= Limits::MAX_FIELDS) {
+                return response()->json(['message' => 'This page already has the most people it can hold.'], 422);
+            }
+            $validated['row'] = $lastRow + 1;
         }
 
         // A person alone is enough: the column can be chosen later, or never.
