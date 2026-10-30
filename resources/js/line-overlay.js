@@ -171,8 +171,10 @@ export class LineOverlay {
         });
         this.guidesLayer = svg('g', { class: 'line-overlay__guides' });
         this.linesLayer = svg('g', { class: 'line-overlay__lines' });
+        // Boxes drawn for writing the detector missed, waiting to be read.
+        this.pendingLayer = svg('g', { class: 'line-overlay__pending' });
         this.editLayer = svg('g', { class: 'line-overlay__edit' });
-        this.root.append(this.guidesLayer, this.linesLayer, this.editLayer);
+        this.root.append(this.guidesLayer, this.linesLayer, this.pendingLayer, this.editLayer);
         this.container.appendChild(this.root);
 
         this.root.addEventListener('click', (event) => {
@@ -240,8 +242,31 @@ export class LineOverlay {
         })));
     }
 
+    /**
+     * Outlines drawn but not read yet (Verify's Add missed field), dashed and
+     * numbered in the order they were drawn. An empty list clears them.
+     *
+     * @param {number[][][]} polygons  Page pixels.
+     */
+    setPending(polygons) {
+        const size = Math.max(9, this.height / 90);
+        this.pendingLayer.replaceChildren(...polygons.flatMap((polygon, index) => {
+            const bounds = polygonBounds(polygon);
+            const number = svg('text', {
+                class: 'line-pending__number',
+                x: bounds.left + size * 0.2,
+                y: Math.max(size, bounds.top - size * 0.25),
+                'font-size': size,
+                'aria-hidden': 'true',
+            });
+            number.textContent = String(index + 1);
+            return [svg('polygon', { class: 'line-pending__shape', points: polygonPoints(polygon) }), number];
+        }));
+    }
+
     clear() {
         this.cancelEdit();
+        this.pendingLayer.replaceChildren();
         this.lines = [];
         this.groups = [];
         this.linesLayer.replaceChildren();

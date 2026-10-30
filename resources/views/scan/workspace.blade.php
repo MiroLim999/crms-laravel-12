@@ -395,15 +395,32 @@
                             </div>
                         </header>
 
-                        {{-- Shown while a box is drawn for Add missed field. --}}
+                        {{--
+                            Shown while Add missed field is on: draw one or more
+                            boxes, then Read sends them to TrOCR (nothing is read before).
+                        --}}
                         <div class="line-edit-toolbar add-field-toolbar d-none" id="addFieldToolbar" role="toolbar"
                              aria-label="Add missed field">
                             <div class="line-edit-toolbar__copy">
                                 <strong>Add missed field</strong>
-                                <span>Drag a box over writing that has no reading.</span>
+                            </div>
+                            <div class="btn-group btn-group-sm" role="radiogroup" aria-label="How to mark the writing">
+                                <input type="radio" class="btn-check" name="addFieldMode" id="addFieldRectangle"
+                                       value="rectangle" checked>
+                                <label class="btn btn-outline-secondary" for="addFieldRectangle" title="Drag a box over the writing">
+                                    <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>Rectangle
+                                </label>
+                                <input type="radio" class="btn-check" name="addFieldMode" id="addFieldDraw" value="draw">
+                                <label class="btn btn-outline-secondary" for="addFieldDraw"
+                                       title="Click round the writing or hold and trace; Enter or double-click closes it">
+                                    <i class="icon-base bx bx-pen icon-sm me-1" aria-hidden="true"></i>Draw
+                                </label>
                             </div>
                             <div class="line-edit-toolbar__actions">
                                 <button type="button" class="btn btn-sm btn-label-secondary" id="addFieldCancel">Cancel</button>
+                                <button type="button" class="btn btn-sm btn-primary" id="addFieldRead" disabled>
+                                    <i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i><span>Read boxes</span>
+                                </button>
                             </div>
                             <div class="line-edit-toolbar__status" id="addFieldStatus" role="status" aria-live="polite"></div>
                         </div>
@@ -831,11 +848,11 @@
         container: el('validationFieldOverlay'),
         onSelect: (index) => activateValidationField(index, 'marker'),
         onModeChange: (mode) => showVerifyLineMode(mode),
-        onDraftChange: (points) => showVerifyDraft(points),
+        onDraftChange: (points) => (addingMissedField ? showAddFieldDraft(points) : showVerifyDraft(points)),
         // Only a new box (Add missed field) arrives here finished and with no
         // line being edited; a redrawn outline is saved by Save and re-read.
         onEdit: (polygon, final) => {
-            if (final && addingMissedField && !lineOverlay.editing) addMissedField(polygon);
+            if (final && addingMissedField && !lineOverlay.editing) addPendingBox(polygon);
         },
     });
 
@@ -4122,7 +4139,9 @@
         const placement = fieldPlacementControls(index);
         if (placement) requiredPart(row, '.validation-field__reading').after(placement);
 
-        const explanation = flagExplanation(item.flags ?? []);
+        // A field with Person and Column says it there (an empty Person is
+        // outlined red), not in a red note.
+        const explanation = placement ? '' : flagExplanation(item.flags ?? []);
         if (explanation) {
             row.classList.add('has-line-flag');
             const flag = requiredPart(row, '.validation-field__flag');
@@ -4519,53 +4538,139 @@
         status.classList.toggle('is-error', isError);
     }
 
+    // Boxes drawn and waiting for Read (page pixels), in the order drawn.
+    let pendingBoxes = [];
+    let readingPendingBoxes = false;
+
+    const ADD_MODE_HINTS = {
+        rectangle: 'Drag a box over each piece of writing with no reading.',
+        draw: 'Click round the writing or hold and trace; Enter or double-click closes it.',
+    };
+
+    function addFieldMode() {
+        return document.querySelector('input[name="addFieldMode"]:checked')?.value ?? 'rectangle';
+    }
+
+    /** The strip's hint, the Read button's count, and the boxes on the page. */
+    function showPendingBoxes(message = null) {
+        const count = pendingBoxes.length;
+        lineOverlay.setPending(pendingBoxes);
+        const read = el('addFieldRead');
+        read.disabled = count === 0 || readingPendingBoxes;
+        read.querySelector('span').textContent = count === 0 ? 'Read boxes' : `Read ${count} box${count === 1 ? '' : 'es'}`;
+        showAddFieldStatus(message ?? (count === 0
+            ? `${ADD_MODE_HINTS[addFieldMode()]} Nothing is read until you press Read.`
+            : `${count} box${count === 1 ? '' : 'es'} ready. Mark another, or press Read (Enter). Ctrl+Z takes back the last one.`));
+    }
+
+    /** Ready for the next box, in the chosen way. */
+    function armAddFieldDrawing() {
+        if (addingMissedField && !readingPendingBoxes) lineOverlay.beginDraw(addFieldMode());
+    }
+
     function startAddingMissedField() {
         if (!processedPage || recordSubmitting) return;
         cancelOutlineEdit();
         addingMissedField = true;
+        pendingBoxes = [];
         el('addMissedFieldBtn').classList.add('active');
         el('addMissedFieldBtn').setAttribute('aria-pressed', 'true');
         el('addFieldToolbar').classList.remove('d-none');
-        showAddFieldStatus('TrOCR reads the box alone. Esc cancels.');
-        lineOverlay.beginDraw('rectangle');
+        showPendingBoxes();
+        armAddFieldDrawing();
     }
 
+    /** Close the tool. Boxes not read yet are dropped. */
     function stopAddingMissedField() {
-        if (!addingMissedField) return;
+        if (!addingMissedField || readingPendingBoxes) return;
         addingMissedField = false;
+        pendingBoxes = [];
+        lineOverlay.setPending([]);
         if (lineOverlay.isAddingNew()) lineOverlay.cancelEdit();
         el('addMissedFieldBtn').classList.remove('active');
         el('addMissedFieldBtn').setAttribute('aria-pressed', 'false');
-        el('addMissedFieldBtn').disabled = false;
         el('addFieldToolbar').classList.add('d-none');
     }
 
-    async function addMissedField(polygon) {
-        el('addMissedFieldBtn').disabled = true;
-        showAddFieldStatus('Reading the box…');
-        try {
-            const { response, payload } = await sendLineRequest(
-                config.lineStoreUrl.replace('__PAGE__', String(processedPage.id)), 'POST', { polygon },
-            );
-            if (!payload?.line) throw new Error(responseErrorMessage(response, payload));
-
-            stopAddingMissedField();
-            rebuildVerifyLines([...processedPage.lines, payload.line], payload.flags ?? {},
-                { focusLineId: payload.line.id, freshLineId: payload.line.id });
-            if (!response.ok) {
-                showOcrLineWarning(payload.line.id, payload.message || 'The box was added, but TrOCR could not read it. Type the value.');
-            }
-            const index = cropped.findIndex((item) => item.lineId === payload.line.id);
-            const row = index >= 0 ? validationRow(index) : null;
-            if (row) requiredInput(row, '.verified').focus({ preventScroll: true });
-        } catch (error) {
-            // Keep drawing: the reviewer can try again, or press Esc.
-            el('addMissedFieldBtn').disabled = false;
-            showAddFieldStatus(error.message || 'The box could not be read. Try again.', true);
-            if (addingMissedField) lineOverlay.beginDraw('rectangle');
-        }
+    /** A box was closed on the page: it waits for Read, and the next can be drawn. */
+    function addPendingBox(polygon) {
+        pendingBoxes.push(polygon);
+        showPendingBoxes();
+        armAddFieldDrawing();
     }
 
+    function removeLastPendingBox() {
+        if (pendingBoxes.length === 0) return false;
+        pendingBoxes.pop();
+        showPendingBoxes();
+        return true;
+    }
+
+    /**
+     * Read: each box is cropped, placed in its person's row and column, and
+     * read by TrOCR alone, one after another. Nothing else is read again.
+     */
+    async function readPendingBoxes() {
+        if (pendingBoxes.length === 0 || readingPendingBoxes) return;
+        // A drawing left open is a box too.
+        if (lineOverlay.isDrawing() && lineOverlay.finishDrawing()) return readPendingBoxes();
+
+        readingPendingBoxes = true;
+        if (lineOverlay.isAddingNew()) lineOverlay.cancelEdit();
+        el('addFieldCancel').disabled = true;
+        el('addFieldToolbar').querySelectorAll('input[name="addFieldMode"]').forEach((input) => { input.disabled = true; });
+        showPendingBoxes(`Reading ${pendingBoxes.length} box${pendingBoxes.length === 1 ? '' : 'es'}…`);
+
+        const added = [];
+        let flags = {};
+        const failed = [];
+        const warnings = [];
+        for (const [index, polygon] of pendingBoxes.entries()) {
+            showAddFieldStatus(`Reading box ${index + 1} of ${pendingBoxes.length}…`);
+            try {
+                const { response, payload } = await sendLineRequest(
+                    config.lineStoreUrl.replace('__PAGE__', String(processedPage.id)), 'POST', { polygon },
+                );
+                if (!payload?.line) throw new Error(responseErrorMessage(response, payload));
+                added.push(payload.line);
+                flags = payload.flags ?? flags;
+                if (!response.ok) warnings.push(payload.line.id);
+            } catch (error) {
+                failed.push({ polygon, message: error.message || 'The box could not be read.' });
+            }
+        }
+
+        readingPendingBoxes = false;
+        el('addFieldCancel').disabled = false;
+        el('addFieldToolbar').querySelectorAll('input[name="addFieldMode"]').forEach((input) => { input.disabled = false; });
+
+        if (added.length > 0) {
+            rebuildVerifyLines([...processedPage.lines, ...added], flags,
+                { focusLineId: added[0].id, freshLineId: null });
+            warnings.forEach((id) => showOcrLineWarning(id, 'The box was added, but TrOCR could not read it. Type the value.'));
+        }
+
+        if (failed.length === 0) {
+            stopAddingMissedField();
+            return;
+        }
+        // Keep the ones that failed on the page, to read again or take back.
+        pendingBoxes = failed.map((failure) => failure.polygon);
+        showPendingBoxes(`${failed.length} box${failed.length === 1 ? '' : 'es'} could not be read: ${failed[0].message}`);
+        el('addFieldStatus').classList.add('is-error');
+        armAddFieldDrawing();
+    }
+
+    /** How a drawing for Add missed field stands, in the strip. */
+    function showAddFieldDraft(points) {
+        if (points === 0) {
+            showPendingBoxes();
+            return;
+        }
+        showAddFieldStatus(points < 3
+            ? `${points} point${points === 1 ? '' : 's'}. At least 3 to make an outline.`
+            : `${points} points. Enter or double-click closes it.`);
+    }
     /** Move a field to another person (row) or column. Its value and check stay. */
     async function placeVerifyLine(index, columnIndex, row) {
         const item = cropped[index];
@@ -4629,7 +4734,10 @@
             select.className = 'form-select form-select-sm';
             select.append(new Option('Choose…', ''), ...options.map(([value, name]) => new Option(name, String(value))));
             select.value = selected === null ? '' : String(selected);
+            // Not placed yet: outlined red until one is chosen.
+            select.classList.toggle('is-invalid', select.value === '');
             select.addEventListener('click', (event) => event.stopPropagation());
+            select.addEventListener('change', () => select.classList.toggle('is-invalid', select.value === ''));
             wrap.append(text, select);
             controls.append(wrap);
             return select;
@@ -4663,10 +4771,41 @@
 
     el('addMissedFieldBtn').addEventListener('click', () => (addingMissedField ? stopAddingMissedField() : startAddingMissedField()));
     el('addFieldCancel').addEventListener('click', stopAddingMissedField);
+    el('addFieldRead').addEventListener('click', readPendingBoxes);
+    document.querySelectorAll('input[name="addFieldMode"]').forEach((input) => {
+        input.addEventListener('change', () => {
+            if (!(input instanceof HTMLInputElement) || !input.checked) return;
+            // A drawing of three points or more is kept as a box, not lost.
+            if (lineOverlay.isDrawing()) lineOverlay.finishDrawing();
+            armAddFieldDrawing();
+            showPendingBoxes();
+            // Off the button, so Enter and Esc reach the drawing.
+            input.blur();
+        });
+    });
     document.addEventListener('keydown', (event) => {
-        if (!addingMissedField || event.key !== 'Escape') return;
-        event.preventDefault();
-        stopAddingMissedField();
+        if (!addingMissedField || readingPendingBoxes) return;
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.matches('input:not([type="radio"]), textarea, select') || target.isContentEditable)) return;
+        const command = event.ctrlKey || event.metaKey;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            // Esc first drops a drawing, then closes the tool.
+            if (lineOverlay.isDrawing()) armAddFieldDrawing();
+            else stopAddingMissedField();
+        } else if (event.key === 'Enter') {
+            event.preventDefault();
+            if (lineOverlay.isDrawing()) {
+                if (!lineOverlay.finishDrawing()) {
+                    showAddFieldStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+                }
+            } else {
+                readPendingBoxes();
+            }
+        } else if (command && !event.shiftKey && event.key.toLowerCase() === 'z') {
+            event.preventDefault();
+            if (!(lineOverlay.isDrawing() && lineOverlay.undoDrawStep())) removeLastPendingBox();
+        }
     });
 
     document.querySelectorAll('input[name="verifyLineMode"]').forEach((input) => {

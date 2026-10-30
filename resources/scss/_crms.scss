@@ -3013,6 +3013,27 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   opacity: .45;
 }
 
+// Add missed field: boxes drawn and waiting for Read, dashed blue and numbered.
+.line-pending__shape {
+  fill: rgba(var(--bs-primary-rgb), .14);
+  stroke: var(--bs-primary);
+  stroke-dasharray: 5 3;
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.line-pending__number {
+  fill: var(--bs-primary);
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+  pointer-events: none;
+  user-select: none;
+}
+
 .line-edit__draft {
   fill: rgba(40, 199, 111, .12);
   stroke: var(--bs-success);
