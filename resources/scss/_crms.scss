@@ -3536,6 +3536,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     pointer-events: auto;
     touch-action: none;
     transform: translate(-50%, -50%);
+    // Faint until the line is pointed at, selected or dragged, so the table's
+    // edges stay clean but the grips can still be found.
+    opacity: .3;
+    transition: opacity .12s ease;
 
     &.is-start {
       inset-inline-start: 0;
@@ -3565,6 +3569,14 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
     .row-line__grip {
       background-color: var(--bs-primary);
+    }
+  }
+
+  &:hover,
+  &.is-selected,
+  &.is-dragging {
+    .row-line__grip {
+      opacity: 1;
     }
   }
 
