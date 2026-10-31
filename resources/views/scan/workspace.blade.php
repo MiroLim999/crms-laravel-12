@@ -161,7 +161,9 @@
                                                 title="Remove the last row" aria-label="Remove a row">
                                             <i class="icon-base bx bx-minus icon-sm" aria-hidden="true"></i>
                                         </button>
-                                        <span class="document-grid-card__count" id="gridRowCount" aria-live="polite">0</span>
+                                        <input type="number" class="document-grid-card__count" id="gridRowCount"
+                                               min="1" max="40" step="1" value="0" inputmode="numeric"
+                                               aria-label="Number of rows" title="Type how many rows the table has">
                                         <button type="button" class="btn btn-outline-secondary" id="addRowBtn"
                                                 title="Add a row line under the selected one, or a row at the bottom"
                                                 aria-label="Add a row">
@@ -734,6 +736,7 @@
         fieldsToColumns,
         followFirstAndLastLine,
         insertRuledY,
+        distributeRuledYs,
         remapRuledYs,
         sameBand,
     } from '{{ Vite::asset('resources/js/ledger-grid.js') }}';
@@ -1108,7 +1111,13 @@
 
     /** A row line under the selected one (half way to the next), or a row at the bottom. */
     function addRow() {
-        const inserted = insertRuledY(gridRows, selectedRow);
+        if (gridRows.length - 1 >= MAX_ROWS) {
+            showGridMessage(`You can have at most ${MAX_ROWS} rows.`);
+            return;
+        }
+        let inserted = insertRuledY(gridRows, selectedRow);
+        // The table already reaches the page's bottom: split the last row instead.
+        if (!inserted && selectedRow === null && gridRows.length >= 2) inserted = insertRuledY(gridRows, gridRows.length - 2);
         if (!inserted) {
             showGridMessage(selectedRow === null || selectedRow >= gridRows.length - 1
                 ? 'There is no room for another row below the last line: the page ends there.'
@@ -1118,6 +1127,36 @@
         showGridMessage(null);
         applyRows(inserted.ys);
         selectRow(inserted.index);
+    }
+
+    const MAX_ROWS = 40;
+
+    /** Set the number of rows to a typed value: add rows at the bottom or remove from the end. */
+    function setRowCount(wanted) {
+        if (!isLedger || !Number.isInteger(wanted) || wanted < 1) {
+            updateGridCard();
+            return;
+        }
+        let ys = [...gridRows];
+        let stopped = false;
+        wanted = Math.min(wanted, MAX_ROWS);
+        while (ys.length - 1 < wanted && !stopped) {
+            const inserted = insertRuledY(ys, null);
+            if (inserted) ys = inserted.ys; else stopped = true;
+        }
+        if (stopped) {
+            // No room below the last line: space the rows evenly between the first and last line.
+            const even = distributeRuledYs(gridRows, wanted);
+            if (even) { ys = even; stopped = false; }
+        }
+        if (ys.length - 1 > wanted) ys = ys.slice(0, wanted + 1);
+        showGridMessage(stopped ? 'There is no room for more rows: they would be too thin.' : null);
+        if (ys.length !== gridRows.length) {
+            selectedRow = null;
+            applyRows(ys);
+        } else {
+            updateGridCard();
+        }
     }
 
     function nudgeRow(pixels) {
@@ -1190,7 +1229,9 @@
     function updateGridCard(boxes = marker.toJSON()) {
         if (!isLedger) return;
         const columns = ledgerColumns(boxes).length;
-        el('gridRowCount').textContent = String(Math.max(0, gridRows.length - 1));
+        const rowCountInput = el('gridRowCount');
+        if (document.activeElement !== rowCountInput) rowCountInput.value = String(Math.max(0, gridRows.length - 1));
+        rowCountInput.disabled = columns === 0;
 
         const message = !rowsByHand && rowsSource && !rowsSource.from_page
             // Compared with the template itself, not the grid Snap was sent.
@@ -2776,6 +2817,12 @@
     if (isLedger) {
         el('addRowBtn').addEventListener('click', () => addRow());
         el('removeRowBtn').addEventListener('click', () => removeRow());
+        el('gridRowCount').addEventListener('change', (event) => setRowCount(Number.parseInt(event.target.value, 10)));
+        el('gridRowCount').addEventListener('keydown', (event) => {
+            event.stopPropagation();
+            if (event.key === 'Enter') event.target.blur();
+        });
+        el('gridRowCount').addEventListener('blur', () => updateGridCard());
         el('addColumnBtn').addEventListener('click', () => addLedgerColumn());
         // A click on the page around the markers lets go of the row line.
         markerOverlay.addEventListener('pointerdown', (event) => {
