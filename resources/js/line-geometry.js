@@ -82,16 +82,12 @@ export function alignedGeometry(aligned, ruledYs, { keepRows = false } = {}) {
  * @param {number} [estimated]
  */
 export function snapRowsMessage(rows, estimated = Array.isArray(rows?.estimated) ? rows.estimated.length : 0) {
-    const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
-    const check = estimated > 0
-        ? ` ${plural(estimated, 'amber line')} ${estimated === 1 ? 'has' : 'have'} no printed line under ${estimated === 1 ? 'it' : 'them'}: check against the page.`
-        : '';
-    if (!rows || typeof rows !== 'object') return check.trim();
+    if (!rows || typeof rows !== 'object') return '';
 
     if (rows.from_page) {
         const count = Number(rows.count) || 0;
         const template = Number(rows.template) || 0;
-        return `Rows found on the page${count === template ? '' : ` (template: ${template})`}.${check}`;
+        return `Rows found on the page${count === template ? '' : ` (template: ${template})`}.`;
     }
 
     const reasons = {
@@ -101,7 +97,7 @@ export function snapRowsMessage(rows, estimated = Array.isArray(rows?.estimated)
         no_match: 'the page’s rows do not line up with the grid',
     };
     const reason = reasons[rows.reason];
-    return reason ? `Rows kept from the template: ${reason}.${check}` : check.trim();
+    return reason ? `Rows kept from the template: ${reason}.` : '';
 }
 
 /**

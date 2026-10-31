@@ -249,14 +249,14 @@ test('Snap to table says where the rows came from, in plain words', () => {
     );
     assert.equal(
         snapRowsMessage({ from_page: true, count: 20, template: 20, estimated: [20] }),
-        'Rows found on the page. 1 amber line has no printed line under it: check against the page.',
+        'Rows found on the page.',
     );
     assert.equal(
         snapRowsMessage({ from_page: false, count: 20, template: 20, estimated: [], reason: 'no_rows' }),
         'Rows kept from the template: no evenly ruled rows were found on this page.',
     );
-    // The amber count as it stands now (lines checked by hand are no longer amber).
-    assert.equal(snapRowsMessage(null, 2), '2 amber lines have no printed line under them: check against the page.');
+    // Amber lines no longer add a note.
+    assert.equal(snapRowsMessage(null, 2), '');
     assert.equal(snapRowsMessage({ from_page: false, reason: 'something_new', estimated: [] }), '');
 });
 
