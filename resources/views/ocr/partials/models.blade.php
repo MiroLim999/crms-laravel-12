@@ -140,13 +140,6 @@
                                     @if ($model['is_base'])
                                         <span class="badge bg-label-secondary">Base</span>
                                     @endif
-                                    @if ($model['loaded'])
-                                        <span class="badge bg-label-info py-0 px-1.5 text-xs d-inline-flex align-items-center gap-1"
-                                              title="Held in the OCR service's memory">
-                                            <i class="icon-base bx bx-chip icon-xs"></i>
-                                            <span>RAM</span>
-                                        </span>
-                                    @endif
                                 </div>
 
                                 @if ($showKey)
