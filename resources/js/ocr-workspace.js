@@ -735,8 +735,9 @@ function initModelPerformance() {
     const kpiWrap = $('#ocr-performance-kpis');
 
     let chart = null;
-    // Radar first; the Side-by-side button switches to bars.
-    let currentView = 'radar';
+    // Bars first: with three scores, side-by-side bars compare the model with
+    // Base more plainly than a triangle. The Radar button is still there.
+    let currentView = 'bars';
     let overlayBase = true;
     let currentProfileKey = String(data.selected ?? '');
 
@@ -774,6 +775,16 @@ function initModelPerformance() {
             : Number(value);
     };
 
+    // One decimal, but two near either end of the scale: 99.97% must not read
+    // as a perfect 100.0%, nor a 0.03% error rate as none at all.
+    const pct = (value) => {
+        const number = Number(value);
+        if (value === null || value === undefined || !Number.isFinite(number)) return '—';
+        const fine = (number > 99 && number < 100) || (number > 0 && number < 1);
+
+        return `${number.toFixed(fine ? 2 : 1)}%`;
+    };
+
     const updateSummary = (profile) => {
         const friendlyName = profile?.display_label || profile?.label || 'No model selected';
         if (inspectedModelBadge) {
@@ -784,6 +795,29 @@ function initModelPerformance() {
         }
 
         // Reading speed from real scans, for whichever model is being inspected.
+        const reading = profile?.reading;
+        const hasSpeed = Boolean(reading?.ms_per_line);
+        const speedVal = document.querySelector('[data-reading-val]');
+        const speedSub = document.querySelector('[data-reading-sub]');
+        if (speedVal) speedVal.textContent = hasSpeed ? `${Number(reading.ms_per_line).toLocaleString()} ms` : '—';
+        if (speedSub) {
+            speedSub.textContent = hasSpeed
+                ? `per line · ${Number(reading.lines).toLocaleString()} lines in real scans`
+                : 'No real scans read yet';
+        }
+        // The cards are hidden for a model without test scores, so the speed
+        // is then said in the footer instead.
+        document.getElementById('ocr-reading-speed')?.classList.toggle('d-none', Boolean(profile?.has_data));
+
+        const note = document.querySelector('[data-benchmark-note]');
+        if (note) {
+            note.textContent = profile?.has_data
+                ? `Scored on ${Number(profile.sample_count).toLocaleString()} test images (${profile.dataset})`
+                    + `${profile.evaluated_at ? `, evaluated ${profile.evaluated_at}` : ''}. `
+                    + 'These are test-set scores, not accuracy on real scans: see OCR Quality on the Dashboard.'
+                : 'This model has no test-set scores yet.';
+        }
+
         const speedText = document.querySelector('#ocr-reading-speed [data-reading-text]');
         if (speedText) {
             const reading = profile?.reading;
@@ -812,13 +846,13 @@ function initModelPerformance() {
             const value = scoreValue(profile, metric.key);
             const baseValue = baseHasData ? scoreValue(baseProfile, metric.key) : null;
 
-            if (kpiValNode) kpiValNode.textContent = value === null ? '—' : `${value.toFixed(1)}%`;
+            if (kpiValNode) kpiValNode.textContent = pct(value);
 
             // Error rate for the first two cards (accuracy is 100 minus it), so the
             // last line carries the figure the evaluation report actually measured.
             const errorRate = value === null ? null : ({
-                character_accuracy: `${(100 - value).toFixed(1)}% CER`,
-                word_accuracy: `${(100 - value).toFixed(1)}% WER`,
+                character_accuracy: profile?.cer != null ? `CER ${pct(profile.cer)}` : null,
+                word_accuracy: profile?.wer != null ? `WER ${pct(profile.wer)}` : null,
             })[metric.key] ?? null;
 
             if (isComparing && value !== null && baseValue !== null) {
@@ -832,7 +866,7 @@ function initModelPerformance() {
                     kpiDeltaNode.title = `${Math.abs(diff).toFixed(1)} percentage points ${diff >= 0 ? 'above' : 'below'} the base model`;
                 }
                 if (kpiSubNode) {
-                    kpiSubNode.textContent = [`Base ${baseValue.toFixed(1)}%`, errorRate].filter(Boolean).join(' · ');
+                    kpiSubNode.textContent = [`Base ${pct(baseValue)}`, errorRate].filter(Boolean).join(' · ');
                 }
             } else if (isBase && value !== null) {
                 if (kpiDeltaNode) {
@@ -878,12 +912,12 @@ function initModelPerformance() {
             ${isModelVisible ? `
             <div class="ocr-tooltip-row">
                 <div><span class="ocr-tooltip-badge" style="background:#ff6384"></span><strong>${profileLabel}</strong></div>
-                <span class="fw-bold text-primary">${val !== null && val !== undefined ? val.toFixed(1) + '%' : '—'}</span>
+                <span class="fw-bold text-primary">${pct(val)}</span>
             </div>` : ''}
             ${isBaseVisible && bVal !== null && bVal !== undefined ? `
             <div class="ocr-tooltip-row">
                 <div><span class="ocr-tooltip-badge" style="background:#696cff"></span><span>TrOCR Base</span></div>
-                <span class="text-muted">${bVal.toFixed(1)}%</span>
+                <span class="text-muted">${pct(bVal)}</span>
             </div>` : ''}
             ${isModelVisible && isBaseVisible && diff !== null ? `
             <div class="ocr-tooltip-delta ${diff >= 0 ? 'text-success' : 'text-danger'}">
@@ -1055,7 +1089,7 @@ function initModelPerformance() {
                         // the top one stays on a line, the side ones stack.
                         formatter: (label, opts) => {
                             const index = opts?.dataPointIndex ?? 0;
-                            const score = Number.isFinite(scores[index]) ? `${Math.round(scores[index])}%` : '';
+                            const score = Number.isFinite(scores[index]) ? pct(scores[index]) : '';
 
                             if (!score) return label;
 
@@ -1119,7 +1153,7 @@ function initModelPerformance() {
                         fontWeight: 700,
                         colors: ['#fff'],
                     },
-                    formatter: (v) => `${Number(v).toFixed(1)}%`,
+                    formatter: (v) => pct(v),
                 },
                 stroke: {
                     show: true,

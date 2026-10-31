@@ -56,6 +56,11 @@
             </form>
         </div>
 
+        <p class="ocr-models-hint">
+            <i class="icon-base bx bx-info-circle icon-xs me-1" aria-hidden="true"></i>
+            Click a model to see its scores on the left.
+        </p>
+
         @if ($needsActivation)
             <div class="alert alert-warning d-flex align-items-start gap-2 py-2 px-3 small mb-0 mt-3" role="status">
                 <i class="icon-base bx bx-error icon-sm flex-shrink-0 mt-1" aria-hidden="true"></i>
@@ -218,6 +223,9 @@
                                 </div>
                             @else
                                 <span class="ocr-model-lock text-muted"
+                                      tabindex="0"
+                                      role="img"
+                                      aria-label="Locked: {{ $blockedReason }}"
                                       data-bs-toggle="tooltip"
                                       data-bs-placement="top"
                                       title="{{ $blockedReason }}">

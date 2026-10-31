@@ -190,7 +190,8 @@ class OcrModelPerformance
 
     private function percentage(float $rate): float
     {
-        return round(max(0.0, min(1.0, $rate)) * 100, 1);
+        // Two decimals, so 99.97% and a 0.03% error rate survive to the page.
+        return round(max(0.0, min(1.0, $rate)) * 100, 2);
     }
 
     /** @return array{character_accuracy: null, word_accuracy: null, exact_match: null} */

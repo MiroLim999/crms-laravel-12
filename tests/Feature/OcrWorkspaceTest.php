@@ -140,6 +140,27 @@ class OcrWorkspaceTest extends TestCase
             ->assertDontSee('Stop FastAPI');
     }
 
+    public function test_the_performance_card_says_where_its_numbers_come_from(): void
+    {
+        $this->fakeHealthyService();
+
+        $response = $this->actingAs($this->superAdmin())
+            ->get(route('ocr.index'))
+            ->assertOk()
+            // Processing time sits with the scores, and the hint says how to switch model.
+            ->assertSee('Reading speed')
+            ->assertSee('Click a model to see its scores')
+            // The old note's jargon, and its claim about error reduction, are gone.
+            ->assertDontSee('teacher forcing')
+            ->assertDontSee('Error reduction reflects');
+
+        // Side-by-side bars are the first view.
+        $this->assertMatchesRegularExpression(
+            '/class="btn btn-primary" id="ocr-btn-view-bars" aria-pressed="true"/',
+            $response->getContent(),
+        );
+    }
+
     public function test_the_workspace_lets_the_super_admin_activate_a_model_when_the_service_is_up(): void
     {
         $this->fakeHealthyService();

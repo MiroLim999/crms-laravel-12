@@ -93,6 +93,19 @@
     color: var(--bs-secondary-color);
     background: color-mix(in sRGB, var(--bs-secondary-bg) 60%, transparent);
     flex-shrink: 0;
+    // Not a button: hovering or focusing it explains why the model is locked.
+    cursor: help;
+
+    &:focus-visible {
+      outline: 2px solid color-mix(in sRGB, var(--bs-primary) 55%, transparent);
+      outline-offset: 2px;
+    }
+  }
+
+  .ocr-models-hint {
+    margin: 0.75rem 0 0;
+    color: var(--bs-secondary-color);
+    font-size: 0.75rem;
   }
 
   // Add model and Rescan models, under the title. Not part of the collapsible
@@ -297,7 +310,8 @@
   // badges and last lines of all three cards line up.
   .ocr-performance-kpis {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    // Three scores and the reading speed.
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.75rem;
     margin-bottom: 1rem;
 
@@ -693,6 +707,12 @@
 }
 
 
+
+@media (max-width: 991.98px) {
+  .ocr-workspace .ocr-performance-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 
 @media (max-width: 575.98px) {
   .ocr-workspace {

@@ -42,11 +42,14 @@
                     ? ['role' => 'base', 'name' => 'TrOCR Base', 'scores' => $perfBase['scores']]
                     : null,
             ])->filter()->values();
+            // Two decimals near the top, so 99.97% is not read as 100.0%.
+            $score = fn (?float $value): string => $value === null ? '—'
+                : number_format($value, $value > 99 && $value < 100 ? 2 : 1).'%';
             $perfSummary = $perfSeries
                 ->map(fn (array $series): string => $series['name']
-                    .': characters '.$percent($series['scores']['character_accuracy'])
-                    .', words '.$percent($series['scores']['word_accuracy'])
-                    .', exact match '.$percent($series['scores']['exact_match']))
+                    .': characters '.$score($series['scores']['character_accuracy'])
+                    .', words '.$score($series['scores']['word_accuracy'])
+                    .', exact match '.$score($series['scores']['exact_match']))
                 ->implode('; ');
 
             $chartData = [

@@ -306,7 +306,8 @@ function renderOcrPerformance(data) {
   if (!target || !series.length) return;
 
   const theme = themeOptions(target);
-  const pct = value => `${Math.round(value)}%`;
+  // Two decimals near the top, so 99.97% is not drawn as a perfect 100%.
+  const pct = value => `${Number(value).toFixed(value > 99 && value < 100 ? 2 : 0)}%`;
   // Scores ride on the axis labels (see xaxis.labels.formatter).
   const keys = ['character_accuracy', 'word_accuracy', 'exact_match'];
   const categories = ['Chars', 'Words', 'Exact'];
@@ -368,7 +369,8 @@ function renderOcrPerformance(data) {
       custom: ({ dataPointIndex: point }) => {
         const rows = series.map((item, index) => {
           const { color } = looks[index];
-          const value = `${values[index][point].toFixed(1)}%`;
+          const raw = values[index][point];
+          const value = `${raw.toFixed(raw > 99 && raw < 100 ? 2 : 1)}%`;
 
           return '<div class="d-flex justify-content-between align-items-center small mb-1">'
             + `<span><span class="badge-dot me-1" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};"></span>${escapeHtml(item.name)}</span>`

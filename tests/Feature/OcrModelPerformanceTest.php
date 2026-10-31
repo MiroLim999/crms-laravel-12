@@ -41,8 +41,9 @@ class OcrModelPerformanceTest extends TestCase
         $this->assertSame('evaluation', $profile['source']);
         $this->assertSame('Locked test set', $profile['source_label']);
         $this->assertSame('civil-records-v1 · test · 5,000 samples · evaluated Aug 2, 2026', $profile['evidence']);
+        // Two decimals are kept, so a 99.97% model is never rounded up to 100%.
         $this->assertSame([
-            'character_accuracy' => 87.7,
+            'character_accuracy' => 87.66,
             'word_accuracy' => 75.0,
             'exact_match' => 87.6,
         ], $profile['scores']);

@@ -53,6 +53,14 @@
                         <div class="ocr-kpi-sub" data-kpi-sub="{{ $key }}">&nbsp;</div>
                     </div>
                 @endforeach
+                {{-- Processing time, from real scans in this system, not from the test set. --}}
+                <div class="ocr-kpi-card" title="How long TrOCR takes to read one line in real scans in this system (not on the test set)">
+                    <div class="ocr-kpi-label">Reading speed</div>
+                    <div class="ocr-kpi-figure">
+                        <span class="ocr-kpi-val" data-reading-val>—</span>
+                    </div>
+                    <div class="ocr-kpi-sub" data-reading-sub>&nbsp;</div>
+                </div>
             </div>
 
             <div class="ocr-performance-toolbar {{ $selectedHasData ? '' : 'd-none' }}" id="ocr-performance-toolbar">
@@ -61,11 +69,11 @@
                     <label class="form-check-label small fw-medium" for="ocr-compare-toggle">Overlay base model</label>
                 </div>
                 <div class="btn-group btn-group-sm" role="group" aria-label="Chart type">
-                    <button type="button" class="btn btn-primary" id="ocr-btn-view-radar" aria-pressed="true"
+                    <button type="button" class="btn btn-label-secondary" id="ocr-btn-view-radar" aria-pressed="false"
                             title="Radar chart">
                         <i class="icon-base bx bx-radar me-1" aria-hidden="true"></i>Radar
                     </button>
-                    <button type="button" class="btn btn-label-secondary" id="ocr-btn-view-bars" aria-pressed="false"
+                    <button type="button" class="btn btn-primary" id="ocr-btn-view-bars" aria-pressed="true"
                             title="Bar chart, side by side">
                         <i class="icon-base bx bx-bar-chart-alt-2 me-1" aria-hidden="true"></i>Side-by-side
                     </button>
@@ -104,7 +112,14 @@
         </p>
         <p class="text-muted small mb-0">
             <i class="icon-base bx bx-info-circle icon-sm me-1" aria-hidden="true"></i>
-            Scores are evaluated on identical locked test splits without teacher forcing. Error reduction reflects relative improvement over the pre-trained baseline.
+            <span data-benchmark-note>
+                @if ($selectedHasData)
+                    Scored on {{ number_format($selectedPerformance['sample_count']) }} test images ({{ $selectedPerformance['dataset'] }}){{ $selectedPerformance['evaluated_at'] ? ', evaluated '.$selectedPerformance['evaluated_at'] : '' }}.
+                    These are test-set scores, not accuracy on real scans: see OCR Quality on the Dashboard.
+                @else
+                    This model has no test-set scores yet.
+                @endif
+            </span>
         </p>
     </div>
 </section>
