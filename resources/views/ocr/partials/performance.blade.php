@@ -90,13 +90,18 @@
                     {{ $selectedPerformance['display_label'] ?? $selectedPerformance['label'] ?? 'This model' }} has no valid locked-test benchmark report.
                 </p>
                 <div class="ocr-empty-command-box font-monospace small bg-label-secondary py-1.5 px-3 rounded text-break" id="ocr-empty-command">
-                    php artisan ocr:evaluate {{ $selectedPerformance['key'] ?? 'model_key' }}
+                    python ml/test_finetuned.py --model {{ $selectedPerformance['key'] ?? 'model_key' }}
                 </div>
             </div>
         </div>
     </div>
 
     <div class="card-footer py-2.5">
+        {{-- Speed on real scans, not the test set; the script fills it for the model being inspected. --}}
+        <p class="small mb-2" id="ocr-reading-speed" aria-live="polite">
+            <i class="icon-base bx bx-time-five icon-sm me-1" aria-hidden="true"></i>
+            <span data-reading-text>—</span>
+        </p>
         <p class="text-muted small mb-0">
             <i class="icon-base bx bx-info-circle icon-sm me-1" aria-hidden="true"></i>
             Scores are evaluated on identical locked test splits without teacher forcing. Error reduction reflects relative improvement over the pre-trained baseline.

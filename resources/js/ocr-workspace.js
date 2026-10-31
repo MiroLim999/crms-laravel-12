@@ -780,7 +780,16 @@ function initModelPerformance() {
             inspectedModelBadge.textContent = `${friendlyName}${profile?.is_active ? ' (active)' : ''}`;
         }
         if (emptyCommand && profile?.key) {
-            emptyCommand.textContent = `php artisan ocr:evaluate ${profile.key}`;
+            emptyCommand.textContent = `python ml/test_finetuned.py --model ${profile.key}`;
+        }
+
+        // Reading speed from real scans, for whichever model is being inspected.
+        const speedText = document.querySelector('#ocr-reading-speed [data-reading-text]');
+        if (speedText) {
+            const reading = profile?.reading;
+            speedText.textContent = reading?.ms_per_line
+                ? `Reading speed: about ${Number(reading.ms_per_line).toLocaleString()} ms per line, from ${Number(reading.lines).toLocaleString()} lines read in real scans`
+                : 'Reading speed: this model has not read any real scans yet';
         }
 
         const isBase = profile?.key === 'base';

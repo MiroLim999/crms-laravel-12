@@ -2,7 +2,9 @@
 
 namespace App\Services\Ocr;
 
+use App\Jobs\ProcessDocumentPage;
 use App\Models\OcrModel;
+use App\Models\PageRun;
 
 /**
  * Read-only benchmark profiles for the OCR workspace radar.
@@ -84,6 +86,12 @@ class OcrModelPerformance
             );
         }
 
+        $speeds = $this->readingSpeeds();
+        foreach ($profiles as &$profile) {
+            $profile['reading'] = $speeds[$profile['key']] ?? ['lines' => 0, 'ms_per_line' => null];
+        }
+        unset($profile);
+
         $active = collect($profiles)->firstWhere('is_active', true);
         $evaluated = collect($profiles)->firstWhere('has_data', true);
 
@@ -153,6 +161,31 @@ class OcrModelPerformance
             'sample_count' => $model->evaluation_sample_count,
             'evaluated_at' => $date,
         ];
+    }
+
+    /**
+     * How fast each model read lines in real scans: the time spent reading over
+     * the lines read, from every finished Scan the page job has logged. This is
+     * speed on this machine, not on the test set, and it is independent of
+     * whether the model has a benchmark.
+     *
+     * @return array<string, array{lines: int, ms_per_line: int|null}>
+     */
+    private function readingSpeeds(): array
+    {
+        return PageRun::query()
+            ->where('outcome', PageRun::COMPLETED)
+            ->whereIn('mode', [ProcessDocumentPage::MODE_FULL, ProcessDocumentPage::MODE_READ])
+            ->whereNotNull('read_ms')
+            ->whereNotNull('ocr_model_key')
+            ->where('lines', '>', 0)
+            ->get(['ocr_model_key', 'read_ms', 'lines'])
+            ->groupBy('ocr_model_key')
+            ->map(fn ($runs) => [
+                'lines' => (int) $runs->sum('lines'),
+                'ms_per_line' => (int) round($runs->sum('read_ms') / $runs->sum('lines')),
+            ])
+            ->all();
     }
 
     private function percentage(float $rate): float

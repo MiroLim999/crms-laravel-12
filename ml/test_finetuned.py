@@ -16,6 +16,7 @@ cancel callback between images so the API can stop it cleanly.
 
 import argparse
 import os
+import time
 
 # Quiets the HF stack. Must precede torch/transformers.
 import hf_quiet  # noqa: F401
@@ -188,6 +189,10 @@ def run_evaluation(
     references, predictions, rows = [], [], []
     cancelled = False
     processed = 0
+    # Seconds spent inside the model (including a retry), so the report can say how
+    # long reading takes and not only how well it reads.
+    inference_seconds = 0.0
+    timed_images = 0
 
     for start in range(0, total, batch_size):
         # Checked per batch rather than per image: a batch is the smallest unit
@@ -200,6 +205,7 @@ def run_evaluation(
         chunk = image_files[start:start + batch_size]
         paths = [os.path.join(image_dir, name) for name in chunk]
 
+        batch_started = time.perf_counter()
         try:
             texts = _predict_batch(processor, net, device, paths, max_new_tokens)
         except Exception as e:
@@ -216,6 +222,9 @@ def run_evaluation(
                 except Exception as inner:
                     log(f"Skipped {os.path.basename(path)}: {inner}")
                     texts.append(None)
+
+        inference_seconds += time.perf_counter() - batch_started
+        timed_images += len(chunk)
 
         for filename, predicted in zip(chunk, texts):
             processed += 1
@@ -251,8 +260,10 @@ def run_evaluation(
         chart = save_metrics_png(results, subfolder=variant, model_label=model_key)
         chart = {"variant": variant, "name": os.path.basename(chart), "path": chart}
 
+    ms_per_sample = (inference_seconds / timed_images * 1000) if timed_images else 0.0
     log(f"CER {results['cer'] * 100:.2f}% | WER {results['wer'] * 100:.2f}% | "
-        f"exact {results['accuracy'] * 100:.2f}% over {results['total']} sample(s).")
+        f"exact {results['accuracy'] * 100:.2f}% over {results['total']} sample(s) | "
+        f"{ms_per_sample:.0f} ms per sample on {device}.")
 
     return {
         "cancelled": cancelled,
@@ -269,6 +280,9 @@ def run_evaluation(
             "exact_match": round(results["accuracy"], 4),
             "exact": results["exact"],
             "total": results["total"],
+            # Processing time: average model time per image, batched, on `device`.
+            "ms_per_sample": round(ms_per_sample, 1),
+            "device": str(device),
         },
     }
 
@@ -318,6 +332,8 @@ def main(argv=None):
 
     print("-" * 82)
     print()
+    print(f"Processing time: {result['metrics']['ms_per_sample']:.0f} ms per sample "
+          f"on {result['metrics']['device']} (batch {args.batch_size}).")
     print_metrics(
         {
             "cer": result["metrics"]["cer"],
