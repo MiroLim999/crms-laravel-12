@@ -3417,45 +3417,51 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   flex: 0 0 auto;
   flex-wrap: wrap;
   align-items: center;
-  gap: .35rem .6rem;
-  padding: .4rem .75rem .35rem;
+  gap: .3rem .75rem;
+  padding: .55rem .75rem .45rem;
   background: rgba(40, 199, 111, .08);
   border-block-end: 1px solid rgba(40, 199, 111, .35);
   // Slides down and up (see slideToolbar in the scan view); the page below eases with it.
   overflow: hidden;
 
+  // Text-only tools in one segmented control: the labels say what each does.
   .btn-group .btn {
-    padding-inline: .6rem;
+    padding-inline: .75rem;
     white-space: nowrap;
   }
 }
 
-// Title and the field being edited on one line: "Adjust outline  Child's Name · row 20".
+// What is being edited: a small caption over the field's name ("Adjust outline /
+// Child's Name · row 20"), or just the tool's name.
 .line-edit-toolbar__copy {
   display: flex;
-  flex: 1 1 9rem;
-  align-items: baseline;
-  gap: .4rem;
+  flex: 1 1 8rem;
+  flex-direction: column;
+  justify-content: center;
   min-inline-size: 0;
-  font-size: .75rem;
+  line-height: 1.25;
 
   strong {
-    flex: 0 0 auto;
-    color: var(--bs-heading-color);
-    white-space: nowrap;
-  }
-
-  span {
     overflow: hidden;
-    color: var(--bs-secondary-color);
+    color: var(--bs-heading-color);
+    font-size: .8125rem;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 }
 
+.line-edit-toolbar__eyebrow {
+  color: var(--bs-success);
+  font-size: .625rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
 .line-edit-toolbar__actions {
   display: flex;
-  gap: .35rem;
+  align-items: center;
+  gap: .25rem;
 }
 
 .line-edit-toolbar__status {
@@ -3470,6 +3476,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   // "Enter closes it"); a toolbar that grows and shrinks with it moves the page under
   // the pointer in the middle of a stroke. The full text is in the tooltip.
   min-block-size: 1.35em;
+  padding-block-start: .3rem;
+  border-block-start: 1px solid rgba(40, 199, 111, .22);
 
   &.is-error {
     color: var(--bs-danger);
@@ -4069,6 +4077,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .add-field-toolbar {
   background: rgba(var(--bs-primary-rgb), .07);
   border-block-end-color: rgba(var(--bs-primary-rgb), .3);
+
+  .line-edit-toolbar__status {
+    border-block-start-color: rgba(var(--bs-primary-rgb), .2);
+  }
 }
 
 // Under a field the reviewer added, or one between two rows: which person

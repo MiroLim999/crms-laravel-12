@@ -431,17 +431,13 @@
                             <div class="btn-group btn-group-sm" role="radiogroup" aria-label="How to mark the writing">
                                 <input type="radio" class="btn-check" name="addFieldMode" id="addFieldRectangle"
                                        value="rectangle" checked>
-                                <label class="btn btn-outline-secondary" for="addFieldRectangle" title="Drag a box over the writing">
-                                    <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>Rectangle
-                                </label>
+                                <label class="btn btn-outline-secondary" for="addFieldRectangle" title="Drag a box over the writing">Rectangle</label>
                                 <input type="radio" class="btn-check" name="addFieldMode" id="addFieldDraw" value="draw">
                                 <label class="btn btn-outline-secondary" for="addFieldDraw"
-                                       title="Click round the writing or hold and trace; Enter or double-click closes it">
-                                    <i class="icon-base bx bx-pen icon-sm me-1" aria-hidden="true"></i>Draw
-                                </label>
+                                       title="Click round the writing or hold and trace; Enter or double-click closes it">Draw</label>
                             </div>
                             <div class="line-edit-toolbar__actions">
-                                <button type="button" class="btn btn-sm btn-label-secondary" id="addFieldCancel">Cancel</button>
+                                <button type="button" class="btn btn-sm btn-text-secondary" id="addFieldCancel">Cancel</button>
                                 <button type="button" class="btn btn-sm btn-primary" id="addFieldRead" disabled>
                                     <i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i><span>Read boxes</span>
                                 </button>
@@ -453,35 +449,27 @@
                         <div class="line-edit-toolbar d-none" id="lineEditToolbar" role="toolbar"
                              aria-label="Adjust outline">
                             <div class="line-edit-toolbar__copy">
-                                <strong>Adjust outline</strong>
-                                <span id="lineEditName"></span>
+                                <span class="line-edit-toolbar__eyebrow">Adjust outline</span>
+                                <strong id="lineEditName"></strong>
                             </div>
                             <div class="btn-group btn-group-sm" role="group" aria-label="Outline tool">
                                 <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditBox"
                                        value="box" checked>
-                                <label class="btn btn-outline-secondary" for="lineEditBox" title="Stretch the outline by its handles">
-                                    <i class="icon-base bx bx-expand-alt icon-sm me-1" aria-hidden="true"></i>Stretch
-                                </label>
+                                <label class="btn btn-outline-secondary" for="lineEditBox" title="Stretch the outline by its handles">Stretch</label>
                                 <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditPoints"
                                        value="points">
                                 <label class="btn btn-outline-secondary" for="lineEditPoints"
-                                       title="Drag corners; drag a dot between corners to add one; Delete removes one">
-                                    <i class="icon-base bx bx-shape-polygon icon-sm me-1" aria-hidden="true"></i>Move points
-                                </label>
+                                       title="Drag corners; drag a dot between corners to add one; Delete removes one">Move points</label>
                                 <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditDraw"
                                        value="draw">
                                 <label class="btn btn-outline-secondary" for="lineEditDraw"
-                                       title="Draw a new outline: click points or hold and trace; Enter or double-click closes it">
-                                    <i class="icon-base bx bx-pen icon-sm me-1" aria-hidden="true"></i>Draw
-                                </label>
+                                       title="Draw a new outline: click points or hold and trace; Enter or double-click closes it">Draw</label>
                                 <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditRectangle"
                                        value="rectangle">
-                                <label class="btn btn-outline-secondary" for="lineEditRectangle" title="Drag a box over the writing">
-                                    <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>Rectangle
-                                </label>
+                                <label class="btn btn-outline-secondary" for="lineEditRectangle" title="Drag a box over the writing">Rectangle</label>
                             </div>
                             <div class="line-edit-toolbar__actions">
-                                <button type="button" class="btn btn-sm btn-label-secondary" id="lineEditCancel">Cancel</button>
+                                <button type="button" class="btn btn-sm btn-text-secondary" id="lineEditCancel">Cancel</button>
                                 <button type="button" class="btn btn-sm btn-primary" id="lineEditSave">
                                     <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>Save and re-read
                                 </button>
