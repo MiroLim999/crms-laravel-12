@@ -4552,7 +4552,6 @@
 
     function renderVerifyRows() {
         const container = el('verifyRows');
-        parkLineEditToolbar(); // it may sit inside a row that is about to be replaced
         container.innerHTML = '';
         activeValidationIndex = null;
         activeValidationGroupId = null;
@@ -4580,11 +4579,44 @@
     }
 
     // ---------------------------------------------------------- outline fixes
-    const lineEditHome = { parent: el('lineEditToolbar').parentElement, next: el('lineEditToolbar').nextElementSibling };
-    // Clicks and presses inside the tools must not select or refocus the row they sit in.
-    ['click', 'pointerdown', 'mousedown'].forEach((type) => {
-        el('lineEditToolbar').addEventListener(type, (event) => event.stopPropagation());
-    });
+    /**
+     * Open or close one of the tool bars above the page (Adjust outline, Add
+     * missed field): it slides down when shown and up when closed, and the
+     * page below eases with it. Opening while it is already open does nothing;
+     * opening while it is closing turns it round.
+     */
+    function slideToolbar(toolbar, open) {
+        toolbar.getAnimations().forEach((animation) => animation.cancel());
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const hidden = toolbar.classList.contains('d-none');
+
+        if (open) {
+            if (!hidden) return;
+            toolbar.classList.remove('d-none');
+            const height = toolbar.offsetHeight;
+            if (reduceMotion || height === 0) return;
+            toolbar.animate([
+                { maxBlockSize: '0px', paddingBlock: '0px', opacity: 0, transform: 'translateY(-.5rem)' },
+                { maxBlockSize: `${height}px`, opacity: 1, transform: 'translateY(0)' },
+            ], { duration: 280, easing: 'ease-out' });
+            return;
+        }
+
+        if (hidden) return;
+        const height = toolbar.offsetHeight;
+        if (reduceMotion || height === 0) {
+            toolbar.classList.add('d-none');
+            return;
+        }
+        const closing = toolbar.animate([
+            { maxBlockSize: `${height}px`, opacity: 1, transform: 'translateY(0)' },
+            { maxBlockSize: '0px', paddingBlock: '0px', opacity: 0, transform: 'translateY(-.5rem)' },
+        ], { duration: 220, easing: 'ease-in', fill: 'forwards' });
+        closing.finished.then(() => {
+            toolbar.classList.add('d-none');
+            closing.cancel();
+        }).catch(() => {}); // turned round by a new open
+    }
 
     function lineUpdateUrl(lineId) {
         return config.lineUpdateUrl
@@ -4603,21 +4635,14 @@
     function startOutlineEdit(index) {
         if (!processedPage || !cropped[index]) return;
         stopAddingMissedField();
-        cancelOutlineEdit();
+        // Moving to another field keeps the tools open, so they do not close and reopen.
+        cancelOutlineEdit({ hide: false });
 
         editingLineIndex = index;
         activateValidationField(index, 'row');
         el('lineEditName').textContent = cropped[index].name;
-        // The tools open under the field's own row in the left panel, sliding down.
-        const toolbar = el('lineEditToolbar');
-        const row = validationRow(index);
-        if (row) {
-            row.append(toolbar); // a grid row: the tools take its full width, under the field
-            toolbar.classList.remove('d-none');
-            row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        } else {
-            toolbar.classList.remove('d-none');
-        }
+        // The tools slide down above the page, in the document pane; the field list does not move.
+        slideToolbar(el('lineEditToolbar'), true);
         showLineEditStatus('');
         const mode = document.querySelector('input[name="verifyLineMode"]:checked')?.value ?? 'box';
         lineOverlay.beginEdit(index, mode);
@@ -4647,20 +4672,12 @@
                 : `${points} points. Enter or double-click closes it; Save and re-read uses it.`);
     }
 
-    /** Put the outline tools back in their hidden home, out of any row. */
-    function parkLineEditToolbar() {
-        const toolbar = el('lineEditToolbar');
-        const home = lineEditHome;
-        if (!home || toolbar.parentElement === home.parent) return;
-        home.parent.insertBefore(toolbar, home.next);
-    }
-
-    function cancelOutlineEdit() {
+    /** Close the outline tools (they slide up), unless `hide` is false: the caller opens them again at once. */
+    function cancelOutlineEdit({ hide = true } = {}) {
         if (editingLineIndex === null) return;
         lineOverlay.cancelEdit();
         editingLineIndex = null;
-        el('lineEditToolbar').classList.add('d-none');
-        parkLineEditToolbar();
+        if (hide) slideToolbar(el('lineEditToolbar'), false);
         el('lineEditSave').disabled = false;
     }
 
@@ -4834,7 +4851,7 @@
         pendingBoxes = [];
         el('addMissedFieldBtn').classList.add('active');
         el('addMissedFieldBtn').setAttribute('aria-pressed', 'true');
-        el('addFieldToolbar').classList.remove('d-none');
+        slideToolbar(el('addFieldToolbar'), true);
         showPendingBoxes();
         armAddFieldDrawing();
     }
@@ -4848,7 +4865,7 @@
         if (lineOverlay.isAddingNew()) lineOverlay.cancelEdit();
         el('addMissedFieldBtn').classList.remove('active');
         el('addMissedFieldBtn').setAttribute('aria-pressed', 'false');
-        el('addFieldToolbar').classList.add('d-none');
+        slideToolbar(el('addFieldToolbar'), false);
     }
 
     /** A box was closed on the page: it waits for Read, and the next can be drawn. */

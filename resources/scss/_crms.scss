@@ -3421,67 +3421,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   padding: .4rem .75rem .35rem;
   background: rgba(40, 199, 111, .08);
   border-block-end: 1px solid rgba(40, 199, 111, .35);
-  // Slides down when shown (d-none comes off); the page below eases down with it.
+  // Slides down and up (see slideToolbar in the scan view); the page below eases with it.
   overflow: hidden;
-  animation: line-edit-toolbar-in .28s ease-out;
 
   .btn-group .btn {
     padding-inline: .6rem;
     white-space: nowrap;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
-}
-
-@keyframes line-edit-toolbar-in {
-  from {
-    max-block-size: 0;
-    padding-block: 0;
-    opacity: 0;
-    transform: translateY(-.5rem);
-  }
-
-  to {
-    max-block-size: 10rem;
-    padding-block: .4rem .35rem;
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-// Inside a field's row in the left panel: the tools open right under it, full
-// width, with the four tools sharing one line.
-.validation-field .line-edit-toolbar {
-  grid-column: 1 / -1;
-  margin-block-start: .5rem;
-  border: 1px solid rgba(40, 199, 111, .35);
-  border-radius: var(--bs-border-radius);
-  cursor: default;
-
-  .btn-group {
-    display: flex;
-    inline-size: 100%;
-
-    .btn {
-      flex: 1 1 0;
-      justify-content: center;
-      padding-inline: .25rem;
-      font-size: .75rem;
-
-      i {
-        display: none;
-      }
-    }
-  }
-
-  .line-edit-toolbar__copy {
-    flex-basis: 100%;
-  }
-
-  .line-edit-toolbar__actions {
-    margin-inline-start: auto;
   }
 }
 
