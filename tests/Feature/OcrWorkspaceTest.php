@@ -154,9 +154,9 @@ class OcrWorkspaceTest extends TestCase
             ->assertDontSee('teacher forcing')
             ->assertDontSee('Error reduction reflects');
 
-        // Side-by-side bars are the first view.
+        // The radar is the first view.
         $this->assertMatchesRegularExpression(
-            '/class="btn btn-primary" id="ocr-btn-view-bars" aria-pressed="true"/',
+            '/class="btn btn-primary" id="ocr-btn-view-radar" aria-pressed="true"/',
             $response->getContent(),
         );
     }

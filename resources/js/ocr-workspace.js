@@ -735,9 +735,8 @@ function initModelPerformance() {
     const kpiWrap = $('#ocr-performance-kpis');
 
     let chart = null;
-    // Bars first: with three scores, side-by-side bars compare the model with
-    // Base more plainly than a triangle. The Radar button is still there.
-    let currentView = 'bars';
+    // Radar first; the Side-by-side button switches to bars.
+    let currentView = 'radar';
     let overlayBase = true;
     let currentProfileKey = String(data.selected ?? '');
 
@@ -806,17 +805,8 @@ function initModelPerformance() {
                 : 'No real scans read yet';
         }
         // The cards are hidden for a model without test scores, so the speed
-        // is then said in the footer instead.
+        // is then said in the footer instead; otherwise there is no footer.
         document.getElementById('ocr-reading-speed')?.classList.toggle('d-none', Boolean(profile?.has_data));
-
-        const note = document.querySelector('[data-benchmark-note]');
-        if (note) {
-            note.textContent = profile?.has_data
-                ? `Scored on ${Number(profile.sample_count).toLocaleString()} test images (${profile.dataset})`
-                    + `${profile.evaluated_at ? `, evaluated ${profile.evaluated_at}` : ''}. `
-                    + 'These are test-set scores, not accuracy on real scans: see OCR Quality on the Dashboard.'
-                : 'This model has no test-set scores yet.';
-        }
 
         const speedText = document.querySelector('#ocr-reading-speed [data-reading-text]');
         if (speedText) {

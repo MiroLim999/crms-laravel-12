@@ -69,11 +69,11 @@
                     <label class="form-check-label small fw-medium" for="ocr-compare-toggle">Overlay base model</label>
                 </div>
                 <div class="btn-group btn-group-sm" role="group" aria-label="Chart type">
-                    <button type="button" class="btn btn-label-secondary" id="ocr-btn-view-radar" aria-pressed="false"
+                    <button type="button" class="btn btn-primary" id="ocr-btn-view-radar" aria-pressed="true"
                             title="Radar chart">
                         <i class="icon-base bx bx-radar me-1" aria-hidden="true"></i>Radar
                     </button>
-                    <button type="button" class="btn btn-primary" id="ocr-btn-view-bars" aria-pressed="true"
+                    <button type="button" class="btn btn-label-secondary" id="ocr-btn-view-bars" aria-pressed="false"
                             title="Bar chart, side by side">
                         <i class="icon-base bx bx-bar-chart-alt-2 me-1" aria-hidden="true"></i>Side-by-side
                     </button>
@@ -104,22 +104,12 @@
         </div>
     </div>
 
-    <div class="card-footer py-2.5">
-        {{-- Speed on real scans, not the test set; the script fills it for the model being inspected. --}}
-        <p class="small mb-2" id="ocr-reading-speed" aria-live="polite">
+    {{-- Only for a model without test scores: its cards are hidden, so its
+         reading speed is said here instead. The script fills it per model. --}}
+    <div class="card-footer py-2.5 {{ $selectedHasData ? 'd-none' : '' }}" id="ocr-reading-speed">
+        <p class="small mb-0" aria-live="polite">
             <i class="icon-base bx bx-time-five icon-sm me-1" aria-hidden="true"></i>
             <span data-reading-text>—</span>
-        </p>
-        <p class="text-muted small mb-0">
-            <i class="icon-base bx bx-info-circle icon-sm me-1" aria-hidden="true"></i>
-            <span data-benchmark-note>
-                @if ($selectedHasData)
-                    Scored on {{ number_format($selectedPerformance['sample_count']) }} test images ({{ $selectedPerformance['dataset'] }}){{ $selectedPerformance['evaluated_at'] ? ', evaluated '.$selectedPerformance['evaluated_at'] : '' }}.
-                    These are test-set scores, not accuracy on real scans: see OCR Quality on the Dashboard.
-                @else
-                    This model has no test-set scores yet.
-                @endif
-            </span>
         </p>
     </div>
 </section>
