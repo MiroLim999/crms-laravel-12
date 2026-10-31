@@ -2327,13 +2327,32 @@ def place_outline(polygon, lines_json):
 
 # ============================================================ template grid
 
+def _rules_tilt(h_rules):
+    """How far a page's printed row rules are turned, in degrees clockwise (0 without any).
+
+    The median of the rules' slopes, each weighted by its length: a long rule
+    is measured best, and a short or bent one does not throw it off.
+    """
+    if not h_rules:
+        return 0.0
+    slopes = np.array([float(r["b"]) for r in h_rules])
+    weights = np.array([float(r["hi"] - r["lo"] + 1) for r in h_rules])
+    order = np.argsort(slopes)
+    cumulative = np.cumsum(weights[order])
+    slope = slopes[order][int(np.searchsorted(cumulative, cumulative[-1] / 2))]
+    return float(math.degrees(math.atan(slope)))
+
+
 def detect_grid(page):
     """Printed rules on a page: a template sample, or a document being scanned.
 
     Suggests ruled_ys (the longest run of evenly spaced row rules), columns
     (the spans between vertical rules inside that run) and frame_bottom
     (where those column rules end: the bottom of the table), all as page
-    fractions. `page` is a path or a PIL image.
+    fractions. `page` is a path or a PIL image. Also says how far the page's
+    rules are turned ("tilt", degrees clockwise). Row rules are measured where
+    they cross the middle of the page's width, column rules where they cross
+    the middle of its height.
     """
     image = (Image.open(page) if isinstance(page, str) else page).convert("L")
     width, height = image.size
@@ -2429,6 +2448,7 @@ def detect_grid(page):
         "size": [width, height],
         "horizontal": [round((r["a"] + r["b"] * centre) / height, 5) for r in h_rules],
         "vertical": [round((r["a"] + r["b"] * height / 2) / width, 5) for r in v_rules],
+        "tilt": round(_rules_tilt(h_rules), 3),
         "suggestion": suggestion,
     }
 
@@ -2511,8 +2531,10 @@ def _straighten_geometry(geometry, degrees, old_size, new_size, grid_frame):
     column turned about its own centre lands with that centre where the page
     takes it, standing upright: what remains of its own tilt after the page's
     is a column slightly off the typical one, and the printed rule it is
-    snapped to decides its edges anyway. Row lines keep their distance from
-    the columns' tops.
+    snapped to decides its edges anyway. A row line is held as its height
+    across the middle of the page (the Align step draws it through that point,
+    turned with the columns), so that point goes where the page takes it and
+    the line runs level through it.
     """
     (width, height), (new_width, new_height) = old_size, new_size
     moved = dict(geometry)
@@ -2529,9 +2551,10 @@ def _straighten_geometry(geometry, degrees, old_size, new_size, grid_frame):
             ]}
             for column, cx, cy, w, h in placed
         ]
-        old_top = float(np.median([float(column["box"][1]) * height for column in columns]))
-        new_top = float(np.median([cy - h / 2 for _, _, cy, _, h in placed]))
-        moved["ruled_ys"] = [(new_top + float(y) * height - old_top) / new_height for y in geometry.get("ruled_ys") or []]
+        moved["ruled_ys"] = [
+            _straightened_point(width / 2, float(y) * height, degrees, old_size, new_size)[1] / new_height
+            for y in geometry.get("ruled_ys") or []
+        ]
 
     fields = []
     for field in geometry.get("fields") or []:
@@ -3010,14 +3033,56 @@ def _snap_to_lines(geometry, vertical, horizontal):
     return {**geometry, "columns": columns, "ruled_ys": [round(y, 5) for y in ruled]}
 
 
+def _tilted_grid(geometry, degrees, size):
+    """A grid fitted as if its page were level, turned `degrees` clockwise with the page.
+
+    The fit measures every column edge where its printed rule crosses the
+    middle of the page's height, and every row line where its rule crosses the
+    middle of the page's width. On a tilted page each column is then turned by
+    `degrees` about its centre, and that centre is put where its own rules'
+    middle and its rows' middle cross: the turned markers lie along the
+    tilted table, the outer columns' tops on its first row line rather than a
+    few pixels off it. Row lines keep their heights: the Align step draws each
+    one through its height at the middle of the page, turned with the columns
+    (as _straighten_geometry reads it back). Fields are left as they are.
+    """
+    width, height = size
+    theta = math.radians(degrees)
+    cos, sin = math.cos(theta), math.sin(theta)
+    columns = []
+    for column in geometry.get("columns") or []:
+        x, y, w, h = [float(v) for v in column["box"]]
+        across = (x + w / 2) * width - width / 2
+        middle = (y + h / 2) * height
+        # How far along the turned row through the column's middle its centre lies.
+        along = across * cos - (middle - height / 2) * sin
+        cx, cy = width / 2 + along * cos, middle + along * sin
+        # The fit's sizes are measured level; the turned marker's own sides are a little shorter.
+        box_w, box_h = w * cos, h * cos
+        left = min(max(0.0, cx / width - box_w / 2), 1.0 - box_w)
+        top = min(max(0.0, cy / height - box_h / 2), 1.0 - box_h)
+        columns.append({**column, "box": [round(left, 5), round(top, 5), round(box_w, 5), round(box_h, 5)],
+                        "angle": degrees})
+    return {**geometry, "columns": columns}
+
+
+# Snap turns the grid with the page from this tilt on (degrees). Markers are
+# turned in tenths of a degree, and a tenth across a whole register page moves
+# a row line's ends by a pixel or two.
+SNAP_TILT = 0.1
+
+
 def snap_page(page_path, geometry):
     """Snap to table: the markers fitted to this page's printed table, fast.
 
     The column-and-row fit Detect makes, without straightening the page or
     finding any handwriting, so it takes a moment rather than a Kraken pass.
     The row lines are the page's own (see _rows_from_page), and fit["rows"]
-    says where they came from. Also returns every printed rule found (page
-    fractions), for the markers' magnetic edges while Staff drag them.
+    says where they came from. A page scanned a little turned gets its grid
+    turned with it (see _tilted_grid; fit["tilt"] says how far), so the row
+    lines follow its printed rules from end to end. Also returns every printed
+    rule found (page fractions), for the markers' magnetic edges while Staff
+    drag them.
     """
     image = Image.open(page_path).convert("RGB")
     found = detect_grid(image)
@@ -3027,6 +3092,10 @@ def snap_page(page_path, geometry):
         fitted, fit["rows"] = _rows_from_page(fitted, found,
                                               template_rows=max(0, len(geometry.get("ruled_ys") or []) - 1))
         fitted = _keep_shortened_columns(geometry, fitted)
+        tilt = round(float(found.get("tilt") or 0.0), 1)
+        if abs(tilt) >= SNAP_TILT:
+            fitted = _tilted_grid(fitted, tilt, image.size)
+            fit["tilt"] = tilt
     return {
         "size": list(image.size),
         "fit": fit,

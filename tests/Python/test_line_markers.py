@@ -486,6 +486,47 @@ class DetectTest(unittest.TestCase):
         # faint or short one may be missed; the fit does not need them all).
         self.assertGreaterEqual(len(result["lines"]["vertical"]), len(edges) - 1)
         self.assertGreaterEqual(len(result["lines"]["horizontal"]), len(ruled))
+        # A level page keeps a level grid.
+        self.assertNotIn("tilt", result["fit"])
+        self.assertTrue(all("angle" not in column for column in snapped["columns"]))
+
+    def test_snap_to_table_turns_the_grid_with_a_slightly_tilted_page(self):
+        # Scanned 0.6 degrees anticlockwise: each rule's right end sits about
+        # 7 px above its left end, more than a level row line can follow.
+        degrees = -0.6
+        page = Page()
+        page.image = page.image.rotate(-degrees, resample=Image.BICUBIC, fillcolor=(PAPER,) * 3)
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "page.png")
+        page.image.save(path)
+
+        result = lm.snap_page(path, geometry())
+        snapped = result["geometry"]
+
+        self.assertTrue(result["fit"]["fitted"])
+        tilt = result["fit"]["tilt"]
+        self.assertAlmostEqual(degrees, tilt, delta=0.1)
+        cos, sin = np.cos(np.radians(degrees)), np.sin(np.radians(degrees))
+
+        def turned(x, y):
+            """Where the scan's turn took page pixel (x, y)."""
+            dx, dy = x - WIDTH / 2, y - HEIGHT / 2
+            return WIDTH / 2 + dx * cos - dy * sin, HEIGHT / 2 + dx * sin + dy * cos
+
+        # Each row line, drawn through its height at the middle of the page and
+        # turned with the columns, runs on its printed rule from end to end.
+        slope = np.tan(np.radians(tilt))
+        for y, printed in zip(snapped["ruled_ys"], RULED):
+            for end in (COLUMN_EDGES[0], COLUMN_EDGES[-1]):
+                x, expected = turned(end, printed)
+                self.assertAlmostEqual(expected, y * HEIGHT + slope * (x - WIDTH / 2), delta=2)
+        # Each column turned with the page, its centre on its turned column.
+        for column, left, right in zip(snapped["columns"], COLUMN_EDGES, COLUMN_EDGES[1:]):
+            self.assertEqual(tilt, column["angle"])
+            x, y, w, h = column["box"]
+            cx, cy = turned((left + right) / 2, (RULED[0] + RULED[-1]) / 2)
+            self.assertAlmostEqual(cx, (x + w / 2) * WIDTH, delta=2)
+            self.assertAlmostEqual(cy, (y + h / 2) * HEIGHT, delta=2)
 
     def test_a_rule_found_twice_does_not_cut_the_table_short(self):
         # Warped paper: part of the third rule comes back as a second rule 5 px
@@ -693,6 +734,26 @@ class TurnedMarkersTest(unittest.TestCase):
         self.assertAlmostEqual(expected[0], xs.mean(), delta=1.0)
         self.assertAlmostEqual(expected[1], ys.mean(), delta=1.0)
 
+    def test_a_turned_grid_s_row_lines_land_level_where_the_page_takes_them(self):
+        # Row lines are sent as their height across the middle of the page and
+        # drawn turned with the columns. Straightening the page by that tilt
+        # lays every point of each one on one level line.
+        degrees = 2.0
+        size = (WIDTH, HEIGHT)
+        straight = lm.straighten_page(Image.new("RGB", size, (PAPER,) * 3), degrees)
+        grid = geometry()
+        for column in grid["columns"]:
+            column["angle"] = degrees
+
+        moved = lm._straighten_geometry(grid, degrees, size, straight.size, grid_frame=True)
+
+        slope = np.tan(np.radians(degrees))
+        for before, after in zip(grid["ruled_ys"], moved["ruled_ys"]):
+            for x in (COLUMN_EDGES[0], WIDTH / 2, COLUMN_EDGES[-1]):
+                _, landed = lm._straightened_point(x, before * HEIGHT + slope * (x - WIDTH / 2), degrees,
+                                                   size, straight.size)
+                self.assertAlmostEqual(after * straight.height, landed, delta=0.01)
+
     def test_a_turned_template_field_is_read_from_a_level_crop(self):
         folder = tempfile.mkdtemp()
         path = os.path.join(folder, "page.png")
@@ -722,17 +783,15 @@ class TurnedMarkersTest(unittest.TestCase):
         page.image = page.image.rotate(-3, resample=Image.BICUBIC, fillcolor=(PAPER,) * 3)
         tilted = geometry()
         cos, sin = np.cos(np.radians(3)), np.sin(np.radians(3))
-        tops = []
         for column in tilted["columns"]:
             x, y, w, h = column["box"]
             dx, dy = (x + w / 2 - 0.5) * WIDTH, (y + h / 2 - 0.5) * HEIGHT
             cx, cy = WIDTH / 2 + dx * cos - dy * sin, HEIGHT / 2 + dx * sin + dy * cos
             column["box"] = [cx / WIDTH - w / 2, cy / HEIGHT - h / 2, w, h]
             column["angle"] = 3
-            tops.append(column["box"][1])
-        # Row lines follow the columns' typical top, as the Align step sends them.
-        top = float(np.median(tops))
-        tilted["ruled_ys"] = [top + (y - RULED[0]) / HEIGHT for y in RULED]
+        # A row line is sent as its height across the middle of the page, as the
+        # Align step holds it: the turned rule's height at x = WIDTH / 2.
+        tilted["ruled_ys"] = [0.5 + (y / HEIGHT - 0.5) / cos for y in RULED]
 
         def detector(image):
             # Straightening grows the canvas; the writing moves with it.

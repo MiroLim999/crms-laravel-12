@@ -81,6 +81,127 @@ export function clampRuledY(ys, index, y, minGap = MIN_ROW_GAP) {
     return low > high ? ys[index] : Math.min(high, Math.max(low, y));
 }
 
+/**
+ * The ledger's tilt in degrees clockwise: its columns' typical (median) turn.
+ * The server straightens a page by the same (grid_tilt in line_markers.py).
+ */
+export function gridTilt(columns) {
+    return median(columns.map((column) => Number(column.angle) || 0)) ?? 0;
+}
+
+/**
+ * A row line's height at page fraction x. A row line is held as its height
+ * across the middle of the page (x = 0.5), where Snap measures the printed
+ * rules, and runs at the ledger's tilt. `aspect` is the page's width over its
+ * height in pixels: a tilt is an angle in pixels, not in page fractions.
+ */
+export function rowLineY(y, x, tilt = 0, aspect = 1) {
+    return y + Math.tan((Number(tilt) || 0) * Math.PI / 180) * (x - 0.5) * aspect;
+}
+
+/**
+ * The ledger's columns turned together by `degrees` clockwise, as one table:
+ * each turns about its own centre, and the centres go round the middle of the
+ * page's width at the height of the table's middle. The row lines, held at the
+ * middle of the page's width, stay on the columns without changing. Fields
+ * are left alone. Returns the same array when nothing turns.
+ */
+export function tiltColumns(boxes, degrees, aspect = 1) {
+    const turn = Number(degrees) || 0;
+    const columns = boxes.filter(isColumn);
+    if (turn === 0 || columns.length === 0) return boxes;
+
+    const band = columnBand(columns);
+    const middle = (band.top + band.bottom) / 2;
+    const radians = turn * Math.PI / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+
+    return boxes.map((box) => {
+        if (!isColumn(box)) return box;
+        // Measured on a page `aspect` wide and 1 high, where a turn is a turn.
+        const dx = (box.x + box.w / 2 - 0.5) * aspect;
+        const dy = box.y + box.h / 2 - middle;
+        const cx = 0.5 + (dx * cos - dy * sin) / aspect;
+        const cy = middle + dx * sin + dy * cos;
+        return {
+            ...box,
+            x: Math.min(1 - box.w, Math.max(0, cx - box.w / 2)),
+            y: Math.min(1 - box.h, Math.max(0, cy - box.h / 2)),
+            angle: (Number(box.angle) || 0) + turn,
+        };
+    });
+}
+
+// ------------------------------------------------------- one row line's tilt
+// Each row line may be turned a little more or less than the table (paper is
+// curved, and no two printed rules run quite alike): `tilts[i]` is how many
+// degrees line i is turned beyond the table's own tilt (gridTilt). The line
+// still passes through its held height at the middle of the page.
+
+const toTenths = (value) => Math.round(value * 10) / 10;
+
+/**
+ * The most a row line may be turned to (degrees clockwise, in tenths) before
+ * it touches its neighbours or leaves the page, anywhere across the table
+ * (from `left` to `right`, page fractions). `angles` are every line's total
+ * angle (the table's tilt and its own). Returns `wanted` when it fits, else
+ * the nearest angle that does, or the line's current one when none does.
+ */
+export function clampRowAngle(ys, angles, index, wanted, { left = 0, right = 1, aspect = 1, minGap = MIN_ROW_GAP } = {}) {
+    const current = Number(angles[index]) || 0;
+    // Rise per page width, in page heights: what a line's angle means in page fractions.
+    const slope = (degrees) => Math.tan((Number(degrees) || 0) * Math.PI / 180) * aspect;
+
+    let low = -Infinity;
+    let high = Infinity;
+    [left, right].forEach((x) => {
+        const dx = x - 0.5;
+        if (dx === 0) return;
+        const above = index > 0 ? ys[index - 1] + slope(angles[index - 1]) * dx + minGap : 0;
+        const below = index < ys.length - 1 ? ys[index + 1] + slope(angles[index + 1]) * dx - minGap : 1;
+        const bounds = [(above - ys[index]) / dx, (below - ys[index]) / dx].sort((a, b) => a - b);
+        low = Math.max(low, bounds[0]);
+        high = Math.min(high, bounds[1]);
+    });
+    if (low > high) return current;
+
+    // Back to degrees; round inwards so a tenth never crosses the limit.
+    const degrees = (rise) => (Math.atan(rise / aspect) * 180) / Math.PI;
+    const lowest = Number.isFinite(low) ? Math.ceil(degrees(low) * 10 - 1e-9) / 10 : -Infinity;
+    const highest = Number.isFinite(high) ? Math.floor(degrees(high) * 10 + 1e-9) / 10 : Infinity;
+    if (lowest > highest) return current;
+
+    return toTenths(Math.min(highest, Math.max(lowest, wanted)));
+}
+
+/** The tilts of a row list with a line added at `at`: the mean of its two neighbours. */
+export function insertTilt(tilts, at) {
+    const above = Number(tilts[at - 1]) || 0;
+    const below = tilts[at] === undefined ? above : Number(tilts[at]) || 0;
+    return [...tilts.slice(0, at), toTenths((above + below) / 2), ...tilts.slice(at)];
+}
+
+/** `count` tilts spread along the old ones, for lines respaced evenly between the first and last. */
+export function respaceTilts(tilts, count) {
+    if (count <= 0) return [];
+    if (tilts.length === 0) return Array.from({ length: count }, () => 0);
+    return Array.from({ length: count }, (_, index) => {
+        const at = count === 1 ? 0 : (index * (tilts.length - 1)) / (count - 1);
+        const from = Math.floor(at);
+        const to = Math.min(tilts.length - 1, from + 1);
+        const own = Number(tilts[from]) || 0;
+        const next = Number(tilts[to]) || 0;
+        return toTenths(own + (next - own) * (at - from));
+    });
+}
+
+/** `tilts` made `count` long: cut short, or padded with the last line's tilt. */
+export function fitTilts(tilts, count) {
+    const list = Array.isArray(tilts) ? tilts : [];
+    return Array.from({ length: count }, (_, index) => Number(list[Math.min(index, list.length - 1)]) || 0);
+}
+
 /** Every row line moved by dy, stopped at the top and bottom of the page. */
 export function shiftRuledYs(ys, dy) {
     if (ys.length === 0) return [];

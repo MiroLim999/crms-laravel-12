@@ -1709,7 +1709,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     inline-size: 100%;
     min-block-size: 3rem;
     padding: .45rem .9rem .45rem .5rem;
-    border-radius: .5rem;
+    border-radius: var(--bs-border-radius);
     font-weight: 500;
     text-align: start;
     transition: border-color .15s ease, box-shadow .15s ease;
@@ -3451,6 +3451,40 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// Inside a field's row in the left panel: the tools open right under it, full
+// width, with the four tools sharing one line.
+.validation-field .line-edit-toolbar {
+  grid-column: 1 / -1;
+  margin-block-start: .5rem;
+  border: 1px solid rgba(40, 199, 111, .35);
+  border-radius: var(--bs-border-radius);
+  cursor: default;
+
+  .btn-group {
+    display: flex;
+    inline-size: 100%;
+
+    .btn {
+      flex: 1 1 0;
+      justify-content: center;
+      padding-inline: .25rem;
+      font-size: .75rem;
+
+      i {
+        display: none;
+      }
+    }
+  }
+
+  .line-edit-toolbar__copy {
+    flex-basis: 100%;
+  }
+
+  .line-edit-toolbar__actions {
+    margin-inline-start: auto;
+  }
+}
+
 // Title and the field being edited on one line: "Adjust outline  Child's Name · row 20".
 .line-edit-toolbar__copy {
   display: flex;
@@ -3573,6 +3607,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .row-line {
   position: absolute;
   block-size: 0;
+  // A tilted table turns each line about its left end (see row-lines.js).
+  transform-origin: 0 0;
 
   .row-line__rule {
     position: absolute;
@@ -3756,6 +3792,24 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     font-size: .8125rem;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
+  }
+
+  // Tilt while a row line is selected: it turns that line alone. The label
+  // names the line ("Line 3") and the group is outlined in the line's own
+  // blue, so it is clear that the other lines stay as they are.
+  .document-grid-card__line.is-row-scope {
+    .document-grid-card__label {
+      color: var(--bs-primary);
+    }
+
+    .btn-group .btn {
+      --bs-btn-border-color: var(--bs-primary);
+      --bs-btn-hover-border-color: var(--bs-primary);
+    }
+
+    .document-grid-card__count {
+      border-block-color: var(--bs-primary);
+    }
   }
 
   .document-grid-card__source,
@@ -5748,7 +5802,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   color: var(--bs-heading-color);
   background: var(--bs-card-bg, var(--bs-paper-bg));
   border: 1px solid var(--bs-border-color);
-  border-radius: .5rem;
+  border-radius: var(--bs-border-radius);
   box-shadow: 0 1px 2px rgba(var(--crms-shadow-rgb), .06);
   font-size: .8125rem;
   font-weight: 500;

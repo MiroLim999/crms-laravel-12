@@ -7,11 +7,17 @@
  * snaps onto the page's printed lines (Alt: place freely). Only the grips take
  * the pointer, so the columns under the lines can still be dragged.
  *
+ * On a page scanned a little turned the lines turn with the table (`tilt`,
+ * the columns' typical turn): each is held as its height across the middle of
+ * the page and drawn through that point at the tilt (see rowLineY). A line may
+ * be turned a little more or less than the table (`tilts[i]` degrees extra),
+ * as no two printed rules on a curved page run quite alike.
+ *
  * The layer keeps no rows of its own: the page renders the rows it holds and
  * is told about every change, so undo and the server see one set of rows.
  */
 
-import { clampRuledY, nearestLine, shiftRuledYs } from './ledger-grid.js';
+import { clampRuledY, nearestLine, rowLineY, shiftRuledYs } from './ledger-grid.js';
 
 /** A line dragged within this many screen pixels of a printed one snaps onto it. */
 const SNAP_PIXELS = 8;
@@ -34,7 +40,7 @@ export class RowLineLayer {
         this.onSelect = onSelect;
         this.onMove = onMove;
         this.onRemove = onRemove;
-        this.state = { rows: [], left: 0, right: 1, selected: null, estimated: new Set(), locked: false };
+        this.state = { rows: [], left: 0, right: 1, selected: null, estimated: new Set(), locked: false, tilt: 0, tilts: [], aspect: 1 };
 
         this.layer = document.createElement('div');
         this.layer.className = 'row-line-layer';
@@ -55,12 +61,16 @@ export class RowLineLayer {
      * Draw the rows as they stand. `dragging` marks the lines being moved,
      * drawn where the pointer has them before anything is committed.
      *
-     * @param {{rows?: number[], left?: number, right?: number, selected?: number|null, estimated?: Set<string>, locked?: boolean}} state
+     * `tilt` is the table's turn in degrees clockwise, `tilts` how far each
+     * line is turned beyond it, `aspect` the page's width over its height in
+     * pixels.
+     *
+     * @param {{rows?: number[], left?: number, right?: number, selected?: number|null, estimated?: Set<string>, locked?: boolean, tilt?: number, tilts?: number[], aspect?: number}} state
      * @param {Set<number>|null} [dragging]
      */
     render(state = {}, dragging = null) {
         this.state = { ...this.state, ...state };
-        const { rows, left, right, selected, estimated, locked } = this.state;
+        const { rows, left, right, selected, estimated, locked, aspect } = this.state;
 
         this.layer.classList.toggle('is-locked', Boolean(locked));
         // The lines' elements are kept and updated, not replaced: a click selects
@@ -75,9 +85,14 @@ export class RowLineLayer {
             row.classList.toggle('is-selected', index === selected);
             row.classList.toggle('is-estimated', isEstimated);
             row.classList.toggle('is-dragging', Boolean(dragging?.has(index)));
-            row.style.top = `${y * 100}%`;
+            const angle = this.angleOf(index);
+            // Turned about its left end, a line reaches the table's right edge
+            // when it is that much longer.
+            const length = Math.max(0, right - left) / Math.cos(angle * Math.PI / 180);
+            row.style.top = `${rowLineY(y, left, angle, aspect) * 100}%`;
             row.style.left = `${left * 100}%`;
-            row.style.width = `${Math.max(0, right - left) * 100}%`;
+            row.style.width = `${length * 100}%`;
+            row.style.transform = angle ? `rotate(${angle}deg)` : '';
             row.querySelectorAll('.row-line__grip').forEach((grip) => {
                 grip.dataset.index = String(index);
                 grip.title = isEstimated
@@ -85,6 +100,12 @@ export class RowLineLayer {
                     : `Row line ${index + 1}: drag to move (Shift: every line), double-click to remove`;
             });
         });
+    }
+
+    /** Line `index`'s turn in degrees clockwise: the table's and its own. */
+    angleOf(index) {
+        const { tilt, tilts } = this.state;
+        return Math.round(((Number(tilt) || 0) + (Number(tilts?.[index]) || 0)) * 1000) / 1000;
     }
 
     drag(event) {
@@ -96,9 +117,13 @@ export class RowLineLayer {
         const index = Number(grip.dataset.index);
         const together = event.shiftKey;
         const origin = [...this.state.rows];
+        // On a turned line the grip is higher or lower than the line's middle
+        // height, which is what a line is held as and snapped by.
+        const gripX = grip.classList.contains('is-end') ? this.state.right : this.state.left;
+        const offset = rowLineY(0, gripX, this.angleOf(index), this.state.aspect);
         const pageY = (clientY) => {
             const bounds = this.overlay.getBoundingClientRect();
-            return { y: (clientY - bounds.top) / Math.max(1, bounds.height), height: Math.max(1, bounds.height) };
+            return { y: (clientY - bounds.top) / Math.max(1, bounds.height) - offset, height: Math.max(1, bounds.height) };
         };
         const startY = pageY(event.clientY).y;
         const moving = new Set(together ? origin.map((_, i) => i) : [index]);

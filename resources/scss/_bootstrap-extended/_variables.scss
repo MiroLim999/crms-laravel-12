@@ -551,8 +551,15 @@ $btn-focus-box-shadow: none !default;
 $btn-disabled-opacity: .45 !default;
 $btn-active-box-shadow: none !default;
 
-$btn-border-radius-xs: $border-radius-xs !default; // (C)
-$btn-border-radius-xl: $border-radius-xl !default; // (C)
+// CRMS: one corner size for every button and input, whatever its size, so
+// toolbars that mix small and regular controls line up. Round icon buttons
+// stay round through .rounded-pill.
+$btn-border-radius-xs: $border-radius !default; // (C)
+$btn-border-radius-sm: $border-radius !default;
+$btn-border-radius-lg: $border-radius !default;
+$btn-border-radius-xl: $border-radius !default; // (C)
+$input-border-radius-sm: $border-radius !default;
+$input-border-radius-lg: $border-radius !default;
 
 $btn-transition: all .2s ease-in-out !default;
 

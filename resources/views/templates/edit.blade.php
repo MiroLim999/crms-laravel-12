@@ -47,6 +47,10 @@
     <div class="template-builder-page">
         <header class="template-builder-page__header">
             <div class="template-builder-page__heading">
+                {{-- The document type, unless the layout's name already says it. --}}
+                @if (! $template || mb_strtolower(trim($template->name)) !== mb_strtolower(trim($docType->label())))
+                    <span class="template-builder-page__eyebrow">{{ $docType->label() }}</span>
+                @endif
                 <div class="d-flex flex-wrap align-items-center gap-2">
                     <h1 class="h4 mb-0">
                         {{ $template ? $template->name : 'New template layout' }}

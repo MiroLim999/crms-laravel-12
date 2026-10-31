@@ -144,6 +144,7 @@
                                     @if (count($ruledYs) >= 2)
                                         <li>+ Field is read once (e.g. Page No.). + Column is read on every row (e.g. Remarks).</li>
                                         <li>Stretch a new field down two or more rows, between columns, to read it as a column.</li>
+                                        <li>Page scanned a little turned? Snap to table turns the table with it; Tilt fine-tunes it.</li>
                                     @endif
                                 </ul>
                             </div>
@@ -168,6 +169,27 @@
                                                 title="Add a row line under the selected one, or a row at the bottom"
                                                 aria-label="Add a row">
                                             <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                {{-- A page scanned a little turned: the columns and row lines turn with it. --}}
+                                <div class="document-grid-card__line" id="gridTiltLine">
+                                    {{-- "Tilt" for the table; "Line 3" while row line 3 is selected: Tilt then turns that line alone. --}}
+                                    <span class="document-grid-card__label" id="gridTiltLabel">Tilt</span>
+                                    <div class="btn-group btn-group-sm" role="group" id="gridTiltGroup" aria-label="Tilt of the table">
+                                        <button type="button" class="btn btn-outline-secondary" id="tiltLeftBtn"
+                                                title="Turn the table anticlockwise by 0.1° (Shift: 1°)"
+                                                aria-label="Turn the table anticlockwise">
+                                            <i class="icon-base bx bx-rotate-left icon-sm" aria-hidden="true"></i>
+                                        </button>
+                                        <input type="text" class="document-grid-card__count" id="gridTiltValue"
+                                               value="0.0°" inputmode="decimal" autocomplete="off"
+                                               aria-label="How far the table is turned, in degrees"
+                                               title="How far the table is turned. Snap to table measures it from the page.">
+                                        <button type="button" class="btn btn-outline-secondary" id="tiltRightBtn"
+                                                title="Turn the table clockwise by 0.1° (Shift: 1°)"
+                                                aria-label="Turn the table clockwise">
+                                            <i class="icon-base bx bx-rotate-right icon-sm" aria-hidden="true"></i>
                                         </button>
                                     </div>
                                 </div>
@@ -731,14 +753,20 @@
     import { LineOverlay, polygonBounds } from '{{ Vite::asset('resources/js/line-overlay.js') }}';
     import {
         addColumn,
+        clampRowAngle,
         clampRuledY,
         columnBand,
         fieldsToColumns,
+        fitTilts,
         followFirstAndLastLine,
+        gridTilt,
         insertRuledY,
+        insertTilt,
         distributeRuledYs,
         remapRuledYs,
+        respaceTilts,
         sameBand,
+        tiltColumns,
     } from '{{ Vite::asset('resources/js/ledger-grid.js') }}';
     import { RowLineLayer, rowKey } from '{{ Vite::asset('resources/js/row-lines.js') }}';
     import { valueProblem } from '{{ Vite::asset('resources/js/value-types.js') }}';
@@ -919,6 +947,11 @@
     const isLedger = config.ruledYs.length >= 2;
     const templateRows = config.ruledYs.map(Number);
     let gridRows = [...templateRows];
+    // How many degrees each row line is turned beyond the table's own tilt
+    // (one per line, in step with gridRows): paper is curved, and no two
+    // printed rules run quite alike. Staff set one by selecting its line and
+    // using Tilt; Snap to table, Detect and Reset start every line at 0.
+    let rowTilts = templateRows.map(() => 0);
     // Row lines with no printed line under them (rowKey), drawn amber.
     let estimatedRows = new Set();
     // Staff moved, added or removed a row line themselves: Detect keeps theirs.
@@ -944,7 +977,8 @@
 
     function fieldsMatchTemplate() {
         return JSON.stringify(marker.toJSON()) === JSON.stringify(templateBoxes)
-            && JSON.stringify(gridRows) === JSON.stringify(templateRows);
+            && JSON.stringify(gridRows) === JSON.stringify(templateRows)
+            && rowTilts.every((tilt) => tilt === 0);
     }
 
     /** Markers and row lines, as one undoable state. */
@@ -952,6 +986,7 @@
         return {
             boxes: cloneBoxes(marker.toJSON()),
             rows: [...gridRows],
+            tilts: [...rowTilts],
             estimated: [...estimatedRows],
             byHand: rowsByHand,
         };
@@ -959,7 +994,7 @@
 
     /** The markers and row lines as one string, to tell one grid from another. */
     function gridSnapshot() {
-        return JSON.stringify({ boxes: marker.toJSON(), rows: gridRows });
+        return JSON.stringify({ boxes: marker.toJSON(), rows: gridRows, tilts: rowTilts });
     }
 
     function rememberBand(boxes) {
@@ -978,7 +1013,10 @@
         if (gridBand && band && columns.length === gridColumnCount && gridRows.length >= 2
             && !sameBand(band, gridBand)) {
             const from = gridBand;
+            const lineCount = gridRows.length;
             gridRows = remapRuledYs(gridRows, from, band);
+            // A line squeezed off the page by the move would put the tilts out of step.
+            if (gridRows.length !== lineCount) rowTilts = gridRows.map(() => 0);
             estimatedRows = new Set([...estimatedRows].map((key) => rowKey(remapRuledYs([Number(key)], from, band)[0])));
         }
         rememberBand(boxes);
@@ -987,9 +1025,19 @@
     function previewRowsFollow(boxes) {
         const columns = ledgerColumns(boxes);
         const band = columnBand(columns);
-        if (!gridBand || !band || columns.length !== gridColumnCount || gridRows.length < 2 || sameBand(band, gridBand)) return;
+        if (!gridBand || !band || columns.length !== gridColumnCount || gridRows.length < 2 || sameBand(band, gridBand)) {
+            // A column being turned moves no band: the lines only take its tilt.
+            renderRows(boxes);
+            return;
+        }
         const moved = (ys) => remapRuledYs(ys, gridBand, band);
         renderRows(boxes, moved(gridRows), new Set([...estimatedRows].map((key) => rowKey(moved([Number(key)])[0]))));
+    }
+
+    /** The page's width over its height in pixels: a tilt is an angle in pixels. */
+    function pageAspect() {
+        const { width, height } = marker.canvas;
+        return width > 0 && height > 0 ? width / height : 1;
     }
 
     function renderRows(boxes = marker.toJSON(), rows = gridRows, estimated = estimatedRows) {
@@ -1005,6 +1053,10 @@
             selected: selectedRow,
             estimated,
             locked: lineEditing,
+            // On a page scanned a little turned, the lines turn with the columns.
+            tilt: gridTilt(columns),
+            tilts: rowTilts,
+            aspect: pageAspect(),
         });
     }
 
@@ -1012,11 +1064,13 @@
      * Markers and row lines set together, as one change: on a new page, by
      * Snap to table and Detect, by Reset, and by undo.
      */
-    function setGrid(boxes, rows, { estimated = [], byHand = false } = {}) {
+    function setGrid(boxes, rows, { estimated = [], byHand = false, tilts = null, selected = null } = {}) {
         gridRows = [...rows];
+        rowTilts = tilts ? fitTilts(tilts, gridRows.length) : gridRows.map(() => 0);
         estimatedRows = new Set(estimated);
         rowsByHand = byHand;
-        selectedRow = null;
+        // The row line that stays selected, if any (the table's tilt keeps it).
+        selectedRow = Number.isInteger(selected) && selected >= 0 && selected < gridRows.length ? selected : null;
         settingGrid = true;
         try {
             marker.setBoxes(cloneBoxes(boxes));
@@ -1049,12 +1103,16 @@
      * Row lines changed by hand, as one undoable change. Columns on the first or
      * last line follow it, so the table's top and bottom stay on its lines.
      */
-    function applyRows(next, { estimated = estimatedRows } = {}) {
-        const rows = next.filter((y, index, all) => index === 0 || y - all[index - 1] > 0.0005);
+    function applyRows(next, { estimated = estimatedRows, tilts = rowTilts } = {}) {
+        // A line almost on top of the one above it is dropped, with its tilt.
+        const kept = next.map((y, index, all) => index === 0 || y - all[index - 1] > 0.0005);
+        const rows = next.filter((_, index) => kept[index]);
+        const nextTilts = fitTilts(tilts, next.length).filter((_, index) => kept[index]);
         const boxes = marker.toJSON();
         const halfRow = rows.length >= 2 ? (rows[rows.length - 1] - rows[0]) / (rows.length - 1) / 2 : 0.01;
         const followed = followFirstAndLastLine(boxes, gridRows, rows, halfRow);
         gridRows = rows;
+        rowTilts = nextTilts;
         estimatedRows = new Set([...estimated].filter((key) => rows.some((y) => rowKey(y) === key)));
         rowsByHand = true;
         if (selectedRow !== null && selectedRow >= rows.length) selectedRow = null;
@@ -1096,7 +1154,8 @@
     function removeRow(index = selectedRow ?? gridRows.length - 1) {
         if (!isLedger || gridRows.length <= 2 || !Number.isInteger(index) || index < 0 || index >= gridRows.length) return;
         selectedRow = null;
-        applyRows(gridRows.filter((_, candidate) => candidate !== index));
+        applyRows(gridRows.filter((_, candidate) => candidate !== index),
+            { tilts: rowTilts.filter((_, candidate) => candidate !== index) });
     }
 
     /**
@@ -1125,8 +1184,90 @@
             return;
         }
         showGridMessage(null);
-        applyRows(inserted.ys);
+        // The new line is turned like the two it lies between.
+        applyRows(inserted.ys, { tilts: insertTilt(rowTilts, inserted.index) });
         selectRow(inserted.index);
+    }
+
+    // ------------------------------------------------------------ table tilt
+    // A page scanned a little turned: the table's columns and row lines turn
+    // with it, in tenths of a degree. Snap to table measures it from the page;
+    // Scan with OCR then straightens the page by it before reading.
+    const MAX_TILT = 10;
+
+    function formatTilt(degrees) {
+        const value = Math.round(degrees * 10) / 10;
+        return `${(value === 0 ? 0 : value).toFixed(1).replace('-', '−')}°`;
+    }
+
+    function parseTilt(text) {
+        const value = Number.parseFloat(String(text).replace(/[−–]/g, '-').replace(',', '.').replace(/[^0-9.+-]/g, ''));
+        return Number.isFinite(value) ? value : null;
+    }
+
+    const tenths = (value) => Math.round(value * 10) / 10;
+    const limitTilt = (degrees) => tenths(Math.min(MAX_TILT, Math.max(-MAX_TILT, Number(degrees) || 0)));
+
+    /**
+     * The tilt the Tilt control shows and changes: the selected row line's
+     * own (the table's and its extra turn), or the table's when no line is
+     * selected.
+     */
+    function shownTilt(boxes = marker.toJSON()) {
+        const table = gridTilt(ledgerColumns(boxes));
+        return selectedRow === null ? table : table + (rowTilts[selectedRow] ?? 0);
+    }
+
+    /** Turn the table to `degrees` clockwise, as one undoable change. */
+    function setTableTilt(degrees) {
+        const boxes = marker.toJSON();
+        const turned = tiltColumns(boxes, limitTilt(degrees) - gridTilt(ledgerColumns(boxes)), pageAspect());
+        if (turned === boxes) {
+            updateGridCard();
+            return;
+        }
+        const selected = marker.selectedIndexes();
+        // Every line turns with the table, keeping its own extra turn; the selected one stays selected.
+        setGrid(turned, gridRows, {
+            estimated: [...estimatedRows], byHand: rowsByHand, tilts: rowTilts, selected: selectedRow,
+        });
+        marker.selectIndexes(selected);
+    }
+
+    /**
+     * Turn one row line to `degrees` clockwise, as one undoable change, and
+     * leave it selected. The others stay as they are. A line stops short of
+     * touching its neighbours or leaving the page.
+     */
+    function setRowTilt(index, degrees) {
+        if (!Number.isInteger(index) || index < 0 || index >= gridRows.length) return;
+        const columns = ledgerColumns(marker.toJSON());
+        if (columns.length === 0) return;
+
+        const table = gridTilt(columns);
+        const wanted = limitTilt(degrees);
+        const allowed = clampRowAngle(gridRows, rowTilts.map((own) => table + own), index, wanted, {
+            left: Math.min(...columns.map((column) => column.x)),
+            right: Math.max(...columns.map((column) => column.x + column.w)),
+            aspect: pageAspect(),
+        });
+        showGridMessage(allowed === wanted ? null : 'This row line cannot turn any further: it would touch the next one.');
+
+        const own = tenths(allowed - table);
+        if (own === rowTilts[index]) {
+            updateGridCard();
+            return;
+        }
+        rowTilts = rowTilts.map((tilt, line) => (line === index ? own : tilt));
+        // A line turned by hand is one Detect keeps, like a line moved by hand.
+        rowsByHand = true;
+        rowsChanged();
+    }
+
+    /** What the Tilt control does: the selected row line alone, else the whole table. */
+    function setTilt(degrees) {
+        if (selectedRow === null) setTableTilt(degrees);
+        else setRowTilt(selectedRow, degrees);
     }
 
     const MAX_ROWS = 40;
@@ -1138,22 +1279,35 @@
             return;
         }
         let ys = [...gridRows];
+        let tilts = [...rowTilts];
         let stopped = false;
         wanted = Math.min(wanted, MAX_ROWS);
         while (ys.length - 1 < wanted && !stopped) {
             const inserted = insertRuledY(ys, null);
-            if (inserted) ys = inserted.ys; else stopped = true;
+            if (inserted) {
+                tilts = insertTilt(tilts, inserted.index);
+                ys = inserted.ys;
+            } else {
+                stopped = true;
+            }
         }
         if (stopped) {
             // No room below the last line: space the rows evenly between the first and last line.
             const even = distributeRuledYs(gridRows, wanted);
-            if (even) { ys = even; stopped = false; }
+            if (even) {
+                ys = even;
+                tilts = respaceTilts(rowTilts, even.length);
+                stopped = false;
+            }
         }
-        if (ys.length - 1 > wanted) ys = ys.slice(0, wanted + 1);
+        if (ys.length - 1 > wanted) {
+            ys = ys.slice(0, wanted + 1);
+            tilts = tilts.slice(0, wanted + 1);
+        }
         showGridMessage(stopped ? 'There is no room for more rows: they would be too thin.' : null);
         if (ys.length !== gridRows.length) {
             selectedRow = null;
-            applyRows(ys);
+            applyRows(ys, { tilts });
         } else {
             updateGridCard();
         }
@@ -1232,6 +1386,23 @@
         const rowCountInput = el('gridRowCount');
         if (document.activeElement !== rowCountInput) rowCountInput.value = String(Math.max(0, gridRows.length - 1));
         rowCountInput.disabled = columns === 0;
+
+        // Tilt turns the selected row line alone, else the whole table.
+        const line = selectedRow !== null && selectedRow < gridRows.length ? selectedRow : null;
+        const subject = line === null ? 'the table' : `row line ${line + 1}`;
+        const tiltInput = el('gridTiltValue');
+        if (document.activeElement !== tiltInput) tiltInput.value = formatTilt(shownTilt(boxes));
+        tiltInput.disabled = columns === 0;
+        tiltInput.title = line === null
+            ? 'How far the table is turned. Snap to table measures it from the page.'
+            : `How far row line ${line + 1} is turned. Click the page to turn the whole table instead.`;
+        el('tiltLeftBtn').disabled = columns === 0;
+        el('tiltRightBtn').disabled = columns === 0;
+        el('tiltLeftBtn').title = `Turn ${subject} anticlockwise by 0.1° (Shift: 1°)`;
+        el('tiltRightBtn').title = `Turn ${subject} clockwise by 0.1° (Shift: 1°)`;
+        el('gridTiltLine').classList.toggle('is-row-scope', line !== null);
+        el('gridTiltGroup').setAttribute('aria-label', `Tilt of ${subject}`);
+        el('gridTiltLabel').textContent = line === null ? 'Tilt' : `Line ${line + 1}`;
 
         const message = !rowsByHand && rowsSource && !rowsSource.from_page
             // Compared with the template itself, not the grid Snap was sent.
@@ -1581,6 +1752,7 @@
         // Like the markers, the row lines stay put while lines are edited.
         if (allowed) selectedRow = null;
         renderRows();
+        updateGridCard();
         if (allowed) {
             // Editing needs the outlines on screen.
             alignPreview.setVisible(true);
@@ -2217,7 +2389,11 @@
 
         restoringFieldHistory = true;
         try {
-            setGrid(previous.boxes, previous.rows, { estimated: previous.estimated, byHand: previous.byHand });
+            setGrid(previous.boxes, previous.rows, {
+                estimated: previous.estimated,
+                byHand: previous.byHand,
+                tilts: previous.tilts,
+            });
         } finally {
             restoringFieldHistory = false;
         }
@@ -2823,6 +2999,18 @@
             if (event.key === 'Enter') event.target.blur();
         });
         el('gridRowCount').addEventListener('blur', () => updateGridCard());
+        el('tiltLeftBtn').addEventListener('click', (event) => setTilt(shownTilt() - (event.shiftKey ? 1 : 0.1)));
+        el('tiltRightBtn').addEventListener('click', (event) => setTilt(shownTilt() + (event.shiftKey ? 1 : 0.1)));
+        el('gridTiltValue').addEventListener('change', (event) => {
+            const value = parseTilt(event.target.value);
+            if (value === null) updateGridCard();
+            else setTilt(value);
+        });
+        el('gridTiltValue').addEventListener('keydown', (event) => {
+            event.stopPropagation();
+            if (event.key === 'Enter') event.target.blur();
+        });
+        el('gridTiltValue').addEventListener('blur', () => updateGridCard());
         el('addColumnBtn').addEventListener('click', () => addLedgerColumn());
         // A click on the page around the markers lets go of the row line.
         markerOverlay.addEventListener('pointerdown', (event) => {
@@ -4182,7 +4370,9 @@
         adjust.setAttribute('aria-label', `Adjust the outline of ${displayName}`);
         adjust.addEventListener('click', (event) => {
             event.stopPropagation();
-            startOutlineEdit(index);
+            // A second click on the same field closes its tools.
+            if (editingLineIndex === index) cancelOutlineEdit();
+            else startOutlineEdit(index);
         });
 
         // A field the reviewer added, or one between two rows: its person, column, Remove.
@@ -4371,6 +4561,7 @@
 
     function renderVerifyRows() {
         const container = el('verifyRows');
+        parkLineEditToolbar(); // it may sit inside a row that is about to be replaced
         container.innerHTML = '';
         activeValidationIndex = null;
         activeValidationGroupId = null;
@@ -4398,6 +4589,12 @@
     }
 
     // ---------------------------------------------------------- outline fixes
+    const lineEditHome = { parent: el('lineEditToolbar').parentElement, next: el('lineEditToolbar').nextElementSibling };
+    // Clicks and presses inside the tools must not select or refocus the row they sit in.
+    ['click', 'pointerdown', 'mousedown'].forEach((type) => {
+        el('lineEditToolbar').addEventListener(type, (event) => event.stopPropagation());
+    });
+
     function lineUpdateUrl(lineId) {
         return config.lineUpdateUrl
             .replace('__PAGE__', String(processedPage?.id ?? ''))
@@ -4420,7 +4617,16 @@
         editingLineIndex = index;
         activateValidationField(index, 'row');
         el('lineEditName').textContent = cropped[index].name;
-        el('lineEditToolbar').classList.remove('d-none');
+        // The tools open under the field's own row in the left panel, sliding down.
+        const toolbar = el('lineEditToolbar');
+        const row = validationRow(index);
+        if (row) {
+            row.append(toolbar); // a grid row: the tools take its full width, under the field
+            toolbar.classList.remove('d-none');
+            row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+            toolbar.classList.remove('d-none');
+        }
         showLineEditStatus('');
         const mode = document.querySelector('input[name="verifyLineMode"]:checked')?.value ?? 'box';
         lineOverlay.beginEdit(index, mode);
@@ -4450,11 +4656,20 @@
                 : `${points} points. Enter or double-click closes it; Save and re-read uses it.`);
     }
 
+    /** Put the outline tools back in their hidden home, out of any row. */
+    function parkLineEditToolbar() {
+        const toolbar = el('lineEditToolbar');
+        const home = lineEditHome;
+        if (!home || toolbar.parentElement === home.parent) return;
+        home.parent.insertBefore(toolbar, home.next);
+    }
+
     function cancelOutlineEdit() {
         if (editingLineIndex === null) return;
         lineOverlay.cancelEdit();
         editingLineIndex = null;
         el('lineEditToolbar').classList.add('d-none');
+        parkLineEditToolbar();
         el('lineEditSave').disabled = false;
     }
 

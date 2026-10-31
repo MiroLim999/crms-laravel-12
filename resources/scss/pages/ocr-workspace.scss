@@ -131,16 +131,6 @@
     cursor: pointer;
     transition: background-color 0.15s ease, box-shadow 0.15s ease;
 
-    &::before {
-      position: absolute;
-      inset-block: 0.75rem;
-      inset-inline-start: 0;
-      width: 0.1875rem;
-      background: transparent;
-      border-radius: 0 50rem 50rem 0;
-      content: '';
-    }
-
     &:last-child {
       border-bottom: 0;
     }
@@ -155,12 +145,6 @@
 
       &:hover {
         background: color-mix(in sRGB, var(--bs-primary) 11%, transparent);
-      }
-    }
-
-    &.is-active {
-      &::before {
-        background: var(--bs-success);
       }
     }
   }

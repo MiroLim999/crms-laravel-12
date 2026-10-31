@@ -8,13 +8,20 @@ import {
     distributeRuledYs,
     fieldsOverLedger,
     fieldsToColumns,
+    clampRowAngle,
+    fitTilts,
     followFirstAndLastLine,
+    gridTilt,
     insertRuledY,
+    insertTilt,
     ledgerGridProblems,
     MIN_ROW_GAP,
     nearestLine,
     remapRuledYs,
+    respaceTilts,
+    rowLineY,
     shiftRuledYs,
+    tiltColumns,
 } from '../../resources/js/ledger-grid.js';
 
 const close = (actual, expected) => {
@@ -212,4 +219,104 @@ test('a consistent ledger has no problems, and a layout without columns is not a
     assert.deepEqual(ledgerGridProblems([column('A', 0.1), column('B', 0.2)], [0.2, 0.4, 0.6, 0.8]), []);
     assert.deepEqual(ledgerGridProblems([], [0.2]), []);
     assert.equal(ledgerGridProblems([column('A', 0.1)], [0.2])[0].blocking, true);
+});
+
+test('the table is as tilted as its columns typically are', () => {
+    assert.equal(gridTilt([]), 0);
+    assert.equal(gridTilt([column('A', 0.1), column('B', 0.3)]), 0);
+    assert.equal(gridTilt([{ ...column('A', 0.1), angle: -0.4 }, { ...column('B', 0.3), angle: -0.4 },
+        { ...column('C', 0.5), angle: 3 }]), -0.4);
+});
+
+test('a row line is held at the middle of the page and runs at the tilt in pixels', () => {
+    // A page twice as wide as it is high, tilted 1 degree clockwise: 0.25 of the
+    // width right of the middle is half the page's height across, so the line
+    // drops tan(1 degree) / 2 of the height there.
+    const drop = Math.tan(Math.PI / 180) / 2;
+    assert.ok(Math.abs(rowLineY(0.3, 0.5, 1, 2) - 0.3) < 1e-12);
+    assert.ok(Math.abs(rowLineY(0.3, 0.75, 1, 2) - (0.3 + drop)) < 1e-12);
+    assert.ok(Math.abs(rowLineY(0.3, 0.25, 1, 2) - (0.3 - drop)) < 1e-12);
+    assert.equal(rowLineY(0.3, 0.9), 0.3);
+});
+
+test('turning the table turns every column and keeps them on the row lines', () => {
+    const aspect = 1.4;
+    const field = { name: 'Page No.', x: 0.8, y: 0.05, w: 0.1, h: 0.03 };
+    const boxes = [field, column('A', 0.1), column('B', 0.45), column('C', 0.8)];
+
+    const turned = tiltColumns(boxes, 0.5, aspect);
+
+    assert.equal(turned[0], field);
+    const rows = [0.2, 0.8];
+    turned.slice(1).forEach((box) => {
+        assert.equal(box.angle, 0.5);
+        assert.equal(box.w, 0.1);
+        assert.equal(box.h, 0.6);
+        // Its top and bottom where the turned first and last row lines cross it.
+        const centre = box.x + box.w / 2;
+        assert.ok(Math.abs(box.y - rowLineY(rows[0], centre, 0.5, aspect)) < 1e-4, `${box.name} top`);
+        assert.ok(Math.abs(box.y + box.h - rowLineY(rows[1], centre, 0.5, aspect)) < 1e-4, `${box.name} bottom`);
+    });
+    // Turned back, the table is where it was.
+    tiltColumns(turned, -0.5, aspect).slice(1).forEach((box, index) => {
+        assert.ok(Math.abs(box.x - boxes[index + 1].x) < 1e-9);
+        assert.ok(Math.abs(box.y - boxes[index + 1].y) < 1e-9);
+        assert.ok(Math.abs(box.angle) < 1e-9);
+    });
+    assert.equal(tiltColumns(boxes, 0, aspect), boxes);
+    assert.equal(tiltColumns([field], 1, aspect)[0], field);
+});
+
+// ---------------------------------------------------- one row line's own tilt
+
+const lines = [0.2, 0.3, 0.4, 0.5];
+const span = { left: 0.04, right: 0.96, aspect: 1.4 };
+
+test('a row line turns freely while it stays clear of its neighbours', () => {
+    assert.equal(clampRowAngle(lines, [0, 0, 0, 0], 1, 0.4, span), 0.4);
+    assert.equal(clampRowAngle(lines, [0, 0, 0, 0], 1, -0.7, span), -0.7);
+});
+
+test('a row line stops before it would touch the next one, at either end of the table', () => {
+    // 0.1 of the page apart; across 0.46 of the width on a 1.4 page the line rises
+    // 0.46 * 1.4 * tan(angle): about 8 degrees closes the gap (less the minimum gap).
+    const furthest = clampRowAngle(lines, [0, 0, 0, 0], 1, 30, span);
+    assert.ok(furthest > 7 && furthest < 8.5, `${furthest}`);
+    assert.equal(clampRowAngle(lines, [0, 0, 0, 0], 1, -30, span), -furthest);
+    // The nearest tenth inside the limit: never over it.
+    const rise = Math.tan((furthest * Math.PI) / 180) * 1.4 * 0.46;
+    assert.ok(rise <= 0.1 - MIN_ROW_GAP + 1e-9);
+});
+
+test('the neighbours own tilts count when a row line is limited', () => {
+    // The line above leans towards this one on the right, so there is less room there.
+    const tight = clampRowAngle(lines, [0, 3, 0, 0], 2, -30, span);
+    const free = clampRowAngle(lines, [0, 0, 0, 0], 2, -30, span);
+    assert.ok(Math.abs(tight) < Math.abs(free));
+    // A line that already crosses stays as it is.
+    assert.equal(clampRowAngle([0.2, 0.2005, 0.3], [0, 0, 0], 1, 2, span), 0);
+});
+
+test('the first and last lines stay on the page', () => {
+    const top = clampRowAngle([0.01, 0.2, 0.4], [0, 0, 0], 0, 30, span);
+    assert.ok(Math.abs(top) < 1);
+    assert.ok(clampRowAngle([0.01, 0.2, 0.4], [0, 0, 0], 0, 0.1, span) === 0.1);
+});
+
+test('a line added between two others is turned like both', () => {
+    assert.deepEqual(insertTilt([0.2, 0.6], 1), [0.2, 0.4, 0.6]);
+    assert.deepEqual(insertTilt([0.2, 0.6], 2), [0.2, 0.6, 0.6]);
+    assert.deepEqual(insertTilt([], 0), [0]);
+});
+
+test('lines respaced evenly spread the old tilts along the new count', () => {
+    assert.deepEqual(respaceTilts([0, 1], 5), [0, 0.3, 0.5, 0.8, 1]);
+    assert.deepEqual(respaceTilts([0.5], 3), [0.5, 0.5, 0.5]);
+    assert.deepEqual(respaceTilts([], 2), [0, 0]);
+});
+
+test('a tilt list is made the length of the lines: cut short, or padded with the last', () => {
+    assert.deepEqual(fitTilts([0.1, 0.2, 0.3], 2), [0.1, 0.2]);
+    assert.deepEqual(fitTilts([0.1, 0.2], 4), [0.1, 0.2, 0.2, 0.2]);
+    assert.deepEqual(fitTilts(null, 3), [0, 0, 0]);
 });
