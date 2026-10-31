@@ -469,6 +469,7 @@ const panels = {
   ocr: { chart: 'dashboard-quality-chart', key: 'quality', render: renderQuality },
   // No chart: a swapped card is all there is to redraw.
   requests: { chart: '', key: 'requests', render: () => {} },
+  processing: { chart: '', key: 'processing', render: () => {} },
 };
 
 const pending = new Map();

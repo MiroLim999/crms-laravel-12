@@ -6236,59 +6236,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   line-height: 1.35;
 }
 
-.dashboard-kpi__health-rate {
-  flex: 0 0 auto;
-  color: var(--bs-success);
-  font-size: .875rem;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-
-.dashboard-kpi__health-track {
-  position: relative;
-  overflow: hidden;
-  block-size: .5rem;
-  margin-block: 1.35rem .75rem;
-  background: rgba(var(--crms-ink-rgb), .09);
-  border-radius: 999px;
-
-  span {
-    display: block;
-    inline-size: var(--dashboard-kpi-health, 0%);
-    block-size: 100%;
-    background: var(--bs-success);
-    border-radius: inherit;
-    box-shadow: 0 0 .5rem rgba(var(--bs-success-rgb), .22);
-  }
-}
-
-.dashboard-kpi__health-details {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .5rem;
-  color: var(--bs-secondary-color);
-  font-size: .6875rem;
-  font-variant-numeric: tabular-nums;
-
-  span {
-    display: inline-flex;
-    align-items: center;
-    gap: .35rem;
-    min-inline-size: 0;
-    white-space: nowrap;
-  }
-
-  i {
-    display: inline-block;
-    flex: 0 0 auto;
-    inline-size: .4rem;
-    block-size: .4rem;
-    background: var(--bs-warning);
-    border-radius: 50%;
-  }
-}
-
 .dashboard-chart {
   max-inline-size: 100%;
 }
@@ -6311,9 +6258,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// Total records over active accounts, in the tall card beside the trend
-// chart. The two parts share the card's height 3:2: the records line grows
-// into the larger part, and the account figures sit centred in theirs.
+// Total records and what they are made of, in the tall card beside the trend
+// chart. The figure reads from the top down, under its title.
 .dashboard-kpi--combined {
   >.card-body {
     min-block-size: 0;
@@ -6336,7 +6282,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     display: flex;
     flex-direction: column;
     gap: .35rem;
-    margin-block: auto;
+    margin-block: 1rem auto;
   }
 
   // Icon and title, then the link. On a narrow card the link drops below
@@ -6364,15 +6310,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     font-weight: 600;
     line-height: 1.25;
     white-space: nowrap;
-  }
-
-  // The number, with its rate at the far end of the line.
-  .dashboard-kpi__figure {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: .35rem .75rem;
   }
 
   .dashboard-kpi__value {
@@ -6459,34 +6396,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     text-align: end;
   }
 
-  .dashboard-kpi__health-label {
-    color: var(--bs-secondary-color);
-    font-size: .75rem;
-    white-space: nowrap;
-  }
-
-  .dashboard-kpi__health-rate {
-    font-size: .875rem;
-  }
-
-  .dashboard-kpi__health-details {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    gap: .15rem .6rem;
-    font-size: .75rem;
-  }
-
-  .dashboard-kpi__health-track {
-    block-size: .5rem;
-    margin-block: .5rem 0;
-  }
-
-  .dashboard-kpi__divider {
-    flex: 0 0 auto;
-    block-size: 1px;
-    margin-block: 1rem;
-    background-color: rgba(var(--crms-ink-rgb), .08);
-  }
 }
 
 // The three top-row cards share one header height, so their header lines
@@ -7404,6 +7313,79 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// Processing: figures in one bordered strip, like the change request decisions.
+.dashboard-processing__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  margin: 1rem 0 0;
+  background: rgba(var(--crms-ink-rgb), .025);
+  border: 1px solid rgba(var(--crms-ink-rgb), .09);
+  border-radius: .625rem;
+
+  >div {
+    display: grid;
+    gap: .15rem;
+    min-inline-size: 0;
+    padding: .7rem .85rem;
+  }
+
+  // A hairline between neighbours, as in the change request decisions.
+  >div+div {
+    border-inline-start: 1px solid rgba(var(--crms-ink-rgb), .1);
+  }
+
+  dt {
+    overflow: hidden;
+    color: var(--bs-secondary-color);
+    font-size: .75rem;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  dd {
+    margin: 0;
+    color: var(--bs-heading-color);
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+  }
+
+  dd.text-danger {
+    color: var(--bs-danger) !important;
+  }
+}
+
+.dashboard-processing__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-block-start: .75rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+}
+
+// Says what the OCR Performance scores were measured on.
+.dashboard-perf__note {
+  margin: .5rem 0 0;
+  color: var(--bs-secondary-color);
+  font-size: .6875rem;
+  line-height: 1.35;
+}
+
+.dashboard-processing__table {
+  font-variant-numeric: tabular-nums;
+
+  th {
+    color: var(--bs-secondary-color);
+    font-size: .75rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+}
+
 .dashboard-changes {
   display: grid;
   margin: 1rem 0 0;
@@ -7682,18 +7664,6 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
-// The availability bar fills to its value.
-.dashboard-reveal .dashboard-kpi__health-track span {
-  animation: dashboard-track-in .55s $dashboard-ease backwards;
-  animation-delay: calc(var(--dashboard-reveal, 0) * #{$dashboard-reveal-step} + 180ms);
-}
-
-@keyframes dashboard-track-in {
-  from {
-    inline-size: 0;
-  }
-}
-
 // Chips settle in after their chart.
 .dashboard-reveal .dashboard-quality__chips {
   animation: dashboard-fade-in .25s $dashboard-ease backwards;
@@ -7721,7 +7691,6 @@ $dashboard-reveal-step: 40ms;
   .dashboard-reveal,
   .dashboard-panel--refreshed,
   .dashboard-reveal .dashboard-archive__bar,
-  .dashboard-reveal .dashboard-kpi__health-track span,
   .dashboard-reveal .dashboard-quality__chips,
   .dashboard-reveal .dashboard-scan__step,
   .dashboard-reveal .dashboard-scan__link,

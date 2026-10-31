@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\DocumentPage;
 use App\Models\PageLine;
+use App\Models\PageRun;
 use App\Services\Lines\LineMarkers;
 use App\Services\Lines\LineMarkersCancelled;
 use App\Services\Lines\PageLineReader;
@@ -49,9 +50,16 @@ class ProcessDocumentPage implements ShouldQueue
     public function handle(LineMarkers $markers, PageLineReader $reader): void
     {
         $page = DocumentPage::find($this->pageId);
-        if ($page === null || $this->stopIfCancelled($page)) {
-            return;  // Pruned, submitted or cancelled while waiting in the queue.
+        if ($page === null) {
+            return;  // Pruned or submitted while waiting in the queue.
         }
+        if ($this->stopIfCancelled($page)) {
+            $this->record($page, PageRun::CANCELLED);  // Cancelled while waiting: it never started.
+
+            return;
+        }
+
+        $started = hrtime(true);
 
         if ($this->mode !== self::MODE_READ) {
             // Cancelling while the lines are being found stops the detector
@@ -64,12 +72,15 @@ class ProcessDocumentPage implements ShouldQueue
                 // Discarded just below.
             }
             if ($this->stopIfCancelled($page)) {
+                $this->record($page, PageRun::CANCELLED, $started);
+
                 return;
             }
         }
 
         if ($this->mode === self::MODE_DETECT) {
             $page->forceFill(['status' => DocumentPage::STATUS_DETECTED, 'processed_at' => now()])->save();
+            $this->record($page, PageRun::COMPLETED, $started);
 
             return;
         }
@@ -77,12 +88,16 @@ class ProcessDocumentPage implements ShouldQueue
         $page->forceFill(['status' => DocumentPage::STATUS_READING])->save();
         // Either cancel (discard the page, or back to Detect's result) ends
         // the read at the next batch.
+        $readStarted = hrtime(true);
         $reader->read($page, $page->lines()->get(), fn () => $this->currentStatus() !== DocumentPage::STATUS_READING);
+        $readMs = (int) round((hrtime(true) - $readStarted) / 1_000_000);
 
         // A read cancelled from Detect's result is back to "detected" already;
         // any other cancelled page is discarded.
         $page->refresh();
         if ($this->stopIfCancelled($page) || $page->status !== DocumentPage::STATUS_READING) {
+            $this->record($page, PageRun::CANCELLED, $started);
+
             return;
         }
 
@@ -90,6 +105,33 @@ class ProcessDocumentPage implements ShouldQueue
             'status' => DocumentPage::STATUS_READY,
             'processed_at' => now(),
         ])->save();
+        $this->record($page, PageRun::COMPLETED, $started, readMs: $readMs);
+    }
+
+    /**
+     * Keep how this run ended for the dashboard. The page itself is deleted
+     * when cancelled and pruned when abandoned, so it cannot be counted later.
+     * Never lets a logging problem fail the page.
+     *
+     * @param  int|null  $started  hrtime(true) when the work began; null if it never did
+     */
+    private function record(DocumentPage $page, string $outcome, ?int $started = null, ?string $error = null, ?int $readMs = null): void
+    {
+        try {
+            PageRun::create([
+                'user_id' => $page->created_by,
+                'document_page_id' => $page->getKey(),
+                'mode' => $this->mode,
+                'outcome' => $outcome,
+                'duration_ms' => $started === null ? null : (int) round((hrtime(true) - $started) / 1_000_000),
+                'read_ms' => $readMs,
+                'lines' => $outcome === PageRun::COMPLETED ? $page->lines()->count() : null,
+                'ocr_model_key' => $page->ocr_model_key,
+                'error' => $error === null ? null : mb_substr($error, 0, 500),
+            ]);
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 
     /** The page's status now, as Staff may have changed it meanwhile. */
@@ -119,6 +161,11 @@ class ProcessDocumentPage implements ShouldQueue
             'status' => DocumentPage::STATUS_FAILED,
             'error' => mb_substr($exception?->getMessage() ?: 'The page could not be processed.', 0, 2000),
         ]);
+
+        // This instance is not the one that ran handle(), so it cannot say how long it took.
+        if ($page = DocumentPage::find($this->pageId)) {
+            $this->record($page, PageRun::FAILED, error: $exception?->getMessage() ?: 'The page could not be processed.');
+        }
     }
 
     private function outline(DocumentPage $page, LineMarkers $markers): void

@@ -299,6 +299,12 @@
                                     </span>
                                 @endif
                             </div>
+                            @if ($perfInUse && $perfInUse['has_data'])
+                                {{-- Where the scores come from, so they are not read as accuracy on real scans (OCR Quality is that). --}}
+                                <p class="dashboard-perf__note">
+                                    Scored on {{ number_format($perfInUse['sample_count']) }} test images ({{ $perfInUse['dataset'] }}), not on your scans.
+                                </p>
+                            @endif
                         @endif
                     </div>
                 </div>
@@ -469,43 +475,109 @@
                                 @endif
                             </div>
                         </div>
-
-                        <div class="dashboard-kpi__divider"></div>
-
-                        <div class="dashboard-kpi-subcard">
-                            <div class="dashboard-kpi__head">
-                                <span class="dashboard-kpi__mini-icon bg-label-success">
-                                    <i class="icon-base bx bx-user-check" aria-hidden="true"></i>
-                                </span>
-                                <span class="dashboard-kpi__label">Active accounts</span>
-                                <a href="{{ route('users.index') }}" class="btn btn-xs btn-label-success px-2" title="Open User Accounts">
-                                    <span>Manage users</span>
-                                    <i class="icon-base bx bx-right-arrow-alt ms-1" aria-hidden="true"></i>
-                                </a>
-                            </div>
-
-                            <div class="dashboard-kpi__group">
-                                <div class="dashboard-kpi__figure">
-                                    <strong class="dashboard-kpi__value" data-dashboard-count>{{ number_format($accountActive) }}</strong>
-                                    <span class="dashboard-kpi__health-label">
-                                        <strong class="dashboard-kpi__health-rate">{{ $percent($accountActiveRate) }}</strong> active
-                                    </span>
-                                </div>
-                                <div class="dashboard-kpi__health-details">
-                                    <span>{{ number_format($accountTotal) }} total</span>
-                                    <span>
-                                        <i aria-hidden="true"></i>
-                                        {{ number_format($accountInactive) }} inactive
-                                    </span>
-                                </div>
-                                <div class="dashboard-kpi__health-track" aria-hidden="true"
-                                     style="--dashboard-kpi-health: {{ number_format($accountActiveRate, 1, '.', '') }}%">
-                                    <span></span>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        {{--
+            Processing and who did the work: how the page job ended and how long it
+            took, then one row per person who can scan. It follows its own period.
+        --}}
+        @php
+            $processing = $analytics['processing'];
+            $processingScope = $scopes['processing'];
+            $processingTotal = $processing['completed'] + $processing['failed'] + $processing['cancelled'];
+            // 24 s, or 1 min 05 s: a scan takes seconds to minutes.
+            $duration = fn (?int $ms): string => $ms === null
+                ? '—'
+                : ($ms < 60_000 ? number_format($ms / 1000, $ms < 10_000 ? 1 : 0).' s'
+                    : intdiv($ms, 60_000).' min '.str_pad((string) intdiv($ms % 60_000, 1000), 2, '0', STR_PAD_LEFT).' s');
+        @endphp
+        <div class="row g-4 mb-4">
+            <div class="col-12 dashboard-reveal" style="--dashboard-reveal: 4">
+                <x-dashboard.panel panel="processing" title="Processing and staff activity">
+                    <x-slot:meta>Detect and Scan runs · {{ $processingScope['short_label'] }}</x-slot:meta>
+                    <x-slot:tools>
+                        <x-dashboard.period-filter panel="processing" label="processing and staff activity"
+                                                   :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
+                    </x-slot:tools>
+
+                    <dl class="dashboard-processing__stats" aria-label="Processing in {{ $processingScope['short_label'] }}">
+                        <div title="Detect or Scan runs that finished">
+                            <dt>Finished</dt>
+                            <dd>{{ number_format($processing['completed']) }}</dd>
+                        </div>
+                        <div title="Runs that stopped with an error">
+                            <dt>Failed</dt>
+                            <dd @class(['text-danger' => $processing['failed'] > 0])>{{ number_format($processing['failed']) }}</dd>
+                        </div>
+                        <div title="Runs Staff cancelled">
+                            <dt>Cancelled</dt>
+                            <dd>{{ number_format($processing['cancelled']) }}</dd>
+                        </div>
+                        <div title="Average time of a finished Detect, over {{ number_format($processing['detect']['runs']) }} runs">
+                            <dt>Average Detect</dt>
+                            <dd>{{ $duration($processing['detect']['average_ms']) }}</dd>
+                        </div>
+                        <div title="Average time of a finished Scan with OCR, over {{ number_format($processing['scan']['runs']) }} runs">
+                            <dt>Average Scan</dt>
+                            <dd>{{ $duration($processing['scan']['average_ms']) }}</dd>
+                        </div>
+                        <div title="Time TrOCR takes to read one line, measured on {{ number_format($processing['reading']['lines']) }} lines from real scans">
+                            <dt>Reading speed</dt>
+                            <dd>{{ $processing['reading']['ms_per_line'] === null ? '—' : number_format($processing['reading']['ms_per_line']).' ms / line' }}</dd>
+                        </div>
+                    </dl>
+                    @if ($processingTotal === 0)
+                        <p class="text-muted small mt-2 mb-0">No Detect or Scan has run in this period.</p>
+                    @endif
+
+                    <div class="table-responsive mt-3">
+                        <table class="table table-sm align-middle mb-0 dashboard-processing__table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Staff</th>
+                                    <th scope="col" class="text-end" title="Records submitted in this period">Records submitted</th>
+                                    <th scope="col" class="text-end" title="Scans with OCR that finished in this period">Pages scanned</th>
+                                    <th scope="col" class="text-end">Last sign-in</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @forelse ($processing['staff'] as $person)
+                                    <tr>
+                                        <td>
+                                            {{ $person['name'] }}
+                                            @unless ($person['active'])
+                                                <span class="badge bg-label-secondary ms-1">Inactive</span>
+                                            @endunless
+                                        </td>
+                                        <td class="text-end">{{ number_format($person['submitted']) }}</td>
+                                        <td class="text-end">{{ number_format($person['scanned']) }}</td>
+                                        <td class="text-end text-nowrap">
+                                            @if ($person['last_sign_in'])
+                                                <time datetime="{{ $person['last_sign_in']->toIso8601String() }}"
+                                                      title="{{ $person['last_sign_in']->format('j M Y, g:i A') }}">{{ $person['last_sign_in']->diffForHumans() }}</time>
+                                            @else
+                                                <span class="text-muted">Never</span>
+                                            @endif
+                                        </td>
+                                    </tr>
+                                @empty
+                                    <tr><td colspan="4" class="text-center text-muted py-3">No staff accounts yet.</td></tr>
+                                @endforelse
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="dashboard-processing__foot">
+                        <span>{{ number_format($accountActive) }} of {{ number_format($accountTotal) }} accounts active</span>
+                        <a href="{{ route('users.index') }}" class="btn btn-xs btn-label-primary px-2" title="Open User Accounts">
+                            <span>Manage users</span>
+                            <i class="icon-base bx bx-right-arrow-alt ms-1" aria-hidden="true"></i>
+                        </a>
+                    </div>
+                </x-dashboard.panel>
             </div>
         </div>
 

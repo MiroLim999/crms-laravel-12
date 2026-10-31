@@ -9,6 +9,7 @@ use App\Models\DocumentPage;
 use App\Models\DocumentTemplate;
 use App\Models\OcrModel;
 use App\Models\PageLine;
+use App\Models\PageRun;
 use App\Models\User;
 use App\Services\Lines\LineMarkers;
 use App\Services\Lines\LineMarkersCancelled;
@@ -176,6 +177,34 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertNull(DocumentPage::find($page->getKey()));
         Storage::disk('local')->assertMissing($page->image_path);
         $this->assertSame([], $this->ocrCalls);
+    }
+
+    public function test_each_run_is_kept_for_the_dashboard_after_its_page_is_gone(): void
+    {
+        $this->app->instance(LineMarkers::class, $this->stubMarkers());
+
+        // A finished Detect, a finished Scan, and a cancelled one that never started.
+        $detected = $this->storedPage();
+        ProcessDocumentPage::dispatchSync($detected->getKey(), ProcessDocumentPage::MODE_DETECT);
+        ProcessDocumentPage::dispatchSync($detected->getKey(), ProcessDocumentPage::MODE_READ);
+
+        $cancelled = $this->storedPage();
+        $this->actingAs($cancelled->creator)->postJson(route('documents.pages.cancel', $cancelled))->assertOk();
+        ProcessDocumentPage::dispatchSync($cancelled->getKey(), ProcessDocumentPage::MODE_DETECT);
+        $this->assertNull(DocumentPage::find($cancelled->getKey()));
+
+        $runs = PageRun::query()->orderBy('id')->get();
+        $this->assertSame(
+            [['detect', 'completed'], ['read', 'completed'], ['detect', 'cancelled']],
+            $runs->map(fn (PageRun $run) => [$run->mode, $run->outcome])->all(),
+        );
+        $this->assertSame($detected->created_by, $runs[0]->user_id);
+        $this->assertNotNull($runs[0]->duration_ms);
+        $this->assertGreaterThan(0, $runs[0]->lines);
+        $this->assertSame('test-model', $runs[0]->ocr_model_key);
+        $this->assertNull($runs[2]->duration_ms, 'A run cancelled while waiting never started.');
+        $this->assertNull($runs[0]->read_ms, 'Detect reads nothing.');
+        $this->assertNotNull($runs[1]->read_ms, 'A Scan says how long the reading took.');
     }
 
     public function test_cancelling_while_the_lines_are_found_stops_the_detector_and_drops_the_page(): void
@@ -857,6 +886,11 @@ class LineOutlinePipelineTest extends TestCase
 
         $page->refresh();
         $this->assertSame(DocumentPage::STATUS_FAILED, $page->status);
+
+        $run = PageRun::sole();
+        $this->assertSame([PageRun::FAILED, $page->created_by], [$run->outcome, $run->user_id]);
+        $this->assertSame('Line detection failed: Kraken is not installed.', $run->error);
+
         $this->actingAs($page->creator)
             ->getJson(route('documents.pages.show', $page))
             ->assertJsonPath('error', 'Line detection failed: Kraken is not installed.');
