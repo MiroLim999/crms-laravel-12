@@ -27,7 +27,6 @@ class CivilRecordFactory extends Factory
 
         return [
             'doc_type' => $type->value,
-            'registry_number' => strtoupper($type->value).'-'.fake()->unique()->numberBetween(1000, 9999),
             'status' => RecordStatus::Submitted->value,
             'ocr_model_key' => 'base',
             'created_by' => fn () => User::factory()->staff(),

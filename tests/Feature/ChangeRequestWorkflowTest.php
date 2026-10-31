@@ -100,38 +100,20 @@ class ChangeRequestWorkflowTest extends TestCase
         $this->assertNotNull($request->reviewed_by);
     }
 
-    public function test_registry_number_can_be_corrected_through_the_reviewed_workflow(): void
+    public function test_a_registry_number_is_no_longer_a_change_on_its_own(): void
     {
         $staff = User::factory()->staff()->create();
         $record = $this->lockedRecord();
-        $record->update(['registry_number' => 'OLD-2026-001']);
 
         $this->actingAs($staff)
             ->post(route('records.change-requests.store', $record), [
                 'reason' => 'The original register confirms a different registry number.',
                 'registry_number' => 'NEW-2026-001',
             ])
-            ->assertRedirect();
+            ->assertRedirect()
+            ->assertSessionHas('error', 'None of those values differ from what is on record.');
 
-        $request = ChangeRequest::latest('id')->firstOrFail()->load('items');
-
-        $this->assertTrue($request->changes_registry_number);
-        $this->assertSame('OLD-2026-001', $request->current_registry_number);
-        $this->assertSame('NEW-2026-001', $request->proposed_registry_number);
-        $this->assertCount(0, $request->items);
-        $this->assertSame('OLD-2026-001', $record->fresh()->registry_number);
-
-        $this->actingAs(User::factory()->admin()->create())
-            ->post(route('change-requests.approve', $request), [
-                'decision_note' => 'Checked against the original register.',
-            ])
-            ->assertRedirect();
-
-        $this->assertSame('NEW-2026-001', $record->fresh()->registry_number);
-
-        $entry = AuditLog::where('action', 'change_request.approved')->latest('id')->firstOrFail();
-        $this->assertSame('OLD-2026-001', $entry->old_values['Registry Number']);
-        $this->assertSame('NEW-2026-001', $entry->new_values['Registry Number']);
+        $this->assertSame(0, ChangeRequest::count());
     }
 
     public function test_a_required_field_cannot_be_cleared_in_a_change_request(): void

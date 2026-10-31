@@ -34,7 +34,7 @@
                     <label for="change-request-search" class="form-label">Search</label>
                     <input type="search" id="change-request-search" name="q" value="{{ $search }}"
                            class="form-control"
-                           placeholder="Request number, registry number, record type, reason{{ $canModerate ? ', or requester' : '' }}">
+                           placeholder="Request number, record type, reason{{ $canModerate ? ', or requester' : '' }}">
                 </div>
                 <div class="col-sm-6 col-lg-3">
                     <label for="change-request-status" class="form-label">Status</label>
@@ -98,7 +98,7 @@
                                                 <i class="icon-base bx {{ $changeRequest->record->typeIcon() }} icon-sm" aria-hidden="true"></i>
                                                 <span>
                                                     <strong>{{ $recordHeadings->get($changeRequest->record_id, 'Record #'.$changeRequest->record_id) }}</strong>
-                                                    <small>{{ $changeRequest->record->registry_number ?? 'No registry number' }}</small>
+                                                    <small>Record #{{ $changeRequest->record_id }}</small>
                                                 </span>
                                             </a>
                                         @else

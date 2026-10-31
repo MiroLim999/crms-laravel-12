@@ -4277,35 +4277,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.validation-registry-row {
-  display: grid;
-  flex: 0 0 auto;
-  grid-template-columns: minmax(8rem, .7fr) minmax(12rem, 1.3fr);
-  align-items: center;
-  gap: 1rem;
-  padding: .7rem 1rem;
-  background: var(--bs-paper-bg);
-  border-block-end: 1px solid var(--bs-border-color);
-
-  label {
-    margin: 0;
-    color: var(--bs-heading-color);
-    font-size: .8125rem;
-    font-weight: 600;
-
-    span {
-      color: var(--bs-secondary-color);
-      font-size: .6875rem;
-      font-weight: 400;
-    }
-  }
-
-  .form-control {
-    min-block-size: 2.35rem;
-    font-size: .8125rem;
-  }
-}
-
 .validation-list-heading,
 .validation-field {
   display: grid;
@@ -4880,11 +4851,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     inline-size: 100%;
   }
 
-  .validation-registry-row {
-    grid-template-columns: 1fr;
-    gap: .4rem;
-  }
-
   .validation-list-heading {
     display: none;
   }
@@ -5184,7 +5150,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.change-request-registry-row,
 .change-request-editor-row {
   display: grid;
   grid-template-columns: minmax(9rem, .72fr) minmax(9rem, .85fr) minmax(14rem, 1.43fr);
@@ -5352,11 +5317,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   &.record-field-row {
     grid-template-columns: minmax(8rem, .8fr) minmax(8rem, 1fr) 1.5rem minmax(8rem, 1fr);
-  }
-
-  &--registry {
-    background: var(--bs-paper-bg);
-    border-block-end: 1px solid var(--bs-border-color);
   }
 }
 
@@ -5530,7 +5490,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     flex-direction: column;
   }
 
-  .change-request-registry-row,
   .change-request-editor-row {
     grid-template-columns: minmax(0, 1fr);
     gap: .65rem;

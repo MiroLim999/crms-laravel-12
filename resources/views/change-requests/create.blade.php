@@ -19,10 +19,6 @@
         </div>
 
         <section class="record-summary-strip change-request-record-summary" aria-label="Record summary">
-            <div class="record-summary-item {{ $record->registry_number ? '' : 'is-warning' }}">
-                <span>Registry number</span>
-                <strong>{{ $record->registry_number ?? 'Not recorded' }}</strong>
-            </div>
             @if ($personCount > 0)
                 <div class="record-summary-item">
                     <span>People</span>
@@ -55,26 +51,6 @@
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-change-reset>
                             Reset values
                         </button>
-                    </div>
-
-                    <div class="change-request-registry-row" data-change-row>
-                        <div class="change-request-editor-label">
-                            <strong>Registry number</strong>
-                            <small>Document detail</small>
-                        </div>
-                        <div class="change-request-current-value">
-                            <span>Current</span>
-                            <strong>{{ $record->registry_number ?: 'Not recorded' }}</strong>
-                        </div>
-                        <div>
-                            <label for="registry-number" class="form-label">Proposed value</label>
-                            <input type="text" id="registry-number" name="registry_number"
-                                   value="{{ old('registry_number', $record->registry_number) }}"
-                                   maxlength="64"
-                                   data-change-input data-current-value="{{ $record->registry_number }}"
-                                   class="form-control @error('registry_number') is-invalid @enderror">
-                            @error('registry_number')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                        </div>
                     </div>
 
                     <div class="change-request-group-list">

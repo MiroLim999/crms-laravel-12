@@ -26,7 +26,7 @@
             </div>
             <div class="record-summary-item">
                 <span>Record</span>
-                <strong>{{ $changeRequest->record->registry_number ?? 'No registry number' }}</strong>
+                <strong>#{{ $changeRequest->record->getKey() }}</strong>
                 <small>{{ $changeRequest->record->typeShortLabel() }}</small>
             </div>
             <div class="record-summary-item">
@@ -100,22 +100,6 @@
                         <span></span>
                         <span>Proposed value</span>
                     </div>
-
-                    @if ($changeRequest->changes_registry_number)
-                        <div class="change-request-diff-row change-request-diff-row--registry">
-                            <div class="record-field-row__label">
-                                <span>Registry number</span>
-                                <small>Document detail</small>
-                            </div>
-                            <div class="change-request-diff-value is-current">
-                                {{ filled($changeRequest->current_registry_number) ? $changeRequest->current_registry_number : 'Not recorded' }}
-                            </div>
-                            <i class="icon-base bx bx-right-arrow-alt change-request-diff-arrow" aria-hidden="true"></i>
-                            <div class="change-request-diff-value is-proposed">
-                                {{ filled($changeRequest->proposed_registry_number) ? $changeRequest->proposed_registry_number : 'Not recorded' }}
-                            </div>
-                        </div>
-                    @endif
 
                     <div class="record-group-list change-request-diff-groups">
                         @foreach ($changeGroups as $group)

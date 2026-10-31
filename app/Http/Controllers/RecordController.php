@@ -91,7 +91,6 @@ class RecordController extends Controller
                 fn ($item) => ['field_id' => $item->record_field_id, 'request' => $changeRequest],
             ))
             ->groupBy('field_id');
-        $registryWasCorrected = $approvedRequests->contains->changes_registry_number;
 
         return view('records.show', [
             'record' => $record,
@@ -100,9 +99,8 @@ class RecordController extends Controller
             'fieldChanges' => $fieldChanges,
             'personCount' => collect($fieldGroups)->where('kind', 'person')->count(),
             'firstPersonGroupId' => collect($fieldGroups)->firstWhere('kind', 'person')['id'] ?? null,
-            'registryWasCorrected' => $registryWasCorrected,
             'ocrAdjustedCount' => $record->fields->filter->wasCorrected()->count(),
-            'postSubmissionChangeCount' => $fieldChanges->count() + ($registryWasCorrected ? 1 : 0),
+            'postSubmissionChangeCount' => $fieldChanges->count(),
         ]);
     }
 

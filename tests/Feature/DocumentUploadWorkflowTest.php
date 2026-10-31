@@ -803,7 +803,6 @@ class DocumentUploadWorkflowTest extends TestCase
         return [
             'doc_type' => $template->doc_type->value,
             'document_template_id' => $template->getKey(),
-            'registry_number' => '2026-001',
             'ocr_model_key' => 'test-model',
             'scan' => UploadedFile::fake()->image('certificate.png', 600, 800),
             'fields' => $fields,

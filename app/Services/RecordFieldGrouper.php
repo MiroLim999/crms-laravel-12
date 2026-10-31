@@ -36,7 +36,7 @@ class RecordFieldGrouper
         $type = $record->typeShortLabel();
 
         if ($people->isEmpty()) {
-            return $record->registry_number ?: "{$type} record #{$record->getKey()}";
+            return "{$type} record #{$record->getKey()}";
         }
 
         $entries = $people->map(function (array $group): ?string {

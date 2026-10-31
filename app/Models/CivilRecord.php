@@ -26,7 +26,7 @@ class CivilRecord extends Model
     protected $table = 'records';
 
     protected $fillable = [
-        'doc_type', 'document_type_id', 'document_template_id', 'registry_number', 'status',
+        'doc_type', 'document_type_id', 'document_template_id', 'status',
         'scan_path', 'scan_mime', 'scan_rotation', 'page_image_path', 'ocr_model_key', 'created_by',
         'submitted_by', 'submitted_at',
     ];
@@ -160,8 +160,8 @@ class CivilRecord extends Model
     // ------------------------------------------------------------------ search
 
     /**
-     * Records with every word in the registry number, or every word in one
-     * verified field. The words can come in any order. No words, no filter.
+     * Records with every word in one verified field. The words can come in
+     * any order. No words, no filter.
      *
      * @param  Builder<self>  $query
      * @param  list<string>  $words  From SearchWords::from().
@@ -172,9 +172,7 @@ class CivilRecord extends Model
             return;
         }
 
-        $query->where(fn (Builder $records) => $records
-            ->where(fn (Builder $record) => SearchWords::whereContainsAll($record, 'registry_number', $words))
-            ->orWhereHas('fields', fn (Builder $field) => SearchWords::whereContainsAll($field, 'verified_value', $words)));
+        $query->whereHas('fields', fn (Builder $field) => SearchWords::whereContainsAll($field, 'verified_value', $words));
     }
 
     /**
@@ -202,7 +200,7 @@ class CivilRecord extends Model
     /**
      * The first field the search matched other than the title field, and how
      * many further fields matched. Null when nothing besides the title matched:
-     * then the title, or the registry number below it, shows the match.
+     * then the title shows the match.
      * Needs withTitleField() and withSearchMatches().
      *
      * @return array{field: RecordField, more: int}|null

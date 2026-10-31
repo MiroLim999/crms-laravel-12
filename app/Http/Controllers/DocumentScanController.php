@@ -162,7 +162,6 @@ class DocumentScanController extends Controller
         $validated = $request->validate([
             'doc_type' => ['required', 'string', 'exists:document_types,key'],
             'document_template_id' => ['required', 'exists:document_templates,id'],
-            'registry_number' => ['nullable', 'string', 'max:64'],
             'ocr_model_key' => [
                 'required',
                 'string',
@@ -258,7 +257,6 @@ class DocumentScanController extends Controller
                     'doc_type' => $documentType->legacyType()->value,
                     'document_type_id' => $documentType->getKey(),
                     'document_template_id' => $validated['document_template_id'],
-                    'registry_number' => $validated['registry_number'] ?? null,
                     'status' => RecordStatus::Submitted,
                     'scan_path' => $path,
                     'scan_mime' => $scan->getMimeType(),
@@ -311,7 +309,6 @@ class DocumentScanController extends Controller
                     $record,
                     new: [
                         'document_type' => $documentType->key,
-                        'registry_number' => $validated['registry_number'] ?? null,
                         'field_count' => $record->fields->count(),
                         'corrected_fields' => $corrected,
                         'outlined_fields' => $record->fields->whereNotNull('polygon')->count(),

@@ -535,15 +535,6 @@
                             </div>
                         </header>
 
-                        <div class="validation-registry-row">
-                            <label for="registry_number">
-                                Registry number <span>optional</span>
-                            </label>
-                            <input type="text" id="registry_number" name="registry_number"
-                                   class="form-control" maxlength="64"
-                                   placeholder="As written on the certificate">
-                        </div>
-
                         {{-- Filled in when the page job has something to say about the grid as a whole. --}}
                         <div class="grid-notes d-none" id="verifyNotes" role="status" aria-live="polite">
                             <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>

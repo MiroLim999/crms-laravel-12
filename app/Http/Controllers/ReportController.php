@@ -74,7 +74,7 @@ class ReportController extends Controller
             $handle = fopen('php://output', 'w');
 
             fputcsv($handle, [
-                'Record ID', 'Registry number', 'Document type', 'Status', 'Primary value',
+                'Record ID', 'Document type', 'Status', 'Primary value',
                 'Created at', 'Created by', 'Submitted at', 'Submitted by',
                 'OCR model', 'Fields', 'Average confidence',
             ]);
@@ -102,7 +102,6 @@ class ReportController extends Controller
     {
         return array_map($this->safeCell(...), [
             $record->getKey(),
-            $record->registry_number,
             $record->typeLabel(),
             $record->status->label(),
             $record->title(),

@@ -664,7 +664,7 @@
                             <tbody>
                                 @forelse ($staffOverview['recent_records'] as $record)
                                     <tr>
-                                        <td><a href="{{ route('records.show', $record) }}">{{ $record->registry_number ?: 'Record #'.$record->getKey() }}</a></td>
+                                        <td><a href="{{ route('records.show', $record) }}">Record #{{ $record->getKey() }}</a></td>
                                         <td>{{ $record->typeShortLabel() }}</td>
                                         <td class="text-end text-nowrap">{{ $record->submitted_at?->diffForHumans() }}</td>
                                     </tr>

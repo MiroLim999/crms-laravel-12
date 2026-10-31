@@ -58,8 +58,7 @@ class ChangeRequestController extends Controller
                 $query->where(function ($query) use ($search, $term, $user): void {
                     $query->where('reason', 'like', $term)
                         ->orWhereHas('record', function ($recordQuery) use ($search, $term): void {
-                            $recordQuery->where('registry_number', 'like', $term)
-                                ->orWhereHas('documentTypeDefinition', fn ($typeQuery) => $typeQuery
+                            $recordQuery->whereHas('documentTypeDefinition', fn ($typeQuery) => $typeQuery
                                     ->where('name', 'like', $term)
                                     ->orWhere('short_name', 'like', $term));
 
@@ -146,7 +145,6 @@ class ChangeRequestController extends Controller
 
         $validated = $request->validate([
             'reason' => ['required', 'string', 'min:10', 'max:2000'],
-            'registry_number' => ['nullable', 'string', 'max:64'],
             'values' => ['nullable', 'array'],
             'values.*' => ['nullable', 'string', 'max:2000'],
         ], [
@@ -159,9 +157,6 @@ class ChangeRequestController extends Controller
                 $validated['values'] ?? [],
                 $validated['reason'],
                 $request->user(),
-                array_key_exists('registry_number', $validated)
-                    ? ['registry_number' => $validated['registry_number']]
-                    : [],
             );
         } catch (ChangeRequestException $e) {
             return back()->withInput()->with('error', $e->getMessage());

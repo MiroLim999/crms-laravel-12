@@ -65,8 +65,8 @@ class ChangeRequestPresentationTest extends TestCase
     {
         $staff = User::factory()->staff()->create();
         $admin = User::factory()->admin()->create();
-        $firstRecord = $this->groupedRecord($staff, 'REQ-ONE');
-        $secondRecord = $this->groupedRecord($staff, 'REQ-TWO');
+        $firstRecord = $this->groupedRecord($staff);
+        $secondRecord = $this->groupedRecord($staff);
         $firstField = $firstRecord->fields->firstWhere('name', 'Name');
         $secondField = $secondRecord->fields->firstWhere('name', 'Name');
         $approved = app(ChangeRequestService::class)->open(
@@ -87,8 +87,8 @@ class ChangeRequestPresentationTest extends TestCase
             ->get(route('change-requests.index', ['q' => 'Unique pending correction']))
             ->assertOk()
             ->assertSee('Request queue')
-            ->assertSee('REQ-TWO')
-            ->assertDontSee('REQ-ONE');
+            ->assertSee('<small>Record #'.$secondRecord->getKey().'</small>', escape: false)
+            ->assertDontSee('<small>Record #'.$firstRecord->getKey().'</small>', escape: false);
 
         $this->assertSame(1, $response->viewData('requests')->total());
         $this->assertSame(1, $response->viewData('statusCounts')->get(ChangeRequestStatus::Pending->value));
@@ -114,14 +114,13 @@ class ChangeRequestPresentationTest extends TestCase
             ->assertSessionHas('error');
     }
 
-    private function groupedRecord(User $staff, ?string $registryNumber = 'BIRTH-2026-001'): CivilRecord
+    private function groupedRecord(User $staff): CivilRecord
     {
         $record = CivilRecord::factory()
             ->ofType(DocumentType::Birth)
             ->submitted($staff)
             ->create([
                 'created_by' => $staff->getKey(),
-                'registry_number' => $registryNumber,
                 'scan_path' => 'scans/change-request-source.png',
                 'scan_mime' => 'image/png',
             ]);

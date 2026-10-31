@@ -28,14 +28,12 @@ class ChangeRequestService
      * Raise a request against a locked record.
      *
      * @param  array<int, string|null>  $proposals  Keyed by record_field id.
-     * @param  array{registry_number?: string|null}  $recordProposals
      */
     public function open(
         CivilRecord $record,
         array $proposals,
         string $reason,
         User $requester,
-        array $recordProposals = [],
     ): ChangeRequest {
         $fields = $record->fields->keyBy('id');
 
@@ -56,26 +54,11 @@ class ChangeRequestService
             }
         }
 
-        $changesRegistryNumber = array_key_exists('registry_number', $recordProposals)
-            && $this->normaliseValue($recordProposals['registry_number'])
-                !== $this->normaliseValue($record->registry_number);
-        $proposedRegistryNumber = $changesRegistryNumber
-            ? $this->normaliseValue($recordProposals['registry_number'])
-            : null;
-
-        if ($changes === [] && ! $changesRegistryNumber) {
+        if ($changes === []) {
             throw new ChangeRequestException('None of those values differ from what is on record.');
         }
 
-        return DB::transaction(function () use (
-            $record,
-            $changes,
-            $fields,
-            $reason,
-            $requester,
-            $changesRegistryNumber,
-            $proposedRegistryNumber,
-        ) {
+        return DB::transaction(function () use ($record, $changes, $fields, $reason, $requester) {
             // Lock the record row first, so two submissions for one record take
             // turns here and the second one finds the request the first created.
             CivilRecord::whereKey($record->getKey())->lockForUpdate()->first();
@@ -88,9 +71,6 @@ class ChangeRequestService
                 'status' => ChangeRequestStatus::Pending,
                 'reason' => $reason,
                 'requested_by' => $requester->getKey(),
-                'changes_registry_number' => $changesRegistryNumber,
-                'current_registry_number' => $changesRegistryNumber ? $record->registry_number : null,
-                'proposed_registry_number' => $proposedRegistryNumber,
             ]);
 
             foreach ($changes as $fieldId => $proposed) {
@@ -101,7 +81,7 @@ class ChangeRequestService
                 ]);
             }
 
-            $changeCount = count($changes) + ($changesRegistryNumber ? 1 : 0);
+            $changeCount = count($changes);
 
             $this->audit->log(
                 'change_request.opened',
@@ -109,7 +89,6 @@ class ChangeRequestService
                 new: [
                     'record_id' => $record->getKey(),
                     'field_count' => count($changes),
-                    'registry_number_changed' => $changesRegistryNumber,
                 ],
                 description: "Requested {$changeCount} change(s) on record #{$record->getKey()}.",
                 actor: $requester,
@@ -143,15 +122,6 @@ class ChangeRequestService
                 $applied[$field->name] = $proposed;
 
                 $field->forceFill(['verified_value' => $proposed])->save();
-            }
-
-            if ($request->changes_registry_number) {
-                $previous['Registry Number'] = $request->record->registry_number;
-                $applied['Registry Number'] = $request->proposed_registry_number;
-
-                $request->record->forceFill([
-                    'registry_number' => $request->proposed_registry_number,
-                ])->save();
             }
 
             $request->forceFill([

@@ -68,7 +68,7 @@ class ReportExportTest extends TestCase
 
         // Header plus exactly the one matching record.
         $this->assertCount(2, $lines);
-        $this->assertStringContainsString('Registry number', $lines[0]);
+        $this->assertStringNotContainsString('Registry number', $lines[0]);
         $this->assertStringContainsString('Ana Reyes', $lines[1]);
         $this->assertStringContainsString('Nina Staffer', $lines[1]);
         $this->assertStringNotContainsString('Pedro Cruz', $csv);
@@ -78,7 +78,6 @@ class ReportExportTest extends TestCase
     {
         $staff = User::factory()->staff()->create();
         $record = $this->record($staff, DocumentType::Birth, RecordStatus::Submitted);
-        $record->update(['registry_number' => '=HYPERLINK("x","y")']);
         $record->fields()->create([
             'name' => 'Child Full Name',
             'ocr_text' => '=1+1',
@@ -92,7 +91,6 @@ class ReportExportTest extends TestCase
             ->streamedContent();
         $row = $this->csvRows($csv)[0];
 
-        $this->assertSame('\'=HYPERLINK("x","y")', $row['Registry number']);
         $this->assertSame("'=1+1", $row['Primary value']);
 
         // Number columns are written as they were.
@@ -176,7 +174,6 @@ class ReportExportTest extends TestCase
         return CivilRecord::create([
             'doc_type' => $type->value,
             'status' => $status->value,
-            'registry_number' => strtoupper($type->value).'-'.fake()->unique()->numberBetween(1000, 9999),
             'created_by' => $staff->getKey(),
             'submitted_by' => $status === RecordStatus::Submitted ? $staff->getKey() : null,
             'submitted_at' => $status === RecordStatus::Submitted ? now() : null,

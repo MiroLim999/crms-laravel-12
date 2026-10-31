@@ -10,7 +10,7 @@
 
 @section('content')
     <x-page-header title="Records Archive"
-                   subtitle="Search submitted civil registry records by name or registry number." />
+                   subtitle="Search submitted civil registry records by name or any verified value." />
 
     <x-card>
         <form method="GET" action="{{ route('records.index') }}" class="row g-3 align-items-end">
@@ -20,7 +20,7 @@
                 <div class="d-flex gap-2">
                     {{-- data-record-search: the "/" shortcut lands here, since the top bar's search is hidden on this page. --}}
                     <input type="search" id="q" name="q" value="{{ $filters['q'] ?? '' }}" maxlength="255"
-                           class="form-control flex-grow-1 @error('q') is-invalid @enderror" placeholder="Name or registry number"
+                           class="form-control flex-grow-1 @error('q') is-invalid @enderror" placeholder="Name or any verified value"
                            aria-keyshortcuts="/" data-record-search>
                     <button class="btn btn-primary" type="submit">
                         <i class="icon-base bx bx-search icon-sm me-1" aria-hidden="true"></i> Search
@@ -86,7 +86,7 @@
                                     @endif
                                     <div>
                                         <small class="text-muted">
-                                            {{ $record->registry_number ?? 'No registry number' }}
+                                            Record #{{ $record->getKey() }}
                                         </small>
                                     </div>
                                     {{-- Why a search found this record, when the title above does not show it. --}}

@@ -14,7 +14,6 @@ class ChangeRequest extends Model
 
     protected $fillable = [
         'record_id', 'status', 'reason', 'requested_by',
-        'changes_registry_number', 'current_registry_number', 'proposed_registry_number',
         'reviewed_by', 'reviewed_at', 'decision_note',
     ];
 
@@ -22,7 +21,6 @@ class ChangeRequest extends Model
     {
         return [
             'status' => ChangeRequestStatus::class,
-            'changes_registry_number' => 'boolean',
             'reviewed_at' => 'datetime',
         ];
     }
@@ -54,6 +52,6 @@ class ChangeRequest extends Model
 
     public function changeCount(): int
     {
-        return $this->items->count() + ($this->changes_registry_number ? 1 : 0);
+        return $this->items->count();
     }
 }

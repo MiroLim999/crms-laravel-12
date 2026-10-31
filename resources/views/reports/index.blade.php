@@ -93,7 +93,7 @@
                                 <td>
                                     <a href="{{ route('records.show', $record) }}" class="fw-medium">{{ $record->title() }}</a>
                                     <div>
-                                        <small class="text-muted">{{ $record->registry_number ?? 'No registry number' }}</small>
+                                        <small class="text-muted">Record #{{ $record->getKey() }}</small>
                                     </div>
                                 </td>
                                 <td>

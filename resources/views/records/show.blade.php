@@ -8,7 +8,7 @@
          id="layout-navbar" aria-label="Completed document workflow">
         <div class="document-workspace-topbar__context">
             <strong>{{ $recordHeading }}</strong>
-            <small>{{ $record->typeLabel() }} · {{ $record->registry_number ?? 'No registry number' }}</small>
+            <small>{{ $record->typeLabel() }} · Record #{{ $record->getKey() }}</small>
         </div>
 
         <nav class="document-flow-steps" aria-label="Document processing complete">
@@ -49,13 +49,6 @@
         @endif
 
         <section class="record-summary-strip" aria-label="Record summary">
-            <div class="record-summary-item {{ $record->registry_number ? '' : 'is-warning' }}">
-                <span>Registry number</span>
-                <strong>{{ $record->registry_number ?? 'Not recorded' }}</strong>
-                @if ($registryWasCorrected)
-                    <small>Corrected after submission</small>
-                @endif
-            </div>
             @if ($personCount > 0)
                 <div class="record-summary-item">
                     <span>People</span>

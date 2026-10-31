@@ -22,7 +22,6 @@ class RecordDetailPresentationTest extends TestCase
             ->ofType(DocumentType::Birth)
             ->submitted($staff)
             ->create([
-                'registry_number' => null,
                 'scan_path' => 'scans/birth-register.png',
                 'scan_mime' => 'image/png',
             ]);
