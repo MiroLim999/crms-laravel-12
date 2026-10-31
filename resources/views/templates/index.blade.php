@@ -71,7 +71,7 @@
                                 <a href="{{ route('templates.create', ['type' => $type->value]) }}"
                                    class="btn btn-sm btn-primary">
                                     <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>
-                                    New layout
+                                    Add layout
                                 </a>
                             @endunless
                             <div class="dropdown template-library-manage">
