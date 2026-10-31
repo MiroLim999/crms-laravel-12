@@ -187,14 +187,14 @@ class TemplateVersioningTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('templates.edit', $published))
             ->assertOk()
-            ->assertSee('This layout is in use:')
+            ->assertSee('Saving makes a new version')
             ->assertSee('Save &amp; publish new version', escape: false)
             ->assertSee('name="revision" value="1"', escape: false);
 
         $draft = $this->layout(['name' => 'Unused draft']);
         $this->actingAs($this->admin)->get(route('templates.edit', $draft))
             ->assertOk()
-            ->assertDontSee('This layout is in use:')
+            ->assertDontSee('Saving makes a new version')
             ->assertSee('Save draft');
     }
 

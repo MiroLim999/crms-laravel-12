@@ -9207,6 +9207,153 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
+// The builder hides the navbar, so Sneat's frosted strip under it has nothing
+// to cover: it only blurred the page title.
+.template-builder-focused .layout-page::before {
+  display: none !important;
+}
+
+// One toolbar row: the file chip is capped, and Delete sample and Shortcuts
+// show only their icons (their names stay in the title and aria-label).
+.template-builder-canvas-card {
+  .marker-toolbar {
+    flex-wrap: nowrap;
+    gap: .5rem;
+  }
+
+  .marker-toolbar__primary,
+  .marker-toolbar__actions {
+    flex: 0 1 auto;
+    gap: .4rem;
+  }
+
+  .marker-toolbar .btn {
+    white-space: nowrap;
+  }
+
+  .template-sample-control {
+    flex: 0 1 auto;
+    min-inline-size: 0;
+    max-inline-size: 11rem;
+  }
+
+  .template-sample-delete-button > span,
+  .marker-help-button > span {
+    display: none;
+  }
+
+  .template-sample-delete-button,
+  .marker-help-button > i {
+    margin-inline-end: 0 !important;
+  }
+
+  // Every control in the bar: the same height and the same corners.
+  .marker-toolbar :is(.btn, .marker-selection-summary) {
+    --bs-btn-border-radius: .375rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .35rem;
+    block-size: 2rem;
+    border-radius: .375rem;
+  }
+
+  .marker-toolbar .btn-group > .btn {
+    border-radius: 0;
+  }
+
+  .marker-toolbar .btn-group > .btn:first-child {
+    border-start-start-radius: .375rem;
+    border-end-start-radius: .375rem;
+  }
+
+  .marker-toolbar .btn-group > .btn:last-child {
+    border-start-end-radius: .375rem;
+    border-end-end-radius: .375rem;
+  }
+
+  .marker-toolbar .btn > i {
+    margin-inline-end: 0 !important;
+  }
+}
+
+// Desktop: the builder is one fixed screen. The page itself never scrolls; the
+// canvas fills what is left under the header and only the right panel scrolls.
+// Sized for 1920 x 1080 and 1920 x 1200 (and anything larger or smaller).
+@media (min-width: 992px) {
+  html:has(.template-builder-focused),
+  .template-builder-focused {
+    overflow: hidden;
+  }
+
+  .template-builder-focused {
+    .content-wrapper {
+      block-size: 100vh;
+      block-size: 100dvh;
+      min-block-size: 0;
+    }
+
+    .container-xxl.container-p-y {
+      block-size: 100%;
+      display: flex;
+      flex-direction: column;
+      min-block-size: 0;
+    }
+  }
+
+  .template-builder-page {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-block-size: 0;
+
+    > form {
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
+      min-block-size: 0;
+    }
+  }
+
+  .template-builder-page__header,
+  .template-builder-in-use {
+    flex: 0 0 auto;
+  }
+
+  .template-builder-grid {
+    flex: 1 1 0;
+    min-block-size: 0;
+    position: relative;
+
+    > [class*='col-'] {
+      position: relative;
+    }
+  }
+
+  // Both columns fill the row without ever making it taller.
+  .template-builder-canvas-card,
+  .template-builder-side-panel {
+    position: absolute;
+    inset-block: 0;
+    inset-inline: calc(var(--bs-gutter-x) * .5);
+  }
+
+  .template-builder-canvas-card {
+    display: flex;
+    flex-direction: column;
+
+    .doc-viewport {
+      block-size: auto;
+      flex: 1 1 0;
+      min-block-size: 0;
+    }
+  }
+
+  .template-builder-side-panel {
+    max-block-size: none;
+  }
+}
+
 @media (max-width: 991.98px) {
   .template-builder-focused .container-xxl.container-p-y {
     padding: .65rem !important;

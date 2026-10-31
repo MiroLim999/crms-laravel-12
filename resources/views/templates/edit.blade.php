@@ -13,7 +13,6 @@
         // makes a new version, so what was read with this one stays as it was.
         $inUse = $template !== null && ($usage['published'] || $usage['records'] > 0 || $usage['pages'] > 0);
         $usageParts = array_filter([
-            $usage['published'] ? 'published for Staff' : null,
             $usage['records'] > 0 ? $usage['records'].' '.Str::plural('record', $usage['records']).' read with it' : null,
             $usage['pages'] > 0 ? $usage['pages'].' unsubmitted '.Str::plural('page', $usage['pages']) : null,
         ]);
@@ -48,7 +47,6 @@
     <div class="template-builder-page">
         <header class="template-builder-page__header">
             <div class="template-builder-page__heading">
-                <span class="template-builder-page__eyebrow">{{ $docType->label() }}</span>
                 <div class="d-flex flex-wrap align-items-center gap-2">
                     <h1 class="h4 mb-0">
                         {{ $template ? $template->name : 'New template layout' }}
@@ -64,9 +62,6 @@
                         </a>
                     @endif
                 </div>
-                <p class="mb-0 text-muted">
-                    Place each marker over the value Staff should extract. Coordinates are saved independently of scan resolution.
-                </p>
             </div>
 
             <a href="{{ route('templates.index') }}" class="btn btn-outline-secondary">
@@ -93,17 +88,6 @@
             <input type="hidden" name="grouping_mode" value="{{ $currentGroupingMode }}" id="groupingMode">
             <div id="fieldInputs"></div>
 
-            @if ($inUse)
-                <div class="template-builder-in-use" role="note">
-                    <i class="icon-base bx bx-lock-alt" aria-hidden="true"></i>
-                    <div>
-                        <strong>This layout is in use:</strong> {{ implode(', ', $usageParts) }}.
-                        Saving changed markers, row lines or field settings makes a new version, so everything
-                        read with this one keeps it. Its name, notes and sample are saved here.
-                    </div>
-                </div>
-            @endif
-
             <div class="row g-3 template-builder-grid">
                 <div class="col-xl-9 col-lg-8">
                     <section class="card document-canvas-card template-builder-canvas-card"
@@ -123,7 +107,7 @@
                                 @if ($template?->sample_path)
                                     <button type="button" class="btn btn-sm btn-outline-danger template-sample-delete-button"
                                             data-bs-toggle="modal" data-bs-target="#deleteTemplateSampleModal"
-                                            title="Delete stored sample document">
+                                            title="Delete stored sample document" aria-label="Delete sample">
                                         <i class="icon-base bx bx-trash icon-sm" aria-hidden="true"></i>
                                         <span>Delete sample</span>
                                     </button>
@@ -522,12 +506,16 @@
                         </div>
 
                         <div class="template-builder-save-panel">
-                            {{-- The "in use" banner at the top says what makes a new version. --}}
+                            {{-- A layout in use is never overwritten: its buttons say so on hover. --}}
                             @if ($inUse)
-                                <button type="submit" class="btn btn-outline-secondary" data-publish="0">
+                                @php
+                                    $inUseNote = 'In use'.($usageParts ? ': '.implode(', ', $usageParts) : '')
+                                        .'. Saving makes a new version; records already read keep this one.';
+                                @endphp
+                                <button type="submit" class="btn btn-outline-secondary" data-publish="0" title="{{ $inUseNote }}">
                                     Save as new draft
                                 </button>
-                                <button type="submit" class="btn btn-primary" data-publish="1">
+                                <button type="submit" class="btn btn-primary" data-publish="1" title="{{ $inUseNote }}">
                                     <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
                                     Save &amp; publish new version
                                 </button>
