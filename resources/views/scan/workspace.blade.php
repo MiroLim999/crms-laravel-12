@@ -429,12 +429,12 @@
                                 <strong>Add missed field</strong>
                             </div>
                             <div class="btn-group btn-group-sm" role="radiogroup" aria-label="How to mark the writing">
-                                <input type="radio" class="btn-check" name="addFieldMode" id="addFieldRectangle"
-                                       value="rectangle" checked>
-                                <label class="btn btn-outline-secondary" for="addFieldRectangle" title="Drag a box over the writing">Rectangle</label>
                                 <input type="radio" class="btn-check" name="addFieldMode" id="addFieldDraw" value="draw">
                                 <label class="btn btn-outline-secondary" for="addFieldDraw"
                                        title="Click round the writing or hold and trace; Enter or double-click closes it">Draw</label>
+                                <input type="radio" class="btn-check" name="addFieldMode" id="addFieldRectangle"
+                                       value="rectangle" checked>
+                                <label class="btn btn-outline-secondary" for="addFieldRectangle" title="Drag a box over the writing">Rectangle</label>
                             </div>
                             <div class="line-edit-toolbar__actions">
                                 <button type="button" class="btn btn-sm btn-text-secondary" id="addFieldCancel">Cancel</button>
@@ -453,13 +453,6 @@
                                 <strong id="lineEditName"></strong>
                             </div>
                             <div class="btn-group btn-group-sm" role="group" aria-label="Outline tool">
-                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditBox"
-                                       value="box" checked>
-                                <label class="btn btn-outline-secondary" for="lineEditBox" title="Stretch the outline by its handles">Stretch</label>
-                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditPoints"
-                                       value="points">
-                                <label class="btn btn-outline-secondary" for="lineEditPoints"
-                                       title="Drag corners; drag a dot between corners to add one; Delete removes one">Move points</label>
                                 <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditDraw"
                                        value="draw">
                                 <label class="btn btn-outline-secondary" for="lineEditDraw"
@@ -467,11 +460,20 @@
                                 <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditRectangle"
                                        value="rectangle">
                                 <label class="btn btn-outline-secondary" for="lineEditRectangle" title="Drag a box over the writing">Rectangle</label>
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditBox"
+                                       value="box" checked>
+                                <label class="btn btn-outline-secondary" for="lineEditBox" title="Stretch the outline by its handles">Stretch</label>
+                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditPoints"
+                                       value="points">
+                                <label class="btn btn-outline-secondary" for="lineEditPoints"
+                                       title="Drag corners; drag a dot between corners to add one; Delete removes one">Move points</label>
                             </div>
                             <div class="line-edit-toolbar__actions">
                                 <button type="button" class="btn btn-sm btn-text-secondary" id="lineEditCancel">Cancel</button>
                                 <button type="button" class="btn btn-sm btn-primary" id="lineEditSave">
-                                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>Save and re-read
+                                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
+                                    <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                                    <span>Save and re-read</span>
                                 </button>
                             </div>
                             <div class="line-edit-toolbar__status" id="lineEditStatus" role="status" aria-live="polite"></div>
@@ -4666,7 +4668,15 @@
         lineOverlay.cancelEdit();
         editingLineIndex = null;
         if (hide) slideToolbar(el('lineEditToolbar'), false);
-        el('lineEditSave').disabled = false;
+        setLineEditSaving(false);
+    }
+
+    /** Save and re-read: a spinner in place of the tick while the line is cropped and read again. */
+    function setLineEditSaving(saving) {
+        const button = el('lineEditSave');
+        button.disabled = saving;
+        button.querySelector('.bx-check')?.classList.toggle('d-none', saving);
+        button.querySelector('.spinner-border')?.classList.toggle('d-none', !saving);
     }
 
     /**
@@ -4685,8 +4695,7 @@
         if (!polygon) return;
 
         const item = cropped[index];
-        const button = el('lineEditSave');
-        button.disabled = true;
+        setLineEditSaving(true);
         showLineEditStatus('Cropping along the new outline and reading it again…');
 
         try {
@@ -4702,7 +4711,7 @@
                 showOcrLineWarning(payload.line.id, payload.message || 'The outline was saved, but TrOCR could not read it.');
             }
         } catch (error) {
-            button.disabled = false;
+            setLineEditSaving(false);
             showLineEditStatus(error.message || 'The outline could not be saved.', true);
         }
     }
