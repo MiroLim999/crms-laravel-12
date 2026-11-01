@@ -330,6 +330,85 @@ class OcrWorkspaceTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'ocr_model.evaluation_imported']);
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    private function evaluation(string $manifest, float $cer, float $wer, float $exact, string $dataset = 'civil-records-v1'): array
+    {
+        return [
+            'schema_version' => 1,
+            'model_key' => 'any',
+            'dataset' => $dataset,
+            'manifest_sha256' => $manifest,
+            'split' => 'test',
+            'sample_count' => 5000,
+            'metrics' => ['cer' => $cer, 'wer' => $wer, 'exact_match' => $exact],
+            'evaluated_at' => '2026-08-12T00:00:00+00:00',
+            'weights_file' => 'model.safetensors',
+            'weights_sha256' => str_repeat('b', 64),
+        ];
+    }
+
+    /**
+     * The notebook ships the base model's scores from the same run; FastAPI puts
+     * them on the base model. Registering the upload must pick them up at once,
+     * so the overlay compares like with like without a Rescan.
+     */
+    public function test_registration_also_imports_base_scores_from_the_same_run(): void
+    {
+        OcrModel::create(['key' => 'base', 'label' => 'base']);
+        $models = [
+            [
+                'key' => 'trocr-v2', 'label' => 'TrOCR v2', 'available' => true, 'loaded' => false,
+                'files' => ['base-evaluation-report.json', 'config.json', 'evaluation-report.json', 'model.safetensors'],
+                'evaluation' => $this->evaluation(str_repeat('c', 64), 0.0003, 0.001, 0.9978),
+            ],
+            [
+                'key' => 'base', 'label' => 'TrOCR base', 'available' => true, 'loaded' => false,
+                'files' => ['config.json', 'evaluation-report.json', 'model.safetensors'],
+                'evaluation' => $this->evaluation(str_repeat('c', 64), 0.1198, 0.5146, 0.3318),
+            ],
+        ];
+        $this->fakeHealthyService([
+            '*/models' => Http::response(['default' => 'trocr-v2', 'models' => $models]),
+        ]);
+
+        $this->actingAs($this->superAdmin())
+            ->postJson(route('ocr.register'), ['name' => 'trocr-v2'])
+            ->assertOk()
+            ->assertJsonPath('message', fn (string $message) => str_contains($message, 'same test set, so the comparison is fair'));
+
+        $base = OcrModel::firstWhere('key', 'base');
+        $this->assertSame(0.1198, $base->cer);
+        $this->assertSame(str_repeat('c', 64), $base->evaluation_manifest_sha256);
+        $this->assertTrue(OcrModel::firstWhere('key', 'trocr-v2')->sharesTestSetWith($base));
+    }
+
+    public function test_registration_warns_when_base_scores_are_from_another_test_set(): void
+    {
+        OcrModel::create(['key' => 'base', 'label' => 'base']);
+        $models = [
+            [
+                'key' => 'trocr-v2', 'label' => 'TrOCR v2', 'available' => true, 'loaded' => false,
+                'files' => ['config.json', 'evaluation-report.json', 'model.safetensors'],
+                'evaluation' => $this->evaluation(str_repeat('c', 64), 0.0003, 0.001, 0.9978, 'names-100k'),
+            ],
+            [
+                'key' => 'base', 'label' => 'TrOCR base', 'available' => true, 'loaded' => false,
+                'files' => ['config.json', 'evaluation-report.json', 'model.safetensors'],
+                'evaluation' => $this->evaluation(str_repeat('d', 64), 0.1198, 0.5146, 0.3318, 'names-50k'),
+            ],
+        ];
+        $this->fakeHealthyService([
+            '*/models' => Http::response(['default' => 'trocr-v2', 'models' => $models]),
+        ]);
+
+        $this->actingAs($this->superAdmin())
+            ->postJson(route('ocr.register'), ['name' => 'trocr-v2'])
+            ->assertOk()
+            ->assertJsonPath('message', fn (string $message) => str_contains($message, 'could not be matched to the same test set (they are from names-50k)'));
+    }
+
     // --------------------------------------------------------------------- save settings
 
     /**

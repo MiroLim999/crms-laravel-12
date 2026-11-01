@@ -546,6 +546,9 @@ class AddModelResponse(BaseModel):
     ok: bool
     name: str
     saved: list[str]
+    # What happened to a base-evaluation-report.json in the upload: "installed",
+    # "unchanged", "skipped: <reason>", or None when there was none.
+    base_report: Optional[str] = None
 
 
 class DeleteModelResponse(BaseModel):
@@ -758,16 +761,22 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
-def _read_evaluation_report(model_dir, strict=False):
+def _read_evaluation_report(model_dir, strict=False, report_path=None):
     """Return a normalized, artifact-bound benchmark report.
 
     Reports are optional, but a report included in a new upload must be valid.
     The weights digest prevents metrics from one Kaggle run being attached to a
     different checkpoint by accidentally mixing files before upload.
+
+    `report_path` checks a report that is not yet in `model_dir` (a base-model
+    report carried in an upload) against the weights in `model_dir`. Such a
+    check is never cached: the cache belongs to the report installed there.
     """
-    path = os.path.join(model_dir, EVALUATION_REPORT_FILE)
+    installed = report_path is None
+    path = os.path.join(model_dir, EVALUATION_REPORT_FILE) if installed else report_path
     if not os.path.isfile(path):
-        _evaluation_cache.pop(model_dir, None)
+        if installed:
+            _evaluation_cache.pop(model_dir, None)
         return None
 
     try:
@@ -807,7 +816,7 @@ def _read_evaluation_report(model_dir, strict=False):
             os.stat(weights_path).st_mtime_ns, os.path.getsize(weights_path),
             expected_weights_sha256,
         )
-        cached = _evaluation_cache.get(model_dir)
+        cached = _evaluation_cache.get(model_dir) if installed else None
         if not strict and cached is not None and cached["signature"] == signature:
             return cached["report"]
         if not hmac.compare_digest(_sha256_file(weights_path), expected_weights_sha256):
@@ -840,15 +849,76 @@ def _read_evaluation_report(model_dir, strict=False):
             "weights_file": weights_file,
             "weights_sha256": expected_weights_sha256,
         }
-        _evaluation_cache[model_dir] = {"signature": signature, "report": normalized}
+        if installed:
+            _evaluation_cache[model_dir] = {"signature": signature, "report": normalized}
         return normalized
     except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as error:
         if strict:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid {EVALUATION_REPORT_FILE}: {error}.",
+                detail=f"Invalid {os.path.basename(path)}: {error}.",
             )
         return None
+
+
+# The fine-tuning notebook also measures the base model on the same locked test
+# set and ships that result in the model ZIP under this name.
+BASE_EVALUATION_REPORT_FILE = "base-evaluation-report.json"
+
+
+def _install_base_report(model_dir):
+    """Install the base-model report an upload carries, if it fits this computer.
+
+    The workspace overlays the base model's scores on a fine-tuned model's, which
+    is only a fair comparison when both were measured on the same test set. The
+    notebook measures both in one run, so the base report travels in the ZIP.
+    It is installed as the base model's evaluation-report.json only when:
+      - the uploaded model has its own valid report,
+      - both reports name the same dataset, manifest and sample count, and
+      - its weights_sha256 matches the base model on this computer.
+    Otherwise nothing changes. A bad base report never fails the upload: the
+    fine-tuned model is still fine. The previous base report is kept beside it.
+
+    Returns "installed", "unchanged", None (no base report in the upload) or the
+    reason it was skipped."""
+    candidate = os.path.join(model_dir, BASE_EVALUATION_REPORT_FILE)
+    if not os.path.isfile(candidate):
+        return None
+
+    try:
+        if not _looks_like_model(BASE_MODEL_DIR):
+            raise ValueError("the base model is not installed in ml/models/base")
+        model_report = _read_evaluation_report(model_dir)
+        if model_report is None:
+            raise ValueError("the uploaded model has no evaluation-report.json to pair it with")
+        base_report = _read_evaluation_report(BASE_MODEL_DIR, strict=True, report_path=candidate)
+        for field in ("dataset", "manifest_sha256", "sample_count"):
+            if base_report[field] != model_report[field]:
+                raise ValueError(
+                    f"its {field} differs from the uploaded model's report, so it is not the same test set"
+                )
+    except HTTPException as error:
+        reason = str(error.detail).rstrip(".")
+    except ValueError as error:
+        reason = str(error)
+    else:
+        target = os.path.join(BASE_MODEL_DIR, EVALUATION_REPORT_FILE)
+        with open(candidate, "rb") as source:
+            incoming = source.read()
+        if os.path.isfile(target):
+            with open(target, "rb") as source:
+                if source.read() == incoming:
+                    return "unchanged"
+            shutil.copy2(target, os.path.join(BASE_MODEL_DIR, "evaluation-report.previous.json"))
+        staged = target + ".tmp"
+        with open(staged, "wb") as out:
+            out.write(incoming)
+        os.replace(staged, target)
+        logger.info("Installed the base-model report from the '%s' upload.", os.path.basename(model_dir))
+        return "installed"
+
+    logger.warning("Kept the base-model report: %s.", reason)
+    return f"skipped: {reason}"
 
 # A model folder is a dozen small files plus one big weights file. An archive with
 # thousands of members is not a model, and walking it would be the expensive part of
@@ -1099,7 +1169,16 @@ def add_model(
         raise HTTPException(status_code=500, detail=f"Failed to save files: {e}")
 
     logger.info(f"Added model '{safe_name}' with {len(saved)} files.")
-    return {"ok": True, "name": safe_name, "saved": saved}
+
+    # After the model is safely in place: the base report is a bonus, never a
+    # reason to undo an upload that is otherwise good.
+    try:
+        base_report = _install_base_report(target)
+    except OSError as e:
+        logger.warning("Could not install the base-model report: %s", e)
+        base_report = f"skipped: {e}"
+
+    return {"ok": True, "name": safe_name, "saved": saved, "base_report": base_report}
 
 
 @app.post("/delete_model", response_model=DeleteModelResponse, dependencies=[Depends(require_service_key)])

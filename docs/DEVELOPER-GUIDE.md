@@ -220,6 +220,8 @@ crms-laravel-12/
 │   ├── factories/                      # Model factories for testing and seeding
 │   ├── migrations/                     # Database migrations (records, templates, audit logs, OCR)
 │   └── seeders/                        # RoleSeeder, SuperAdminSeeder, DocumentTemplateSeeder, DemoUsersSeeder
+├── finetuning-kaggle/
+│   └── trocr-finetuning-code.ipynb     # Kaggle fine-tuning notebook; writes both CRMS reports
 ├── ml/                                 # Complete Python OCR & Machine Learning workspace
 │   ├── api/
 │   │   ├── main.py                     # FastAPI microservice (batched inference, health, service key, signed model uploads)
@@ -227,8 +229,6 @@ crms-laravel-12/
 │   ├── datasets/<name>/                # Training/validation/test images & manifest CSV (gitignored)
 │   ├── models/                         # Fine-tuned model checkpoints (gitignored)
 │   ├── evaluation-metrics/             # Evaluation charts, in base/ and finetuned/
-│   ├── notebooks/
-│   │   └── trocr-finetuning-code.ipynb # Kaggle / Colab fine-tuning notebook; writes evaluation-report.json
 │   ├── dataset_registry.py             # Dataset names, folders and label rules
 │   ├── download_trocr.py               # Downloads Hugging Face base TrOCR weights
 │   ├── hf_quiet.py                     # Hugging Face environment logging silencer
@@ -596,9 +596,9 @@ ml/
 ├── metrics.py            # CER, WER, and exact-match computation logic
 ├── trocr_common.py       # Model loading and confidence scoring shared with the OCR service
 ├── dataset_registry.py   # Dataset names and path resolution
-├── download_trocr.py     # Fetches microsoft/trocr-base-handwritten weights
-└── notebooks/            # Kaggle / Colab fine-tuning notebook (writes evaluation-report.json)
+└── download_trocr.py     # Fetches microsoft/trocr-base-handwritten weights
 ```
+The Kaggle fine-tuning notebook lives outside `ml/`, in `finetuning-kaggle/trocr-finetuning-code.ipynb`.
 
 ### 1. Dataset Layout Specification
 Training datasets live in named folders under `ml/datasets/` (gitignored). The scripts use the one called `default` unless you pass `--dataset <name>`:
@@ -630,7 +630,7 @@ python ml/test_finetuned.py --model trocr-v1   # a folder under ml/models/
 This prints the Character Error Rate (CER), Word Error Rate (WER) and exact-match accuracy on the test split, and saves a chart under `ml/evaluation-metrics/finetuned/` (`base/` for the base model). It also prints the **processing time**: the average milliseconds the model needs per image, batched, and on which device (a few images are not enough, because the first batch includes GPU warm-up).
 
 ### 5. Benchmark Provenance Report (`evaluation-report.json`)
-The OCR Workspace shows a model's CER, WER and exact match **only** from an `evaluation-report.json` inside the model folder, never from operational scans. The fine-tuning notebook (`ml/notebooks/trocr-finetuning-code.ipynb`) writes it. The OCR service accepts it only if it has:
+The OCR Workspace shows a model's CER, WER and exact match **only** from an `evaluation-report.json` inside the model folder, never from operational scans. The fine-tuning notebook (`finetuning-kaggle/trocr-finetuning-code.ipynb`, cell 12) writes it. The OCR service accepts it only if it has:
 - `schema_version: 1` and `split: "test"` (the locked test split), with a positive `sample_count`
 - the `dataset` name and the SHA-256 of its manifest (`manifest_sha256`)
 - the weights file name (`weights_file`) and its SHA-256 (`weights_sha256`). The service hashes the real weights file and rejects the report if they differ, so metrics from one run cannot be attached to another checkpoint
@@ -638,17 +638,26 @@ The OCR Workspace shows a model's CER, WER and exact match **only** from an `eva
 
 A model without a report still works; it just shows no benchmark. A report that fails these checks is refused when the model is uploaded.
 
+**Base model scores from the same run (`base-evaluation-report.json`).** The OCR Workspace overlays the base model's scores on the fine-tuned model's, which is only fair when both were measured on the same test set. So the notebook also measures the base model on that test set (cell 9b, before training) and writes `base-evaluation-report.json` beside `evaluation-report.json`, in the same format, with `model_key: "base"`. Its `weights_sha256` is the base weights the notebook loaded, pinned to Hugging Face revision `eaacaf452b06415df8f10bb6fad3a4c11e609406`, the same file `download_trocr.py` installs in `ml/models/base/`. When a model is uploaded, the OCR service installs that file as `ml/models/base/evaluation-report.json` only if:
+- the uploaded model has its own valid `evaluation-report.json`,
+- both reports name the same `dataset`, `manifest_sha256` and `sample_count`, and
+- its `weights_sha256` matches the base weights on this computer.
+
+Otherwise the base scores stay as they were, and the service log says why. A bad base report never fails the upload. The replaced base report is kept as `ml/models/base/evaluation-report.previous.json`. Registering the upload reads the new base scores straight away (no **Rescan models** needed), and the success message says whether the base scores come from the same test set as the new model.
+
+In cell 4, set `CRMS_MODEL_KEY` to the name you will upload the model as and `DATASET_LABEL` to the dataset's name; left blank, they fall back to the folder names (`trocr-finetuned`, `dataset_003`).
+
 `ml/regenerate_report.py` rebuilds a lost or outdated report for numbers that were already measured, for example in the fine-tuning notebook:
 ```bash
 python ml/regenerate_report.py --model trocr-v1 --dataset <dataset-name> --samples <test-sample-count> --cer <cer> --wer <wer> --exact <exact-match>
 ```
 It hashes the real weights file, but it **does not measure anything**: every figure (`--dataset`, `--samples`, `--cer`, `--wer`, `--exact`) is required and is written exactly as you pass it. It used to carry built-in default numbers, and one model's report ended up showing figures nobody had measured; those defaults are gone. Its `manifest_sha256` is a hash of the dataset name, not of a manifest file. Copy every figure from a real test-split run, so the benchmark shown in the app stays a real measurement.
 
-The active model `TrOcr-50k-broken-samples` shows CER 0.03%, WER 0.10% and exact match 99.78% (4,989 of 5,000 test images). That is the result the Kaggle notebook printed for it (`ml/notebooks/trocr-finetuning-code.ipynb`, cell 11). All of it is measured on the synthetic test split, not on real scans. The earlier report in that folder (8% / 24% / 48%) matched no recorded run and is kept beside it as `evaluation-report.before-2026-11-01.json`. After changing a report, click **Rescan models** in the OCR Workspace so the app reads it again.
+The active model `TrOcr-50k-broken-samples` shows CER 0.03%, WER 0.10% and exact match 99.78% (4,989 of 5,000 test images). That is the result the Kaggle notebook printed for it (`finetuning-kaggle/trocr-finetuning-code.ipynb`, cell 11). That run predates `base-evaluation-report.json`, so the base model's report (CER 11.98%, WER 51.46%, exact match 33.18%, from cell 9b of the same run) was written with `regenerate_report.py`; both name the same dataset and sample count, but their `manifest_sha256` values differ because `regenerate_report.py` hashes the dataset name. All of it is measured on the synthetic test split, not on real scans. The earlier report in that folder (8% / 24% / 48%) matched no recorded run and is kept beside it as `evaluation-report.before-2026-11-01.json`. After changing a report, click **Rescan models** in the OCR Workspace so the app reads it again.
 
 ### 6. Installing Models into the Web Application
 1. Log in as **Super Admin** and navigate to the **OCR Workspace**.
-2. Click **Add model** and upload either a `.zip` archive or the loose files: `config.json`, `model.safetensors` (or `pytorch_model.bin`), the tokenizer files, and optionally `evaluation-report.json`.
+2. Click **Add model** and upload either a `.zip` archive or the loose files: `config.json`, `model.safetensors` (or `pytorch_model.bin`), the tokenizer files, and optionally `evaluation-report.json` and `base-evaluation-report.json`. The notebook's `trocr-finetuned.zip` already holds all of them.
 3. In the **Models** panel, click **Activate** next to it and confirm. Staff scan with the active model from then on. Use **Rescan models** after copying a model folder into `ml/models/` by hand.
 
 ---

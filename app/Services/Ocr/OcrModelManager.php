@@ -203,8 +203,8 @@ class OcrModelManager
      */
     public function registerInstalled(string $name, User $actor): OcrModel
     {
-        $remote = collect($this->client->models()['models'])
-            ->first(fn (array $model) => ($model['key'] ?? null) === $name);
+        $inventory = collect($this->client->models()['models']);
+        $remote = $inventory->first(fn (array $model) => ($model['key'] ?? null) === $name);
 
         if ($remote === null) {
             throw new OcrServiceException(
@@ -217,7 +217,20 @@ class OcrModelManager
             ->values()
             ->all();
 
-        return DB::transaction(function () use ($name, $files, $remote, $actor) {
+        // The upload may have carried the base model's scores from the same test
+        // run, which FastAPI installs on the base model. Pick them up now, so the
+        // workspace overlay compares like with like without a Rescan.
+        $baseRemote = $name === 'base' ? null
+            : $inventory->first(fn (array $model) => ($model['key'] ?? null) === 'base');
+
+        return DB::transaction(function () use ($name, $files, $remote, $baseRemote, $actor) {
+            if ($baseRemote !== null) {
+                $base = OcrModel::query()->where('key', 'base')->lockForUpdate()->first();
+                if ($base !== null) {
+                    $this->syncEvaluation($base, $baseRemote, $actor);
+                }
+            }
+
             $existing = OcrModel::query()->where('key', $name)->lockForUpdate()->first();
 
             if ($existing !== null && $existing->disk_deleted_at === null) {

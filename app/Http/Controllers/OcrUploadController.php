@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\OcrModel;
 use App\Services\Ocr\OcrModelManager;
 use App\Services\Ocr\OcrServiceException;
 use App\Services\Ocr\OcrUploadAuthorizer;
@@ -53,6 +54,21 @@ class OcrUploadController extends Controller
         }
 
         $message = "Installed model '{$model->key}'. Select it below and save settings to start scanning with it.";
+
+        // The workspace overlays the base model's scores on this model's. Say
+        // whether that comparison is fair: both scored on the same test set.
+        $base = $model->key === 'base' ? null : OcrModel::query()->where('key', 'base')->first();
+        $sameTestSet = $base !== null ? $model->sharesTestSetWith($base) : null;
+        if ($sameTestSet === true) {
+            $message .= ' The base model\'s scores come from the same test set, so the comparison is fair.';
+        } elseif ($sameTestSet === false) {
+            // A differing manifest hash is not proof of a different test set (a
+            // hand-written report hashes the dataset name instead), so say only
+            // what is known.
+            $message .= " The base model's scores could not be matched to the same test set"
+                ." (they are from {$base->evaluation_dataset}), so the comparison may not be like for like."
+                .' A ZIP from the fine-tuning notebook includes the base scores from the same run.';
+        }
         $request->session()->flash('success', $message);
 
         return response()->json([

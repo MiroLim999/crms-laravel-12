@@ -84,4 +84,20 @@ class OcrModel extends Model
             && $this->evaluation_manifest_sha256 !== null
             && $this->evaluation_weights_sha256 !== null;
     }
+
+    /**
+     * Whether this model and `$other` were scored on the same test set (same
+     * dataset, manifest and sample count), so their scores compare fairly.
+     * Null when either one has no complete evaluation.
+     */
+    public function sharesTestSetWith(self $other): ?bool
+    {
+        if (! $this->hasEvaluation() || ! $other->hasEvaluation()) {
+            return null;
+        }
+
+        return $this->evaluation_dataset === $other->evaluation_dataset
+            && $this->evaluation_manifest_sha256 === $other->evaluation_manifest_sha256
+            && $this->evaluation_sample_count === $other->evaluation_sample_count;
+    }
 }
