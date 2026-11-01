@@ -100,7 +100,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Your Markers Decide the Rows**: Evenly ruled rows repeat, so a grid slid one row up or down matches the printed rules exactly as well as the right one. Scan with OCR therefore keeps the table's first row line within half a row of where you put it (and lets the row spacing stretch by up to 10% about that line, for a page scanned at another scale). It never jumps a whole row on its own. Detect and Snap to table can carry far-off markers onto the table, and Detect says how many rows it moved the grid.
 - **A Ledger Marker on Free Text**: If a ledger template's column is placed over writing that does not sit in its rows (a list of diseases under the register's 22-row template), Detect and Scan with OCR read that column as free text, line by line ("Remarks · line 1", "· line 2", ...), exactly as an added field is, instead of forcing every line into one of the template's rows. The test is scale-free: on every real ledger page the baselines sit at the same height within their rows and one row apart; on free text they do not. Staff are told in the Detect summary.
 - **Grid Notes**: When the grid may be wrong, the Detect summary and the top of Verify say so, in plain words, and change nothing: **rows that differ a lot in height** from the template's (a header taken for a row, a rule the page lacks), **written lines below the last row** (more rows than the grid, and those are not read: Snap to table, or **Add row**, puts them in), **written lines in a row-sized band above the first row** (a taller band is a header and stays quiet), and **Detect moved the grid N rows**. The page's row lines are also cut at the page's edge, so a template with more rows than the page never leaves a marker running past it.
-- **Training Export**: `php artisan crms:export-training` writes verified crops and their corrected text as a TrOCR training CSV (`file_name, text, doc_id, column, row`).
+- **Training Export**: `php artisan crms:export-training` writes verified crops and their corrected text as a TrOCR training CSV (`file_name, text, doc_id, column, row`). With `--test-set=<name>` it writes them instead as a local test set in `ml/datasets/<name>/` that `ml/test_finetuned.py` can score (see "Scoring on real ledger lines" in the OCR section).
 
 ### 3. Dynamic Document Template Builder & Type Management
 - **Visual Template Designer**: Create and publish document layouts with real-time coordinate calibration.
@@ -221,7 +221,8 @@ crms-laravel-12/
 │   ├── migrations/                     # Database migrations (records, templates, audit logs, OCR)
 │   └── seeders/                        # RoleSeeder, SuperAdminSeeder, DocumentTemplateSeeder, DemoUsersSeeder
 ├── finetuning-kaggle/
-│   └── trocr-finetuning-code.ipynb     # Kaggle fine-tuning notebook; writes both CRMS reports
+│   ├── trocr-finetuning-code.ipynb     # Kaggle fine-tuning notebook, from the base model; writes both CRMS reports
+│   └── trocr-sequential-finetuning.ipynb # Continues a fine-tuned model on new samples (see section 5b)
 ├── ml/                                 # Complete Python OCR & Machine Learning workspace
 │   ├── api/
 │   │   ├── main.py                     # FastAPI microservice (batched inference, health, service key, signed model uploads)
@@ -550,6 +551,7 @@ php artisan schedule:list                           # What the scheduler runs, a
 php artisan schedule:work                           # Run prune-pages every hour; serve.ps1 starts it (use Task Scheduler in production)
 php artisan crms:export-training                    # Verified line crops and their corrected text, as a TrOCR training CSV
 php artisan crms:export-training --since=2026-09-01 --out=D:\exports\september   # Only records submitted since then, to that folder
+php artisan crms:export-training --test-set=real-lines   # The same lines as a local test set in ml/datasets/real-lines (stays on this computer)
 ```
 
 ### TrOCR Models
@@ -561,6 +563,7 @@ python ml\train_trocr.py --help                              # Every option (--o
 python ml\test_trocr.py                                      # Evaluate the base model on the test split
 python ml\test_finetuned.py --model <model>                  # Evaluate a model: CER, WER, exact match, and a chart
 python ml\test_finetuned.py --model <model> --limit 200      # ... on the first 200 samples only
+python ml\test_finetuned.py --model <model> --dataset real-lines   # ... on real ledger lines exported with --test-set
 python ml\predict.py --model <model> --folder ml\new_images  # Read a folder of loose images
 ```
 
@@ -630,7 +633,7 @@ python ml/test_finetuned.py --model trocr-v1   # a folder under ml/models/
 This prints the Character Error Rate (CER), Word Error Rate (WER) and exact-match accuracy on the test split, and saves a chart under `ml/evaluation-metrics/finetuned/` (`base/` for the base model). It also prints the **processing time**: the average milliseconds the model needs per image, batched, and on which device (a few images are not enough, because the first batch includes GPU warm-up).
 
 ### 5. Benchmark Provenance Report (`evaluation-report.json`)
-The OCR Workspace shows a model's CER, WER and exact match **only** from an `evaluation-report.json` inside the model folder, never from operational scans. The fine-tuning notebook (`finetuning-kaggle/trocr-finetuning-code.ipynb`, cell 12) writes it. The OCR service accepts it only if it has:
+The OCR Workspace shows a model's CER, WER and exact match **only** from an `evaluation-report.json` inside the model folder, never from operational scans. The fine-tuning notebook (`finetuning-kaggle/trocr-finetuning-code.ipynb`, cell 15) writes it. The OCR service accepts it only if it has:
 - `schema_version: 1` and `split: "test"` (the locked test split), with a positive `sample_count`
 - the `dataset` name and the SHA-256 of its manifest (`manifest_sha256`)
 - the weights file name (`weights_file`) and its SHA-256 (`weights_sha256`). The service hashes the real weights file and rejects the report if they differ, so metrics from one run cannot be attached to another checkpoint
@@ -638,14 +641,14 @@ The OCR Workspace shows a model's CER, WER and exact match **only** from an `eva
 
 A model without a report still works; it just shows no benchmark. A report that fails these checks is refused when the model is uploaded.
 
-**Base model scores from the same run (`base-evaluation-report.json`).** The OCR Workspace overlays the base model's scores on the fine-tuned model's, which is only fair when both were measured on the same test set. So the notebook also measures the base model on that test set (cell 9b, before training) and writes `base-evaluation-report.json` beside `evaluation-report.json`, in the same format, with `model_key: "base"`. Its `weights_sha256` is the base weights the notebook loaded, pinned to Hugging Face revision `eaacaf452b06415df8f10bb6fad3a4c11e609406`, the same file `download_trocr.py` installs in `ml/models/base/`. When a model is uploaded, the OCR service installs that file as `ml/models/base/evaluation-report.json` only if:
+**Base model scores from the same run (`base-evaluation-report.json`).** The OCR Workspace overlays the base model's scores on the fine-tuned model's, which is only fair when both were measured on the same test set. So the notebook also measures the base model on that test set (cell 10, before training) and writes `base-evaluation-report.json` beside `evaluation-report.json`, in the same format, with `model_key: "base"`. Its `weights_sha256` is the base weights the notebook loaded, pinned to Hugging Face revision `eaacaf452b06415df8f10bb6fad3a4c11e609406`, the same file `download_trocr.py` installs in `ml/models/base/`. When a model is uploaded, the OCR service installs that file as `ml/models/base/evaluation-report.json` only if:
 - the uploaded model has its own valid `evaluation-report.json`,
 - both reports name the same `dataset`, `manifest_sha256` and `sample_count`, and
 - its `weights_sha256` matches the base weights on this computer.
 
 Otherwise the base scores stay as they were, and the service log says why. A bad base report never fails the upload. The replaced base report is kept as `ml/models/base/evaluation-report.previous.json`. Registering the upload reads the new base scores straight away (no **Rescan models** needed), and the success message says whether the base scores come from the same test set as the new model.
 
-In cell 4, set `CRMS_MODEL_KEY` to the name you will upload the model as and `DATASET_LABEL` to the dataset's name; left blank, they fall back to the folder names (`trocr-finetuned`, `dataset_003`).
+In cell 4, set `CRMS_MODEL_KEY` to the name you will upload the model as and `DATASET_LABEL` to the dataset's name. Left blank, the model is named after the dataset size (`TrOcr-100k-samples`) and the dataset after its Kaggle name (for example `synthetic-broken-handwritten-samples50k`, not the inner `dataset_003` folder).
 
 `ml/regenerate_report.py` rebuilds a lost or outdated report for numbers that were already measured, for example in the fine-tuning notebook:
 ```bash
@@ -653,7 +656,38 @@ python ml/regenerate_report.py --model trocr-v1 --dataset <dataset-name> --sampl
 ```
 It hashes the real weights file, but it **does not measure anything**: every figure (`--dataset`, `--samples`, `--cer`, `--wer`, `--exact`) is required and is written exactly as you pass it. It used to carry built-in default numbers, and one model's report ended up showing figures nobody had measured; those defaults are gone. Its `manifest_sha256` is a hash of the dataset name, not of a manifest file. Copy every figure from a real test-split run, so the benchmark shown in the app stays a real measurement.
 
-The active model `TrOcr-50k-broken-samples` shows CER 0.03%, WER 0.10% and exact match 99.78% (4,989 of 5,000 test images). That is the result the Kaggle notebook printed for it (`finetuning-kaggle/trocr-finetuning-code.ipynb`, cell 11). That run predates `base-evaluation-report.json`, so the base model's report (CER 11.98%, WER 51.46%, exact match 33.18%, from cell 9b of the same run) was written with `regenerate_report.py`; both name the same dataset and sample count, but their `manifest_sha256` values differ because `regenerate_report.py` hashes the dataset name. All of it is measured on the synthetic test split, not on real scans. The earlier report in that folder (8% / 24% / 48%) matched no recorded run and is kept beside it as `evaluation-report.before-2026-11-01.json`. After changing a report, click **Rescan models** in the OCR Workspace so the app reads it again.
+The active model `TrOcr-50k-broken-samples` shows CER 0.03%, WER 0.10% and exact match 99.78% (4,989 of 5,000 test images). That is the result the Kaggle notebook printed for it (cell 11 of the notebook version that made that run; its outputs are in git history before 2026-11-02). That run predates `base-evaluation-report.json`, so the base model's report (CER 11.98%, WER 51.46%, exact match 33.18%, from cell 9b of the same run) was written with `regenerate_report.py`; both name the same dataset and sample count, but their `manifest_sha256` values differ because `regenerate_report.py` hashes the dataset name. All of it is measured on the synthetic test split, not on real scans. The earlier report in that folder (8% / 24% / 48%) matched no recorded run and is kept beside it as `evaluation-report.before-2026-11-01.json`. After changing a report, click **Rescan models** in the OCR Workspace so the app reads it again.
+
+### 5a. The Fine-Tuning Notebook (from the base model)
+`finetuning-kaggle/trocr-finetuning-code.ipynb` fine-tunes `microsoft/trocr-base-handwritten` on one Kaggle dataset (`manifest.csv` + `train/ val/ test/`). It is set up for 100k samples; `PROFILE = 'auto'` in cell 4 picks the preset closest to the dataset size (5k, 10k, 20k, 50k or 100k). Run it with **Save Version -> Save & Run All**; 100k samples take about 3 hours on Kaggle's T4 x2.
+
+- **Repeatable:** a fixed `SEED` for Python, NumPy, PyTorch and the training shuffle.
+- **Data checks before training:** every image named in `manifest.csv` must exist; exact byte copies of test images are left out of training and validation; it counts the test texts that also appear in training and scores those apart from the unseen ones (cell 14); it warns about training labels longer than `MAX_LABEL_LENGTH` and test labels longer than CRMS reads. `UNREADABLE` labels are skipped in any case and with spaces around them, as in `ml/train_trocr.py`.
+- **Picture variation (`AUGMENT`):** training pictures get small random changes (narrower or wider writing, a tilt of up to 2.5 degrees, extra margin, thicker or thinner ink, contrast, blur, JPEG compression), so the model sees something closer to real scans. Validation and test pictures never change. `augmentation-preview.png` shows eight originals beside their varied versions.
+- **Reads like CRMS:** greedy, full precision, at most 32 new tokens. The saved `generation_config.json` carries `use_cache: true` and `max_new_tokens: 32`, so the model reads at full speed anywhere.
+- **Tokenizer fallback:** newer Transformers 5 releases cannot build this model's tokenizer from the Hugging Face files, so cell 6 then adds `tokenizer.json` from the repository's `refs/pr/11`, like `ml/download_trocr.py`. Its token ids are identical to the tokenizer `TrOcr-50k-broken-samples` was trained with.
+- **Output:** `trocr-finetuned.zip` holds the model, both reports and `training-summary.json` (data checks, settings, epoch log, scores, reading time, versions). `evaluation-report.json` also carries `reading`, `training` and `test_subsets` blocks; the OCR service ignores them. `test-errors.csv` lists every test image either model read wrong.
+
+**Scoring on real ledger lines.** All notebook scores are on the dataset's own pictures. Real ledger lines are civil registry data, so they are never uploaded to Kaggle; score them on this computer instead:
+```bash
+php artisan crms:export-training --test-set=real-lines
+python ml\test_finetuned.py --model base --dataset real-lines
+python ml\test_finetuned.py --model TrOcr-100k-samples --dataset real-lines
+```
+The command copies every verified line crop of submitted records into `ml/datasets/real-lines/test/` with a `manifest.csv` (`filename,label,split,source,record_id,staff_corrected`). It refuses to overwrite an existing folder. Its answer for each line is the value staff verified; `staff_corrected` is 1 where staff changed the reading. A line staff left unchanged keeps the reading of whichever model scanned it, which makes that model look better, so check those lines before trusting a score on this set. `--model base` uses `ml/models/base`.
+
+### 5b. Sequential Fine-Tuning (continuing a fine-tuned model)
+`finetuning-kaggle/trocr-sequential-finetuning.ipynb` trains an already fine-tuned model (for example `TrOcr-50k-broken-samples`) further on new samples, instead of starting again from `microsoft/trocr-base-handwritten` as `trocr-finetuning-code.ipynb` does. It takes three Kaggle inputs: the model to continue from (zip `ml/models/<model>/` and upload it as a private dataset), the old dataset that model was trained on, and the new dataset. Cell 4 finds them; it tells the old dataset from the new one by the `manifest_sha256` in the start model's `evaluation-report.json`, and asks for the paths when it cannot tell.
+
+What it does differently from the first notebook:
+- **Replay:** training mixes the new samples with old training samples (`REPLAY_RATIO`, default 1 old per new), so the model does not forget what it learned.
+- **Gentler learning rates:** decoder 1e-5 and encoder 5e-6, half of the first run's 50k profile.
+- **Same locked test:** every model is scored on the old dataset's test split, so its numbers compare with the start model's. Validation mixes old and new samples (`VAL_OLD_SAMPLES`, `VAL_NEW_SAMPLES`), so an epoch that forgets old samples is not picked as the best.
+- **No test leakage:** images that are exact byte copies of test images are left out of training and validation, and it reports any new test image the start model trained on.
+- **Three-way comparison:** Microsoft's base, the start model and the new model on the same images, plus the exact match on test images whose text no model trained on. It counts the images the new model fixed and broke against the start model, with an exact McNemar test (p below 0.05: unlikely to be chance). Cell 15 then says UPLOAD, DO NOT UPLOAD (worse on the old samples: raise `REPLAY_RATIO` or lower the learning rates) or NO CLEAR GAIN.
+- **Reads like CRMS:** greedy decoding with at most 32 new tokens, the same as `ml/api/main.py`. It also warns about labels longer than that. The first notebook reads the same way since 2026-11-02; its 50k run allowed 40, so that run's numbers can differ slightly.
+
+Its ZIP (`trocr-sequential.zip`) holds the model, `evaluation-report.json` and `base-evaluation-report.json`. Both are measured on the locked test, so the upload installs the base scores as described in section 5. It also holds `sequential-summary.json` with every number of the run: data counts, copies removed, epoch log, scores, verdict, and the parent model's name and weights hash, which `evaluation-report.json` repeats under `parent_model`. `sequential-test-errors.csv` lists every test image the start or new model read wrong, with all three readings. Upload the new model under a new name and keep the start model installed, so you can switch back.
 
 ### 6. Installing Models into the Web Application
 1. Log in as **Super Admin** and navigate to the **OCR Workspace**.

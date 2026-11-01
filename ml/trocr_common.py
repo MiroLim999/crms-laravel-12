@@ -32,10 +32,15 @@ class ModelNotFoundError(Exception):
 def resolve_model(model):
     """Turn a model key from the UI into something from_pretrained accepts.
 
-    Returns (source, key). No key, or 'base', is the Hugging Face base model;
-    a folder path is used as it is; anything else must be a folder under
-    ml/models/."""
+    Returns (source, key). No key, or 'base', is the base model: the copy in
+    ml/models/base when download_trocr.py installed it there (it carries the
+    tokenizer.json that Transformers 5 needs and the Hugging Face repository
+    lacks), else the Hugging Face name. A folder path is used as it is; anything
+    else must be a folder under ml/models/."""
     if not model or model == BASE_MODEL_KEY:
+        installed = os.path.join(MODELS_DIR, BASE_MODEL_KEY)
+        if os.path.isfile(os.path.join(installed, "config.json")):
+            return installed, BASE_MODEL_KEY
         return BASE_MODEL_NAME, BASE_MODEL_KEY
 
     if os.path.isdir(model):

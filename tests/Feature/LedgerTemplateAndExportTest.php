@@ -210,6 +210,51 @@ class LedgerTemplateAndExportTest extends TestCase
         $this->assertTrue(AuditLog::where('action', 'training.exported')->exists());
     }
 
+    public function test_training_export_can_write_a_local_test_set_for_the_evaluation_script(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTemplateSeeder::class);
+        $user = User::factory()->staff()->create();
+        $record = CivilRecord::create([
+            'doc_type' => DocumentType::Birth->value,
+            'status' => RecordStatus::Submitted,
+            'created_by' => $user->getKey(),
+            'submitted_by' => $user->getKey(),
+            'submitted_at' => now(),
+        ]);
+        foreach ([['Juan Dela Crux', 'Juan Dela Cruz'], ['Cebu', 'Cebu']] as $i => [$read, $verified]) {
+            Storage::disk('local')->put("records/{$record->getKey()}/crops/{$i}.png", "crop-{$i}");
+            $record->fields()->create([
+                'name' => "Line {$i}", 'ocr_text' => $read, 'verified_value' => $verified,
+                'crop_path' => "records/{$record->getKey()}/crops/{$i}.png",
+                'x' => 0.1, 'y' => 0.2, 'width' => 0.2, 'height' => 0.05, 'sort_order' => $i,
+            ]);
+        }
+
+        $name = 'phpunit-real-lines-'.uniqid();
+        $root = base_path('ml/datasets/'.$name);
+        try {
+            $this->artisan('crms:export-training', ['--test-set' => $name])
+                ->expectsOutputToContain('Wrote 2 real line(s) from 1 record(s)')
+                ->expectsOutputToContain('Staff changed the reading of 1 of them')
+                ->assertSuccessful();
+
+            $rows = array_map('str_getcsv', file($root.'/manifest.csv', FILE_IGNORE_NEW_LINES));
+            $this->assertSame(['filename', 'label', 'split', 'source', 'record_id', 'staff_corrected'], $rows[0]);
+            $this->assertCount(3, $rows);
+            $this->assertSame(['Juan Dela Cruz', 'test', 'crms', (string) $record->getKey(), '1'], array_slice($rows[1], 1));
+            $this->assertSame(['Cebu', 'test', 'crms', (string) $record->getKey(), '0'], array_slice($rows[2], 1));
+            $this->assertSame('crop-0', File::get($root.'/test/'.$rows[1][0]));
+
+            // Never overwrites an existing test set, and refuses names that are not one folder.
+            $this->artisan('crms:export-training', ['--test-set' => $name])->assertFailed();
+            $this->artisan('crms:export-training', ['--test-set' => '../escape'])->assertFailed();
+            $this->assertDirectoryDoesNotExist(base_path('ml/escape'));
+        } finally {
+            File::deleteDirectory($root);
+        }
+    }
+
     public function test_unsubmitted_pages_are_pruned_with_their_files(): void
     {
         Storage::fake('local');
