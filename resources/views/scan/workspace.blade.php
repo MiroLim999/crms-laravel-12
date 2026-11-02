@@ -11,6 +11,50 @@
     {{-- Step 1: the document type and the scan --}}
     @include('scan.partials.document-step', ['currentType' => $docType])
 
+    {{-- Batch Queue banner: visible across Align & Verify when a batch is active --}}
+    <div id="batchQueueBanner" class="card batch-queue-banner mb-3 d-none" aria-live="polite" data-phase="queuing">
+        <div class="batch-queue-banner__body">
+            <div class="batch-queue-banner__top">
+                <div class="batch-queue-banner__info">
+                    <span class="batch-queue-banner__pill">
+                        <i class="icon-base bx bx-copy" aria-hidden="true"></i>
+                        <span>Batch Queue</span>
+                    </span>
+                    <div class="batch-queue-banner__titles">
+                        <strong class="batch-queue-banner__heading" id="batchQueuePhaseTitle">Queuing documents...</strong>
+                        <span class="batch-queue-banner__sub" id="batchQueueCounter">0 / 0</span>
+                    </div>
+                </div>
+                <div class="batch-queue-banner__actions" id="batchQueueActions">
+                    <div class="batch-queue-stages" aria-label="Batch workflow stages">
+                        <span class="batch-queue-stage is-active" data-batch-stage="queuing">
+                            <span class="batch-queue-stage__dot">1</span>
+                            <span class="batch-queue-stage__label">Queue &amp; Save</span>
+                        </span>
+                        <i class="icon-base bx bx-chevron-right batch-queue-stage__sep" aria-hidden="true"></i>
+                        <span class="batch-queue-stage" data-batch-stage="scanning">
+                            <span class="batch-queue-stage__dot">2</span>
+                            <span class="batch-queue-stage__label">Scan All</span>
+                        </span>
+                        <i class="icon-base bx bx-chevron-right batch-queue-stage__sep" aria-hidden="true"></i>
+                        <span class="batch-queue-stage" data-batch-stage="verifying">
+                            <span class="batch-queue-stage__dot">3</span>
+                            <span class="batch-queue-stage__label">Validate &amp; Import</span>
+                        </span>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-primary batch-queue-add-btn d-none" id="batchAddMoreBtn">
+                        <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i><span>Add files</span>
+                    </button>
+                </div>
+            </div>
+            <div class="batch-queue-progress" role="progressbar" aria-label="Batch progress"
+                 id="batchQueueProgressTrack" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                <div class="batch-queue-progress__bar" id="batchQueueProgressBar" style="width: 0%"></div>
+            </div>
+            <div class="batch-queue-chips" id="batchQueueChips" role="list" aria-label="Queued documents"></div>
+        </div>
+    </div>
+
     {{-- Step 2: mark the fields --}}
     <section id="step-mark" class="document-step-panel d-none">
         <div class="field-marker-comparison-grid">
@@ -358,8 +402,11 @@
                             title="Straighten this page, find its table, and outline every handwritten line before reading">
                         <i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Detect fields and ink
                     </button>
+                    <button class="btn btn-primary btn-lg d-none" type="button" id="saveQueueNextBtn">
+                        <i class="icon-base bx bx-save icon-sm me-1"></i> <span id="saveQueueNextLabel">Save &amp; Queue Document</span>
+                    </button>
                     <button class="btn btn-primary btn-lg" type="button" id="scanNowBtn">
-                        <i class="icon-base bx bx-scan icon-sm me-1"></i> Scan with OCR
+                        <i class="icon-base bx bx-scan icon-sm me-1"></i> <span id="scanNowBtnLabel">Scan with OCR</span>
                     </button>
                 </div>
             </div>
@@ -2539,9 +2586,459 @@
         }
     }
 
+    // ---------------------------------------------------------------- Upload Mode & Batch Queue System
+    let uploadMode = 'single';
+    let batchState = {
+        active: false,
+        key: null,
+        phase: 'idle', // 'queuing' | 'scanning' | 'verifying' | 'done'
+        items: [],     // { file, name, status, pageId, page, workspaceScanPath, recordUrl, error, boxes, rows, tilts }
+        currentIndex: 0,
+    };
+
+    const uploadModeRadios = document.querySelectorAll('input[name="uploadMode"]');
+    const uploadModeCards = document.querySelectorAll('[data-mode-card]');
+    const uploadModeHintEl = document.getElementById('uploadModeHint');
+    const dropzoneTitleEl = document.getElementById('dropzoneTitle');
+    const dropzoneButtonEl = document.getElementById('dropzoneButton');
+
+    uploadModeRadios.forEach((radio) => {
+        radio.addEventListener('change', (e) => {
+            uploadMode = e.target.value;
+            uploadModeCards.forEach((card) => {
+                card.classList.toggle('is-active', card.dataset.modeCard === uploadMode);
+            });
+            if (uploadMode === 'batch') {
+                scanFileInput.setAttribute('multiple', 'multiple');
+                if (dropzoneTitleEl) dropzoneTitleEl.textContent = 'Drop batch scans here';
+                if (dropzoneButtonEl) dropzoneButtonEl.textContent = 'Choose files';
+                if (uploadModeHintEl) uploadModeHintEl.textContent = 'Queue multiple scans in /documents/workspace, scan all, then validate';
+            } else {
+                scanFileInput.removeAttribute('multiple');
+                if (dropzoneTitleEl) dropzoneTitleEl.textContent = 'Drop the scan here';
+                if (dropzoneButtonEl) dropzoneButtonEl.textContent = 'Choose file';
+                if (uploadModeHintEl) uploadModeHintEl.textContent = 'Upload and process one document at a time';
+            }
+        });
+    });
+
+    function renderBatchQueueBanner() {
+        const banner = document.getElementById('batchQueueBanner');
+        if (!banner) return;
+
+        if (!batchState.active || batchState.items.length === 0) {
+            banner.classList.add('d-none');
+            return;
+        }
+        banner.classList.remove('d-none');
+        banner.dataset.phase = batchState.phase;
+
+        const total = batchState.items.length;
+        const phaseTitle = document.getElementById('batchQueuePhaseTitle');
+        const counter = document.getElementById('batchQueueCounter');
+        const progressTrack = document.getElementById('batchQueueProgressTrack');
+        const progressBar = document.getElementById('batchQueueProgressBar');
+        const chipsContainer = document.getElementById('batchQueueChips');
+        const addMoreBtn = document.getElementById('batchAddMoreBtn');
+        const saveQueueBtn = document.getElementById('saveQueueNextBtn');
+        const saveQueueLabel = document.getElementById('saveQueueNextLabel');
+        const scanNowBtn = document.getElementById('scanNowBtn');
+        const scanNowLabel = document.getElementById('scanNowBtnLabel');
+
+        const savedCount = batchState.items.filter((it) => ['saved', 'scanning', 'ready', 'verifying', 'imported'].includes(it.status)).length;
+        const readyCount = batchState.items.filter((it) => ['ready', 'verifying', 'imported'].includes(it.status)).length;
+        const importedCount = batchState.items.filter((it) => it.status === 'imported').length;
+
+        const stageOrder = ['queuing', 'scanning', 'verifying'];
+        const activeStageIdx = stageOrder.indexOf(batchState.phase);
+        banner.querySelectorAll('[data-batch-stage]').forEach((stageNode) => {
+            const idx = stageOrder.indexOf(stageNode.dataset.batchStage);
+            stageNode.classList.toggle('is-active', idx === activeStageIdx);
+            stageNode.classList.toggle('is-complete', idx < activeStageIdx);
+        });
+
+        const updateProgress = (pct) => {
+            if (progressBar) progressBar.style.width = `${pct}%`;
+            if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(pct));
+        };
+
+        if (batchState.phase === 'queuing') {
+            const allSaved = savedCount === total;
+            if (phaseTitle) {
+                phaseTitle.textContent = allSaved
+                    ? 'All documents saved in workspace queue — ready to scan all'
+                    : `Align & save each document to queue (${savedCount} of ${total} saved)`;
+            }
+            if (counter) counter.textContent = `${savedCount} / ${total} saved`;
+            updateProgress(Math.round((savedCount / total) * 100));
+            if (addMoreBtn) addMoreBtn.classList.remove('d-none');
+            if (saveQueueBtn) {
+                saveQueueBtn.classList.toggle('d-none', allSaved);
+                if (saveQueueLabel) {
+                    const currentItem = batchState.items[batchState.currentIndex];
+                    const hasMoreUnsaved = batchState.items.some((it, idx) => idx !== batchState.currentIndex && it.status === 'pending');
+                    saveQueueLabel.textContent = currentItem?.status === 'saved'
+                        ? (hasMoreUnsaved ? 'Update & Next Document' : 'Update Queued Document')
+                        : (hasMoreUnsaved ? `Save & Next (${savedCount + 1}/${total})` : `Save Final Document (${total}/${total})`);
+                }
+            }
+            if (scanNowBtn) {
+                scanNowBtn.classList.toggle('d-none', !allSaved);
+                if (scanNowLabel) scanNowLabel.textContent = `Scan All Queued Documents (${total})`;
+            }
+        } else if (batchState.phase === 'scanning') {
+            if (phaseTitle) phaseTitle.textContent = `Scanning all queued documents with OCR (${readyCount} of ${total} scanned)...`;
+            if (counter) counter.textContent = `${readyCount} / ${total} scanned`;
+            updateProgress(Math.round((readyCount / total) * 100));
+            if (addMoreBtn) addMoreBtn.classList.add('d-none');
+            if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
+            if (scanNowBtn) scanNowBtn.classList.remove('d-none');
+        } else if (batchState.phase === 'verifying') {
+            if (phaseTitle) phaseTitle.textContent = `Validate & import each document (${importedCount} of ${total} imported)`;
+            if (counter) counter.textContent = `${importedCount} / ${total} imported`;
+            updateProgress(Math.round((importedCount / total) * 100));
+            if (addMoreBtn) addMoreBtn.classList.add('d-none');
+            if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
+        }
+
+        if (chipsContainer) {
+            chipsContainer.innerHTML = '';
+            batchState.items.forEach((item, index) => {
+                const badgeMap = {
+                    pending: { cls: 'is-pending', icon: 'bx-time-five', text: 'Pending' },
+                    saving: { cls: 'is-working', icon: 'bx-refresh', text: 'Saving' },
+                    saved: { cls: 'is-queued', icon: 'bx-check-circle', text: 'Queued' },
+                    scanning: { cls: 'is-working', icon: 'bx-radar', text: 'Scanning' },
+                    ready: { cls: 'is-ready', icon: 'bx-scan', text: 'Scanned' },
+                    verifying: { cls: 'is-verifying', icon: 'bx-edit-alt', text: 'Validating' },
+                    imported: { cls: 'is-imported', icon: 'bx-check-shield', text: 'Imported' },
+                    failed: { cls: 'is-failed', icon: 'bx-error-circle', text: 'Failed' },
+                };
+                const badgeInfo = badgeMap[item.status] || badgeMap.pending;
+                const isCurrent = index === batchState.currentIndex;
+
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = `batch-queue-chip ${badgeInfo.cls}${isCurrent ? ' is-current' : ''}`;
+                chip.setAttribute('role', 'listitem');
+                chip.disabled = batchState.phase === 'scanning' || (batchState.phase === 'verifying' && item.status === 'imported');
+                chip.innerHTML = `
+                    <span class="batch-queue-chip__index">${index + 1}</span>
+                    <span class="batch-queue-chip__name" title="${item.name}">${item.name}</span>
+                    <span class="batch-queue-chip__status">
+                        <i class="icon-base bx ${badgeInfo.icon}" aria-hidden="true"></i>
+                        <span>${badgeInfo.text}</span>
+                    </span>
+                `;
+                chip.addEventListener('click', () => {
+                    if (batchState.phase === 'queuing' && index !== batchState.currentIndex) {
+                        openBatchQueueItem(index);
+                    } else if (batchState.phase === 'verifying' && index !== batchState.currentIndex && item.status !== 'imported') {
+                        openBatchVerifyItem(index);
+                    }
+                });
+                chipsContainer.appendChild(chip);
+            });
+            const activeChip = chipsContainer.querySelector('.batch-queue-chip.is-current');
+            activeChip?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        }
+    }
+
+    async function startBatchQueue(fileList) {
+        const validFiles = Array.from(fileList || []).filter((file) => {
+            if (file.size > 20 * 1024 * 1024) {
+                alert(`${file.name} is larger than 20 MB and was skipped.`);
+                return false;
+            }
+            return true;
+        });
+
+        if (validFiles.length === 0) {
+            scanFileInput.value = '';
+            return;
+        }
+
+        if (!batchState.active) {
+            batchState.active = true;
+            batchState.key = 'batch_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+            batchState.phase = 'queuing';
+            batchState.items = [];
+            batchState.currentIndex = 0;
+        }
+
+        validFiles.forEach((file) => {
+            batchState.items.push({
+                file,
+                name: file.name,
+                status: 'pending',
+                pageId: null,
+                page: null,
+                workspaceScanPath: null,
+                recordUrl: null,
+                error: null,
+                boxes: null,
+                rows: null,
+                tilts: null,
+            });
+        });
+
+        scanFileInput.value = '';
+        await openBatchQueueItem(batchState.currentIndex);
+    }
+
+    async function openBatchQueueItem(index) {
+        const item = batchState.items[index];
+        if (!item) return;
+
+        batchState.currentIndex = index;
+        renderBatchQueueBanner();
+
+        dropzone.classList.add('is-loading');
+        dropzone.setAttribute('aria-busy', 'true');
+
+        try {
+            scanFile = item.file;
+            clearDetection();
+            const measurement = await marker.load(item.file);
+            scanPageCount = Number(measurement?.pageCount) || 1;
+            updateScanNotices();
+            el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${index + 1}/${batchState.items.length}) · ${item.name}`;
+            el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+            showStep('mark');
+            guardBackButton();
+            resetFieldHistory();
+            rowsSource = null;
+
+            if (item.boxes && item.rows) {
+                setGrid(item.boxes, item.rows, { tilts: item.tilts });
+            } else {
+                setGrid(templateBoxes, templateRows);
+            }
+            fetchSnapLines();
+            renderBatchQueueBanner();
+            window.requestAnimationFrame(() => marker.resetZoom());
+        } catch (error) {
+            item.status = 'failed';
+            item.error = error.message || 'Could not open file';
+            renderBatchQueueBanner();
+            alert(error.message || 'That document could not be opened.');
+        } finally {
+            dropzone.classList.remove('is-loading');
+            dropzone.removeAttribute('aria-busy');
+        }
+    }
+
+    document.getElementById('batchAddMoreBtn')?.addEventListener('click', () => {
+        scanFileInput.setAttribute('multiple', 'multiple');
+        scanFileInput.click();
+    });
+
+    document.getElementById('saveQueueNextBtn')?.addEventListener('click', async () => {
+        if (scanInProgress || !batchState.active) return;
+
+        const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
+        if (markerValidationMessage) {
+            showOcrError(markerValidationMessage);
+            return;
+        }
+
+        const item = batchState.items[batchState.currentIndex];
+        if (!item) return;
+
+        const btn = el('saveQueueNextBtn');
+        btn.disabled = true;
+        clearOcrError();
+        item.status = 'saving';
+        renderBatchQueueBanner();
+
+        try {
+            item.boxes = cloneBoxes(marker.toJSON());
+            item.rows = [...gridRows];
+            item.tilts = [...rowTilts];
+
+            const form = new FormData();
+            form.set('document_template_id', String(config.templateId));
+            form.set('geometry_json', JSON.stringify(currentGeometry()));
+            form.set('page', await canvasBlob(marker.canvas), 'page.png');
+            form.set('scan', item.file, item.file.name);
+            form.set('batch_key', batchState.key);
+            form.set('defer_scan', '1');
+            if (modelSelect instanceof HTMLSelectElement) form.set('model', modelSelect.value);
+
+            const response = await fetch(config.pagesUrl, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: form,
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            if (!response.ok || !payload?.id) {
+                throw new Error(responseErrorMessage(response, payload));
+            }
+
+            item.pageId = payload.id;
+            item.page = payload;
+            item.workspaceScanPath = payload.workspaceScanPath || null;
+            item.status = 'saved';
+            renderBatchQueueBanner();
+
+            // Move to next unsaved document if any
+            const nextPendingIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && it.status === 'pending');
+            const firstPendingIndex = batchState.items.findIndex((it) => it.status === 'pending');
+            const targetIndex = nextPendingIndex !== -1 ? nextPendingIndex : firstPendingIndex;
+
+            if (targetIndex !== -1) {
+                await openBatchQueueItem(targetIndex);
+            } else {
+                renderBatchQueueBanner();
+            }
+        } catch (error) {
+            item.status = 'failed';
+            item.error = error.message;
+            renderBatchQueueBanner();
+            showOcrError(error.message || 'Could not save document to queue.');
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    async function runBatchScanAll() {
+        if (scanInProgress || !batchState.active) return;
+
+        batchState.phase = 'scanning';
+        renderBatchQueueBanner();
+
+        const button = el('scanNowBtn');
+        const originalButtonContent = button.innerHTML;
+        const controller = new AbortController();
+        const run = startRun(controller, 'scan');
+        let progress = null;
+        let timeoutId = null;
+
+        scanInProgress = true;
+        clearOcrError();
+        button.disabled = true;
+        el('detectBtn').disabled = true;
+
+        try {
+            progress = openProgressModal();
+            beginOcrProgress(batchState.items.length);
+            timeoutId = window.setTimeout(() => controller.abort(), 30 * 60 * 1000);
+
+            for (let i = 0; i < batchState.items.length; i++) {
+                const item = batchState.items[i];
+                if (!item.pageId) continue;
+
+                batchState.currentIndex = i;
+                item.status = 'scanning';
+                renderBatchQueueBanner();
+
+                const basePct = Math.round((i / batchState.items.length) * 90) + 5;
+                setOcrProgress(
+                    basePct,
+                    `Scanning document ${i + 1} of ${batchState.items.length}`,
+                    `Reading handwriting on ${item.name}...`,
+                );
+
+                // Trigger ProcessDocumentPage on the queued page via reoutline
+                const triggerRes = await fetch(config.pageGeometryUrl.replace('__PAGE__', String(item.pageId)), {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': config.csrf,
+                        'X-Requested-With': 'XMLHttpRequest',
+                        Accept: 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    signal: controller.signal,
+                    body: JSON.stringify({
+                        geometry_json: JSON.stringify(item.page?.geometry || currentGeometry()),
+                        model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null,
+                    }),
+                });
+                const triggeredPayload = (triggerRes.headers.get('content-type') || '').includes('application/json')
+                    ? await triggerRes.json()
+                    : null;
+                if (!triggerRes.ok || !triggeredPayload?.statusUrl) {
+                    throw new Error(responseErrorMessage(triggerRes, triggeredPayload));
+                }
+
+                run.pageId = item.pageId;
+                const finishedPage = await waitForPage(triggeredPayload, controller.signal);
+                item.page = finishedPage;
+                item.status = 'ready';
+                renderBatchQueueBanner();
+            }
+
+            await completeOcrProgress('Batch scan complete', 'Opening the first document for validation.');
+            batchState.phase = 'verifying';
+            await openBatchVerifyItem(0);
+        } catch (error) {
+            if (!run.cancelled) {
+                showOcrError(error.message || 'Batch scan failed.');
+            }
+            batchState.phase = 'queuing';
+            renderBatchQueueBanner();
+        } finally {
+            if (activeRun === run) activeRun = null;
+            if (timeoutId !== null) window.clearTimeout(timeoutId);
+            stopOcrProgress();
+            await closeProgressModal(progress);
+            scanInProgress = false;
+            button.innerHTML = originalButtonContent;
+            button.disabled = false;
+            el('detectBtn').disabled = false;
+            renderBatchQueueBanner();
+        }
+    }
+
+    async function openBatchVerifyItem(index) {
+        const item = batchState.items[index];
+        if (!item || !item.page) return;
+
+        batchState.currentIndex = index;
+        if (item.status !== 'imported') {
+            item.status = 'verifying';
+        }
+        renderBatchQueueBanner();
+
+        scanFile = item.file;
+        const page = item.page;
+
+        await marker.loadFromUrl(page.imageUrl);
+        if (item.boxes && item.rows) {
+            setGrid(geometryMarkers(page.geometry, page), page.geometry?.ruled_ys ?? item.rows);
+        }
+
+        processedPage = page;
+        cropped = verificationItems(page.lines, page);
+        readings = cropped.map((entry) => entry.reading);
+        requiredInput(document, '#ocrModelKey').value = (page.modelKey || '').trim();
+        requiredInput(document, '#documentPageId').value = String(page.id);
+        el('summaryModel').textContent = page.model || '—';
+        el('workspaceContextDetail').textContent = `${config.typeLabel} · Verify (${index + 1}/${batchState.items.length}) · ${item.name}`;
+        el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+
+        clearValidationSubmitError();
+        renderVerifyRows();
+        showGridNotes(page);
+        showStep('verify');
+        prepareValidationComparison();
+    }
+
     scanFileInput.addEventListener('change', (event) => {
         if (!(event.currentTarget instanceof HTMLInputElement)) return;
-        openDocument(event.currentTarget.files?.[0]);
+        if (uploadMode === 'batch' || batchState.active) {
+            startBatchQueue(event.currentTarget.files);
+        } else {
+            openDocument(event.currentTarget.files?.[0]);
+        }
     });
 
     // Once a scan is open, leaving would lose the markers and the checked
@@ -2636,7 +3133,13 @@
             dropzone.classList.remove('is-dragging');
         });
     });
-    dropzone.addEventListener('drop', (event) => openDocument(event.dataTransfer?.files?.[0]));
+    dropzone.addEventListener('drop', (event) => {
+        if (uploadMode === 'batch' || batchState.active) {
+            startBatchQueue(event.dataTransfer?.files);
+        } else {
+            openDocument(event.dataTransfer?.files?.[0]);
+        }
+    });
     dropzone.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
@@ -3442,6 +3945,10 @@
 
     el('scanNowBtn').addEventListener('click', async () => {
         if (scanInProgress) return;
+        if (batchState.active && batchState.phase === 'queuing') {
+            await runBatchScanAll();
+            return;
+        }
 
         // Outline changes are only read once saved: offer to save them first.
         applyOpenDrawing();
@@ -5523,7 +6030,12 @@
 
         const form = el('submitForm');
         const data = new FormData(form);
-        data.set('scan', scanFile, scanFile.name);
+        const currentBatchItem = batchState.active ? batchState.items[batchState.currentIndex] : null;
+        if (currentBatchItem?.workspaceScanPath) {
+            data.set('workspace_scan_path', currentBatchItem.workspaceScanPath);
+        } else {
+            data.set('scan', scanFile, scanFile.name);
+        }
         if (allowMissing) data.set('allow_missing', '1');
 
         const personGroups = validationGroups.filter((candidate) => candidate.kind === 'person');
@@ -5595,6 +6107,23 @@
 
             if (!payload?.redirect) {
                 throw new Error('The record was saved, but the archive location was not returned. Open Records Archive to confirm it.');
+            }
+
+            if (batchState.active && currentBatchItem) {
+                currentBatchItem.status = 'imported';
+                currentBatchItem.recordUrl = payload.redirect;
+                renderBatchQueueBanner();
+
+                const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && it.status !== 'imported');
+                const firstRemainingIndex = batchState.items.findIndex((it) => it.status !== 'imported');
+                const targetVerifyIndex = nextVerifyIndex !== -1 ? nextVerifyIndex : firstRemainingIndex;
+
+                if (targetVerifyIndex !== -1) {
+                    recordSubmitting = false;
+                    button.innerHTML = idleButton;
+                    await openBatchVerifyItem(targetVerifyIndex);
+                    return;
+                }
             }
 
             button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved. Opening record...';

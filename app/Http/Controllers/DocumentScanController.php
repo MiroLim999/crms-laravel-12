@@ -168,7 +168,8 @@ class DocumentScanController extends Controller
                 'max:255',
                 Rule::exists(OcrModel::class, 'key')->whereNull('disk_deleted_at'),
             ],
-            'scan' => ['required', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'scan' => ['required_without:workspace_scan_path', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'workspace_scan_path' => ['required_without:scan', 'nullable', 'string', 'max:500'],
             'fields' => ['required', 'array', 'min:1', 'max:'.Limits::MAX_FIELDS],
             'fields.*.verified' => ['required', 'accepted'],
             'fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
@@ -239,19 +240,33 @@ class DocumentScanController extends Controller
             throw ValidationException::withMessages(['missing_required' => $missingRequired]);
         }
 
+        $disk = Storage::disk('local');
         $scan = $request->file('scan');
-        if (! $scan instanceof UploadedFile) {
-            throw ValidationException::withMessages([
-                'scan' => 'Choose a valid scanned document to submit.',
-            ]);
+        $workspaceScanToClean = null;
+        if ($scan instanceof UploadedFile) {
+            $path = $scan->store('scans', 'local');
+            $scanMime = $scan->getMimeType();
+        } else {
+            $workspaceScanPath = (string) ($validated['workspace_scan_path'] ?? '');
+            if (! str_starts_with($workspaceScanPath, 'documents/workspace/')
+                || str_contains($workspaceScanPath, '..')
+                || ! $disk->exists($workspaceScanPath)) {
+                throw ValidationException::withMessages([
+                    'scan' => 'Choose a valid scanned document to submit.',
+                ]);
+            }
+            $ext = strtolower(pathinfo($workspaceScanPath, PATHINFO_EXTENSION)) ?: 'bin';
+            $path = 'scans/' . bin2hex(random_bytes(20)) . '.' . $ext;
+            $disk->copy($workspaceScanPath, $path);
+            $scanMime = $disk->mimeType($path) ?: 'application/octet-stream';
+            $workspaceScanToClean = $workspaceScanPath;
         }
 
-        $path = $scan->store('scans', 'local');
         $copiedFiles = [];
         $gridChanges = $this->gridChanges($template, $page);
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, &$copiedFiles) {
+            $record = DB::transaction(function () use ($request, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, &$copiedFiles) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -259,7 +274,7 @@ class DocumentScanController extends Controller
                     'document_template_id' => $validated['document_template_id'],
                     'status' => RecordStatus::Submitted,
                     'scan_path' => $path,
-                    'scan_mime' => $scan->getMimeType(),
+                    'scan_mime' => $scanMime,
                     // Field outlines are fractions of the page as outlined,
                     // which Detect may have straightened.
                     'scan_rotation' => $page?->deskew_degrees,
@@ -333,8 +348,15 @@ class DocumentScanController extends Controller
         // page image. The page's working files (image, remaining crops,
         // overlay) are no longer needed.
         if ($page !== null) {
-            Storage::disk('local')->deleteDirectory($page->directory());
+            $disk->deleteDirectory($page->directory());
             $page->delete();
+        }
+        if ($workspaceScanToClean !== null) {
+            $disk->delete($workspaceScanToClean);
+            $batchFolder = dirname($workspaceScanToClean);
+            if ($batchFolder !== 'documents/workspace' && $disk->files($batchFolder) === []) {
+                $disk->deleteDirectory($batchFolder);
+            }
         }
 
         $redirect = route('records.show', $record);
@@ -350,6 +372,321 @@ class DocumentScanController extends Controller
         return redirect()
             ->to($redirect)
             ->with('success', $message);
+    }
+
+    /**
+     * Batch File Upload: Save an uploaded file to /documents/workspace directory.
+     */
+    public function batchUpload(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'scan' => ['required', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'batch_id' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
+        ], [
+            'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
+        ]);
+
+        $scan = $request->file('scan');
+        $batchId = $validated['batch_id'] ?? ('batch_' . now()->format('Ymd_His') . '_' . bin2hex(random_bytes(4)));
+
+        // Target Directory: Route batch uploaded files to /documents/workspace directory
+        $workspaceDir = 'documents/workspace/' . $batchId;
+        $originalName = $scan->getClientOriginalName();
+        $storedName = time() . '_' . bin2hex(random_bytes(3)) . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $originalName);
+        $path = $scan->storeAs($workspaceDir, $storedName, 'local');
+
+        return response()->json([
+            'success' => true,
+            'batch_id' => $batchId,
+            'file_name' => $originalName,
+            'path' => $path,
+            'mime' => $scan->getMimeType(),
+            'size' => $scan->getSize(),
+        ], 201);
+    }
+
+    /**
+     * Batch Scanning: Once the entire batch has finished saving, initiate scan for each document.
+     */
+    public function batchScan(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'path' => ['required', 'string'],
+            'document_template_id' => ['required', 'exists:document_templates,id'],
+            'ocr_model_key' => ['nullable', 'string'],
+        ]);
+
+        $path = $validated['path'];
+        $disk = Storage::disk('local');
+        if (! $disk->exists($path)) {
+            return response()->json(['message' => 'Scanned file not found in workspace.'], 404);
+        }
+
+        $template = DocumentTemplate::findOrFail((int) $validated['document_template_id']);
+        $modelKey = $this->modelChoice->resolve($validated['ocr_model_key'] ?? null);
+
+        // Build default geometry from template
+        $boxes = $template->markerBoxes();
+        $ruledYs = $template->isLedger() ? array_values($template->ruled_ys ?? []) : [];
+        $columns = [];
+        $fields = [];
+        foreach ($boxes as $box) {
+            $bx = [
+                'name' => $box['name'],
+                'box' => [(float)$box['x'], (float)$box['y'], (float)$box['w'], (float)$box['h']],
+            ];
+            if (($box['kind'] ?? '') === 'column') {
+                $columns[] = $bx;
+            } else {
+                if (isset($box['person_group'])) {
+                    $bx['person_group'] = (int)$box['person_group'];
+                }
+                if (isset($box['person_field_order'])) {
+                    $bx['person_field_order'] = (int)$box['person_field_order'];
+                }
+                $fields[] = $bx;
+            }
+        }
+        $geometry = [
+            'columns' => $columns,
+            'ruled_ys' => array_map('floatval', $ruledYs),
+            'fields' => $fields,
+        ];
+
+        // Create a DocumentPage for line markers & OCR reading
+        $page = DocumentPage::create([
+            'document_template_id' => $template->getKey(),
+            'created_by' => $request->user()->getKey(),
+            'status' => DocumentPage::STATUS_QUEUED,
+            'image_path' => '',
+            'width' => 1200,
+            'height' => 1700,
+            'geometry' => $geometry,
+            'ocr_model_key' => $modelKey,
+        ]);
+
+        // Place image in page directory
+        $pageImageDest = $page->directory() . '/page.png';
+        $fullPath = $disk->path($path);
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+        if ($ext === 'png') {
+            $disk->copy($path, $pageImageDest);
+        } else {
+            // Convert to png using GD or copy if image
+            $imageContent = @file_get_contents($fullPath);
+            $im = @imagecreatefromstring($imageContent);
+            if ($im !== false) {
+                imagepng($im, $disk->path($pageImageDest));
+                imagedestroy($im);
+            } else {
+                // If PDF or unconverted, copy directly as fallback
+                $disk->copy($path, $pageImageDest);
+            }
+        }
+
+        $size = @getimagesize($disk->path($pageImageDest));
+        $page->forceFill([
+            'image_path' => $pageImageDest,
+            'width' => $size ? $size[0] : 1200,
+            'height' => $size ? $size[1] : 1700,
+        ])->save();
+
+        // Dispatch synchronous or asynchronous processing
+        $job = new \App\Jobs\ProcessDocumentPage($page->getKey(), \App\Jobs\ProcessDocumentPage::MODE_FULL);
+        try {
+            app()->call([$job, 'handle']);
+            $page->refresh();
+        } catch (\Throwable $e) {
+            $job->failed($e);
+            $page->refresh();
+            return response()->json([
+                'success' => false,
+                'page_id' => $page->getKey(),
+                'status' => $page->status,
+                'error' => $page->error ?: $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'page_id' => $page->getKey(),
+            'status' => $page->status,
+            'error' => $page->error,
+            'lines_count' => $page->lines()->count(),
+            'model_key' => $page->ocr_model_key,
+        ]);
+    }
+
+    /**
+     * Batch Validation & Import: After scanning, validate each document and import into database.
+     * Matches the existing single file upload validation and database import logic.
+     */
+    public function batchImport(Request $request): JsonResponse
+    {
+        $this->hydrateJsonFields($request);
+
+        $validated = $request->validate([
+            'doc_type' => ['required', 'string', 'exists:document_types,key'],
+            'document_template_id' => ['required', 'exists:document_templates,id'],
+            'ocr_model_key' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::exists(OcrModel::class, 'key')->whereNull('disk_deleted_at'),
+            ],
+            'scan_path' => ['required', 'string'],
+            'fields' => ['required', 'array', 'min:1', 'max:'.Limits::MAX_FIELDS],
+            'fields.*.verified' => ['required', 'accepted'],
+            'fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
+            'fields.*.ocr_text' => ['nullable', 'string', 'max:2000'],
+            'fields.*.ocr_confidence' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'fields.*.verified_value' => ['required', 'string', 'max:2000'],
+            'fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:'.Limits::MAX_FIELDS],
+            'fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:'.(Limits::MAX_FIELDS - 1)],
+            'fields.*.x' => ['required', 'numeric', 'min:0', 'max:1'],
+            'fields.*.y' => ['required', 'numeric', 'min:0', 'max:1'],
+            'fields.*.width' => ['required', 'numeric', 'min:0.00001', 'max:1'],
+            'fields.*.height' => ['required', 'numeric', 'min:0.00001', 'max:1'],
+            'document_page_id' => ['nullable', 'integer'],
+            'fields.*.line_id' => ['nullable', 'integer', 'distinct'],
+            'allow_missing' => ['sometimes', 'boolean'],
+        ]);
+
+        $templateId = (int) $validated['document_template_id'];
+        $documentType = DocumentTypeDefinition::where('key', (string) $validated['doc_type'])->firstOrFail();
+        $template = DocumentTemplate::with(['documentTypeDefinition', 'fields'])->find($templateId);
+
+        if ($template?->document_type_id !== $documentType->getKey()) {
+            throw ValidationException::withMessages([
+                'document_template_id' => 'The selected template does not belong to this document type.',
+            ]);
+        }
+
+        $settingsByName = $template->settingsByName();
+
+        $coordinateErrors = [];
+        foreach ($validated['fields'] as $index => $field) {
+            $hasPersonGroup = isset($field['person_group']);
+            $hasPersonOrder = isset($field['person_field_order']);
+            if ($hasPersonGroup !== $hasPersonOrder) {
+                $coordinateErrors["fields.{$index}.person_group"] =
+                    'A grouped field must include both its person and field order.';
+            }
+            if ((float) $field['x'] + (float) $field['width'] > 1.00001) {
+                $coordinateErrors["fields.{$index}.width"] = 'This field marker extends beyond the document width.';
+            }
+            if ((float) $field['y'] + (float) $field['height'] > 1.00001) {
+                $coordinateErrors["fields.{$index}.height"] = 'This field marker extends beyond the document height.';
+            }
+        }
+        if ($coordinateErrors !== []) {
+            throw ValidationException::withMessages($coordinateErrors);
+        }
+
+        [$page, $linesById] = $this->pageLinesFor($request, $validated, $templateId);
+
+        $missingRequired = [
+            ...$this->missingRequiredFields($template, $validated['fields'], $linesById),
+            ...$this->missingRegisterRows($template, $page, $validated['fields'], $linesById),
+        ];
+        if ($missingRequired !== [] && ! $request->boolean('allow_missing')) {
+            throw ValidationException::withMessages(['missing_required' => $missingRequired]);
+        }
+
+        $disk = Storage::disk('local');
+        $workspaceScanPath = $validated['scan_path'];
+        if (! $disk->exists($workspaceScanPath)) {
+            throw ValidationException::withMessages(['scan_path' => 'Workspace scan file not found.']);
+        }
+
+        // Copy file into scans/ just as single upload does
+        $ext = pathinfo($workspaceScanPath, PATHINFO_EXTENSION);
+        $scansPath = 'scans/' . bin2hex(random_bytes(20)) . '.' . ($ext ?: 'bin');
+        $disk->copy($workspaceScanPath, $scansPath);
+        $mime = $disk->mimeType($scansPath) ?: 'application/octet-stream';
+
+        $copiedFiles = [];
+        $gridChanges = $this->gridChanges($template, $page);
+
+        try {
+            $record = DB::transaction(function () use ($request, $scansPath, $mime, $validated, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, &$copiedFiles) {
+                $record = CivilRecord::create([
+                    'doc_type' => $documentType->legacyType()->value,
+                    'document_type_id' => $documentType->getKey(),
+                    'document_template_id' => $validated['document_template_id'],
+                    'status' => RecordStatus::Submitted,
+                    'scan_path' => $scansPath,
+                    'scan_mime' => $mime,
+                    'scan_rotation' => $page?->deskew_degrees,
+                    'ocr_model_key' => $validated['ocr_model_key'],
+                    'created_by' => $request->user()->getKey(),
+                    'submitted_by' => $request->user()->getKey(),
+                    'submitted_at' => now(),
+                ]);
+
+                if ($page !== null) {
+                    $record->update(['page_image_path' => $this->keepPageImage($record, $page, $copiedFiles)]);
+                }
+
+                foreach (array_values($validated['fields']) as $index => $field) {
+                    $line = isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null;
+                    $settings = $settingsByName[$this->templateNameKey($field, $line)] ?? null;
+
+                    $record->fields()->create([
+                        'name' => $field['name'],
+                        'ocr_text' => $field['ocr_text'] ?? null,
+                        'ocr_confidence' => $field['ocr_confidence'] ?? null,
+                        'verified_value' => $field['verified_value'],
+                        'is_required' => $settings['required'] ?? true,
+                        'role' => $settings['role'] ?? null,
+                        'person_group' => $field['person_group'] ?? null,
+                        'person_field_order' => $field['person_field_order'] ?? null,
+                        'x' => $field['x'],
+                        'y' => $field['y'],
+                        'width' => $field['width'],
+                        'height' => $field['height'],
+                        'sort_order' => $index,
+                        ...($line ? $this->lineAttributes($record, $page, $line, $index, $copiedFiles) : []),
+                    ]);
+                }
+
+                $record->load('fields');
+                $corrected = $record->fields->filter->wasCorrected()->count();
+
+                $this->audit->log(
+                    'record.submitted',
+                    $record,
+                    new: [
+                        'document_type' => $documentType->key,
+                        'field_count' => $record->fields->count(),
+                        'corrected_fields' => $corrected,
+                        'outlined_fields' => $record->fields->whereNotNull('polygon')->count(),
+                        'ocr_model' => $validated['ocr_model_key'],
+                        ...($missingRequired !== [] ? ['missing_required_fields' => $missingRequired] : []),
+                        ...($gridChanges !== [] ? ['grid_changes' => $gridChanges] : []),
+                    ],
+                    description: "Submitted and locked a {$record->typeShortLabel()} record.",
+                );
+
+                return $record;
+            });
+        } catch (Throwable $exception) {
+            $disk->delete([$scansPath, ...$copiedFiles]);
+            throw $exception;
+        }
+
+        if ($page !== null) {
+            $disk->deleteDirectory($page->directory());
+            $page->delete();
+        }
+
+        return response()->json([
+            'success' => true,
+            'record_id' => $record->getKey(),
+            'redirect' => route('records.show', $record),
+            'message' => 'Record successfully validated and imported.',
+        ], 201);
     }
 
     private function hydrateJsonFields(Request $request): void

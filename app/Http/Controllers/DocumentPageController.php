@@ -57,11 +57,16 @@ class DocumentPageController extends Controller
             // The rendered page exactly as it was aligned, so outlines and markers
             // share one pixel grid.
             'page' => ['required', 'file', 'mimes:png', 'max:40960'],
+            'scan' => ['sometimes', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'batch_key' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
             'model' => ['nullable', 'string', 'max:255'],
             // Detect: straighten the page and fit the template to it, outline
             // every line, and stop before reading so Staff can check first.
             'detect' => ['sometimes', 'boolean'],
+            'defer_scan' => ['sometimes', 'boolean'],
             ...GeometryInput::rules(),
+        ], [
+            'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
         ]);
 
         $geometry = GeometryInput::checked($validated['geometry']);
@@ -84,15 +89,38 @@ class DocumentPageController extends Controller
             'ocr_model_key' => $this->modelChoice->resolve($validated['model'] ?? null),
         ]);
 
-        $path = Storage::disk('local')->putFileAs($page->directory(), $image, 'page.png');
+        $disk = Storage::disk('local');
+        $path = $disk->putFileAs($page->directory(), $image, 'page.png');
         $page->forceFill(['image_path' => $path])->save();
 
-        ProcessDocumentPage::dispatch(
-            $page->getKey(),
-            $request->boolean('detect') ? ProcessDocumentPage::MODE_DETECT : ProcessDocumentPage::MODE_FULL,
-        );
+        $workspaceScanPath = null;
+        $scan = $request->file('scan');
+        if ($scan instanceof UploadedFile) {
+            $batchKey = $validated['batch_key'] ?? 'batch-' . $page->getKey();
+            $ext = strtolower($scan->getClientOriginalExtension() ?: ($scan->extension() ?: 'bin'));
+            $safeName = sprintf('%d-%s.%s', $page->getKey(), preg_replace('/[^A-Za-z0-9_-]/', '_', pathinfo($scan->getClientOriginalName(), PATHINFO_FILENAME)) ?: 'scan', $ext);
+            $workspaceScanPath = $disk->putFileAs('documents/workspace/' . $batchKey, $scan, $safeName);
+            $disk->put($page->directory() . '/workspace_scan.json', json_encode([
+                'path' => $workspaceScanPath,
+                'name' => $scan->getClientOriginalName(),
+                'mime' => $scan->getMimeType(),
+                'batch_key' => $batchKey,
+            ], JSON_UNESCAPED_SLASHES));
+        }
 
-        return response()->json($this->payload($page->fresh()), 202);
+        if (! $request->boolean('defer_scan')) {
+            ProcessDocumentPage::dispatch(
+                $page->getKey(),
+                $request->boolean('detect') ? ProcessDocumentPage::MODE_DETECT : ProcessDocumentPage::MODE_FULL,
+            );
+        }
+
+        $payload = $this->payload($page->fresh());
+        if ($workspaceScanPath !== null) {
+            $payload['workspaceScanPath'] = $workspaceScanPath;
+        }
+
+        return response()->json($payload, 202);
     }
 
     /**
@@ -154,7 +182,7 @@ class DocumentPageController extends Controller
         $this->authorizePage($request, $page);
         GeometryInput::hydrate($request);
 
-        if (! in_array($page->status, [DocumentPage::STATUS_DETECTED, DocumentPage::STATUS_READY], true)) {
+        if (! in_array($page->status, [DocumentPage::STATUS_QUEUED, DocumentPage::STATUS_DETECTED, DocumentPage::STATUS_READY], true)) {
             return response()->json(['message' => 'This page is still being processed.'], 409);
         }
 
