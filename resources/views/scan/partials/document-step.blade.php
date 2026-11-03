@@ -185,30 +185,20 @@
                     <div class="document-upload-mode-grid">
                         <label class="document-upload-mode-option is-active" for="uploadModeSingle" data-mode-card="single">
                             <input type="radio" class="visually-hidden" name="uploadMode" id="uploadModeSingle" value="single" checked autocomplete="off">
-                            <span class="document-upload-mode-option__icon" aria-hidden="true">
+                            <span class="document-type-option__icon" aria-hidden="true">
                                 <i class="icon-base bx bx-file"></i>
                             </span>
-                            <span class="document-upload-mode-option__body">
-                                <span class="document-upload-mode-option__title">Single Upload</span>
-                                <span class="document-upload-mode-option__desc">One scan · Align, scan &amp; verify</span>
-                            </span>
-                            <span class="document-upload-mode-option__check" aria-hidden="true">
-                                <i class="icon-base bx bx-check"></i>
-                            </span>
+                            <span class="document-type-select__value">Single Upload</span>
+                            <i class="icon-base bx bx-check document-type-option__check document-upload-mode-option__check" aria-hidden="true"></i>
                         </label>
 
                         <label class="document-upload-mode-option" for="uploadModeBatch" data-mode-card="batch">
                             <input type="radio" class="visually-hidden" name="uploadMode" id="uploadModeBatch" value="batch" autocomplete="off">
-                            <span class="document-upload-mode-option__icon" aria-hidden="true">
+                            <span class="document-type-option__icon" aria-hidden="true">
                                 <i class="icon-base bx bx-copy"></i>
                             </span>
-                            <span class="document-upload-mode-option__body">
-                                <span class="document-upload-mode-option__title">Batch File Upload</span>
-                                <span class="document-upload-mode-option__desc">Multiple scans · Queue, scan all &amp; validate</span>
-                            </span>
-                            <span class="document-upload-mode-option__check" aria-hidden="true">
-                                <i class="icon-base bx bx-check"></i>
-                            </span>
+                            <span class="document-type-select__value">Batch File Upload</span>
+                            <i class="icon-base bx bx-check document-type-option__check document-upload-mode-option__check" aria-hidden="true"></i>
                         </label>
                     </div>
                 </div>

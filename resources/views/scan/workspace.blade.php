@@ -11,55 +11,29 @@
     {{-- Step 1: the document type and the scan --}}
     @include('scan.partials.document-step', ['currentType' => $docType])
 
-    {{-- Batch Queue banner: visible across Align & Verify when a batch is active --}}
-    <div id="batchQueueBanner" class="card batch-queue-banner mb-3 d-none" aria-live="polite" data-phase="queuing">
-        <div class="batch-queue-banner__body">
-            <div class="batch-queue-banner__top">
-                <div class="batch-queue-banner__info">
-                    <span class="batch-queue-banner__pill">
-                        <i class="icon-base bx bx-copy" aria-hidden="true"></i>
-                        <span>Batch Queue</span>
-                    </span>
-                    <div class="batch-queue-banner__titles">
-                        <strong class="batch-queue-banner__heading" id="batchQueuePhaseTitle">Queuing documents...</strong>
-                        <span class="batch-queue-banner__sub" id="batchQueueCounter">0 / 0</span>
-                    </div>
-                </div>
-                <div class="batch-queue-banner__actions" id="batchQueueActions">
-                    <div class="batch-queue-stages" aria-label="Batch workflow stages">
-                        <span class="batch-queue-stage is-active" data-batch-stage="queuing">
-                            <span class="batch-queue-stage__dot">1</span>
-                            <span class="batch-queue-stage__label">Queue &amp; Save</span>
-                        </span>
-                        <i class="icon-base bx bx-chevron-right batch-queue-stage__sep" aria-hidden="true"></i>
-                        <span class="batch-queue-stage" data-batch-stage="scanning">
-                            <span class="batch-queue-stage__dot">2</span>
-                            <span class="batch-queue-stage__label">Scan All</span>
-                        </span>
-                        <i class="icon-base bx bx-chevron-right batch-queue-stage__sep" aria-hidden="true"></i>
-                        <span class="batch-queue-stage" data-batch-stage="verifying">
-                            <span class="batch-queue-stage__dot">3</span>
-                            <span class="batch-queue-stage__label">Validate &amp; Import</span>
-                        </span>
-                    </div>
-                    <button type="button" class="btn btn-sm btn-outline-primary batch-queue-add-btn d-none" id="batchAddMoreBtn">
-                        <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i><span>Add files</span>
-                    </button>
-                </div>
-            </div>
-            <div class="batch-queue-progress" role="progressbar" aria-label="Batch progress"
-                 id="batchQueueProgressTrack" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
-                <div class="batch-queue-progress__bar" id="batchQueueProgressBar" style="width: 0%"></div>
-            </div>
-            <div class="batch-queue-chips" id="batchQueueChips" role="list" aria-label="Queued documents"></div>
-        </div>
-    </div>
-
     {{-- Step 2: mark the fields --}}
     <section id="step-mark" class="document-step-panel d-none">
         <div class="field-marker-comparison-grid">
             <div class="field-marker-document-pane">
                 <x-card class="document-canvas-card" bodyClass="p-0">
+                    {{-- Batch Queue banner: sits inside the document card above the toolbar --}}
+                    <div id="batchQueueBanner" class="batch-queue-banner d-none" aria-live="polite" data-phase="queuing">
+                        <div class="batch-queue-banner__body">
+                            <div class="batch-queue-banner__top">
+                                <div class="batch-queue-banner__info">
+                                    <span class="batch-queue-banner__pill">
+                                        <i class="icon-base bx bx-copy" aria-hidden="true"></i>
+                                        <span>Batch Queue</span>
+                                    </span>
+                                    <div class="batch-queue-banner__titles">
+                                        <strong class="batch-queue-banner__heading" id="batchQueuePhaseTitle">Queuing documents...</strong>
+                                        <span class="batch-queue-banner__sub" id="batchQueueCounter">0 / 0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="marker-toolbar">
                         {{-- The file's name is in the top bar, beside the document type. --}}
                         <div class="marker-toolbar__primary">
@@ -2493,6 +2467,17 @@
 
     function showStep(name) {
         Object.entries(steps).forEach(([key, node]) => node.classList.toggle('d-none', key !== name));
+
+        const batchBanner = document.getElementById('batchQueueBanner');
+        if (batchBanner) {
+            if (name === 'mark') {
+                const toolbar = document.querySelector('#step-mark .marker-toolbar');
+                toolbar?.parentNode?.insertBefore(batchBanner, toolbar);
+            } else if (name === 'verify') {
+                const verifyHeader = document.querySelector('#step-verify .validation-document-pane .validation-pane__header');
+                verifyHeader?.parentNode?.insertBefore(batchBanner, verifyHeader);
+            }
+        }
 
         const marking = name === 'mark';
         const focusedWorkspace = marking || name === 'verify';
