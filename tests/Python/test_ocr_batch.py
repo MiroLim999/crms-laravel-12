@@ -215,6 +215,7 @@ class DeviceChoiceTest(unittest.TestCase):
             return FakeProcessor(), model
 
         with mock.patch.object(main, "load_model", side_effect=load), \
+                mock.patch.object(main, "_base_is_installed", return_value=True), \
                 mock.patch.object(main, "_check_gpu", side_effect=RuntimeError("no kernel image")), \
                 mock.patch.object(main, "eos_token_id", return_value=EOS), \
                 self.assertLogs("ocr-api", level="WARNING"):

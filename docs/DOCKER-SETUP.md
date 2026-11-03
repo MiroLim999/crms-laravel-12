@@ -42,20 +42,54 @@ docker compose logs -f worker        # worker messages (Ctrl+C to stop watching)
 | `.env` | settings and secret key |
 | `docker-data/storage` | scans, line pictures, logs |
 | `docker-data/backups` | database backups |
-| `ml/models` | models |
+| `ml/models` | models (empty on a new computer: CRMS downloads none by itself; add them from your USB with **OCR Workspace → Add model**) |
 | Docker volume `crms_mysql-data` | the database |
 
 ---
 
 ## Updates
 
-```bash
-git pull
-sh docker-start.sh        # Windows: powershell -ExecutionPolicy Bypass -File .\docker-start.ps1
-docker compose exec web php artisan migrate
-```
+Docker builds whatever is in the project folder, so first make sure the folder has the version you want.
 
-Records and models are not touched.
+1. **Go to the project folder.** A new terminal, including the one inside Docker Desktop, opens in your user folder (`C:\Users\yourname`), where git says `fatal: not a git repository`. Move into the project first:
+
+   Windows (use your own project folder):
+
+   ```powershell
+   cd C:\crms-laravel-12
+   ```
+
+   Mac / Linux:
+
+   ```bash
+   cd ~/crms-laravel-12
+   ```
+
+2. **Check the branch.** Docker has no branch of its own; it uses the one checked out here.
+
+   ```bash
+   git branch --show-current          # should print: main
+   git status                         # should say: working tree clean
+   git pull                           # only if the new version is on GitHub and not yet on this computer
+   ```
+
+3. **Rebuild and start**, then update the database.
+
+   Windows:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\docker-start.ps1
+   docker compose exec web php artisan migrate
+   ```
+
+   Mac / Linux:
+
+   ```bash
+   sh docker-start.sh
+   docker compose exec web php artisan migrate
+   ```
+
+Docker Desktop only has to show **Engine running**; the start script builds and starts the containers itself, so there is no need to start them first. Records and models are not touched.
 
 ---
 
@@ -95,6 +129,7 @@ docker compose exec mysql sh -c 'mysql -uroot -p$MYSQL_ROOT_PASSWORD crms < /bac
 | You see | Do this |
 | :--- | :--- |
 | `port is already allocated` / `address already in use` | Another program uses 8080 or 8081. Close it, or change the port in `docker-compose.yml` (8080 under `web`; 8081 under `ocr` **and** in `OCR_BROWSER_API_URL`). |
+| `fatal: not a git repository` (or `docker compose` says it found no configuration file) | The terminal is not in the project folder. Run `cd` to the project folder (see [Updates](#updates)). |
 | `bind source path does not exist` (mentions `.env`) | `.env` is missing. Create it (step 2), then start again. |
 | A scan waits forever | Worker is not running. Run `docker compose ps` and `docker compose logs worker`. |
 | **OCR service offline** | Reader is still starting. Wait a minute and reload. Still offline: `docker compose logs ocr`. |

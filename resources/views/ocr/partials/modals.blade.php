@@ -243,12 +243,60 @@
                     The model weights cannot be restored from CRMS. Existing records keep their submitted values
                     and model reference.
                 </div>
+                <div class="alert alert-warning text-start small mt-2 mb-0 d-none" id="deleteBaseNote">
+                    This is the built-in base model. Without it the radar has nothing to compare other models
+                    against, and the base scores in a new upload can no longer be installed. You can bring it back
+                    by running <span class="font-monospace">ml/download_trocr.py</span>.
+                </div>
             </div>
             <div class="modal-footer justify-content-center pt-0">
                 <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Keep model</button>
                 <button type="submit" class="btn btn-danger" id="delete-submit">
                     <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
                     <span>Delete permanently</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{{-- Choose a model's colour (list icon, chart, tooltip). A colour another model
+     has is swapped with it, so colours stay unique. ocr-workspace.js fills it. --}}
+<div class="modal fade" id="colorModal" tabindex="-1"
+     aria-labelledby="colorModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form class="modal-content" method="POST" action="" id="colorForm">
+            @csrf
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="colorModalTitle">Choose a colour</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3">For <strong id="colorModelLabel"></strong></p>
+                <fieldset>
+                    <legend class="visually-hidden">Colours</legend>
+                    <div class="ocr-color-grid">
+                        @foreach ([1 => 'Blue', 2 => 'Orange', 3 => 'Aqua', 4 => 'Yellow', 5 => 'Pink', 6 => 'Green', 7 => 'Violet', 8 => 'Red'] as $slot => $colorName)
+                            <label class="ocr-color-option">
+                                <input type="radio" name="color_slot" value="{{ $slot }}" class="visually-hidden" required>
+                                <span class="ocr-color-swatch" style="background: var(--ocr-series-{{ $slot }})" aria-hidden="true">
+                                    <i class="icon-base bx bx-check" aria-hidden="true"></i>
+                                </span>
+                                <span class="ocr-color-name">{{ $colorName }}</span>
+                                <span class="ocr-color-owner" data-color-owner="{{ $slot }}"></span>
+                            </label>
+                        @endforeach
+                    </div>
+                </fieldset>
+                <p class="text-muted small mt-3 mb-0">
+                    Picking a colour another model has swaps them: that model takes this one's colour.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="color-submit">
+                    <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                    <span>Save colour</span>
                 </button>
             </div>
         </form>

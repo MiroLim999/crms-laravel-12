@@ -10,6 +10,7 @@ use App\Models\DocumentTemplate;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\User;
+use App\Services\Ocr\OcrModelPerformance;
 use Database\Seeders\DocumentTemplateSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -138,6 +139,27 @@ class OcrWorkspaceTest extends TestCase
             // Process control is gone, not hidden behind a flag.
             ->assertDontSee('Start FastAPI')
             ->assertDontSee('Stop FastAPI');
+    }
+
+    public function test_the_performance_card_says_where_its_numbers_come_from(): void
+    {
+        $this->fakeHealthyService();
+
+        $response = $this->actingAs($this->superAdmin())
+            ->get(route('ocr.index'))
+            ->assertOk()
+            // Processing time sits with the scores, and the hint says how to switch model.
+            ->assertSee('Reading speed')
+            ->assertSee('Click a model to see its scores')
+            // The old note's jargon, and its claim about error reduction, are gone.
+            ->assertDontSee('teacher forcing')
+            ->assertDontSee('Error reduction reflects');
+
+        // The radar is the first view.
+        $this->assertMatchesRegularExpression(
+            '/class="btn btn-primary" id="ocr-btn-view-radar" aria-pressed="true"/',
+            $response->getContent(),
+        );
     }
 
     public function test_the_workspace_lets_the_super_admin_activate_a_model_when_the_service_is_up(): void
@@ -309,6 +331,85 @@ class OcrWorkspaceTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'ocr_model.evaluation_imported']);
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    private function evaluation(string $manifest, float $cer, float $wer, float $exact, string $dataset = 'civil-records-v1'): array
+    {
+        return [
+            'schema_version' => 1,
+            'model_key' => 'any',
+            'dataset' => $dataset,
+            'manifest_sha256' => $manifest,
+            'split' => 'test',
+            'sample_count' => 5000,
+            'metrics' => ['cer' => $cer, 'wer' => $wer, 'exact_match' => $exact],
+            'evaluated_at' => '2026-08-12T00:00:00+00:00',
+            'weights_file' => 'model.safetensors',
+            'weights_sha256' => str_repeat('b', 64),
+        ];
+    }
+
+    /**
+     * The notebook ships the base model's scores from the same run; FastAPI puts
+     * them on the base model. Registering the upload must pick them up at once,
+     * so the overlay compares like with like without a Rescan.
+     */
+    public function test_registration_also_imports_base_scores_from_the_same_run(): void
+    {
+        OcrModel::create(['key' => 'base', 'label' => 'base']);
+        $models = [
+            [
+                'key' => 'trocr-v2', 'label' => 'TrOCR v2', 'available' => true, 'loaded' => false,
+                'files' => ['base-evaluation-report.json', 'config.json', 'evaluation-report.json', 'model.safetensors'],
+                'evaluation' => $this->evaluation(str_repeat('c', 64), 0.0003, 0.001, 0.9978),
+            ],
+            [
+                'key' => 'base', 'label' => 'TrOCR base', 'available' => true, 'loaded' => false,
+                'files' => ['config.json', 'evaluation-report.json', 'model.safetensors'],
+                'evaluation' => $this->evaluation(str_repeat('c', 64), 0.1198, 0.5146, 0.3318),
+            ],
+        ];
+        $this->fakeHealthyService([
+            '*/models' => Http::response(['default' => 'trocr-v2', 'models' => $models]),
+        ]);
+
+        $this->actingAs($this->superAdmin())
+            ->postJson(route('ocr.register'), ['name' => 'trocr-v2'])
+            ->assertOk()
+            ->assertJsonPath('message', fn (string $message) => str_contains($message, 'same test set, so the comparison is fair'));
+
+        $base = OcrModel::firstWhere('key', 'base');
+        $this->assertSame(0.1198, $base->cer);
+        $this->assertSame(str_repeat('c', 64), $base->evaluation_manifest_sha256);
+        $this->assertTrue(OcrModel::firstWhere('key', 'trocr-v2')->sharesTestSetWith($base));
+    }
+
+    public function test_registration_warns_when_base_scores_are_from_another_test_set(): void
+    {
+        OcrModel::create(['key' => 'base', 'label' => 'base']);
+        $models = [
+            [
+                'key' => 'trocr-v2', 'label' => 'TrOCR v2', 'available' => true, 'loaded' => false,
+                'files' => ['config.json', 'evaluation-report.json', 'model.safetensors'],
+                'evaluation' => $this->evaluation(str_repeat('c', 64), 0.0003, 0.001, 0.9978, 'names-100k'),
+            ],
+            [
+                'key' => 'base', 'label' => 'TrOCR base', 'available' => true, 'loaded' => false,
+                'files' => ['config.json', 'evaluation-report.json', 'model.safetensors'],
+                'evaluation' => $this->evaluation(str_repeat('d', 64), 0.1198, 0.5146, 0.3318, 'names-50k'),
+            ],
+        ];
+        $this->fakeHealthyService([
+            '*/models' => Http::response(['default' => 'trocr-v2', 'models' => $models]),
+        ]);
+
+        $this->actingAs($this->superAdmin())
+            ->postJson(route('ocr.register'), ['name' => 'trocr-v2'])
+            ->assertOk()
+            ->assertJsonPath('message', fn (string $message) => str_contains($message, 'could not be matched to the same test set (they are from names-50k)'));
+    }
+
     // --------------------------------------------------------------------- save settings
 
     /**
@@ -431,7 +532,7 @@ class OcrWorkspaceTest extends TestCase
         $this->assertSame('trocr-v1', OcrModel::active()->key);
     }
 
-    public function test_the_base_model_cannot_be_renamed_or_deleted(): void
+    public function test_the_base_model_cannot_be_renamed(): void
     {
         $this->fakeHealthyService();
         $actor = $this->superAdmin();
@@ -440,11 +541,96 @@ class OcrWorkspaceTest extends TestCase
             ->post(route('ocr.rename', 'base'), ['new_name' => 'mine'])
             ->assertSessionHas('error');
 
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '_model'));
+    }
+
+    public function test_the_base_model_can_be_deleted_like_any_other(): void
+    {
+        $this->fakeHealthyService([
+            '*/delete_model' => Http::response(['ok' => true, 'deleted' => 'base']),
+        ]);
+        $actor = $this->superAdmin();
+
         $this->actingAs($actor)
             ->delete(route('ocr.destroy', 'base'))
-            ->assertSessionHas('error');
+            ->assertSessionHas('success');
 
-        Http::assertNotSent(fn ($request) => str_contains($request->url(), '_model'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/delete_model')
+            && ($request['model'] ?? null) === 'base');
+        $this->assertDatabaseHas('audit_logs', ['action' => 'ocr_model.deleted']);
+    }
+
+    public function test_a_fresh_install_with_no_models_shows_an_empty_list(): void
+    {
+        // ml/models is not in git: on a new computer the service has nothing to list
+        // until a model is added by hand.
+        Http::fake([
+            '*/health' => Http::response(['status' => 'ok', 'model_loaded' => false, 'device' => 'cpu', 'default' => null, 'models' => []]),
+            '*/models' => Http::response(['default' => null, 'models' => []]),
+        ]);
+
+        $this->actingAs($this->superAdmin())
+            ->get(route('ocr.index'))
+            ->assertOk()
+            ->assertSee('No models available')
+            ->assertDontSee('Built-in model');
+
+        $this->assertSame(0, OcrModel::count());
+    }
+
+    public function test_a_base_model_whose_folder_is_gone_is_marked_deleted(): void
+    {
+        OcrModel::create(['key' => 'base', 'label' => 'TrOCR base']);
+        Http::fake([
+            '*/health' => Http::response(['status' => 'ok', 'model_loaded' => false, 'device' => 'cpu', 'default' => null, 'models' => []]),
+            '*/models' => Http::response(['default' => null, 'models' => []]),
+        ]);
+
+        $this->actingAs($this->superAdmin())
+            ->get(route('ocr.index'))
+            ->assertOk()
+            ->assertSee('No models available');
+
+        $this->assertNotNull(OcrModel::firstWhere('key', 'base')->disk_deleted_at);
+    }
+
+    public function test_a_picked_colour_is_kept_and_a_taken_colour_is_swapped(): void
+    {
+        $actor = $this->superAdmin();
+        OcrModel::create(['key' => 'model-a', 'label' => 'model-a']);
+        OcrModel::create(['key' => 'model-b', 'label' => 'model-b']);
+        $slots = fn () => collect(app(OcrModelPerformance::class)->summary()['models'])
+            ->pluck('color_slot', 'key');
+
+        $before = $slots();
+        $this->assertNotSame($before['model-a'], $before['model-b']);
+
+        // A free colour.
+        $free = collect(range(1, 8))->first(fn ($slot) => ! $before->contains($slot));
+        $this->actingAs($actor)
+            ->post(route('ocr.models.color', 'model-a'), ['color_slot' => $free])
+            ->assertSessionHas('success');
+        $this->assertSame($free, $slots()['model-a']);
+        $this->assertSame($before['model-b'], $slots()['model-b']);
+
+        // B's colour: A takes it, B takes A's.
+        $this->actingAs($actor)
+            ->post(route('ocr.models.color', 'model-a'), ['color_slot' => $before['model-b']])
+            ->assertSessionHas('success');
+        $this->assertSame($before['model-b'], $slots()['model-a']);
+        $this->assertSame($free, $slots()['model-b']);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'ocr_model.color_changed']);
+    }
+
+    public function test_a_colour_outside_the_palette_is_refused(): void
+    {
+        OcrModel::create(['key' => 'model-a', 'label' => 'model-a']);
+
+        $this->actingAs($this->superAdmin())
+            ->post(route('ocr.models.color', 'model-a'), ['color_slot' => 9])
+            ->assertSessionHasErrors('color_slot');
+
+        $this->assertNull(OcrModel::firstWhere('key', 'model-a')->color_slot);
     }
 
     public function test_deleting_a_model_tombstones_it_and_is_audited(): void

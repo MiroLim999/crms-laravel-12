@@ -8,12 +8,14 @@ use App\Models\AuditLog;
 use App\Models\CivilRecord;
 use App\Models\DocumentTemplate;
 use App\Models\OcrModel;
+use App\Models\PageRun;
 use App\Models\User;
 use App\Services\ChangeRequestService;
 use App\Services\DashboardAnalytics;
 use Database\Seeders\DocumentTemplateSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -433,6 +435,73 @@ class AnalyticsDashboardTest extends TestCase
         $this->assertSame(['365', '30'], [$response->viewData('scopes')['trend']['period'], $response->viewData('scopes')['ocr']['period']]);
     }
 
+    public function test_processing_counts_runs_times_them_and_lists_what_each_person_did(): void
+    {
+        Carbon::setTestNow('2026-08-11 04:00:00');
+        $ana = User::factory()->staff()->create(['name' => 'Ana Staff']);
+        $ben = User::factory()->staff()->create(['name' => 'Ben Staff']);
+        User::factory()->staff()->create(['name' => 'Gone Staff', 'is_active' => false]);
+
+        $run = fn (User $user, string $mode, string $outcome, ?int $ms, string $when = '2026-08-10 02:00:00', ?int $readMs = null, ?int $lines = null) => PageRun::create([
+            'user_id' => $user->getKey(), 'mode' => $mode, 'outcome' => $outcome, 'duration_ms' => $ms,
+            'read_ms' => $readMs, 'lines' => $lines,
+        ])->forceFill(['created_at' => Carbon::parse($when)])->save();
+
+        $run($ana, 'detect', 'completed', 20_000, lines: 100);
+        $run($ana, 'detect', 'completed', 30_000, lines: 100);
+        // 40 s + 8 s reading 100 lines, and 2 s reading 50: (6_000 + 2_000) / 150 lines = 53 ms a line.
+        $run($ana, 'full', 'completed', 60_000, readMs: 6_000, lines: 100);
+        $run($ana, 'read', 'completed', 10_000, readMs: 2_000, lines: 50);
+        $run($ben, 'full', 'failed', null);
+        $run($ben, 'detect', 'cancelled', null);
+        // Outside the default 12 months: not counted.
+        $run($ana, 'full', 'completed', 999_000, '2024-01-01 02:00:00');
+
+        $this->record($ana, DocumentType::Birth);
+        $this->record($ana, DocumentType::Death);
+        $this->record($ben, DocumentType::Birth);
+
+        // Audit rows cannot be edited through the model, so the older one is inserted directly.
+        foreach (['2026-08-09 01:00:00', '2026-08-10 01:00:00'] as $signedIn) {
+            DB::table('audit_logs')->insert(['user_id' => $ana->getKey(), 'action' => 'auth.login', 'created_at' => $signedIn]);
+        }
+
+        $response = $this->actingAs(User::factory()->admin()->create())
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertSee('Processing and staff activity');
+        $processing = $response->viewData('analytics')['processing'];
+
+        $this->assertSame([4, 1, 1], [$processing['completed'], $processing['failed'], $processing['cancelled']]);
+        $this->assertSame(['runs' => 2, 'average_ms' => 25_000], $processing['detect']);
+        $this->assertSame(['runs' => 2, 'average_ms' => 35_000], $processing['scan']);
+        $this->assertSame(['lines' => 150, 'ms_per_line' => 53], $processing['reading']);
+
+        // Most submissions first; the inactive account has no work, so it is left out.
+        $this->assertSame(['Ana Staff', 'Ben Staff'], array_column($processing['staff'], 'name'));
+        $this->assertSame([2, 2], [$processing['staff'][0]['submitted'], $processing['staff'][0]['scanned']]);
+        $this->assertSame([1, 0], [$processing['staff'][1]['submitted'], $processing['staff'][1]['scanned']]);
+        $this->assertSame('2026-08-10', $processing['staff'][0]['last_sign_in']->toDateString());
+        $this->assertNull($processing['staff'][1]['last_sign_in']);
+
+        $response->assertSee('Average Detect')->assertSee('25 s')->assertSee('35 s')->assertSee('53 ms / line')->assertSee('Never')
+            // The account counts and the link to them sit with the staff they describe.
+            ->assertSee('accounts active')->assertSee('Manage users')->assertDontSee('Active accounts');
+    }
+
+    public function test_processing_says_so_when_nothing_has_run_and_has_its_own_period(): void
+    {
+        $response = $this->actingAs(User::factory()->admin()->create())
+            ->get(route('dashboard', ['processing_period' => '30']))
+            ->assertOk()
+            ->assertSee('No Detect or Scan has run in this period.');
+
+        $this->assertSame('30', $response->viewData('scopes')['processing']['period']);
+        $this->assertSame('365', $response->viewData('scopes')['trend']['period']);
+        $this->assertNull($response->viewData('analytics')['processing']['scan']['average_ms']);
+        $this->assertNull($response->viewData('analytics')['processing']['reading']['ms_per_line']);
+    }
+
     public function test_change_requests_show_the_queue_now_and_the_decisions_in_the_period(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
@@ -622,9 +691,9 @@ class AnalyticsDashboardTest extends TestCase
             ->assertOk()
             ->assertSee('Average OCR confidence')
             ->assertSee('Human correction rate')
-            ->assertSee('Active accounts')
-            // One of the two accounts is active.
-            ->assertSee('50.0%</strong> active', escape: false)
+            // One of the two accounts is active; the count sits with the staff list.
+            ->assertSee('1 of 2 accounts active')
+            ->assertDontSee('Active accounts')
             ->assertDontSee('Template usage and OCR review signals');
     }
 
@@ -646,6 +715,9 @@ class AnalyticsDashboardTest extends TestCase
             array_map(fn (array $item) => [$item['role'], $item['name']], $series),
         );
         $this->assertEquals(['character_accuracy' => 90.0, 'word_accuracy' => 70.0, 'exact_match' => 50.0], $series[0]['scores']);
+
+        // The card says the scores are from test images, so they are not read as accuracy on real scans.
+        $response->assertSee('test images')->assertSee('not on your scans');
     }
 
     public function test_ocr_performance_never_draws_a_score_nobody_measured(): void

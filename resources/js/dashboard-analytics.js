@@ -291,11 +291,18 @@ function renderVolume(data) {
 }
 
 // How each model is drawn: the model in use solid and filled, TrOCR Base
-// dashed and lighter. The legend chips in the view use the same colours.
+// dashed and lighter. Each one wears its own colour from the OCR Workspace
+// (--ocr-series-N, N picked per model on the server); the legend chips too.
 const performanceLook = {
-  model: { color: '#ff6384', opacity: 0.32, marker: 4, width: 2, dash: 0 },
-  base: { color: '#696cff', opacity: 0.18, marker: 3, width: 1.5, dash: 4 },
+  model: { opacity: 0.32, marker: 4, width: 2, dash: 0 },
+  base: { opacity: 0.18, marker: 3, width: 1.5, dash: 4 },
 };
+const SERIES_FALLBACK = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+function seriesColor(slot) {
+  const n = Math.min(Math.max(Number(slot) || 1, 1), SERIES_FALLBACK.length);
+  return getComputedStyle(document.documentElement).getPropertyValue(`--ocr-series-${n}`).trim()
+    || SERIES_FALLBACK[n - 1];
+}
 
 // The view sends only models with measured test scores, the model in use
 // first; with none it shows a note in place of the chart. Nothing is filled
@@ -306,13 +313,17 @@ function renderOcrPerformance(data) {
   if (!target || !series.length) return;
 
   const theme = themeOptions(target);
-  const pct = value => `${Math.round(value)}%`;
+  // Two decimals near the top, so 99.97% is not drawn as a perfect 100%.
+  const pct = value => `${Number(value).toFixed(value > 99 && value < 100 ? 2 : 0)}%`;
   // Scores ride on the axis labels (see xaxis.labels.formatter).
   const keys = ['character_accuracy', 'word_accuracy', 'exact_match'];
   const categories = ['Chars', 'Words', 'Exact'];
   const categoryNames = ['Character accuracy', 'Word accuracy', 'Exact match'];
   const values = series.map(item => keys.map(key => Number(item.scores[key])));
-  const looks = series.map(item => performanceLook[item.role] || performanceLook.base);
+  const looks = series.map(item => ({
+    ...(performanceLook[item.role] || performanceLook.base),
+    color: seriesColor(item.color_slot),
+  }));
 
   // Largest radius that fits: the stacked side labels need ~50px each
   // across, and the triangle plus labels need ~1.5r + 60px down.
@@ -368,7 +379,8 @@ function renderOcrPerformance(data) {
       custom: ({ dataPointIndex: point }) => {
         const rows = series.map((item, index) => {
           const { color } = looks[index];
-          const value = `${values[index][point].toFixed(1)}%`;
+          const raw = values[index][point];
+          const value = `${raw.toFixed(raw > 99 && raw < 100 ? 2 : 1)}%`;
 
           return '<div class="d-flex justify-content-between align-items-center small mb-1">'
             + `<span><span class="badge-dot me-1" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};"></span>${escapeHtml(item.name)}</span>`
@@ -469,6 +481,7 @@ const panels = {
   ocr: { chart: 'dashboard-quality-chart', key: 'quality', render: renderQuality },
   // No chart: a swapped card is all there is to redraw.
   requests: { chart: '', key: 'requests', render: () => {} },
+  processing: { chart: '', key: 'processing', render: () => {} },
 };
 
 const pending = new Map();

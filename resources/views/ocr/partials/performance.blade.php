@@ -21,6 +21,11 @@
 
             <div class="ocr-inspected-indicator d-flex align-items-center gap-2 min-w-0">
                 <span class="text-muted small">Inspecting:</span>
+                {{-- The model's colour, as in the model list and the chart (set again by ocr-workspace.js). --}}
+                <span class="ocr-inspected-dot" id="ocr-inspected-model-dot" aria-hidden="true"
+                      @if ($selectedPerformance['color_slot'] ?? null)
+                          style="background: var(--ocr-series-{{ (int) $selectedPerformance['color_slot'] }})"
+                      @endif></span>
                 <span class="badge bg-label-primary font-monospace fw-semibold" id="ocr-inspected-model-name">
                     {{ $selectedPerformance['display_label'] ?? $selectedPerformance['label'] ?? 'Selected model' }}
                 </span>
@@ -53,13 +58,17 @@
                         <div class="ocr-kpi-sub" data-kpi-sub="{{ $key }}">&nbsp;</div>
                     </div>
                 @endforeach
+                {{-- Processing time, from real scans in this system, not from the test set. --}}
+                <div class="ocr-kpi-card" title="How long TrOCR takes to read one line in real scans in this system (not on the test set)">
+                    <div class="ocr-kpi-label">Reading speed</div>
+                    <div class="ocr-kpi-figure">
+                        <span class="ocr-kpi-val" data-reading-val>—</span>
+                    </div>
+                    <div class="ocr-kpi-sub" data-reading-sub>&nbsp;</div>
+                </div>
             </div>
 
             <div class="ocr-performance-toolbar {{ $selectedHasData ? '' : 'd-none' }}" id="ocr-performance-toolbar">
-                <div class="form-check form-switch mb-0" id="ocr-compare-toggle-wrap">
-                    <input class="form-check-input" type="checkbox" id="ocr-compare-toggle" checked>
-                    <label class="form-check-label small fw-medium" for="ocr-compare-toggle">Overlay base model</label>
-                </div>
                 <div class="btn-group btn-group-sm" role="group" aria-label="Chart type">
                     <button type="button" class="btn btn-primary" id="ocr-btn-view-radar" aria-pressed="true"
                             title="Radar chart">
@@ -71,6 +80,16 @@
                     </button>
                 </div>
             </div>
+
+            <p class="ocr-compare-warning d-none" id="ocr-compare-warning" role="status">
+                <i class="icon-base bx bx-error icon-sm me-1" aria-hidden="true"></i>
+                <span data-compare-warning-text></span>
+            </p>
+
+            {{-- Which models the chart draws, each in its own colour. The inspected
+                 model and the one compared with are always on. --}}
+            <div class="ocr-chart-models {{ $selectedHasData ? '' : 'd-none' }}" id="ocr-chart-models"
+                 role="group" aria-label="Models on the chart"></div>
 
             {{-- Chart Container --}}
             <div id="ocr-model-radar"
@@ -90,16 +109,18 @@
                     {{ $selectedPerformance['display_label'] ?? $selectedPerformance['label'] ?? 'This model' }} has no valid locked-test benchmark report.
                 </p>
                 <div class="ocr-empty-command-box font-monospace small bg-label-secondary py-1.5 px-3 rounded text-break" id="ocr-empty-command">
-                    php artisan ocr:evaluate {{ $selectedPerformance['key'] ?? 'model_key' }}
+                    python ml/test_finetuned.py --model {{ $selectedPerformance['key'] ?? 'model_key' }}
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="card-footer py-2.5">
-        <p class="text-muted small mb-0">
-            <i class="icon-base bx bx-info-circle icon-sm me-1" aria-hidden="true"></i>
-            Scores are evaluated on identical locked test splits without teacher forcing. Error reduction reflects relative improvement over the pre-trained baseline.
+    {{-- Only for a model without test scores: its cards are hidden, so its
+         reading speed is said here instead. The script fills it per model. --}}
+    <div class="card-footer py-2.5 {{ $selectedHasData ? 'd-none' : '' }}" id="ocr-reading-speed">
+        <p class="small mb-0" aria-live="polite">
+            <i class="icon-base bx bx-time-five icon-sm me-1" aria-hidden="true"></i>
+            <span data-reading-text>—</span>
         </p>
     </div>
 </section>

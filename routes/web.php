@@ -299,6 +299,7 @@ Route::middleware('auth')->group(function () {
         // list of routes that were removed.
         Route::post('models/{key}/activate', [OcrModelController::class, 'activate'])->name('models.activate');
         Route::post('models/{key}/rename', [OcrModelController::class, 'rename'])->name('rename');
+        Route::post('models/{key}/color', [OcrModelController::class, 'color'])->name('models.color');
         Route::delete('models/{key}', [OcrModelController::class, 'destroy'])->name('destroy');
     });
 });

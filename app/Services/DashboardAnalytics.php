@@ -4,11 +4,14 @@ namespace App\Services;
 
 use App\Enums\ChangeRequestStatus;
 use App\Enums\RecordStatus;
+use App\Enums\RoleSlug;
+use App\Jobs\ProcessDocumentPage;
 use App\Models\AuditLog;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
 use App\Models\OcrSetting;
+use App\Models\PageRun;
 use App\Models\RecordField;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -33,7 +36,7 @@ class DashboardAnalytics
      *
      * @var list<string>
      */
-    public const PANELS = ['trend', 'ocr', 'requests'];
+    public const PANELS = ['trend', 'ocr', 'requests', 'processing'];
 
     /** @var array<string, string> */
     public const PERIODS = [
@@ -165,6 +168,7 @@ class DashboardAnalytics
             'trend' => $this->recordTrend($scopes['trend'], $entries, $first),
             'ocr_quality' => $this->ocrQuality($scopes['ocr']),
             'change_requests' => $this->changeRequestSummary($scopes['requests']),
+            'processing' => $this->processing($scopes['processing']),
             'recent_changes' => $this->recentChanges(),
             'accounts' => $this->accountHealth(),
         ];
@@ -507,6 +511,104 @@ class DashboardAnalytics
                 ->where('status', ChangeRequestStatus::Withdrawn->value)
                 ->whereBetween('updated_at', [$scope['db_start'], $scope['db_end']])
                 ->count(),
+        ];
+    }
+
+    /**
+     * How the page job did in the period, and what each person who can scan did.
+     *
+     * Runs come from page_runs, which outlives the pages themselves (a cancelled
+     * page is deleted at once, the rest a day later). A "scan" is a Scan with OCR,
+     * whether it cut the page itself or read what Detect had already cut; a
+     * "detect" is the Detect button. Times average only runs that finished.
+     *
+     * @param  array<string, mixed>  $scope  the processing panel's
+     * @return array<string, mixed>
+     */
+    private function processing(array $scope): array
+    {
+        $runs = fn () => PageRun::query()->whereBetween('created_at', [$scope['db_start'], $scope['db_end']]);
+
+        $outcomes = $runs()
+            ->selectRaw('outcome, COUNT(*) as n')
+            ->groupBy('outcome')
+            ->pluck('n', 'outcome');
+
+        $timing = function (array $modes) use ($runs): array {
+            $finished = fn () => $runs()->where('outcome', PageRun::COMPLETED)->whereIn('mode', $modes);
+            $average = $finished()->whereNotNull('duration_ms')->avg('duration_ms');
+
+            return [
+                'runs' => $finished()->count(),
+                'average_ms' => $average === null ? null : (int) round($average),
+            ];
+        };
+
+        // TrOCR's own speed on real scans: the time spent reading over the lines read.
+        // (sum() quotes the column: `lines` is a reserved word in MySQL, so raw SQL would break.)
+        $read = fn () => $runs()
+            ->where('outcome', PageRun::COMPLETED)
+            ->whereIn('mode', [ProcessDocumentPage::MODE_FULL, ProcessDocumentPage::MODE_READ])
+            ->whereNotNull('read_ms')
+            ->where('lines', '>', 0);
+        $readLines = (int) $read()->sum('lines');
+        $readMs = (int) $read()->sum('read_ms');
+
+        // Who can scan: Staff and Super Admin. Admin never does, so would only be an empty row.
+        $people = User::query()
+            ->whereHas('role', fn ($q) => $q->whereIn('slug', [RoleSlug::Staff->value, RoleSlug::SuperAdmin->value]))
+            ->get(['id', 'name', 'is_active']);
+
+        $submitted = $this->records($scope)
+            ->whereIn('submitted_by', $people->modelKeys())
+            ->selectRaw('submitted_by, COUNT(*) as n')
+            ->groupBy('submitted_by')
+            ->pluck('n', 'submitted_by');
+
+        $scanned = $runs()
+            ->where('outcome', PageRun::COMPLETED)
+            ->whereIn('mode', [ProcessDocumentPage::MODE_FULL, ProcessDocumentPage::MODE_READ])
+            ->whereIn('user_id', $people->modelKeys())
+            ->selectRaw('user_id, COUNT(*) as n')
+            ->groupBy('user_id')
+            ->pluck('n', 'user_id');
+
+        // Not a period figure: when someone last signed in, whenever that was.
+        $lastSignIn = AuditLog::query()
+            ->where('action', 'auth.login')
+            ->whereIn('user_id', $people->modelKeys())
+            ->selectRaw('user_id, MAX(created_at) as last_at')
+            ->groupBy('user_id')
+            ->pluck('last_at', 'user_id');
+
+        $staff = $people
+            ->map(fn (User $person) => [
+                'name' => $person->name,
+                'active' => (bool) $person->is_active,
+                'submitted' => (int) ($submitted[$person->getKey()] ?? 0),
+                'scanned' => (int) ($scanned[$person->getKey()] ?? 0),
+                'last_sign_in' => isset($lastSignIn[$person->getKey()])
+                    ? CarbonImmutable::parse($lastSignIn[$person->getKey()], 'UTC')
+                        ->setTimezone((string) config('crms.reporting_timezone', 'Asia/Manila'))
+                    : null,
+            ])
+            // Anyone with work in the period, and active accounts even with none.
+            ->filter(fn (array $row) => $row['active'] || $row['submitted'] > 0 || $row['scanned'] > 0)
+            ->sortBy([['submitted', 'desc'], ['scanned', 'desc'], ['name', 'asc']])
+            ->values()
+            ->all();
+
+        return [
+            'completed' => (int) ($outcomes[PageRun::COMPLETED] ?? 0),
+            'failed' => (int) ($outcomes[PageRun::FAILED] ?? 0),
+            'cancelled' => (int) ($outcomes[PageRun::CANCELLED] ?? 0),
+            'detect' => $timing([ProcessDocumentPage::MODE_DETECT]),
+            'scan' => $timing([ProcessDocumentPage::MODE_FULL, ProcessDocumentPage::MODE_READ]),
+            'reading' => [
+                'lines' => $readLines,
+                'ms_per_line' => $readLines > 0 ? (int) round($readMs / $readLines) : null,
+            ],
+            'staff' => $staff,
         ];
     }
 

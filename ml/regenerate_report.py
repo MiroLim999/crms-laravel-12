@@ -1,9 +1,20 @@
 """
 regenerate_report.py
-Helper script to regenerate a valid CRMS evaluation-report.json for an installed OCR model.
+Helper script to rebuild a valid CRMS evaluation-report.json for an installed OCR model.
+
+THIS SCRIPT DOES NOT MEASURE ANYTHING. It only hashes the real weights file and
+writes down the numbers you give it. So it has no default numbers: every figure
+must be copied from a real run on the locked test split (the fine-tuning
+notebook's printed result, or `python ml/test_finetuned.py`). An earlier version
+carried built-in defaults, and a model's report ended up showing numbers nobody
+had measured.
 
 Usage:
-    python ml/regenerate_report.py --model TrOcr-50k-broken-samples
+    python ml/regenerate_report.py --model TrOcr-50k-broken-samples \
+        --dataset synthetic-broken-handwritten-samples50k --samples 5000 \
+        --cer 0.0003 --wer 0.0010 --exact 0.9978
+
+Rates are decimals: 0.0003 means 0.03%.
 """
 
 import argparse
@@ -29,11 +40,11 @@ def sha256_file(path: str) -> str:
 
 def regenerate(
     model_name: str,
-    dataset: str = "synthetic-broken-handwritten-samples50k",
-    sample_count: int = 5000,
-    cer: float = 0.0003,
-    wer: float = 0.0010,
-    exact_match: float = 0.9978,
+    dataset: str,
+    sample_count: int,
+    cer: float,
+    wer: float,
+    exact_match: float,
     evaluated_at: str | None = None,
 ) -> str:
     model_dir = os.path.join(MODELS_DIR, model_name)
@@ -86,33 +97,25 @@ def regenerate(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Regenerate CRMS evaluation-report.json")
-    parser.add_argument("--model", default="TrOcr-50k-broken-samples", help="Model folder name, e.g. 'base' or 'TrOcr-50k-broken-samples'")
-    parser.add_argument("--dataset", default="synthetic-broken-handwritten-samples50k")
-    parser.add_argument("--samples", type=int, default=5000)
-    parser.add_argument("--cer", type=float, default=None, help="Character Error Rate (0-1)")
-    parser.add_argument("--wer", type=float, default=None, help="Word Error Rate (0-1)")
-    parser.add_argument("--exact", type=float, default=None, help="Exact match accuracy (0-1)")
+    parser = argparse.ArgumentParser(
+        description="Rebuild a CRMS evaluation-report.json from numbers you measured. Measures nothing itself."
+    )
+    parser.add_argument("--model", required=True, help="Model folder name under ml/models/, e.g. 'base'")
+    parser.add_argument("--dataset", required=True, help="Name of the dataset the test split came from")
+    parser.add_argument("--samples", type=int, required=True, help="Number of test samples that were evaluated")
+    parser.add_argument("--cer", type=float, required=True, help="Character Error Rate as a decimal (0.0003 = 0.03%%)")
+    parser.add_argument("--wer", type=float, required=True, help="Word Error Rate as a decimal")
+    parser.add_argument("--exact", type=float, required=True, help="Exact-match accuracy as a decimal (0-1)")
     args = parser.parse_args()
-
-    # Model specific defaults from the notebook benchmark evaluation
-    if args.model == "base":
-        cer = args.cer if args.cer is not None else 0.1198
-        wer = args.wer if args.wer is not None else 0.5146
-        exact = args.exact if args.exact is not None else 0.3318
-    else:
-        cer = args.cer if args.cer is not None else 0.08
-        wer = args.wer if args.wer is not None else 0.24
-        exact = args.exact if args.exact is not None else 0.48
 
     try:
         regenerate(
             model_name=args.model,
             dataset=args.dataset,
             sample_count=args.samples,
-            cer=cer,
-            wer=wer,
-            exact_match=exact,
+            cer=args.cer,
+            wer=args.wer,
+            exact_match=args.exact,
         )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)

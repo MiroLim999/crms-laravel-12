@@ -18,7 +18,7 @@ class OcrModel extends Model
     use HasFactory;
 
     protected $fillable = [
-        'key', 'label', 'notes', 'is_active',
+        'key', 'label', 'color_slot', 'notes', 'is_active',
         'cer', 'wer', 'exact_match', 'evaluated_at', 'registered_by',
         'evaluation_dataset', 'evaluation_split', 'evaluation_sample_count',
         'evaluation_manifest_sha256', 'evaluation_weights_sha256',
@@ -83,5 +83,21 @@ class OcrModel extends Model
             && $this->evaluation_sample_count > 0
             && $this->evaluation_manifest_sha256 !== null
             && $this->evaluation_weights_sha256 !== null;
+    }
+
+    /**
+     * Whether this model and `$other` were scored on the same test set (same
+     * dataset, manifest and sample count), so their scores compare fairly.
+     * Null when either one has no complete evaluation.
+     */
+    public function sharesTestSetWith(self $other): ?bool
+    {
+        if (! $this->hasEvaluation() || ! $other->hasEvaluation()) {
+            return null;
+        }
+
+        return $this->evaluation_dataset === $other->evaluation_dataset
+            && $this->evaluation_manifest_sha256 === $other->evaluation_manifest_sha256
+            && $this->evaluation_sample_count === $other->evaluation_sample_count;
     }
 }

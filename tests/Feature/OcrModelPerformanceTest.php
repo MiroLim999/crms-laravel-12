@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\CivilRecord;
 use App\Models\OcrModel;
+use App\Models\PageRun;
 use App\Models\RecordField;
 use App\Models\User;
 use App\Services\Ocr\OcrModelPerformance;
@@ -40,11 +41,33 @@ class OcrModelPerformanceTest extends TestCase
         $this->assertSame('evaluation', $profile['source']);
         $this->assertSame('Locked test set', $profile['source_label']);
         $this->assertSame('civil-records-v1 · test · 5,000 samples · evaluated Aug 2, 2026', $profile['evidence']);
+        // Two decimals are kept, so a 99.97% model is never rounded up to 100%.
         $this->assertSame([
-            'character_accuracy' => 87.7,
+            'character_accuracy' => 87.66,
             'word_accuracy' => 75.0,
             'exact_match' => 87.6,
         ], $profile['scores']);
+    }
+
+    public function test_each_model_gets_its_reading_speed_from_real_scans(): void
+    {
+        OcrModel::create(['key' => 'fast', 'label' => 'Fast']);
+        OcrModel::create(['key' => 'unused', 'label' => 'Unused']);
+
+        $run = fn (string $model, string $mode, string $outcome, ?int $readMs, ?int $lines) => PageRun::create([
+            'mode' => $mode, 'outcome' => $outcome, 'ocr_model_key' => $model, 'read_ms' => $readMs, 'lines' => $lines,
+        ]);
+        $run('fast', 'full', 'completed', 6_000, 100);
+        $run('fast', 'read', 'completed', 2_000, 50);
+        // Not counted: Detect reads nothing, and a failed or cancelled run has no reading to time.
+        $run('fast', 'detect', 'completed', null, 100);
+        $run('fast', 'full', 'failed', null, null);
+        $run('fast', 'full', 'cancelled', 900, 10);
+
+        $models = collect(app(OcrModelPerformance::class)->summary()['models'])->keyBy('key');
+
+        $this->assertSame(['lines' => 150, 'ms_per_line' => 53], $models['fast']['reading']);
+        $this->assertSame(['lines' => 0, 'ms_per_line' => null], $models['unused']['reading']);
     }
 
     public function test_metrics_without_complete_report_provenance_are_not_shown(): void

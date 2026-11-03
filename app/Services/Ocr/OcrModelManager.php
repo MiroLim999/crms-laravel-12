@@ -75,6 +75,9 @@ class OcrModelManager
             'label' => $local?->label ?? $remote['label'] ?? $key,
             'is_base' => $key === 'base',
             'on_disk' => $remote !== null,
+            // Files the service actually holds for this model. The base model can be
+            // listed with none (it is then read online), and there is nothing to delete.
+            'has_files' => ! empty($remote['files'] ?? []),
             'loaded' => (bool) ($remote['loaded'] ?? false),
             'is_active' => (bool) $local?->is_active,
             'registered' => $local !== null,
@@ -203,8 +206,8 @@ class OcrModelManager
      */
     public function registerInstalled(string $name, User $actor): OcrModel
     {
-        $remote = collect($this->client->models()['models'])
-            ->first(fn (array $model) => ($model['key'] ?? null) === $name);
+        $inventory = collect($this->client->models()['models']);
+        $remote = $inventory->first(fn (array $model) => ($model['key'] ?? null) === $name);
 
         if ($remote === null) {
             throw new OcrServiceException(
@@ -217,7 +220,20 @@ class OcrModelManager
             ->values()
             ->all();
 
-        return DB::transaction(function () use ($name, $files, $remote, $actor) {
+        // The upload may have carried the base model's scores from the same test
+        // run, which FastAPI installs on the base model. Pick them up now, so the
+        // workspace overlay compares like with like without a Rescan.
+        $baseRemote = $name === 'base' ? null
+            : $inventory->first(fn (array $model) => ($model['key'] ?? null) === 'base');
+
+        return DB::transaction(function () use ($name, $files, $remote, $baseRemote, $actor) {
+            if ($baseRemote !== null) {
+                $base = OcrModel::query()->where('key', 'base')->lockForUpdate()->first();
+                if ($base !== null) {
+                    $this->syncEvaluation($base, $baseRemote, $actor);
+                }
+            }
+
             $existing = OcrModel::query()->where('key', $name)->lockForUpdate()->first();
 
             if ($existing !== null && $existing->disk_deleted_at === null) {
@@ -266,7 +282,8 @@ class OcrModelManager
 
     public function delete(string $key, User $actor): void
     {
-        $this->guardNotBase($key, 'deleted');
+        // The base model may be deleted like any other (its local copy in ml/models/base).
+        // Renaming it stays blocked: its key is how CRMS recognises it.
         $this->guardNotActive($key, 'Delete');
         $this->client->deleteModel($key);
 
@@ -318,24 +335,9 @@ class OcrModelManager
         }
 
         foreach ($registry as $key => $model) {
+            // The base model too: the service lists it only while ml/models/base
+            // holds it (nothing is downloaded by itself), so absent means gone.
             if ($remote->has($key)) {
-                continue;
-            }
-
-            if ($key === 'base') {
-                // The base model is pulled from the Hugging Face cache, so it is
-                // never really absent. A tombstone on it is always wrong.
-                if ($model->disk_deleted_at !== null) {
-                    $model->fill(['disk_deleted_at' => null, 'disk_deleted_by' => null]);
-                    $this->audit->saveAndLog(
-                        'ocr_model.restored',
-                        $model,
-                        'Cleared an invalid tombstone from the protected base OCR model.',
-                        $actor,
-                    );
-                    $counts['restored']++;
-                }
-
                 continue;
             }
 

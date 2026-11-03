@@ -13,6 +13,8 @@
     // A fresh install has models on disk but none activated, so Staff cannot scan.
     $needsActivation = $activeModel === null && $selectable->isNotEmpty();
     $selectedKey = $modelPerformance['selected'] ?? ($activeModel?->key ?? null);
+    // Each model's colour slot, the same one the charts use (OcrModelPerformance).
+    $colorSlots = collect($modelPerformance['models'] ?? [])->pluck('color_slot', 'key');
 @endphp
 
 <section class="card ocr-models-card h-100" aria-labelledby="installed-models-title">
@@ -56,6 +58,11 @@
             </form>
         </div>
 
+        <p class="ocr-models-hint">
+            <i class="icon-base bx bx-info-circle icon-xs me-1" aria-hidden="true"></i>
+            Click a model to see its scores on the left.
+        </p>
+
         @if ($needsActivation)
             <div class="alert alert-warning d-flex align-items-start gap-2 py-2 px-3 small mb-0 mt-3" role="status">
                 <i class="icon-base bx bx-error icon-sm flex-shrink-0 mt-1" aria-hidden="true"></i>
@@ -85,20 +92,20 @@
                         $showKey = strcasecmp((string) $model['label'], (string) $model['key']) !== 0;
                         $canManage = $engine['reachable']
                             && $model['on_disk']
-                            && ! $model['is_base']
+                            && $model['has_files']
                             && ! $model['is_active']
                             && $model['disk_deleted_at'] === null;
 
                         if (! $engine['reachable']) {
                             $blockedReason = 'The OCR service is offline.';
-                        } elseif ($model['is_base']) {
-                            $blockedReason = 'The built-in base model is protected.';
                         } elseif ($model['is_active']) {
                             $blockedReason = 'Activate another model before renaming or deleting this one.';
                         } elseif ($model['disk_deleted_at']) {
                             $blockedReason = 'This model was deleted from disk.';
                         } elseif (! $model['on_disk']) {
                             $blockedReason = 'The model folder is missing from disk.';
+                        } elseif (! $model['has_files']) {
+                            $blockedReason = 'No local copy: this model is read online, so there is nothing to delete.';
                         } else {
                             $blockedReason = '';
                         }
@@ -129,10 +136,30 @@
                              data-model-key="{{ $model['key'] }}"
                              title="Click to inspect this model's benchmark performance">
                         <div class="ocr-model-main">
-                            <span class="ocr-model-icon {{ $model['is_active'] ? 'is-active' : ($model['is_base'] ? 'is-base' : '') }}"
-                                  aria-hidden="true">
-                                <i class="icon-base bx bx-brain"></i>
-                            </span>
+                            @if ($model['registered'] && $model['disk_deleted_at'] === null)
+                                {{-- The model's colour; click it to choose another (any model, active ones too). --}}
+                                <button type="button"
+                                        class="btn btn-link p-0 ocr-model-icon"
+                                        @if ($colorSlots->get($model['key']))
+                                            style="--ocr-model-color: var(--ocr-series-{{ (int) $colorSlots->get($model['key']) }})"
+                                        @endif
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#colorModal"
+                                        data-key="{{ $model['key'] }}"
+                                        data-label="{{ $model['label'] }}"
+                                        aria-label="Change the colour of {{ $model['label'] }}"
+                                        title="Change colour">
+                                    <i class="icon-base bx bx-brain" aria-hidden="true"></i>
+                                </button>
+                            @else
+                                <span class="ocr-model-icon"
+                                      @if ($colorSlots->get($model['key']))
+                                          style="--ocr-model-color: var(--ocr-series-{{ (int) $colorSlots->get($model['key']) }})"
+                                      @endif
+                                      aria-hidden="true">
+                                    <i class="icon-base bx bx-brain"></i>
+                                </span>
+                            @endif
 
                             <div class="min-w-0">
                                 <div class="d-flex flex-wrap align-items-center gap-2">
@@ -156,6 +183,7 @@
                                         <span>Discovered on disk</span>
                                     @endif
                                 </div>
+
                             </div>
                         </div>
 
@@ -197,15 +225,28 @@
                                             @endif
                                         </div>
 
-                                        <button type="button"
-                                                class="dropdown-item model-rename-trigger"
-                                                data-key="{{ $model['key'] }}"
-                                                data-label="{{ $model['label'] }}"
-                                                data-bs-toggle="modal"
-                                                data-bs-target="#renameModal">
-                                            <i class="icon-base bx bx-rename icon-sm me-2"></i>Rename
-                                        </button>
-                                        <div class="dropdown-divider"></div>
+                                        @if ($model['registered'])
+                                            <button type="button"
+                                                    class="dropdown-item"
+                                                    data-key="{{ $model['key'] }}"
+                                                    data-label="{{ $model['label'] }}"
+                                                    data-bs-toggle="modal"
+                                                    data-bs-target="#colorModal">
+                                                <i class="icon-base bx bx-palette icon-sm me-2"></i>Change colour
+                                            </button>
+                                        @endif
+                                        @unless ($model['is_base'])
+                                            {{-- The base model's key is how CRMS recognises it, so it cannot be renamed. --}}
+                                            <button type="button"
+                                                    class="dropdown-item model-rename-trigger"
+                                                    data-key="{{ $model['key'] }}"
+                                                    data-label="{{ $model['label'] }}"
+                                                    data-bs-toggle="modal"
+                                                    data-bs-target="#renameModal">
+                                                <i class="icon-base bx bx-rename icon-sm me-2"></i>Rename
+                                            </button>
+                                            <div class="dropdown-divider"></div>
+                                        @endunless
                                         <button type="button"
                                                 class="dropdown-item text-danger model-delete-trigger"
                                                 data-key="{{ $model['key'] }}"
@@ -218,6 +259,9 @@
                                 </div>
                             @else
                                 <span class="ocr-model-lock text-muted"
+                                      tabindex="0"
+                                      role="img"
+                                      aria-label="Locked: {{ $blockedReason }}"
                                       data-bs-toggle="tooltip"
                                       data-bs-placement="top"
                                       title="{{ $blockedReason }}">

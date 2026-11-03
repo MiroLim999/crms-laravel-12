@@ -661,6 +661,7 @@ function initModelActions() {
         $('#deleteLabel').textContent = label;
         $('#deleteKey').textContent = key;
         $('#deleteKeyRow').classList.toggle('d-none', label === key);
+        $('#deleteBaseNote')?.classList.toggle('d-none', key !== 'base');
     });
 
     deleteForm?.addEventListener('submit', () => setButtonBusy(deleteSubmit, true, 'Deleting…'));
@@ -729,16 +730,50 @@ function initModelPerformance() {
     const inspectedModelBadge = $('#ocr-inspected-model-name');
     const btnRadar = $('#ocr-btn-view-radar');
     const btnBars = $('#ocr-btn-view-bars');
-    const compareToggle = $('#ocr-compare-toggle');
-    const compareToggleWrap = $('#ocr-compare-toggle-wrap');
+    const compareWarning = $('#ocr-compare-warning');
+    const chipsWrap = $('#ocr-chart-models');
     const toolbar = $('#ocr-performance-toolbar');
     const kpiWrap = $('#ocr-performance-kpis');
 
     let chart = null;
     // Radar first; the Side-by-side button switches to bars.
     let currentView = 'radar';
-    let overlayBase = true;
     let currentProfileKey = String(data.selected ?? '');
+
+    // The models ticked in the "On the chart" row, besides the one being inspected.
+    // First visit: the base model (the built-in one, else one with "base" in its name).
+    const defaultExtra = () => {
+        const scored = [...profiles.values()].filter((p) => p.has_data);
+        const base = scored.find((p) => p.key === 'base')
+            ?? scored.find((p) => /base/i.test(`${p.key} ${p.label}`));
+
+        return base ? [base.key] : [];
+    };
+    const extraShown = new Set(defaultExtra());
+
+    // The score badges are measured against the first other model that is ticked.
+    const compareProfileFor = (profile) => {
+        for (const key of extraShown) {
+            const other = profiles.get(key);
+            if (other?.has_data && other.key !== profile?.key) return other;
+        }
+
+        return null;
+    };
+
+    const nameOf = (profile) => profile?.display_label || profile?.label || profile?.key || 'Model';
+
+    // Every model the chart draws, inspected one first, then the compared one.
+    const chartProfiles = (profile) => {
+        const list = [profile];
+        const compared = compareProfileFor(profile);
+        if (compared) list.push(compared);
+        profiles.forEach((other) => {
+            if (other.has_data && extraShown.has(other.key) && !list.includes(other)) list.push(other);
+        });
+
+        return list;
+    };
 
     const kpiVals = new Map(
         Array.from(document.querySelectorAll('[data-kpi-val]')).map((n) => [n.dataset.kpiVal, n]),
@@ -766,6 +801,16 @@ function initModelPerformance() {
         };
     };
 
+    // Each model's own colour (--ocr-series-N; the server picks N per model), so two
+    // models never share a colour in the list, the radar, the bars or the tooltip.
+    const SERIES_FALLBACK = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+    const seriesColor = (profile) => {
+        const slot = Math.min(Math.max(Number(profile?.color_slot) || 1, 1), SERIES_FALLBACK.length);
+        const styles = getComputedStyle(target.closest('.ocr-workspace') || document.documentElement);
+
+        return styles.getPropertyValue(`--ocr-series-${slot}`).trim() || SERIES_FALLBACK[slot - 1];
+    };
+
     const scoreValue = (profile, key) => {
         const value = profile?.scores?.[key];
 
@@ -774,22 +819,66 @@ function initModelPerformance() {
             : Number(value);
     };
 
+    // One decimal, but two near either end of the scale: 99.97% must not read
+    // as a perfect 100.0%, nor a 0.03% error rate as none at all.
+    const pct = (value) => {
+        const number = Number(value);
+        if (value === null || value === undefined || !Number.isFinite(number)) return '—';
+        const fine = (number > 99 && number < 100) || (number > 0 && number < 1);
+
+        return `${number.toFixed(fine ? 2 : 1)}%`;
+    };
+
     const updateSummary = (profile) => {
         const friendlyName = profile?.display_label || profile?.label || 'No model selected';
         if (inspectedModelBadge) {
             inspectedModelBadge.textContent = `${friendlyName}${profile?.is_active ? ' (active)' : ''}`;
         }
+        const inspectedDot = document.getElementById('ocr-inspected-model-dot');
+        if (inspectedDot && profile) inspectedDot.style.background = seriesColor(profile);
         if (emptyCommand && profile?.key) {
-            emptyCommand.textContent = `php artisan ocr:evaluate ${profile.key}`;
+            emptyCommand.textContent = `python ml/test_finetuned.py --model ${profile.key}`;
         }
 
-        const isBase = profile?.key === 'base';
-        const baseProfile = !isBase ? profiles.get('base') : null;
-        const baseHasData = Boolean(baseProfile?.has_data);
-        const isComparing = baseHasData && overlayBase && !isBase;
+        // Reading speed from real scans, for whichever model is being inspected.
+        const reading = profile?.reading;
+        const hasSpeed = Boolean(reading?.ms_per_line);
+        const speedVal = document.querySelector('[data-reading-val]');
+        const speedSub = document.querySelector('[data-reading-sub]');
+        if (speedVal) speedVal.textContent = hasSpeed ? `${Number(reading.ms_per_line).toLocaleString()} ms` : '—';
+        if (speedSub) {
+            speedSub.textContent = hasSpeed
+                ? `per line · ${Number(reading.lines).toLocaleString()} lines in real scans`
+                : 'No real scans read yet';
+        }
+        // The cards are hidden for a model without test scores, so the speed
+        // is then said in the footer instead; otherwise there is no footer.
+        document.getElementById('ocr-reading-speed')?.classList.toggle('d-none', Boolean(profile?.has_data));
 
+        const speedText = document.querySelector('#ocr-reading-speed [data-reading-text]');
+        if (speedText) {
+            const reading = profile?.reading;
+            speedText.textContent = reading?.ms_per_line
+                ? `Reading speed: about ${Number(reading.ms_per_line).toLocaleString()} ms per line, from ${Number(reading.lines).toLocaleString()} lines read in real scans`
+                : 'Reading speed: this model has not read any real scans yet';
+        }
 
-        if (compareToggleWrap) compareToggleWrap.classList.toggle('d-none', isBase || !baseHasData);
+        const compared = compareProfileFor(profile);
+        const isComparing = Boolean(compared);
+
+        // Scores from different test pictures are not a fair comparison: say so.
+        const differentTestSet = isComparing && profile?.test_set && compared.test_set
+            && profile.test_set !== compared.test_set;
+        if (compareWarning) {
+            compareWarning.classList.toggle('d-none', !differentTestSet);
+            const text = compareWarning.querySelector('[data-compare-warning-text]');
+            if (text && differentTestSet) {
+                text.textContent = `${nameOf(compared)} was tested on different pictures `
+                    + `(${compared.dataset}, ${Number(compared.sample_count).toLocaleString()} images), `
+                    + 'so this is not a fair comparison.';
+            }
+        }
+
         // Keep KPI cards and toolbar visible whenever the selected model has evaluation data
         if (kpiWrap) kpiWrap.classList.toggle('d-none', !profile?.has_data);
         if (toolbar) toolbar.classList.toggle('d-none', !profile?.has_data);
@@ -801,15 +890,15 @@ function initModelPerformance() {
             const kpiSubNode = kpiSubs.get(metric.key);
 
             const value = scoreValue(profile, metric.key);
-            const baseValue = baseHasData ? scoreValue(baseProfile, metric.key) : null;
+            const baseValue = isComparing ? scoreValue(compared, metric.key) : null;
 
-            if (kpiValNode) kpiValNode.textContent = value === null ? '—' : `${value.toFixed(1)}%`;
+            if (kpiValNode) kpiValNode.textContent = pct(value);
 
             // Error rate for the first two cards (accuracy is 100 minus it), so the
             // last line carries the figure the evaluation report actually measured.
             const errorRate = value === null ? null : ({
-                character_accuracy: `${(100 - value).toFixed(1)}% CER`,
-                word_accuracy: `${(100 - value).toFixed(1)}% WER`,
+                character_accuracy: profile?.cer != null ? `CER ${pct(profile.cer)}` : null,
+                word_accuracy: profile?.wer != null ? `WER ${pct(profile.wer)}` : null,
             })[metric.key] ?? null;
 
             if (isComparing && value !== null && baseValue !== null) {
@@ -820,24 +909,19 @@ function initModelPerformance() {
                 if (kpiDeltaNode) {
                     kpiDeltaNode.textContent = `${sign}${Math.abs(diff).toFixed(1)} pts`;
                     kpiDeltaNode.className = `badge ${diff >= 0 ? 'bg-label-success' : 'bg-label-danger'} ocr-kpi-delta`;
-                    kpiDeltaNode.title = `${Math.abs(diff).toFixed(1)} percentage points ${diff >= 0 ? 'above' : 'below'} the base model`;
+                    kpiDeltaNode.title = `${Math.abs(diff).toFixed(1)} percentage points ${diff >= 0 ? 'above' : 'below'} ${nameOf(compared)}`;
                 }
                 if (kpiSubNode) {
-                    kpiSubNode.textContent = [`Base ${baseValue.toFixed(1)}%`, errorRate].filter(Boolean).join(' · ');
+                    kpiSubNode.textContent = [`vs ${pct(baseValue)}`, errorRate].filter(Boolean).join(' · ');
+                    kpiSubNode.title = `${nameOf(compared)}: ${pct(baseValue)}`;
                 }
-            } else if (isBase && value !== null) {
-                if (kpiDeltaNode) {
-                    kpiDeltaNode.textContent = 'Baseline';
-                    kpiDeltaNode.className = 'badge bg-label-warning ocr-kpi-delta';
-                    kpiDeltaNode.title = 'The base model is the reference the others are compared with';
-                }
-                if (kpiSubNode) kpiSubNode.textContent = errorRate ?? 'Reference';
             } else {
                 if (kpiDeltaNode) {
                     kpiDeltaNode.className = 'badge ocr-kpi-delta d-none';
                     kpiDeltaNode.removeAttribute('title');
                 }
                 if (kpiSubNode) {
+                    kpiSubNode.removeAttribute('title');
                     // A non-breaking space keeps the line, so card heights stay equal.
                     kpiSubNode.textContent = errorRate ?? (value === null ? 'Not evaluated' : '\u00a0');
                 }
@@ -845,43 +929,98 @@ function initModelPerformance() {
         });
     };
 
-    const makeTooltipHtml = (profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex, w) => {
+    const escapeHtml = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[c]);
+
+    // One row per model drawn, each with its own colour; the first is the inspected
+    // model. The last line is its gap to the model it is compared with.
+    const makeTooltipHtml = (shown, scoresOf, compared, dataPointIndex, w) => {
         const collapsed = w?.globals?.collapsedSeriesIndices || [];
-        const isModelVisible = !collapsed.includes(0);
-        const isBaseVisible = showBaseComparison && !collapsed.includes(1);
-
-        if (!isModelVisible && !isBaseVisible) {
-            return '';
-        }
-
         const metric = metrics[dataPointIndex];
-        const val = scores?.[dataPointIndex];
-        const bVal = baseScores ? baseScores[dataPointIndex] : null;
-        const diff = (val !== null && bVal !== null && val !== undefined && bVal !== undefined)
-            ? val - bVal
+        const rows = shown
+            .map((p, index) => ({ p, index, value: scoresOf[index]?.[dataPointIndex] }))
+            .filter((row) => !collapsed.includes(row.index));
+
+        if (!metric || !rows.length) return '';
+
+        const own = rows.find((row) => row.index === 0);
+        const other = compared ? rows.find((row) => row.p === compared) : null;
+        const diff = own && other && Number.isFinite(own.value) && Number.isFinite(other.value)
+            ? own.value - other.value
             : null;
-        const sign = diff !== null && diff >= 0 ? '+' : '';
-        const relGain = (diff !== null && bVal > 0) ? ((diff / bVal) * 100).toFixed(1) : null;
-        const profileLabel = profile?.display_label || profile?.label || 'Selected Model';
 
         return `<div class="ocr-apex-tooltip">
-            <div class="ocr-tooltip-title">${metric.label}</div>
-            ${isModelVisible ? `
+            <div class="ocr-tooltip-title">${escapeHtml(metric.label)}</div>
+            ${rows.map((row) => `
             <div class="ocr-tooltip-row">
-                <div><span class="ocr-tooltip-badge" style="background:#ff6384"></span><strong>${profileLabel}</strong></div>
-                <span class="fw-bold text-primary">${val !== null && val !== undefined ? val.toFixed(1) + '%' : '—'}</span>
-            </div>` : ''}
-            ${isBaseVisible && bVal !== null && bVal !== undefined ? `
-            <div class="ocr-tooltip-row">
-                <div><span class="ocr-tooltip-badge" style="background:#696cff"></span><span>TrOCR Base</span></div>
-                <span class="text-muted">${bVal.toFixed(1)}%</span>
-            </div>` : ''}
-            ${isModelVisible && isBaseVisible && diff !== null ? `
+                <div><span class="ocr-tooltip-badge" style="background:${seriesColor(row.p)}"></span>${row.index === 0
+                    ? `<strong>${escapeHtml(nameOf(row.p))}</strong>`
+                    : `<span>${escapeHtml(nameOf(row.p))}</span>`}</div>
+                <span class="${row.index === 0 ? 'fw-bold' : 'text-muted'}">${pct(row.value)}</span>
+            </div>`).join('')}
+            ${diff !== null ? `
             <div class="ocr-tooltip-delta ${diff >= 0 ? 'text-success' : 'text-danger'}">
                 <i class="icon-base bx ${diff >= 0 ? 'bx-trending-up' : 'bx-trending-down'}"></i>
-                <span>${sign}${diff.toFixed(1)}% absolute gain ${relGain ? `(${sign}${relGain}% relative lift)` : ''}</span>
+                <span>${diff >= 0 ? '+' : '−'}${Math.abs(diff).toFixed(1)} points vs ${escapeHtml(nameOf(compared))}</span>
             </div>` : ''}
         </div>`;
+    };
+
+    // The "On the chart" buttons: one per model with test scores, in its colour.
+    // The inspected model is always drawn, so its button is fixed.
+    const renderChips = (profile, shown) => {
+        if (!chipsWrap) return;
+
+        chipsWrap.innerHTML = '';
+        const scored = [...profiles.values()].filter((p) => p.has_data);
+        chipsWrap.classList.toggle('d-none', scored.length < 2);
+        if (scored.length < 2) return;
+
+
+        const compared = compareProfileFor(profile);
+        scored.forEach((p) => {
+            const on = shown.includes(p);
+            const fixed = p.key === profile.key;
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = `ocr-series-chip${on ? ' is-on' : ''}${fixed ? ' is-fixed' : ''}`;
+            chip.style.setProperty('--ocr-chip-color', seriesColor(p));
+            chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+            chip.disabled = fixed;
+            // The full name, since a long one is shortened on the button.
+            chip.title = `${nameOf(p)}: ${p.key === profile.key
+                ? 'the model you are inspecting'
+                : (on ? 'click to hide it from the chart' : 'click to draw it on the chart')}`;
+
+            const dot = document.createElement('span');
+            dot.className = 'ocr-series-chip-dot';
+            dot.setAttribute('aria-hidden', 'true');
+            const text = document.createElement('span');
+            text.textContent = nameOf(p);
+            chip.append(dot, text);
+
+            if (!fixed) {
+                chip.addEventListener('click', () => {
+                    if (extraShown.has(p.key)) extraShown.delete(p.key);
+                    else extraShown.add(p.key);
+                    render(profiles.get(currentProfileKey));
+                });
+            }
+            chipsWrap.appendChild(chip);
+        });
+
+        const allShown = scored.every((p) => shown.includes(p));
+        const all = document.createElement('button');
+        all.type = 'button';
+        all.className = 'btn btn-link btn-sm p-0 ocr-chart-models-all';
+        all.textContent = allShown ? 'Show fewer' : 'Show all';
+        all.addEventListener('click', () => {
+            if (allShown) extraShown.clear();
+            else scored.forEach((p) => extraShown.add(p.key));
+            render(profiles.get(currentProfileKey));
+        });
+        chipsWrap.appendChild(all);
     };
 
     const render = (profile) => {
@@ -914,6 +1053,7 @@ function initModelPerformance() {
         empty?.classList.toggle('d-none', hasData);
 
         if (!hasData) {
+            chipsWrap?.classList.add('d-none');
             releaseLayout();
             target.setAttribute('aria-label', 'No model performance data available');
             if (emptyCopy) {
@@ -930,35 +1070,42 @@ function initModelPerformance() {
             word_accuracy: colors.word,
             exact_match: colors.exact,
         })[metric.key] || colors.primary);
-        target.setAttribute('aria-label', `Performance evaluation for ${profile.display_label || profile.label}`);
 
-        const isBase = profile?.key === 'base';
-        const baseProfile = !isBase ? profiles.get('base') : null;
-        const baseHasData = Boolean(baseProfile?.has_data);
-        const baseScores = baseHasData
-            ? metrics.map((metric) => scoreValue(baseProfile, metric.key))
-            : null;
-        const showBaseComparison = baseHasData
-            && overlayBase
-            && !isBase
-            && Array.isArray(baseScores)
-            && baseScores.every((s) => s !== null);
+        // Every model drawn, each in its own colour (the same as in the model list).
+        const shown = chartProfiles(profile)
+            .filter((p, index) => index === 0 || metrics.every((metric) => scoreValue(p, metric.key) !== null));
+        const comparedProfile = compareProfileFor(profile);
+        const compared = shown.includes(comparedProfile) ? comparedProfile : null;
+        const scoresOf = shown.map((p) => metrics.map((metric) => scoreValue(p, metric.key)));
+        const seriesColors = shown.map((p) => seriesColor(p));
+        const series = shown.map((p, index) => ({ name: nameOf(p), data: scoresOf[index] }));
+        const many = shown.length > 1;
 
-        const series = [{
-            name: `${profile.display_label || profile.label} (Fine-tuned)`,
-            data: scores,
-        }];
+        renderChips(profile, shown);
+        target.setAttribute('aria-label', many
+            ? `Performance of ${shown.map(nameOf).join(', ')}`
+            : `Performance evaluation for ${nameOf(profile)}`);
 
-        if (showBaseComparison) {
-            series.push({
-                name: 'TrOCR Base (Baseline)',
-                data: baseScores,
-            });
-        }
-
-        // Same pink as the model triangle on the dashboard's OCR Performance card.
-        const modelColor = '#ff6384';
-        const comparisonColors = [modelColor, '#696cff'];
+        // The inspected model is drawn strongest; the others lighter, so overlapping
+        // shapes stay readable.
+        const fillOpacity = shown.map((_, index) => (index === 0 ? (many ? 0.24 : 0.32) : 0.1));
+        const strokeWidth = shown.map((_, index) => (index === 0 ? 3 : 2));
+        const markerSize = shown.map((_, index) => (index === 0 ? 5 : 4));
+        const markerStroke = shown.map((_, index) => (index === 0 ? 2.5 : 1.5));
+        const tooltip = {
+            custom: ({ dataPointIndex, w }) => makeTooltipHtml(shown, scoresOf, compared, dataPointIndex, w),
+        };
+        const legend = {
+            show: many,
+            position: 'bottom',
+            horizontalAlign: 'center',
+            fontSize: '13px',
+            fontWeight: 600,
+            fontFamily: colors.font,
+            markers: { radius: 6, width: 10, height: 10 },
+            itemMargin: { horizontal: 16, vertical: 6 },
+            offsetY: 8,
+        };
 
         if (currentView === 'radar') {
             const radarSeries = [
@@ -983,43 +1130,21 @@ function initModelPerformance() {
                         speed: 350,
                     },
                 },
-                colors: showBaseComparison
-                    ? [...comparisonColors, 'transparent']
-                    : [modelColor, 'transparent'],
+                colors: [...seriesColors, 'transparent'],
                 dataLabels: { enabled: false },
-                fill: showBaseComparison
-                    ? { type: 'solid', opacity: [0.32, 0.18, 0] }
-                    : { type: 'solid', opacity: [0.32, 0] },
+                fill: { type: 'solid', opacity: [...fillOpacity, 0] },
                 grid: {
                     padding: { top: 12, right: 24, bottom: 8, left: 24 },
                 },
-                legend: {
-                    show: showBaseComparison,
-                    position: 'bottom',
-                    horizontalAlign: 'center',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    fontFamily: colors.font,
-                    markers: { radius: 6, width: 10, height: 10 },
-                    itemMargin: { horizontal: 16, vertical: 6 },
-                    offsetY: 8,
-                },
+                legend,
                 // Hollow dots like the dashboard card: card-coloured centre, series-coloured ring.
-                markers: showBaseComparison
-                    ? {
-                        size: [5, 4, 0],
-                        colors: [colors.card, colors.card, 'transparent'],
-                        strokeColors: [modelColor, '#696cff', 'transparent'],
-                        strokeWidth: [2.5, 1.5, 0],
-                        hover: { size: 7 },
-                    }
-                    : {
-                        size: [5, 0],
-                        colors: [colors.card, 'transparent'],
-                        strokeColors: [modelColor, 'transparent'],
-                        strokeWidth: [2.5, 0],
-                        hover: { size: 7 },
-                    },
+                markers: {
+                    size: [...markerSize, 0],
+                    colors: [...shown.map(() => colors.card), 'transparent'],
+                    strokeColors: [...seriesColors, 'transparent'],
+                    strokeWidth: [...markerStroke, 0],
+                    hover: { size: 7 },
+                },
                 plotOptions: {
                     radar: {
                         size: 185,
@@ -1033,20 +1158,16 @@ function initModelPerformance() {
                     },
                 },
                 series: radarSeries,
-                stroke: showBaseComparison
-                    ? { width: [3, 1.5, 0], dashArray: [0, 4, 0] }
-                    : { width: [3, 0], dashArray: [0, 0] },
-                tooltip: {
-                    custom: ({ dataPointIndex, w }) => makeTooltipHtml(profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex, w),
-                },
+                stroke: { width: [...strokeWidth, 0], dashArray: [...shown.map(() => 0), 0] },
+                tooltip,
                 xaxis: {
                     categories: metrics.map((metric) => metric.axis || metric.label),
                     labels: {
-                        // Dashboard style: dark label with the model's score;
+                        // Dashboard style: dark label with the inspected model's score;
                         // the top one stays on a line, the side ones stack.
                         formatter: (label, opts) => {
                             const index = opts?.dataPointIndex ?? 0;
-                            const score = Number.isFinite(scores[index]) ? `${Math.round(scores[index])}%` : '';
+                            const score = Number.isFinite(scores[index]) ? pct(scores[index]) : '';
 
                             if (!score) return label;
 
@@ -1071,8 +1192,8 @@ function initModelPerformance() {
                         chart: { height: 320 },
                         grid: { padding: { top: 8, right: 8, bottom: 8, left: 8 } },
                         markers: {
-                            size: showBaseComparison ? [5, 4, 0] : [5, 0],
-                            strokeWidth: showBaseComparison ? [2, 1.5, 0] : [2, 0],
+                            size: [...markerSize, 0],
+                            strokeWidth: [...shown.map((_, index) => (index === 0 ? 2 : 1.5)), 0],
                             hover: { size: 7 },
                         },
                         plotOptions: { radar: { size: 105, offsetY: 0 } },
@@ -1080,11 +1201,11 @@ function initModelPerformance() {
                 }],
             });
         } else {
-            // Grouped horizontal comparison bars
+            // Grouped horizontal bars, one bar per model drawn.
             chart = new ApexCharts(target, {
                 chart: {
                     type: 'bar',
-                    height: 380,
+                    height: Math.max(380, 140 + metrics.length * shown.length * 34),
                     fontFamily: colors.font,
                     foreColor: colors.text,
                     toolbar: { show: false },
@@ -1097,12 +1218,12 @@ function initModelPerformance() {
                 plotOptions: {
                     bar: {
                         horizontal: true,
-                        barHeight: '52%',
+                        barHeight: many ? '78%' : '52%',
                         borderRadius: 0,
                         dataLabels: { position: 'center' },
                     },
                 },
-                colors: showBaseComparison ? comparisonColors : [colors.primary],
+                colors: seriesColors,
                 dataLabels: {
                     enabled: true,
                     style: {
@@ -1110,33 +1231,22 @@ function initModelPerformance() {
                         fontWeight: 700,
                         colors: ['#fff'],
                     },
-                    formatter: (v) => `${Number(v).toFixed(1)}%`,
+                    formatter: (v) => pct(v),
                 },
+                // A thin gap in the card colour between neighbouring bars.
                 stroke: {
                     show: true,
-                    width: 1,
-                    colors: ['transparent'],
+                    width: 2,
+                    colors: [colors.card],
                 },
                 grid: {
                     borderColor: colors.border,
                     strokeDashArray: 4,
                     padding: { top: 8, right: 20, bottom: 12, left: 16 },
                 },
-                legend: {
-                    show: showBaseComparison,
-                    position: 'bottom',
-                    horizontalAlign: 'center',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    fontFamily: colors.font,
-                    markers: { radius: 6, width: 10, height: 10 },
-                    itemMargin: { horizontal: 16, vertical: 6 },
-                    offsetY: 8,
-                },
+                legend,
                 series,
-                tooltip: {
-                    custom: ({ dataPointIndex, w }) => makeTooltipHtml(profile, baseProfile, scores, baseScores, showBaseComparison, dataPointIndex, w),
-                },
+                tooltip,
                 xaxis: {
                     categories: metrics.map((m) => m.label),
                     min: 0,
@@ -1221,13 +1331,6 @@ function initModelPerformance() {
         btnBars.addEventListener('click', () => setView('bars'));
     }
 
-    if (compareToggle) {
-        compareToggle.addEventListener('change', () => {
-            overlayBase = compareToggle.checked;
-            render(profiles.get(currentProfileKey));
-        });
-    }
-
     if (selector) {
         selector.addEventListener('change', () => inspectModel(selector.value));
     }
@@ -1297,7 +1400,39 @@ function initModelPerformance() {
 
 // ----------------------------------------------------------------------- bootstrap
 
+// "Choose a colour": opened from a model's colour circle or its ⋮ menu. Ticks the
+// model's current colour and names the model that has each of the others.
+function initColorPicker() {
+    const modal = $('#colorModal');
+    const form = $('#colorForm');
+    if (!modal || !form) return;
+
+    modal.addEventListener('show.bs.modal', (event) => {
+        const trigger = event.relatedTarget;
+        const key = trigger?.dataset.key ?? '';
+        const label = trigger?.dataset.label ?? key;
+        const models = readModelPerformance()?.models ?? [];
+        const mine = models.find((m) => m.key === key);
+
+        form.action = url(config.urls.modelColor, key);
+        $('#colorModelLabel').textContent = label;
+
+        form.querySelectorAll('[data-color-owner]').forEach((node) => {
+            const owner = models.find((m) => m.key !== key && Number(m.color_slot) === Number(node.dataset.colorOwner));
+            const name = owner ? (owner.display_label || owner.label || owner.key) : '';
+            node.textContent = name;
+            node.title = name ? `${name} has this colour now` : '';
+        });
+        form.querySelectorAll('input[name="color_slot"]').forEach((input) => {
+            input.checked = Number(input.value) === Number(mine?.color_slot);
+        });
+    });
+
+    form.addEventListener('submit', () => setButtonBusy($('#color-submit'), true, 'Saving…'));
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    initColorPicker();
     initModelUpload();
     initModelActions();
     initEngineStatus();

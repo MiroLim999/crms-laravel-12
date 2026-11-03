@@ -2,7 +2,9 @@
 
 namespace App\Services\Ocr;
 
+use App\Jobs\ProcessDocumentPage;
 use App\Models\OcrModel;
+use App\Models\PageRun;
 
 /**
  * Read-only benchmark profiles for the OCR workspace radar.
@@ -84,6 +86,14 @@ class OcrModelPerformance
             );
         }
 
+        $speeds = $this->readingSpeeds();
+        foreach ($profiles as &$profile) {
+            $profile['reading'] = $speeds[$profile['key']] ?? ['lines' => 0, 'ms_per_line' => null];
+        }
+        unset($profile);
+
+        $profiles = $this->assignColorSlots($profiles, $models);
+
         $active = collect($profiles)->firstWhere('is_active', true);
         $evaluated = collect($profiles)->firstWhere('has_data', true);
 
@@ -92,6 +102,55 @@ class OcrModelPerformance
             'metrics' => self::METRICS,
             'models' => $profiles,
         ];
+    }
+
+    /**
+     * Give every model its own colour (slot 1-8 of --ocr-series-N in the workspace
+     * styles), so models never share a colour in the list, the radar or the bars.
+     *
+     * A colour the Super Admin picked (ocr_models.color_slot) is kept. Every other
+     * model gets one by itself: the colour follows the model, not its place in the
+     * list, so each starts from the slot its registry id points at and only moves on
+     * when that slot is taken. Deleting or activating another model therefore does
+     * not repaint the rest. With more than eight models, colours repeat.
+     *
+     * @param  list<array<string, mixed>>  $profiles
+     * @param  \Illuminate\Support\Collection<string, OcrModel>  $models
+     * @return list<array<string, mixed>>
+     */
+    private function assignColorSlots(array $profiles, \Illuminate\Support\Collection $models): array
+    {
+        $slots = 8;
+        $taken = [];
+        $order = collect($profiles)
+            ->map(fn (array $profile, int $index) => [
+                'index' => $index,
+                'id' => $models->get($profile['key'])?->getKey(),
+                'chosen' => (int) ($models->get($profile['key'])?->color_slot ?? 0),
+            ])
+            ->sortBy(fn (array $row) => $row['id'] ?? PHP_INT_MAX);
+
+        // Picked colours first, oldest model first if two ever picked the same one.
+        foreach ($order as $row) {
+            if ($row['chosen'] >= 1 && $row['chosen'] <= $slots && ! isset($taken[$row['chosen']])) {
+                $taken[$row['chosen']] = true;
+                $profiles[$row['index']]['color_slot'] = $row['chosen'];
+            }
+        }
+
+        foreach ($order as $row) {
+            if (isset($profiles[$row['index']]['color_slot'])) {
+                continue;
+            }
+            $slot = $row['id'] !== null ? ((int) $row['id'] - 1) % $slots + 1 : 1;
+            for ($tries = 0; $tries < $slots && isset($taken[$slot]); $tries++) {
+                $slot = $slot % $slots + 1;
+            }
+            $taken[$slot] = true;
+            $profiles[$row['index']]['color_slot'] = $slot;
+        }
+
+        return $profiles;
     }
 
     /**
@@ -122,6 +181,7 @@ class OcrModelPerformance
                 'dataset' => null,
                 'split' => null,
                 'sample_count' => 0,
+                'test_set' => null,
                 'evaluated_at' => null,
             ];
         }
@@ -151,13 +211,46 @@ class OcrModelPerformance
             'dataset' => $model->evaluation_dataset,
             'split' => $model->evaluation_split ?? 'test',
             'sample_count' => $model->evaluation_sample_count,
+            // Same value = scored on the same test images (dataset, manifest and
+            // count, as OcrModel::sharesTestSetWith checks), so they compare fairly.
+            'test_set' => implode('|', [
+                $model->evaluation_dataset,
+                $model->evaluation_manifest_sha256,
+                $model->evaluation_sample_count,
+            ]),
             'evaluated_at' => $date,
         ];
     }
 
+    /**
+     * How fast each model read lines in real scans: the time spent reading over
+     * the lines read, from every finished Scan the page job has logged. This is
+     * speed on this machine, not on the test set, and it is independent of
+     * whether the model has a benchmark.
+     *
+     * @return array<string, array{lines: int, ms_per_line: int|null}>
+     */
+    private function readingSpeeds(): array
+    {
+        return PageRun::query()
+            ->where('outcome', PageRun::COMPLETED)
+            ->whereIn('mode', [ProcessDocumentPage::MODE_FULL, ProcessDocumentPage::MODE_READ])
+            ->whereNotNull('read_ms')
+            ->whereNotNull('ocr_model_key')
+            ->where('lines', '>', 0)
+            ->get(['ocr_model_key', 'read_ms', 'lines'])
+            ->groupBy('ocr_model_key')
+            ->map(fn ($runs) => [
+                'lines' => (int) $runs->sum('lines'),
+                'ms_per_line' => (int) round($runs->sum('read_ms') / $runs->sum('lines')),
+            ])
+            ->all();
+    }
+
     private function percentage(float $rate): float
     {
-        return round(max(0.0, min(1.0, $rate)) * 100, 1);
+        // Two decimals, so 99.97% and a 0.03% error rate survive to the page.
+        return round(max(0.0, min(1.0, $rate)) * 100, 2);
     }
 
     /** @return array{character_accuracy: null, word_accuracy: null, exact_match: null} */
