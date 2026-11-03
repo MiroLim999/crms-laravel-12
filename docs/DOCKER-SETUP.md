@@ -53,8 +53,16 @@ Docker builds whatever is in the project folder, so first make sure the folder h
 
 1. **Go to the project folder.** A new terminal, including the one inside Docker Desktop, opens in your user folder (`C:\Users\yourname`), where git says `fatal: not a git repository`. Move into the project first:
 
+   Windows (use your own project folder):
+
+   ```powershell
+   cd C:\crms-laravel-12
+   ```
+
+   Mac / Linux:
+
    ```bash
-   cd C:\crms-laravel-12              # your project folder; Mac/Linux: cd ~/crms-laravel-12
+   cd ~/crms-laravel-12
    ```
 
 2. **Check the branch.** Docker has no branch of its own; it uses the one checked out here.
@@ -65,10 +73,19 @@ Docker builds whatever is in the project folder, so first make sure the folder h
    git pull                           # only if the new version is on GitHub and not yet on this computer
    ```
 
-3. **Rebuild and start**, then update the database:
+3. **Rebuild and start**, then update the database.
+
+   Windows:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\docker-start.ps1
+   docker compose exec web php artisan migrate
+   ```
+
+   Mac / Linux:
 
    ```bash
-   sh docker-start.sh                 # Windows: powershell -ExecutionPolicy Bypass -File .\docker-start.ps1
+   sh docker-start.sh
    docker compose exec web php artisan migrate
    ```
 
