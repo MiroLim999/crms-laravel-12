@@ -14,7 +14,7 @@ Do this before the README installation. You need about **20 GB free disk** and g
 | :--- | :--- |
 | **Windows** | Windows must be **22H2 or newer** (`Win + R` → `winver`). Virtualization must be **Enabled** (Task Manager → Performance → CPU); if not, turn it on in the BIOS. Install [Git](https://git-scm.com/download/win) and [Docker Desktop](https://www.docker.com/products/docker-desktop/), restart, open Docker Desktop. If asked, run `wsl --update`. |
 | **Mac** | Install Git (run `git --version` in Terminal and accept the prompt) and [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Apple Silicon). In Docker: **Settings → Resources → Memory → 8 GB or more**. |
-| **Linux** | Install Git, then Docker Desktop from the AUR: `yay -S docker-desktop`. Open Docker Desktop (or run `systemctl --user start docker-desktop`). |
+| **Linux** | Install Git, then Docker Desktop from yay: `yay -S docker-desktop`. Open Docker Desktop (or run `systemctl --user start docker-desktop`). |
 
 Wait until Docker says **Engine running**, then follow the [README installation](../README.md#installation-docker).
 
