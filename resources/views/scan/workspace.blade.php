@@ -696,6 +696,37 @@
         </div>
     </div>
 
+    {{-- Queued batch document options (Delete / Open) --}}
+    <div class="modal fade" id="batchDocumentModal" tabindex="-1"
+         aria-labelledby="batchDocumentModalTitle" aria-describedby="batchDocumentModalDescription"
+         aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
+            <div class="modal-content leave-scan-modal">
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-danger" aria-hidden="true">
+                        <i class="icon-base bx bx-trash"></i>
+                    </span>
+                    <h5 class="modal-title" id="batchDocumentModalTitle">Queued Document</h5>
+                    <p class="leave-scan-modal__text" id="batchDocumentModalDescription">
+                        Remove this document from the batch queue?
+                    </p>
+
+                    <div class="leave-scan-modal__actions">
+                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">
+                            Cancel
+                        </button>
+                        <button type="button" class="btn btn-outline-primary d-none" id="batchDocOpenBtn">
+                            Open
+                        </button>
+                        <button type="button" class="btn btn-danger" id="confirmDeleteBatchDocBtn">
+                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- OCR progress while the model runs --}}
     <div class="modal fade" id="scanningModal" tabindex="-1" data-bs-backdrop="static"
          data-bs-keyboard="false" aria-hidden="true">
@@ -2702,33 +2733,196 @@
                 };
                 const badgeInfo = badgeMap[item.status] || badgeMap.pending;
                 const isCurrent = index === batchState.currentIndex;
+                const canInteract = batchState.phase !== 'scanning' && !(batchState.phase === 'verifying' && item.status === 'imported');
 
                 const chip = document.createElement('button');
                 chip.type = 'button';
                 chip.className = `batch-queue-chip ${badgeInfo.cls}${isCurrent ? ' is-current' : ''}`;
                 chip.setAttribute('role', 'listitem');
-                chip.disabled = batchState.phase === 'scanning' || (batchState.phase === 'verifying' && item.status === 'imported');
+                chip.disabled = !canInteract;
+                chip.draggable = canInteract && batchState.items.length > 1;
+                chip.title = canInteract ? `${item.name} — Drag to change priority, or click to delete / open` : item.name;
                 chip.innerHTML = `
                     <span class="batch-queue-chip__index">${index + 1}</span>
-                    <span class="batch-queue-chip__name" title="${item.name}">${item.name}</span>
+                    <span class="batch-queue-chip__name">${item.name}</span>
                     <span class="batch-queue-chip__status">
                         <i class="icon-base bx ${badgeInfo.icon}" aria-hidden="true"></i>
                         <span>${badgeInfo.text}</span>
                     </span>
                 `;
-                chip.addEventListener('click', () => {
-                    if (batchState.phase === 'queuing' && index !== batchState.currentIndex) {
-                        openBatchQueueItem(index);
-                    } else if (batchState.phase === 'verifying' && index !== batchState.currentIndex && item.status !== 'imported') {
-                        openBatchVerifyItem(index);
+
+                chip.addEventListener('dragstart', (event) => {
+                    if (!chip.draggable) return;
+                    draggedBatchIndex = index;
+                    batchChipDidDrag = true;
+                    chip.classList.add('is-dragging');
+                    if (event.dataTransfer) {
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData('text/plain', String(index));
                     }
                 });
+
+                chip.addEventListener('dragover', (event) => {
+                    if (draggedBatchIndex === null || draggedBatchIndex === index) return;
+                    event.preventDefault();
+                    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                    chip.classList.add('is-drag-over');
+                });
+
+                chip.addEventListener('dragleave', () => {
+                    chip.classList.remove('is-drag-over');
+                });
+
+                chip.addEventListener('drop', (event) => {
+                    event.preventDefault();
+                    chip.classList.remove('is-drag-over');
+                    if (draggedBatchIndex === null || draggedBatchIndex === index) return;
+
+                    const activeItem = batchState.items[batchState.currentIndex];
+                    if (batchState.phase === 'queuing' && activeItem && !activeItem.boxes) {
+                        activeItem.boxes = cloneBoxes(marker.toJSON());
+                        activeItem.rows = [...gridRows];
+                        activeItem.tilts = [...rowTilts];
+                    }
+
+                    const [movedItem] = batchState.items.splice(draggedBatchIndex, 1);
+                    batchState.items.splice(index, 0, movedItem);
+                    batchState.currentIndex = Math.max(0, batchState.items.indexOf(activeItem));
+                    draggedBatchIndex = null;
+
+                    if (activeItem) {
+                        el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${batchState.currentIndex + 1}/${batchState.items.length}) · ${activeItem.name}`;
+                        el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+                    }
+                    renderBatchQueueBanner();
+                });
+
+                chip.addEventListener('dragend', () => {
+                    chip.classList.remove('is-dragging');
+                    chipsContainer.querySelectorAll('.batch-queue-chip').forEach((c) => c.classList.remove('is-drag-over'));
+                    draggedBatchIndex = null;
+                    window.setTimeout(() => { batchChipDidDrag = false; }, 60);
+                });
+
+                chip.addEventListener('click', () => {
+                    if (batchChipDidDrag || !canInteract) return;
+                    openBatchDocumentModal(index);
+                });
+
                 chipsContainer.appendChild(chip);
             });
             const activeChip = chipsContainer.querySelector('.batch-queue-chip.is-current');
             activeChip?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
         }
     }
+
+    let draggedBatchIndex = null;
+    let batchChipDidDrag = false;
+    let selectedBatchModalIndex = null;
+
+    function openBatchDocumentModal(index) {
+        const item = batchState.items[index];
+        if (!item) return;
+
+        selectedBatchModalIndex = index;
+        const modalEl = document.getElementById('batchDocumentModal');
+        const titleEl = document.getElementById('batchDocumentModalTitle');
+        const descEl = document.getElementById('batchDocumentModalDescription');
+        const openBtn = document.getElementById('batchDocOpenBtn');
+
+        if (titleEl) titleEl.textContent = `Priority #${index + 1} · ${item.name}`;
+        if (descEl) {
+            descEl.textContent = index === batchState.currentIndex
+                ? `Remove "${item.name}" from the batch queue?`
+                : `Remove "${item.name}" from the batch queue, or open it to work on it now.`;
+        }
+        if (openBtn) {
+            openBtn.classList.toggle('d-none', index === batchState.currentIndex || item.status === 'imported');
+        }
+        if (modalEl) {
+            window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        }
+    }
+
+    document.getElementById('batchDocOpenBtn')?.addEventListener('click', async () => {
+        const modalEl = document.getElementById('batchDocumentModal');
+        if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
+        if (selectedBatchModalIndex === null) return;
+        const idx = selectedBatchModalIndex;
+        selectedBatchModalIndex = null;
+
+        if (batchState.phase === 'queuing' && idx !== batchState.currentIndex) {
+            const currentItem = batchState.items[batchState.currentIndex];
+            if (currentItem) {
+                currentItem.boxes = cloneBoxes(marker.toJSON());
+                currentItem.rows = [...gridRows];
+                currentItem.tilts = [...rowTilts];
+            }
+            await openBatchQueueItem(idx);
+        } else if (batchState.phase === 'verifying' && idx !== batchState.currentIndex) {
+            await openBatchVerifyItem(idx);
+        }
+    });
+
+    document.getElementById('confirmDeleteBatchDocBtn')?.addEventListener('click', async () => {
+        const modalEl = document.getElementById('batchDocumentModal');
+        if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
+        if (selectedBatchModalIndex === null) return;
+
+        const deleteIdx = selectedBatchModalIndex;
+        selectedBatchModalIndex = null;
+        const targetItem = batchState.items[deleteIdx];
+        if (!targetItem) return;
+
+        const wasCurrent = deleteIdx === batchState.currentIndex;
+        const currentItem = batchState.items[batchState.currentIndex];
+        if (!wasCurrent && batchState.phase === 'queuing' && currentItem) {
+            currentItem.boxes = cloneBoxes(marker.toJSON());
+            currentItem.rows = [...gridRows];
+            currentItem.tilts = [...rowTilts];
+        }
+
+        if (targetItem.pageId) {
+            fetch(config.pageCancelUrl.replace('__PAGE__', String(targetItem.pageId)), {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+            }).catch(() => {});
+        }
+
+        batchState.items.splice(deleteIdx, 1);
+
+        if (batchState.items.length === 0) {
+            batchState.active = false;
+            batchState.phase = 'idle';
+            batchState.currentIndex = 0;
+            scanFile = null;
+            scanFileInput.value = '';
+            renderBatchQueueBanner();
+            showStep('upload');
+            return;
+        }
+
+        if (wasCurrent) {
+            const nextIndex = Math.min(deleteIdx, batchState.items.length - 1);
+            if (batchState.phase === 'verifying') {
+                await openBatchVerifyItem(nextIndex);
+            } else {
+                await openBatchQueueItem(nextIndex);
+            }
+        } else {
+            batchState.currentIndex = Math.max(0, batchState.items.indexOf(currentItem));
+            if (currentItem) {
+                el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${batchState.currentIndex + 1}/${batchState.items.length}) · ${currentItem.name}`;
+                el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+            }
+            renderBatchQueueBanner();
+        }
+    });
 
     async function startBatchQueue(fileList) {
         const validFiles = Array.from(fileList || []).filter((file) => {

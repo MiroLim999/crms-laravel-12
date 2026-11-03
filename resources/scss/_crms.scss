@@ -1840,7 +1840,27 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   font-size: .75rem;
   line-height: 1.15;
   cursor: pointer;
-  transition: border-color .15s ease, background-color .15s ease;
+  user-select: none;
+  transition: border-color .15s ease, background-color .15s ease, opacity .15s ease, transform .12s ease;
+
+  &[draggable="true"] {
+    cursor: grab;
+
+    &:active {
+      cursor: grabbing;
+    }
+  }
+
+  &.is-dragging {
+    opacity: .45;
+    transform: scale(.97);
+  }
+
+  &.is-drag-over {
+    border-color: var(--bs-primary);
+    border-style: dashed;
+    background: rgba(var(--bs-primary-rgb), .06);
+  }
 
   &:hover:not(:disabled) {
     border-color: rgba(var(--bs-primary-rgb), .45);
