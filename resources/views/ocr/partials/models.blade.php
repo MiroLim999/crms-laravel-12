@@ -90,20 +90,20 @@
                         $showKey = strcasecmp((string) $model['label'], (string) $model['key']) !== 0;
                         $canManage = $engine['reachable']
                             && $model['on_disk']
-                            && ! $model['is_base']
+                            && $model['has_files']
                             && ! $model['is_active']
                             && $model['disk_deleted_at'] === null;
 
                         if (! $engine['reachable']) {
                             $blockedReason = 'The OCR service is offline.';
-                        } elseif ($model['is_base']) {
-                            $blockedReason = 'The built-in base model is protected.';
                         } elseif ($model['is_active']) {
                             $blockedReason = 'Activate another model before renaming or deleting this one.';
                         } elseif ($model['disk_deleted_at']) {
                             $blockedReason = 'This model was deleted from disk.';
                         } elseif (! $model['on_disk']) {
                             $blockedReason = 'The model folder is missing from disk.';
+                        } elseif (! $model['has_files']) {
+                            $blockedReason = 'No local copy: this model is read online, so there is nothing to delete.';
                         } else {
                             $blockedReason = '';
                         }
@@ -202,15 +202,18 @@
                                             @endif
                                         </div>
 
-                                        <button type="button"
-                                                class="dropdown-item model-rename-trigger"
-                                                data-key="{{ $model['key'] }}"
-                                                data-label="{{ $model['label'] }}"
-                                                data-bs-toggle="modal"
-                                                data-bs-target="#renameModal">
-                                            <i class="icon-base bx bx-rename icon-sm me-2"></i>Rename
-                                        </button>
-                                        <div class="dropdown-divider"></div>
+                                        @unless ($model['is_base'])
+                                            {{-- The base model's key is how CRMS recognises it, so it cannot be renamed. --}}
+                                            <button type="button"
+                                                    class="dropdown-item model-rename-trigger"
+                                                    data-key="{{ $model['key'] }}"
+                                                    data-label="{{ $model['label'] }}"
+                                                    data-bs-toggle="modal"
+                                                    data-bs-target="#renameModal">
+                                                <i class="icon-base bx bx-rename icon-sm me-2"></i>Rename
+                                            </button>
+                                            <div class="dropdown-divider"></div>
+                                        @endunless
                                         <button type="button"
                                                 class="dropdown-item text-danger model-delete-trigger"
                                                 data-key="{{ $model['key'] }}"

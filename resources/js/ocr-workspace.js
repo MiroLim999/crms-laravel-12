@@ -661,6 +661,7 @@ function initModelActions() {
         $('#deleteLabel').textContent = label;
         $('#deleteKey').textContent = key;
         $('#deleteKeyRow').classList.toggle('d-none', label === key);
+        $('#deleteBaseNote')?.classList.toggle('d-none', key !== 'base');
     });
 
     deleteForm?.addEventListener('submit', () => setButtonBusy(deleteSubmit, true, 'Deleting…'));

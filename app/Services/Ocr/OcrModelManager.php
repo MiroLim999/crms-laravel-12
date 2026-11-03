@@ -75,6 +75,9 @@ class OcrModelManager
             'label' => $local?->label ?? $remote['label'] ?? $key,
             'is_base' => $key === 'base',
             'on_disk' => $remote !== null,
+            // Files the service actually holds for this model. The base model can be
+            // listed with none (it is then read online), and there is nothing to delete.
+            'has_files' => ! empty($remote['files'] ?? []),
             'loaded' => (bool) ($remote['loaded'] ?? false),
             'is_active' => (bool) $local?->is_active,
             'registered' => $local !== null,
@@ -279,7 +282,8 @@ class OcrModelManager
 
     public function delete(string $key, User $actor): void
     {
-        $this->guardNotBase($key, 'deleted');
+        // The base model may be deleted like any other (its local copy in ml/models/base).
+        // Renaming it stays blocked: its key is how CRMS recognises it.
         $this->guardNotActive($key, 'Delete');
         $this->client->deleteModel($key);
 

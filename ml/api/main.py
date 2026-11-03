@@ -298,7 +298,11 @@ def _model_info():
         base_evaluation = _read_evaluation_report(BASE_MODEL_DIR)
         if base_evaluation is not None:
             base_info["evaluation"] = base_evaluation
-    infos.append(base_info)
+    # Once the local base copy has been deleted it leaves the list, as any model does.
+    # It stays only when it is the one way left to read (no other model is installed),
+    # in which case it is read online.
+    if base_is_local or not discovered:
+        infos.append(base_info)
     return infos
 
 
@@ -1185,16 +1189,19 @@ def add_model(
 def delete_model(payload: DeleteModelRequest) -> dict:
     """Delete a model folder from Models/. Body: { "model": "<key>" }.
 
-    Refuses to touch the built-in base model and guards against any path that
-    resolves outside the Models/ directory."""
+    The base model's local copy (Models/base) can be deleted too. Guards against
+    any path that resolves outside the Models/ directory."""
     key = (payload.model or "").strip()
 
     if not key:
         raise HTTPException(status_code=400, detail="No model specified.")
-    if key == BASE_MODEL_KEY:
-        raise HTTPException(status_code=400, detail="The base model cannot be deleted.")
 
+    # _discover_models() hides the base folder, so it is looked up on its own.
     discovered = _discover_models()
+    if key == BASE_MODEL_KEY:
+        if not _looks_like_model(BASE_MODEL_DIR):
+            raise HTTPException(status_code=404, detail="The base model has no local copy to delete.")
+        discovered = {BASE_MODEL_KEY: BASE_MODEL_DIR}
     if key not in discovered:
         raise HTTPException(status_code=404, detail=f"Model '{key}' was not found.")
 

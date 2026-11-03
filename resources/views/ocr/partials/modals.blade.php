@@ -243,6 +243,11 @@
                     The model weights cannot be restored from CRMS. Existing records keep their submitted values
                     and model reference.
                 </div>
+                <div class="alert alert-warning text-start small mt-2 mb-0 d-none" id="deleteBaseNote">
+                    This is the built-in base model. Without it the radar has nothing to compare other models
+                    against, and the base scores in a new upload can no longer be installed. You can bring it back
+                    by running <span class="font-monospace">ml/download_trocr.py</span>.
+                </div>
             </div>
             <div class="modal-footer justify-content-center pt-0">
                 <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Keep model</button>

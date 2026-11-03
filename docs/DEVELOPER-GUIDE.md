@@ -689,6 +689,15 @@ What it does differently from the first notebook:
 
 Its ZIP (`trocr-sequential.zip`) holds the model, `evaluation-report.json` and `base-evaluation-report.json`. Both are measured on the locked test, so the upload installs the base scores as described in section 5. It also holds `sequential-summary.json` with every number of the run: data counts, copies removed, epoch log, scores, verdict, and the parent model's name and weights hash, which `evaluation-report.json` repeats under `parent_model`. `sequential-test-errors.csv` lists every test image the start or new model read wrong, with all three readings. Upload the new model under a new name and keep the start model installed, so you can switch back.
 
+### 5c. Benchmarking Other Models on a Dataset (no training)
+`finetuning-kaggle/trocr-benchmark-models.ipynb` reads one dataset's `test` split with Microsoft's base model and with a model you add as an input (for example the 50k model), then packages each as a ZIP. Use it to put models trained on different datasets on the same test, so the OCR Workspace can show them side by side and on the radar. CRMS compares two models only when their reports name the same `dataset`, `manifest_sha256` and `sample_count`; the notebook takes these from the dataset you add (default `synthetic-handwritten-samples100k`) and warns if the `manifest.csv` differs from `EXPECTED_MANIFEST_SHA256` (the 100k model's).
+
+- The base ZIP carries the original Hugging Face weights, so its hash equals `ml/models/base`. The 50k ZIP carries your model's own files unchanged; only the reports are new.
+- Each ZIP holds `config.json`, `generation_config.json`, `model.safetensors`, `processor_config.json`, `tokenizer.json`, `tokenizer_config.json`, `evaluation-report.json`, `base-evaluation-report.json` and `training-summary.json` (`kind: benchmark_only`).
+- Before zipping, the notebook reloads each packaged folder and re-reads 32 test images; the readings must match the scored model's.
+- The 100k model trained on this dataset's train split; the base and 50k models did not, so the scores say how well each reads 100k-style pictures, not real ledgers. Cell 10 therefore also scores the test texts that are not in the 100k training split.
+- Upload names (`BASE_KEY`, `FIFTY_K_KEY` in cell 3) must be new: CRMS refuses a name that already exists.
+
 ### 6. Installing Models into the Web Application
 1. Log in as **Super Admin** and navigate to the **OCR Workspace**.
 2. Click **Add model** and upload either a `.zip` archive or the loose files: `config.json`, `model.safetensors` (or `pytorch_model.bin`), the tokenizer files, and optionally `evaluation-report.json` and `base-evaluation-report.json`. The notebook's `trocr-finetuned.zip` already holds all of them.

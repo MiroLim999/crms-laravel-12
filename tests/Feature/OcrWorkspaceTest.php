@@ -531,7 +531,7 @@ class OcrWorkspaceTest extends TestCase
         $this->assertSame('trocr-v1', OcrModel::active()->key);
     }
 
-    public function test_the_base_model_cannot_be_renamed_or_deleted(): void
+    public function test_the_base_model_cannot_be_renamed(): void
     {
         $this->fakeHealthyService();
         $actor = $this->superAdmin();
@@ -540,11 +540,23 @@ class OcrWorkspaceTest extends TestCase
             ->post(route('ocr.rename', 'base'), ['new_name' => 'mine'])
             ->assertSessionHas('error');
 
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '_model'));
+    }
+
+    public function test_the_base_model_can_be_deleted_like_any_other(): void
+    {
+        $this->fakeHealthyService([
+            '*/delete_model' => Http::response(['ok' => true, 'deleted' => 'base']),
+        ]);
+        $actor = $this->superAdmin();
+
         $this->actingAs($actor)
             ->delete(route('ocr.destroy', 'base'))
-            ->assertSessionHas('error');
+            ->assertSessionHas('success');
 
-        Http::assertNotSent(fn ($request) => str_contains($request->url(), '_model'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/delete_model')
+            && ($request['model'] ?? null) === 'base');
+        $this->assertDatabaseHas('audit_logs', ['action' => 'ocr_model.deleted']);
     }
 
     public function test_deleting_a_model_tombstones_it_and_is_audited(): void
