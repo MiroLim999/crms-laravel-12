@@ -335,24 +335,9 @@ class OcrModelManager
         }
 
         foreach ($registry as $key => $model) {
+            // The base model too: the service lists it only while ml/models/base
+            // holds it (nothing is downloaded by itself), so absent means gone.
             if ($remote->has($key)) {
-                continue;
-            }
-
-            if ($key === 'base') {
-                // The base model is pulled from the Hugging Face cache, so it is
-                // never really absent. A tombstone on it is always wrong.
-                if ($model->disk_deleted_at !== null) {
-                    $model->fill(['disk_deleted_at' => null, 'disk_deleted_by' => null]);
-                    $this->audit->saveAndLog(
-                        'ocr_model.restored',
-                        $model,
-                        'Cleared an invalid tombstone from the protected base OCR model.',
-                        $actor,
-                    );
-                    $counts['restored']++;
-                }
-
                 continue;
             }
 

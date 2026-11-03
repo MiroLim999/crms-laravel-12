@@ -103,8 +103,8 @@ REPO_ROOT = os.path.dirname(ML_ROOT)
 # (with config.json + model.safetensors) and it shows up automatically.
 MODELS_DIR = os.path.join(ML_ROOT, "models")
 
-# The un-fine-tuned base model, always offered as an option.
-FALLBACK_MODEL = "microsoft/trocr-base-handwritten"
+# The un-fine-tuned base model, offered only once installed in ml/models/base
+# (python ml/download_trocr.py, or Add model); never downloaded by the service.
 BASE_MODEL_KEY = "base"
 BASE_MODEL_LABEL = "TrOCR base (not fine-tuned)"
 BASE_MODEL_DIR = os.path.join(MODELS_DIR, BASE_MODEL_KEY)
@@ -240,22 +240,39 @@ def _label_for(key):
     return MODEL_LABELS.get(key, _prettify(key))
 
 
+# Models are installed by hand (Add model in the OCR Workspace, or a folder copied
+# into ml/models). Nothing is downloaded by itself, so with no model installed the
+# service says so instead of fetching one from Hugging Face.
+NO_MODEL_MESSAGE = (
+    "No OCR model is installed. A Super Admin can add one in the OCR Workspace "
+    "(Add model), or copy a model folder into ml/models and click Rescan models."
+)
+
+
+def _base_is_installed():
+    return _looks_like_model(BASE_MODEL_DIR)
+
+
 def _default_key():
+    """The model to read with when none is asked for; None when none is installed."""
     discovered = _discover_models()
     if PREFERRED_DEFAULT in discovered:
         return PREFERRED_DEFAULT
     if discovered:
         return next(iter(discovered))
-    return BASE_MODEL_KEY
+    return BASE_MODEL_KEY if _base_is_installed() else None
 
 
 def _resolve_key(requested):
-    """Choose a usable model key, honoring the request when possible."""
-    if requested == BASE_MODEL_KEY:
+    """Choose an installed model key, honoring the request when possible."""
+    if requested == BASE_MODEL_KEY and _base_is_installed():
         return BASE_MODEL_KEY
     if requested in _discover_models():
         return requested
-    return _default_key()
+    key = _default_key()
+    if key is None:
+        raise HTTPException(status_code=503, detail=NO_MODEL_MESSAGE)
+    return key
 
 
 def _model_info():
@@ -280,44 +297,49 @@ def _model_info():
         if evaluation is not None:
             info["evaluation"] = evaluation
         infos.append(info)
-    base_is_local = _looks_like_model(BASE_MODEL_DIR)
-    base_info = {
-        "key": BASE_MODEL_KEY,
-        "label": BASE_MODEL_LABEL,
-        # Keep the legacy online fallback, but report the actual local files so
-        # the workspace can distinguish a reproducible install from a hub load.
-        "available": True,
-        "loaded": BASE_MODEL_KEY in _models,
-        "files": sorted(
-            name
-            for name in os.listdir(BASE_MODEL_DIR)
-            if base_is_local and os.path.isfile(os.path.join(BASE_MODEL_DIR, name))
-        ) if base_is_local else [],
-    }
-    if base_is_local:
+    # The base model is listed like any other: only while ml/models/base holds it.
+    # A fresh install (ml/models is not in git) therefore lists no models at all.
+    if _base_is_installed():
+        base_info = {
+            "key": BASE_MODEL_KEY,
+            "label": BASE_MODEL_LABEL,
+            "available": True,
+            "loaded": BASE_MODEL_KEY in _models,
+            "files": sorted(
+                name
+                for name in os.listdir(BASE_MODEL_DIR)
+                if os.path.isfile(os.path.join(BASE_MODEL_DIR, name))
+            ),
+        }
         base_evaluation = _read_evaluation_report(BASE_MODEL_DIR)
         if base_evaluation is not None:
             base_info["evaluation"] = base_evaluation
-    # Once the local base copy has been deleted it leaves the list, as any model does.
-    # It stays only when it is the one way left to read (no other model is installed),
-    # in which case it is read online.
-    if base_is_local or not discovered:
         infos.append(base_info)
     return infos
 
 
 def _load_model(key):
-    """Load (and cache) the model for `key`. Returns its cache entry."""
+    """Load (and cache) the model for `key`. Returns its cache entry.
+
+    Only installed models are loaded. A folder that vanished since the request was
+    resolved falls back to another installed model; with none, the caller gets a
+    503 saying no model is installed."""
     if key == BASE_MODEL_KEY:
-        model_src = BASE_MODEL_DIR if _looks_like_model(BASE_MODEL_DIR) else FALLBACK_MODEL
+        if not _base_is_installed():
+            fallback = _default_key()
+            if fallback is None or fallback == BASE_MODEL_KEY:
+                raise HTTPException(status_code=503, detail=NO_MODEL_MESSAGE)
+            return _load_model(fallback)
+        model_src = BASE_MODEL_DIR
         label, cache_key = BASE_MODEL_LABEL, BASE_MODEL_KEY
     else:
         model_src = _discover_models().get(key)
         if model_src is None:
-            # Requested folder vanished/invalid -> fall back to the base model.
-            model_src, label, cache_key = FALLBACK_MODEL, BASE_MODEL_LABEL, BASE_MODEL_KEY
-        else:
-            label, cache_key = _label_for(key), key
+            fallback = _default_key()
+            if fallback is None or fallback == key:
+                raise HTTPException(status_code=503, detail=NO_MODEL_MESSAGE)
+            return _load_model(fallback)
+        label, cache_key = _label_for(key), key
 
     # Fast path, no lock: a hit on an already-populated cache cannot race, and
     # /ocr must not queue behind a colleague's cold start of a different model.
@@ -503,12 +525,12 @@ class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
     device: str
-    default: str
+    default: Optional[str] = None  # None: no model is installed
     models: list[ModelInfo]
 
 
 class ModelsResponse(BaseModel):
-    default: str
+    default: Optional[str] = None  # None: no model is installed
     models: list[ModelInfo]
 
 

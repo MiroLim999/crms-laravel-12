@@ -42,7 +42,7 @@ docker compose logs -f worker        # worker messages (Ctrl+C to stop watching)
 | `.env` | settings and secret key |
 | `docker-data/storage` | scans, line pictures, logs |
 | `docker-data/backups` | database backups |
-| `ml/models` | models |
+| `ml/models` | models (empty on a new computer: CRMS downloads none by itself; add them from your USB with **OCR Workspace → Add model**) |
 | Docker volume `crms_mysql-data` | the database |
 
 ---

@@ -10,6 +10,7 @@ use App\Models\DocumentTemplate;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\User;
+use App\Services\Ocr\OcrModelPerformance;
 use Database\Seeders\DocumentTemplateSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -559,12 +560,46 @@ class OcrWorkspaceTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'ocr_model.deleted']);
     }
 
+    public function test_a_fresh_install_with_no_models_shows_an_empty_list(): void
+    {
+        // ml/models is not in git: on a new computer the service has nothing to list
+        // until a model is added by hand.
+        Http::fake([
+            '*/health' => Http::response(['status' => 'ok', 'model_loaded' => false, 'device' => 'cpu', 'default' => null, 'models' => []]),
+            '*/models' => Http::response(['default' => null, 'models' => []]),
+        ]);
+
+        $this->actingAs($this->superAdmin())
+            ->get(route('ocr.index'))
+            ->assertOk()
+            ->assertSee('No models available')
+            ->assertDontSee('Built-in model');
+
+        $this->assertSame(0, OcrModel::count());
+    }
+
+    public function test_a_base_model_whose_folder_is_gone_is_marked_deleted(): void
+    {
+        OcrModel::create(['key' => 'base', 'label' => 'TrOCR base']);
+        Http::fake([
+            '*/health' => Http::response(['status' => 'ok', 'model_loaded' => false, 'device' => 'cpu', 'default' => null, 'models' => []]),
+            '*/models' => Http::response(['default' => null, 'models' => []]),
+        ]);
+
+        $this->actingAs($this->superAdmin())
+            ->get(route('ocr.index'))
+            ->assertOk()
+            ->assertSee('No models available');
+
+        $this->assertNotNull(OcrModel::firstWhere('key', 'base')->disk_deleted_at);
+    }
+
     public function test_a_picked_colour_is_kept_and_a_taken_colour_is_swapped(): void
     {
         $actor = $this->superAdmin();
         OcrModel::create(['key' => 'model-a', 'label' => 'model-a']);
         OcrModel::create(['key' => 'model-b', 'label' => 'model-b']);
-        $slots = fn () => collect(app(\App\Services\Ocr\OcrModelPerformance::class)->summary()['models'])
+        $slots = fn () => collect(app(OcrModelPerformance::class)->summary()['models'])
             ->pluck('color_slot', 'key');
 
         $before = $slots();

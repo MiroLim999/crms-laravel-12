@@ -51,6 +51,8 @@ The models are not in the repository (1.3 GB each). Copy the folder `TrOcr-50k-b
 Check that this file exists: `ml/models/TrOcr-50k-broken-samples/config.json` (if there is an extra folder level, move the inner folder up one level).
 
 > **No fine-tuned model?** Download the base model instead: `python ml/download_trocr.py`. It goes to `ml/models/base`.
+>
+> **You can also skip this step.** CRMS never downloads a model by itself, so the OCR Workspace then starts with **no models**, and scanning says "No OCR model is installed" until you add one. Add it later from your USB: **OCR Workspace → Add model** (the model's ZIP), or copy the folder into `ml/models/` and click **Rescan models**. Then click **Activate**.
 
 ### Step 3: Start and set up
 
