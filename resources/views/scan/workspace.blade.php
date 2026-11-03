@@ -30,6 +30,7 @@
                                         <span class="batch-queue-banner__sub" id="batchQueueCounter">0 / 0</span>
                                     </div>
                                 </div>
+                                <div class="batch-queue-chips" id="batchQueueChips" role="list" aria-label="Queued documents"></div>
                             </div>
                         </div>
                     </div>
