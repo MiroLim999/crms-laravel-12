@@ -37,9 +37,31 @@
   // Backdrop behind a scanned page. The scan itself is a photo of white paper
   // and stays white in both modes.
   --crms-viewport-bg: #e9ebf0;
+
+  // One colour per OCR model, used by the OCR Workspace and the dashboard
+  // (OcrModelPerformance::assignColorSlots picks N). Checked for colour-blind
+  // separation and contrast; the dark steps are in the dark block below.
+  --ocr-series-1: #2a78d6; // blue
+  --ocr-series-2: #eb6834; // orange
+  --ocr-series-3: #1baf7a; // aqua
+  --ocr-series-4: #eda100; // yellow
+  --ocr-series-5: #e87ba4; // pink
+  --ocr-series-6: #008300; // green
+  --ocr-series-7: #6250d6; // violet
+  --ocr-series-8: #e34948; // red
 }
 
 [data-bs-theme='dark'] {
+  // OCR model colours, stepped for the dark card (#18181f).
+  --ocr-series-1: #3987e5;
+  --ocr-series-2: #d95926;
+  --ocr-series-3: #199e70;
+  --ocr-series-4: #c98500;
+  --ocr-series-5: #d55181;
+  --ocr-series-6: #008300;
+  --ocr-series-7: #9085e9;
+  --ocr-series-8: #e66767;
+
   color-scheme: dark;
 
   // Surfaces: a true-black page (lets an OLED panel switch those pixels off)

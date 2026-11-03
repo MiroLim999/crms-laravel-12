@@ -12,6 +12,7 @@ use App\Services\Ocr\OcrServiceException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
 /**
@@ -207,6 +208,57 @@ class OcrModelController extends Controller
         } catch (OcrServiceException $e) {
             return $this->back()->with('error', $e->getMessage());
         }
+    }
+
+    /**
+     * Give a model the colour the Super Admin picked in the workspace. A colour
+     * another model already has is swapped: that model takes this one's current
+     * colour, so no two models ever share one.
+     */
+    public function color(Request $request, string $key): RedirectResponse
+    {
+        $validated = $request->validate([
+            'color_slot' => ['required', 'integer', 'between:1,8'],
+        ]);
+        $chosen = (int) $validated['color_slot'];
+
+        $model = OcrModel::query()->where('key', $key)->whereNull('disk_deleted_at')->first();
+        if ($model === null) {
+            return $this->back()->with('error', "Model '{$key}' is not in the registry yet. Rescan models first.");
+        }
+
+        $current = collect($this->performance->summary()['models'])->pluck('color_slot', 'key');
+        $mine = (int) ($current->get($key) ?? 0);
+        $holderKey = $current->search($chosen, true);
+
+        if ($mine === $chosen && (int) $model->color_slot === $chosen) {
+            return $this->back()->with('success', "'{$key}' already has that colour.");
+        }
+
+        DB::transaction(function () use ($model, $key, $chosen, $mine, $holderKey, $request) {
+            if (is_string($holderKey) && $holderKey !== $key) {
+                $holder = OcrModel::query()->where('key', $holderKey)->first();
+                if ($holder !== null) {
+                    $holder->color_slot = $mine >= 1 ? $mine : null;
+                    $this->audit->saveAndLog(
+                        'ocr_model.color_changed',
+                        $holder,
+                        "Swapped colours: '{$holderKey}' gave its colour to '{$key}'.",
+                        $request->user(),
+                    );
+                }
+            }
+
+            $model->color_slot = $chosen;
+            $this->audit->saveAndLog(
+                'ocr_model.color_changed',
+                $model,
+                "Changed the colour of OCR model '{$key}'.",
+                $request->user(),
+            );
+        });
+
+        return $this->back()->with('success', "Changed the colour of '{$key}'.");
     }
 
     private function back(): RedirectResponse

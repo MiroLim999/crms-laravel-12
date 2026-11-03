@@ -92,6 +92,8 @@ class OcrModelPerformance
         }
         unset($profile);
 
+        $profiles = $this->assignColorSlots($profiles, $models);
+
         $active = collect($profiles)->firstWhere('is_active', true);
         $evaluated = collect($profiles)->firstWhere('has_data', true);
 
@@ -100,6 +102,55 @@ class OcrModelPerformance
             'metrics' => self::METRICS,
             'models' => $profiles,
         ];
+    }
+
+    /**
+     * Give every model its own colour (slot 1-8 of --ocr-series-N in the workspace
+     * styles), so models never share a colour in the list, the radar or the bars.
+     *
+     * A colour the Super Admin picked (ocr_models.color_slot) is kept. Every other
+     * model gets one by itself: the colour follows the model, not its place in the
+     * list, so each starts from the slot its registry id points at and only moves on
+     * when that slot is taken. Deleting or activating another model therefore does
+     * not repaint the rest. With more than eight models, colours repeat.
+     *
+     * @param  list<array<string, mixed>>  $profiles
+     * @param  \Illuminate\Support\Collection<string, OcrModel>  $models
+     * @return list<array<string, mixed>>
+     */
+    private function assignColorSlots(array $profiles, \Illuminate\Support\Collection $models): array
+    {
+        $slots = 8;
+        $taken = [];
+        $order = collect($profiles)
+            ->map(fn (array $profile, int $index) => [
+                'index' => $index,
+                'id' => $models->get($profile['key'])?->getKey(),
+                'chosen' => (int) ($models->get($profile['key'])?->color_slot ?? 0),
+            ])
+            ->sortBy(fn (array $row) => $row['id'] ?? PHP_INT_MAX);
+
+        // Picked colours first, oldest model first if two ever picked the same one.
+        foreach ($order as $row) {
+            if ($row['chosen'] >= 1 && $row['chosen'] <= $slots && ! isset($taken[$row['chosen']])) {
+                $taken[$row['chosen']] = true;
+                $profiles[$row['index']]['color_slot'] = $row['chosen'];
+            }
+        }
+
+        foreach ($order as $row) {
+            if (isset($profiles[$row['index']]['color_slot'])) {
+                continue;
+            }
+            $slot = $row['id'] !== null ? ((int) $row['id'] - 1) % $slots + 1 : 1;
+            for ($tries = 0; $tries < $slots && isset($taken[$slot]); $tries++) {
+                $slot = $slot % $slots + 1;
+            }
+            $taken[$slot] = true;
+            $profiles[$row['index']]['color_slot'] = $slot;
+        }
+
+        return $profiles;
     }
 
     /**
@@ -130,6 +181,7 @@ class OcrModelPerformance
                 'dataset' => null,
                 'split' => null,
                 'sample_count' => 0,
+                'test_set' => null,
                 'evaluated_at' => null,
             ];
         }
@@ -159,6 +211,13 @@ class OcrModelPerformance
             'dataset' => $model->evaluation_dataset,
             'split' => $model->evaluation_split ?? 'test',
             'sample_count' => $model->evaluation_sample_count,
+            // Same value = scored on the same test images (dataset, manifest and
+            // count, as OcrModel::sharesTestSetWith checks), so they compare fairly.
+            'test_set' => implode('|', [
+                $model->evaluation_dataset,
+                $model->evaluation_manifest_sha256,
+                $model->evaluation_sample_count,
+            ]),
             'evaluated_at' => $date,
         ];
     }

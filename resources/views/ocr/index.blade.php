@@ -38,6 +38,7 @@
                 modelActivate: @json(route('ocr.models.activate', '__KEY__')),
                 modelRename: @json(route('ocr.rename', '__KEY__')),
                 modelDestroy: @json(route('ocr.destroy', '__KEY__')),
+                modelColor: @json(route('ocr.models.color', '__KEY__')),
             },
             engineReachable: @json($engine['reachable']),
         };

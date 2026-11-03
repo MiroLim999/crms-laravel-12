@@ -291,11 +291,18 @@ function renderVolume(data) {
 }
 
 // How each model is drawn: the model in use solid and filled, TrOCR Base
-// dashed and lighter. The legend chips in the view use the same colours.
+// dashed and lighter. Each one wears its own colour from the OCR Workspace
+// (--ocr-series-N, N picked per model on the server); the legend chips too.
 const performanceLook = {
-  model: { color: '#ff6384', opacity: 0.32, marker: 4, width: 2, dash: 0 },
-  base: { color: '#696cff', opacity: 0.18, marker: 3, width: 1.5, dash: 4 },
+  model: { opacity: 0.32, marker: 4, width: 2, dash: 0 },
+  base: { opacity: 0.18, marker: 3, width: 1.5, dash: 4 },
 };
+const SERIES_FALLBACK = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+function seriesColor(slot) {
+  const n = Math.min(Math.max(Number(slot) || 1, 1), SERIES_FALLBACK.length);
+  return getComputedStyle(document.documentElement).getPropertyValue(`--ocr-series-${n}`).trim()
+    || SERIES_FALLBACK[n - 1];
+}
 
 // The view sends only models with measured test scores, the model in use
 // first; with none it shows a note in place of the chart. Nothing is filled
@@ -313,7 +320,10 @@ function renderOcrPerformance(data) {
   const categories = ['Chars', 'Words', 'Exact'];
   const categoryNames = ['Character accuracy', 'Word accuracy', 'Exact match'];
   const values = series.map(item => keys.map(key => Number(item.scores[key])));
-  const looks = series.map(item => performanceLook[item.role] || performanceLook.base);
+  const looks = series.map(item => ({
+    ...(performanceLook[item.role] || performanceLook.base),
+    color: seriesColor(item.color_slot),
+  }));
 
   // Largest radius that fits: the stacked side labels need ~50px each
   // across, and the triangle plus labels need ~1.5r + 60px down.

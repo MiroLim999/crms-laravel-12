@@ -8,6 +8,8 @@
   --ocr-metric-word: #00a7c4;
   --ocr-metric-exact: #2aa876;
 
+  // The model colours (--ocr-series-1..8) are app-wide, in resources/scss/_dark.scss.
+
   .min-w-0 {
     min-width: 0;
   }
@@ -179,26 +181,111 @@
     gap: 0.5rem;
   }
 
+  // The model icon doubles as the "change colour" button (a .btn, so reset its look).
+  .ocr-model-icon.btn {
+    text-decoration: none;
+    transition: box-shadow 0.15s ease-in-out;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--ocr-model-color, var(--bs-primary));
+      background: color-mix(in srgb, var(--ocr-model-color, var(--bs-primary)) 18%, var(--bs-card-bg, #fff));
+      border-color: var(--ocr-model-color, var(--bs-primary));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--ocr-model-color, var(--bs-primary)) 25%, transparent);
+    }
+  }
+
+  // "Choose a colour" dialog: eight swatches, four per row.
+  .ocr-color-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .ocr-color-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+    padding: 0.6rem 0.35rem;
+    text-align: center;
+    border: 1px solid var(--ocr-soft-border);
+    border-radius: var(--bs-border-radius-lg);
+    cursor: pointer;
+
+    &:hover {
+      background: rgba(var(--bs-primary-rgb), 0.04);
+    }
+
+    &:has(input:checked) {
+      border-color: var(--bs-primary);
+      box-shadow: 0 0 0 2px rgba(var(--bs-primary-rgb), 0.25);
+    }
+
+    &:has(input:focus-visible) {
+      outline: 2px solid var(--bs-primary);
+      outline-offset: 2px;
+    }
+  }
+
+  .ocr-color-swatch {
+    display: inline-grid;
+    width: 1.75rem;
+    height: 1.75rem;
+    place-items: center;
+    color: #fff;
+    border-radius: 50%;
+
+    > i {
+      visibility: hidden;
+      font-size: 1.1rem;
+    }
+  }
+
+  .ocr-color-option:has(input:checked) .ocr-color-swatch > i {
+    visibility: visible;
+  }
+
+  .ocr-color-name {
+    color: var(--bs-heading-color);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  // Which model has this colour now (empty when free).
+  .ocr-color-owner {
+    display: -webkit-box;
+    min-height: 2.4em;
+    overflow: hidden;
+    color: var(--bs-secondary-color);
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .ocr-inspected-dot {
+    flex: 0 0 auto;
+    width: 0.75rem;
+    height: 0.75rem;
+    background: var(--bs-primary);
+    border-radius: 50%;
+  }
+
   .ocr-model-icon {
     display: inline-grid;
     flex: 0 0 auto;
     width: 2.35rem;
     height: 2.35rem;
     place-items: center;
-    color: var(--bs-primary);
-    background: var(--bs-card-bg, #fff);
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 24%, var(--bs-border-color));
+    // The model's own colour, the same one it has in the radar and the bars.
+    // Which model is active is said by the Active badge, not by this icon.
+    color: var(--ocr-model-color, var(--bs-primary));
+    background: color-mix(in srgb, var(--ocr-model-color, var(--bs-primary)) 10%, var(--bs-card-bg, #fff));
+    border: 2px solid var(--ocr-model-color, var(--bs-primary));
     border-radius: 50%;
-
-    &.is-active {
-      color: var(--bs-success);
-      border-color: color-mix(in srgb, var(--bs-success) 35%, var(--bs-border-color));
-    }
-
-    &.is-base {
-      color: var(--bs-secondary-color);
-      border-color: var(--bs-border-color);
-    }
 
     > i {
       font-size: 1.1rem;
@@ -304,6 +391,85 @@
     margin-bottom: 1rem;
     padding-bottom: 0.75rem;
     border-bottom: 1px solid var(--ocr-soft-border);
+  }
+
+  .ocr-compare-warning {
+    margin: -0.25rem 0 0.75rem;
+    color: var(--bs-warning-text-emphasis, var(--bs-warning));
+    font-size: 0.8125rem;
+  }
+
+  // "On the chart:" buttons, one per model in its own colour.
+  // One row: names are shortened (full name on hover) and, with many models, the
+  // row scrolls sideways instead of wrapping.
+  .ocr-chart-models {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+    padding-bottom: 2px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .ocr-chart-models-all {
+    flex: 0 0 auto;
+    margin-left: 0.25rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+
+  .ocr-series-chip {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.35rem;
+    max-width: 15rem;
+    padding: 0.15rem 0.55rem;
+    color: var(--bs-secondary-color);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    background: var(--bs-card-bg, #fff);
+    border: 1px dashed var(--bs-border-color);
+    border-radius: 50rem;
+    cursor: pointer;
+
+    > span:last-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    // Off: a hollow ring. On: a filled dot, solid border, normal text.
+    .ocr-series-chip-dot {
+      flex: 0 0 auto;
+      width: 0.65rem;
+      height: 0.65rem;
+      border: 2px solid var(--ocr-chip-color);
+      border-radius: 50%;
+    }
+
+    &.is-on {
+      color: var(--bs-heading-color);
+      background: color-mix(in srgb, var(--ocr-chip-color) 10%, var(--bs-card-bg, #fff));
+      border: 1px solid var(--ocr-chip-color);
+
+      .ocr-series-chip-dot {
+        background: var(--ocr-chip-color);
+      }
+    }
+
+    // Always drawn (inspected / compared): not clickable, but not faded either.
+    &:disabled {
+      opacity: 1;
+      cursor: default;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--ocr-chip-color);
+      outline-offset: 2px;
+    }
   }
 
   // Three equal columns with equal heights, on one shared grid so the values,
@@ -446,17 +612,6 @@
   .apexcharts-series[seriesname="ocr_radar_grid_anchor"] {
     display: none !important;
     pointer-events: none !important;
-  }
-
-  // Dark mode: a soft glow in each triangle's own colour lifts it off the black card.
-  [data-bs-theme='dark'] & #ocr-model-radar {
-    .apexcharts-series path[stroke='#ff6384' i] {
-      filter: drop-shadow(0 0 8px rgba(255, 99, 132, 0.55));
-    }
-
-    .apexcharts-series path[stroke='#696cff' i] {
-      filter: drop-shadow(0 0 6px rgba(105, 108, 255, 0.55));
-    }
   }
 
   .apexcharts-tooltip:empty {

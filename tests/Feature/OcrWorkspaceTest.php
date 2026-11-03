@@ -559,6 +559,45 @@ class OcrWorkspaceTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'ocr_model.deleted']);
     }
 
+    public function test_a_picked_colour_is_kept_and_a_taken_colour_is_swapped(): void
+    {
+        $actor = $this->superAdmin();
+        OcrModel::create(['key' => 'model-a', 'label' => 'model-a']);
+        OcrModel::create(['key' => 'model-b', 'label' => 'model-b']);
+        $slots = fn () => collect(app(\App\Services\Ocr\OcrModelPerformance::class)->summary()['models'])
+            ->pluck('color_slot', 'key');
+
+        $before = $slots();
+        $this->assertNotSame($before['model-a'], $before['model-b']);
+
+        // A free colour.
+        $free = collect(range(1, 8))->first(fn ($slot) => ! $before->contains($slot));
+        $this->actingAs($actor)
+            ->post(route('ocr.models.color', 'model-a'), ['color_slot' => $free])
+            ->assertSessionHas('success');
+        $this->assertSame($free, $slots()['model-a']);
+        $this->assertSame($before['model-b'], $slots()['model-b']);
+
+        // B's colour: A takes it, B takes A's.
+        $this->actingAs($actor)
+            ->post(route('ocr.models.color', 'model-a'), ['color_slot' => $before['model-b']])
+            ->assertSessionHas('success');
+        $this->assertSame($before['model-b'], $slots()['model-a']);
+        $this->assertSame($free, $slots()['model-b']);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'ocr_model.color_changed']);
+    }
+
+    public function test_a_colour_outside_the_palette_is_refused(): void
+    {
+        OcrModel::create(['key' => 'model-a', 'label' => 'model-a']);
+
+        $this->actingAs($this->superAdmin())
+            ->post(route('ocr.models.color', 'model-a'), ['color_slot' => 9])
+            ->assertSessionHasErrors('color_slot');
+
+        $this->assertNull(OcrModel::firstWhere('key', 'model-a')->color_slot);
+    }
+
     public function test_deleting_a_model_tombstones_it_and_is_audited(): void
     {
         $this->fakeHealthyService([

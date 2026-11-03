@@ -13,6 +13,8 @@
     // A fresh install has models on disk but none activated, so Staff cannot scan.
     $needsActivation = $activeModel === null && $selectable->isNotEmpty();
     $selectedKey = $modelPerformance['selected'] ?? ($activeModel?->key ?? null);
+    // Each model's colour slot, the same one the charts use (OcrModelPerformance).
+    $colorSlots = collect($modelPerformance['models'] ?? [])->pluck('color_slot', 'key');
 @endphp
 
 <section class="card ocr-models-card h-100" aria-labelledby="installed-models-title">
@@ -134,10 +136,30 @@
                              data-model-key="{{ $model['key'] }}"
                              title="Click to inspect this model's benchmark performance">
                         <div class="ocr-model-main">
-                            <span class="ocr-model-icon {{ $model['is_active'] ? 'is-active' : ($model['is_base'] ? 'is-base' : '') }}"
-                                  aria-hidden="true">
-                                <i class="icon-base bx bx-brain"></i>
-                            </span>
+                            @if ($model['registered'] && $model['disk_deleted_at'] === null)
+                                {{-- The model's colour; click it to choose another (any model, active ones too). --}}
+                                <button type="button"
+                                        class="btn btn-link p-0 ocr-model-icon"
+                                        @if ($colorSlots->get($model['key']))
+                                            style="--ocr-model-color: var(--ocr-series-{{ (int) $colorSlots->get($model['key']) }})"
+                                        @endif
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#colorModal"
+                                        data-key="{{ $model['key'] }}"
+                                        data-label="{{ $model['label'] }}"
+                                        aria-label="Change the colour of {{ $model['label'] }}"
+                                        title="Change colour">
+                                    <i class="icon-base bx bx-brain" aria-hidden="true"></i>
+                                </button>
+                            @else
+                                <span class="ocr-model-icon"
+                                      @if ($colorSlots->get($model['key']))
+                                          style="--ocr-model-color: var(--ocr-series-{{ (int) $colorSlots->get($model['key']) }})"
+                                      @endif
+                                      aria-hidden="true">
+                                    <i class="icon-base bx bx-brain"></i>
+                                </span>
+                            @endif
 
                             <div class="min-w-0">
                                 <div class="d-flex flex-wrap align-items-center gap-2">
@@ -161,6 +183,7 @@
                                         <span>Discovered on disk</span>
                                     @endif
                                 </div>
+
                             </div>
                         </div>
 
@@ -202,6 +225,16 @@
                                             @endif
                                         </div>
 
+                                        @if ($model['registered'])
+                                            <button type="button"
+                                                    class="dropdown-item"
+                                                    data-key="{{ $model['key'] }}"
+                                                    data-label="{{ $model['label'] }}"
+                                                    data-bs-toggle="modal"
+                                                    data-bs-target="#colorModal">
+                                                <i class="icon-base bx bx-palette icon-sm me-2"></i>Change colour
+                                            </button>
+                                        @endif
                                         @unless ($model['is_base'])
                                             {{-- The base model's key is how CRMS recognises it, so it cannot be renamed. --}}
                                             <button type="button"

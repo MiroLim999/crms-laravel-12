@@ -36,10 +36,12 @@
             $perfBase = ($perfInUse['key'] ?? null) === 'base' ? null : $perfModels->firstWhere('key', 'base');
             $perfSeries = collect([
                 $perfInUse && $perfInUse['has_data']
-                    ? ['role' => 'model', 'name' => $perfInUse['display_label'], 'scores' => $perfInUse['scores']]
+                    ? ['role' => 'model', 'name' => $perfInUse['display_label'], 'scores' => $perfInUse['scores'],
+                        'color_slot' => $perfInUse['color_slot'] ?? null]
                     : null,
                 $perfBase && $perfBase['has_data']
-                    ? ['role' => 'base', 'name' => 'TrOCR Base', 'scores' => $perfBase['scores']]
+                    ? ['role' => 'base', 'name' => 'TrOCR Base', 'scores' => $perfBase['scores'],
+                        'color_slot' => $perfBase['color_slot'] ?? null]
                     : null,
             ])->filter()->values();
             // Two decimals near the top, so 99.97% is not read as 100.0%.
@@ -285,7 +287,8 @@
                                 @if ($perfInUse)
                                     <span class="dashboard-quality__chip" title="The model in use">
                                         @if ($perfInUse['has_data'])
-                                            <span class="dashboard-quality__dot" style="background-color: #ff6384;" aria-hidden="true"></span>
+                                            {{-- The model's own colour, as in the OCR Workspace. --}}
+                                            <span class="dashboard-quality__dot" style="background-color: var(--ocr-series-{{ (int) ($perfInUse['color_slot'] ?? 1) }});" aria-hidden="true"></span>
                                         @endif
                                         <strong class="text-truncate">{{ $perfInUse['display_label'] }}</strong>
                                         @unless ($perfInUse['has_data'])
@@ -297,7 +300,7 @@
                                 @endif
                                 @if ($perfSeries->contains('role', 'base'))
                                     <span class="dashboard-quality__chip" title="TrOCR Base">
-                                        <span class="dashboard-quality__dot" style="background-color: #696cff;" aria-hidden="true"></span>
+                                        <span class="dashboard-quality__dot" style="background-color: var(--ocr-series-{{ (int) ($perfBase['color_slot'] ?? 1) }});" aria-hidden="true"></span>
                                         Base
                                     </span>
                                 @endif

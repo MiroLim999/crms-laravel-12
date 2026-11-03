@@ -18,7 +18,7 @@ class OcrModel extends Model
     use HasFactory;
 
     protected $fillable = [
-        'key', 'label', 'notes', 'is_active',
+        'key', 'label', 'color_slot', 'notes', 'is_active',
         'cer', 'wer', 'exact_match', 'evaluated_at', 'registered_by',
         'evaluation_dataset', 'evaluation_split', 'evaluation_sample_count',
         'evaluation_manifest_sha256', 'evaluation_weights_sha256',
