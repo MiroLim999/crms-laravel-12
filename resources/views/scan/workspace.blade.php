@@ -399,6 +399,23 @@
             <input type="hidden" name="document_page_id" id="documentPageId">
 
             <div class="validation-workspace">
+                <div class="validation-submit-error d-none" id="validationExistingBanner"
+                     role="alert" aria-live="assertive">
+                    <i class="icon-base bx bx-x-circle" aria-hidden="true"></i>
+                    <div class="flex-grow-1">
+                        <strong>Data Extracted Rejected — Record Already Exists</strong>
+                        <div id="validationExistingMessage">This document's extracted data already exists in the database.</div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <a href="#" target="_blank" class="btn btn-sm btn-outline-danger d-none" id="validationExistingViewLink">
+                            View existing
+                        </a>
+                        <button type="button" class="btn btn-sm btn-danger" id="validationExistingRejectBtn">
+                            Reject extracted data
+                        </button>
+                    </div>
+                </div>
+
                 <div class="validation-submit-error d-none" id="validationSubmitError"
                      role="alert" aria-live="assertive">
                     <i class="icon-base bx bx-error" aria-hidden="true"></i>
@@ -720,6 +737,35 @@
                         </button>
                         <button type="button" class="btn btn-danger" id="confirmDeleteBatchDocBtn">
                             <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- Flowchart: "Is it existing? -> Yes -> Data Extracted Rejected" --}}
+    <div class="modal fade" id="existingRecordModal" tabindex="-1"
+         aria-labelledby="existingRecordModalTitle" aria-describedby="existingRecordModalDescription"
+         aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
+            <div class="modal-content leave-scan-modal">
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-danger" aria-hidden="true">
+                        <i class="icon-base bx bx-x-circle"></i>
+                    </span>
+                    <h5 class="modal-title" id="existingRecordModalTitle">Data Extracted Rejected</h5>
+                    <p class="leave-scan-modal__text" id="existingRecordModalDescription">
+                        This document's extracted data already exists in the database.
+                    </p>
+
+                    <div class="leave-scan-modal__actions">
+                        <a href="#" target="_blank" class="btn btn-outline-secondary d-none" id="existingRecordViewBtn">
+                            View Existing Record
+                        </a>
+                        <button type="button" class="btn btn-danger" id="confirmRejectExistingBtn">
+                            <i class="icon-base bx bx-x-circle icon-sm me-1" aria-hidden="true"></i>
+                            <span id="confirmRejectExistingLabel">Reject &amp; End</span>
                         </button>
                     </div>
                 </div>
@@ -2618,6 +2664,8 @@
     const uploadModeHintEl = document.getElementById('uploadModeHint');
     const dropzoneTitleEl = document.getElementById('dropzoneTitle');
     const dropzoneButtonEl = document.getElementById('dropzoneButton');
+    const dropzoneFolderBtnEl = document.getElementById('dropzoneFolderButton');
+    const scanFolderInput = document.getElementById('scanFolder');
 
     uploadModeRadios.forEach((radio) => {
         radio.addEventListener('change', (e) => {
@@ -2627,16 +2675,32 @@
             });
             if (uploadMode === 'batch') {
                 scanFileInput.setAttribute('multiple', 'multiple');
-                if (dropzoneTitleEl) dropzoneTitleEl.textContent = 'Drop batch scans here';
+                if (dropzoneTitleEl) dropzoneTitleEl.textContent = 'Drop batch scans or a folder here';
                 if (dropzoneButtonEl) dropzoneButtonEl.textContent = 'Choose files';
-                if (uploadModeHintEl) uploadModeHintEl.textContent = 'Queue multiple scans in /documents/workspace, scan all, then validate';
+                if (dropzoneFolderBtnEl) dropzoneFolderBtnEl.classList.remove('d-none');
+                if (uploadModeHintEl) uploadModeHintEl.textContent = 'Upload files or a folder to /documents/workspace, scan all, then validate';
             } else {
                 scanFileInput.removeAttribute('multiple');
                 if (dropzoneTitleEl) dropzoneTitleEl.textContent = 'Drop the scan here';
                 if (dropzoneButtonEl) dropzoneButtonEl.textContent = 'Choose file';
+                if (dropzoneFolderBtnEl) dropzoneFolderBtnEl.classList.add('d-none');
                 if (uploadModeHintEl) uploadModeHintEl.textContent = 'Upload and process one document at a time';
             }
         });
+    });
+
+    dropzoneFolderBtnEl?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (scanFolderInput instanceof HTMLInputElement) {
+            scanFolderInput.value = '';
+            scanFolderInput.click();
+        }
+    });
+
+    scanFolderInput?.addEventListener('change', (event) => {
+        if (!(event.currentTarget instanceof HTMLInputElement)) return;
+        startBatchQueue(event.currentTarget.files);
     });
 
     function renderBatchQueueBanner() {
@@ -2662,9 +2726,9 @@
         const scanNowBtn = document.getElementById('scanNowBtn');
         const scanNowLabel = document.getElementById('scanNowBtnLabel');
 
-        const savedCount = batchState.items.filter((it) => ['saved', 'scanning', 'ready', 'verifying', 'imported'].includes(it.status)).length;
-        const readyCount = batchState.items.filter((it) => ['ready', 'verifying', 'imported'].includes(it.status)).length;
-        const importedCount = batchState.items.filter((it) => it.status === 'imported').length;
+        const savedCount = batchState.items.filter((it) => ['saved', 'scanning', 'ready', 'verifying', 'imported', 'rejected'].includes(it.status)).length;
+        const readyCount = batchState.items.filter((it) => ['ready', 'verifying', 'imported', 'rejected'].includes(it.status)).length;
+        const importedCount = batchState.items.filter((it) => ['imported', 'rejected'].includes(it.status)).length;
 
         const stageOrder = ['queuing', 'scanning', 'verifying'];
         const activeStageIdx = stageOrder.indexOf(batchState.phase);
@@ -2729,11 +2793,12 @@
                     ready: { cls: 'is-ready', icon: 'bx-scan', text: 'Scanned' },
                     verifying: { cls: 'is-verifying', icon: 'bx-edit-alt', text: 'Validating' },
                     imported: { cls: 'is-imported', icon: 'bx-check-shield', text: 'Imported' },
+                    rejected: { cls: 'is-failed', icon: 'bx-x-circle', text: 'Rejected (Existing)' },
                     failed: { cls: 'is-failed', icon: 'bx-error-circle', text: 'Failed' },
                 };
                 const badgeInfo = badgeMap[item.status] || badgeMap.pending;
                 const isCurrent = index === batchState.currentIndex;
-                const canInteract = batchState.phase !== 'scanning' && !(batchState.phase === 'verifying' && item.status === 'imported');
+                const canInteract = batchState.phase !== 'scanning' && !(batchState.phase === 'verifying' && ['imported', 'rejected'].includes(item.status));
 
                 const chip = document.createElement('button');
                 chip.type = 'button';
@@ -2924,8 +2989,58 @@
         }
     });
 
+    const SUPPORTED_SCAN_EXT = /\.(pdf|png|jpe?g|webp|bmp)$/i;
+
+    async function extractDroppedScanFiles(dataTransfer) {
+        if (!dataTransfer) return [];
+        const items = dataTransfer.items ? Array.from(dataTransfer.items) : [];
+        const entries = items
+            .map((item) => (typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null))
+            .filter(Boolean);
+
+        if (entries.length === 0) {
+            return Array.from(dataTransfer.files || []);
+        }
+
+        const collected = [];
+        const readEntry = (entry) => new Promise((resolve) => {
+            if (entry.isFile) {
+                entry.file((file) => {
+                    if (SUPPORTED_SCAN_EXT.test(file.name)) collected.push(file);
+                    resolve();
+                }, () => resolve());
+            } else if (entry.isDirectory) {
+                const reader = entry.createReader();
+                const readBatch = () => {
+                    reader.readEntries(async (batch) => {
+                        if (!batch || batch.length === 0) {
+                            resolve();
+                            return;
+                        }
+                        for (const child of batch) {
+                            await readEntry(child);
+                        }
+                        readBatch();
+                    }, () => resolve());
+                };
+                readBatch();
+            } else {
+                resolve();
+            }
+        });
+
+        for (const entry of entries) {
+            await readEntry(entry);
+        }
+
+        return collected.length > 0 ? collected : Array.from(dataTransfer.files || []);
+    }
+
     async function startBatchQueue(fileList) {
         const validFiles = Array.from(fileList || []).filter((file) => {
+            if (!SUPPORTED_SCAN_EXT.test(file.name)) {
+                return false;
+            }
             if (file.size > 20 * 1024 * 1024) {
                 alert(`${file.name} is larger than 20 MB and was skipped.`);
                 return false;
@@ -3210,7 +3325,116 @@
         showGridNotes(page);
         showStep('verify');
         prepareValidationComparison();
+        checkAndShowExistingRecord(page.existingRecord || null);
     }
+
+    function checkAndShowExistingRecord(existing) {
+        const banner = document.getElementById('validationExistingBanner');
+        const msgEl = document.getElementById('validationExistingMessage');
+        const viewLink = document.getElementById('validationExistingViewLink');
+        const modalEl = document.getElementById('existingRecordModal');
+        const modalDesc = document.getElementById('existingRecordModalDescription');
+        const modalViewBtn = document.getElementById('existingRecordViewBtn');
+        const rejectLabel = document.getElementById('confirmRejectExistingLabel');
+
+        if (!existing) {
+            banner?.classList.add('d-none');
+            return;
+        }
+
+        const recordTitle = existing.title || 'Existing Record';
+        const description = `The extracted data matches an existing record ("${recordTitle}") in the database. Duplicate extracted data is rejected.`;
+
+        if (msgEl) msgEl.textContent = description;
+        if (viewLink) {
+            if (existing.url) {
+                viewLink.href = existing.url;
+                viewLink.classList.remove('d-none');
+            } else {
+                viewLink.classList.add('d-none');
+            }
+        }
+        banner?.classList.remove('d-none');
+
+        if (batchState.active && batchState.items[batchState.currentIndex]) {
+            batchState.items[batchState.currentIndex].status = 'rejected';
+            renderBatchQueueBanner();
+        }
+
+        if (modalDesc) modalDesc.textContent = description;
+        if (modalViewBtn) {
+            if (existing.url) {
+                modalViewBtn.href = existing.url;
+                modalViewBtn.classList.remove('d-none');
+            } else {
+                modalViewBtn.classList.add('d-none');
+            }
+        }
+        if (rejectLabel) {
+            if (batchState.active) {
+                const hasMore = batchState.items.some((it, idx) => idx !== batchState.currentIndex && !['imported', 'rejected'].includes(it.status));
+                rejectLabel.textContent = hasMore ? 'Reject & Next File' : 'Reject & Complete Batch';
+            } else {
+                rejectLabel.textContent = 'Reject & End';
+            }
+        }
+        if (modalEl) {
+            window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        }
+    }
+
+    async function rejectCurrentExistingDocument() {
+        const modalEl = document.getElementById('existingRecordModal');
+        if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
+        document.getElementById('validationExistingBanner')?.classList.add('d-none');
+
+        if (processedPage?.id) {
+            fetch(config.pageCancelUrl.replace('__PAGE__', String(processedPage.id)), {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+            }).catch(() => {});
+        }
+
+        if (batchState.active) {
+            const currentItem = batchState.items[batchState.currentIndex];
+            if (currentItem) currentItem.status = 'rejected';
+            renderBatchQueueBanner();
+
+            const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && !['imported', 'rejected'].includes(it.status));
+            const firstRemainingIndex = batchState.items.findIndex((it) => !['imported', 'rejected'].includes(it.status));
+            const targetVerifyIndex = nextVerifyIndex !== -1 ? nextVerifyIndex : firstRemainingIndex;
+
+            if (targetVerifyIndex !== -1) {
+                await openBatchVerifyItem(targetVerifyIndex);
+                return;
+            }
+
+            const lastImported = [...batchState.items].reverse().find((it) => it.recordUrl);
+            if (lastImported?.recordUrl) {
+                window.location.assign(lastImported.recordUrl);
+                return;
+            }
+
+            batchState.active = false;
+            batchState.phase = 'idle';
+            batchState.items = [];
+            batchState.currentIndex = 0;
+            renderBatchQueueBanner();
+        }
+
+        scanFile = null;
+        processedPage = null;
+        scanFileInput.value = '';
+        showStep('upload');
+    }
+
+    document.getElementById('confirmRejectExistingBtn')?.addEventListener('click', rejectCurrentExistingDocument);
+    document.getElementById('validationExistingRejectBtn')?.addEventListener('click', rejectCurrentExistingDocument);
 
     scanFileInput.addEventListener('change', (event) => {
         if (!(event.currentTarget instanceof HTMLInputElement)) return;
@@ -3313,9 +3537,10 @@
             dropzone.classList.remove('is-dragging');
         });
     });
-    dropzone.addEventListener('drop', (event) => {
+    dropzone.addEventListener('drop', async (event) => {
         if (uploadMode === 'batch' || batchState.active) {
-            startBatchQueue(event.dataTransfer?.files);
+            const files = await extractDroppedScanFiles(event.dataTransfer);
+            startBatchQueue(files);
         } else {
             openDocument(event.dataTransfer?.files?.[0]);
         }
@@ -4252,6 +4477,7 @@
             showStep('verify');
             try {
                 prepareValidationComparison();
+                checkAndShowExistingRecord(page.existingRecord || null);
             } catch (error) {
                 showStep('mark');
                 throw error;
@@ -6275,6 +6501,14 @@
             const payload = contentType.includes('application/json') ? await response.json() : null;
 
             if (!response.ok) {
+                if (response.status === 409 && payload?.existing_record) {
+                    checkAndShowExistingRecord({
+                        id: payload.record_id,
+                        title: payload.record_title || 'Existing Record',
+                        url: payload.record_url || null,
+                    });
+                    return;
+                }
                 // The server found required fields missing that this page did
                 // not: nothing was saved, so ask the same question.
                 if (response.status === 422 && Array.isArray(payload?.errors?.missing_required)) {
@@ -6294,8 +6528,8 @@
                 currentBatchItem.recordUrl = payload.redirect;
                 renderBatchQueueBanner();
 
-                const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && it.status !== 'imported');
-                const firstRemainingIndex = batchState.items.findIndex((it) => it.status !== 'imported');
+                const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && !['imported', 'rejected'].includes(it.status));
+                const firstRemainingIndex = batchState.items.findIndex((it) => !['imported', 'rejected'].includes(it.status));
                 const targetVerifyIndex = nextVerifyIndex !== -1 ? nextVerifyIndex : firstRemainingIndex;
 
                 if (targetVerifyIndex !== -1) {

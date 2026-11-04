@@ -208,13 +208,19 @@
                         <i class="icon-base bx bx-cloud-upload"></i>
                     </span>
                     <span class="document-dropzone__title" id="dropzoneTitle">Drop the scan here</span>
-                    <span class="btn btn-primary document-dropzone__button" id="dropzoneButton">Choose file</span>
+                    <span class="document-dropzone__actions">
+                        <span class="btn btn-primary document-dropzone__button" id="dropzoneButton">Choose file</span>
+                        <button type="button" class="btn btn-outline-primary document-dropzone__folder-btn d-none" id="dropzoneFolderButton">
+                            <i class="icon-base bx bx-archive icon-sm me-1" aria-hidden="true"></i>Upload folder
+                        </button>
+                    </span>
                     <span class="document-dropzone__formats" aria-label="Accepted formats">
                         <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>BMP</span>
                     </span>
                 </label>
                 <input type="file" id="scanFile" class="visually-hidden"
                        accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp">
+                <input type="file" id="scanFolder" class="visually-hidden" webkitdirectory directory multiple>
             @else
                 {{-- Not a file input yet: clicking or dropping here opens the type list. --}}
                 <div class="document-dropzone is-disabled" id="documentDropzone" aria-disabled="true" data-requires-type>

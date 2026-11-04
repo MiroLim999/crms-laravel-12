@@ -240,6 +240,23 @@ class DocumentScanController extends Controller
             throw ValidationException::withMessages(['missing_required' => $missingRequired]);
         }
 
+        // Flowchart step: "Is it existing? -> Yes -> Data Extracted Rejected"
+        $existingRecord = $this->findExistingRecord($templateId, $validated['fields']);
+        if ($existingRecord !== null) {
+            $rejectMessage = "Data Extracted Rejected: This document record ({$existingRecord->title()}) already exists in the database.";
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'existing_record' => true,
+                    'message' => $rejectMessage,
+                    'record_id' => $existingRecord->getKey(),
+                    'record_title' => $existingRecord->title(),
+                    'record_url' => route('records.show', $existingRecord),
+                ], 409);
+            }
+
+            throw ValidationException::withMessages(['scan' => $rejectMessage]);
+        }
+
         $disk = Storage::disk('local');
         $scan = $request->file('scan');
         $workspaceScanToClean = null;
@@ -1035,5 +1052,49 @@ class DocumentScanController extends Controller
     private function selectableModels(): array
     {
         return $this->modelChoice->selectable();
+    }
+
+    /**
+     * Check whether a CivilRecord for the same template already has identical
+     * verified field values ("Is it existing? -> Data Extracted Rejected").
+     *
+     * @param  list<array<string, mixed>>  $fields
+     */
+    private function findExistingRecord(int $templateId, array $fields): ?CivilRecord
+    {
+        $submitted = collect($fields)
+            ->mapWithKeys(fn (array $f) => [
+                mb_strtolower(trim((string) ($f['name'] ?? ''))).':'.((int) ($f['person_group'] ?? 0)) => mb_strtolower(trim((string) preg_replace('/\s+/', ' ', (string) ($f['verified_value'] ?? '')))),
+            ])
+            ->filter(fn (string $v) => $v !== '');
+
+        if ($submitted->isEmpty()) {
+            return null;
+        }
+
+        $candidates = CivilRecord::with('fields')
+            ->where('document_template_id', $templateId)
+            ->latest('id')
+            ->limit(150)
+            ->get();
+
+        foreach ($candidates as $record) {
+            $existing = $record->fields
+                ->mapWithKeys(fn ($f) => [
+                    mb_strtolower(trim((string) $f->name)).':'.((int) ($f->person_group ?? 0)) => mb_strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $f->verified_value))),
+                ])
+                ->filter(fn (string $v) => $v !== '');
+
+            if ($existing->count() !== $submitted->count()) {
+                continue;
+            }
+
+            $allMatch = $submitted->every(fn (string $val, string $key) => ($existing->get($key) ?? null) === $val);
+            if ($allMatch) {
+                return $record;
+            }
+        }
+
+        return null;
     }
 }

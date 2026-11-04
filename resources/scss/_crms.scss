@@ -1589,9 +1589,23 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   font-weight: 600;
 }
 
-.document-dropzone__button {
+.document-dropzone__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: .65rem;
   margin-block: 1.25rem 0;
+}
+
+.document-dropzone__button {
+  margin: 0;
   pointer-events: none;
+}
+
+.document-dropzone__folder-btn {
+  margin: 0;
+  pointer-events: auto;
 }
 
 // Short windows (a 1366x768 laptop leaves about 560px inside the browser): a
