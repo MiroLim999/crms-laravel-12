@@ -3873,7 +3873,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 // The Template Builder's Rows and Columns: the lines may wrap in the narrow panel.
 .template-ledger-card .document-grid-card__line {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: .5rem;
 
   .document-grid-card__label {

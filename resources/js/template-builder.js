@@ -28,6 +28,7 @@ import {
 import {
     builderShortcutIsBlocked,
     handleSelectedFieldDeletion,
+    layoutUndoIsBlocked,
 } from './template-builder-shortcuts';
 import { LayoutHistory } from './template-history';
 import { summariseTest, testFindings, testLineStatus } from './layout-test';
@@ -1150,10 +1151,19 @@ document.addEventListener('keydown', (event) => {
         modalOpen: document.querySelector('.modal.show') !== null,
     };
 
-    if (builderShortcutIsBlocked(event, shortcutOptions)) return;
-
     const commandPressed = event.ctrlKey || event.metaKey;
     const key = event.key.toLocaleLowerCase();
+
+    // Checked before the general rule: a button or checkbox that was just
+    // clicked keeps the focus, and Ctrl+Z must still undo that change.
+    if (commandPressed && !event.shiftKey && !event.altKey && key === 'z'
+        && history.canUndo && !layoutUndoIsBlocked(event, shortcutOptions)) {
+        event.preventDefault();
+        undoLayoutChange();
+        return;
+    }
+
+    if (builderShortcutIsBlocked(event, shortcutOptions)) return;
 
     if (commandPressed && !event.shiftKey && key === 'c' && marker.selectedIndexes().length > 0) {
         event.preventDefault();
@@ -1164,12 +1174,6 @@ document.addEventListener('keydown', (event) => {
     if (commandPressed && !event.shiftKey && key === 'v' && clipboard.length > 0) {
         event.preventDefault();
         pasteCopiedFields();
-        return;
-    }
-
-    if (commandPressed && !event.shiftKey && key === 'z' && history.canUndo) {
-        event.preventDefault();
-        undoLayoutChange();
         return;
     }
 
@@ -1377,7 +1381,6 @@ function renderLedgerGrid() {
 
     const rowsInput = element('evenRowsInput', HTMLInputElement);
     if (document.activeElement !== rowsInput) rowsInput.value = rows > 0 ? String(rows) : '';
-    element('evenRowsBtn', HTMLButtonElement).disabled = ruledYs.length < 2;
     element('removeRuledLineBtn', HTMLButtonElement).disabled = selectedRule === null && ruledYs.length <= 2;
     element('clearGridBtn', HTMLButtonElement).disabled = columns.length === 0 && ruledYs.length === 0;
 }
@@ -1779,7 +1782,7 @@ element('removeRuledLineBtn', HTMLButtonElement).addEventListener('click', () =>
     removeRule(selectedRule ?? (ruledYs.length > 2 ? ruledYs.length - 1 : null));
 });
 
-element('evenRowsBtn', HTMLButtonElement).addEventListener('click', () => {
+function spaceRowsEvenly() {
     const spaced = distributeRuledYs(ruledYs, element('evenRowsInput', HTMLInputElement).value);
     if (!spaced) {
         showBuilderError(ruledYs.length < 2
@@ -1792,12 +1795,12 @@ element('evenRowsBtn', HTMLButtonElement).addEventListener('click', () => {
     estimatedYs = new Set();
     selectedRule = null;
     applyGrid(spaced);
-});
+}
 
 element('evenRowsInput', HTMLInputElement).addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return;
     event.preventDefault();
-    element('evenRowsBtn', HTMLButtonElement).click();
+    spaceRowsEvenly();
 });
 
 element('clearGridBtn', HTMLButtonElement).addEventListener('click', () => {

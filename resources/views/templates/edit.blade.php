@@ -290,7 +290,7 @@
                             <div class="card-disclosure__body" id="ledgerCardBody" hidden>
                                 <div class="card-body">
                                     <div class="document-grid-card__line">
-                                        <button type="button" class="btn btn-sm btn-outline-primary" id="detectGridBtn"
+                                        <button type="button" class="btn btn-sm btn-outline-primary w-100" id="detectGridBtn"
                                                 title="Find the columns and row lines from the sample's printed rules">
                                             <i class="icon-base bx bx-grid-alt icon-sm me-1" aria-hidden="true"></i>
                                             Detect from sample
@@ -312,10 +312,6 @@
                                                 <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
                                             </button>
                                         </div>
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="evenRowsBtn" disabled
-                                                title="Space this many rows evenly between the first and the last line">
-                                            Space evenly
-                                        </button>
                                     </div>
 
                                     <p class="template-ledger-card__summary d-none" id="ledgerGridSummary" aria-live="polite"></p>
@@ -337,7 +333,7 @@
                                         </span>
                                     </div>
 
-                                    <button type="button" class="btn btn-sm btn-outline-danger template-ledger-card__clear" id="clearGridBtn" disabled>
+                                    <button type="button" class="btn btn-sm btn-outline-danger w-100 template-ledger-card__clear" id="clearGridBtn" disabled>
                                         <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
                                         Remove grid
                                     </button>
