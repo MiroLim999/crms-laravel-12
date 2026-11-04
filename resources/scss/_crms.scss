@@ -3649,7 +3649,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 // The Align step's Rows line (in the Fields card) and the Template Builder's
-// Rows and Columns card. One line per tool: a label, then its control.
+// Table grid card. One line per tool: a label, then its control.
 .document-grid-card {
   .document-grid-card__line {
     display: flex;
@@ -3729,7 +3729,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 // A ? beside a card's title, and the tips it shows on hover or focus (the
-// Align step's Rows and Columns and Fields cards). The tips are placed by the
+// Align step's Fields card and the builder's Table grid and Fields cards). The tips are placed by the
 // card header (position-relative): as wide as the header's content, so they
 // never stick out of the side panel, and just below the ?.
 .card-help__toggle {
@@ -3822,7 +3822,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   line-height: 1.4;
 }
 
-// The Template Builder's Rows and Columns: the lines may wrap in the narrow panel.
+// The Template Builder's Table grid: the lines may wrap in the narrow panel.
 .template-ledger-card .document-grid-card__line {
   flex-wrap: nowrap;
   gap: .5rem;

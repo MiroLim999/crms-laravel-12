@@ -254,7 +254,18 @@ function layoutState(boxes = marker.toJSON()) {
     };
 }
 
+// How many markers there were at the last change: deleting every one of them
+// takes the row lines with it (they have no table left to belong to).
+let previousMarkerCount = 0;
+
 function handleMarkerChange(boxes) {
+    if (!restoringHistory && previousMarkerCount > 0 && boxes.length === 0 && ruledYs.length > 0) {
+        ruledYs = [];
+        selectedRule = null;
+        estimatedYs = new Set();
+    }
+    previousMarkerCount = boxes.length;
+
     // Before recording: carrying the row lines along is part of this change.
     followTable(boxes);
     if (!restoringHistory) history.record(layoutState(boxes));
@@ -605,7 +616,6 @@ function updateSelectionUI(indexes, context = {}) {
 
     selectAllInput.checked = total > 0 && count === total;
     selectAllInput.indeterminate = count > 0 && count < total;
-    element('deleteSelectedBtn', HTMLButtonElement).disabled = count === 0;
     element('deleteFieldsBtn', HTMLButtonElement).disabled = count === 0;
     element('groupSelectedBtn', HTMLButtonElement).disabled = count === 0;
     element('ungroupSelectedBtn', HTMLButtonElement).disabled = !indexes.some((index) => (
@@ -964,8 +974,16 @@ function settingsPayload(box) {
     };
 }
 
+/** The Remove button shows only while a picked file is waiting to be saved. */
+function updatePickedSampleUI() {
+    element('removePickedSampleBtn').classList.toggle('d-none', pendingSampleFile === null);
+    // While a replacement waits to be saved, the stored sample's own button would be a second trash can.
+    document.getElementById('deleteStoredSampleBtn')?.classList.toggle('d-none', pendingSampleFile !== null);
+}
+
 async function openSample(file, { pendingUpload = true } = {}) {
     if (pendingUpload) pendingSampleFile = null;
+    updatePickedSampleUI();
     if (!file) return;
 
     if (file.size > 20 * 1024 * 1024) {
@@ -984,6 +1002,7 @@ async function openSample(file, { pendingUpload = true } = {}) {
         forgetSampleGrid();
         loadPrintedLines();
         if (pendingUpload) pendingSampleFile = file;
+        updatePickedSampleUI();
         // Only a PDF's first page is drawn, as for Staff.
         element('sampleFileName').textContent = measurement?.pageCount > 1
             ? `${file.name} (page 1 of ${measurement.pageCount})`
@@ -998,6 +1017,37 @@ async function openSample(file, { pendingUpload = true } = {}) {
         fileLabel.removeAttribute('aria-busy');
     }
 }
+
+/** Let go of a picked, unsaved file: back to the stored sample, or to the blank page. */
+async function removePickedSample() {
+    pendingSampleFile = null;
+    fileInput.value = '';
+    updatePickedSampleUI();
+    clearBuilderError();
+
+    if (config.sample?.url) {
+        await openStoredSample();
+        return;
+    }
+
+    resizeBlankCanvas();
+    drawBlankPage();
+    marker.layout();
+    sampleLoaded = false;
+    forgetSampleGrid();
+    element('sampleFileName').textContent = 'Choose sample';
+    element('sampleHint').classList.remove('d-none');
+    window.requestAnimationFrame(() => marker.resetZoom());
+}
+
+// Asked first, as for a stored sample: the modal names the file.
+element('removePickedSampleModal').addEventListener('show.bs.modal', () => {
+    element('removePickedSampleName').textContent = pendingSampleFile?.name ?? 'the picked file';
+});
+element('confirmRemovePickedSampleBtn', HTMLButtonElement).addEventListener('click', () => {
+    window.bootstrap.Modal.getInstance(element('removePickedSampleModal'))?.hide();
+    removePickedSample();
+});
 
 async function openStoredSample() {
     const storedSample = config.sample;
@@ -1051,7 +1101,6 @@ element('zoomOutBtn', HTMLButtonElement).addEventListener('click', () => marker.
 element('zoomInBtn', HTMLButtonElement).addEventListener('click', () => marker.zoomBy(0.1));
 element('zoomResetBtn', HTMLButtonElement).addEventListener('click', () => marker.resetZoom());
 
-element('deleteSelectedBtn', HTMLButtonElement).addEventListener('click', () => marker.removeSelected());
 // Side panel cards that open and close, as on the Staff Align panel: a click
 // anywhere on the header but the ? (the title button, for the keyboard).
 function setCardOpen(toggle, open) {

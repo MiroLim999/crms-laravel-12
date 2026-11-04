@@ -108,8 +108,18 @@
                                        class="visually-hidden"
                                        accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp">
 
+                                {{-- Only for a file picked but not saved yet: puts back the stored sample, or the blank page. --}}
+                                <button type="button" class="btn btn-sm btn-outline-danger template-sample-delete-button d-none"
+                                        id="removePickedSampleBtn"
+                                        data-bs-toggle="modal" data-bs-target="#removePickedSampleModal"
+                                        title="{{ $template?->sample_path ? 'Remove the picked file and go back to the stored sample' : 'Remove the picked file' }}"
+                                        aria-label="Remove the picked file">
+                                    <i class="icon-base bx bx-trash icon-sm" aria-hidden="true"></i>
+                                    <span>Remove</span>
+                                </button>
+
                                 @if ($template?->sample_path)
-                                    <button type="button" class="btn btn-sm btn-outline-danger template-sample-delete-button"
+                                    <button type="button" class="btn btn-sm btn-outline-danger template-sample-delete-button" id="deleteStoredSampleBtn"
                                             data-bs-toggle="modal" data-bs-target="#deleteTemplateSampleModal"
                                             title="Delete stored sample document" aria-label="Delete sample">
                                         <i class="icon-base bx bx-trash icon-sm" aria-hidden="true"></i>
@@ -179,11 +189,6 @@
                                     <i class="icon-base bx bx-list-check icon-sm" aria-hidden="true"></i>
                                     <span>0 selected</span>
                                 </span>
-                                <button type="button" class="btn btn-sm btn-outline-danger marker-delete-button"
-                                        id="deleteSelectedBtn" disabled>
-                                    <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
-                                    <span>Delete</span>
-                                </button>
                             </div>
                         </div>
 
@@ -264,28 +269,29 @@
                                 <h2 class="card-title h5 mb-0">
                                     <button type="button" class="btn btn-link card-disclosure__toggle" id="ledgerCardToggle"
                                             aria-expanded="false" aria-controls="ledgerCardBody">
-                                        Rows and Columns
+                                        Table grid
                                     </button>
                                 </h2>
                                 <div class="card-help">
                                     <button type="button" class="btn btn-link card-help__toggle"
-                                            aria-label="Rows and Columns tips" aria-describedby="ledgerTips">
+                                            aria-label="Table grid tips" aria-describedby="ledgerTips">
                                         <i class="icon-base bx bx-help-circle" aria-hidden="true"></i>
                                     </button>
                                     <div class="card-help__tips" id="ledgerTips" role="tooltip">
                                         <strong>Tips</strong>
                                         <ul>
-                                            <li>For ruled register books. Each row line is outlined on Staff scans, so writing that crosses a rule is still read whole.</li>
+                                            <li>For ruled register books. Detect from sample finds the columns and row lines from the sample's printed rules.</li>
                                             <li>Drag a row line by the grip at either end of the table, or click a grip and press <kbd>↑</kbd> <kbd>↓</kbd>. <kbd>Shift</kbd> + drag moves every line. Double-click a grip to remove its line.</li>
-                                            <li>Lines snap to the sample's printed rules. Hold <kbd>Alt</kbd> to place one freely.</li>
-                                            <li>Type a number of rows and press <kbd>Enter</kbd> to space them evenly.</li>
-                                            <li>Page scanned a little turned? The Tilt buttons turn the columns and row lines together.</li>
+                                            <li>Lines snap to the printed rules. Hold <kbd>Alt</kbd> to place one freely.</li>
+                                            <li>The − and + buttons remove or add a row line. Type a number and press <kbd>Enter</kbd> to space that many rows evenly.</li>
+                                            <li>Page scanned a little turned? Tilt turns the columns and row lines together.</li>
+                                            <li>Staff scans read each row on its own, so writing that crosses a rule is still read whole.</li>
                                         </ul>
                                     </div>
                                 </div>
                                 {{-- Something to check inside while the card is closed. --}}
                                 <i class="icon-base bx bx-error-circle text-warning card-disclosure__alert d-none" id="ledgerCardAlert"
-                                   title="Check Rows and Columns" aria-hidden="true"></i>
+                                   title="Check Table grid" aria-hidden="true"></i>
                                 <i class="icon-base bx bx-chevron-down card-disclosure__chevron" aria-hidden="true"></i>
                             </div>
 
@@ -370,6 +376,7 @@
                                             <li>Staff check the fields in this order.</li>
                                             <li>Click a name to select its marker. Its settings show below the list.</li>
                                             <li>A field is read once. For something on every row of a table, select it and set Read as to Column.</li>
+                                            <li><kbd>Ctrl</kbd> + <kbd>A</kbd> then <kbd>Delete</kbd> clears the page: every marker and the row lines. <kbd>Ctrl</kbd> + <kbd>Z</kbd> brings them back.</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -547,6 +554,34 @@
                 </div>
             </div>
         </form>
+    </div>
+
+    {{-- A file picked but not saved yet: nothing is stored, so this only drops the choice. --}}
+    <div class="modal fade" id="removePickedSampleModal" tabindex="-1"
+         aria-labelledby="removePickedSampleModalTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="removePickedSampleModalTitle">Remove this sample?</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">Remove <strong id="removePickedSampleName">the picked file</strong> from this layout?</p>
+                    <p class="mb-0 text-muted small">
+                        {{ $template?->sample_path
+                            ? 'It has not been saved yet. The stored sample comes back. Markers and layout settings are not changed.'
+                            : 'It has not been saved yet. Markers and layout settings are not changed.' }}
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirmRemovePickedSampleBtn">
+                        <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
+                        Remove sample
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     @if ($template?->sample_path)
