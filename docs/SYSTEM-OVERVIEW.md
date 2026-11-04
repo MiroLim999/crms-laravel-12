@@ -516,8 +516,9 @@ Times are stored in UTC and shown in Philippine time (`Asia/Manila`) on every pa
 The scan screen has three steps, shown at the top: **1 Document**, **2 Align**, **3 Verify**.
 
 - Choose the **document type**. Only types with a published template can be scanned; the others are listed but disabled.
-- Drop or choose the **scan**: PDF, PNG, JPG, WEBP or BMP, up to 20 MB. TIFF is refused, because Chrome and Edge cannot display it.
-- A PDF is shown in the browser by PDF.js. **Only page 1 of a PDF is used.**
+- Drop or choose the **scan**: a PDF up to 200 MB, or a PNG, JPG, WEBP or BMP image up to 20 MB. TIFF is refused, because Chrome and Edge cannot display it.
+- A PDF is shown in the browser by PDF.js. **A PDF of many pages (a register book) is read one page at a time**: a page bar (‹ Page 3 of 12 ›) picks the page, each page is saved as its own record, and after Submit a window offers the next page without uploading the file again. The record keeps only its own page, cut out of the PDF in the browser with the original scan quality, plus the file's name and page number ("Page 3 of 12 · BIRTHS-1995.pdf" on the record).
+- CRMS remembers which pages of that exact file are saved (by the file's SHA-256 fingerprint): saved pages get a ✓, the file opens at its first page not saved yet, and saving a page (or a one-page file) a second time asks first (**Go back** or **Save again**; the audit log notes a page saved again).
 - CRMS remembers the last type used, so the next visit opens straight to it, ready for the next page of the same book.
 - The screen shows whether the OCR service is online and which model is active.
 
@@ -1061,7 +1062,7 @@ Measured during development (not a formal benchmark):
 
 ### 8.5 Checking what comes in
 
-- Scans: PDF, PNG, JPG, WEBP or BMP, at most 20 MB. The page sent for line finding must be a PNG of at most 40 MB.
+- Scans: a PDF of at most 200 MB opens in the browser, but only one page of it is sent; a record's scan (an image, or that one page) is at most 20 MB. The page sent for line finding must be a PNG of at most 40 MB.
 - Markers must stay inside the page; at most 450 fields, 60 columns and 400 row lines per page.
 - A bad value typed into an address bar (a list where one value belongs, an impossible date) shows a message instead of an error page.
 - CSV cells that could run as Excel formulas are neutralized.
@@ -1175,7 +1176,7 @@ Daily use: `docker compose up -d` to start, `docker compose down` to stop. **Nev
 | **AI accuracy measured on synthetic data only** | The 79.2% exact match is not a measure of real ledger reading. A real-line test set has not been made yet. |
 | Training data is synthetic | Real Filipino registry handwriting, ink, paper and scan quality were not in training. |
 | Confidence not calibrated | A high confidence does not guarantee a correct reading. |
-| One page per scan, page 1 of a PDF | No batch scanning of a whole book; multi-page PDFs must be split. |
+| One page at a time | A PDF of many pages is read page by page in the workspace (Next page after each save). Batch scanning of a whole book is being built on the `gono` branch. |
 | One reading model for everything | Typed or printed text on a page is read by the same handwriting model; there is no separate engine for printed text. |
 | One record per page | A ledger page with many people is stored as one record; search finds the page, not a single person's own record. |
 | Only this computer can open it | Ports are bound to `127.0.0.1`, so several staff on different computers cannot use one installation as set up today. |
@@ -1203,7 +1204,7 @@ In order of value for the defense and for real use:
 3. **Fix or update the 5 failing tests** so the full suite passes.
 4. **Close the quick security gaps**: force the Super Admin password change, update PHP, bind MySQL to 127.0.0.1, refuse self-approval, turn on disk encryption, schedule backups.
 5. **Update the README and DEVELOPER-GUIDE** to the current model and test numbers.
-6. Later: batch scanning and multi-page PDFs, network access for several staff computers (with HTTPS), full-text search, splitting the largest files.
+6. Later: batch scanning (on the `gono` branch; multi-page PDFs are read page by page already), network access for several staff computers (with HTTPS), full-text search, splitting the largest files.
 
 ---
 

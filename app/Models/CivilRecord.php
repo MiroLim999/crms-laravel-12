@@ -29,6 +29,8 @@ class CivilRecord extends Model
         'doc_type', 'document_type_id', 'document_template_id', 'status',
         'scan_path', 'scan_mime', 'scan_rotation', 'page_image_path', 'ocr_model_key', 'created_by',
         'submitted_by', 'submitted_at',
+        // The file the scan came from, and which of its pages (see sourceLabel()).
+        'source_name', 'source_page', 'source_page_count', 'source_hash',
     ];
 
     protected function casts(): array
@@ -37,7 +39,35 @@ class CivilRecord extends Model
             'doc_type' => DocumentType::class,
             'status' => RecordStatus::class,
             'submitted_at' => 'datetime',
+            'source_page' => 'integer',
+            'source_page_count' => 'integer',
         ];
+    }
+
+    /**
+     * Whether the record page can draw the scan as a picture with the field
+     * boxes over it: an image upload, or any upload whose page Detect kept
+     * (a PDF page included). Older PDF records open in a new tab instead.
+     */
+    public function showsScanImage(): bool
+    {
+        return $this->page_image_path !== null || ! str_contains((string) $this->scan_mime, 'pdf');
+    }
+
+    /**
+     * "Page 3 of 12 · BIRTHS-1995.pdf", "BIRTHS-1995.pdf" for a file of one
+     * page, or null for a record saved before the source was kept.
+     */
+    public function sourceLabel(): ?string
+    {
+        $name = filled($this->source_name) ? (string) $this->source_name : null;
+        $page = $this->source_page_count > 1 && $this->source_page !== null
+            ? "Page {$this->source_page} of {$this->source_page_count}"
+            : null;
+
+        $parts = array_filter([$page, $name]);
+
+        return $parts === [] ? null : implode(' · ', $parts);
     }
 
     // ---------------------------------------------------------------- relations

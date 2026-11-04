@@ -52,6 +52,9 @@ class DocumentScanController extends Controller
     /** Session key: the type last opened in the workspace. */
     private const LAST_TYPE = 'scan.last_type';
 
+    /** More pages than any register book has: a typed page number past it is refused. */
+    private const MAX_SOURCE_PAGES = 10000;
+
     /**
      * Step 1 with no type chosen: the workspace's first step, the drop area
      * waiting for a type. Someone who has scanned before goes straight to the
@@ -186,9 +189,20 @@ class DocumentScanController extends Controller
             'fields.*.line_id' => ['nullable', 'integer', 'distinct'],
             // Staff chose "Submit anyway" when asked about missing required fields.
             'allow_missing' => ['sometimes', 'boolean'],
+            // The file this scan is a page of (the workspace sends the page alone,
+            // cut out of the file): its name, the page, and the file's SHA-256.
+            'source_name' => ['nullable', 'string', 'max:255'],
+            'source_page' => ['nullable', 'integer', 'min:1', 'max:'.self::MAX_SOURCE_PAGES, 'required_with:source_page_count,source_hash'],
+            'source_page_count' => ['nullable', 'integer', 'min:1', 'max:'.self::MAX_SOURCE_PAGES],
+            'source_hash' => ['nullable', 'string', 'regex:/^[0-9a-f]{64}$/'],
+            // Staff chose "Save again" when told this page is already saved.
+            'allow_duplicate' => ['sometimes', 'boolean'],
         ], [
             'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
+            'source_hash.regex' => 'The file fingerprint is not valid. Open the file again.',
         ]);
+
+        $source = $this->sourceOf($request, $validated);
 
         $templateId = (int) $validated['document_template_id'];
         $documentType = DocumentTypeDefinition::where('key', (string) $validated['doc_type'])->firstOrFail();
@@ -226,6 +240,25 @@ class DocumentScanController extends Controller
             throw ValidationException::withMessages($coordinateErrors);
         }
 
+        // This page of this exact file is saved already: say so first. Staff may
+        // save it again ("Save again"), which the audit log notes.
+        $savedBefore = $this->savedSourcePage($source);
+        if ($savedBefore !== null && ! $request->boolean('allow_duplicate')) {
+            $message = ($source['page_count'] ?? 1) > 1
+                ? "Page {$source['page']} of this file is already saved as record #{$savedBefore->getKey()}."
+                : "This file is already saved as record #{$savedBefore->getKey()}.";
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'duplicate_page' => true,
+                    'message' => $message,
+                    'record' => $this->sourcePagePayload($savedBefore),
+                ], 409);
+            }
+
+            throw ValidationException::withMessages(['scan' => $message]);
+        }
+
         [$page, $linesById] = $this->pageLinesFor($request, $validated, $templateId);
 
         // Some certificates do leave a required field blank, so a missing one
@@ -251,7 +284,7 @@ class DocumentScanController extends Controller
         $gridChanges = $this->gridChanges($template, $page);
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, &$copiedFiles) {
+            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $savedBefore, &$copiedFiles) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -263,6 +296,10 @@ class DocumentScanController extends Controller
                     // Field outlines are fractions of the page as outlined,
                     // which Detect may have straightened.
                     'scan_rotation' => $page?->deskew_degrees,
+                    'source_name' => $source['name'],
+                    'source_page' => $source['page'],
+                    'source_page_count' => $source['page_count'],
+                    'source_hash' => $source['hash'],
                     'ocr_model_key' => $validated['ocr_model_key'],
                     'created_by' => $request->user()->getKey(),
                     'submitted_by' => $request->user()->getKey(),
@@ -318,6 +355,12 @@ class DocumentScanController extends Controller
                         // This page's grid against the template's: rows, and
                         // columns Staff added or removed in Align.
                         ...($gridChanges !== [] ? ['grid_changes' => $gridChanges] : []),
+                        ...($source['page'] !== null ? [
+                            'source_page' => $source['page'],
+                            'source_page_count' => $source['page_count'],
+                        ] : []),
+                        // Saved although this page was saved before ("Save again").
+                        ...($savedBefore !== null ? ['saved_again_after_record' => $savedBefore->getKey()] : []),
                     ],
                     description: "Submitted and locked a {$record->typeShortLabel()} record.",
                 );
@@ -344,12 +387,94 @@ class DocumentScanController extends Controller
             return response()->json([
                 'message' => $message,
                 'redirect' => $redirect,
+                // The workspace marks this page saved and offers the next one.
+                'record' => $this->sourcePagePayload($record),
             ], 201);
         }
 
         return redirect()
             ->to($redirect)
             ->with('success', $message);
+    }
+
+    /**
+     * The pages of one scanned file that are already saved, by the file's
+     * SHA-256: the workspace ticks them, opens the file at the first page not
+     * saved yet, and warns on a page saved before. The newest record per page.
+     */
+    public function sourcePages(string $hash): JsonResponse
+    {
+        $records = CivilRecord::withTitleField()
+            ->where('source_hash', $hash)
+            ->whereNotNull('source_page')
+            ->orderBy('source_page')
+            ->orderByDesc('id')
+            ->get();
+
+        return response()->json([
+            'pages' => $records->unique('source_page')
+                ->map(fn (CivilRecord $record) => $this->sourcePagePayload($record))
+                ->values(),
+        ]);
+    }
+
+    /**
+     * The file this scan came from, as the workspace sent it. An older
+     * workspace sends none of it: the uploaded file's own name is kept then.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array{name: ?string, page: ?int, page_count: ?int, hash: ?string}
+     */
+    private function sourceOf(Request $request, array $validated): array
+    {
+        $page = isset($validated['source_page']) ? (int) $validated['source_page'] : null;
+        $pageCount = isset($validated['source_page_count']) ? (int) $validated['source_page_count'] : null;
+
+        if ($page !== null && $pageCount !== null && $page > $pageCount) {
+            throw ValidationException::withMessages([
+                'source_page' => "This file has {$pageCount} pages, so there is no page {$page}.",
+            ]);
+        }
+
+        $upload = $request->file('scan');
+        $name = filled($validated['source_name'] ?? null)
+            ? (string) $validated['source_name']
+            : ($upload instanceof UploadedFile ? $upload->getClientOriginalName() : null);
+
+        return [
+            'name' => $name !== null ? mb_substr($name, 0, 255) : null,
+            'page' => $page,
+            'page_count' => $pageCount ?? ($page !== null ? max($page, 1) : null),
+            'hash' => $validated['source_hash'] ?? null,
+        ];
+    }
+
+    /**
+     * @param  array{name: ?string, page: ?int, page_count: ?int, hash: ?string}  $source
+     */
+    private function savedSourcePage(array $source): ?CivilRecord
+    {
+        if ($source['hash'] === null || $source['page'] === null) {
+            return null;
+        }
+
+        return CivilRecord::withTitleField()
+            ->where('source_hash', $source['hash'])
+            ->where('source_page', $source['page'])
+            ->latest('id')
+            ->first();
+    }
+
+    /** @return array{page: ?int, recordId: int, title: string, url: string, submittedAt: ?string} */
+    private function sourcePagePayload(CivilRecord $record): array
+    {
+        return [
+            'page' => $record->source_page,
+            'recordId' => (int) $record->getKey(),
+            'title' => $record->title(),
+            'url' => route('records.show', $record),
+            'submittedAt' => $record->submitted_at?->toIso8601String(),
+        ];
     }
 
     private function hydrateJsonFields(Request $request): void

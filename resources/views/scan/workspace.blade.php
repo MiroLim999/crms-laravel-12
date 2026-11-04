@@ -31,6 +31,25 @@
                                     <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
                                 </button>
                             </div>
+
+                            {{-- A PDF of many pages: one page is aligned, read and saved at a time. ✓: saved already. --}}
+                            <div class="input-group input-group-sm marker-page-controls d-none" role="group" id="scanPageBar"
+                                 aria-label="Pages of this PDF">
+                                <button type="button" class="btn btn-icon btn-outline-secondary" id="scanPagePrevBtn"
+                                        aria-label="Previous page" title="Previous page">
+                                    <i class="icon-base bx bx-chevron-left icon-sm" aria-hidden="true"></i>
+                                </button>
+                                <div class="dropdown marker-page-dropdown">
+                                    <button type="button" class="btn btn-outline-secondary dropdown-toggle marker-page-select"
+                                            id="scanPageSelect" data-bs-toggle="dropdown" aria-expanded="false"
+                                            aria-label="Page to read"></button>
+                                    <div class="dropdown-menu marker-page-menu" id="scanPageMenu"></div>
+                                </div>
+                                <button type="button" class="btn btn-icon btn-outline-secondary" id="scanPageNextBtn"
+                                        aria-label="Next page" title="Next page">
+                                    <i class="icon-base bx bx-chevron-right icon-sm" aria-hidden="true"></i>
+                                </button>
+                            </div>
                         </div>
 
                         <div class="marker-toolbar__actions">
@@ -110,15 +129,20 @@
             <div class="document-side-panel field-marker-controls-pane">
                 {{--
                     What Staff should know about the scan itself, shown only when
-                    it applies: it may be sideways, or only its first page is read.
+                    it applies: it may be sideways; this page (or file) may be
+                    saved already; or other pages of this PDF are.
                 --}}
                 <div class="document-scan-notice d-none" id="scanSidewaysNotice" role="alert">
                     <i class="icon-base bx bx-error" aria-hidden="true"></i>
                     <span id="scanSidewaysMessage"></span>
                 </div>
                 <div class="document-scan-notice d-none" id="scanPagesNotice" role="status">
-                    <i class="icon-base bx bx-file" aria-hidden="true"></i>
-                    <span id="scanPagesMessage"></span>
+                    <i class="icon-base bx bx-check-circle" aria-hidden="true"></i>
+                    <span>
+                        <span id="scanPagesMessage"></span>
+                        <a href="#" target="_blank" rel="noopener" class="document-scan-notice__link d-none"
+                           id="scanPagesRecordLink">Open it</a>
+                    </span>
                 </div>
 
                 {{--
@@ -645,6 +669,67 @@
         </div>
     </div>
 
+    {{-- This page of this file is saved already: Staff decide whether to save it again. --}}
+    <div class="modal fade" id="duplicatePageModal" tabindex="-1"
+         aria-labelledby="duplicatePageModalTitle" aria-describedby="duplicatePageModalDescription"
+         aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
+            <div class="modal-content leave-scan-modal">
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-warning" aria-hidden="true">
+                        <i class="icon-base bx bx-copy"></i>
+                    </span>
+                    <h5 class="modal-title" id="duplicatePageModalTitle">Already saved</h5>
+                    <p class="leave-scan-modal__text mb-2" id="duplicatePageModalDescription">
+                        This page is already saved.
+                    </p>
+                    <p class="leave-scan-modal__text">
+                        <a href="#" target="_blank" rel="noopener" id="duplicatePageRecordLink">Open the saved record</a>
+                        · Saving again makes a second record of it.
+                    </p>
+
+                    <div class="leave-scan-modal__actions">
+                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal"
+                                id="duplicatePageBackBtn">
+                            Go back
+                        </button>
+                        <button type="button" class="btn btn-warning" id="confirmDuplicatePageBtn">
+                            Save again
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- A page of a PDF was saved: go on with the next page, or open the record. --}}
+    <div class="modal fade" id="nextPageModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"
+         aria-labelledby="nextPageModalTitle" aria-describedby="nextPageModalDescription"
+         aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
+            <div class="modal-content leave-scan-modal">
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-success" aria-hidden="true">
+                        <i class="icon-base bx bx-check"></i>
+                    </span>
+                    <h5 class="modal-title" id="nextPageModalTitle">Page saved</h5>
+                    <p class="leave-scan-modal__text mb-2" id="nextPageModalDescription">
+                        Continue with the next page?
+                    </p>
+                    <p class="leave-scan-modal__text" id="nextPageModalProgress"></p>
+
+                    <div class="leave-scan-modal__actions">
+                        <a href="#" class="btn btn-label-secondary" id="nextPageOpenRecordBtn">Open record</a>
+                        <button type="button" class="btn btn-primary" id="nextPageContinueBtn">
+                            Next page
+                            <i class="icon-base bx bx-right-arrow-alt icon-sm ms-1" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- Confirm leaving a scan that is not submitted (Cancel, or a link out) --}}
     <div class="modal fade" id="leaveScanModal" tabindex="-1"
          aria-labelledby="leaveScanModalTitle" aria-describedby="leaveScanModalDescription"
@@ -751,6 +836,16 @@
     } from '{{ Vite::asset('resources/js/ledger-grid.js') }}';
     import { RowLineLayer, rowKey } from '{{ Vite::asset('resources/js/row-lines.js') }}';
     import { valueProblem } from '{{ Vite::asset('resources/js/value-types.js') }}';
+    import {
+        fileFingerprint,
+        firstUnsavedPage,
+        isPdfFile,
+        MAX_PDF_BYTES,
+        MAX_SCAN_BYTES,
+        nextUnsavedPage,
+        pageRanges,
+        pdfPageFile,
+    } from '{{ Vite::asset('resources/js/scan-source.js') }}';
 
     const config = {
         typeLabel: @json($docType->label()),
@@ -774,6 +869,8 @@
         lineStoreUrl: @json(route('documents.pages.lines.store', ['page' => '__PAGE__'])),
         linePlaceUrl: @json(route('documents.pages.lines.place', ['page' => '__PAGE__', 'line' => '__LINE__'])),
         pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
+        // The pages of one file already saved; 64 zeros stand in for its fingerprint.
+        sourcePagesUrl: @json(route('documents.sources.pages', ['hash' => str_repeat('0', 64)])),
         csrf: @json(csrf_token()),
         // The layout's page shape (width : height), from its sample.
         pageRatio: @json($template->page_ratio),
@@ -1045,7 +1142,37 @@
      * Markers and row lines set together, as one change: on a new page, by
      * Snap to table and Detect, by Reset, and by undo.
      */
-    function setGrid(boxes, rows, { estimated = [], byHand = false, tilts = null, selected = null } = {}) {
+    // Where each rectangle field was last placed by the template, Snap or Detect
+    // (name -> box). A field that differs from it was moved by Staff, and Snap
+    // to table leaves such a field where Staff put it.
+    let autoFields = new Map();
+
+    const sameBox = (a, b) => ['x', 'y', 'w', 'h'].every((key) => Math.abs((a[key] ?? 0) - (b[key] ?? 0)) < 0.0005)
+        && Math.abs((Number(a.angle) || 0) - (Number(b.angle) || 0)) < 0.05;
+
+    function rememberAutoFields(boxes, except = new Set()) {
+        boxes.filter((box) => box.kind !== 'column').forEach((box) => {
+            const key = nameKey(box.name);
+            if (!except.has(key)) autoFields.set(key, { x: box.x, y: box.y, w: box.w, h: box.h, angle: box.angle });
+        });
+    }
+
+    /** The names of the fields as they stand now that Staff placed (or added) by hand. */
+    function handPlacedFields(boxes = marker.toJSON()) {
+        return new Set(boxes
+            .filter((box) => box.kind !== 'column')
+            .filter((box) => {
+                const placed = autoFields.get(nameKey(box.name));
+                return !placed || !sameBox(box, placed);
+            })
+            .map((box) => nameKey(box.name)));
+    }
+
+    function setGrid(boxes, rows, { estimated = [], byHand = false, tilts = null, selected = null, remember = false } = {}) {
+        if (remember) {
+            autoFields = new Map();
+            rememberAutoFields(boxes);
+        }
         gridRows = [...rows];
         rowTilts = tilts ? fitTilts(tilts, gridRows.length) : gridRows.map(() => 0);
         estimatedRows = new Set(estimated);
@@ -1511,6 +1638,7 @@
             estimated: (page.geometry?.estimated_rows ?? []).filter((index) => rows[index] !== undefined)
                 .map((index) => rowKey(rows[index])),
             byHand: rowsByHand,
+            remember: true,
         });
         window.requestAnimationFrame(() => marker.resetZoom());
 
@@ -2474,13 +2602,34 @@
     }
 
     // ---------------------------------------------------------------- step 1
-    // How many pages the opened file has: only the first is read.
+    // The opened file. A PDF of many pages is read one page at a time, each
+    // saved as its own record: the page being read (from 1), the file's
+    // fingerprint, and which of its pages are saved already (page number ->
+    // {recordId, title, url}), so the page bar ticks them.
     let scanPageCount = 1;
+    let scanPageNumber = 1;
+    let scanFingerprint = null;
+    let savedPages = new Map();
+    let pageTurning = false;
+
+    const multiPage = () => scanPageCount > 1;
+
+    /** "BIRTHS-1995.pdf · page 3 of 12", or the name alone for a file of one page. */
+    function scanLabel() {
+        const name = scanFile?.name || 'Document';
+        return multiPage() ? `${name} · page ${scanPageNumber} of ${scanPageCount}` : name;
+    }
+
+    function showScanContext() {
+        el('workspaceContextDetail').textContent = `${config.typeLabel} · ${scanLabel()}`;
+        el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+    }
 
     /**
      * What Staff should know about the scan itself. Any paper size is fine
      * (markers are page fractions), but a tall scan of wide pages, or the
-     * other way round, is likely sideways; and of a PDF only page 1 is read.
+     * other way round, is likely sideways. And this page (or this file) may
+     * be saved already, or other pages of this PDF may be.
      */
     function updateScanNotices() {
         // Clearly one way or the other: a near-square page is neither.
@@ -2493,17 +2642,102 @@
             : '';
         el('scanSidewaysNotice').classList.toggle('d-none', !sideways);
 
-        el('scanPagesMessage').textContent = scanPageCount > 1
-            ? `This PDF has ${scanPageCount} pages. Only page 1 is read; save each page as its own file to read the others.`
-            : '';
-        el('scanPagesNotice').classList.toggle('d-none', scanPageCount <= 1);
+        const here = savedPages.get(scanPageNumber) ?? null;
+        const others = [...savedPages.keys()].filter((page) => page !== scanPageNumber && page <= scanPageCount);
+        let message = '';
+        if (here) {
+            message = multiPage()
+                ? `Page ${scanPageNumber} is already saved as record #${here.recordId}.`
+                : `This file is already saved as record #${here.recordId}.`;
+        } else if (multiPage() && others.length > 0) {
+            message = `Saved already: page${others.length === 1 ? '' : 's'} ${pageRanges(others)} of ${scanPageCount}.`;
+        }
+        el('scanPagesMessage').textContent = message;
+        const link = el('scanPagesRecordLink');
+        link.classList.toggle('d-none', !here);
+        if (here) link.href = here.url;
+        // Other pages saved is good to know; this one saved is a warning.
+        el('scanPagesNotice').classList.toggle('is-info', !here);
+        el('scanPagesNotice').classList.toggle('d-none', message === '');
+
+        updatePageBar();
+    }
+
+    /** ‹ Page 3 of 12 › in the Align toolbar, for a PDF of many pages; ✓: saved already. */
+    function updatePageBar() {
+        el('scanPageBar').classList.toggle('d-none', !multiPage());
+        if (!multiPage()) return;
+
+        // A real dropdown, so a saved page can show a green check icon.
+        const menu = el('scanPageMenu');
+        if (menu.children.length !== scanPageCount) {
+            menu.replaceChildren(...Array.from({ length: scanPageCount }, (_, index) => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'dropdown-item';
+                item.dataset.page = String(index + 1);
+                item.addEventListener('click', () => turnToPage(index + 1));
+                return item;
+            }));
+        }
+        const label = (page) => {
+            const span = document.createElement('span');
+            span.className = 'marker-page-label';
+            span.append(`Page ${page} of ${scanPageCount}`);
+            if (savedPages.has(page)) {
+                const check = document.createElement('i');
+                check.className = 'icon-base bx bx-check marker-page-saved';
+                check.setAttribute('aria-label', 'saved');
+                check.title = 'Saved already';
+                span.append(check);
+            }
+            return span;
+        };
+        Array.from(menu.children).forEach((item) => {
+            const page = Number(item.dataset.page);
+            item.replaceChildren(label(page));
+            item.classList.toggle('active', page === scanPageNumber);
+        });
+
+        const select = el('scanPageSelect');
+        select.replaceChildren(label(scanPageNumber));
+        select.disabled = pageTurning;
+        el('scanPagePrevBtn').disabled = pageTurning || scanPageNumber <= 1;
+        el('scanPageNextBtn').disabled = pageTurning || scanPageNumber >= scanPageCount;
+    }
+
+    /**
+     * The file's fingerprint, and which of its pages are saved already. A
+     * lookup that fails ticks nothing: the server still asks before a page
+     * is saved twice.
+     */
+    async function lookUpSavedPages(file) {
+        try {
+            const fingerprint = await fileFingerprint(file);
+            if (scanFile !== file) return;
+            scanFingerprint = fingerprint;
+
+            const response = await fetch(config.sourcePagesUrl.replace('0'.repeat(64), fingerprint), {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+                signal: AbortSignal.timeout?.(10000),
+            });
+            if (!response.ok) throw new Error(`The server answered ${response.status}.`);
+            const payload = await response.json();
+            if (scanFile !== file) return;
+            savedPages = new Map((payload.pages ?? []).map((entry) => [Number(entry.page), entry]));
+        } catch (error) {
+            console.warn('The saved pages of this file could not be looked up:', error);
+        }
     }
 
     async function openDocument(file) {
         if (!file) return;
 
-        if (file.size > 20 * 1024 * 1024) {
-            alert('Choose a document smaller than 20 MB.');
+        // Of a PDF only the page being read is sent, so it may be large.
+        const pdf = isPdfFile(file);
+        if (file.size > (pdf ? MAX_PDF_BYTES : MAX_SCAN_BYTES)) {
+            alert(pdf ? 'Choose a PDF smaller than 200 MB.' : 'Choose an image smaller than 20 MB.');
             scanFileInput.value = '';
             return;
         }
@@ -2513,17 +2747,24 @@
 
         try {
             scanFile = file;
+            scanFingerprint = null;
+            savedPages = new Map();
             clearDetection();
-            const measurement = await marker.load(file);
-            scanPageCount = Number(measurement?.pageCount) || 1;
+            // It opens at its first page not saved yet.
+            const [pageCount] = await Promise.all([pdf ? marker.pdfPageCount(file) : 1, lookUpSavedPages(file)]);
+            if (pageCount <= 1 && file.size > MAX_SCAN_BYTES) {
+                throw new Error('Choose a document smaller than 20 MB. A PDF of many pages may be larger: only the page being read is sent.');
+            }
+            scanPageCount = pageCount;
+            scanPageNumber = firstUnsavedPage(pageCount, savedPages);
+            await marker.load(file, { page: scanPageNumber });
             updateScanNotices();
-            el('workspaceContextDetail').textContent = `${config.typeLabel} · ${file.name}`;
-            el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+            showScanContext();
             showStep('mark');
             guardBackButton();
             resetFieldHistory();
             rowsSource = null;
-            setGrid(templateBoxes, templateRows);
+            setGrid(templateBoxes, templateRows, { remember: true });
             fetchSnapLines();
 
             // The marking section was hidden while the file loaded, so fit only
@@ -2538,6 +2779,40 @@
             dropzone.removeAttribute('aria-busy');
         }
     }
+
+    /**
+     * Another page of the PDF, in Align. The markers and row lines stay where
+     * they are, like a sheet laid over the book: only the page under them
+     * changes. What Detect found belongs to the page before, so it is let go.
+     */
+    async function turnToPage(pageNumber) {
+        const page = Math.min(scanPageCount, Math.max(1, Math.trunc(Number(pageNumber)) || 1));
+        if (!scanFile || page === scanPageNumber || pageTurning || scanInProgress) {
+            updatePageBar();
+            return;
+        }
+
+        pageTurning = true;
+        updatePageBar();
+        try {
+            clearDetection();
+            await marker.load(scanFile, { page });
+            scanPageNumber = page;
+            clearOcrError();
+            updateScanNotices();
+            showScanContext();
+            fetchSnapLines();
+            window.requestAnimationFrame(() => marker.resetZoom());
+        } catch (error) {
+            showOcrError(error.message || `Page ${page} could not be opened.`);
+        } finally {
+            pageTurning = false;
+            updatePageBar();
+        }
+    }
+
+    el('scanPagePrevBtn').addEventListener('click', () => turnToPage(scanPageNumber - 1));
+    el('scanPageNextBtn').addEventListener('click', () => turnToPage(scanPageNumber + 1));
 
     scanFileInput.addEventListener('change', (event) => {
         if (!(event.currentTarget instanceof HTMLInputElement)) return;
@@ -2824,7 +3099,7 @@
 
     function restoreTemplateFields() {
         rowsSource = null;
-        setGrid(templateBoxes, templateRows);
+        setGrid(templateBoxes, templateRows, { remember: true });
         marker.resetZoom();
         el('docViewport').scrollTo({ top: 0, left: 0 });
         clearOcrError();
@@ -3262,10 +3537,23 @@
             // one undoable change (Ctrl+Z) like any marker edit.
             const rows = payload.geometry?.ruled_ys ?? gridRows;
             rowsSource = payload.rows ?? null;
-            setGrid(geometryMarkers(payload.geometry, null), rows, {
+            // Fields Staff moved (or added) stay where they put them: Snap only
+            // fits the table and the fields they have not touched.
+            const before = marker.toJSON();
+            const kept = handPlacedFields(before);
+            const keptBoxes = new Map(before.filter((box) => kept.has(nameKey(box.name)) && box.kind !== 'column')
+                .map((box) => [nameKey(box.name), box]));
+            const snapped = geometryMarkers(payload.geometry, null)
+                .map((box) => (box.kind !== 'column' && keptBoxes.has(nameKey(box.name)) ? keptBoxes.get(nameKey(box.name)) : box));
+            setGrid(snapped, rows, {
                 estimated: (payload.rows?.estimated ?? []).filter((index) => rows[index] !== undefined)
                     .map((index) => rowKey(rows[index])),
             });
+            // The fields Snap placed are the new starting point; the ones kept are still Staff's.
+            rememberAutoFields(snapped, kept);
+            if (keptBoxes.size > 0) {
+                showGridMessage(`Snap left ${keptBoxes.size} field${keptBoxes.size === 1 ? '' : 's'} you moved where ${keptBoxes.size === 1 ? 'it is' : 'they are'}.`);
+            }
         } catch (error) {
             showOcrError(error.name === 'AbortError'
                 ? 'Snap to table timed out. Check that the web app is running, then try again.'
@@ -4011,7 +4299,7 @@
         lineOverlay.setLines(processedPage, cropped);
         validationMarker.resetZoom();
         el('validationDocViewport').scrollTo({ top: 0, left: 0 });
-        el('validationFileName').textContent = scanFile?.name || 'Document';
+        el('validationFileName').textContent = scanLabel();
 
         window.requestAnimationFrame(() => {
             validationMarker.layout();
@@ -5462,7 +5750,7 @@
 
     el('confirmMissingRequiredBtn').addEventListener('click', () => {
         window.bootstrap.Modal.getInstance(el('missingRequiredModal'))?.hide();
-        submitRecord({ allowMissing: true });
+        submitRecord({ ...lastSubmitChoices, allowMissing: true });
     });
 
     el('submitForm').addEventListener('submit', (event) => {
@@ -5470,9 +5758,112 @@
         submitRecord();
     });
 
-    // Only "Submit anyway" passes allowMissing, after the same checks again.
-    async function submitRecord({ allowMissing = false } = {}) {
+    // ------------------------------------------------ a page saved before
+    // The server says this page of this file (or this file) is saved already.
+    function askToSaveAgain(payload) {
+        el('duplicatePageModalDescription').textContent = payload?.message || 'This page is already saved.';
+        const link = el('duplicatePageRecordLink');
+        link.href = payload?.record?.url || '#';
+        link.classList.toggle('d-none', !payload?.record?.url);
+        if (payload?.record) {
+            savedPages.set(scanPageNumber, payload.record);
+            updateScanNotices();
+        }
+        window.bootstrap.Modal.getOrCreateInstance(el('duplicatePageModal')).show();
+    }
+
+    // The safe choice has the focus, so Enter never saves a page twice by accident.
+    el('duplicatePageModal').addEventListener('shown.bs.modal', () => el('duplicatePageBackBtn').focus());
+
+    el('confirmDuplicatePageBtn').addEventListener('click', () => {
+        window.bootstrap.Modal.getInstance(el('duplicatePageModal'))?.hide();
+        submitRecord({ ...lastSubmitChoices, allowDuplicate: true });
+    });
+
+    // ------------------------------------------------ the next page of a PDF
+    const SUBMIT_IDLE_HTML = el('submitBtn').innerHTML;
+
+    function askForNextPage(next, recordUrl) {
+        const saved = [...savedPages.keys()].filter((page) => page <= scanPageCount);
+        el('nextPageModalTitle').textContent = `Page ${scanPageNumber} saved`;
+        el('nextPageModalDescription').textContent = `Continue with page ${next} of ${scanPageCount}?`;
+        el('nextPageModalProgress').textContent = `Saved so far: page${saved.length === 1 ? '' : 's'} ${pageRanges(saved)} of ${scanPageCount}.`;
+        el('nextPageOpenRecordBtn').href = recordUrl;
+        el('nextPageContinueBtn').dataset.page = String(next);
+        window.bootstrap.Modal.getOrCreateInstance(el('nextPageModal')).show();
+    }
+
+    el('nextPageModal').addEventListener('shown.bs.modal', () => el('nextPageContinueBtn').focus());
+
+    /**
+     * Go on with another page of the same PDF once one is saved: Align starts
+     * again from the template's markers, as for a file just opened, and the
+     * file is not uploaded again.
+     */
+    async function continueWithPage(pageNumber) {
+        const button = el('nextPageContinueBtn');
+        button.disabled = true;
+        try {
+            stopAddingMissedField();
+            cancelOutlineEdit();
+            clearValidationSubmitError();
+            clearDetection();
+            processedPage = null;
+            cropped = [];
+            readings = [];
+            requiredInput(document, '#documentPageId').value = '';
+            requiredInput(document, '#ocrModelKey').value = '';
+
+            await marker.load(scanFile, { page: pageNumber });
+            scanPageNumber = pageNumber;
+            recordSubmitting = false;
+            el('submitBtn').innerHTML = SUBMIT_IDLE_HTML;
+            updateScanNotices();
+            showScanContext();
+            showStep('mark');
+            resetFieldHistory();
+            rowsSource = null;
+            setGrid(templateBoxes, templateRows, { remember: true });
+            fetchSnapLines();
+            window.bootstrap.Modal.getInstance(el('nextPageModal'))?.hide();
+            window.requestAnimationFrame(() => marker.resetZoom());
+        } catch (error) {
+            console.error('The next page could not be opened:', error);
+            // The page just saved is safe: show its record.
+            window.location.assign(el('nextPageOpenRecordBtn').href);
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    el('nextPageContinueBtn').addEventListener('click', () => continueWithPage(Number(el('nextPageContinueBtn').dataset.page)));
+
+    /**
+     * What the record keeps of the file: of a PDF of many pages, the page
+     * being read alone, cut out with its original quality; any other file as
+     * it is. A PDF that cannot be cut (one locked with a password) goes whole
+     * when it is small enough, and the record still knows its page.
+     */
+    async function scanForRecord() {
+        if (!multiPage() || !isPdfFile(scanFile)) return scanFile;
+        try {
+            return await pdfPageFile(scanFile, scanPageNumber);
+        } catch (error) {
+            console.warn('The page could not be cut out of the PDF:', error);
+            if (scanFile.size <= MAX_SCAN_BYTES) return scanFile;
+            throw new Error(`Page ${scanPageNumber} could not be taken out of this PDF. Save that page as its own file and upload it.`);
+        }
+    }
+
+    // What Staff last chose to go ahead with, so answering one question
+    // ("Submit anyway", "Save again") keeps the answer to the other.
+    let lastSubmitChoices = { allowMissing: false, allowDuplicate: false };
+
+    // Only "Submit anyway" passes allowMissing, and only "Save again"
+    // allowDuplicate, after the same checks again.
+    async function submitRecord({ allowMissing = false, allowDuplicate = false } = {}) {
         if (recordSubmitting) return;
+        lastSubmitChoices = { allowMissing, allowDuplicate };
 
         clearValidationSubmitError();
         const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
@@ -5523,8 +5914,13 @@
 
         const form = el('submitForm');
         const data = new FormData(form);
-        data.set('scan', scanFile, scanFile.name);
         if (allowMissing) data.set('allow_missing', '1');
+        if (allowDuplicate) data.set('allow_duplicate', '1');
+        // Which file, and which of its pages, this record is.
+        data.set('source_name', scanFile.name);
+        data.set('source_page', String(scanPageNumber));
+        data.set('source_page_count', String(scanPageCount));
+        if (scanFingerprint) data.set('source_hash', scanFingerprint);
 
         const personGroups = validationGroups.filter((candidate) => candidate.kind === 'person');
         const submittedFields = verifiedIndexes.map((sourceIndex) => {
@@ -5569,6 +5965,9 @@
         button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Submitting verified fields...';
 
         try {
+            const scanUpload = await scanForRecord();
+            data.set('scan', scanUpload, scanUpload.name);
+
             const response = await fetch(form.action, {
                 method: 'POST',
                 headers: {
@@ -5583,6 +5982,12 @@
             const payload = contentType.includes('application/json') ? await response.json() : null;
 
             if (!response.ok) {
+                // This page of this file is saved already: nothing was saved,
+                // so ask whether to save it again.
+                if (response.status === 409 && payload?.duplicate_page) {
+                    askToSaveAgain(payload);
+                    return;
+                }
                 // The server found required fields missing that this page did
                 // not: nothing was saved, so ask the same question.
                 if (response.status === 422 && Array.isArray(payload?.errors?.missing_required)) {
@@ -5597,9 +6002,20 @@
                 throw new Error('The record was saved, but the archive location was not returned. Open Records Archive to confirm it.');
             }
 
+            if (payload.record) savedPages.set(scanPageNumber, payload.record);
+            submissionSucceeded = true;
+
+            // A PDF with pages still to save: offer the next one. The page just
+            // saved stays locked meanwhile (recordSubmitting), so it is not sent twice.
+            const next = multiPage() ? nextUnsavedPage(scanPageNumber, scanPageCount, savedPages) : null;
+            if (next !== null) {
+                button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved';
+                askForNextPage(next, payload.redirect);
+                return;
+            }
+
             button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved. Opening record...';
             window.location.assign(payload.redirect);
-            submissionSucceeded = true;
         } catch (error) {
             console.error('Record submission failed:', error);
             const message = error.name === 'AbortError'

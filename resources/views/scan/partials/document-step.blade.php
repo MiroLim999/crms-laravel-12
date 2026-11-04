@@ -202,7 +202,7 @@
                 </div>
             @endif
 
-            <p class="document-upload-note">Up to 20 MB · Only the first page of a PDF is read</p>
+            <p class="document-upload-note">PDF up to 200 MB, read one page at a time · Images up to 20 MB</p>
         </div>
     </div>
 </section>

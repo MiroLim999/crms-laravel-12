@@ -41,6 +41,9 @@ export default defineConfig({
                 'resources/js/row-lines.js',
                 // The value checks Verify runs from each template field's settings.
                 'resources/js/value-types.js',
+                // A scanned file of many pages: its fingerprint, and one page cut
+                // out of it per record. pdf-lib loads only when a page is cut.
+                'resources/js/scan-source.js',
                 // Template Builder interaction shell. It shares FieldMarker with
                 // Staff scanning but is only loaded on Super Admin layout pages.
                 'resources/js/template-builder.js',

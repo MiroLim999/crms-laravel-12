@@ -8,7 +8,9 @@
          id="layout-navbar" aria-label="Completed document workflow">
         <div class="document-workspace-topbar__context">
             <strong>{{ $recordHeading }}</strong>
-            <small>{{ $record->typeLabel() }} · Record #{{ $record->getKey() }}</small>
+            {{-- Where the scan came from: "Page 3 of 12 · BIRTHS-1995.pdf". --}}
+            @php($recordContext = implode(' · ', array_filter([$record->typeLabel(), 'Record #'.$record->getKey(), $record->sourceLabel()])))
+            <small title="{{ $recordContext }}">{{ $recordContext }}</small>
         </div>
 
         <nav class="document-flow-steps" aria-label="Document processing complete">
@@ -114,7 +116,7 @@
                                         <div class="record-field-row"
                                              data-record-field="{{ $field->getKey() }}"
                                              data-group="{{ $group['id'] }}"
-                                             @if ($record->scan_path && !str_contains((string) $record->scan_mime, 'pdf'))
+                                             @if ($record->scan_path && $record->showsScanImage())
                                                  role="button" tabindex="0"
                                                  aria-label="Show {{ $field->name }} on the original scan"
                                              @endif>

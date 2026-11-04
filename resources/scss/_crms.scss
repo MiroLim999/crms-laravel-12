@@ -2285,6 +2285,57 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     flex: 0 0 auto;
     margin-block-start: .08rem;
   }
+
+  // Other pages of this PDF are saved: good to know, not a warning.
+  &.is-info {
+    color: var(--crms-info-text);
+    background: rgba(3, 195, 236, .08);
+    border-color: rgba(3, 195, 236, .24);
+  }
+}
+
+.document-scan-notice__link {
+  margin-inline-start: .2rem;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+// A PDF of many pages: ‹ Page 3 of 12 › beside the zoom, one page read at a time.
+.marker-page-controls {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  inline-size: auto;
+
+  .marker-page-dropdown {
+    display: flex;
+  }
+
+  .marker-page-select {
+    inline-size: auto;
+    min-inline-size: 8.75rem;
+    border-radius: 0;
+    font-variant-numeric: tabular-nums;
+    text-align: start;
+  }
+}
+
+.marker-page-menu {
+  min-inline-size: 9rem;
+  max-block-size: 18rem;
+  overflow-y: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.marker-page-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+.marker-page-saved {
+  color: var(--bs-success);
+  font-size: 1.1rem;
 }
 
 .marker-field-bulk-actions {

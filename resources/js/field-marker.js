@@ -251,6 +251,8 @@ export class FieldMarker {
         this.snapLines = null;
         this.guides = { v: null, h: null };
         this.pdfDoc = null;
+        // The PDF being read, and the file it is read from (see _openPdf).
+        this.pdfOpening = null;
         this.pageMeasurement = null;
         this.zoom = 1;
         this.minZoom = 0.5;
@@ -366,17 +368,17 @@ export class FieldMarker {
     // ------------------------------------------------------------------ loading
 
     /**
-     * Render a File (image or PDF) onto the canvas.
+     * Render a File (image or PDF) onto the canvas. Of a PDF, `page` is the
+     * page drawn (from 1). The PDF is read once and kept, so turning to
+     * another of its pages only draws that page.
      */
-    async load(file) {
-        const isPdf = file.type === 'application/pdf'
-            || file.name.toLowerCase().endsWith('.pdf');
-
-        if (isPdf) {
-            const buffer = await file.arrayBuffer();
-            this.pdfDoc = await pdfjsLib.getDocument({ data: buffer }).promise;
-            await this.renderPdfPage(1);
+    async load(file, { page = 1 } = {}) {
+        if (isPdfDocument(file)) {
+            const doc = await this._openPdf(file);
+            const wanted = Math.trunc(Number(page)) || 1;
+            await this.renderPdfPage(Math.min(doc.numPages, Math.max(1, wanted)));
         } else {
+            this._closePdf();
             await this.renderImage(file);
             this.pageMeasurement = await this._measureImage(file);
         }
@@ -386,11 +388,45 @@ export class FieldMarker {
         return this.pageMeasurement;
     }
 
+    /** How many pages a PDF has, reading it (once) without drawing a page. */
+    async pdfPageCount(file) {
+        return (await this._openPdf(file)).numPages;
+    }
+
+    _openPdf(file) {
+        if (this.pdfOpening?.file === file) return this.pdfOpening.promise;
+
+        this._closePdf();
+        const promise = file.arrayBuffer()
+            .then((buffer) => pdfjsLib.getDocument({ data: buffer }).promise)
+            .then((doc) => {
+                if (this.pdfOpening?.promise === promise) this.pdfDoc = doc;
+                return doc;
+            });
+        this.pdfOpening = { file, promise };
+        promise.catch(() => {
+            if (this.pdfOpening?.promise === promise) this.pdfOpening = null;
+        });
+
+        return promise;
+    }
+
+    /** Let go of the PDF that was read, and of its copy in the PDF worker. */
+    _closePdf() {
+        const doc = this.pdfDoc;
+        this.pdfDoc = null;
+        this.pdfOpening = null;
+        doc?.destroy?.();
+    }
+
     /**
-     * Render from a URL, used when revisiting an already-stored scan.
+     * Render from a URL, used when revisiting an already-stored scan. An
+     * image (such as the page Detect straightened) keeps the PDF that was
+     * read, so its other pages can still be opened.
      */
     async loadFromUrl(url, isPdf = false) {
         if (isPdf) {
+            this._closePdf();
             this.pdfDoc = await pdfjsLib.getDocument({ url }).promise;
             await this.renderPdfPage(1);
         } else {
@@ -413,6 +449,7 @@ export class FieldMarker {
             widthMm: physicalViewport.width * 25.4 / 72,
             heightMm: physicalViewport.height * 25.4 / 72,
             pageCount: this.pdfDoc.numPages,
+            pageNumber,
             physicalSource: 'PDF page box',
         };
 
@@ -1180,6 +1217,10 @@ export class FieldMarker {
         this.boxes.forEach((box) => box.el?.classList.toggle('is-selected', this.selected.has(box)));
         this.onSelectionChange?.(this.selectedIndexes(), { source, activeIndex });
     }
+}
+
+function isPdfDocument(file) {
+    return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
 }
 
 function clamp(value, min, max) {
