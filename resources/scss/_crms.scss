@@ -3484,55 +3484,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// Template builder: printed row lines of a ruled register, drawn over the
-// sample. Only the lines take the pointer, so marquee selection still works
-// on the page around them.
-.ledger-rule-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  inline-size: 100%;
-  block-size: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.ledger-rule {
-  cursor: ns-resize;
-
-  .ledger-rule__line {
-    stroke: #0e9aa7;
-    stroke-width: 1.5px;
-    stroke-dasharray: 6 3;
-    vector-effect: non-scaling-stroke;
-  }
-
-  .ledger-rule__hit {
-    stroke: transparent;
-    stroke-width: 9px;
-    vector-effect: non-scaling-stroke;
-    pointer-events: stroke;
-  }
-
-  // Detect's estimate below the last printed rule: amber until checked.
-  &.is-estimated .ledger-rule__line {
-    stroke: #e59500;
-    stroke-dasharray: 3 3;
-  }
-
-  &.is-selected .ledger-rule__line {
-    stroke: var(--bs-primary);
-    stroke-width: 2.5px;
-    stroke-dasharray: none;
-  }
-
-  &:hover .ledger-rule__line,
-  &.is-dragging .ledger-rule__line {
-    stroke: var(--bs-danger);
-    stroke-width: 2px;
-  }
-}
-
 .template-builder-field-group.is-column {
   color: var(--crms-info-text);
   background: rgba(14, 154, 167, .12);
@@ -3883,14 +3834,30 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 // Rows: − [count] +. Typing a count and pressing Enter spaces them evenly.
 // (Outranks the Align card's stretched .input-group.)
-.template-ledger-card .document-grid-card__line .template-ledger-rows {
+// Rows and Tilt share one line: narrow buttons so both fit the side panel. The
+// Tilt group keeps its size; the stepper takes what is left.
+.template-ledger-card .document-grid-card__line .btn {
+  padding-inline: .4rem;
+}
+
+.template-ledger-card #gridTiltGroup {
   flex: 0 0 auto;
+
+  .document-grid-card__count {
+    width: 2.5rem;
+    min-width: 0;
+  }
+}
+
+.template-ledger-card .document-grid-card__line .template-ledger-rows {
+  flex: 1 1 auto;
   flex-wrap: nowrap;
-  inline-size: auto;
+  min-inline-size: 0;
 
   .form-control {
-    flex: 0 0 3.25rem;
-    inline-size: 3.25rem;
+    flex: 1 1 0;
+    inline-size: 1%;
+    min-inline-size: 2rem;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
     text-align: center;
@@ -3953,10 +3920,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     color: var(--bs-danger);
     font-weight: 500;
   }
-}
-
-.template-ledger-card__clear {
-  margin-block-start: .75rem;
 }
 
 // Ledger column markers in the Align step: aligned like any field, but read

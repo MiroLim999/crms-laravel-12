@@ -159,12 +159,13 @@
                                         <div><span>Drag the rotate knob below a field</span><small>Tilt that field (<kbd>Shift</kbd>: 5° steps)</small></div>
                                         <div><span><kbd>[</kbd> or <kbd>]</kbd></span><small>Tilt selected 0.5° (<kbd>Shift</kbd>: 5°)</small></div>
                                         <div><span>Double-click the knob</span><small>Straighten</small></div>
+                                        <div><span><kbd>Ctrl</kbd> + <kbd>A</kbd></span><small>Select all markers</small></div>
                                         <div><span><kbd>Ctrl</kbd> + <kbd>C</kbd></span><small>Copy selected</small></div>
                                         <div><span><kbd>Ctrl</kbd> + <kbd>V</kbd></span><small>Paste fields</small></div>
                                         <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Delete selected</small></div>
                                         <div><span><kbd>Ctrl</kbd> + <kbd>Z</kbd></span><small>Undo last change (row lines too)</small></div>
-                                        <div><span>Click a row line</span><small>Select it: <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>Del</kbd> removes</small></div>
-                                        <div><span><kbd>Shift</kbd> + drag a row line</span><small>Move every row line</small></div>
+                                        <div><span>Click a row line's grip</span><small>Select it: <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>Del</kbd> removes</small></div>
+                                        <div><span><kbd>Shift</kbd> + drag a grip</span><small>Move every row line</small></div>
                                     </div>
                                 </div>
 
@@ -275,9 +276,10 @@
                                         <strong>Tips</strong>
                                         <ul>
                                             <li>For ruled register books. Each row line is outlined on Staff scans, so writing that crosses a rule is still read whole.</li>
-                                            <li>Click a row line to select it, then drag it or press <kbd>↑</kbd> <kbd>↓</kbd>. <kbd>Shift</kbd> + drag moves every line.</li>
+                                            <li>Drag a row line by the grip at either end of the table, or click a grip and press <kbd>↑</kbd> <kbd>↓</kbd>. <kbd>Shift</kbd> + drag moves every line. Double-click a grip to remove its line.</li>
                                             <li>Lines snap to the sample's printed rules. Hold <kbd>Alt</kbd> to place one freely.</li>
                                             <li>Type a number of rows and press <kbd>Enter</kbd> to space them evenly.</li>
+                                            <li>Page scanned a little turned? The Tilt buttons turn the columns and row lines together.</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -312,6 +314,23 @@
                                                 <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
                                             </button>
                                         </div>
+                                        {{-- A page scanned a little turned: the columns and row lines turn together. --}}
+                                        <div class="btn-group btn-group-sm" role="group" id="gridTiltGroup" aria-label="Tilt of the table">
+                                            <button type="button" class="btn btn-outline-secondary" id="tiltLeftBtn"
+                                                    title="Turn the table anticlockwise by 0.1° (Shift: 1°)"
+                                                    aria-label="Turn the table anticlockwise">
+                                                <i class="icon-base bx bx-rotate-left icon-sm" aria-hidden="true"></i>
+                                            </button>
+                                            <input type="text" class="document-grid-card__count" id="gridTiltValue"
+                                                   value="0.0°" inputmode="decimal" autocomplete="off"
+                                                   aria-label="How far the table is turned, in degrees"
+                                                   title="Tilt: how far the table is turned">
+                                            <button type="button" class="btn btn-outline-secondary" id="tiltRightBtn"
+                                                    title="Turn the table clockwise by 0.1° (Shift: 1°)"
+                                                    aria-label="Turn the table clockwise">
+                                                <i class="icon-base bx bx-rotate-right icon-sm" aria-hidden="true"></i>
+                                            </button>
+                                        </div>
                                     </div>
 
                                     <p class="template-ledger-card__summary d-none" id="ledgerGridSummary" aria-live="polite"></p>
@@ -332,11 +351,6 @@
                                             </button>
                                         </span>
                                     </div>
-
-                                    <button type="button" class="btn btn-sm btn-outline-danger w-100 template-ledger-card__clear" id="clearGridBtn" disabled>
-                                        <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
-                                        Remove grid
-                                    </button>
                                 </div>
                             </div>
                         </section>

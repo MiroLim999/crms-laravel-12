@@ -11,15 +11,16 @@ import {
     distributeRuledYs,
     fieldsOverLedger,
     followFirstAndLastLine,
+    gridTilt,
     insertRuledY,
     isColumn,
     ledgerGridProblems,
-    nearestLine,
     remapRuledYs,
     sameBand,
-    shiftRuledYs,
+    tiltColumns,
 } from './ledger-grid';
 import { attachMarqueeSelection } from './marquee-selection';
+import { RowLineLayer, rowKey } from './row-lines';
 import {
     nonNegativeInteger,
     positiveInteger,
@@ -1163,6 +1164,16 @@ document.addEventListener('keydown', (event) => {
         return;
     }
 
+    // Also right after a click on a button or checkbox, which keeps the focus
+    // (so the browser would highlight the page's text instead). A text box
+    // with text in it keeps its own select-all.
+    if (commandPressed && !event.shiftKey && !event.altKey && key === 'a'
+        && marker.toJSON().length > 0 && !layoutUndoIsBlocked(event, shortcutOptions)) {
+        event.preventDefault();
+        marker.selectAll();
+        return;
+    }
+
     if (builderShortcutIsBlocked(event, shortcutOptions)) return;
 
     if (commandPressed && !event.shiftKey && key === 'c' && marker.selectedIndexes().length > 0) {
@@ -1311,57 +1322,56 @@ form.addEventListener('formdata', (event) => {
 // stretching the table carries its row lines along, and columns sitting on
 // the first and last line follow those lines when they move.
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const ledgerLayer = document.createElementNS(SVG_NS, 'svg');
-ledgerLayer.setAttribute('class', 'ledger-rule-layer');
-ledgerLayer.setAttribute('viewBox', '0 0 1000 1000');
-ledgerLayer.setAttribute('preserveAspectRatio', 'none');
-ledgerLayer.setAttribute('aria-hidden', 'true');
-overlay.appendChild(ledgerLayer);
+// The row lines, drawn and dragged as in the Staff Align step: a grip on each
+// end of the table selects and drags its line (Shift: every line), a
+// double-click on a grip removes it, and a line snaps onto the sample's
+// printed rules (Alt: place freely). Only the grips take the pointer, so the
+// columns under the lines can still be dragged.
+const rowLines = new RowLineLayer({
+    overlay,
+    printedLines: () => printedLines,
+    onSelect: (index) => {
+        // Take focus off a name box, where the arrow keys would only move the caret.
+        const focused = document.activeElement;
+        if (focused instanceof HTMLElement && focused.matches('input, textarea, select')) focused.blur();
+        selectRule(index);
+    },
+    onMove: (rows, { index, together }) => {
+        if (together) {
+            const dy = rows[0] - ruledYs[0];
+            estimatedYs = new Set([...estimatedYs].map((key) => ruleKey(Number(key) + dy)));
+        } else {
+            // Placed by hand: no longer an estimate.
+            estimatedYs.delete(ruleKey(ruledYs[index]));
+        }
+        applyGrid(rows);
+    },
+    onRemove: (index) => removeRule(index),
+});
 
-// A row line dragged within this many screen pixels of a printed rule snaps onto it.
-const RULE_SNAP_PIXELS = 8;
-
-const ruleKey = (y) => Number(y).toFixed(5);
+const ruleKey = rowKey;
 
 function ledgerColumns(boxes = marker.toJSON()) {
     return boxes.filter(isColumn);
 }
 
-/**
- * Draw row lines. While a line is dragged they are drawn where the pointer
- * has them, before anything is committed; `dragging` marks the moving ones.
- */
-function drawRules(ys = ruledYs, columns = ledgerColumns(), dragging = null) {
-    const left = columns.length ? Math.min(...columns.map((c) => c.x)) : 0.02;
-    const right = columns.length ? Math.max(...columns.map((c) => c.x + c.w)) : 0.98;
-
-    ledgerLayer.replaceChildren();
-    ys.forEach((y, index) => {
-        const estimated = estimatedYs.has(ruleKey(y));
-        const group = document.createElementNS(SVG_NS, 'g');
-        group.setAttribute('class', 'ledger-rule');
-        group.classList.toggle('is-selected', index === selectedRule);
-        group.classList.toggle('is-estimated', estimated);
-        group.classList.toggle('is-dragging', Boolean(dragging?.has(index)));
-        group.dataset.index = String(index);
-        const line = document.createElementNS(SVG_NS, 'line');
-        const hit = document.createElementNS(SVG_NS, 'line');
-        [line, hit].forEach((node) => {
-            node.setAttribute('x1', String(left * 1000));
-            node.setAttribute('x2', String(right * 1000));
-            node.setAttribute('y1', String(y * 1000));
-            node.setAttribute('y2', String(y * 1000));
-        });
-        line.setAttribute('class', 'ledger-rule__line');
-        hit.setAttribute('class', 'ledger-rule__hit');
-        const title = document.createElementNS(SVG_NS, 'title');
-        title.textContent = estimated
-            ? `Row line ${index + 1} was estimated: no printed rule was found here. Check it against the page.`
-            : `Row line ${index + 1}: click to select, drag to move, double-click to remove`;
-        group.append(line, hit, title);
-        ledgerLayer.appendChild(group);
+/** Draw the row lines across the table's columns (or the page, without columns). */
+function drawRules(ys = ruledYs, columns = ledgerColumns()) {
+    rowLines.render({
+        rows: ys,
+        left: columns.length ? Math.min(...columns.map((c) => c.x)) : 0.02,
+        right: columns.length ? Math.max(...columns.map((c) => c.x + c.w)) : 0.98,
+        selected: selectedRule,
+        estimated: estimatedYs,
+        // On a page scanned a little turned, the lines turn with the columns.
+        tilt: gridTilt(columns),
+        aspect: pageAspect(),
     });
+}
+
+/** The page's width over its height in pixels: a tilt is an angle in pixels. */
+function pageAspect() {
+    return canvas.width > 0 && canvas.height > 0 ? canvas.width / canvas.height : 1;
 }
 
 function renderLedgerGrid() {
@@ -1382,7 +1392,41 @@ function renderLedgerGrid() {
     const rowsInput = element('evenRowsInput', HTMLInputElement);
     if (document.activeElement !== rowsInput) rowsInput.value = rows > 0 ? String(rows) : '';
     element('removeRuledLineBtn', HTMLButtonElement).disabled = selectedRule === null && ruledYs.length <= 2;
-    element('clearGridBtn', HTMLButtonElement).disabled = columns.length === 0 && ruledYs.length === 0;
+
+    const tiltInput = element('gridTiltValue', HTMLInputElement);
+    if (document.activeElement !== tiltInput) tiltInput.value = formatTilt(gridTilt(columns));
+    tiltInput.disabled = columns.length === 0;
+    element('tiltLeftBtn', HTMLButtonElement).disabled = columns.length === 0;
+    element('tiltRightBtn', HTMLButtonElement).disabled = columns.length === 0;
+}
+
+// ---------------------------------------------------------------- table tilt
+// A page scanned a little turned: the columns and row lines turn together, in
+// tenths of a degree, as in the Staff Align step. The tilt is kept in the
+// columns' own angles, so it is saved with the layout.
+const MAX_TILT = 10;
+
+function formatTilt(degrees) {
+    const value = Math.round(degrees * 10) / 10;
+    return `${(value === 0 ? 0 : value).toFixed(1).replace('-', '\u2212')}\u00b0`;
+}
+
+function parseTilt(text) {
+    const value = Number.parseFloat(String(text).replace(/[\u2212\u2013]/g, '-').replace(',', '.').replace(/[^0-9.+-]/g, ''));
+    return Number.isFinite(value) ? value : null;
+}
+
+/** Turn the table to `degrees` clockwise, as one undoable change. */
+function setTableTilt(degrees) {
+    const boxes = marker.toJSON();
+    const wanted = Math.round(Math.min(MAX_TILT, Math.max(-MAX_TILT, Number(degrees) || 0)) * 10) / 10;
+    const turned = tiltColumns(boxes, wanted - gridTilt(ledgerColumns(boxes)), pageAspect());
+
+    if (turned === boxes) {
+        renderLedgerGrid();
+        return;
+    }
+    replaceBoxes(turned, { keepSelection: true });
 }
 
 /**
@@ -1498,74 +1542,6 @@ function nudgeRule(pixels) {
     estimatedYs.delete(ruleKey(from));
     applyGrid(ruledYs.map((value, index) => (index === selectedRule ? y : value)));
 }
-
-// Click a row line to select it, drag it to move it (Shift: every line
-// together), double-click it to remove it. Near a printed rule it snaps on
-// (Alt: place freely).
-ledgerLayer.addEventListener('pointerdown', (event) => {
-    const group = event.target instanceof Element ? event.target.closest('.ledger-rule') : null;
-    if (!group || event.button !== 0 || event.ctrlKey || event.metaKey) return;
-    event.preventDefault();
-    event.stopPropagation();
-
-    // Take focus off a name box, where the arrow keys would only move the caret.
-    const focused = document.activeElement;
-    if (focused instanceof HTMLElement && focused.matches('input, textarea, select')) focused.blur();
-
-    const index = Number(group.dataset.index);
-    const together = event.shiftKey;
-    const origin = [...ruledYs];
-    const pageY = (clientY) => {
-        const bounds = overlay.getBoundingClientRect();
-        return { y: (clientY - bounds.top) / Math.max(1, bounds.height), height: Math.max(1, bounds.height) };
-    };
-    const startY = pageY(event.clientY).y;
-    const moving = new Set(together ? origin.map((_, i) => i) : [index]);
-    let current = origin;
-    selectRule(index);
-
-    const move = (moveEvent) => {
-        const { y, height } = pageY(moveEvent.clientY);
-        const snap = (value) => (printedLines && !moveEvent.altKey
-            ? nearestLine(value, printedLines.horizontal, RULE_SNAP_PIXELS / height) ?? value
-            : value);
-
-        current = together
-            ? shiftRuledYs(origin, snap(origin[index] + y - startY) - origin[index])
-            : origin.map((value, i) => (i === index ? clampRuledY(origin, index, snap(y)) : value));
-        drawRules(current, ledgerColumns(), moving);
-    };
-
-    const end = () => {
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', end);
-        window.removeEventListener('pointercancel', end);
-
-        if (current.every((y, i) => Math.abs(y - origin[i]) < 1e-9)) {
-            renderLedgerGrid();
-            return;
-        }
-
-        if (together) {
-            const dy = current[0] - origin[0];
-            estimatedYs = new Set([...estimatedYs].map((key) => ruleKey(Number(key) + dy)));
-        } else {
-            estimatedYs.delete(ruleKey(origin[index]));
-        }
-        applyGrid(current);
-    };
-
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
-    window.addEventListener('pointercancel', end);
-});
-
-ledgerLayer.addEventListener('dblclick', (event) => {
-    const group = event.target instanceof Element ? event.target.closest('.ledger-rule') : null;
-    if (!group) return;
-    event.preventDefault();
-    removeRule(Number(group.dataset.index));
-});
 
 // A click on the page around the markers lets go of the row line.
 overlay.addEventListener('pointerdown', (event) => {
@@ -1803,12 +1779,22 @@ element('evenRowsInput', HTMLInputElement).addEventListener('keydown', (event) =
     spaceRowsEvenly();
 });
 
-element('clearGridBtn', HTMLButtonElement).addEventListener('click', () => {
-    ruledYs = [];
-    selectedRule = null;
-    estimatedYs = new Set();
-    replaceBoxes(marker.toJSON().filter((box) => !isColumn(box)));
+element('tiltLeftBtn', HTMLButtonElement).addEventListener('click', (event) => (
+    setTableTilt(gridTilt(ledgerColumns()) - (event.shiftKey ? 1 : 0.1))
+));
+element('tiltRightBtn', HTMLButtonElement).addEventListener('click', (event) => (
+    setTableTilt(gridTilt(ledgerColumns()) + (event.shiftKey ? 1 : 0.1))
+));
+element('gridTiltValue', HTMLInputElement).addEventListener('change', (event) => {
+    const value = parseTilt(event.currentTarget.value);
+    if (value === null) renderLedgerGrid();
+    else setTableTilt(value);
 });
+element('gridTiltValue', HTMLInputElement).addEventListener('keydown', (event) => {
+    event.stopPropagation();
+    if (event.key === 'Enter') event.currentTarget.blur();
+});
+element('gridTiltValue', HTMLInputElement).addEventListener('blur', () => renderLedgerGrid());
 
 element('selectCoveredFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
     if (coveredFieldIndexes.length > 0) marker.selectIndexes(coveredFieldIndexes, { source: 'group' });
