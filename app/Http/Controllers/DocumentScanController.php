@@ -47,10 +47,14 @@ class DocumentScanController extends Controller
         private readonly OcrClient $ocr,
         private readonly AuditLogger $audit,
         private readonly ScanModelChoice $modelChoice,
-    ) {}
+    ) {
+    }
 
     /** Session key: the type last opened in the workspace. */
     private const LAST_TYPE = 'scan.last_type';
+
+    /** More pages than any register book has: a typed page number past it is refused. */
+    private const MAX_SOURCE_PAGES = 10000;
 
     /**
      * Step 1 with no type chosen: the workspace's first step, the drop area
@@ -98,7 +102,7 @@ class DocumentScanController extends Controller
             ->unique('document_type_id')
             ->keyBy('document_type_id');
 
-        return $types->mapWithKeys(fn (DocumentTypeDefinition $type) => [
+        return $types->mapWithKeys(fn(DocumentTypeDefinition $type) => [
             $type->key => $active->get($type->getKey()),
         ]);
     }
@@ -170,14 +174,14 @@ class DocumentScanController extends Controller
             ],
             'scan' => ['required_without:workspace_scan_path', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
             'workspace_scan_path' => ['required_without:scan', 'nullable', 'string', 'max:500'],
-            'fields' => ['required', 'array', 'min:1', 'max:'.Limits::MAX_FIELDS],
+            'fields' => ['required', 'array', 'min:1', 'max:' . Limits::MAX_FIELDS],
             'fields.*.verified' => ['required', 'accepted'],
             'fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
             'fields.*.ocr_text' => ['nullable', 'string', 'max:2000'],
             'fields.*.ocr_confidence' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'fields.*.verified_value' => ['required', 'string', 'max:2000'],
-            'fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:'.Limits::MAX_FIELDS],
-            'fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:'.(Limits::MAX_FIELDS - 1)],
+            'fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:' . Limits::MAX_FIELDS],
+            'fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:' . (Limits::MAX_FIELDS - 1)],
             'fields.*.x' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.y' => ['required', 'numeric', 'min:0', 'max:1'],
             'fields.*.width' => ['required', 'numeric', 'min:0.00001', 'max:1'],
@@ -187,9 +191,20 @@ class DocumentScanController extends Controller
             'fields.*.line_id' => ['nullable', 'integer', 'distinct'],
             // Staff chose "Submit anyway" when asked about missing required fields.
             'allow_missing' => ['sometimes', 'boolean'],
+            // The file this scan is a page of (the workspace sends the page alone,
+            // cut out of the file): its name, the page, and the file's SHA-256.
+            'source_name' => ['nullable', 'string', 'max:255'],
+            'source_page' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_SOURCE_PAGES, 'required_with:source_page_count,source_hash'],
+            'source_page_count' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_SOURCE_PAGES],
+            'source_hash' => ['nullable', 'string', 'regex:/^[0-9a-f]{64}$/'],
+            // Staff chose "Save again" when told this page is already saved.
+            'allow_duplicate' => ['sometimes', 'boolean'],
         ], [
             'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
+            'source_hash.regex' => 'The file fingerprint is not valid. Open the file again.',
         ]);
+
+        $source = $this->sourceOf($request, $validated);
 
         $templateId = (int) $validated['document_template_id'];
         $documentType = DocumentTypeDefinition::where('key', (string) $validated['doc_type'])->firstOrFail();
@@ -227,6 +242,25 @@ class DocumentScanController extends Controller
             throw ValidationException::withMessages($coordinateErrors);
         }
 
+        // This page of this exact file is saved already: say so first. Staff may
+        // save it again ("Save again"), which the audit log notes.
+        $savedBefore = $this->savedSourcePage($source);
+        if ($savedBefore !== null && !$request->boolean('allow_duplicate')) {
+            $message = ($source['page_count'] ?? 1) > 1
+                ? "Page {$source['page']} of this file is already saved as record #{$savedBefore->getKey()}."
+                : "This file is already saved as record #{$savedBefore->getKey()}.";
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'duplicate_page' => true,
+                    'message' => $message,
+                    'record' => $this->sourcePagePayload($savedBefore),
+                ], 409);
+            }
+
+            throw ValidationException::withMessages(['scan' => $message]);
+        }
+
         [$page, $linesById] = $this->pageLinesFor($request, $validated, $templateId);
 
         // Some certificates do leave a required field blank, so a missing one
@@ -235,7 +269,7 @@ class DocumentScanController extends Controller
             ...$this->missingRequiredFields($template, $validated['fields'], $linesById),
             ...$this->missingRegisterRows($template, $page, $validated['fields'], $linesById),
         ];
-        if ($missingRequired !== [] && ! $request->boolean('allow_missing')) {
+        if ($missingRequired !== [] && !$request->boolean('allow_missing')) {
             // One message per field, so the workspace can list them when it asks.
             throw ValidationException::withMessages(['missing_required' => $missingRequired]);
         }
@@ -265,9 +299,11 @@ class DocumentScanController extends Controller
             $scanMime = $scan->getMimeType();
         } else {
             $workspaceScanPath = (string) ($validated['workspace_scan_path'] ?? '');
-            if (! str_starts_with($workspaceScanPath, 'documents/workspace/')
+            if (
+                !str_starts_with($workspaceScanPath, 'documents/workspace/')
                 || str_contains($workspaceScanPath, '..')
-                || ! $disk->exists($workspaceScanPath)) {
+                || !$disk->exists($workspaceScanPath)
+            ) {
                 throw ValidationException::withMessages([
                     'scan' => 'Choose a valid scanned document to submit.',
                 ]);
@@ -283,7 +319,7 @@ class DocumentScanController extends Controller
         $gridChanges = $this->gridChanges($template, $page);
 
         try {
-            $record = DB::transaction(function () use ($request, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, &$copiedFiles) {
+            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, &$copiedFiles) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -295,6 +331,10 @@ class DocumentScanController extends Controller
                     // Field outlines are fractions of the page as outlined,
                     // which Detect may have straightened.
                     'scan_rotation' => $page?->deskew_degrees,
+                    'source_name' => $source['name'],
+                    'source_page' => $source['page'],
+                    'source_page_count' => $source['page_count'],
+                    'source_hash' => $source['hash'],
                     'ocr_model_key' => $validated['ocr_model_key'],
                     'created_by' => $request->user()->getKey(),
                     'submitted_by' => $request->user()->getKey(),
@@ -350,6 +390,12 @@ class DocumentScanController extends Controller
                         // This page's grid against the template's: rows, and
                         // columns Staff added or removed in Align.
                         ...($gridChanges !== [] ? ['grid_changes' => $gridChanges] : []),
+                        ...($source['page'] !== null ? [
+                            'source_page' => $source['page'],
+                            'source_page_count' => $source['page_count'],
+                        ] : []),
+                        // Saved although this page was saved before ("Save again").
+                        ...($savedBefore !== null ? ['saved_again_after_record' => $savedBefore->getKey()] : []),
                     ],
                     description: "Submitted and locked a {$record->typeShortLabel()} record.",
                 );
@@ -383,6 +429,8 @@ class DocumentScanController extends Controller
             return response()->json([
                 'message' => $message,
                 'redirect' => $redirect,
+                // The workspace marks this page saved and offers the next one.
+                'record' => $this->sourcePagePayload($record),
             ], 201);
         }
 
@@ -391,324 +439,9 @@ class DocumentScanController extends Controller
             ->with('success', $message);
     }
 
-    /**
-     * Batch File Upload: Save an uploaded file to /documents/workspace directory.
-     */
-    public function batchUpload(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'scan' => ['required', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
-            'batch_id' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
-        ], [
-            'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
-        ]);
-
-        $scan = $request->file('scan');
-        $batchId = $validated['batch_id'] ?? ('batch_' . now()->format('Ymd_His') . '_' . bin2hex(random_bytes(4)));
-
-        // Target Directory: Route batch uploaded files to /documents/workspace directory
-        $workspaceDir = 'documents/workspace/' . $batchId;
-        $originalName = $scan->getClientOriginalName();
-        $storedName = time() . '_' . bin2hex(random_bytes(3)) . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $originalName);
-        $path = $scan->storeAs($workspaceDir, $storedName, 'local');
-
-        return response()->json([
-            'success' => true,
-            'batch_id' => $batchId,
-            'file_name' => $originalName,
-            'path' => $path,
-            'mime' => $scan->getMimeType(),
-            'size' => $scan->getSize(),
-        ], 201);
-    }
-
-    /**
-     * Batch Scanning: Once the entire batch has finished saving, initiate scan for each document.
-     */
-    public function batchScan(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'path' => ['required', 'string'],
-            'document_template_id' => ['required', 'exists:document_templates,id'],
-            'ocr_model_key' => ['nullable', 'string'],
-        ]);
-
-        $path = $validated['path'];
-        $disk = Storage::disk('local');
-        if (! $disk->exists($path)) {
-            return response()->json(['message' => 'Scanned file not found in workspace.'], 404);
-        }
-
-        $template = DocumentTemplate::findOrFail((int) $validated['document_template_id']);
-        $modelKey = $this->modelChoice->resolve($validated['ocr_model_key'] ?? null);
-
-        // Build default geometry from template
-        $boxes = $template->markerBoxes();
-        $ruledYs = $template->isLedger() ? array_values($template->ruled_ys ?? []) : [];
-        $columns = [];
-        $fields = [];
-        foreach ($boxes as $box) {
-            $bx = [
-                'name' => $box['name'],
-                'box' => [(float)$box['x'], (float)$box['y'], (float)$box['w'], (float)$box['h']],
-            ];
-            if (($box['kind'] ?? '') === 'column') {
-                $columns[] = $bx;
-            } else {
-                if (isset($box['person_group'])) {
-                    $bx['person_group'] = (int)$box['person_group'];
-                }
-                if (isset($box['person_field_order'])) {
-                    $bx['person_field_order'] = (int)$box['person_field_order'];
-                }
-                $fields[] = $bx;
-            }
-        }
-        $geometry = [
-            'columns' => $columns,
-            'ruled_ys' => array_map('floatval', $ruledYs),
-            'fields' => $fields,
-        ];
-
-        // Create a DocumentPage for line markers & OCR reading
-        $page = DocumentPage::create([
-            'document_template_id' => $template->getKey(),
-            'created_by' => $request->user()->getKey(),
-            'status' => DocumentPage::STATUS_QUEUED,
-            'image_path' => '',
-            'width' => 1200,
-            'height' => 1700,
-            'geometry' => $geometry,
-            'ocr_model_key' => $modelKey,
-        ]);
-
-        // Place image in page directory
-        $pageImageDest = $page->directory() . '/page.png';
-        $fullPath = $disk->path($path);
-        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-
-        if ($ext === 'png') {
-            $disk->copy($path, $pageImageDest);
-        } else {
-            // Convert to png using GD or copy if image
-            $imageContent = @file_get_contents($fullPath);
-            $im = @imagecreatefromstring($imageContent);
-            if ($im !== false) {
-                imagepng($im, $disk->path($pageImageDest));
-                imagedestroy($im);
-            } else {
-                // If PDF or unconverted, copy directly as fallback
-                $disk->copy($path, $pageImageDest);
-            }
-        }
-
-        $size = @getimagesize($disk->path($pageImageDest));
-        $page->forceFill([
-            'image_path' => $pageImageDest,
-            'width' => $size ? $size[0] : 1200,
-            'height' => $size ? $size[1] : 1700,
-        ])->save();
-
-        // Dispatch synchronous or asynchronous processing
-        $job = new \App\Jobs\ProcessDocumentPage($page->getKey(), \App\Jobs\ProcessDocumentPage::MODE_FULL);
-        try {
-            app()->call([$job, 'handle']);
-            $page->refresh();
-        } catch (\Throwable $e) {
-            $job->failed($e);
-            $page->refresh();
-            return response()->json([
-                'success' => false,
-                'page_id' => $page->getKey(),
-                'status' => $page->status,
-                'error' => $page->error ?: $e->getMessage(),
-            ], 422);
-        }
-
-        return response()->json([
-            'success' => true,
-            'page_id' => $page->getKey(),
-            'status' => $page->status,
-            'error' => $page->error,
-            'lines_count' => $page->lines()->count(),
-            'model_key' => $page->ocr_model_key,
-        ]);
-    }
-
-    /**
-     * Batch Validation & Import: After scanning, validate each document and import into database.
-     * Matches the existing single file upload validation and database import logic.
-     */
-    public function batchImport(Request $request): JsonResponse
-    {
-        $this->hydrateJsonFields($request);
-
-        $validated = $request->validate([
-            'doc_type' => ['required', 'string', 'exists:document_types,key'],
-            'document_template_id' => ['required', 'exists:document_templates,id'],
-            'ocr_model_key' => [
-                'required',
-                'string',
-                'max:255',
-                Rule::exists(OcrModel::class, 'key')->whereNull('disk_deleted_at'),
-            ],
-            'scan_path' => ['required', 'string'],
-            'fields' => ['required', 'array', 'min:1', 'max:'.Limits::MAX_FIELDS],
-            'fields.*.verified' => ['required', 'accepted'],
-            'fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
-            'fields.*.ocr_text' => ['nullable', 'string', 'max:2000'],
-            'fields.*.ocr_confidence' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'fields.*.verified_value' => ['required', 'string', 'max:2000'],
-            'fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:'.Limits::MAX_FIELDS],
-            'fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:'.(Limits::MAX_FIELDS - 1)],
-            'fields.*.x' => ['required', 'numeric', 'min:0', 'max:1'],
-            'fields.*.y' => ['required', 'numeric', 'min:0', 'max:1'],
-            'fields.*.width' => ['required', 'numeric', 'min:0.00001', 'max:1'],
-            'fields.*.height' => ['required', 'numeric', 'min:0.00001', 'max:1'],
-            'document_page_id' => ['nullable', 'integer'],
-            'fields.*.line_id' => ['nullable', 'integer', 'distinct'],
-            'allow_missing' => ['sometimes', 'boolean'],
-        ]);
-
-        $templateId = (int) $validated['document_template_id'];
-        $documentType = DocumentTypeDefinition::where('key', (string) $validated['doc_type'])->firstOrFail();
-        $template = DocumentTemplate::with(['documentTypeDefinition', 'fields'])->find($templateId);
-
-        if ($template?->document_type_id !== $documentType->getKey()) {
-            throw ValidationException::withMessages([
-                'document_template_id' => 'The selected template does not belong to this document type.',
-            ]);
-        }
-
-        $settingsByName = $template->settingsByName();
-
-        $coordinateErrors = [];
-        foreach ($validated['fields'] as $index => $field) {
-            $hasPersonGroup = isset($field['person_group']);
-            $hasPersonOrder = isset($field['person_field_order']);
-            if ($hasPersonGroup !== $hasPersonOrder) {
-                $coordinateErrors["fields.{$index}.person_group"] =
-                    'A grouped field must include both its person and field order.';
-            }
-            if ((float) $field['x'] + (float) $field['width'] > 1.00001) {
-                $coordinateErrors["fields.{$index}.width"] = 'This field marker extends beyond the document width.';
-            }
-            if ((float) $field['y'] + (float) $field['height'] > 1.00001) {
-                $coordinateErrors["fields.{$index}.height"] = 'This field marker extends beyond the document height.';
-            }
-        }
-        if ($coordinateErrors !== []) {
-            throw ValidationException::withMessages($coordinateErrors);
-        }
-
-        [$page, $linesById] = $this->pageLinesFor($request, $validated, $templateId);
-
-        $missingRequired = [
-            ...$this->missingRequiredFields($template, $validated['fields'], $linesById),
-            ...$this->missingRegisterRows($template, $page, $validated['fields'], $linesById),
-        ];
-        if ($missingRequired !== [] && ! $request->boolean('allow_missing')) {
-            throw ValidationException::withMessages(['missing_required' => $missingRequired]);
-        }
-
-        $disk = Storage::disk('local');
-        $workspaceScanPath = $validated['scan_path'];
-        if (! $disk->exists($workspaceScanPath)) {
-            throw ValidationException::withMessages(['scan_path' => 'Workspace scan file not found.']);
-        }
-
-        // Copy file into scans/ just as single upload does
-        $ext = pathinfo($workspaceScanPath, PATHINFO_EXTENSION);
-        $scansPath = 'scans/' . bin2hex(random_bytes(20)) . '.' . ($ext ?: 'bin');
-        $disk->copy($workspaceScanPath, $scansPath);
-        $mime = $disk->mimeType($scansPath) ?: 'application/octet-stream';
-
-        $copiedFiles = [];
-        $gridChanges = $this->gridChanges($template, $page);
-
-        try {
-            $record = DB::transaction(function () use ($request, $scansPath, $mime, $validated, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, &$copiedFiles) {
-                $record = CivilRecord::create([
-                    'doc_type' => $documentType->legacyType()->value,
-                    'document_type_id' => $documentType->getKey(),
-                    'document_template_id' => $validated['document_template_id'],
-                    'status' => RecordStatus::Submitted,
-                    'scan_path' => $scansPath,
-                    'scan_mime' => $mime,
-                    'scan_rotation' => $page?->deskew_degrees,
-                    'ocr_model_key' => $validated['ocr_model_key'],
-                    'created_by' => $request->user()->getKey(),
-                    'submitted_by' => $request->user()->getKey(),
-                    'submitted_at' => now(),
-                ]);
-
-                if ($page !== null) {
-                    $record->update(['page_image_path' => $this->keepPageImage($record, $page, $copiedFiles)]);
-                }
-
-                foreach (array_values($validated['fields']) as $index => $field) {
-                    $line = isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null;
-                    $settings = $settingsByName[$this->templateNameKey($field, $line)] ?? null;
-
-                    $record->fields()->create([
-                        'name' => $field['name'],
-                        'ocr_text' => $field['ocr_text'] ?? null,
-                        'ocr_confidence' => $field['ocr_confidence'] ?? null,
-                        'verified_value' => $field['verified_value'],
-                        'is_required' => $settings['required'] ?? true,
-                        'role' => $settings['role'] ?? null,
-                        'person_group' => $field['person_group'] ?? null,
-                        'person_field_order' => $field['person_field_order'] ?? null,
-                        'x' => $field['x'],
-                        'y' => $field['y'],
-                        'width' => $field['width'],
-                        'height' => $field['height'],
-                        'sort_order' => $index,
-                        ...($line ? $this->lineAttributes($record, $page, $line, $index, $copiedFiles) : []),
-                    ]);
-                }
-
-                $record->load('fields');
-                $corrected = $record->fields->filter->wasCorrected()->count();
-
-                $this->audit->log(
-                    'record.submitted',
-                    $record,
-                    new: [
-                        'document_type' => $documentType->key,
-                        'field_count' => $record->fields->count(),
-                        'corrected_fields' => $corrected,
-                        'outlined_fields' => $record->fields->whereNotNull('polygon')->count(),
-                        'ocr_model' => $validated['ocr_model_key'],
-                        ...($missingRequired !== [] ? ['missing_required_fields' => $missingRequired] : []),
-                        ...($gridChanges !== [] ? ['grid_changes' => $gridChanges] : []),
-                    ],
-                    description: "Submitted and locked a {$record->typeShortLabel()} record.",
-                );
-
-                return $record;
-            });
-        } catch (Throwable $exception) {
-            $disk->delete([$scansPath, ...$copiedFiles]);
-            throw $exception;
-        }
-
-        if ($page !== null) {
-            $disk->deleteDirectory($page->directory());
-            $page->delete();
-        }
-
-        return response()->json([
-            'success' => true,
-            'record_id' => $record->getKey(),
-            'redirect' => route('records.show', $record),
-            'message' => 'Record successfully validated and imported.',
-        ], 201);
-    }
-
     private function hydrateJsonFields(Request $request): void
     {
-        if (! $request->filled('fields_json')) {
+        if (!$request->filled('fields_json')) {
             return;
         }
 
@@ -720,7 +453,7 @@ class DocumentScanController extends Controller
             ]);
         }
 
-        if (! is_array($fields)) {
+        if (!is_array($fields)) {
             throw ValidationException::withMessages([
                 'fields' => 'The verified fields must be a valid list.',
             ]);
@@ -739,7 +472,7 @@ class DocumentScanController extends Controller
      */
     private function pageLinesFor(Request $request, array $validated, int $templateId): array
     {
-        $lineIds = collect($validated['fields'])->pluck('line_id')->filter()->map(fn ($id) => (int) $id);
+        $lineIds = collect($validated['fields'])->pluck('line_id')->filter()->map(fn($id) => (int) $id);
 
         if (empty($validated['document_page_id'])) {
             if ($lineIds->isNotEmpty()) {
@@ -756,8 +489,10 @@ class DocumentScanController extends Controller
             ->where('created_by', $request->user()->getKey())
             ->first();
 
-        if ($page === null || $page->status !== DocumentPage::STATUS_READY
-            || (int) $page->document_template_id !== $templateId) {
+        if (
+            $page === null || $page->status !== DocumentPage::STATUS_READY
+            || (int) $page->document_template_id !== $templateId
+        ) {
             throw ValidationException::withMessages([
                 'document_page_id' => 'This page is no longer available. Scan it again before submitting.',
             ]);
@@ -767,7 +502,7 @@ class DocumentScanController extends Controller
 
         $errors = [];
         foreach ($validated['fields'] as $index => $field) {
-            if (isset($field['line_id']) && ! $lines->has((int) $field['line_id'])) {
+            if (isset($field['line_id']) && !$lines->has((int) $field['line_id'])) {
                 $errors["fields.{$index}.line_id"] = 'This field no longer matches an outlined line on the page.';
             }
         }
@@ -792,14 +527,14 @@ class DocumentScanController extends Controller
     private function missingRequiredFields(DocumentTemplate $template, array $fields, Collection $linesById): array
     {
         $submitted = collect($fields)
-            ->map(fn (array $field) => $this->templateNameKey(
+            ->map(fn(array $field) => $this->templateNameKey(
                 $field,
                 isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null,
             ))
             ->flip();
 
         return $template->fields
-            ->filter(fn ($field) => $field->is_required && ! $submitted->has(mb_strtolower(trim($field->name))))
+            ->filter(fn($field) => $field->is_required && !$submitted->has(mb_strtolower(trim($field->name))))
             ->pluck('name')
             ->values()
             ->all();
@@ -836,7 +571,7 @@ class DocumentScanController extends Controller
      */
     private function missingRegisterRows(DocumentTemplate $template, ?DocumentPage $page, array $fields, Collection $linesById): array
     {
-        if ($page === null || ! $template->isLedger()) {
+        if ($page === null || !$template->isLedger()) {
             return [];
         }
 
@@ -853,10 +588,10 @@ class DocumentScanController extends Controller
         }
 
         // A cell of a ledger row: what Verify groups into a person.
-        $isCell = fn (PageLine $line) => ! $line->belongsToField()
+        $isCell = fn(PageLine $line) => !$line->belongsToField()
             && $line->row !== null && $line->column_index !== null
-            && ! in_array(PageLine::FLAG_NO_ROW, $line->flags ?? [], true);
-        $columnOf = fn (PageLine $line) => mb_strtolower(trim((string) $line->column_name));
+            && !in_array(PageLine::FLAG_NO_ROW, $line->flags ?? [], true);
+        $columnOf = fn(PageLine $line) => mb_strtolower(trim((string) $line->column_name));
 
         // A person the reviewer started by hand sits past the table's last row;
         // there is no register row to complete for them.
@@ -864,7 +599,7 @@ class DocumentScanController extends Controller
         $shortened = $page->shortenedColumnRows();
 
         $rows = $page->lines
-            ->filter(fn (PageLine $line) => $isCell($line) && isset($columns[$columnOf($line)]) && $line->row <= $tableRows)
+            ->filter(fn(PageLine $line) => $isCell($line) && isset($columns[$columnOf($line)]) && $line->row <= $tableRows)
             ->pluck('row')
             ->unique()
             ->sort()
@@ -881,18 +616,18 @@ class DocumentScanController extends Controller
         $missing = [];
         $untouched = [];
         foreach ($rows as $row) {
-            if (! isset($submitted[$row])) {
+            if (!isset($submitted[$row])) {
                 $untouched[] = $row;
 
                 continue;
             }
 
             // A column Staff shortened in Align is not asked for in the rows it leaves out.
-            $askedHere = array_filter($required, fn (string $key) => ! isset($shortened[$key])
+            $askedHere = array_filter($required, fn(string $key) => !isset($shortened[$key])
                 || in_array($row, $shortened[$key], true), ARRAY_FILTER_USE_KEY);
             $left = array_values(array_diff_key($askedHere, $submitted[$row]));
             if ($left !== []) {
-                $missing[] = $this->personLabel($row).': '.implode(', ', $left);
+                $missing[] = $this->personLabel($row) . ': ' . implode(', ', $left);
             }
         }
 
@@ -916,13 +651,13 @@ class DocumentScanController extends Controller
     private function pageColumnNames(DocumentTemplate $template, DocumentPage $page): array
     {
         $columns = $page->geometry['columns'] ?? null;
-        if (! is_array($columns) || $columns === []) {
+        if (!is_array($columns) || $columns === []) {
             $columns = $template->columns ?? [];
         }
 
         return collect($columns)
-            ->map(fn ($column) => trim((string) ($column['name'] ?? '')))
-            ->filter(fn (string $name) => $name !== '')
+            ->map(fn($column) => trim((string) ($column['name'] ?? '')))
+            ->filter(fn(string $name) => $name !== '')
             ->values()
             ->all();
     }
@@ -936,19 +671,19 @@ class DocumentScanController extends Controller
      */
     private function gridChanges(DocumentTemplate $template, ?DocumentPage $page): array
     {
-        if ($page === null || ! $template->isLedger()) {
+        if ($page === null || !$template->isLedger()) {
             return [];
         }
 
         $pageColumns = $this->pageColumnNames($template, $page);
         $templateColumns = collect($template->columns ?? [])
-            ->map(fn ($column) => trim((string) ($column['name'] ?? '')))
-            ->filter(fn (string $name) => $name !== '')
+            ->map(fn($column) => trim((string) ($column['name'] ?? '')))
+            ->filter(fn(string $name) => $name !== '')
             ->values()
             ->all();
-        $keys = fn (array $names) => array_map('mb_strtolower', $names);
-        $added = array_values(array_filter($pageColumns, fn ($name) => ! in_array(mb_strtolower($name), $keys($templateColumns), true)));
-        $removed = array_values(array_filter($templateColumns, fn ($name) => ! in_array(mb_strtolower($name), $keys($pageColumns), true)));
+        $keys = fn(array $names) => array_map('mb_strtolower', $names);
+        $added = array_values(array_filter($pageColumns, fn($name) => !in_array(mb_strtolower($name), $keys($templateColumns), true)));
+        $removed = array_values(array_filter($templateColumns, fn($name) => !in_array(mb_strtolower($name), $keys($pageColumns), true)));
 
         // A page without row lines of its own says nothing about its rows.
         $pageLines = count($page->geometry['ruled_ys'] ?? []);
@@ -986,9 +721,9 @@ class DocumentScanController extends Controller
         }
 
         return implode(', ', array_map(
-            fn (array $run) => $run[0] === $run[1]
+            fn(array $run) => $run[0] === $run[1]
                 ? $this->personLabel($run[0])
-                : $this->personLabel($run[0]).' – '.$this->personLabel($run[1]),
+                : $this->personLabel($run[0]) . ' – ' . $this->personLabel($run[1]),
             $runs,
         ));
     }
@@ -1006,7 +741,7 @@ class DocumentScanController extends Controller
         $disk = Storage::disk('local');
         $path = sprintf('records/%d/page.png', $record->getKey());
 
-        if (! $disk->exists($page->image_path) || ! $disk->copy($page->image_path, $path)) {
+        if (!$disk->exists($page->image_path) || !$disk->copy($page->image_path, $path)) {
             return null;
         }
 
@@ -1037,7 +772,7 @@ class DocumentScanController extends Controller
         return [
             'crop_path' => $cropPath,
             'polygon' => array_map(
-                fn (array $point) => [round($point[0] / $width, 5), round($point[1] / $height, 5)],
+                fn(array $point) => [round($point[0] / $width, 5), round($point[1] / $height, 5)],
                 $line->polygon,
             ),
             'line_column' => $line->column_name,
@@ -1063,10 +798,10 @@ class DocumentScanController extends Controller
     private function findExistingRecord(int $templateId, array $fields): ?CivilRecord
     {
         $submitted = collect($fields)
-            ->mapWithKeys(fn (array $f) => [
-                mb_strtolower(trim((string) ($f['name'] ?? ''))).':'.((int) ($f['person_group'] ?? 0)) => mb_strtolower(trim((string) preg_replace('/\s+/', ' ', (string) ($f['verified_value'] ?? '')))),
+            ->mapWithKeys(fn(array $f) => [
+                mb_strtolower(trim((string) ($f['name'] ?? ''))) . ':' . ((int) ($f['person_group'] ?? 0)) => mb_strtolower(trim((string) preg_replace('/\s+/', ' ', (string) ($f['verified_value'] ?? '')))),
             ])
-            ->filter(fn (string $v) => $v !== '');
+            ->filter(fn(string $v) => $v !== '');
 
         if ($submitted->isEmpty()) {
             return null;
@@ -1080,16 +815,16 @@ class DocumentScanController extends Controller
 
         foreach ($candidates as $record) {
             $existing = $record->fields
-                ->mapWithKeys(fn ($f) => [
-                    mb_strtolower(trim((string) $f->name)).':'.((int) ($f->person_group ?? 0)) => mb_strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $f->verified_value))),
+                ->mapWithKeys(fn($f) => [
+                    mb_strtolower(trim((string) $f->name)) . ':' . ((int) ($f->person_group ?? 0)) => mb_strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $f->verified_value))),
                 ])
-                ->filter(fn (string $v) => $v !== '');
+                ->filter(fn(string $v) => $v !== '');
 
             if ($existing->count() !== $submitted->count()) {
                 continue;
             }
 
-            $allMatch = $submitted->every(fn (string $val, string $key) => ($existing->get($key) ?? null) === $val);
+            $allMatch = $submitted->every(fn(string $val, string $key) => ($existing->get($key) ?? null) === $val);
             if ($allMatch) {
                 return $record;
             }

@@ -5,7 +5,7 @@
 
 <x-card class="record-scan-card" bodyClass="p-0" title="Original scan"
         subtitle="Select a value to locate its source.">
-    @if (!str_contains((string) $record->scan_mime, 'pdf'))
+    @if ($record->showsScanImage())
         <x-slot:actions>
             <div class="btn-group btn-group-sm" role="group" aria-label="Scan zoom controls">
                 <button type="button" class="btn btn-outline-secondary" data-scan-zoom-out aria-label="Zoom out">−</button>

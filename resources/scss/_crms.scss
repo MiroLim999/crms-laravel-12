@@ -2630,6 +2630,57 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     flex: 0 0 auto;
     margin-block-start: .08rem;
   }
+
+  // Other pages of this PDF are saved: good to know, not a warning.
+  &.is-info {
+    color: var(--crms-info-text);
+    background: rgba(3, 195, 236, .08);
+    border-color: rgba(3, 195, 236, .24);
+  }
+}
+
+.document-scan-notice__link {
+  margin-inline-start: .2rem;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+// A PDF of many pages: ‹ Page 3 of 12 › beside the zoom, one page read at a time.
+.marker-page-controls {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  inline-size: auto;
+
+  .marker-page-dropdown {
+    display: flex;
+  }
+
+  .marker-page-select {
+    inline-size: auto;
+    min-inline-size: 8.75rem;
+    border-radius: 0;
+    font-variant-numeric: tabular-nums;
+    text-align: start;
+  }
+}
+
+.marker-page-menu {
+  min-inline-size: 9rem;
+  max-block-size: 18rem;
+  overflow-y: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.marker-page-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+.marker-page-saved {
+  color: var(--bs-success);
+  font-size: 1.1rem;
 }
 
 .marker-field-bulk-actions {
@@ -3829,55 +3880,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// Template builder: printed row lines of a ruled register, drawn over the
-// sample. Only the lines take the pointer, so marquee selection still works
-// on the page around them.
-.ledger-rule-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  inline-size: 100%;
-  block-size: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.ledger-rule {
-  cursor: ns-resize;
-
-  .ledger-rule__line {
-    stroke: #0e9aa7;
-    stroke-width: 1.5px;
-    stroke-dasharray: 6 3;
-    vector-effect: non-scaling-stroke;
-  }
-
-  .ledger-rule__hit {
-    stroke: transparent;
-    stroke-width: 9px;
-    vector-effect: non-scaling-stroke;
-    pointer-events: stroke;
-  }
-
-  // Detect's estimate below the last printed rule: amber until checked.
-  &.is-estimated .ledger-rule__line {
-    stroke: #e59500;
-    stroke-dasharray: 3 3;
-  }
-
-  &.is-selected .ledger-rule__line {
-    stroke: var(--bs-primary);
-    stroke-width: 2.5px;
-    stroke-dasharray: none;
-  }
-
-  &:hover .ledger-rule__line,
-  &.is-dragging .ledger-rule__line {
-    stroke: var(--bs-danger);
-    stroke-width: 2px;
-  }
-}
-
 .template-builder-field-group.is-column {
   color: var(--crms-info-text);
   background: rgba(14, 154, 167, .12);
@@ -4043,7 +4045,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 // The Align step's Rows line (in the Fields card) and the Template Builder's
-// Rows and Columns card. One line per tool: a label, then its control.
+// Table grid card. One line per tool: a label, then its control.
 .document-grid-card {
   .document-grid-card__line {
     display: flex;
@@ -4123,7 +4125,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 // A ? beside a card's title, and the tips it shows on hover or focus (the
-// Align step's Rows and Columns and Fields cards). The tips are placed by the
+// Align step's Fields card and the builder's Table grid and Fields cards). The tips are placed by the
 // card header (position-relative): as wide as the header's content, so they
 // never stick out of the side panel, and just below the ?.
 .card-help__toggle {
@@ -4216,9 +4218,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   line-height: 1.4;
 }
 
-// The Template Builder's Rows and Columns: the lines may wrap in the narrow panel.
+// The Template Builder's Table grid: the lines may wrap in the narrow panel.
 .template-ledger-card .document-grid-card__line {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: .5rem;
 
   .document-grid-card__label {
@@ -4228,14 +4230,30 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 // Rows: − [count] +. Typing a count and pressing Enter spaces them evenly.
 // (Outranks the Align card's stretched .input-group.)
-.template-ledger-card .document-grid-card__line .template-ledger-rows {
+// Rows and Tilt share one line: narrow buttons so both fit the side panel. The
+// Tilt group keeps its size; the stepper takes what is left.
+.template-ledger-card .document-grid-card__line .btn {
+  padding-inline: .4rem;
+}
+
+.template-ledger-card #gridTiltGroup {
   flex: 0 0 auto;
+
+  .document-grid-card__count {
+    width: 2.5rem;
+    min-width: 0;
+  }
+}
+
+.template-ledger-card .document-grid-card__line .template-ledger-rows {
+  flex: 1 1 auto;
   flex-wrap: nowrap;
-  inline-size: auto;
+  min-inline-size: 0;
 
   .form-control {
-    flex: 0 0 3.25rem;
-    inline-size: 3.25rem;
+    flex: 1 1 0;
+    inline-size: 1%;
+    min-inline-size: 2rem;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
     text-align: center;
@@ -4298,10 +4316,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     color: var(--bs-danger);
     font-weight: 500;
   }
-}
-
-.template-ledger-card__clear {
-  margin-block-start: .75rem;
 }
 
 // Ledger column markers in the Align step: aligned like any field, but read

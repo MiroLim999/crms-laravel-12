@@ -81,9 +81,6 @@ Route::middleware('auth')->group(function () {
         Route::get('documents/workspace', [DocumentScanController::class, 'workspace'])
             ->name('documents.workspace');
         Route::post('documents', [DocumentScanController::class, 'store'])->name('documents.store');
-        Route::post('documents/batch-upload', [DocumentScanController::class, 'batchUpload'])->name('documents.batch-upload');
-        Route::post('documents/batch-scan', [DocumentScanController::class, 'batchScan'])->name('documents.batch-scan');
-        Route::post('documents/batch-import', [DocumentScanController::class, 'batchImport'])->name('documents.batch-import');
 
         // Finishing Align uploads the page and starts line detection in the
         // background; Verify polls for the outlines and readings, shows the crop
