@@ -28,7 +28,7 @@ Works on **Windows 10/11, Linux, and Mac with Apple silicon**. Only this compute
 
 ```bash
 cd ~
-git clone -b docker-setup https://github.com/MiroLim999/crms-laravel-12.git
+git clone https://github.com/MiroLim999/crms-laravel-12.git
 cd crms-laravel-12
 cp .env.example .env
 mkdir -p ml/models
@@ -38,7 +38,7 @@ mkdir -p ml/models
 
 ```powershell
 cd C:\
-git clone -b docker-setup https://github.com/MiroLim999/crms-laravel-12.git
+git clone https://github.com/MiroLim999/crms-laravel-12.git
 cd C:\crms-laravel-12
 Copy-Item .env.example .env
 mkdir ml\models
