@@ -15,7 +15,7 @@
     <x-card>
         <form method="GET" action="{{ route('records.index') }}" class="row g-3 align-items-end">
             {{-- Values come from the validated filters, so a bad one is not echoed back. --}}
-            <div class="col-sm-12 col-xl-6">
+            <div class="col-sm-12 {{ $sourceFiles ? 'col-xl-4' : 'col-xl-6' }}">
                 <label for="q" class="form-label">Search</label>
                 <div class="d-flex gap-2">
                     {{-- data-record-search: the "/" shortcut lands here, since the top bar's search is hidden on this page. --}}
@@ -43,6 +43,22 @@
                 </select>
                 @error('type')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
+            @if ($sourceFiles)
+                {{-- Every page saved from one scanned file (a register book), in page order. --}}
+                <div class="col-sm-12 col-xl-2">
+                    <label for="source" class="form-label">From file</label>
+                    <select id="source" name="source" class="form-select @error('source') is-invalid @enderror"
+                            onchange="this.form.requestSubmit()">
+                        <option value="">Any file</option>
+                        @foreach ($sourceFiles as $file)
+                            <option value="{{ $file['hash'] }}" @selected(($filters['source'] ?? null) === $file['hash'])>
+                                {{ $file['name'] }}{{ $file['pages'] > 1 ? " ({$file['saved']} of {$file['pages']} pages)" : '' }}
+                            </option>
+                        @endforeach
+                    </select>
+                    @error('source')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                </div>
+            @endif
             <div class="col-sm-4 col-xl-2">
                 <label for="from" class="form-label">From</label>
                 <input type="date" id="from" name="from" value="{{ $filters['from'] ?? '' }}"
@@ -86,7 +102,7 @@
                                     @endif
                                     <div>
                                         <small class="text-muted">
-                                            Record #{{ $record->getKey() }}
+                                            Record #{{ $record->getKey() }}@if ($record->sourceLabel()) · {{ $record->sourceLabel() }}@endif
                                         </small>
                                     </div>
                                     {{-- Why a search found this record, when the title above does not show it. --}}

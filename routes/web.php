@@ -85,6 +85,13 @@ Route::middleware('auth')->group(function () {
         Route::get('documents/sources/{hash}/pages', [DocumentScanController::class, 'sourcePages'])
             ->where('hash', '[0-9a-f]{64}')
             ->name('documents.sources.pages');
+        // Skip a page of that file (a cover, a blank page), or read it after all.
+        Route::post('documents/sources/{hash}/pages/{page}/skip', [DocumentScanController::class, 'skipSourcePage'])
+            ->where(['hash' => '[0-9a-f]{64}', 'page' => '[0-9]+'])
+            ->name('documents.sources.skip');
+        Route::delete('documents/sources/{hash}/pages/{page}/skip', [DocumentScanController::class, 'unskipSourcePage'])
+            ->where(['hash' => '[0-9a-f]{64}', 'page' => '[0-9]+'])
+            ->name('documents.sources.unskip');
 
         // Finishing Align uploads the page and starts line detection in the
         // background; Verify polls for the outlines and readings, shows the crop

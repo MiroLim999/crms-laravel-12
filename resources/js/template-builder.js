@@ -543,7 +543,9 @@ function renderFieldList(boxes) {
     updateSelectionUI(marker.selectedIndexes());
 }
 
-const ROLE_LABELS = { name: 'Name', entry: 'Entry no.' };
+const ROLE_LABELS = { name: 'Name', entry: 'Entry no.', volume: 'Volume', page_no: 'Page no.', year: 'Year' };
+// One of each per page, not per row.
+const PAGE_ROLES = ['volume', 'page_no', 'year'];
 const TYPE_LABELS = { date: 'Date', number: 'Number', choice: 'List' };
 
 /** A marker's settings in a few words for the field list: "Name · Date · optional". */
@@ -733,7 +735,8 @@ function applyFieldSettings(patch) {
     const affected = boxes
         .map((box, index) => index)
         .filter((index) => chosen.has(index)
-            || (holder && boxes[index].role === patch.role && sameRow(boxes[index], holder)));
+            || (holder && boxes[index].role === patch.role
+                && (PAGE_ROLES.includes(patch.role) || sameRow(boxes[index], holder))));
 
     marker.updateBoxes(affected, (box, index) => (chosen.has(index) ? patch : { role: null }));
     clearBuilderError();

@@ -30,6 +30,9 @@ Browser, `resources/js/scan-source.js` (a Vite entry; import it like the others)
 
 - `marker.load(file, { page: n })` draws page `n` of a PDF. The PDF is kept, so another page only redraws.
 - `marker.pdfPageCount(file)` gives the page count without drawing.
+- `marker.load(file, { page, rotation })` and `pdfPageFile(file, n, { rotation })` turn a sideways page (0/90/180/270).
+- `marker.renderPdfPageOffscreen(file, n, rotation)` draws a page on its own canvas (single mode uses it to read the next page ahead).
+- Skipped pages: `GET documents/sources/{hash}/pages` now also returns `skipped: [n, …]`; `POST`/`DELETE documents/sources/{hash}/pages/{n}/skip`. Leave skipped pages out of the queue.
 
 Workspace (`resources/views/scan/workspace.blade.php`) state used by Submit:
 `scanFile` (the whole PDF), `scanPageNumber`, `scanPageCount`, `scanFingerprint`, `savedPages`.

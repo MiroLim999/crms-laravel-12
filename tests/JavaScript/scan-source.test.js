@@ -73,6 +73,10 @@ test('one page is cut out of a PDF as a PDF of its own', async () => {
     const third = await PDFDocument.load(await (await pdfPageFile(file, 3)).arrayBuffer());
     assert.deepEqual(third.getPage(0).getSize(), { width: 800, height: 600 });
 
+    // A page scanned sideways is kept turned upright.
+    const turned = await PDFDocument.load(await (await pdfPageFile(file, 1, { rotation: 90 })).arrayBuffer());
+    assert.equal(turned.getPage(0).getRotation().angle, 90);
+
     await assert.rejects(pdfPageFile(file, 4), RangeError);
     await assert.rejects(pdfPageFile(file, 0), RangeError);
 });

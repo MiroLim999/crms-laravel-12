@@ -8,9 +8,20 @@
          id="layout-navbar" aria-label="Completed document workflow">
         <div class="document-workspace-topbar__context">
             <strong>{{ $recordHeading }}</strong>
-            {{-- Where the scan came from: "Page 3 of 12 · BIRTHS-1995.pdf". --}}
+            {{-- Where the scan came from: "Page 3 of 12 · BIRTHS-1995.pdf", a link to every saved page of that file. --}}
             @php($recordContext = implode(' · ', array_filter([$record->typeLabel(), 'Record #'.$record->getKey(), $record->sourceLabel()])))
-            <small title="{{ $recordContext }}">{{ $recordContext }}</small>
+            <small title="{{ $recordContext }}">
+                {{ $record->typeLabel() }} · Record #{{ $record->getKey() }}
+                @if ($record->sourceLabel())
+                    ·
+                    @if ($record->source_hash)
+                        <a href="{{ route('records.index', ['source' => $record->source_hash]) }}"
+                           title="Every saved page of this file">{{ $record->sourceLabel() }}</a>
+                    @else
+                        {{ $record->sourceLabel() }}
+                    @endif
+                @endif
+            </small>
         </div>
 
         <nav class="document-flow-steps" aria-label="Document processing complete">

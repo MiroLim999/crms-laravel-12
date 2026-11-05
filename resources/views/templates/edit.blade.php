@@ -436,8 +436,11 @@
                                         <option value="">Any value</option>
                                         <option value="name">The person's name</option>
                                         <option value="entry">The entry number</option>
+                                        <option value="volume">The register volume</option>
+                                        <option value="page_no">The register page number</option>
+                                        <option value="year">The register year</option>
                                     </select>
-                                    <div class="form-text">The name titles each person in Verify and the records archive.</div>
+                                    <div class="form-text">The name titles each person in Verify and the records archive. The volume and page number (and year, if set) tell Staff when that register page is saved already.</div>
                                 </div>
                                 <div class="mb-2">
                                     <label class="form-label" for="fieldType">Value</label>

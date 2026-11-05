@@ -35,7 +35,9 @@ class RecordController extends Controller
             'status' => ['nullable', 'string', 'in:'.implode(',', array_column(RecordStatus::cases(), 'value'))],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
-        ], [], ['q' => 'search', 'from' => 'from date', 'to' => 'to date']);
+            // One scanned file (a register book): its SHA-256.
+            'source' => ['nullable', 'string', 'regex:/^[0-9a-f]{64}$/'],
+        ], [], ['q' => 'search', 'from' => 'from date', 'to' => 'to date', 'source' => 'file']);
 
         // The filters come from the query string, so an edited URL can carry a
         // bad one. Its message is shown on this page and the filter left out,
@@ -60,6 +62,8 @@ class RecordController extends Controller
             ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
             ->when($filters['from'] ?? null, fn ($q, $from) => $q->where('submitted_at', '>=', LocalTime::dayStart($from)))
             ->when($filters['to'] ?? null, fn ($q, $to) => $q->where('submitted_at', '<=', LocalTime::dayEnd($to)))
+            // A book's pages in page order; anything else newest first.
+            ->when($filters['source'] ?? null, fn ($q, $source) => $q->where('source_hash', $source)->orderBy('source_page'))
             ->orderByDesc('submitted_at')
             ->orderByDesc('id')
             ->paginate(15)
@@ -70,7 +74,33 @@ class RecordController extends Controller
             'filters' => $filters,
             'documentTypes' => DocumentTypeDefinition::ordered(),
             'statuses' => RecordStatus::cases(),
+            'sourceFiles' => $this->sourceFiles(),
         ]);
+    }
+
+    /**
+     * The scanned files records came from, newest first, for the archive's
+     * "From file" filter: one entry per file (by fingerprint), with its name
+     * and how many of its pages are saved.
+     *
+     * @return list<array{hash: string, name: string, pages: int, saved: int}>
+     */
+    private function sourceFiles(): array
+    {
+        return CivilRecord::query()
+            ->whereNotNull('source_hash')
+            ->selectRaw('source_hash, MAX(source_name) as name, MAX(source_page_count) as pages, COUNT(DISTINCT source_page) as saved, MAX(id) as newest')
+            ->groupBy('source_hash')
+            ->orderByDesc('newest')
+            ->limit(200)
+            ->get()
+            ->map(fn ($file) => [
+                'hash' => (string) $file->source_hash,
+                'name' => (string) ($file->name ?? 'Scan'),
+                'pages' => (int) $file->pages,
+                'saved' => (int) $file->saved,
+            ])
+            ->all();
     }
 
     public function show(CivilRecord $record): View

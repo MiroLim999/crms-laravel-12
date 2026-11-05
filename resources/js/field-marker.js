@@ -64,7 +64,8 @@ function serialiseBox(box, withSettings = false) {
     };
 }
 
-const FIELD_ROLES = ['name', 'entry'];
+// A person's name or entry number; the register page's volume or page number.
+const FIELD_ROLES = ['name', 'entry', 'volume', 'page_no', 'year'];
 const VALUE_TYPES = ['date', 'number', 'choice'];
 
 /**
@@ -372,14 +373,14 @@ export class FieldMarker {
      * page drawn (from 1). The PDF is read once and kept, so turning to
      * another of its pages only draws that page.
      */
-    async load(file, { page = 1 } = {}) {
+    async load(file, { page = 1, rotation = 0 } = {}) {
         if (isPdfDocument(file)) {
             const doc = await this._openPdf(file);
             const wanted = Math.trunc(Number(page)) || 1;
-            await this.renderPdfPage(Math.min(doc.numPages, Math.max(1, wanted)));
+            await this.renderPdfPage(Math.min(doc.numPages, Math.max(1, wanted)), rotation);
         } else {
             this._closePdf();
-            await this.renderImage(file);
+            await this.renderImage(file, rotation);
             this.pageMeasurement = await this._measureImage(file);
         }
 
@@ -436,12 +437,17 @@ export class FieldMarker {
         this.layout();
     }
 
-    async renderPdfPage(pageNumber) {
+    /**
+     * Draw a page of the open PDF. `rotation` turns it a further 0, 90, 180
+     * or 270 degrees clockwise, for a page scanned sideways or upside down.
+     */
+    async renderPdfPage(pageNumber, rotation = 0) {
         const page = await this.pdfDoc.getPage(pageNumber);
+        const turn = (page.rotate + normaliseTurn(rotation)) % 360;
 
         // PDF viewport units at scale 1 are points (1/72 inch), so this is a
         // real physical page measurement rather than an estimate from pixels.
-        const physicalViewport = page.getViewport({ scale: 1 });
+        const physicalViewport = page.getViewport({ scale: 1, rotation: turn });
         this.pageMeasurement = {
             kind: 'pdf',
             widthPx: Math.round(physicalViewport.width * 2),
@@ -453,22 +459,25 @@ export class FieldMarker {
             physicalSource: 'PDF page box',
         };
 
-        // Render at 2x so the crops handed to the model keep their detail.
-        const viewport = page.getViewport({ scale: 2 });
-        this.canvas.width = viewport.width;
-        this.canvas.height = viewport.height;
-
-        const ctx = this.canvas.getContext('2d');
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        await paintPdfPage(page, this.canvas, turn);
     }
 
-    async renderImage(file) {
+    /**
+     * A page of a PDF drawn on a canvas of its own, as load() would draw it,
+     * without touching the page on screen (to read the next page ahead).
+     */
+    async renderPdfPageOffscreen(file, pageNumber, rotation = 0) {
+        const doc = await this._openPdf(file);
+        const page = await doc.getPage(pageNumber);
+        const canvas = document.createElement('canvas');
+        await paintPdfPage(page, canvas, (page.rotate + normaliseTurn(rotation)) % 360);
+        return canvas;
+    }
+
+    async renderImage(file, rotation = 0) {
         const url = URL.createObjectURL(file);
         try {
-            await this._drawImage(url);
+            await this._drawImage(url, rotation);
         } finally {
             URL.revokeObjectURL(url);
         }
@@ -565,19 +574,25 @@ export class FieldMarker {
         return null;
     }
 
-    _drawImage(url) {
+    _drawImage(url, rotation = 0) {
+        const turn = normaliseTurn(rotation);
         return new Promise((resolve, reject) => {
             const img = new Image();
             img.crossOrigin = 'anonymous';
             img.onload = () => {
-                this.canvas.width = img.naturalWidth;
-                this.canvas.height = img.naturalHeight;
+                const sideways = turn === 90 || turn === 270;
+                this.canvas.width = sideways ? img.naturalHeight : img.naturalWidth;
+                this.canvas.height = sideways ? img.naturalWidth : img.naturalHeight;
 
                 const ctx = this.canvas.getContext('2d');
                 // White backing: transparent PNGs would otherwise crop to black.
                 ctx.fillStyle = '#ffffff';
                 ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-                ctx.drawImage(img, 0, 0);
+                ctx.save();
+                ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
+                ctx.rotate(turn * Math.PI / 180);
+                ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+                ctx.restore();
                 resolve();
             };
             img.onerror = () => reject(new Error('Could not load that image.'));
@@ -1217,6 +1232,25 @@ export class FieldMarker {
         this.boxes.forEach((box) => box.el?.classList.toggle('is-selected', this.selected.has(box)));
         this.onSelectionChange?.(this.selectedIndexes(), { source, activeIndex });
     }
+}
+
+/** 0, 90, 180 or 270: a quarter turn clockwise, any number of times. */
+export function normaliseTurn(degrees) {
+    const quarters = Math.round((Number(degrees) || 0) / 90);
+    return ((quarters % 4) + 4) % 4 * 90;
+}
+
+/** Render at 2x so the crops handed to the model keep their detail. */
+async function paintPdfPage(page, canvas, turn) {
+    const viewport = page.getViewport({ scale: 2, rotation: turn });
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
 }
 
 function isPdfDocument(file) {

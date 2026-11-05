@@ -824,11 +824,17 @@ class DocumentTemplateController extends Controller
             if (! $grouped || $settings['role'] === null) {
                 continue;
             }
-            $group = $key === 'columns' ? 'ledger' : (string) ($item['person_group'] ?? 'details');
+            // The volume and page number belong to the page: one of each per page.
+            $pageRole = in_array($settings['role'], DocumentTemplateField::PAGE_ROLES, true);
+            $group = $pageRole ? 'page' : ($key === 'columns' ? 'ledger' : (string) ($item['person_group'] ?? 'details'));
             if (isset($taken[$group][$settings['role']])) {
-                $errors["{$key}.{$index}.role"] = $settings['role'] === 'name'
-                    ? "Only one {$this->itemNoun($key)} in a row can hold the person's name."
-                    : "Only one {$this->itemNoun($key)} in a row can hold the entry number.";
+                $errors["{$key}.{$index}.role"] = match ($settings['role']) {
+                    'name' => "Only one {$this->itemNoun($key)} in a row can hold the person's name.",
+                    'entry' => "Only one {$this->itemNoun($key)} in a row can hold the entry number.",
+                    'volume' => 'Only one field on the page can hold the volume number.',
+                    'year' => 'Only one field on the page can hold the year.',
+                    default => 'Only one field on the page can hold the page number.',
+                };
             }
             $taken[$group][$settings['role']] = true;
         }

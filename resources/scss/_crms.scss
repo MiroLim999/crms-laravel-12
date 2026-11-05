@@ -2338,6 +2338,41 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   font-size: 1.1rem;
 }
 
+.marker-page-skipped {
+  color: var(--bs-secondary-color);
+  font-size: .7rem;
+  font-style: italic;
+}
+
+// "5 of 12 saved · 1 skipped" beside the page bar.
+.marker-pages-progress {
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+// A PDF of many pages: skip a page with nothing to read on it.
+.document-pages-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-block-end: 1rem;
+  padding: .5rem .75rem;
+  color: var(--bs-secondary-color);
+  background: var(--bs-paper-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: .5rem;
+  font-size: .72rem;
+  line-height: 1.4;
+
+  .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
+
 .marker-field-bulk-actions {
   display: flex;
   align-items: center;

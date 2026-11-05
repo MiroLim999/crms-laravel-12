@@ -50,6 +50,19 @@
                                     <i class="icon-base bx bx-chevron-right icon-sm" aria-hidden="true"></i>
                                 </button>
                             </div>
+                            <span class="marker-pages-progress d-none" id="scanPagesProgress" aria-live="polite"></span>
+
+                            {{-- A page scanned sideways or upside down: a quarter turn at a time. --}}
+                            <div class="btn-group" role="group" aria-label="Turn the page">
+                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="rotateLeftBtn"
+                                        aria-label="Turn the page left" title="Turn the page a quarter to the left">
+                                    <i class="icon-base bx bx-rotate-left icon-sm" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="rotateRightBtn"
+                                        aria-label="Turn the page right" title="Turn the page a quarter to the right">
+                                    <i class="icon-base bx bx-rotate-right icon-sm" aria-hidden="true"></i>
+                                </button>
+                            </div>
                         </div>
 
                         <div class="marker-toolbar__actions">
@@ -143,6 +156,11 @@
                         <a href="#" target="_blank" rel="noopener" class="document-scan-notice__link d-none"
                            id="scanPagesRecordLink">Open it</a>
                     </span>
+                </div>
+                {{-- A PDF of many pages: a page with nothing to read can be skipped. --}}
+                <div class="document-pages-panel d-none" id="scanPagesPanel">
+                    <span id="scanPagesPanelText"></span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="skipPageBtn">Skip this page</button>
                 </div>
 
                 {{--
@@ -801,6 +819,7 @@
         markerAngleMetadata,
         markerColumnMetadata,
         markerPersonMetadata,
+        normaliseTurn,
         verificationGroupState,
     } from '{{ Vite::asset('resources/js/field-marker.js') }}';
     import { attachMarqueeSelection } from '{{ Vite::asset('resources/js/marquee-selection.js') }}';
@@ -871,6 +890,7 @@
         pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
         // The pages of one file already saved; 64 zeros stand in for its fingerprint.
         sourcePagesUrl: @json(route('documents.sources.pages', ['hash' => str_repeat('0', 64)])),
+        sourceSkipUrl: {{ Js::from(route('documents.sources.skip', ['hash' => str_repeat('0', 64), 'page' => 999999])) }},
         csrf: @json(csrf_token()),
         // The layout's page shape (width : height), from its sample.
         pageRatio: @json($template->page_ratio),
@@ -1151,21 +1171,35 @@
         && Math.abs((Number(a.angle) || 0) - (Number(b.angle) || 0)) < 0.05;
 
     function rememberAutoFields(boxes, except = new Set()) {
+        rememberFields(autoFields, boxes, except);
+    }
+
+    function rememberFields(map, boxes, except = new Set()) {
         boxes.filter((box) => box.kind !== 'column').forEach((box) => {
             const key = nameKey(box.name);
-            if (!except.has(key)) autoFields.set(key, { x: box.x, y: box.y, w: box.w, h: box.h, angle: box.angle });
+            if (!except.has(key)) map.set(key, { x: box.x, y: box.y, w: box.w, h: box.h, angle: box.angle });
         });
     }
 
-    /** The names of the fields as they stand now that Staff placed (or added) by hand. */
-    function handPlacedFields(boxes = marker.toJSON()) {
-        return new Set(boxes
+    /**
+     * Snap's answer laid over the markers as they stand: the table and the
+     * fields Staff have not touched move, the fields they placed (or added)
+     * by hand stay. `auto` is where each field was last placed for them.
+     */
+    function snappedLayout(payload, before, auto, fallbackRows) {
+        const rows = payload.geometry?.ruled_ys ?? fallbackRows;
+        const kept = new Map(before
             .filter((box) => box.kind !== 'column')
             .filter((box) => {
-                const placed = autoFields.get(nameKey(box.name));
+                const placed = auto.get(nameKey(box.name));
                 return !placed || !sameBox(box, placed);
             })
-            .map((box) => nameKey(box.name)));
+            .map((box) => [nameKey(box.name), box]));
+        const boxes = geometryMarkers(payload.geometry, null)
+            .map((box) => (box.kind !== 'column' && kept.has(nameKey(box.name)) ? kept.get(nameKey(box.name)) : box));
+        const estimated = (payload.rows?.estimated ?? []).filter((index) => rows[index] !== undefined)
+            .map((index) => rowKey(rows[index]));
+        return { boxes, rows, estimated, kept };
     }
 
     function setGrid(boxes, rows, { estimated = [], byHand = false, tilts = null, selected = null, remember = false } = {}) {
@@ -2604,22 +2638,29 @@
     // ---------------------------------------------------------------- step 1
     // The opened file. A PDF of many pages is read one page at a time, each
     // saved as its own record: the page being read (from 1), the file's
-    // fingerprint, and which of its pages are saved already (page number ->
-    // {recordId, title, url}), so the page bar ticks them.
+    // fingerprint, which of its pages are saved already (page number ->
+    // {recordId, title, url}) or skipped (a cover, a blank page), and how far
+    // Staff turned each page (a page scanned sideways).
     let scanPageCount = 1;
     let scanPageNumber = 1;
     let scanFingerprint = null;
     let savedPages = new Map();
+    let skippedPages = new Set();
+    let pageRotations = new Map();
     let pageTurning = false;
 
     const multiPage = () => scanPageCount > 1;
+    const rotationOf = (page) => pageRotations.get(page) ?? 0;
+    /** Pages that need nothing more: saved, or skipped. */
+    const donePages = () => new Set([...savedPages.keys(), ...skippedPages]);
 
-    /** "BIRTHS-1995.pdf · page 3 of 12", or the name alone for a file of one page. */
+    /** "Page 3 of 12 · BIRTHS-1995.pdf", or the name alone for a file of one page. */
     function scanLabel() {
         const name = scanFile?.name || 'Document';
-        return multiPage() ? `${name} · page ${scanPageNumber} of ${scanPageCount}` : name;
+        return multiPage() ? `Page ${scanPageNumber} of ${scanPageCount} · ${name}` : name;
     }
 
+    // The page first, so a long file name never pushes it out of the top bar.
     function showScanContext() {
         el('workspaceContextDetail').textContent = `${config.typeLabel} · ${scanLabel()}`;
         el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
@@ -2629,7 +2670,7 @@
      * What Staff should know about the scan itself. Any paper size is fine
      * (markers are page fractions), but a tall scan of wide pages, or the
      * other way round, is likely sideways. And this page (or this file) may
-     * be saved already, or other pages of this PDF may be.
+     * be saved already, or skipped.
      */
     function updateScanNotices() {
         // Clearly one way or the other: a near-square page is neither.
@@ -2638,34 +2679,38 @@
         const layout = Number(config.pageRatio) > 0 ? shape(Number(config.pageRatio)) : null;
         const sideways = scan !== null && layout !== null && scan !== layout;
         el('scanSidewaysMessage').textContent = sideways
-            ? `This scan is ${scan}, but pages for this layout are ${layout}. It may be sideways: turn it upright and upload it again.`
+            ? `This page is ${scan}, but pages for this layout are ${layout}. It may be sideways: turn it with the arrows above the page.`
             : '';
         el('scanSidewaysNotice').classList.toggle('d-none', !sideways);
 
         const here = savedPages.get(scanPageNumber) ?? null;
-        const others = [...savedPages.keys()].filter((page) => page !== scanPageNumber && page <= scanPageCount);
-        let message = '';
-        if (here) {
-            message = multiPage()
+        el('scanPagesMessage').textContent = here
+            ? (multiPage()
                 ? `Page ${scanPageNumber} is already saved as record #${here.recordId}.`
-                : `This file is already saved as record #${here.recordId}.`;
-        } else if (multiPage() && others.length > 0) {
-            message = `Saved already: page${others.length === 1 ? '' : 's'} ${pageRanges(others)} of ${scanPageCount}.`;
-        }
-        el('scanPagesMessage').textContent = message;
+                : `This file is already saved as record #${here.recordId}.`)
+            : '';
         const link = el('scanPagesRecordLink');
         link.classList.toggle('d-none', !here);
         if (here) link.href = here.url;
-        // Other pages saved is good to know; this one saved is a warning.
-        el('scanPagesNotice').classList.toggle('is-info', !here);
-        el('scanPagesNotice').classList.toggle('d-none', message === '');
+        el('scanPagesNotice').classList.toggle('d-none', !here);
+
+        // Skip: for a page with nothing to read (a cover, an index, a blank page).
+        const skipped = skippedPages.has(scanPageNumber);
+        el('scanPagesPanel').classList.toggle('d-none', !multiPage() || Boolean(here));
+        el('scanPagesPanelText').textContent = skipped
+            ? `Page ${scanPageNumber} is skipped: it is not read.`
+            : 'Nothing to read on this page (a cover, a blank page)?';
+        el('skipPageBtn').textContent = skipped ? 'Read this page' : 'Skip this page';
+        el('skipPageBtn').disabled = !scanFingerprint;
+        el('skipPageBtn').title = scanFingerprint ? '' : 'This file could not be identified, so a page cannot be skipped.';
 
         updatePageBar();
     }
 
-    /** ‹ Page 3 of 12 › in the Align toolbar, for a PDF of many pages; ✓: saved already. */
+    /** ‹ Page 3 of 12 › in the Align toolbar, for a PDF of many pages; a green ✓: saved. */
     function updatePageBar() {
         el('scanPageBar').classList.toggle('d-none', !multiPage());
+        el('scanPagesProgress').classList.toggle('d-none', !multiPage());
         if (!multiPage()) return;
 
         // A real dropdown, so a saved page can show a green check icon.
@@ -2690,6 +2735,11 @@
                 check.setAttribute('aria-label', 'saved');
                 check.title = 'Saved already';
                 span.append(check);
+            } else if (skippedPages.has(page)) {
+                const note = document.createElement('small');
+                note.className = 'marker-page-skipped';
+                note.textContent = 'skipped';
+                span.append(note);
             }
             return span;
         };
@@ -2704,12 +2754,22 @@
         select.disabled = pageTurning;
         el('scanPagePrevBtn').disabled = pageTurning || scanPageNumber <= 1;
         el('scanPageNextBtn').disabled = pageTurning || scanPageNumber >= scanPageCount;
+
+        // How far the book is, at a glance.
+        const saved = [...savedPages.keys()].filter((page) => page <= scanPageCount).length;
+        const skippedCount = [...skippedPages].filter((page) => page <= scanPageCount && !savedPages.has(page)).length;
+        el('scanPagesProgress').textContent = `${saved} of ${scanPageCount} saved${skippedCount > 0 ? ` · ${skippedCount} skipped` : ''}`;
+    }
+
+    function applySourcePages(payload) {
+        savedPages = new Map((payload?.pages ?? []).map((entry) => [Number(entry.page), entry]));
+        skippedPages = new Set((payload?.skipped ?? []).map(Number));
     }
 
     /**
-     * The file's fingerprint, and which of its pages are saved already. A
-     * lookup that fails ticks nothing: the server still asks before a page
-     * is saved twice.
+     * The file's fingerprint, and which of its pages are saved or skipped
+     * already. A lookup that fails ticks nothing: the server still asks
+     * before a page is saved twice.
      */
     async function lookUpSavedPages(file) {
         try {
@@ -2725,7 +2785,7 @@
             if (!response.ok) throw new Error(`The server answered ${response.status}.`);
             const payload = await response.json();
             if (scanFile !== file) return;
-            savedPages = new Map((payload.pages ?? []).map((entry) => [Number(entry.page), entry]));
+            applySourcePages(payload);
         } catch (error) {
             console.warn('The saved pages of this file could not be looked up:', error);
         }
@@ -2746,17 +2806,21 @@
         dropzone.setAttribute('aria-busy', 'true');
 
         try {
+            discardReadAhead();
             scanFile = file;
             scanFingerprint = null;
             savedPages = new Map();
+            skippedPages = new Set();
+            pageRotations = new Map();
+            lastLayout = null;
             clearDetection();
-            // It opens at its first page not saved yet.
+            // It opens at its first page not saved (or skipped) yet.
             const [pageCount] = await Promise.all([pdf ? marker.pdfPageCount(file) : 1, lookUpSavedPages(file)]);
             if (pageCount <= 1 && file.size > MAX_SCAN_BYTES) {
                 throw new Error('Choose a document smaller than 20 MB. A PDF of many pages may be larger: only the page being read is sent.');
             }
             scanPageCount = pageCount;
-            scanPageNumber = firstUnsavedPage(pageCount, savedPages);
+            scanPageNumber = firstUnsavedPage(pageCount, donePages());
             await marker.load(file, { page: scanPageNumber });
             updateScanNotices();
             showScanContext();
@@ -2780,24 +2844,29 @@
         }
     }
 
-    /**
-     * Another page of the PDF, in Align. The markers and row lines stay where
-     * they are, like a sheet laid over the book: only the page under them
-     * changes. What Detect found belongs to the page before, so it is let go.
-     */
-    async function turnToPage(pageNumber) {
-        const page = Math.min(scanPageCount, Math.max(1, Math.trunc(Number(pageNumber)) || 1));
-        if (!scanFile || page === scanPageNumber || pageTurning || scanInProgress) {
-            updatePageBar();
-            return;
-        }
+    /** Detect's outlines belong to the page as it is: ask before they go. */
+    function mayLetGoOfDetection() {
+        return detection === null || window.confirm(
+            'Detect already found the lines on this page. Turning to another page, or turning this one, '
+            + 'lets them go (about 30 seconds of work).\n\nOK: go ahead.\nCancel: stay on this page.',
+        );
+    }
 
+    /**
+     * Draw page `page` turned `rotation` degrees, keeping the markers and row
+     * lines where they are, like a sheet laid over the book: only the page
+     * under them changes. What Detect found belongs to the page before.
+     */
+    async function showPage(page, rotation) {
         pageTurning = true;
         updatePageBar();
         try {
+            discardReadAhead();
             clearDetection();
-            await marker.load(scanFile, { page });
+            await marker.load(scanFile, { page, rotation });
             scanPageNumber = page;
+            if (rotation === 0) pageRotations.delete(page);
+            else pageRotations.set(page, rotation);
             clearOcrError();
             updateScanNotices();
             showScanContext();
@@ -2811,8 +2880,66 @@
         }
     }
 
+    /** Another page of the PDF, in Align. */
+    async function turnToPage(pageNumber) {
+        const page = Math.min(scanPageCount, Math.max(1, Math.trunc(Number(pageNumber)) || 1));
+        if (!scanFile || page === scanPageNumber || pageTurning || scanInProgress || !mayLetGoOfDetection()) {
+            updatePageBar();
+            return;
+        }
+        await showPage(page, rotationOf(page));
+    }
+
+    /** A page scanned sideways or upside down: a quarter turn at a time. */
+    async function turnThisPage(quarter) {
+        if (!scanFile || pageTurning || scanInProgress || !mayLetGoOfDetection()) return;
+        await showPage(scanPageNumber, normaliseTurn(rotationOf(scanPageNumber) + quarter));
+    }
+
     el('scanPagePrevBtn').addEventListener('click', () => turnToPage(scanPageNumber - 1));
     el('scanPageNextBtn').addEventListener('click', () => turnToPage(scanPageNumber + 1));
+    el('rotateLeftBtn').addEventListener('click', () => turnThisPage(-90));
+    el('rotateRightBtn').addEventListener('click', () => turnThisPage(90));
+
+    /**
+     * Skip this page (nothing to read on it), or read it after all. A skipped
+     * page counts as done, here and the next time the file is opened.
+     */
+    async function toggleSkipPage() {
+        if (!scanFingerprint || pageTurning || scanInProgress) return;
+        const page = scanPageNumber;
+        const skip = !skippedPages.has(page);
+        const button = el('skipPageBtn');
+        button.disabled = true;
+        try {
+            const url = config.sourceSkipUrl.replace('0'.repeat(64), scanFingerprint).replace('/999999/', `/${page}/`);
+            const response = await fetch(url, {
+                method: skip ? 'POST' : 'DELETE',
+                headers: { 'X-CSRF-TOKEN': config.csrf, Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json') ? await response.json() : null;
+            if (!response.ok) throw new Error(responseErrorMessage(response, payload));
+            applySourcePages(payload);
+            discardReadAhead();
+            updateScanNotices();
+
+            if (skip) {
+                const next = nextUnsavedPage(page, scanPageCount, donePages());
+                if (next === null) {
+                    el('scanPagesPanelText').textContent = 'Every page of this file is saved or skipped.';
+                } else {
+                    await turnToPage(next);
+                }
+            }
+        } catch (error) {
+            showOcrError(error.message || 'The page could not be skipped.');
+        } finally {
+            updateScanNotices();
+        }
+    }
+
+    el('skipPageBtn').addEventListener('click', toggleSkipPage);
 
     scanFileInput.addEventListener('change', (event) => {
         if (!(event.currentTarget instanceof HTMLInputElement)) return;
@@ -3472,9 +3599,14 @@
     let snapToken = 0;
 
     async function requestSnap(signal = null) {
+        return postSnap(await canvasBlob(marker.canvas), currentGeometry(), signal);
+    }
+
+    /** Snap a page (as a PNG) with this geometry: the markers fitted to its table. */
+    async function postSnap(blob, geometry, signal = null) {
         const form = new FormData();
-        form.set('geometry_json', JSON.stringify(currentGeometry()));
-        form.set('page', await canvasBlob(marker.canvas), 'page.png');
+        form.set('geometry_json', JSON.stringify(geometry));
+        form.set('page', blob, 'page.png');
         const response = await fetch(config.snapUrl, {
             method: 'POST',
             headers: { 'X-CSRF-TOKEN': config.csrf, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' },
@@ -3513,8 +3645,9 @@
         button.disabled = busy;
     }
 
-    el('snapTableBtn').addEventListener('click', async () => {
-        if (scanInProgress) return;
+    /** Snap to table: the markers fitted to this page's printed table. True when it fitted. */
+    async function snapToTable() {
+        if (scanInProgress) return false;
         const token = ++snapToken;
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), 60 * 1000);
@@ -3527,37 +3660,29 @@
 
         try {
             const payload = await requestSnap(controller.signal);
-            if (token !== snapToken) return;
+            if (token !== snapToken) return false;
             marker.setSnapLines(payload.lines);
             if (!payload.fitted) {
                 showOcrError(payload.reason || 'No printed table matching these markers was found on this page.');
-                return;
+                return false;
             }
             // The columns fitted to the table and the page's own row lines, as
-            // one undoable change (Ctrl+Z) like any marker edit.
-            const rows = payload.geometry?.ruled_ys ?? gridRows;
+            // one undoable change (Ctrl+Z) like any marker edit. Fields Staff
+            // moved (or added) stay where they put them.
             rowsSource = payload.rows ?? null;
-            // Fields Staff moved (or added) stay where they put them: Snap only
-            // fits the table and the fields they have not touched.
-            const before = marker.toJSON();
-            const kept = handPlacedFields(before);
-            const keptBoxes = new Map(before.filter((box) => kept.has(nameKey(box.name)) && box.kind !== 'column')
-                .map((box) => [nameKey(box.name), box]));
-            const snapped = geometryMarkers(payload.geometry, null)
-                .map((box) => (box.kind !== 'column' && keptBoxes.has(nameKey(box.name)) ? keptBoxes.get(nameKey(box.name)) : box));
-            setGrid(snapped, rows, {
-                estimated: (payload.rows?.estimated ?? []).filter((index) => rows[index] !== undefined)
-                    .map((index) => rowKey(rows[index])),
-            });
+            const fit = snappedLayout(payload, marker.toJSON(), autoFields, gridRows);
+            setGrid(fit.boxes, fit.rows, { estimated: fit.estimated });
             // The fields Snap placed are the new starting point; the ones kept are still Staff's.
-            rememberAutoFields(snapped, kept);
-            if (keptBoxes.size > 0) {
-                showGridMessage(`Snap left ${keptBoxes.size} field${keptBoxes.size === 1 ? '' : 's'} you moved where ${keptBoxes.size === 1 ? 'it is' : 'they are'}.`);
+            rememberAutoFields(fit.boxes, new Set(fit.kept.keys()));
+            if (fit.kept.size > 0) {
+                showGridMessage(`Snap left ${fit.kept.size} field${fit.kept.size === 1 ? '' : 's'} you moved where ${fit.kept.size === 1 ? 'it is' : 'they are'}.`);
             }
+            return true;
         } catch (error) {
             showOcrError(error.name === 'AbortError'
                 ? 'Snap to table timed out. Check that the web app is running, then try again.'
                 : (error.message || 'The page could not be snapped to its table.'));
+            return false;
         } finally {
             window.clearTimeout(timeoutId);
             scanInProgress = false;
@@ -3566,17 +3691,24 @@
             el('scanNowBtn').disabled = boxes.length === 0 || markerSetValidationMessage(boxes) !== null;
             el('detectBtn').disabled = el('scanNowBtn').disabled;
         }
-    });
+    }
+
+    el('snapTableBtn').addEventListener('click', () => snapToTable());
 
     /**
      * Send the page exactly as rendered here, with the markers as they stand,
      * so every outline that comes back lines up with this canvas pixel for pixel.
      */
     async function uploadPage({ detect }, signal) {
+        return postPage(await canvasBlob(marker.canvas), currentGeometry(), detect, signal);
+    }
+
+    /** Hand a page (as a PNG) with this geometry to the background line detector. */
+    async function postPage(blob, geometry, detect, signal) {
         const form = new FormData();
         form.set('document_template_id', String(config.templateId));
-        form.set('geometry_json', JSON.stringify(currentGeometry()));
-        form.set('page', await canvasBlob(marker.canvas), 'page.png');
+        form.set('geometry_json', JSON.stringify(geometry));
+        form.set('page', blob, 'page.png');
         // Absent unless Staff choice is enabled; the server falls back to the
         // promoted model and re-checks that the key is one it allows.
         if (modelSelect instanceof HTMLSelectElement) form.set('model', modelSelect.value);
@@ -3728,6 +3860,45 @@
 
     el('ocrProgressCancel').addEventListener('click', cancelActiveRun);
 
+    /** A read page into Verify (after Scan with OCR, or read ahead). */
+    async function showReadPage(page, { readingDetectedPage = false, beforeShow = null } = {}) {
+        clearDetection();
+
+        // A tilted ledger grid makes the server straighten the page before
+        // outlining it; show that page so the outlines sit on their writing.
+        if (!readingDetectedPage && Math.abs(Number(page.deskew) || 0) >= 0.05) {
+            await marker.loadFromUrl(page.imageUrl);
+            setGrid(geometryMarkers(page.geometry, page), page.geometry?.ruled_ys ?? gridRows, { byHand: rowsByHand });
+        }
+
+        if (!Array.isArray(page.lines) || page.lines.length === 0) {
+            throw new Error('No handwriting was found inside the markers. Check the alignment and scan again.');
+        }
+
+        if (typeof page.modelKey !== 'string' || page.modelKey.trim() === '') {
+            throw new Error('The OCR service did not identify the model used. No data was saved; please scan again.');
+        }
+
+        processedPage = page;
+        cropped = verificationItems(page.lines, page);
+        readings = cropped.map((item) => item.reading);
+        requiredInput(document, '#ocrModelKey').value = page.modelKey.trim();
+        requiredInput(document, '#documentPageId').value = String(page.id);
+        el('summaryModel').textContent = page.model || '—';
+
+        setOcrProgress(96, 'Preparing validation', 'The handwriting results are ready for your review.');
+        renderVerifyRows();
+        showGridNotes(page);
+        await beforeShow?.();
+        showStep('verify');
+        try {
+            prepareValidationComparison();
+        } catch (error) {
+            showStep('mark');
+            throw error;
+        }
+    }
+
     el('scanNowBtn').addEventListener('click', async () => {
         if (scanInProgress) return;
 
@@ -3795,6 +3966,8 @@
 
             timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
             let payload;
+            // The next page of the book starts from this layout.
+            lastLayout = currentLayout();
             const readingDetectedPage = detectionIsCurrent();
             if (readingDetectedPage) {
                 showRunKind('read');
@@ -3822,41 +3995,9 @@
             }
 
             const page = await waitForPage(payload, controller.signal);
-            clearDetection();
-
-            // A tilted ledger grid makes the server straighten the page before
-            // outlining it; show that page so the outlines sit on their writing.
-            if (!readingDetectedPage && Math.abs(Number(page.deskew) || 0) >= 0.05) {
-                await marker.loadFromUrl(page.imageUrl);
-                setGrid(geometryMarkers(page.geometry, page), page.geometry?.ruled_ys ?? gridRows, { byHand: rowsByHand });
-            }
-
-            if (!Array.isArray(page.lines) || page.lines.length === 0) {
-                throw new Error('No handwriting was found inside the markers. Check the alignment and scan again.');
-            }
-
-            if (typeof page.modelKey !== 'string' || page.modelKey.trim() === '') {
-                throw new Error('The OCR service did not identify the model used. No data was saved; please scan again.');
-            }
-
-            processedPage = page;
-            cropped = verificationItems(page.lines, page);
-            readings = cropped.map((item) => item.reading);
-            requiredInput(document, '#ocrModelKey').value = page.modelKey.trim();
-            requiredInput(document, '#documentPageId').value = String(page.id);
-            el('summaryModel').textContent = page.model || '—';
-
-            setOcrProgress(96, 'Preparing validation', 'The handwriting results are ready for your review.');
-            renderVerifyRows();
-            showGridNotes(page);
-            await completeOcrProgress();
-            showStep('verify');
-            try {
-                prepareValidationComparison();
-            } catch (error) {
-                showStep('mark');
-                throw error;
-            }
+            await showReadPage(page, { readingDetectedPage, beforeShow: () => completeOcrProgress() });
+            // While Staff check this page, the next one is read.
+            startReadAhead();
         } catch (error) {
             if (run.cancelled) {
                 // Cancelled from the progress window: back to Align. A Detect
@@ -5783,11 +5924,152 @@
     // ------------------------------------------------ the next page of a PDF
     const SUBMIT_IDLE_HTML = el('submitBtn').innerHTML;
 
+    // The markers and row lines a page was read with: the next page of the same
+    // book starts from them (pages of one book share their layout), and Snap
+    // to table fits them onto it. Fields Staff moved by hand stay theirs.
+    let lastLayout = null;
+    const currentLayout = () => ({
+        boxes: cloneBoxes(marker.toJSON()),
+        rows: [...gridRows],
+        byHand: rowsByHand,
+        autoFields: new Map(autoFields),
+    });
+
+    // The next page, read in the background while Staff check this one, so it
+    // is ready when they get there: { page, rotation, status ('working',
+    // 'ready', 'failed'), pageId, result, controller, promise, onStatus }.
+    let readAhead = null;
+
+    function cancelServerPage(id) {
+        fetch(config.pageCancelUrl.replace('__PAGE__', String(id)), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrf,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            keepalive: true,
+            body: '{}',
+        }).catch(() => {});
+    }
+
+    /** Stop reading ahead (another page was chosen, or the layout changed). */
+    function discardReadAhead() {
+        const job = readAhead;
+        readAhead = null;
+        if (!job) return;
+        job.controller.abort();
+        if (job.pageId !== null) cancelServerPage(job.pageId);
+    }
+
+    /** Poll a page the server works on, without the progress window (see waitForPage). */
+    async function pollPage(initial, signal, onStatus) {
+        const started = Date.now();
+        let page = initial;
+        for (;;) {
+            onStatus?.(page, Date.now() - started);
+            if (page.status === 'ready') return page;
+            if (page.status === 'failed' || page.status === 'cancelled') {
+                throw new Error(page.error || 'The next page could not be read.');
+            }
+            await wait(1000, signal);
+            const response = await fetch(page.statusUrl, {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+                signal,
+            });
+            const next = (response.headers.get('content-type') || '').includes('application/json') ? await response.json() : null;
+            if (!response.ok || !next) throw new Error(responseErrorMessage(response, next));
+            page = next;
+        }
+    }
+
+    /**
+     * Once a page reaches Verify, start reading the next page not done yet:
+     * drawn off screen, the last layout snapped onto its table, then read by
+     * the server. Without a fitted table it is not read ahead: Staff align it.
+     */
+    function startReadAhead() {
+        discardReadAhead();
+        if (!multiPage() || !lastLayout || !isPdfFile(scanFile)) return;
+        const done = donePages();
+        done.add(scanPageNumber);
+        const page = nextUnsavedPage(scanPageNumber, scanPageCount, done);
+        if (page === null) return;
+
+        const job = {
+            page,
+            rotation: rotationOf(page),
+            layout: lastLayout,
+            status: 'working',
+            pageId: null,
+            result: null,
+            onStatus: null,
+            controller: new AbortController(),
+        };
+        readAhead = job;
+        job.promise = readPageAhead(job).then(
+            (result) => {
+                job.result = result;
+                job.status = 'ready';
+            },
+            (error) => {
+                job.status = 'failed';
+                if (error.name !== 'AbortError') console.warn(`Page ${job.page} was not read ahead:`, error);
+            },
+        );
+    }
+
+    async function readPageAhead(job) {
+        const { signal } = job.controller;
+        const blob = await canvasBlob(await marker.renderPdfPageOffscreen(scanFile, job.page, job.rotation));
+        const { layout } = job;
+
+        const snap = await postSnap(blob, alignedGeometry(layout.boxes, layout.rows, { keepRows: layout.byHand }), signal);
+        if (!snap.fitted) throw new Error(snap.reason || 'No printed table was found on that page.');
+        const auto = new Map(layout.autoFields);
+        const fit = snappedLayout(snap, layout.boxes, auto, layout.rows);
+        rememberFields(auto, fit.boxes, new Set(fit.kept.keys()));
+
+        const payload = await postPage(blob, alignedGeometry(fit.boxes, fit.rows, { keepRows: layout.byHand }), false, signal);
+        job.pageId = payload.id;
+        const page = await pollPage(payload, signal, (status, elapsed) => job.onStatus?.(status, elapsed));
+
+        return { page, boxes: fit.boxes, rows: fit.rows, estimated: fit.estimated, rowsSource: snap.rows ?? null, byHand: layout.byHand, autoFields: auto };
+    }
+
+    /** The page read ahead, waiting for it (with the progress window) if it is still being read. */
+    async function readAheadResult(job, fieldCount) {
+        if (job.status === 'ready') return job.result;
+        if (job.status !== 'working') return null;
+
+        const progress = openProgressModal();
+        beginOcrProgress(fieldCount);
+        const run = startRun(job.controller, 'scan', job.pageId);
+        job.onStatus = (page, elapsed) => {
+            run.pageId = page.id ?? run.pageId;
+            showPageStatus(page, elapsed, 'scan');
+        };
+        try {
+            await job.promise;
+        } finally {
+            if (activeRun === run) activeRun = null;
+            stopOcrProgress();
+            await closeProgressModal(progress);
+        }
+        return job.status === 'ready' ? job.result : null;
+    }
+
     function askForNextPage(next, recordUrl) {
         const saved = [...savedPages.keys()].filter((page) => page <= scanPageCount);
+        const ahead = readAhead?.page === next ? readAhead : null;
         el('nextPageModalTitle').textContent = `Page ${scanPageNumber} saved`;
         el('nextPageModalDescription').textContent = `Continue with page ${next} of ${scanPageCount}?`;
-        el('nextPageModalProgress').textContent = `Saved so far: page${saved.length === 1 ? '' : 's'} ${pageRanges(saved)} of ${scanPageCount}.`;
+        el('nextPageModalProgress').textContent = `Saved so far: page${saved.length === 1 ? '' : 's'} ${pageRanges(saved)} of ${scanPageCount}.`
+            + (ahead?.status === 'ready' ? ` Page ${next} is read already: you go straight to checking it.`
+                : ahead?.status === 'working' ? ` Page ${next} is being read now.` : '');
         el('nextPageOpenRecordBtn').href = recordUrl;
         el('nextPageContinueBtn').dataset.page = String(next);
         window.bootstrap.Modal.getOrCreateInstance(el('nextPageModal')).show();
@@ -5795,10 +6077,23 @@
 
     el('nextPageModal').addEventListener('shown.bs.modal', () => el('nextPageContinueBtn').focus());
 
+    function hideModal(node) {
+        return new Promise((resolve) => {
+            const modal = window.bootstrap.Modal.getInstance(node);
+            if (!modal || !node.classList.contains('show')) {
+                resolve();
+                return;
+            }
+            node.addEventListener('hidden.bs.modal', () => resolve(), { once: true });
+            modal.hide();
+        });
+    }
+
     /**
-     * Go on with another page of the same PDF once one is saved: Align starts
-     * again from the template's markers, as for a file just opened, and the
-     * file is not uploaded again.
+     * Go on with another page of the same PDF once one is saved, without
+     * uploading the file again. It starts from the layout the last page was
+     * read with, snapped onto this page's table; when it was read ahead
+     * already, straight to Verify.
      */
     async function continueWithPage(pageNumber) {
         const button = el('nextPageContinueBtn');
@@ -5814,19 +6109,48 @@
             requiredInput(document, '#documentPageId').value = '';
             requiredInput(document, '#ocrModelKey').value = '';
 
-            await marker.load(scanFile, { page: pageNumber });
+            const job = readAhead?.page === pageNumber ? readAhead : null;
+            if (!job) discardReadAhead();
+
+            await marker.load(scanFile, { page: pageNumber, rotation: rotationOf(pageNumber) });
             scanPageNumber = pageNumber;
             recordSubmitting = false;
             el('submitBtn').innerHTML = SUBMIT_IDLE_HTML;
+            await hideModal(el('nextPageModal'));
+            resetFieldHistory();
+            rowsSource = null;
+            if (lastLayout) {
+                setGrid(lastLayout.boxes, lastLayout.rows, { byHand: lastLayout.byHand });
+                autoFields = new Map(lastLayout.autoFields);
+            } else {
+                setGrid(templateBoxes, templateRows, { remember: true });
+            }
             updateScanNotices();
             showScanContext();
             showStep('mark');
-            resetFieldHistory();
-            rowsSource = null;
-            setGrid(templateBoxes, templateRows, { remember: true });
-            fetchSnapLines();
-            window.bootstrap.Modal.getInstance(el('nextPageModal'))?.hide();
             window.requestAnimationFrame(() => marker.resetZoom());
+
+            const result = job ? await readAheadResult(job, lastLayout?.boxes.length ?? 1) : null;
+            if (readAhead === job) readAhead = null;
+            if (result) {
+                setGrid(result.boxes, result.rows, { estimated: result.estimated, byHand: result.byHand });
+                autoFields = new Map(result.autoFields);
+                rowsSource = result.rowsSource;
+                lastLayout = currentLayout();
+                fetchSnapLines();
+                try {
+                    await showReadPage(result.page, { readingDetectedPage: false });
+                    startReadAhead();
+                    return;
+                } catch (error) {
+                    showOcrError(error.message || 'That page could not be read. Check the markers and scan it.');
+                    return;
+                }
+            }
+
+            fetchSnapLines();
+            // The last page's layout, fitted onto this page's own table.
+            if (lastLayout) await snapToTable();
         } catch (error) {
             console.error('The next page could not be opened:', error);
             // The page just saved is safe: show its record.
@@ -5839,15 +6163,17 @@
     el('nextPageContinueBtn').addEventListener('click', () => continueWithPage(Number(el('nextPageContinueBtn').dataset.page)));
 
     /**
-     * What the record keeps of the file: of a PDF of many pages, the page
-     * being read alone, cut out with its original quality; any other file as
-     * it is. A PDF that cannot be cut (one locked with a password) goes whole
-     * when it is small enough, and the record still knows its page.
+     * What the record keeps of the file: of a PDF of many pages (or a page
+     * Staff turned), the page being read alone, cut out with its original
+     * quality and turned upright; any other file as it is. A PDF that cannot
+     * be cut (one locked with a password) goes whole when it is small enough,
+     * and the record still knows its page.
      */
     async function scanForRecord() {
-        if (!multiPage() || !isPdfFile(scanFile)) return scanFile;
+        const rotation = rotationOf(scanPageNumber);
+        if (!isPdfFile(scanFile) || (!multiPage() && rotation === 0)) return scanFile;
         try {
-            return await pdfPageFile(scanFile, scanPageNumber);
+            return await pdfPageFile(scanFile, scanPageNumber, { rotation });
         } catch (error) {
             console.warn('The page could not be cut out of the PDF:', error);
             if (scanFile.size <= MAX_SCAN_BYTES) return scanFile;
@@ -6007,7 +6333,7 @@
 
             // A PDF with pages still to save: offer the next one. The page just
             // saved stays locked meanwhile (recordSubmitting), so it is not sent twice.
-            const next = multiPage() ? nextUnsavedPage(scanPageNumber, scanPageCount, savedPages) : null;
+            const next = multiPage() ? nextUnsavedPage(scanPageNumber, scanPageCount, donePages()) : null;
             if (next !== null) {
                 button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved';
                 askForNextPage(next, payload.redirect);

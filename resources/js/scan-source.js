@@ -162,10 +162,11 @@ const readPdfs = new WeakMap();
 
 /**
  * Page `pageNumber` (from 1) of a PDF as a PDF of its own, ready to be saved
- * as one record's scan. pdf-lib is loaded the first time this is needed.
+ * as one record's scan. `rotation` (0, 90, 180 or 270, clockwise) turns a page
+ * scanned sideways upright in it too. pdf-lib is loaded the first time.
  */
-export async function pdfPageFile(file, pageNumber) {
-    const { PDFDocument } = await import('pdf-lib');
+export async function pdfPageFile(file, pageNumber, { rotation = 0 } = {}) {
+    const { PDFDocument, degrees } = await import('pdf-lib');
 
     let reading = readPdfs.get(file);
     if (!reading) {
@@ -182,6 +183,8 @@ export async function pdfPageFile(file, pageNumber) {
 
     const single = await PDFDocument.create({ updateMetadata: false });
     const [page] = await single.copyPages(source, [pageNumber - 1]);
+    const turn = ((Math.round((Number(rotation) || 0) / 90) % 4) + 4) % 4 * 90;
+    if (turn !== 0) page.setRotation(degrees((page.getRotation().angle + turn) % 360));
     single.addPage(page);
     const bytes = await single.save();
 

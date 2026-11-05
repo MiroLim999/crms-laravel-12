@@ -6,10 +6,12 @@ use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
 use App\Models\DocumentPage;
 use App\Models\DocumentTemplate;
+use App\Models\DocumentTemplateField;
 use App\Models\DocumentTypeDefinition;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\PageLine;
+use App\Models\RecordField;
 use App\Services\AuditLogger;
 use App\Services\Ocr\OcrClient;
 use App\Services\Ocr\ScanModelChoice;
@@ -261,6 +263,28 @@ class DocumentScanController extends Controller
 
         [$page, $linesById] = $this->pageLinesFor($request, $validated, $templateId);
 
+        // The register's own volume and page number (and year), when the layout
+        // marks the fields holding them: the same register page saved before,
+        // from another file or another scan of the book, asks first too.
+        $registerPage = $this->registerPageOf($validated['fields'], $linesById, $settingsByName);
+        if ($savedBefore === null && $registerPage !== null) {
+            $savedBefore = $this->savedRegisterPage($documentType->getKey(), $registerPage);
+            if ($savedBefore !== null && ! $request->boolean('allow_duplicate')) {
+                $year = $registerPage['year'] !== null ? " ({$registerPage['year']})" : '';
+                $message = "Volume {$registerPage['volume']}, page {$registerPage['page_no']}{$year} is already saved as record #{$savedBefore->getKey()}.";
+
+                if ($request->expectsJson()) {
+                    return response()->json([
+                        'duplicate_page' => true,
+                        'message' => $message,
+                        'record' => $this->sourcePagePayload($savedBefore),
+                    ], 409);
+                }
+
+                throw ValidationException::withMessages(['scan' => $message]);
+            }
+        }
+
         // Some certificates do leave a required field blank, so a missing one
         // is not refused outright: Staff must confirm it first.
         $missingRequired = [
@@ -372,6 +396,14 @@ class DocumentScanController extends Controller
             throw $exception;
         }
 
+        // A page skipped before and saved after all is no longer skipped.
+        if ($source['hash'] !== null && $source['page'] !== null) {
+            DB::table('skipped_source_pages')
+                ->where('source_hash', $source['hash'])
+                ->where('page', $source['page'])
+                ->delete();
+        }
+
         // The record now holds its own copies of every crop it kept, and of the
         // page image. The page's working files (image, remaining crops,
         // overlay) are no longer needed.
@@ -415,7 +447,101 @@ class DocumentScanController extends Controller
             'pages' => $records->unique('source_page')
                 ->map(fn (CivilRecord $record) => $this->sourcePagePayload($record))
                 ->values(),
+            // Pages Staff chose to skip (a cover, a blank page): done, not saved.
+            'skipped' => DB::table('skipped_source_pages')
+                ->where('source_hash', $hash)
+                ->orderBy('page')
+                ->pluck('page')
+                ->map(fn ($page) => (int) $page)
+                ->values(),
         ]);
+    }
+
+    /** Skip a page of a file: it is not read, and counts as done. */
+    public function skipSourcePage(Request $request, string $hash, int $page): JsonResponse
+    {
+        abort_if($page < 1 || $page > self::MAX_SOURCE_PAGES, 404);
+
+        DB::table('skipped_source_pages')->updateOrInsert(
+            ['source_hash' => $hash, 'page' => $page],
+            ['skipped_by' => $request->user()->getKey(), 'created_at' => now(), 'updated_at' => now()],
+        );
+
+        return $this->sourcePages($hash);
+    }
+
+    /** Read a skipped page after all. */
+    public function unskipSourcePage(string $hash, int $page): JsonResponse
+    {
+        DB::table('skipped_source_pages')->where('source_hash', $hash)->where('page', $page)->delete();
+
+        return $this->sourcePages($hash);
+    }
+
+    /**
+     * The register volume, page number and year Staff verified, from the
+     * fields the layout marks as holding them. Null unless both the volume
+     * and the page number are there.
+     *
+     * @param  list<array<string, mixed>>  $fields
+     * @param  Collection<int, PageLine>  $linesById
+     * @param  array<string, array<string, mixed>>  $settingsByName
+     * @return array{volume: string, page_no: string, year: ?string}|null
+     */
+    private function registerPageOf(array $fields, Collection $linesById, array $settingsByName): ?array
+    {
+        $found = ['volume' => null, 'page_no' => null, 'year' => null];
+        foreach ($fields as $field) {
+            $line = isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null;
+            $role = $settingsByName[$this->templateNameKey($field, $line)]['role'] ?? null;
+            $value = trim((string) ($field['verified_value'] ?? ''));
+            if (array_key_exists((string) $role, $found) && $found[$role] === null && $value !== '') {
+                $found[$role] = $value;
+            }
+        }
+
+        return $found['volume'] !== null && $found['page_no'] !== null ? $found : null;
+    }
+
+    /** "Vol. 07" -> "7": letters and digits alone, without leading zeros or a "Vol."/"Page" word. */
+    public static function plainRegisterValue(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $value = (string) preg_replace('/^\s*(volume|vol|page|pg|p)\b\.?\s*/i', '', $value);
+
+        return ltrim((string) preg_replace('/[^0-9a-z]/', '', mb_strtolower($value)), '0');
+    }
+
+    /**
+     * The newest record of this document type with the same register volume
+     * and page number (and year, when both have one).
+     *
+     * @param  array{volume: string, page_no: string, year: ?string}  $register
+     */
+    private function savedRegisterPage(int $documentTypeId, array $register): ?CivilRecord
+    {
+        $wanted = array_map(fn (?string $value) => self::plainRegisterValue($value), $register);
+        if ($wanted['volume'] === '' || $wanted['page_no'] === '') {
+            return null;
+        }
+
+        $byRecord = [];
+        RecordField::query()
+            ->join('records', 'records.id', '=', 'record_fields.record_id')
+            ->where('records.document_type_id', $documentTypeId)
+            ->whereIn('record_fields.role', DocumentTemplateField::PAGE_ROLES)
+            ->get(['record_fields.record_id', 'record_fields.role', 'record_fields.verified_value'])
+            ->each(function ($row) use (&$byRecord) {
+                $byRecord[$row->record_id][$row->role] ??= self::plainRegisterValue($row->verified_value);
+            });
+
+        $matches = array_keys(array_filter($byRecord, fn (array $saved) => ($saved['volume'] ?? null) === $wanted['volume']
+            && ($saved['page_no'] ?? null) === $wanted['page_no']
+            && ($wanted['year'] === null || ! isset($saved['year']) || $saved['year'] === $wanted['year'])));
+
+        return $matches === [] ? null : CivilRecord::find(max($matches));
     }
 
     /**

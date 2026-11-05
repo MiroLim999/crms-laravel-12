@@ -13,8 +13,15 @@ class DocumentTemplateField extends Model
 {
     use HasFactory;
 
-    /** What a field can hold for its person: their name, or the entry number. */
-    public const ROLES = ['name', 'entry'];
+    /**
+     * What a field can hold: for its person, their name or the entry number;
+     * for the page, the register's volume, page number or year (together
+     * they tell a register page that is saved already, see DocumentScanController).
+     */
+    public const ROLES = ['name', 'entry', 'volume', 'page_no', 'year'];
+
+    /** The page roles: one of each per page, never per person. */
+    public const PAGE_ROLES = ['volume', 'page_no', 'year'];
 
     /** How Staff check a value in Verify. */
     public const VALUE_TYPES = ['text', 'date', 'number', 'choice'];
