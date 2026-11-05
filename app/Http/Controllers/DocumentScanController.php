@@ -319,7 +319,7 @@ class DocumentScanController extends Controller
         $gridChanges = $this->gridChanges($template, $page);
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, &$copiedFiles) {
+            $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $savedBefore, &$copiedFiles) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -437,6 +437,86 @@ class DocumentScanController extends Controller
         return redirect()
             ->to($redirect)
             ->with('success', $message);
+    }
+
+    /**
+     * The pages of one scanned file that are already saved, by the file's
+     * SHA-256: the workspace ticks them, opens the file at the first page not
+     * saved yet, and warns on a page saved before. The newest record per page.
+     */
+    public function sourcePages(string $hash): JsonResponse
+    {
+        $records = CivilRecord::withTitleField()
+            ->where('source_hash', $hash)
+            ->whereNotNull('source_page')
+            ->orderBy('source_page')
+            ->orderByDesc('id')
+            ->get();
+
+        return response()->json([
+            'pages' => $records->unique('source_page')
+                ->map(fn (CivilRecord $record) => $this->sourcePagePayload($record))
+                ->values(),
+        ]);
+    }
+
+    /**
+     * The file this scan came from, as the workspace sent it. An older
+     * workspace sends none of it: the uploaded file's own name is kept then.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array{name: ?string, page: ?int, page_count: ?int, hash: ?string}
+     */
+    private function sourceOf(Request $request, array $validated): array
+    {
+        $page = isset($validated['source_page']) ? (int) $validated['source_page'] : null;
+        $pageCount = isset($validated['source_page_count']) ? (int) $validated['source_page_count'] : null;
+
+        if ($page !== null && $pageCount !== null && $page > $pageCount) {
+            throw ValidationException::withMessages([
+                'source_page' => "This file has {$pageCount} pages, so there is no page {$page}.",
+            ]);
+        }
+
+        $upload = $request->file('scan');
+        $name = filled($validated['source_name'] ?? null)
+            ? (string) $validated['source_name']
+            : ($upload instanceof UploadedFile ? $upload->getClientOriginalName() : null);
+
+        return [
+            'name' => $name !== null ? mb_substr($name, 0, 255) : null,
+            'page' => $page,
+            'page_count' => $pageCount ?? ($page !== null ? max($page, 1) : null),
+            'hash' => $validated['source_hash'] ?? null,
+        ];
+    }
+
+    /**
+     * @param  array{name: ?string, page: ?int, page_count: ?int, hash: ?string}  $source
+     */
+    private function savedSourcePage(array $source): ?CivilRecord
+    {
+        if ($source['hash'] === null || $source['page'] === null) {
+            return null;
+        }
+
+        return CivilRecord::withTitleField()
+            ->where('source_hash', $source['hash'])
+            ->where('source_page', $source['page'])
+            ->latest('id')
+            ->first();
+    }
+
+    /** @return array{page: ?int, recordId: int, title: string, url: string, submittedAt: ?string} */
+    private function sourcePagePayload(CivilRecord $record): array
+    {
+        return [
+            'page' => $record->source_page,
+            'recordId' => (int) $record->getKey(),
+            'title' => $record->title(),
+            'url' => route('records.show', $record),
+            'submittedAt' => $record->submitted_at?->toIso8601String(),
+        ];
     }
 
     private function hydrateJsonFields(Request $request): void

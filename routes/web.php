@@ -81,6 +81,10 @@ Route::middleware('auth')->group(function () {
         Route::get('documents/workspace', [DocumentScanController::class, 'workspace'])
             ->name('documents.workspace');
         Route::post('documents', [DocumentScanController::class, 'store'])->name('documents.store');
+        // Which pages of one scanned file (by its SHA-256) are already saved.
+        Route::get('documents/sources/{hash}/pages', [DocumentScanController::class, 'sourcePages'])
+            ->where('hash', '[0-9a-f]{64}')
+            ->name('documents.sources.pages');
 
         // Finishing Align uploads the page and starts line detection in the
         // background; Verify polls for the outlines and readings, shows the crop

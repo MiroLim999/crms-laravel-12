@@ -183,7 +183,13 @@ class DocumentPageController extends Controller
         $this->authorizePage($request, $page);
         GeometryInput::hydrate($request);
 
-        if (! in_array($page->status, [DocumentPage::STATUS_QUEUED, DocumentPage::STATUS_DETECTED, DocumentPage::STATUS_READY], true)) {
+        if (! in_array($page->status, [
+            DocumentPage::STATUS_QUEUED,
+            DocumentPage::STATUS_DETECTED,
+            DocumentPage::STATUS_READY,
+            DocumentPage::STATUS_CANCELLED,
+            DocumentPage::STATUS_FAILED,
+        ], true)) {
             return response()->json(['message' => 'This page is still being processed.'], 409);
         }
 

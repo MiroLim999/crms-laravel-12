@@ -2939,6 +2939,898 @@
             }
         }
 
+        // ---------------------------------------------------------------- Upload Mode & Batch Queue System
+        let uploadMode = 'single';
+        let batchState = {
+            active: false,
+            key: null,
+            phase: 'idle', // 'queuing' | 'scanning' | 'verifying' | 'done'
+            items: [],     // { file, name, status, pageId, page, workspaceScanPath, recordUrl, error, boxes, rows, tilts }
+            currentIndex: 0,
+        };
+
+        const uploadModeRadios = document.querySelectorAll('input[name="uploadMode"]');
+        const uploadModeCards = document.querySelectorAll('[data-mode-card]');
+        const uploadModeHintEl = document.getElementById('uploadModeHint');
+        const dropzoneTitleEl = document.getElementById('dropzoneTitle');
+        const dropzoneButtonEl = document.getElementById('dropzoneButton');
+        const dropzoneFolderBtnEl = document.getElementById('dropzoneFolderButton');
+        const scanFolderInput = document.getElementById('scanFolder');
+
+        uploadModeRadios.forEach((radio) => {
+            radio.addEventListener('change', (e) => {
+                uploadMode = e.target.value;
+                uploadModeCards.forEach((card) => {
+                    card.classList.toggle('is-active', card.dataset.modeCard === uploadMode);
+                });
+                if (uploadMode === 'batch') {
+                    scanFileInput.setAttribute('multiple', 'multiple');
+                    if (dropzoneTitleEl) dropzoneTitleEl.textContent = 'Drop batch scans or a folder here';
+                    if (dropzoneButtonEl) dropzoneButtonEl.textContent = 'Choose files';
+                    if (dropzoneFolderBtnEl) dropzoneFolderBtnEl.classList.remove('d-none');
+                    if (uploadModeHintEl) uploadModeHintEl.textContent = 'Upload files or a folder to /documents/workspace, scan all, then validate';
+                } else {
+                    scanFileInput.removeAttribute('multiple');
+                    if (dropzoneTitleEl) dropzoneTitleEl.textContent = 'Drop the scan here';
+                    if (dropzoneButtonEl) dropzoneButtonEl.textContent = 'Choose file';
+                    if (dropzoneFolderBtnEl) dropzoneFolderBtnEl.classList.add('d-none');
+                    if (uploadModeHintEl) uploadModeHintEl.textContent = 'Upload and process one document at a time';
+                }
+            });
+        });
+
+        dropzoneFolderBtnEl?.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (scanFolderInput instanceof HTMLInputElement) {
+                scanFolderInput.value = '';
+                scanFolderInput.click();
+            }
+        });
+
+        scanFolderInput?.addEventListener('change', (event) => {
+            if (!(event.currentTarget instanceof HTMLInputElement)) return;
+            startBatchQueue(event.currentTarget.files);
+        });
+
+        function renderBatchQueueBanner() {
+            const banner = document.getElementById('batchQueueBanner');
+            if (!banner) return;
+
+            if (!batchState.active || batchState.items.length === 0) {
+                banner.classList.add('d-none');
+                return;
+            }
+            banner.classList.remove('d-none');
+            banner.dataset.phase = batchState.phase;
+
+            const total = batchState.items.length;
+            const phaseTitle = document.getElementById('batchQueuePhaseTitle');
+            const counter = document.getElementById('batchQueueCounter');
+            const progressTrack = document.getElementById('batchQueueProgressTrack');
+            const progressBar = document.getElementById('batchQueueProgressBar');
+            const chipsContainer = document.getElementById('batchQueueChips');
+            const addMoreBtn = document.getElementById('batchAddMoreBtn');
+            const saveQueueBtn = document.getElementById('saveQueueNextBtn');
+            const saveQueueLabel = document.getElementById('saveQueueNextLabel');
+            const scanNowBtn = document.getElementById('scanNowBtn');
+            const scanNowLabel = document.getElementById('scanNowBtnLabel');
+
+            const savedCount = batchState.items.filter((it) => ['saved', 'scanning', 'ready', 'verifying', 'imported', 'rejected'].includes(it.status)).length;
+            const readyCount = batchState.items.filter((it) => ['ready', 'verifying', 'imported', 'rejected'].includes(it.status)).length;
+            const importedCount = batchState.items.filter((it) => ['imported', 'rejected'].includes(it.status)).length;
+
+            const stageOrder = ['queuing', 'scanning', 'verifying'];
+            const activeStageIdx = stageOrder.indexOf(batchState.phase);
+            banner.querySelectorAll('[data-batch-stage]').forEach((stageNode) => {
+                const idx = stageOrder.indexOf(stageNode.dataset.batchStage);
+                stageNode.classList.toggle('is-active', idx === activeStageIdx);
+                stageNode.classList.toggle('is-complete', idx < activeStageIdx);
+            });
+
+            const updateProgress = (pct) => {
+                if (progressBar) progressBar.style.width = `${pct}%`;
+                if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(pct));
+            };
+
+            if (batchState.phase === 'queuing') {
+                const allSaved = savedCount === total;
+                if (phaseTitle) {
+                    phaseTitle.textContent = allSaved
+                        ? 'All documents saved in workspace queue — ready to scan all'
+                        : `Align & save each document to queue (${savedCount} of ${total} saved)`;
+                }
+                if (counter) counter.textContent = `${savedCount} / ${total} saved`;
+                updateProgress(Math.round((savedCount / total) * 100));
+                if (addMoreBtn) addMoreBtn.classList.remove('d-none');
+                if (saveQueueBtn) {
+                    saveQueueBtn.classList.toggle('d-none', allSaved);
+                    if (saveQueueLabel) {
+                        const currentItem = batchState.items[batchState.currentIndex];
+                        const hasMoreUnsaved = batchState.items.some((it, idx) => idx !== batchState.currentIndex && it.status === 'pending');
+                        saveQueueLabel.textContent = currentItem?.status === 'saved'
+                            ? (hasMoreUnsaved ? 'Update & Next Document' : 'Update Queued Document')
+                            : (hasMoreUnsaved ? `Save & Next (${savedCount + 1}/${total})` : `Save Final Document (${total}/${total})`);
+                    }
+                }
+                if (scanNowBtn) {
+                    scanNowBtn.classList.toggle('d-none', !allSaved);
+                    if (scanNowLabel) scanNowLabel.textContent = `Scan All Queued Documents (${total})`;
+                }
+            } else if (batchState.phase === 'scanning') {
+                if (phaseTitle) phaseTitle.textContent = `Scanning all queued documents with OCR (${readyCount} of ${total} scanned)...`;
+                if (counter) counter.textContent = `${readyCount} / ${total} scanned`;
+                updateProgress(Math.round((readyCount / total) * 100));
+                if (addMoreBtn) addMoreBtn.classList.add('d-none');
+                if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
+                if (scanNowBtn) scanNowBtn.classList.remove('d-none');
+            } else if (batchState.phase === 'verifying') {
+                if (phaseTitle) phaseTitle.textContent = `Validate & import each document (${importedCount} of ${total} imported)`;
+                if (counter) counter.textContent = `${importedCount} / ${total} imported`;
+                updateProgress(Math.round((importedCount / total) * 100));
+                if (addMoreBtn) addMoreBtn.classList.add('d-none');
+                if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
+            }
+
+            if (chipsContainer) {
+                chipsContainer.innerHTML = '';
+                batchState.items.forEach((item, index) => {
+                    const badgeMap = {
+                        pending: { cls: 'is-pending', icon: 'bx-time-five', text: 'Pending' },
+                        saving: { cls: 'is-working', icon: 'bx-refresh', text: 'Saving' },
+                        saved: { cls: 'is-queued', icon: 'bx-check-circle', text: 'Queued' },
+                        scanning: { cls: 'is-working', icon: 'bx-radar', text: 'Scanning' },
+                        ready: { cls: 'is-ready', icon: 'bx-scan', text: 'Scanned' },
+                        verifying: { cls: 'is-verifying', icon: 'bx-edit-alt', text: 'Validating' },
+                        imported: { cls: 'is-imported', icon: 'bx-check-shield', text: 'Imported' },
+                        rejected: { cls: 'is-failed', icon: 'bx-x-circle', text: 'Rejected (Existing)' },
+                        failed: { cls: 'is-failed', icon: 'bx-error-circle', text: 'Failed' },
+                    };
+                    const badgeInfo = badgeMap[item.status] || badgeMap.pending;
+                    const isCurrent = index === batchState.currentIndex;
+                    const canInteract = batchState.phase !== 'scanning' && !(batchState.phase === 'verifying' && ['imported', 'rejected'].includes(item.status));
+
+                    const chip = document.createElement('button');
+                    chip.type = 'button';
+                    chip.className = `batch-queue-chip ${badgeInfo.cls}${isCurrent ? ' is-current' : ''}`;
+                    chip.setAttribute('role', 'listitem');
+                    chip.disabled = !canInteract;
+                    chip.draggable = canInteract && batchState.items.length > 1;
+                    chip.title = canInteract ? `${item.name} — Drag to change priority, or click to delete / open` : item.name;
+                    chip.innerHTML = `
+                        <span class="batch-queue-chip__index">${index + 1}</span>
+                        <span class="batch-queue-chip__name">${item.name}</span>
+                        <span class="batch-queue-chip__status">
+                            <i class="icon-base bx ${badgeInfo.icon}" aria-hidden="true"></i>
+                            <span>${badgeInfo.text}</span>
+                        </span>
+                    `;
+
+                    chip.addEventListener('dragstart', (event) => {
+                        if (!chip.draggable) return;
+                        draggedBatchIndex = index;
+                        batchChipDidDrag = true;
+                        chip.classList.add('is-dragging');
+                        if (event.dataTransfer) {
+                            event.dataTransfer.effectAllowed = 'move';
+                            event.dataTransfer.setData('text/plain', String(index));
+                        }
+                    });
+
+                    chip.addEventListener('dragover', (event) => {
+                        if (draggedBatchIndex === null || draggedBatchIndex === index) return;
+                        event.preventDefault();
+                        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                        chip.classList.add('is-drag-over');
+                    });
+
+                    chip.addEventListener('dragleave', () => {
+                        chip.classList.remove('is-drag-over');
+                    });
+
+                    chip.addEventListener('drop', (event) => {
+                        event.preventDefault();
+                        chip.classList.remove('is-drag-over');
+                        if (draggedBatchIndex === null || draggedBatchIndex === index) return;
+
+                        const activeItem = batchState.items[batchState.currentIndex];
+                        if (batchState.phase === 'queuing' && activeItem && !activeItem.boxes) {
+                            activeItem.boxes = cloneBoxes(marker.toJSON());
+                            activeItem.rows = [...gridRows];
+                            activeItem.tilts = [...rowTilts];
+                        }
+
+                        const [movedItem] = batchState.items.splice(draggedBatchIndex, 1);
+                        batchState.items.splice(index, 0, movedItem);
+                        batchState.currentIndex = Math.max(0, batchState.items.indexOf(activeItem));
+                        draggedBatchIndex = null;
+
+                        if (activeItem) {
+                            el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${batchState.currentIndex + 1}/${batchState.items.length}) · ${activeItem.name}`;
+                            el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+                        }
+                        renderBatchQueueBanner();
+                    });
+
+                    chip.addEventListener('dragend', () => {
+                        chip.classList.remove('is-dragging');
+                        chipsContainer.querySelectorAll('.batch-queue-chip').forEach((c) => c.classList.remove('is-drag-over'));
+                        draggedBatchIndex = null;
+                        window.setTimeout(() => { batchChipDidDrag = false; }, 60);
+                    });
+
+                    chip.addEventListener('click', () => {
+                        if (batchChipDidDrag || !canInteract) return;
+                        openBatchDocumentModal(index);
+                    });
+
+                    chipsContainer.appendChild(chip);
+                });
+                const activeChip = chipsContainer.querySelector('.batch-queue-chip.is-current');
+                activeChip?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+            }
+        }
+
+        let draggedBatchIndex = null;
+        let batchChipDidDrag = false;
+        let selectedBatchModalIndex = null;
+
+        function openBatchDocumentModal(index) {
+            const item = batchState.items[index];
+            if (!item) return;
+
+            selectedBatchModalIndex = index;
+            const modalEl = document.getElementById('batchDocumentModal');
+            const titleEl = document.getElementById('batchDocumentModalTitle');
+            const descEl = document.getElementById('batchDocumentModalDescription');
+            const openBtn = document.getElementById('batchDocOpenBtn');
+
+            if (titleEl) titleEl.textContent = `Priority #${index + 1} · ${item.name}`;
+            if (descEl) {
+                descEl.textContent = index === batchState.currentIndex
+                    ? `Remove "${item.name}" from the batch queue?`
+                    : `Remove "${item.name}" from the batch queue, or open it to work on it now.`;
+            }
+            if (openBtn) {
+                openBtn.classList.toggle('d-none', index === batchState.currentIndex || item.status === 'imported');
+            }
+            if (modalEl) {
+                window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+            }
+        }
+
+        document.getElementById('batchDocOpenBtn')?.addEventListener('click', async () => {
+            const modalEl = document.getElementById('batchDocumentModal');
+            if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
+            if (selectedBatchModalIndex === null) return;
+            const idx = selectedBatchModalIndex;
+            selectedBatchModalIndex = null;
+
+            if (batchState.phase === 'queuing' && idx !== batchState.currentIndex) {
+                const currentItem = batchState.items[batchState.currentIndex];
+                if (currentItem) {
+                    currentItem.boxes = cloneBoxes(marker.toJSON());
+                    currentItem.rows = [...gridRows];
+                    currentItem.tilts = [...rowTilts];
+                }
+                await openBatchQueueItem(idx);
+            } else if (batchState.phase === 'verifying' && idx !== batchState.currentIndex) {
+                await openBatchVerifyItem(idx);
+            }
+        });
+
+        document.getElementById('confirmDeleteBatchDocBtn')?.addEventListener('click', async () => {
+            const modalEl = document.getElementById('batchDocumentModal');
+            if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
+            if (selectedBatchModalIndex === null) return;
+
+            const deleteIdx = selectedBatchModalIndex;
+            selectedBatchModalIndex = null;
+            const targetItem = batchState.items[deleteIdx];
+            if (!targetItem) return;
+
+            const wasCurrent = deleteIdx === batchState.currentIndex;
+            const currentItem = batchState.items[batchState.currentIndex];
+            if (!wasCurrent && batchState.phase === 'queuing' && currentItem) {
+                currentItem.boxes = cloneBoxes(marker.toJSON());
+                currentItem.rows = [...gridRows];
+                currentItem.tilts = [...rowTilts];
+            }
+
+            if (targetItem.pageId) {
+                fetch(config.pageCancelUrl.replace('__PAGE__', String(targetItem.pageId)), {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': config.csrf,
+                        'X-Requested-With': 'XMLHttpRequest',
+                        Accept: 'application/json',
+                    },
+                    credentials: 'same-origin',
+                }).catch(() => {});
+            }
+
+            batchState.items.splice(deleteIdx, 1);
+
+            if (batchState.items.length === 0) {
+                batchState.active = false;
+                batchState.phase = 'idle';
+                batchState.currentIndex = 0;
+                scanFile = null;
+                scanFileInput.value = '';
+                renderBatchQueueBanner();
+                showStep('upload');
+                return;
+            }
+
+            if (wasCurrent) {
+                const nextIndex = Math.min(deleteIdx, batchState.items.length - 1);
+                if (batchState.phase === 'verifying') {
+                    await openBatchVerifyItem(nextIndex);
+                } else {
+                    await openBatchQueueItem(nextIndex);
+                }
+            } else {
+                batchState.currentIndex = Math.max(0, batchState.items.indexOf(currentItem));
+                if (currentItem) {
+                    el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${batchState.currentIndex + 1}/${batchState.items.length}) · ${currentItem.name}`;
+                    el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+                }
+                renderBatchQueueBanner();
+            }
+        });
+
+        const SUPPORTED_SCAN_EXT = /\.(pdf|png|jpe?g|webp|bmp)$/i;
+
+        async function extractDroppedScanFiles(dataTransfer) {
+            if (!dataTransfer) return [];
+            const items = dataTransfer.items ? Array.from(dataTransfer.items) : [];
+            const entries = items
+                .map((item) => (typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null))
+                .filter(Boolean);
+
+            if (entries.length === 0) {
+                return Array.from(dataTransfer.files || []);
+            }
+
+            const collected = [];
+            const readEntry = (entry) => new Promise((resolve) => {
+                if (entry.isFile) {
+                    entry.file((file) => {
+                        if (SUPPORTED_SCAN_EXT.test(file.name)) collected.push(file);
+                        resolve();
+                    }, () => resolve());
+                } else if (entry.isDirectory) {
+                    const reader = entry.createReader();
+                    const readBatch = () => {
+                        reader.readEntries(async (batch) => {
+                            if (!batch || batch.length === 0) {
+                                resolve();
+                                return;
+                            }
+                            for (const child of batch) {
+                                await readEntry(child);
+                            }
+                            readBatch();
+                        }, () => resolve());
+                    };
+                    readBatch();
+                } else {
+                    resolve();
+                }
+            });
+
+            for (const entry of entries) {
+                await readEntry(entry);
+            }
+
+            return collected.length > 0 ? collected : Array.from(dataTransfer.files || []);
+        }
+
+        async function startBatchQueue(fileList) {
+            const validFiles = Array.from(fileList || []).filter((file) => {
+                if (!SUPPORTED_SCAN_EXT.test(file.name)) {
+                    return false;
+                }
+                if (file.size > 20 * 1024 * 1024) {
+                    alert(`${file.name} is larger than 20 MB and was skipped.`);
+                    return false;
+                }
+                return true;
+            });
+
+            if (validFiles.length === 0) {
+                scanFileInput.value = '';
+                return;
+            }
+
+            if (!batchState.active) {
+                batchState.active = true;
+                batchState.key = 'batch_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+                batchState.phase = 'queuing';
+                batchState.items = [];
+                batchState.currentIndex = 0;
+            }
+
+            validFiles.forEach((file) => {
+                batchState.items.push({
+                    file,
+                    name: file.name,
+                    status: 'pending',
+                    pageId: null,
+                    page: null,
+                    workspaceScanPath: null,
+                    recordUrl: null,
+                    error: null,
+                    boxes: null,
+                    rows: null,
+                    tilts: null,
+                });
+            });
+
+            scanFileInput.value = '';
+            await openBatchQueueItem(batchState.currentIndex);
+        }
+
+        async function openBatchQueueItem(index) {
+            const item = batchState.items[index];
+            if (!item) return;
+
+            batchState.currentIndex = index;
+            renderBatchQueueBanner();
+
+            dropzone.classList.add('is-loading');
+            dropzone.setAttribute('aria-busy', 'true');
+
+            try {
+                scanFile = item.file;
+                scanFingerprint = null;
+                savedPages = new Map();
+                clearDetection();
+                await marker.load(item.file, { page: 1 });
+                scanPageCount = 1;
+                scanPageNumber = 1;
+                updateScanNotices();
+                el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${index + 1}/${batchState.items.length}) · ${item.name}`;
+                el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+                showStep('mark');
+                guardBackButton();
+                resetFieldHistory();
+                rowsSource = null;
+
+                if (item.boxes && item.rows) {
+                    setGrid(item.boxes, item.rows, { tilts: item.tilts });
+                } else {
+                    setGrid(templateBoxes, templateRows);
+                }
+                fetchSnapLines();
+                renderBatchQueueBanner();
+                window.requestAnimationFrame(() => marker.resetZoom());
+            } catch (error) {
+                item.status = 'failed';
+                item.error = error.message || 'Could not open file';
+                renderBatchQueueBanner();
+                alert(error.message || 'That document could not be opened.');
+            } finally {
+                dropzone.classList.remove('is-loading');
+                dropzone.removeAttribute('aria-busy');
+            }
+        }
+
+        document.getElementById('batchAddMoreBtn')?.addEventListener('click', () => {
+            scanFileInput.setAttribute('multiple', 'multiple');
+            scanFileInput.click();
+        });
+
+        document.getElementById('saveQueueNextBtn')?.addEventListener('click', async () => {
+            if (scanInProgress || !batchState.active) return;
+
+            const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
+            if (markerValidationMessage) {
+                showOcrError(markerValidationMessage);
+                return;
+            }
+
+            const item = batchState.items[batchState.currentIndex];
+            if (!item) return;
+
+            const btn = el('saveQueueNextBtn');
+            btn.disabled = true;
+            clearOcrError();
+            item.status = 'saving';
+            renderBatchQueueBanner();
+
+            try {
+                item.boxes = cloneBoxes(marker.toJSON());
+                item.rows = [...gridRows];
+                item.tilts = [...rowTilts];
+
+                const form = new FormData();
+                form.set('document_template_id', String(config.templateId));
+                form.set('geometry_json', JSON.stringify(currentGeometry()));
+                form.set('page', await canvasBlob(marker.canvas), 'page.png');
+                form.set('scan', item.file, item.file.name);
+                form.set('batch_key', batchState.key);
+                form.set('defer_scan', '1');
+                if (modelSelect instanceof HTMLSelectElement) form.set('model', modelSelect.value);
+
+                const response = await fetch(config.pagesUrl, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': config.csrf,
+                        'X-Requested-With': 'XMLHttpRequest',
+                        Accept: 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body: form,
+                });
+                const payload = (response.headers.get('content-type') || '').includes('application/json')
+                    ? await response.json()
+                    : null;
+                if (!response.ok || !payload?.id) {
+                    throw new Error(responseErrorMessage(response, payload));
+                }
+
+                item.pageId = payload.id;
+                item.page = payload;
+                item.workspaceScanPath = payload.workspaceScanPath || null;
+                item.status = 'saved';
+                renderBatchQueueBanner();
+
+                // Move to next unsaved document if any
+                const nextPendingIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && it.status === 'pending');
+                const firstPendingIndex = batchState.items.findIndex((it) => it.status === 'pending');
+                const targetIndex = nextPendingIndex !== -1 ? nextPendingIndex : firstPendingIndex;
+
+                if (targetIndex !== -1) {
+                    await openBatchQueueItem(targetIndex);
+                } else {
+                    renderBatchQueueBanner();
+                }
+            } catch (error) {
+                item.status = 'failed';
+                item.error = error.message;
+                renderBatchQueueBanner();
+                showOcrError(error.message || 'Could not save document to queue.');
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        async function runBatchScanAll() {
+            if (scanInProgress || !batchState.active) return;
+
+            const itemsToScan = batchState.items.filter((it) => it.pageId);
+            const total = itemsToScan.length;
+            if (total === 0) return;
+
+            batchState.phase = 'scanning';
+            itemsToScan.forEach((it) => {
+                it.status = 'scanning';
+            });
+            renderBatchQueueBanner();
+
+            const button = el('scanNowBtn');
+            const originalButtonContent = button.innerHTML;
+            const controller = new AbortController();
+            const run = startRun(controller, 'scan');
+            run.batchPageIds = itemsToScan.map((it) => it.pageId);
+            let progress = null;
+            let timeoutId = null;
+
+            scanInProgress = true;
+            clearOcrError();
+            button.disabled = true;
+            el('detectBtn').disabled = true;
+
+            try {
+                progress = openProgressModal();
+                stopOcrProgress();
+                ocrProgress = 0;
+                el('ocrProgressFields').textContent = `0 of ${total} documents scanned`;
+                setOcrProgress(
+                    4,
+                    `Scanning batch (0 of ${total} complete)`,
+                    `Queueing all ${total} documents in the batch for OCR processing...`,
+                );
+                timeoutId = window.setTimeout(() => controller.abort(), 30 * 60 * 1000);
+
+                // Trigger ProcessDocumentPage for all documents in the batch upfront
+                // so the entire batch is queued and tracked as one unified loading job.
+                const trackList = [];
+                for (let i = 0; i < itemsToScan.length; i++) {
+                    const item = itemsToScan[i];
+                    const triggerRes = await fetch(config.pageGeometryUrl.replace('__PAGE__', String(item.pageId)), {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': config.csrf,
+                            'X-Requested-With': 'XMLHttpRequest',
+                            Accept: 'application/json',
+                        },
+                        credentials: 'same-origin',
+                        signal: controller.signal,
+                        body: JSON.stringify({
+                            geometry_json: JSON.stringify(item.page?.geometry || currentGeometry()),
+                            model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null,
+                        }),
+                    });
+                    const triggeredPayload = (triggerRes.headers.get('content-type') || '').includes('application/json')
+                        ? await triggerRes.json()
+                        : null;
+                    if (!triggerRes.ok || !triggeredPayload?.statusUrl) {
+                        throw new Error(responseErrorMessage(triggerRes, triggeredPayload));
+                    }
+                    item.page = triggeredPayload;
+                    trackList.push({
+                        item,
+                        page: triggeredPayload,
+                        statusUrl: triggeredPayload.statusUrl,
+                        phaseStartedAt: Date.now(),
+                        lastStatus: triggeredPayload.status || 'queued',
+                        done: triggeredPayload.status === 'ready',
+                    });
+                }
+
+                // Poll all queued documents together and compute one combined 0-100% progress across the entire batch
+                for (;;) {
+                    let sumFraction = 0;
+                    let readyCount = 0;
+                    let activeItemName = null;
+                    let activeStageLabel = 'Finding handwritten lines & reading handwriting';
+                    const now = Date.now();
+
+                    for (const entry of trackList) {
+                        const st = entry.page.status;
+                        if (st !== entry.lastStatus) {
+                            entry.lastStatus = st;
+                            entry.phaseStartedAt = now;
+                        }
+                        const elapsedSec = Math.max(0, (now - entry.phaseStartedAt) / 1000);
+
+                        if (st === 'ready') {
+                            sumFraction += 1;
+                            readyCount += 1;
+                        } else if (st === 'reading') {
+                            const creep = 1 - Math.exp(-elapsedSec / 6);
+                            sumFraction += 0.72 + creep * 0.24;
+                            if (!activeItemName) {
+                                activeItemName = entry.item.name;
+                                activeStageLabel = 'Reading handwriting with TrOCR';
+                            }
+                        } else if (st === 'detecting') {
+                            const creep = 1 - Math.exp(-elapsedSec / 20);
+                            sumFraction += 0.16 + creep * 0.54;
+                            if (!activeItemName) {
+                                activeItemName = entry.item.name;
+                                activeStageLabel = 'Finding handwritten lines';
+                            }
+                        } else {
+                            const creep = 1 - Math.exp(-elapsedSec / 8);
+                            sumFraction += 0.04 + creep * 0.10;
+                            if (!activeItemName) {
+                                activeItemName = entry.item.name;
+                            }
+                        }
+                    }
+
+                    const overallPct = 4 + (sumFraction / total) * 92;
+                    el('ocrProgressFields').textContent = `${readyCount} of ${total} documents scanned`;
+                    setOcrProgress(
+                        Math.max(ocrProgress, overallPct),
+                        `Scanning batch (${readyCount} of ${total} complete)`,
+                        activeItemName
+                            ? `${activeStageLabel} across ${total} batch documents (currently processing ${activeItemName}).`
+                            : `Processing all ${total} documents in the batch...`,
+                    );
+
+                    if (readyCount === total) {
+                        break;
+                    }
+
+                    await wait(700, controller.signal);
+
+                    for (const entry of trackList) {
+                        if (entry.done) continue;
+                        const response = await fetch(entry.statusUrl, {
+                            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                            credentials: 'same-origin',
+                            signal: controller.signal,
+                        });
+                        const next = (response.headers.get('content-type') || '').includes('application/json')
+                            ? await response.json()
+                            : null;
+                        if (!response.ok || !next) {
+                            throw new Error(responseErrorMessage(response, next));
+                        }
+                        entry.page = next;
+                        entry.item.page = next;
+
+                        if (next.status === 'failed') {
+                            entry.item.status = 'failed';
+                            renderBatchQueueBanner();
+                            throw new Error(next.error || `The document "${entry.item.name}" could not be processed.`);
+                        }
+                        if (next.status === 'ready') {
+                            entry.done = true;
+                            entry.item.status = 'ready';
+                            const nextActiveIdx = batchState.items.findIndex((it) => it.status === 'scanning');
+                            if (nextActiveIdx !== -1) {
+                                batchState.currentIndex = nextActiveIdx;
+                            }
+                            renderBatchQueueBanner();
+                        }
+                    }
+                }
+
+                el('ocrProgressFields').textContent = `${total} of ${total} documents scanned`;
+                await completeOcrProgress('Batch scan complete', 'Opening the first document for validation.');
+                batchState.phase = 'verifying';
+                await openBatchVerifyItem(0);
+            } catch (error) {
+                if (!run.cancelled) {
+                    showOcrError(error.message || 'Batch scan failed.');
+                }
+                batchState.items.forEach((it) => {
+                    if (it.status === 'scanning') it.status = 'saved';
+                });
+                batchState.phase = 'queuing';
+                renderBatchQueueBanner();
+            } finally {
+                if (activeRun === run) activeRun = null;
+                if (timeoutId !== null) window.clearTimeout(timeoutId);
+                stopOcrProgress();
+                await closeProgressModal(progress);
+                scanInProgress = false;
+                button.innerHTML = originalButtonContent;
+                button.disabled = false;
+                el('detectBtn').disabled = false;
+                renderBatchQueueBanner();
+            }
+        }
+
+        async function openBatchVerifyItem(index) {
+            const item = batchState.items[index];
+            if (!item || !item.page) return;
+
+            batchState.currentIndex = index;
+            if (item.status !== 'imported') {
+                item.status = 'verifying';
+            }
+            renderBatchQueueBanner();
+
+            scanFile = item.file;
+            const page = item.page;
+
+            await marker.loadFromUrl(page.imageUrl);
+            if (item.boxes && item.rows) {
+                setGrid(geometryMarkers(page.geometry, page), page.geometry?.ruled_ys ?? item.rows);
+            }
+
+            processedPage = page;
+            cropped = verificationItems(page.lines, page);
+            readings = cropped.map((entry) => entry.reading);
+            requiredInput(document, '#ocrModelKey').value = (page.modelKey || '').trim();
+            requiredInput(document, '#documentPageId').value = String(page.id);
+            el('summaryModel').textContent = page.model || '—';
+            el('workspaceContextDetail').textContent = `${config.typeLabel} · Verify (${index + 1}/${batchState.items.length}) · ${item.name}`;
+            el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+
+            clearValidationSubmitError();
+            renderVerifyRows();
+            showGridNotes(page);
+            showStep('verify');
+            prepareValidationComparison();
+            checkAndShowExistingRecord(page.existingRecord || null);
+        }
+
+        function checkAndShowExistingRecord(existing) {
+            const banner = document.getElementById('validationExistingBanner');
+            const msgEl = document.getElementById('validationExistingMessage');
+            const viewLink = document.getElementById('validationExistingViewLink');
+            const modalEl = document.getElementById('existingRecordModal');
+            const modalDesc = document.getElementById('existingRecordModalDescription');
+            const modalViewBtn = document.getElementById('existingRecordViewBtn');
+            const rejectLabel = document.getElementById('confirmRejectExistingLabel');
+
+            if (!existing) {
+                banner?.classList.add('d-none');
+                return;
+            }
+
+            const recordTitle = existing.title || 'Existing Record';
+            const description = `The extracted data matches an existing record ("${recordTitle}") in the database. Duplicate extracted data is rejected.`;
+
+            if (msgEl) msgEl.textContent = description;
+            if (viewLink) {
+                if (existing.url) {
+                    viewLink.href = existing.url;
+                    viewLink.classList.remove('d-none');
+                } else {
+                    viewLink.classList.add('d-none');
+                }
+            }
+            banner?.classList.remove('d-none');
+
+            if (batchState.active && batchState.items[batchState.currentIndex]) {
+                batchState.items[batchState.currentIndex].status = 'rejected';
+                renderBatchQueueBanner();
+            }
+
+            if (modalDesc) modalDesc.textContent = description;
+            if (modalViewBtn) {
+                if (existing.url) {
+                    modalViewBtn.href = existing.url;
+                    modalViewBtn.classList.remove('d-none');
+                } else {
+                    modalViewBtn.classList.add('d-none');
+                }
+            }
+            if (rejectLabel) {
+                if (batchState.active) {
+                    const hasMore = batchState.items.some((it, idx) => idx !== batchState.currentIndex && !['imported', 'rejected'].includes(it.status));
+                    rejectLabel.textContent = hasMore ? 'Reject & Next File' : 'Reject & Complete Batch';
+                } else {
+                    rejectLabel.textContent = 'Reject & End';
+                }
+            }
+            if (modalEl) {
+                window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+            }
+        }
+
+        async function rejectCurrentExistingDocument() {
+            const modalEl = document.getElementById('existingRecordModal');
+            if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
+            document.getElementById('validationExistingBanner')?.classList.add('d-none');
+
+            if (processedPage?.id) {
+                fetch(config.pageCancelUrl.replace('__PAGE__', String(processedPage.id)), {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': config.csrf,
+                        'X-Requested-With': 'XMLHttpRequest',
+                        Accept: 'application/json',
+                    },
+                    credentials: 'same-origin',
+                }).catch(() => {});
+            }
+
+            if (batchState.active) {
+                const currentItem = batchState.items[batchState.currentIndex];
+                if (currentItem) currentItem.status = 'rejected';
+                renderBatchQueueBanner();
+
+                const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && !['imported', 'rejected'].includes(it.status));
+                const firstRemainingIndex = batchState.items.findIndex((it) => !['imported', 'rejected'].includes(it.status));
+                const targetVerifyIndex = nextVerifyIndex !== -1 ? nextVerifyIndex : firstRemainingIndex;
+
+                if (targetVerifyIndex !== -1) {
+                    await openBatchVerifyItem(targetVerifyIndex);
+                    return;
+                }
+
+                const lastImported = [...batchState.items].reverse().find((it) => it.recordUrl);
+                if (lastImported?.recordUrl) {
+                    window.location.assign(lastImported.recordUrl);
+                    return;
+                }
+
+                batchState.active = false;
+                batchState.phase = 'idle';
+                batchState.items = [];
+                batchState.currentIndex = 0;
+                renderBatchQueueBanner();
+            }
+
+            scanFile = null;
+            processedPage = null;
+            scanFileInput.value = '';
+            showStep('upload');
+        }
+
+        document.getElementById('confirmRejectExistingBtn')?.addEventListener('click', rejectCurrentExistingDocument);
+        document.getElementById('validationExistingRejectBtn')?.addEventListener('click', rejectCurrentExistingDocument);
+
         scanFileInput.addEventListener('change', (event) => {
             if (!(event.currentTarget instanceof HTMLInputElement)) return;
             if (uploadMode === 'batch' || batchState.active) {
@@ -3846,8 +4738,11 @@
             el('ocrProgressCancel').textContent = 'Cancelling…';
             setOcrProgress(ocrProgress, 'Cancelling', 'Stopping this run.');
             run.controller.abort();
-            if (run.pageId !== null) {
-                fetch(config.pageCancelUrl.replace('__PAGE__', String(run.pageId)), {
+            const idsToCancel = Array.isArray(run.batchPageIds) && run.batchPageIds.length > 0
+                ? run.batchPageIds
+                : (run.pageId !== null ? [run.pageId] : []);
+            idsToCancel.forEach((id) => {
+                fetch(config.pageCancelUrl.replace('__PAGE__', String(id)), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -3859,7 +4754,7 @@
                     keepalive: true,
                     body: JSON.stringify({ keep_detection: run.kind === 'read' }),
                 }).catch((error) => console.warn('Cancelling the page on the server failed:', error));
-            }
+            });
         }
 
         el('ocrProgressCancel').addEventListener('click', cancelActiveRun);
@@ -6055,7 +6950,12 @@
 
             const form = el('submitForm');
             const data = new FormData(form);
-            data.set('scan', scanFile, scanFile.name);
+            const currentBatchItem = batchState.active ? batchState.items[batchState.currentIndex] : null;
+            if (currentBatchItem?.workspaceScanPath) {
+                data.set('workspace_scan_path', currentBatchItem.workspaceScanPath);
+            } else {
+                data.set('scan', scanFile, scanFile.name);
+            }
             if (allowMissing) data.set('allow_missing', '1');
             if (allowDuplicate) data.set('allow_duplicate', '1');
             // Which file, and which of its pages, this record is.
@@ -6107,8 +7007,10 @@
             button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Submitting verified fields...';
 
             try {
-                const scanUpload = await scanForRecord();
-                data.set('scan', scanUpload, scanUpload.name);
+                if (!currentBatchItem?.workspaceScanPath) {
+                    const scanUpload = await scanForRecord();
+                    data.set('scan', scanUpload, scanUpload.name);
+                }
 
                 const response = await fetch(form.action, {
                     method: 'POST',
@@ -6124,6 +7026,20 @@
                 const payload = contentType.includes('application/json') ? await response.json() : null;
 
                 if (!response.ok) {
+                    if (response.status === 409 && payload?.existing_record) {
+                        checkAndShowExistingRecord({
+                            id: payload.record_id,
+                            title: payload.record_title || 'Existing Record',
+                            url: payload.record_url || null,
+                        });
+                        return;
+                    }
+                    // This page of this file is saved already: nothing was saved,
+                    // so ask whether to save it again.
+                    if (response.status === 409 && payload?.duplicate_page) {
+                        askToSaveAgain(payload);
+                        return;
+                    }
                     // The server found required fields missing that this page did
                     // not: nothing was saved, so ask the same question.
                     if (response.status === 422 && Array.isArray(payload?.errors?.missing_required)) {
@@ -6136,6 +7052,35 @@
 
                 if (!payload?.redirect) {
                     throw new Error('The record was saved, but the archive location was not returned. Open Records Archive to confirm it.');
+                }
+
+                if (batchState.active && currentBatchItem) {
+                    currentBatchItem.status = 'imported';
+                    currentBatchItem.recordUrl = payload.redirect;
+                    renderBatchQueueBanner();
+
+                    const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && !['imported', 'rejected'].includes(it.status));
+                    const firstRemainingIndex = batchState.items.findIndex((it) => !['imported', 'rejected'].includes(it.status));
+                    const targetVerifyIndex = nextVerifyIndex !== -1 ? nextVerifyIndex : firstRemainingIndex;
+
+                    if (targetVerifyIndex !== -1) {
+                        recordSubmitting = false;
+                        button.innerHTML = idleButton;
+                        await openBatchVerifyItem(targetVerifyIndex);
+                        return;
+                    }
+                }
+
+                if (payload.record) savedPages.set(scanPageNumber, payload.record);
+                submissionSucceeded = true;
+
+                // A PDF with pages still to save: offer the next one. The page just
+                // saved stays locked meanwhile (recordSubmitting), so it is not sent twice.
+                const next = !batchState.active && multiPage() ? nextUnsavedPage(scanPageNumber, scanPageCount, savedPages) : null;
+                if (next !== null) {
+                    button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved';
+                    askForNextPage(next, payload.redirect);
+                    return;
                 }
 
                 button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved. Opening record...';
