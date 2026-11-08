@@ -4332,6 +4332,70 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// Group fields: the picked fields, on the page and in the list.
+.line-marker.is-picked .line-marker__shape,
+.line-marker.is-picked.is-selected .line-marker__shape,
+.line-marker.is-picked.is-selected.is-current .line-marker__shape {
+  fill: rgba(var(--bs-info-rgb), .22);
+  stroke: var(--bs-info);
+  stroke-width: 2.4px;
+}
+
+// While picking, every table outline shows it can be clicked.
+.validation-field-overlay.is-picking .line-marker {
+  cursor: copy;
+}
+
+.validation-field.is-picked,
+.validation-field.is-picked.is-active {
+  background: rgba(var(--bs-info-rgb), .1);
+  box-shadow: inset .2rem 0 0 var(--bs-info);
+}
+
+// "2 picked" beside a person's name, so picks in a closed group are not lost.
+.validation-record-group.has-picked .validation-record-group__copy strong::after {
+  content: attr(data-picked);
+  margin-inline-start: .45rem;
+  padding: .05rem .4rem;
+  color: #fff;
+  background: var(--bs-info);
+  border-radius: .3rem;
+  font-size: .625rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.group-fields-toolbar__name {
+  flex: 0 1 12rem;
+  min-inline-size: 8rem;
+}
+
+// A person's name, above their fields: typed by Staff or read from the page.
+.validation-record-group__name {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .45rem 1rem .45rem 1.35rem;
+  border-block-end: 1px solid var(--bs-border-color);
+
+  label {
+    flex: 0 0 auto;
+    color: var(--bs-heading-color);
+    font-size: .75rem;
+    font-weight: 600;
+  }
+
+  .form-control {
+    flex: 0 1 18rem;
+    min-inline-size: 0;
+  }
+
+  small {
+    color: var(--bs-secondary-color);
+    font-size: .6875rem;
+  }
+}
+
 // Draw again: red, where Add missed field is blue.
 .redraw-field-toolbar {
   background: rgba(var(--bs-danger-rgb), .06);

@@ -192,7 +192,7 @@ export class LineOverlay {
             const target = event.target instanceof Element ? event.target : null;
             if (target?.closest('.line-overlay__edit')) return;
             const group = target?.closest('.line-marker');
-            if (group) this.onSelect?.(Number(group.dataset.index));
+            if (group) this.onSelect?.(Number(group.dataset.index), event);
             else this.onBackground?.();
         });
         this.root.addEventListener('keydown', (event) => {
@@ -295,6 +295,13 @@ export class LineOverlay {
     }
 
     /** The row's lines turn orange; the current one green. */
+    /** Lines picked for something (Verify's Group fields): outlined on their own. */
+    setPicked(indexes) {
+        const picked = new Set(indexes);
+        this.groups.forEach((group, index) => group.classList.toggle('is-picked', picked.has(index)));
+        indexes.forEach((index) => this.groups[index] && this.linesLayer.appendChild(this.groups[index]));
+    }
+
     setSelection(indexes, currentIndex = null) {
         const selected = new Set(indexes);
         this.groups.forEach((group, index) => {
