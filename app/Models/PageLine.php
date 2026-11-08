@@ -24,6 +24,13 @@ class PageLine extends Model
 
     public const FLAG_SHARED_CELL = 'shared_cell';
 
+    /**
+     * Verify: the reviewer deleted this field's crop (it took in the wrong
+     * writing). The field must be drawn again and read before the record can
+     * be submitted. The old outline and reading are kept for Ctrl+Z.
+     */
+    public const FLAG_REDRAW = 'redraw';
+
     public const SOURCE_TEMPLATE = 'template';
 
     /** A written line Detect found inside a rectangle field. */

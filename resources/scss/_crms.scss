@@ -4150,6 +4150,72 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-inline-start: 3px solid var(--bs-danger);
 }
 
+// Adjust outline and Delete crop, side by side under the value box.
+.validation-field__tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-self: start;
+  gap: .25rem .5rem;
+
+  .validation-field__adjust {
+    gap: .1rem;
+  }
+}
+
+.validation-field__delete-crop.validation-field__adjust {
+  color: var(--bs-danger);
+}
+
+// A deleted crop: a dashed gap where the picture was, a locked value box,
+// and Draw again beside the red note.
+.validation-field__crop-deleted {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .3rem;
+  inline-size: 100%;
+  min-block-size: 3rem;
+  padding: .25rem .5rem;
+  color: var(--bs-danger);
+  background: rgba(var(--bs-danger-rgb), .06);
+  border: 1px dashed rgba(var(--bs-danger-rgb), .55);
+  font-size: .75rem;
+  font-weight: 500;
+}
+
+.validation-field.is-crop-deleted {
+  .validation-field__flag {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .4rem .75rem;
+  }
+
+  .validation-field__draw-again {
+    padding: .15rem .6rem;
+    font-size: .75rem;
+  }
+}
+
+// The deleted outline is off the page until the field is drawn again.
+.line-marker.is-crop-deleted {
+  display: none;
+}
+
+// Draw again: red, where Add missed field is blue.
+.redraw-field-toolbar {
+  background: rgba(var(--bs-danger-rgb), .06);
+  border-block-end-color: rgba(var(--bs-danger-rgb), .3);
+
+  .line-edit-toolbar__eyebrow {
+    color: var(--bs-danger);
+  }
+
+  .line-edit-toolbar__status {
+    border-block-start-color: rgba(var(--bs-danger-rgb), .2);
+  }
+}
+
 // The template's hint for this value, and a value that does not fit its field
 // (a date, a number, one of a list): pointed out, never blocking.
 .validation-field__hint {

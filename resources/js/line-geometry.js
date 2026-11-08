@@ -15,6 +15,8 @@
 
 export const FLAG_NO_ROW = 'no_row';
 export const FLAG_SHARED_CELL = 'shared_cell';
+// Verify: the reviewer deleted this field's crop; it must be drawn again.
+export const FLAG_REDRAW = 'redraw';
 export const SOURCE_TEMPLATE = 'template';
 export const SOURCE_FIELD = 'field';
 export const SOURCE_MANUAL = 'manual';
@@ -183,6 +185,7 @@ export function verificationItems(lines, page) {
             ...(personGroup !== null ? { personGroup } : {}),
             ...(personGroup !== null && personFieldOrder !== null ? { personFieldOrder } : {}),
             needsReview: flags.length > 0,
+            cropDeleted: flags.includes(FLAG_REDRAW),
             adjusted: Boolean(line.adjusted),
             flags,
             // 'manual': added by hand (Verify's Add missed field, Align's Add line).
@@ -349,6 +352,9 @@ export function detectionSummary(page) {
  * A short explanation for a flagged line, shown under its text box.
  */
 export function flagExplanation(flags) {
+    if (flags.includes(FLAG_REDRAW)) {
+        return 'Crop deleted: draw this field again on the page. TrOCR reads the new box.';
+    }
     if (flags.includes(FLAG_NO_ROW)) {
         return 'Needs review: this line sits between two rows. Choose its person below, or remove it.';
     }

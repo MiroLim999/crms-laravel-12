@@ -296,7 +296,11 @@ class DocumentPageController extends Controller
             'reset' => ['sometimes', 'boolean'],
             // The reviewer confirmed that this line belongs in another cell.
             'allow_move' => ['sometimes', 'boolean'],
+            // A crop deleted in Verify and drawn again: the field stays in its
+            // own person and column wherever the new outline sits.
+            'keep_place' => ['sometimes', 'boolean'],
         ]);
+        $keepPlace = $request->boolean('keep_place');
 
         $polygon = $this->clampPolygon($validated['polygon'], $page);
 
@@ -321,7 +325,7 @@ class DocumentPageController extends Controller
         // row moves only when the reviewer confirms it. A line with no row is
         // placed from its outline as before: that is how it gets a row.
         $move = $this->cellChange($page, $line, $placed);
-        if ($move !== null && ! $request->boolean('allow_move') && ! $request->boolean('reset')) {
+        if ($move !== null && ! $keepPlace && ! $request->boolean('allow_move') && ! $request->boolean('reset')) {
             $disk->delete($cropPath);
 
             return response()->json([
@@ -342,7 +346,7 @@ class DocumentPageController extends Controller
 
         // A field line keeps its field identity. A ledger line is placed
         // again from where the reviewer put it.
-        if (! $line->belongsToField()) {
+        if (! $line->belongsToField() && ! $keepPlace) {
             $columns = $page->geometry['columns'] ?? [];
             $columnIndex = $placed['column_index'];
             if ($columnIndex !== null && isset($columns[$columnIndex])) {
@@ -352,6 +356,8 @@ class DocumentPageController extends Controller
             $line->row = $placed['row'];
             $line->flags = in_array(PageLine::FLAG_NO_ROW, $placed['flags'], true) ? [PageLine::FLAG_NO_ROW] : [];
         }
+        // A new outline is the redraw a deleted crop was waiting for.
+        $line->flags = array_values(array_diff($line->flags ?? [], [PageLine::FLAG_REDRAW]));
         $line->save();
         $this->refreshSharedCells($page);
 
@@ -572,6 +578,37 @@ class DocumentPageController extends Controller
         }
 
         return response()->json([
+            'flags' => $this->lineFlags($page),
+        ]);
+    }
+
+    /**
+     * Verify: delete a field's crop that took in the wrong writing (two
+     * lines overlapping, a cut-off word), so the field must be drawn again
+     * and read before the record is submitted. `needed: false` takes it back
+     * (Ctrl+Z). The old outline, crop and reading stay until the field is
+     * drawn again, so nothing is lost by the undo.
+     */
+    public function markRedraw(Request $request, DocumentPage $page, PageLine $line): JsonResponse
+    {
+        $this->authorizePage($request, $page);
+        // The route's scopeBindings() already ensures this; checked again on purpose.
+        abort_unless((int) $line->document_page_id === (int) $page->getKey(), 404);
+
+        if ($page->status !== DocumentPage::STATUS_READY) {
+            return response()->json(['message' => 'This page is still being processed.'], 409);
+        }
+
+        $validated = $request->validate(['needed' => ['required', 'boolean']]);
+
+        $flags = array_values(array_diff($line->flags ?? [], [PageLine::FLAG_REDRAW]));
+        if ($validated['needed']) {
+            $flags[] = PageLine::FLAG_REDRAW;
+        }
+        $line->forceFill(['flags' => $flags])->save();
+
+        return response()->json([
+            'line' => $line->fresh()->toClient(),
             'flags' => $this->lineFlags($page),
         ]);
     }

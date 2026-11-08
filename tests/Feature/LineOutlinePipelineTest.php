@@ -726,6 +726,94 @@ class LineOutlinePipelineTest extends TestCase
             ->assertJsonPath('line.row', 2);
     }
 
+    public function test_a_deleted_crop_is_drawn_again_in_its_own_cell_and_read(): void
+    {
+        // The Name of row 1 took in the wrong writing: Staff delete its crop.
+        $page = $this->processedPage();
+        $name = $page->lines->firstWhere('column_name', 'Name');
+        $this->ocrCalls = [];
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.redraw', ['page' => $page, 'line' => $name]), ['needed' => true])
+            ->assertOk()
+            ->assertJsonPath('line.flags', [PageLine::FLAG_REDRAW]);
+        $this->assertSame([], $this->ocrCalls, 'deleting reads nothing');
+
+        // The new box sits over Date, row 2, but it is this field drawn again:
+        // it stays Name, row 1, is read at once, and is no longer waiting.
+        $this->app->instance(LineMarkers::class, $this->stubMarkers(cropPlacement: ['column_index' => 1, 'row' => 2]));
+        $this->actingAs($page->creator)
+            ->putJson(route('documents.pages.lines.update', ['page' => $page, 'line' => $name]), [
+                'polygon' => [[42, 58], [302, 58], [302, 112], [42, 112]],
+                'keep_place' => true,
+            ])
+            ->assertOk()
+            ->assertJsonPath('line.column', 'Name')
+            ->assertJsonPath('line.row', 1)
+            ->assertJsonPath('line.flags', [])
+            ->assertJsonPath('line.text', 'read line-'.$name->getKey());
+
+        $this->assertCount(1, $this->ocrCalls);
+        $this->assertEquals([[42, 58], [302, 58], [302, 112], [42, 112]], $name->fresh()->polygon);
+    }
+
+    public function test_deleting_a_crop_can_be_taken_back_and_only_on_a_read_page(): void
+    {
+        $page = $this->processedPage();
+        $name = $page->lines->firstWhere('column_name', 'Name');
+        $route = route('documents.pages.lines.redraw', ['page' => $page, 'line' => $name]);
+
+        $this->actingAs($page->creator)->postJson($route, ['needed' => true])->assertOk();
+        // Ctrl+Z: the old crop and reading are back as they were.
+        $this->actingAs($page->creator)
+            ->postJson($route, ['needed' => false])
+            ->assertOk()
+            ->assertJsonPath('line.flags', [])
+            ->assertJsonPath('line.text', $name->ocr_text);
+
+        // Someone else's page, or a page still being outlined, is refused.
+        $this->actingAs(User::factory()->staff()->create())->postJson($route, ['needed' => true])->assertNotFound();
+        $page->forceFill(['status' => DocumentPage::STATUS_DETECTED])->save();
+        $this->actingAs($page->creator)->postJson($route, ['needed' => true])->assertStatus(409);
+        $this->assertSame([], $name->fresh()->flags);
+    }
+
+    public function test_a_record_is_not_submitted_while_a_deleted_crop_waits_to_be_drawn_again(): void
+    {
+        $page = $this->processedPage();
+        $name = $page->lines->firstWhere('column_name', 'Name');
+        $date = $page->lines->firstWhere('column_name', 'Date');
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.redraw', ['page' => $page, 'line' => $date]), ['needed' => true])
+            ->assertOk();
+
+        $this->actingAs($page->creator)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                'doc_type' => DocumentType::Birth->value,
+                'document_template_id' => $page->document_template_id,
+                'document_page_id' => $page->getKey(),
+                'ocr_model_key' => 'test-model',
+                'scan' => UploadedFile::fake()->image('certificate.png', 800, 600),
+                'fields' => [[
+                    'verified' => '1',
+                    'name' => 'Name · row 1',
+                    'ocr_text' => $name->ocr_text,
+                    'ocr_confidence' => 88.5,
+                    'verified_value' => 'Juan Dela Cruz',
+                    'person_group' => 1,
+                    'person_field_order' => 0,
+                    'x' => 0.05, 'y' => 0.1, 'width' => 0.2, 'height' => 0.05,
+                    'line_id' => $name->getKey(),
+                ]],
+                'allow_missing' => '1',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['fields' => 'One field has a deleted crop. Draw it again before submitting.']);
+
+        $this->assertSame(0, CivilRecord::count());
+    }
+
     public function test_an_outline_adjusted_within_its_own_cell_saves_without_asking(): void
     {
         $page = $this->processedPage();

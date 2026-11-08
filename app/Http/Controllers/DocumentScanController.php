@@ -261,6 +261,18 @@ class DocumentScanController extends Controller
 
         [$page, $linesById] = $this->pageLinesFor($request, $validated, $templateId);
 
+        // A crop deleted in Verify must be drawn again and read first.
+        $toRedraw = $page?->lines
+            ->filter(fn (PageLine $line) => in_array(PageLine::FLAG_REDRAW, $line->flags ?? [], true))
+            ->count() ?? 0;
+        if ($toRedraw > 0) {
+            throw ValidationException::withMessages([
+                'fields' => $toRedraw === 1
+                    ? 'One field has a deleted crop. Draw it again before submitting.'
+                    : "{$toRedraw} fields have a deleted crop. Draw them again before submitting.",
+            ]);
+        }
+
         // Some certificates do leave a required field blank, so a missing one
         // is not refused outright: Staff must confirm it first.
         $missingRequired = [

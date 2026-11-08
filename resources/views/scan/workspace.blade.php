@@ -503,6 +503,27 @@
                             <div class="line-edit-toolbar__status" id="lineEditStatus" role="status" aria-live="polite"></div>
                         </div>
 
+                        {{-- Shown while a field whose crop was deleted is drawn again: the box is read at once. --}}
+                        <div class="line-edit-toolbar redraw-field-toolbar d-none" id="redrawFieldToolbar" role="toolbar"
+                             aria-label="Draw the field again">
+                            <div class="line-edit-toolbar__copy">
+                                <span class="line-edit-toolbar__eyebrow">Draw again</span>
+                                <strong id="redrawFieldName"></strong>
+                            </div>
+                            <div class="btn-group btn-group-sm" role="radiogroup" aria-label="How to mark the writing">
+                                <input type="radio" class="btn-check" name="redrawFieldMode" id="redrawFieldDraw" value="draw">
+                                <label class="btn btn-outline-secondary" for="redrawFieldDraw"
+                                       title="Click round the writing or hold and trace; Enter or double-click closes it">Draw</label>
+                                <input type="radio" class="btn-check" name="redrawFieldMode" id="redrawFieldRectangle"
+                                       value="rectangle" checked>
+                                <label class="btn btn-outline-secondary" for="redrawFieldRectangle" title="Drag a box over the writing">Rectangle</label>
+                            </div>
+                            <div class="line-edit-toolbar__actions">
+                                <button type="button" class="btn btn-sm btn-text-secondary" id="redrawFieldCancel">Later</button>
+                            </div>
+                            <div class="line-edit-toolbar__status" id="redrawFieldStatus" role="status" aria-live="polite"></div>
+                        </div>
+
                         <div class="doc-viewport validation-doc-viewport" id="validationDocViewport">
                             <div class="doc-stage" id="validationDocStage">
                                 <canvas id="validationPageCanvas"></canvas>
@@ -730,6 +751,33 @@
         </div>
     </div>
 
+    {{-- Confirm deleting a field's crop with Delete or Backspace (Verify) --}}
+    <div class="modal fade" id="deleteCropModal" tabindex="-1"
+         aria-labelledby="deleteCropModalTitle" aria-describedby="deleteCropModalDescription"
+         aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
+            <div class="modal-content leave-scan-modal">
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-danger" aria-hidden="true">
+                        <i class="icon-base bx bx-trash"></i>
+                    </span>
+                    <h5 class="modal-title" id="deleteCropModalTitle">Delete this crop?</h5>
+                    <p class="leave-scan-modal__text" id="deleteCropModalDescription"></p>
+
+                    <div class="leave-scan-modal__actions">
+                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal"
+                                id="deleteCropCancelBtn">
+                            Keep it
+                        </button>
+                        <button type="button" class="btn btn-danger" id="deleteCropConfirmBtn">
+                            Delete crop
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- Confirm leaving a scan that is not submitted (Cancel, or a link out) --}}
     <div class="modal fade" id="leaveScanModal" tabindex="-1"
          aria-labelledby="leaveScanModalTitle" aria-describedby="leaveScanModalDescription"
@@ -810,6 +858,7 @@
         detectionSummary,
         flagExplanation,
         FLAG_NO_ROW,
+        FLAG_REDRAW,
         geometryMarkers,
         SOURCE_MANUAL,
         gridNotes,
@@ -868,6 +917,7 @@
         lineRestoreUrl: @json(route('documents.pages.lines.restore', ['page' => '__PAGE__', 'line' => '__LINE__'])),
         lineStoreUrl: @json(route('documents.pages.lines.store', ['page' => '__PAGE__'])),
         linePlaceUrl: @json(route('documents.pages.lines.place', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        lineRedrawUrl: @json(route('documents.pages.lines.redraw', ['page' => '__PAGE__', 'line' => '__LINE__'])),
         pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
         // The pages of one file already saved; 64 zeros stand in for its fingerprint.
         sourcePagesUrl: @json(route('documents.sources.pages', ['hash' => str_repeat('0', 64)])),
@@ -957,11 +1007,15 @@
         container: el('validationFieldOverlay'),
         onSelect: (index) => activateValidationField(index, 'marker'),
         onModeChange: (mode) => showVerifyLineMode(mode),
-        onDraftChange: (points) => (addingMissedField ? showAddFieldDraft(points) : showVerifyDraft(points)),
+        onDraftChange: (points) => (addingMissedField
+            ? showAddFieldDraft(points)
+            : redrawingLineId !== null ? showRedrawDraft(points) : showVerifyDraft(points)),
         // Only a new box (Add missed field) arrives here finished and with no
         // line being edited; a redrawn outline is saved by Save and re-read.
         onEdit: (polygon, final) => {
-            if (final && addingMissedField && !lineOverlay.editing) addPendingBox(polygon);
+            if (!final || lineOverlay.editing) return;
+            if (addingMissedField) addPendingBox(polygon);
+            else if (redrawingLineId !== null) saveRedrawnField(polygon);
         },
     });
 
@@ -4540,6 +4594,11 @@
             const input = requiredInput(row, '.verified');
             const checkbox = requiredInput(row, '.validation-verified');
 
+            if (checked && cropped[index]?.cropDeleted) {
+                setValidationFieldError(index, 'Draw this field again first; its crop was deleted.');
+                firstBlankIndex ??= index;
+                return;
+            }
             if (checked && !canVerifyValue(input.value)) {
                 checkbox.checked = false;
                 row.classList.remove('is-verified');
@@ -4594,9 +4653,15 @@
                 </div>
                 <div class="validation-field__reading">
                     <span class="validation-field__reading-text">TrOCR read: <span></span></span>
-                    <button type="button" class="btn btn-link btn-sm validation-field__adjust">
-                        <i class="icon-base bx bx-shape-polygon" aria-hidden="true"></i>Adjust outline
-                    </button>
+                    <span class="validation-field__tools">
+                        <button type="button" class="btn btn-link btn-sm validation-field__adjust">
+                            <i class="icon-base bx bx-shape-polygon" aria-hidden="true"></i>Adjust outline
+                        </button>
+                        <button type="button" class="btn btn-link btn-sm validation-field__adjust validation-field__delete-crop"
+                                title="The crop took in the wrong writing: delete it and draw this field again">
+                            <i class="icon-base bx bx-trash" aria-hidden="true"></i>Delete crop
+                        </button>
+                    </span>
                 </div>
                 <div class="validation-field__hint d-none"></div>
                 <div class="validation-field__type d-none"></div>
@@ -4648,6 +4713,20 @@
         const placement = fieldPlacementControls(index);
         if (placement) requiredPart(row, '.validation-field__reading').after(placement);
 
+        // Delete crop: for a crop that took in the wrong writing. A field with
+        // Remove already has its own way out, so it is not offered twice.
+        const deleteCrop = requiredPart(row, '.validation-field__delete-crop');
+        if (placement || item.cropDeleted) {
+            deleteCrop.remove();
+        } else {
+            deleteCrop.setAttribute('aria-label', `Delete the crop of ${displayName} and draw it again`);
+            deleteCrop.addEventListener('click', (event) => {
+                event.stopPropagation();
+                deleteCrop.disabled = true;
+                deleteFieldCrop(index);
+            });
+        }
+
         // A field with Person and Column says it there (an empty Person is
         // outlined red), not in a red note.
         const explanation = placement ? '' : flagExplanation(item.flags ?? []);
@@ -4686,6 +4765,39 @@
         if (reading.error) {
             row.classList.add('has-ocr-error');
             requiredPart(row, '.validation-field__ocr-error').classList.remove('d-none');
+        }
+
+        if (item.cropDeleted) {
+            // Nothing to check until the field is drawn again and read.
+            row.classList.add('is-crop-deleted');
+            requiredPart(row, '.validation-field__tools').remove();
+            // The old crop's score means nothing now.
+            badge.remove();
+            const placeholder = document.createElement('span');
+            placeholder.className = 'validation-field__crop validation-field__crop-deleted';
+            placeholder.innerHTML = '<i class="icon-base bx bx-trash" aria-hidden="true"></i>Crop deleted';
+            const picture = row.querySelector('img.validation-field__crop');
+            if (picture) picture.replaceWith(placeholder);
+            else requiredPart(row, '.validation-field__entry').prepend(placeholder);
+            requiredPart(row, '.validation-field__reading-text').textContent = 'Not read yet';
+            input.value = '';
+            input.disabled = true;
+            input.placeholder = 'Draw the field again';
+            checkbox.disabled = true;
+            requiredPart(row, '.validation-field__ocr-error').classList.add('d-none');
+            row.classList.remove('has-ocr-error', 'needs-review');
+
+            const flag = requiredPart(row, '.validation-field__flag');
+            const again = document.createElement('button');
+            again.type = 'button';
+            again.className = 'btn btn-sm btn-danger validation-field__draw-again';
+            again.innerHTML = '<i class="icon-base bx bx-edit-alt icon-sm me-1" aria-hidden="true"></i>Draw again';
+            again.setAttribute('aria-label', `Draw ${displayName} again`);
+            again.addEventListener('click', (event) => {
+                event.stopPropagation();
+                startRedrawField(index);
+            });
+            flag.append(again);
         }
 
         row.addEventListener('click', () => activateValidationField(index, 'row'));
@@ -4913,6 +5025,7 @@
     function startOutlineEdit(index) {
         if (!processedPage || !cropped[index]) return;
         stopAddingMissedField();
+        stopRedrawField();
         // Moving to another field keeps the tools open, so they do not close and reopen.
         cancelOutlineEdit({ hide: false });
 
@@ -5132,6 +5245,7 @@
     function startAddingMissedField() {
         if (!processedPage || recordSubmitting) return;
         cancelOutlineEdit();
+        stopRedrawField();
         addingMissedField = true;
         pendingBoxes = [];
         el('addMissedFieldBtn').classList.add('active');
@@ -5283,6 +5397,185 @@
         }
     }
 
+    // ------------------------------------------------------ delete crop
+    // A crop that took in the wrong writing (two lines overlapping, a word
+    // cut off) is deleted, and the field must be drawn again: the new box is
+    // cropped and read by TrOCR at once, and stays in the same person and
+    // column. Submit waits until every deleted crop is drawn again.
+
+    let redrawingLineId = null;
+    let savingRedraw = false;
+
+    const REDRAW_MODE_HINTS = {
+        rectangle: 'Drag a box over this field’s writing only. It is read as soon as you let go.',
+        draw: 'Click round this field’s writing or hold and trace; Enter or double-click closes it and reads it.',
+    };
+
+    function redrawFieldMode() {
+        return document.querySelector('input[name="redrawFieldMode"]:checked')?.value ?? 'rectangle';
+    }
+
+    function showRedrawStatus(message, isError = false) {
+        const status = el('redrawFieldStatus');
+        status.textContent = message;
+        status.title = message;
+        status.classList.toggle('is-error', isError);
+    }
+
+    function showRedrawDraft(points) {
+        if (points === 0) {
+            showRedrawStatus(REDRAW_MODE_HINTS.draw);
+            return;
+        }
+        showRedrawStatus(points < 3
+            ? `${points} point${points === 1 ? '' : 's'}. At least 3 to make an outline.`
+            : `${points} points. Enter or double-click closes it and reads it.`);
+    }
+
+    function armRedrawDrawing() {
+        if (redrawingLineId === null || savingRedraw) return;
+        lineOverlay.beginDraw(redrawFieldMode());
+        showRedrawStatus(REDRAW_MODE_HINTS[redrawFieldMode()]);
+    }
+
+    async function deleteFieldCrop(index) {
+        const item = cropped[index];
+        if (!item || !processedPage) return;
+        try {
+            const { response, payload } = await sendLineRequest(
+                verifyLineUrl(config.lineRedrawUrl, item.lineId), 'POST', { needed: true },
+            );
+            if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
+            applyLineUpdate(payload.line, payload.flags ?? {});
+            pushVerifyUndo({ kind: 'cropDeleted', id: item.lineId });
+            const fresh = cropped.findIndex((candidate) => candidate.lineId === item.lineId);
+            if (fresh >= 0) startRedrawField(fresh);
+        } catch (error) {
+            const button = validationRow(index)?.querySelector('.validation-field__delete-crop');
+            if (button instanceof HTMLButtonElement) button.disabled = false;
+            setValidationFieldError(index, error.message || 'The crop could not be deleted.');
+        }
+    }
+
+    function startRedrawField(index) {
+        const item = cropped[index];
+        if (!processedPage || !item?.cropDeleted || recordSubmitting) return;
+        stopAddingMissedField();
+        cancelOutlineEdit();
+        redrawingLineId = item.lineId;
+        activateValidationField(index, 'marker');
+        const group = validationGroupForField(index);
+        el('redrawFieldName').textContent = group?.kind === 'person'
+            ? `${item.heading || item.label} · ${group.label}`
+            : (item.heading || item.label);
+        slideToolbar(el('redrawFieldToolbar'), true);
+        armRedrawDrawing();
+    }
+
+    /** Close the tool; the field still waits to be drawn again. */
+    function stopRedrawField() {
+        if (redrawingLineId === null || savingRedraw) return;
+        redrawingLineId = null;
+        if (lineOverlay.isAddingNew()) lineOverlay.cancelEdit();
+        slideToolbar(el('redrawFieldToolbar'), false);
+    }
+
+    /** The new box: cropped, kept in the field's own person and column, read at once. */
+    async function saveRedrawnField(polygon) {
+        const lineId = redrawingLineId;
+        if (lineId === null || savingRedraw) return;
+        savingRedraw = true;
+        const controls = el('redrawFieldToolbar').querySelectorAll('input, button');
+        controls.forEach((control) => { control.disabled = true; });
+        lineOverlay.setPending([polygon]);
+        showRedrawStatus('Cropping the new box and reading it…');
+        try {
+            const { response, payload } = await sendLineRequest(
+                verifyLineUrl(config.lineUpdateUrl, lineId), 'PUT', { polygon, keep_place: true },
+            );
+            if (!payload?.line) throw new Error(responseErrorMessage(response, payload));
+            savingRedraw = false;
+            lineOverlay.setPending([]);
+            stopRedrawField();
+            applyLineUpdate(payload.line, payload.flags ?? {});
+            if (!response.ok) {
+                showOcrLineWarning(payload.line.id, payload.message || 'The box was saved, but TrOCR could not read it. Type the value.');
+            }
+        } catch (error) {
+            savingRedraw = false;
+            lineOverlay.setPending([]);
+            armRedrawDrawing();
+            showRedrawStatus(error.message || 'The box could not be read. Draw it again.', true);
+        } finally {
+            controls.forEach((control) => { control.disabled = false; });
+        }
+    }
+
+    // Delete or Backspace on the selected field asks first. Not while typing
+    // in a box, so correcting a typo never deletes a crop.
+    let cropToDelete = null;
+
+    function askToDeleteCrop(index) {
+        const item = cropped[index];
+        if (!item || item.cropDeleted || !processedPage) return;
+        cropToDelete = item.lineId;
+        const group = validationGroupForField(index);
+        const name = item.heading || item.label;
+        el('deleteCropModalDescription').textContent = `${name}${group?.kind === 'person' ? ` · ${group.label}` : ''} `
+            + 'will have to be drawn again before you can submit. Ctrl+Z takes it back.';
+        window.bootstrap.Modal.getOrCreateInstance(el('deleteCropModal')).show();
+    }
+
+    el('deleteCropModal').addEventListener('shown.bs.modal', () => el('deleteCropCancelBtn').focus());
+    el('deleteCropModal').addEventListener('hidden.bs.modal', () => { cropToDelete = null; });
+    el('deleteCropConfirmBtn').addEventListener('click', () => {
+        const index = cropped.findIndex((item) => item.lineId === cropToDelete);
+        window.bootstrap.Modal.getOrCreateInstance(el('deleteCropModal')).hide();
+        if (index >= 0) deleteFieldCrop(index);
+    });
+    document.addEventListener('keydown', (event) => {
+        if (!['Delete', 'Backspace'].includes(event.key) || event.ctrlKey || event.metaKey || event.altKey) return;
+        if (!processedPage || el('step-verify').classList.contains('d-none')) return;
+        if (addingMissedField || redrawingLineId !== null || editingLineIndex !== null || recordSubmitting) return;
+        if (document.querySelector('.modal.show')) return;
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.matches('input, textarea, select, button') || target.isContentEditable)) return;
+        if (activeValidationIndex === null) return;
+        event.preventDefault();
+        askToDeleteCrop(activeValidationIndex);
+    });
+
+    el('redrawFieldCancel').addEventListener('click', stopRedrawField);
+    document.querySelectorAll('input[name="redrawFieldMode"]').forEach((input) => {
+        input.addEventListener('change', () => {
+            if (!(input instanceof HTMLInputElement) || !input.checked) return;
+            // A drawing of three points or more is read, not lost.
+            if (lineOverlay.isDrawing() && lineOverlay.finishDrawing()) return;
+            armRedrawDrawing();
+            // Off the button, so Enter and Esc reach the drawing.
+            input.blur();
+        });
+    });
+    document.addEventListener('keydown', (event) => {
+        if (redrawingLineId === null || savingRedraw) return;
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.matches('input:not([type="radio"]), textarea, select') || target.isContentEditable)) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            // Esc first drops a drawing, then closes the tool.
+            if (lineOverlay.isDrawing()) armRedrawDrawing();
+            else stopRedrawField();
+        } else if (event.key === 'Enter' && lineOverlay.isDrawing()) {
+            event.preventDefault();
+            if (!lineOverlay.finishDrawing()) {
+                showRedrawStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+            }
+        } else if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z' && lineOverlay.isDrawing()) {
+            event.preventDefault();
+            lineOverlay.undoDrawStep();
+        }
+    });
+
     // Ctrl+Z in Verify takes back the last change to the added fields: the
     // fields just read, a removal, or a move to another person or column.
     const verifyUndo = [];
@@ -5313,6 +5606,13 @@
                 if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
                 rebuildVerifyLines([...processedPage.lines, payload.line].sort((a, b) => a.position - b.position),
                     payload.flags ?? {}, { focusLineId: payload.line.id });
+            } else if (entry.kind === 'cropDeleted') {
+                // The old crop and reading come back, unless it was drawn again since.
+                if (!processedPage.lines.some((line) => line.id === entry.id && (line.flags ?? []).includes(FLAG_REDRAW))) return;
+                if (redrawingLineId === entry.id) stopRedrawField();
+                const { response, payload } = await sendLineRequest(verifyLineUrl(config.lineRedrawUrl, entry.id), 'POST', { needed: false });
+                if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
+                applyLineUpdate(payload.line, payload.flags ?? {});
             } else if (entry.kind === 'moved') {
                 const { response, payload } = await sendLineRequest(
                     verifyLineUrl(config.linePlaceUrl, entry.id), 'PATCH', { row: entry.row, ...entry.column },
@@ -5331,7 +5631,7 @@
     }
 
     document.addEventListener('keydown', (event) => {
-        if (addingMissedField || !processedPage || el('step-verify').classList.contains('d-none')) return;
+        if (addingMissedField || redrawingLineId !== null || !processedPage || el('step-verify').classList.contains('d-none')) return;
         if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'z') return;
         const target = event.target;
         // Typing keeps the browser's own undo.
@@ -5868,6 +6168,17 @@
         clearValidationSubmitError();
         const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
         rows.forEach((row) => clearValidationFieldError(Number(row.dataset.fieldIndex)));
+
+        // A deleted crop must be drawn again and read before anything is submitted.
+        const toRedraw = cropped.map((item, index) => (item.cropDeleted ? index : null)).filter((index) => index !== null);
+        if (toRedraw.length > 0) {
+            showValidationSubmitError(toRedraw.length === 1
+                ? 'One field has a deleted crop. Draw it again before submitting.'
+                : `${toRedraw.length} fields have a deleted crop. Draw them again before submitting.`);
+            toRedraw.forEach((index) => setValidationFieldError(index, 'Press Draw again and mark this field on the page.'));
+            activateValidationField(toRedraw[0], 'marker');
+            return;
+        }
 
         const verifiedIndexes = rows
             .filter((row) => requiredInput(row, '.validation-verified').checked)

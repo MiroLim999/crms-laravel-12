@@ -127,6 +127,10 @@ Route::middleware('auth')->group(function () {
         Route::delete('documents/pages/{page}/lines/{line}', [DocumentPageController::class, 'destroyLine'])
             ->scopeBindings()
             ->name('documents.pages.lines.destroy');
+        // Verify: delete a field's wrong crop (it must be drawn again), or take that back.
+        Route::post('documents/pages/{page}/lines/{line}/redraw', [DocumentPageController::class, 'markRedraw'])
+            ->scopeBindings()
+            ->name('documents.pages.lines.redraw');
         Route::post('documents/pages/{page}/lines/{line}/restore', [DocumentPageController::class, 'restoreLine'])
             ->scopeBindings()
             ->withTrashed()

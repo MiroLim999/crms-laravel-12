@@ -511,6 +511,8 @@ export class LineOverlay {
 
         group.classList.toggle('is-adjusted', Boolean(line.adjusted));
         group.classList.toggle('is-unsaved', Boolean(line.unsaved));
+        // A crop deleted in Verify is off the page until it is drawn again.
+        group.classList.toggle('is-crop-deleted', Boolean(line.cropDeleted));
         group.querySelector('.line-marker__shape').setAttribute('points', polygonPoints(line.polygon));
         group.querySelector('.line-adjusted-mark')?.remove();
 
