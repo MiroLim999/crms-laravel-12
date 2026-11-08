@@ -463,7 +463,9 @@
                             <div class="line-edit-toolbar__actions">
                                 <button type="button" class="btn btn-sm btn-text-secondary" id="addFieldCancel">Cancel</button>
                                 <button type="button" class="btn btn-sm btn-primary" id="addFieldRead" disabled>
-                                    <i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i><span>Read boxes</span>
+                                    <i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i>
+                                    <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                                    <span class="add-field-read__label">Read boxes</span>
                                 </button>
                             </div>
                             <div class="line-edit-toolbar__status" id="addFieldStatus" role="status" aria-live="polite"></div>
@@ -482,15 +484,8 @@
                                 <label class="btn btn-outline-secondary" for="lineEditDraw"
                                        title="Draw a new outline: click points or hold and trace; Enter or double-click closes it">Draw</label>
                                 <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditRectangle"
-                                       value="rectangle">
+                                       value="rectangle" checked>
                                 <label class="btn btn-outline-secondary" for="lineEditRectangle" title="Drag a box over the writing">Rectangle</label>
-                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditBox"
-                                       value="box" checked>
-                                <label class="btn btn-outline-secondary" for="lineEditBox" title="Stretch the outline by its handles">Stretch</label>
-                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditPoints"
-                                       value="points">
-                                <label class="btn btn-outline-secondary" for="lineEditPoints"
-                                       title="Drag corners; drag a dot between corners to add one; Delete removes one">Move points</label>
                             </div>
                             <div class="line-edit-toolbar__actions">
                                 <button type="button" class="btn btn-sm btn-text-secondary" id="lineEditCancel">Cancel</button>
@@ -503,7 +498,7 @@
                             <div class="line-edit-toolbar__status" id="lineEditStatus" role="status" aria-live="polite"></div>
                         </div>
 
-                        {{-- Shown while a field whose crop was deleted is drawn again: the box is read at once. --}}
+                        {{-- Shown while a field whose crop was deleted is drawn again: Save and re-read reads the box. --}}
                         <div class="line-edit-toolbar redraw-field-toolbar d-none" id="redrawFieldToolbar" role="toolbar"
                              aria-label="Draw the field again">
                             <div class="line-edit-toolbar__copy">
@@ -520,6 +515,11 @@
                             </div>
                             <div class="line-edit-toolbar__actions">
                                 <button type="button" class="btn btn-sm btn-text-secondary" id="redrawFieldCancel">Later</button>
+                                <button type="button" class="btn btn-sm btn-primary" id="redrawFieldSave" disabled>
+                                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
+                                    <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                                    <span>Save and re-read</span>
+                                </button>
                             </div>
                             <div class="line-edit-toolbar__status" id="redrawFieldStatus" role="status" aria-live="polite"></div>
                         </div>
@@ -1007,6 +1007,8 @@
         container: el('validationFieldOverlay'),
         onSelect: (index) => activateValidationField(index, 'marker'),
         onModeChange: (mode) => showVerifyLineMode(mode),
+        // Verify has no Stretch tool: a closed drawing waits as a box to save.
+        drawnMode: 'rectangle',
         onDraftChange: (points) => (addingMissedField
             ? showAddFieldDraft(points)
             : redrawingLineId !== null ? showRedrawDraft(points) : showVerifyDraft(points)),
@@ -1015,7 +1017,7 @@
         onEdit: (polygon, final) => {
             if (!final || lineOverlay.editing) return;
             if (addingMissedField) addPendingBox(polygon);
-            else if (redrawingLineId !== null) saveRedrawnField(polygon);
+            else if (redrawingLineId !== null) holdRedrawBox(polygon);
         },
     });
 
@@ -4722,8 +4724,7 @@
             deleteCrop.setAttribute('aria-label', `Delete the crop of ${displayName} and draw it again`);
             deleteCrop.addEventListener('click', (event) => {
                 event.stopPropagation();
-                deleteCrop.disabled = true;
-                deleteFieldCrop(index);
+                askToDeleteCrop(index);
             });
         }
 
@@ -5035,7 +5036,7 @@
         // The tools slide down above the page, in the document pane; the field list does not move.
         slideToolbar(el('lineEditToolbar'), true);
         showLineEditStatus('');
-        const mode = document.querySelector('input[name="verifyLineMode"]:checked')?.value ?? 'box';
+        const mode = document.querySelector('input[name="verifyLineMode"]:checked')?.value ?? 'rectangle';
         lineOverlay.beginEdit(index, mode);
         showVerifyLineMode(mode);
     }
@@ -5231,7 +5232,12 @@
         lineOverlay.setPending(pendingBoxes);
         const read = el('addFieldRead');
         read.disabled = count === 0 || readingPendingBoxes;
-        read.querySelector('span').textContent = count === 0 ? 'Read boxes' : `Read ${count} box${count === 1 ? '' : 'es'}`;
+        read.querySelector('.add-field-read__label').textContent = readingPendingBoxes
+            ? 'Reading…'
+            : count === 0 ? 'Read boxes' : `Read ${count} box${count === 1 ? '' : 'es'}`;
+        // A spinner in place of the scan icon while the boxes are read.
+        read.querySelector('.bx-scan')?.classList.toggle('d-none', readingPendingBoxes);
+        read.querySelector('.spinner-border')?.classList.toggle('d-none', !readingPendingBoxes);
         showAddFieldStatus(message ?? (count === 0
             ? `${ADD_MODE_HINTS[addFieldMode()]} Nothing is read until you press Read.`
             : `${count} box${count === 1 ? '' : 'es'} ready. Mark another, or press Read (Enter). Ctrl+Z takes back the last one.`));
@@ -5317,6 +5323,7 @@
         }
 
         readingPendingBoxes = false;
+        showPendingBoxes();
         el('addFieldCancel').disabled = false;
         el('addFieldToolbar').querySelectorAll('input[name="addFieldMode"]').forEach((input) => { input.disabled = false; });
 
@@ -5407,9 +5414,12 @@
     let savingRedraw = false;
 
     const REDRAW_MODE_HINTS = {
-        rectangle: 'Drag a box over this field’s writing only. It is read as soon as you let go.',
-        draw: 'Click round this field’s writing or hold and trace; Enter or double-click closes it and reads it.',
+        rectangle: 'Drag a box over this field’s writing only, then press Save and re-read.',
+        draw: 'Click round this field’s writing or hold and trace; Enter or double-click closes it.',
     };
+    const REDRAW_READY_HINT = 'Box ready. Press Save and re-read (Enter), or drag again to replace it.';
+    // The box drawn for the field, waiting for Save and re-read (page pixels).
+    let redrawBox = null;
 
     function redrawFieldMode() {
         return document.querySelector('input[name="redrawFieldMode"]:checked')?.value ?? 'rectangle';
@@ -5429,13 +5439,31 @@
         }
         showRedrawStatus(points < 3
             ? `${points} point${points === 1 ? '' : 's'}. At least 3 to make an outline.`
-            : `${points} points. Enter or double-click closes it and reads it.`);
+            : `${points} points. Enter or double-click closes it.`);
     }
 
     function armRedrawDrawing() {
         if (redrawingLineId === null || savingRedraw) return;
         lineOverlay.beginDraw(redrawFieldMode());
-        showRedrawStatus(REDRAW_MODE_HINTS[redrawFieldMode()]);
+        showRedrawStatus(redrawBox ? REDRAW_READY_HINT : REDRAW_MODE_HINTS[redrawFieldMode()]);
+    }
+
+    /** The box for the field, shown on the page until it is saved; null clears it. */
+    function setRedrawBox(polygon) {
+        redrawBox = polygon;
+        lineOverlay.setPending(polygon ? [polygon] : []);
+        el('redrawFieldSave').disabled = !polygon || savingRedraw;
+    }
+
+    /** Save and re-read: a spinner in place of the tick while the box is cropped and read. */
+    function setRedrawSaving(saving) {
+        savingRedraw = saving;
+        const button = el('redrawFieldSave');
+        button.disabled = saving || !redrawBox;
+        button.querySelector('.bx-check')?.classList.toggle('d-none', saving);
+        button.querySelector('.spinner-border')?.classList.toggle('d-none', !saving);
+        el('redrawFieldCancel').disabled = saving;
+        el('redrawFieldToolbar').querySelectorAll('input[name="redrawFieldMode"]').forEach((input) => { input.disabled = saving; });
     }
 
     async function deleteFieldCrop(index) {
@@ -5463,6 +5491,7 @@
         stopAddingMissedField();
         cancelOutlineEdit();
         redrawingLineId = item.lineId;
+        setRedrawBox(null);
         activateValidationField(index, 'marker');
         const group = validationGroupForField(index);
         el('redrawFieldName').textContent = group?.kind === 'person'
@@ -5476,43 +5505,55 @@
     function stopRedrawField() {
         if (redrawingLineId === null || savingRedraw) return;
         redrawingLineId = null;
+        setRedrawBox(null);
         if (lineOverlay.isAddingNew()) lineOverlay.cancelEdit();
         slideToolbar(el('redrawFieldToolbar'), false);
     }
 
-    /** The new box: cropped, kept in the field's own person and column, read at once. */
-    async function saveRedrawnField(polygon) {
+    /** A box was closed on the page: it waits for Save and re-read; another drag replaces it. */
+    function holdRedrawBox(polygon) {
+        if (redrawingLineId === null || savingRedraw) return;
+        setRedrawBox(polygon);
+        armRedrawDrawing();
+    }
+
+    /** Save and re-read: the box is cropped, kept in the field's own person and column, and read. */
+    async function saveRedrawnField() {
         const lineId = redrawingLineId;
         if (lineId === null || savingRedraw) return;
-        savingRedraw = true;
-        const controls = el('redrawFieldToolbar').querySelectorAll('input, button');
-        controls.forEach((control) => { control.disabled = true; });
-        lineOverlay.setPending([polygon]);
+        // A drawing left open is the box.
+        if (lineOverlay.isDrawing() && !lineOverlay.finishDrawing()) {
+            showRedrawStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+            return;
+        }
+        if (!redrawBox) {
+            showRedrawStatus('Draw a box over the writing first.', true);
+            return;
+        }
+        if (lineOverlay.isAddingNew()) lineOverlay.cancelEdit();
+        setRedrawSaving(true);
         showRedrawStatus('Cropping the new box and reading it…');
         try {
             const { response, payload } = await sendLineRequest(
-                verifyLineUrl(config.lineUpdateUrl, lineId), 'PUT', { polygon, keep_place: true },
+                verifyLineUrl(config.lineUpdateUrl, lineId), 'PUT', { polygon: redrawBox, keep_place: true },
             );
             if (!payload?.line) throw new Error(responseErrorMessage(response, payload));
-            savingRedraw = false;
-            lineOverlay.setPending([]);
+            setRedrawSaving(false);
             stopRedrawField();
             applyLineUpdate(payload.line, payload.flags ?? {});
             if (!response.ok) {
                 showOcrLineWarning(payload.line.id, payload.message || 'The box was saved, but TrOCR could not read it. Type the value.');
             }
         } catch (error) {
-            savingRedraw = false;
-            lineOverlay.setPending([]);
+            setRedrawSaving(false);
             armRedrawDrawing();
             showRedrawStatus(error.message || 'The box could not be read. Draw it again.', true);
-        } finally {
-            controls.forEach((control) => { control.disabled = false; });
         }
     }
 
-    // Delete or Backspace on the selected field asks first. Not while typing
-    // in a box, so correcting a typo never deletes a crop.
+    // Delete crop (the button, or Delete / Backspace on the selected field)
+    // asks first. The keys never act while typing in a box, so correcting a
+    // typo never deletes a crop.
     let cropToDelete = null;
 
     function askToDeleteCrop(index) {
@@ -5546,10 +5587,11 @@
     });
 
     el('redrawFieldCancel').addEventListener('click', stopRedrawField);
+    el('redrawFieldSave').addEventListener('click', saveRedrawnField);
     document.querySelectorAll('input[name="redrawFieldMode"]').forEach((input) => {
         input.addEventListener('change', () => {
             if (!(input instanceof HTMLInputElement) || !input.checked) return;
-            // A drawing of three points or more is read, not lost.
+            // A drawing of three points or more is kept as the box, not lost.
             if (lineOverlay.isDrawing() && lineOverlay.finishDrawing()) return;
             armRedrawDrawing();
             // Off the button, so Enter and Esc reach the drawing.
@@ -5562,13 +5604,20 @@
         if (target instanceof HTMLElement && (target.matches('input:not([type="radio"]), textarea, select') || target.isContentEditable)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
-            // Esc first drops a drawing, then closes the tool.
+            // Esc drops a drawing, then the waiting box, then closes the tool.
             if (lineOverlay.isDrawing()) armRedrawDrawing();
-            else stopRedrawField();
-        } else if (event.key === 'Enter' && lineOverlay.isDrawing()) {
+            else if (redrawBox) {
+                setRedrawBox(null);
+                armRedrawDrawing();
+            } else stopRedrawField();
+        } else if (event.key === 'Enter') {
             event.preventDefault();
-            if (!lineOverlay.finishDrawing()) {
-                showRedrawStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+            if (lineOverlay.isDrawing()) {
+                if (!lineOverlay.finishDrawing()) {
+                    showRedrawStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+                }
+            } else if (redrawBox) {
+                saveRedrawnField();
             }
         } else if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z' && lineOverlay.isDrawing()) {
             event.preventDefault();
@@ -5791,7 +5840,7 @@
             if (!(input instanceof HTMLInputElement) || !input.checked) return;
             // Leaving Draw keeps a drawing of three points or more.
             if (input.value !== 'draw' && lineOverlay.isDrawing() && lineOverlay.finishDrawing()) {
-                if (input.value !== 'box') lineOverlay.setEditMode(input.value);
+                lineOverlay.setEditMode(input.value);
             } else {
                 lineOverlay.setEditMode(input.value);
             }
@@ -5819,9 +5868,6 @@
         } else if (command && !event.shiftKey && event.key.toLowerCase() === 'z' && lineOverlay.isDrawing()) {
             event.preventDefault();
             lineOverlay.undoDrawStep();
-        } else if (['Delete', 'Backspace'].includes(event.key) && lineOverlay.editing?.mode === 'points') {
-            event.preventDefault();
-            lineOverlay.deleteActivePoint();
         }
     });
 

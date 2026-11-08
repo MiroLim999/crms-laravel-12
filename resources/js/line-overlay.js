@@ -146,7 +146,7 @@ export class LineOverlay {
      */
     constructor({
         container, onSelect = null, preview = false, onBackground = null, onEdit = null, onModeChange = null,
-        onDraftChange = null, selectWhileEditing = false,
+        onDraftChange = null, selectWhileEditing = false, drawnMode = 'box',
     }) {
         this.container = container;
         this.onSelect = onSelect;
@@ -157,6 +157,9 @@ export class LineOverlay {
         // Align lets another line be picked mid-edit; Verify keeps the one
         // being corrected until it is saved or cancelled.
         this.selectWhileEditing = selectWhileEditing;
+        // The tool a closed drawing of an existing line hands over to:
+        // 'box' (stretch it) in Align; Verify, which has no Stretch, keeps a box.
+        this.drawnMode = drawnMode;
         this._justDragged = false;
         this.width = 1;
         this.height = 1;
@@ -431,7 +434,7 @@ export class LineOverlay {
             this.onEdit?.(drawn, true);
             return true;
         }
-        this.setEditMode('box');
+        this.setEditMode(this.drawnMode);
         this.onEdit?.(this.editedPolygon(), true);
         return true;
     }
