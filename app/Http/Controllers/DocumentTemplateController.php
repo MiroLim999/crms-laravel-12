@@ -110,6 +110,34 @@ class DocumentTemplateController extends Controller
     }
 
     /**
+     * Snap to table, as in the scan workspace: fit the column and row markers
+     * onto the printed table of the sample. Nothing is stored.
+     */
+    public function snap(Request $request, LineMarkers $markers): JsonResponse
+    {
+        GeometryInput::hydrate($request);
+        $validated = $request->validate([
+            'page' => ['required', 'file', 'mimes:png', 'max:40960'],
+            ...GeometryInput::rules(),
+        ]);
+        $geometry = GeometryInput::checked($validated['geometry']);
+        $image = $request->file('page');
+
+        try {
+            $result = $markers->snap($image->getRealPath(), $geometry);
+        } catch (LineMarkersException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'fitted' => (bool) ($result['fit']['fitted'] ?? false),
+            'reason' => $result['fit']['reason'] ?? null,
+            'geometry' => $result['geometry'] ?? $geometry,
+            'lines' => $result['lines'] ?? ['vertical' => [], 'horizontal' => []],
+        ]);
+    }
+
+    /**
      * Test the layout being built on its sample, saved or not: the page is
      * straightened, the markers fitted to its table and every line outlined,
      * exactly as Detect does it for Staff. Nothing is read or kept; the

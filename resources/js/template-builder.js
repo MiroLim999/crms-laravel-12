@@ -2064,6 +2064,74 @@ async function testLayout() {
 
 element('testLayoutBtn', HTMLButtonElement).addEventListener('click', testLayout);
 
+// Snap to table: fit the columns and row lines onto the sample's printed table.
+async function snapToTable() {
+    if (!sampleLoaded) {
+        showBuilderError('Choose a sample page first: the markers are fitted to its printed table.');
+        return;
+    }
+    if (marker.toJSON().length === 0) {
+        showBuilderError('Add a field or a ledger column to snap.');
+        return;
+    }
+
+    const button = element('snapTableBtn', HTMLButtonElement);
+    const { width, height } = button.getBoundingClientRect();
+    button.style.inlineSize = `${width}px`;
+    button.style.blockSize = `${height}px`;
+    button.classList.add('is-loading');
+    button.setAttribute('aria-busy', 'true');
+    button.disabled = true;
+    clearBuilderError();
+
+    try {
+        const blob = await new Promise((resolve, reject) => {
+            canvas.toBlob((result) => (result ? resolve(result) : reject(new Error('The sample could not be prepared.'))), 'image/png');
+        });
+        const data = new FormData();
+        data.set('page', blob, 'sample.png');
+        data.set('geometry_json', JSON.stringify(testGeometry()));
+
+        const response = await window.fetch(config.snapUrl, {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': config.csrf, 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+            body: data,
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.message || `Snap to table failed with HTTP ${response.status}.`);
+
+        usePrintedLines(payload.lines);
+        if (!payload.fitted) {
+            throw new Error(payload.reason || 'No printed table matching these markers was found on this sample.');
+        }
+
+        const geometry = payload.geometry ?? {};
+        const placed = new Map();
+        (geometry.columns ?? []).forEach((column) => placed.set(column.name.trim(), column.box));
+        const boxes = marker.toJSON().map((box) => {
+            const next = isColumn(box) ? placed.get(box.name.trim()) : null;
+            return next ? { ...box, x: next[0], y: next[1], w: next[2], h: next[3] } : box;
+        });
+        if (Array.isArray(geometry.ruled_ys) && geometry.ruled_ys.length >= 2) {
+            estimatedYs = new Set();
+            selectedRule = null;
+            ruledYs = normaliseRuledYs(geometry.ruled_ys);
+        }
+        replaceBoxes(boxes);
+    } catch (error) {
+        showBuilderError(error instanceof Error ? error.message : 'The sample could not be snapped to its table.');
+    } finally {
+        button.style.inlineSize = '';
+        button.style.blockSize = '';
+        button.classList.remove('is-loading');
+        button.removeAttribute('aria-busy');
+        button.disabled = false;
+    }
+}
+
+element('snapTableBtn', HTMLButtonElement).addEventListener('click', snapToTable);
+
 marker.setBoxes(cloneBoxes(initialBoxes));
 renderLedgerGrid();
 window.requestAnimationFrame(() => marker.resetZoom());

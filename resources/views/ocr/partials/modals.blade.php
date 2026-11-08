@@ -228,11 +228,8 @@
         <form class="modal-content" method="POST" action="" id="deleteForm">
             @csrf
             @method('DELETE')
-            <div class="modal-body text-center p-4 p-sm-5">
-                <span class="ocr-delete-icon" aria-hidden="true">
-                    <i class="icon-base bx bx-trash"></i>
-                </span>
-                <h2 class="modal-title h5 mt-3 mb-2" id="deleteModelTitle">Delete this model?</h2>
+            <div class="modal-body p-4">
+                <h2 class="modal-title h5 mb-3" id="deleteModelTitle">Delete this model?</h2>
                 <p class="mb-1">
                     <strong id="deleteLabel"></strong> will be removed from disk.
                 </p>
@@ -249,7 +246,7 @@
                     by running <span class="font-monospace">ml/download_trocr.py</span>.
                 </div>
             </div>
-            <div class="modal-footer justify-content-center pt-0">
+            <div class="modal-footer pt-0">
                 <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Keep model</button>
                 <button type="submit" class="btn btn-danger" id="delete-submit">
                     <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>

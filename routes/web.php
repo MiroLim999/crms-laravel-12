@@ -238,6 +238,9 @@ Route::middleware('auth')->group(function () {
         // Suggests a ledger grid from the printed rules on a sample page.
         Route::post('templates/detect-grid', [DocumentTemplateController::class, 'detectGrid'])
             ->name('templates.detect-grid');
+        // Snap to table: fit the builder's markers onto the sample's printed table.
+        Route::post('templates/snap', [DocumentTemplateController::class, 'snap'])
+            ->name('templates.snap');
         // Outlines the sample with the layout being built, as Detect would for Staff.
         // It runs in the queue (about half a minute); the builder polls the status.
         Route::post('templates/test-layout', [DocumentTemplateController::class, 'testLayout'])

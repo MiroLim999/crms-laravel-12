@@ -28,6 +28,7 @@
             'baselineRuledYs' => $ruledYs,
             'detectGridUrl' => route('templates.detect-grid'),
             'testLayoutUrl' => route('templates.test-layout'),
+            'snapUrl' => route('templates.snap'),
             'csrf' => csrf_token(),
             'initialGroupingMode' => $currentGroupingMode,
             'baselineGroupingMode' => $template?->grouping_mode ?? 'auto',
@@ -178,6 +179,14 @@
                                         <div><span><kbd>Shift</kbd> + drag a grip</span><small>Move every row line</small></div>
                                     </div>
                                 </div>
+
+                                <button type="button" class="btn btn-sm btn-outline-primary marker-snap-button"
+                                        id="snapTableBtn"
+                                        title="Fit the column and row markers onto the sample's printed table lines">
+                                    <i class="icon-base bx bx-grid-alt icon-sm me-1" aria-hidden="true"></i>
+                                    <span>Snap to table</span>
+                                    <span class="spinner-border marker-snap-spinner" aria-hidden="true"></span>
+                                </button>
 
                                 <button type="button" class="btn btn-sm btn-outline-secondary marker-reset-button" id="resetFieldsBtn"
                                         title="Restore the saved layout and document view" disabled>

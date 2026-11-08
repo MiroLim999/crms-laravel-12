@@ -631,6 +631,7 @@
                                     <span><small>Model</small><code id="summaryModel">&mdash;</code></span>
                                     <span><small>Confidence</small><strong id="summaryConfidence">&mdash;</strong></span>
                                     <span><small>Review</small><strong id="summaryReview">&mdash;</strong></span>
+                                    <span><small>Scan time</small><strong id="summaryScanTime">&mdash;</strong></span>
                                 </div>
 
                                 <div class="validation-progress-summary" aria-live="polite">
@@ -816,6 +817,28 @@
                         <button type="button" class="btn btn-primary" id="nextPageContinueBtn">
                             Next page
                             <i class="icon-base bx bx-right-arrow-alt icon-sm ms-1" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- The last record was saved: stay on Scan, no redirect to Records. --}}
+    <div class="modal fade" id="recordSavedModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"
+        aria-labelledby="recordSavedModalTitle" aria-describedby="recordSavedModalDescription" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
+            <div class="modal-content leave-scan-modal">
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-success" aria-hidden="true">
+                        <i class="icon-base bx bx-check"></i>
+                    </span>
+                    <h5 class="modal-title" id="recordSavedModalTitle">Saved</h5>
+                    <p class="leave-scan-modal__text mb-2" id="recordSavedModalDescription">The record was saved.</p>
+                    <p class="leave-scan-modal__text" id="recordSavedModalTime"></p>
+                    <div class="leave-scan-modal__actions">
+                        <button type="button" class="btn btn-primary" id="recordSavedScanBtn">
+                            <i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i>Scan another
                         </button>
                     </div>
                 </div>
@@ -3096,7 +3119,7 @@
                     chip.setAttribute('role', 'listitem');
                     chip.disabled = !canInteract;
                     chip.draggable = canInteract && batchState.items.length > 1;
-                    chip.title = canInteract ? `${item.name} — Drag to change priority, or click to delete / open` : item.name;
+                    chip.title = canInteract ? `${item.name} — Drag to change priority, or right-click to delete` : item.name;
                     chip.innerHTML = `
                         <span class="batch-queue-chip__index">${index + 1}</span>
                         <span class="batch-queue-chip__name">${item.name}</span>
@@ -3159,7 +3182,14 @@
                         window.setTimeout(() => { batchChipDidDrag = false; }, 60);
                     });
 
-                    chip.addEventListener('click', () => {
+                    // Left click opens the document; right click offers Delete.
+                    chip.addEventListener('click', async () => {
+                        if (batchChipDidDrag || !canInteract || index === batchState.currentIndex) return;
+                        await switchToBatchItem(index);
+                    });
+
+                    chip.addEventListener('contextmenu', (event) => {
+                        event.preventDefault();
                         if (batchChipDidDrag || !canInteract) return;
                         openBatchDocumentModal(index);
                     });
@@ -3186,26 +3216,14 @@
             const openBtn = document.getElementById('batchDocOpenBtn');
 
             if (titleEl) titleEl.textContent = `Priority #${index + 1} · ${item.name}`;
-            if (descEl) {
-                descEl.textContent = index === batchState.currentIndex
-                    ? `Remove "${item.name}" from the batch queue?`
-                    : `Remove "${item.name}" from the batch queue, or open it to work on it now.`;
-            }
-            if (openBtn) {
-                openBtn.classList.toggle('d-none', index === batchState.currentIndex || item.status === 'imported');
-            }
+            if (descEl) descEl.textContent = `Remove "${item.name}" from the batch queue?`;
+            if (openBtn) openBtn.classList.add('d-none');
             if (modalEl) {
                 window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
             }
         }
 
-        document.getElementById('batchDocOpenBtn')?.addEventListener('click', async () => {
-            const modalEl = document.getElementById('batchDocumentModal');
-            if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
-            if (selectedBatchModalIndex === null) return;
-            const idx = selectedBatchModalIndex;
-            selectedBatchModalIndex = null;
-
+        async function switchToBatchItem(idx) {
             if (batchState.phase === 'queuing' && idx !== batchState.currentIndex) {
                 const currentItem = batchState.items[batchState.currentIndex];
                 if (currentItem) {
@@ -3217,7 +3235,7 @@
             } else if (batchState.phase === 'verifying' && idx !== batchState.currentIndex) {
                 await openBatchVerifyItem(idx);
             }
-        });
+        }
 
         document.getElementById('confirmDeleteBatchDocBtn')?.addEventListener('click', async () => {
             const modalEl = document.getElementById('batchDocumentModal');
@@ -3503,6 +3521,7 @@
             const total = itemsToScan.length;
             if (total === 0) return;
 
+            scanStartedAt = performance.now();
             batchState.phase = 'scanning';
             itemsToScan.forEach((it) => {
                 it.status = 'scanning';
@@ -3665,6 +3684,7 @@
                 el('ocrProgressFields').textContent = `${total} of ${total} documents scanned`;
                 await completeOcrProgress('Batch scan complete', 'Opening the first document for validation.');
                 batchState.phase = 'verifying';
+                finishScanTimer();
                 await openBatchVerifyItem(0);
             } catch (error) {
                 if (!run.cancelled) {
@@ -3688,9 +3708,62 @@
             }
         }
 
+        // How long the last scan took (from pressing Scan with OCR to the results).
+        let scanStartedAt = null;
+        let lastScanMs = null;
+
+        function formatScanDuration(ms) {
+            const seconds = Math.max(0, Math.round(ms / 1000));
+            const minutes = Math.floor(seconds / 60);
+            return minutes > 0 ? `${minutes}m ${String(seconds % 60).padStart(2, '0')}s` : `${seconds}s`;
+        }
+
+        function finishScanTimer() {
+            if (scanStartedAt === null) return;
+            lastScanMs = performance.now() - scanStartedAt;
+            scanStartedAt = null;
+            el('summaryScanTime').textContent = formatScanDuration(lastScanMs);
+        }
+
+        // The item whose rows are on screen, so its entries can be kept when switching files.
+        let verifyRenderedItem = null;
+
+        function saveVerifyState(item) {
+            if (!item || item !== verifyRenderedItem) return;
+            const saved = {};
+            validationRowByIndex.forEach((row, index) => {
+                const input = row.querySelector('.verified');
+                const checkbox = row.querySelector('.validation-verified');
+                if (!(input instanceof HTMLInputElement) || !(checkbox instanceof HTMLInputElement)) return;
+                saved[index] = { value: input.value, verified: checkbox.checked };
+            });
+            item.verifyState = saved;
+        }
+
+        function restoreVerifyState(item) {
+            const saved = item?.verifyState;
+            if (!saved) return;
+            Object.entries(saved).forEach(([index, entry]) => {
+                const row = validationRowByIndex.get(Number(index));
+                const input = row?.querySelector('.verified');
+                const checkbox = row?.querySelector('.validation-verified');
+                if (!(input instanceof HTMLInputElement) || !(checkbox instanceof HTMLInputElement)) return;
+                if (input.value !== entry.value) {
+                    input.value = entry.value;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                checkbox.checked = Boolean(entry.verified) && entry.value.trim() !== '';
+                row.classList.toggle('is-verified', checkbox.checked);
+            });
+            clearValidationSubmitError();
+            updateVerificationSummary();
+        }
+
         async function openBatchVerifyItem(index) {
             const item = batchState.items[index];
             if (!item || !item.page) return;
+
+            saveVerifyState(batchState.items[batchState.currentIndex]);
 
             batchState.currentIndex = index;
             if (item.status !== 'imported') {
@@ -3717,6 +3790,8 @@
 
             clearValidationSubmitError();
             renderVerifyRows();
+            verifyRenderedItem = item;
+            restoreVerifyState(item);
             showGridNotes(page);
             showStep('verify');
             prepareValidationComparison();
@@ -4809,6 +4884,7 @@
             let progress = null;
             let timeoutId = null;
 
+            scanStartedAt = performance.now();
             scanInProgress = true;
             clearOcrError();
             button.disabled = true;
@@ -4885,6 +4961,7 @@
                 renderVerifyRows();
                 showGridNotes(page);
                 await completeOcrProgress();
+                finishScanTimer();
                 showStep('verify');
                 try {
                     prepareValidationComparison();
@@ -6829,6 +6906,22 @@
             window.bootstrap.Modal.getOrCreateInstance(el('nextPageModal')).show();
         }
 
+        function showRecordSaved() {
+            el('recordSavedModalDescription').textContent = batchState.active
+                ? 'All the documents in this batch were saved.'
+                : 'The record was saved.';
+            el('recordSavedModalTime').textContent = lastScanMs === null
+                ? ''
+                : `Scan took ${formatScanDuration(lastScanMs)}.`;
+            window.bootstrap.Modal.getOrCreateInstance(el('recordSavedModal')).show();
+        }
+
+        // Back to a fresh Scan page; the record itself stays in Records.
+        el('recordSavedScanBtn').addEventListener('click', () => {
+            leaving = true;
+            window.location.assign(@json(route('documents.create')));
+        });
+
         el('nextPageModal').addEventListener('shown.bs.modal', () => el('nextPageContinueBtn').focus());
 
         /**
@@ -7083,8 +7176,8 @@
                     return;
                 }
 
-                button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved. Opening record...';
-                window.location.assign(payload.redirect);
+                button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved';
+                showRecordSaved();
             } catch (error) {
                 console.error('Record submission failed:', error);
                 const message = error.name === 'AbortError'
