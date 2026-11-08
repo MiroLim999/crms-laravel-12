@@ -2311,6 +2311,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     display: flex;
   }
 
+  // The arrows are the same 30 px squares as the zoom buttons.
+  .btn-icon {
+    justify-content: center;
+    padding: 0;
+  }
+
   .marker-page-select {
     inline-size: auto;
     min-inline-size: 8.75rem;

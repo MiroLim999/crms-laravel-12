@@ -35,17 +35,17 @@
                             {{-- A PDF of many pages: one page is aligned, read and saved at a time. ✓: saved already. --}}
                             <div class="input-group input-group-sm marker-page-controls d-none" role="group" id="scanPageBar"
                                  aria-label="Pages of this PDF">
-                                <button type="button" class="btn btn-icon btn-outline-secondary" id="scanPagePrevBtn"
+                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="scanPagePrevBtn"
                                         aria-label="Previous page" title="Previous page">
                                     <i class="icon-base bx bx-chevron-left icon-sm" aria-hidden="true"></i>
                                 </button>
                                 <div class="dropdown marker-page-dropdown">
-                                    <button type="button" class="btn btn-outline-secondary dropdown-toggle marker-page-select"
+                                    <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle marker-tool-button marker-page-select"
                                             id="scanPageSelect" data-bs-toggle="dropdown" aria-expanded="false"
                                             aria-label="Page to read"></button>
                                     <div class="dropdown-menu marker-page-menu" id="scanPageMenu"></div>
                                 </div>
-                                <button type="button" class="btn btn-icon btn-outline-secondary" id="scanPageNextBtn"
+                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="scanPageNextBtn"
                                         aria-label="Next page" title="Next page">
                                     <i class="icon-base bx bx-chevron-right icon-sm" aria-hidden="true"></i>
                                 </button>
