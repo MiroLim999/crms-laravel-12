@@ -416,8 +416,7 @@
                         <header class="validation-pane__header">
                             <div class="min-w-0">
                                 <span class="validation-pane__eyebrow">Source</span>
-                                <h3 class="h5 mb-1" id="originalDocumentTitle">Original document</h3>
-                                <span class="validation-file-name" id="validationFileName">Document</span>
+                                <h3 class="h5 mb-0" id="originalDocumentTitle">Original document</h3>
                             </div>
 
                             <div class="validation-pane__tools">
@@ -4355,7 +4354,6 @@
         lineOverlay.setLines(processedPage, cropped);
         validationMarker.resetZoom();
         el('validationDocViewport').scrollTo({ top: 0, left: 0 });
-        el('validationFileName').textContent = scanLabel();
 
         window.requestAnimationFrame(() => {
             validationMarker.layout();
@@ -4769,26 +4767,27 @@
         }
 
         if (item.cropDeleted) {
-            // Nothing to check until the field is drawn again and read.
+            // Nothing to check until the field is drawn again: one clean line
+            // with the name, what happened, and the one thing to do.
             row.classList.add('is-crop-deleted');
-            requiredPart(row, '.validation-field__tools').remove();
-            // The old crop's score means nothing now.
-            badge.remove();
+            ['.validation-field__reading', '.validation-field__hint', '.validation-field__type',
+                '.validation-field__flag', '.validation-field__ocr-error'].forEach((selector) => row.querySelector(selector)?.remove());
+            row.classList.remove('has-line-flag', 'has-ocr-error', 'needs-review');
+
+            const entry = requiredPart(row, '.validation-field__entry');
             const placeholder = document.createElement('span');
             placeholder.className = 'validation-field__crop validation-field__crop-deleted';
             placeholder.innerHTML = '<i class="icon-base bx bx-trash" aria-hidden="true"></i>Crop deleted';
             const picture = row.querySelector('img.validation-field__crop');
             if (picture) picture.replaceWith(placeholder);
-            else requiredPart(row, '.validation-field__entry').prepend(placeholder);
-            requiredPart(row, '.validation-field__reading-text').textContent = 'Not read yet';
+            else entry.prepend(placeholder);
+
+            // The value box stays in the row (the list reads it) but is not shown.
             input.value = '';
             input.disabled = true;
-            input.placeholder = 'Draw the field again';
+            input.classList.add('d-none');
             checkbox.disabled = true;
-            requiredPart(row, '.validation-field__ocr-error').classList.add('d-none');
-            row.classList.remove('has-ocr-error', 'needs-review');
 
-            const flag = requiredPart(row, '.validation-field__flag');
             const again = document.createElement('button');
             again.type = 'button';
             again.className = 'btn btn-sm btn-danger validation-field__draw-again';
@@ -4798,7 +4797,7 @@
                 event.stopPropagation();
                 startRedrawField(index);
             });
-            flag.append(again);
+            entry.append(again);
         }
 
         row.addEventListener('click', () => activateValidationField(index, 'row'));
@@ -5474,7 +5473,9 @@
                 verifyLineUrl(config.lineRedrawUrl, item.lineId), 'POST', { needed: true },
             );
             if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
+            const fromHeight = validationRow(index)?.offsetHeight ?? 0;
             applyLineUpdate(payload.line, payload.flags ?? {});
+            animateFieldChange(item.lineId, fromHeight);
             pushVerifyUndo({ kind: 'cropDeleted', id: item.lineId });
             const fresh = cropped.findIndex((candidate) => candidate.lineId === item.lineId);
             if (fresh >= 0) startRedrawField(fresh);
@@ -5483,6 +5484,28 @@
             if (button instanceof HTMLButtonElement) button.disabled = false;
             setValidationFieldError(index, error.message || 'The crop could not be deleted.');
         }
+    }
+
+    /**
+     * Ease a field's row from its old height to its new one and flash its new
+     * state, so deleting (or putting back) a crop moves instead of jumping.
+     * `fromHeight` is the row's height before the list was rebuilt.
+     */
+    function animateFieldChange(lineId, fromHeight) {
+        const index = cropped.findIndex((candidate) => candidate.lineId === lineId);
+        const row = index >= 0 ? validationRow(index) : null;
+        if (!row || !fromHeight || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+        row.classList.add('is-changing');
+        const toHeight = row.offsetHeight;
+        if (Math.abs(toHeight - fromHeight) > 1) {
+            row.style.overflow = 'hidden';
+            row.animate(
+                [{ height: `${fromHeight}px` }, { height: `${toHeight}px` }],
+                { duration: 360, easing: 'cubic-bezier(.22, .8, .24, 1)' },
+            ).finished.catch(() => {}).finally(() => { row.style.overflow = ''; });
+        }
+        window.setTimeout(() => row.classList.remove('is-changing'), 700);
     }
 
     function startRedrawField(index) {
@@ -5540,7 +5563,9 @@
             if (!payload?.line) throw new Error(responseErrorMessage(response, payload));
             setRedrawSaving(false);
             stopRedrawField();
+            const fromHeight = validationRow(cropped.findIndex((candidate) => candidate.lineId === lineId))?.offsetHeight ?? 0;
             applyLineUpdate(payload.line, payload.flags ?? {});
+            animateFieldChange(lineId, fromHeight);
             if (!response.ok) {
                 showOcrLineWarning(payload.line.id, payload.message || 'The box was saved, but TrOCR could not read it. Type the value.');
             }
@@ -5619,9 +5644,17 @@
             } else if (redrawBox) {
                 saveRedrawnField();
             }
-        } else if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z' && lineOverlay.isDrawing()) {
+        } else if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z') {
             event.preventDefault();
-            lineOverlay.undoDrawStep();
+            // Ctrl+Z takes back the newest thing first: a point of the drawing,
+            // then the waiting box, then the deleted crop itself.
+            if (lineOverlay.isDrawing() && lineOverlay.undoDrawStep()) return;
+            if (redrawBox) {
+                setRedrawBox(null);
+                armRedrawDrawing();
+                return;
+            }
+            undoVerifyChange();
         }
     });
 
@@ -5661,7 +5694,9 @@
                 if (redrawingLineId === entry.id) stopRedrawField();
                 const { response, payload } = await sendLineRequest(verifyLineUrl(config.lineRedrawUrl, entry.id), 'POST', { needed: false });
                 if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
+                const fromHeight = validationRow(cropped.findIndex((candidate) => candidate.lineId === entry.id))?.offsetHeight ?? 0;
                 applyLineUpdate(payload.line, payload.flags ?? {});
+                animateFieldChange(entry.id, fromHeight);
             } else if (entry.kind === 'moved') {
                 const { response, payload } = await sendLineRequest(
                     verifyLineUrl(config.linePlaceUrl, entry.id), 'PATCH', { row: entry.row, ...entry.column },
