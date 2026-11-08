@@ -4788,16 +4788,35 @@
             input.classList.add('d-none');
             checkbox.disabled = true;
 
-            const again = document.createElement('button');
-            again.type = 'button';
-            again.className = 'btn btn-sm btn-danger validation-field__draw-again';
-            again.innerHTML = '<i class="icon-base bx bx-edit-alt icon-sm me-1" aria-hidden="true"></i>Draw again';
+            // What to do next, in step with the Draw again bar above the page
+            // (see showRedrawState): Draw again, then draw on the page, then
+            // Save and re-read.
+            const actions = document.createElement('div');
+            actions.className = 'validation-field__redraw';
+            actions.innerHTML = `
+                <button type="button" class="btn btn-sm btn-danger validation-field__draw-again">
+                    <i class="icon-base bx bx-edit-alt icon-sm me-1" aria-hidden="true"></i>Draw again
+                </button>
+                <span class="validation-field__redraw-hint" role="status">
+                    <i class="icon-base bx bx-chevron-left" aria-hidden="true"></i>Draw a box on the page
+                </span>
+                <button type="button" class="btn btn-sm btn-primary validation-field__redraw-save">
+                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
+                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                    Save and re-read
+                </button>`;
+            const again = requiredPart(actions, '.validation-field__draw-again');
             again.setAttribute('aria-label', `Draw ${displayName} again`);
             again.addEventListener('click', (event) => {
                 event.stopPropagation();
                 startRedrawField(index);
             });
-            entry.append(again);
+            requiredPart(actions, '.validation-field__redraw-save').addEventListener('click', (event) => {
+                event.stopPropagation();
+                saveRedrawnField();
+            });
+            row.dataset.redraw = 'idle';
+            entry.append(actions);
         }
 
         row.addEventListener('click', () => activateValidationField(index, 'row'));
@@ -4865,16 +4884,20 @@
         requiredPart(section, '.validation-record-group__copy strong').textContent = group.label;
         requiredPart(section, '.validation-record-group__copy small').textContent = groupIdentity(group);
 
-        const reviewCount = group.indexes.filter((index) => (
+        // A deleted crop is not something to review but something to do.
+        const redrawCount = group.indexes.filter((index) => cropped[index]?.cropDeleted).length;
+        const reviewCount = group.indexes.filter((index) => !cropped[index]?.cropDeleted && (
             normaliseConfidence(readings[index]) < config.threshold || cropped[index]?.needsReview
         )).length;
         const missing = missingRequired(group);
         const review = requiredPart(section, '.validation-record-group__review');
         review.textContent = [
+            redrawCount > 0 ? `${redrawCount} to draw again` : null,
             reviewCount > 0 ? `${reviewCount} to review` : null,
             missing.length > 0 ? `${missing.length} missing` : null,
         ].filter(Boolean).join(' · ') || 'Ready to review';
         review.classList.toggle('has-review', reviewCount > 0 || missing.length > 0);
+        review.classList.toggle('has-redraw', redrawCount > 0);
 
         const body = requiredPart(section, '.validation-record-group__body');
         if (missing.length > 0) {
@@ -5450,8 +5473,10 @@
     /** The box for the field, shown on the page until it is saved; null clears it. */
     function setRedrawBox(polygon) {
         redrawBox = polygon;
-        lineOverlay.setPending(polygon ? [polygon] : []);
+        // One box for one field: no number on it.
+        lineOverlay.setPending(polygon ? [polygon] : [], { numbered: false });
         el('redrawFieldSave').disabled = !polygon || savingRedraw;
+        showRedrawState();
     }
 
     /** Save and re-read: a spinner in place of the tick while the box is cropped and read. */
@@ -5463,6 +5488,7 @@
         button.querySelector('.spinner-border')?.classList.toggle('d-none', !saving);
         el('redrawFieldCancel').disabled = saving;
         el('redrawFieldToolbar').querySelectorAll('input[name="redrawFieldMode"]').forEach((input) => { input.disabled = saving; });
+        showRedrawState();
     }
 
     async function deleteFieldCrop(index) {
@@ -5484,6 +5510,22 @@
             if (button instanceof HTMLButtonElement) button.disabled = false;
             setValidationFieldError(index, error.message || 'The crop could not be deleted.');
         }
+    }
+
+    /**
+     * Each deleted row's next step, in step with the Draw again bar: 'idle'
+     * (Draw again), 'drawing' (draw a box on the page), 'ready' (Save and
+     * re-read) or 'saving' (its spinner).
+     */
+    function showRedrawState() {
+        el('verifyRows').querySelectorAll('.validation-field.is-crop-deleted').forEach((row) => {
+            const item = cropped[Number(row.dataset.fieldIndex)];
+            const current = item && item.lineId === redrawingLineId;
+            const state = !current ? 'idle' : savingRedraw ? 'saving' : redrawBox ? 'ready' : 'drawing';
+            row.dataset.redraw = state;
+            const save = row.querySelector('.validation-field__redraw-save');
+            if (save instanceof HTMLButtonElement) save.disabled = state === 'saving';
+        });
     }
 
     /**
@@ -5522,6 +5564,11 @@
             : (item.heading || item.label);
         slideToolbar(el('redrawFieldToolbar'), true);
         armRedrawDrawing();
+        showRedrawState();
+        // Bring its old outline into view once the bar has slid down.
+        window.setTimeout(() => {
+            if (redrawingLineId === item.lineId) revealValidationMarker(index);
+        }, 300);
     }
 
     /** Close the tool; the field still waits to be drawn again. */
@@ -5531,6 +5578,7 @@
         setRedrawBox(null);
         if (lineOverlay.isAddingNew()) lineOverlay.cancelEdit();
         slideToolbar(el('redrawFieldToolbar'), false);
+        showRedrawState();
     }
 
     /** A box was closed on the page: it waits for Save and re-read; another drag replaces it. */

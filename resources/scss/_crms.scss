@@ -4261,6 +4261,71 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   display: none;
 }
 
+// What the deleted row offers next (see showRedrawState).
+.validation-field__redraw {
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
+
+  > * {
+    display: none;
+  }
+
+  .validation-field__redraw-save .spinner-border {
+    display: none;
+  }
+}
+
+.validation-field[data-redraw="idle"] .validation-field__draw-again,
+.validation-field[data-redraw="drawing"] .validation-field__redraw-hint,
+.validation-field[data-redraw="ready"] .validation-field__redraw-save,
+.validation-field[data-redraw="saving"] .validation-field__redraw-save {
+  display: inline-flex;
+  align-items: center;
+}
+
+.validation-field[data-redraw="saving"] .validation-field__redraw-save {
+  .bx-check {
+    display: none;
+  }
+
+  .spinner-border {
+    display: inline-block;
+  }
+}
+
+.validation-field__redraw-save {
+  padding: .3rem .7rem;
+  font-size: .75rem;
+  white-space: nowrap;
+}
+
+// "Draw a box on the page", pointing left at the page, gently pulsing.
+@keyframes redraw-hint-pulse {
+  50% {
+    opacity: .55;
+  }
+}
+
+.validation-field__redraw-hint {
+  gap: .15rem;
+  color: var(--bs-danger);
+  font-size: .75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: redraw-hint-pulse 1.6s ease-in-out infinite;
+
+  .bx {
+    font-size: 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .validation-field__redraw-hint {
+    animation: none;
+  }
+}
+
 // Draw again: red, where Add missed field is blue.
 .redraw-field-toolbar {
   background: rgba(var(--bs-danger-rgb), .06);
@@ -4554,6 +4619,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   &.has-review {
     color: var(--crms-warning-text-d);
+  }
+
+  // A deleted crop waiting to be drawn again outranks the rest.
+  &.has-redraw {
+    color: var(--bs-danger);
+    font-weight: 600;
   }
 }
 

@@ -250,10 +250,14 @@ export class LineOverlay {
      * numbered in the order they were drawn. An empty list clears them.
      *
      * @param {number[][][]} polygons  Page pixels.
+     * @param {{numbered?: boolean}} [options]  false: a single box for one
+     *        field (Verify's Draw again) needs no number.
      */
-    setPending(polygons) {
+    setPending(polygons, { numbered = true } = {}) {
         const size = Math.max(9, this.height / 90);
         this.pendingLayer.replaceChildren(...polygons.flatMap((polygon, index) => {
+            const shape = svg('polygon', { class: 'line-pending__shape', points: polygonPoints(polygon) });
+            if (!numbered) return [shape];
             const bounds = polygonBounds(polygon);
             const number = svg('text', {
                 class: 'line-pending__number',
@@ -263,7 +267,7 @@ export class LineOverlay {
                 'aria-hidden': 'true',
             });
             number.textContent = String(index + 1);
-            return [svg('polygon', { class: 'line-pending__shape', points: polygonPoints(polygon) }), number];
+            return [shape, number];
         }));
     }
 
