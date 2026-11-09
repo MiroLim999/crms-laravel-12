@@ -934,26 +934,32 @@
     {{-- Queued batch document options (Delete / Open) --}}
     <div class="modal fade" id="batchDocumentModal" tabindex="-1" aria-labelledby="batchDocumentModalTitle"
         aria-describedby="batchDocumentModalDescription" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog" style="max-inline-size: min(25rem, calc(100% - 2rem));">
             <div class="modal-content leave-scan-modal">
                 <div class="modal-body">
                     <span class="leave-scan-modal__icon bg-label-danger" aria-hidden="true">
                         <i class="icon-base bx bx-trash"></i>
                     </span>
-                    <h5 class="modal-title" id="batchDocumentModalTitle">Queued Document</h5>
+                    <h5 class="modal-title" id="batchDocumentModalTitle">Remove from batch queue?</h5>
                     <p class="leave-scan-modal__text" id="batchDocumentModalDescription">
-                        Remove this document from the batch queue?
+                        This document will be taken out of the batch.
                     </p>
 
+                    <div class="batch-delete-file">
+                        <i class="icon-base bx bx-file" aria-hidden="true"></i>
+                        <div class="min-w-0">
+                            <div class="batch-delete-file__name" id="batchDocumentName"></div>
+                            <div class="batch-delete-file__meta" id="batchDocumentMeta"></div>
+                        </div>
+                    </div>
+                    <ul class="batch-delete-notes" id="batchDocumentNotes"></ul>
+
                     <div class="leave-scan-modal__actions">
-                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">
-                            Cancel
+                        <button type="button" class="btn btn-secondary text-nowrap" id="batchDocCancelBtn" data-bs-dismiss="modal">
+                            Keep it
                         </button>
-                        <button type="button" class="btn btn-outline-primary d-none" id="batchDocOpenBtn">
-                            Open
-                        </button>
-                        <button type="button" class="btn btn-danger" id="confirmDeleteBatchDocBtn">
-                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>Delete
+                        <button type="button" class="btn btn-danger text-nowrap" id="confirmDeleteBatchDocBtn">
+                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>Remove from queue
                         </button>
                     </div>
                 </div>
@@ -3171,21 +3177,41 @@
                     const isCurrent = index === batchState.currentIndex;
                     const canInteract = batchState.phase !== 'scanning' && !(batchState.phase === 'verifying' && ['imported', 'rejected'].includes(item.status));
 
-                    const chip = document.createElement('button');
-                    chip.type = 'button';
-                    chip.className = `batch-queue-chip ${badgeInfo.cls}${isCurrent ? ' is-current' : ''}`;
+                    // The chip opens its document on click; the small × beside it removes it.
+                    const chip = document.createElement('div');
+                    chip.className = `batch-queue-chip ${badgeInfo.cls}${isCurrent ? ' is-current' : ''}${canInteract ? '' : ' is-locked'}`;
                     chip.setAttribute('role', 'listitem');
-                    chip.disabled = !canInteract;
                     chip.draggable = canInteract && batchState.items.length > 1;
-                    chip.title = canInteract ? `${item.name} — Drag to change priority, or click to delete / open` : item.name;
-                    chip.innerHTML = `
+
+                    const openBtn = document.createElement('button');
+                    openBtn.type = 'button';
+                    openBtn.className = 'batch-queue-chip__open';
+                    openBtn.disabled = !canInteract;
+                    openBtn.title = canInteract ? `${item.name} — Click to open, drag to change priority` : item.name;
+                    openBtn.innerHTML = `
                         <span class="batch-queue-chip__index">${index + 1}</span>
-                        <span class="batch-queue-chip__name">${item.name}</span>
+                        <span class="batch-queue-chip__name"></span>
                         <span class="batch-queue-chip__status">
                             <i class="icon-base bx ${badgeInfo.icon}" aria-hidden="true"></i>
                             <span>${badgeInfo.text}</span>
                         </span>
                     `;
+                    openBtn.querySelector('.batch-queue-chip__name').textContent = item.name;
+                    chip.appendChild(openBtn);
+
+                    if (canInteract) {
+                        const removeBtn = document.createElement('button');
+                        removeBtn.type = 'button';
+                        removeBtn.className = 'batch-queue-chip__remove';
+                        removeBtn.setAttribute('aria-label', `Remove ${item.name} from the queue`);
+                        removeBtn.title = 'Remove from queue';
+                        removeBtn.innerHTML = '<i class="icon-base bx bx-x" aria-hidden="true"></i>';
+                        removeBtn.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            openBatchDocumentModal(index);
+                        });
+                        chip.appendChild(removeBtn);
+                    }
 
                     chip.addEventListener('dragstart', (event) => {
                         if (!chip.draggable) return;
@@ -3240,9 +3266,9 @@
                         window.setTimeout(() => { batchChipDidDrag = false; }, 60);
                     });
 
-                    chip.addEventListener('click', () => {
+                    openBtn.addEventListener('click', () => {
                         if (batchChipDidDrag || !canInteract) return;
-                        openBatchDocumentModal(index);
+                        openBatchDocument(index);
                     });
 
                     chipsContainer.appendChild(chip);
@@ -3262,32 +3288,54 @@
 
             selectedBatchModalIndex = index;
             const modalEl = document.getElementById('batchDocumentModal');
-            const titleEl = document.getElementById('batchDocumentModalTitle');
-            const descEl = document.getElementById('batchDocumentModalDescription');
-            const openBtn = document.getElementById('batchDocOpenBtn');
+            const total = batchState.items.length;
+            const statusText = {
+                pending: 'Not aligned yet',
+                saving: 'Saving',
+                saved: 'Aligned and queued',
+                scanning: 'Being scanned',
+                ready: 'Scanned, waiting for validation',
+                verifying: 'Being validated',
+                failed: 'Failed',
+            }[item.status] || 'Queued';
 
-            if (titleEl) titleEl.textContent = `Priority #${index + 1} · ${item.name}`;
-            if (descEl) {
-                descEl.textContent = index === batchState.currentIndex
-                    ? `Remove "${item.name}" from the batch queue?`
-                    : `Remove "${item.name}" from the batch queue, or open it to work on it now.`;
+            const setText = (id, text) => {
+                const node = document.getElementById(id);
+                if (node) node.textContent = text;
+            };
+            setText('batchDocumentName', item.name);
+            setText('batchDocumentMeta', `Priority ${index + 1} of ${total} · ${statusText}`);
+
+            const notes = [];
+            if (index === batchState.currentIndex) notes.push('This is the document you are working on now. The next one in the queue opens in its place.');
+            if (['saved', 'ready', 'scanning', 'verifying'].includes(item.status) || item.pageId) {
+                notes.push('Its alignment and any scan results will be discarded.');
             }
-            if (openBtn) {
-                openBtn.classList.toggle('d-none', index === batchState.currentIndex || item.status === 'imported');
+            notes.push('The file on your computer is not changed. You can add it again later.');
+            const notesEl = document.getElementById('batchDocumentNotes');
+            if (notesEl) {
+                notesEl.innerHTML = '';
+                notes.forEach((text) => {
+                    const li = document.createElement('li');
+                    li.textContent = text;
+                    notesEl.appendChild(li);
+                });
             }
+
             if (modalEl) {
                 window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
             }
         }
 
-        document.getElementById('batchDocOpenBtn')?.addEventListener('click', async () => {
-            const modalEl = document.getElementById('batchDocumentModal');
-            if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
-            if (selectedBatchModalIndex === null) return;
-            const idx = selectedBatchModalIndex;
-            selectedBatchModalIndex = null;
+        document.getElementById('batchDocumentModal')?.addEventListener('shown.bs.modal', () => {
+            // Cancel is the safe default, so Enter never deletes by accident.
+            document.getElementById('batchDocCancelBtn')?.focus();
+        });
 
-            if (batchState.phase === 'queuing' && idx !== batchState.currentIndex) {
+        // Open a queued document straight from its chip.
+        async function openBatchDocument(idx) {
+            if (idx === batchState.currentIndex) return;
+            if (batchState.phase === 'queuing') {
                 const currentItem = batchState.items[batchState.currentIndex];
                 if (currentItem) {
                     currentItem.boxes = cloneBoxes(marker.toJSON());
@@ -3295,10 +3343,10 @@
                     currentItem.tilts = [...rowTilts];
                 }
                 await openBatchQueueItem(idx);
-            } else if (batchState.phase === 'verifying' && idx !== batchState.currentIndex) {
+            } else if (batchState.phase === 'verifying') {
                 await openBatchVerifyItem(idx);
             }
-        });
+        }
 
         document.getElementById('confirmDeleteBatchDocBtn')?.addEventListener('click', async () => {
             const modalEl = document.getElementById('batchDocumentModal');
@@ -5416,7 +5464,6 @@
         lineOverlay.setLines(processedPage, cropped);
         validationMarker.resetZoom();
         el('validationDocViewport').scrollTo({ top: 0, left: 0 });
-        el('validationFileName').textContent = scanLabel();
 
             window.requestAnimationFrame(() => {
                 validationMarker.layout();

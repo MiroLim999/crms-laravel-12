@@ -1844,9 +1844,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .batch-queue-chip {
   display: inline-flex;
   flex: 0 0 auto;
-  align-items: center;
-  gap: .35rem;
-  padding: .2rem .45rem;
+  align-items: stretch;
   color: var(--bs-body-color);
   background: var(--bs-paper-bg);
   border: 1px solid var(--bs-border-color);
@@ -1856,6 +1854,46 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   cursor: pointer;
   user-select: none;
   transition: border-color .15s ease, background-color .15s ease, opacity .15s ease, transform .12s ease;
+
+  // The part that opens the document.
+  .batch-queue-chip__open {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    padding: .2rem .45rem;
+    color: inherit;
+    font: inherit;
+    line-height: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: .375rem 0 0 .375rem;
+    cursor: inherit;
+  }
+
+  // The × that removes it from the queue.
+  .batch-queue-chip__remove {
+    display: inline-grid;
+    place-items: center;
+    inline-size: 1.5rem;
+    padding: 0;
+    color: var(--bs-secondary-color);
+    background: transparent;
+    border: 0;
+    border-inline-start: 1px solid var(--bs-border-color);
+    border-radius: 0 .375rem .375rem 0;
+    cursor: pointer;
+    transition: color .15s ease, background-color .15s ease;
+
+    .bx {
+      font-size: .95rem;
+    }
+
+    &:hover,
+    &:focus-visible {
+      color: var(--bs-danger);
+      background: rgba(255, 62, 29, .1);
+    }
+  }
 
   &[draggable="true"] {
     cursor: grab;
@@ -1876,7 +1914,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     background: rgba(var(--bs-primary-rgb), .06);
   }
 
-  &:hover:not(:disabled) {
+  &:hover:not(.is-locked) {
     border-color: rgba(var(--bs-primary-rgb), .45);
   }
 
@@ -1890,7 +1928,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     }
   }
 
-  &:disabled {
+  &.is-locked {
     cursor: default;
     opacity: .85;
   }
@@ -2852,6 +2890,51 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: .75rem;
+}
+
+// Batch queue: the file being removed, and what removing it means.
+.batch-delete-file {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin-block-end: .85rem;
+  padding: .7rem .85rem;
+  text-align: start;
+  background: rgba(var(--crms-ink-rgb), .04);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+
+  >.bx {
+    flex: none;
+    color: var(--bs-danger);
+    font-size: 1.5rem;
+  }
+}
+
+.batch-delete-file__name {
+  overflow: hidden;
+  font-size: .85rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-delete-file__meta {
+  margin-block-start: .1rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+}
+
+.batch-delete-notes {
+  margin: 0 0 1.5rem;
+  padding-inline-start: 1.1rem;
+  color: var(--bs-secondary-color);
+  font-size: .8rem;
+  text-align: start;
+
+  li+li {
+    margin-block-start: .25rem;
+  }
 }
 
 // Verify: asks before a record is submitted without required fields.
