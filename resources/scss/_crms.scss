@@ -3630,8 +3630,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// The Align toolbar's Grid lines switch: off hides the row lines and the
-// column frames (they keep their places), so the page's own lines show.
+// The Align and Template Builder toolbars' Grid lines switch: off hides the
+// row lines and every field box (they keep their places), so the page shows
+// as scanned.
 .marker-grid-toggle {
   display: inline-flex;
   align-items: center;
@@ -3658,8 +3659,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     display: none;
   }
 
-  .field-box.is-column,
-  .field-box.is-column * {
+  .field-box,
+  .field-box * {
     visibility: hidden !important;
   }
 }
