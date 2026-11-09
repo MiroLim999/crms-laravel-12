@@ -2343,10 +2343,79 @@ def _rules_tilt(h_rules):
     return float(math.degrees(math.atan(slope)))
 
 
+# A gap in a table's row rules this many rows tall at most is taken for rules
+# the page lost (faint, creased, worn away), not for the end of the table.
+MAX_BRIDGED_ROWS = 4
+
+
+def _bridge_missing_rules(rules, ys):
+    """Row rules the detector missed inside a table, put back where they belong.
+
+    On a worn or creased page a few row rules come out too faint to find, and
+    the gap they leave - two, three or four rows tall - would cut the evenly
+    ruled run the table body is found by in two. Such a gap is split into
+    rows of equal height when ordinary row gaps lie on both sides of it in the
+    same unbroken stretch: past the table's first or last rule a gap of that
+    size is the header, a margin or the paper below, never lost rows.
+
+    `rules` and `ys` go together (sorted by y, in pixels); a line put back
+    borrows the rule above it for its extent. Returns both, lines included.
+    """
+    if len(ys) < 4:
+        return rules, ys
+    gaps = np.diff(ys)
+    typical = float(np.median(gaps))
+    if typical <= 0:
+        return rules, ys
+    # 1: a row, k >= 2: k rows with their rules missing, 0: anything else.
+    # A gap is measured against the rows around it: rows lower on a page
+    # photographed at a slant are a little shorter than those at its top.
+    normal = [0.75 * typical <= gap <= 1.25 * typical for gap in gaps]
+    kinds = []
+    for i, gap in enumerate(gaps):
+        if normal[i]:
+            kinds.append(1)
+            continue
+        near = [gaps[j] for j in range(max(0, i - 3), min(len(gaps), i + 4)) if normal[j]]
+        row = float(np.median(near)) if near else typical
+        k = int(round(gap / row))
+        kinds.append(k if 2 <= k <= MAX_BRIDGED_ROWS and abs(gap / k - row) <= 0.12 * row else 0)
+    # Only gaps inside a stretch, between ordinary rows, are bridged.
+    start = 0
+    while start < len(kinds):
+        if kinds[start] == 0:
+            start += 1
+            continue
+        end = start
+        while end + 1 < len(kinds) and kinds[end + 1] != 0:
+            end += 1
+        lo, hi = start, end
+        while lo <= hi and kinds[lo] >= 2:
+            kinds[lo] = 0
+            lo += 1
+        while hi >= lo and kinds[hi] >= 2:
+            kinds[hi] = 0
+            hi -= 1
+        start = end + 1
+    if not any(k >= 2 for k in kinds):
+        return rules, ys
+    out_rules, out_ys = [rules[0]], [ys[0]]
+    for k, (rule, y) in enumerate(zip(rules[1:], ys[1:])):
+        if kinds[k] >= 2:
+            step = (y - ys[k]) / kinds[k]
+            for part in range(1, kinds[k]):
+                out_rules.append(rules[k])
+                out_ys.append(ys[k] + part * step)
+        out_rules.append(rule)
+        out_ys.append(y)
+    return out_rules, out_ys
+
+
 def detect_grid(page):
     """Printed rules on a page: a template sample, or a document being scanned.
 
-    Suggests ruled_ys (the longest run of evenly spaced row rules), columns
+    Suggests ruled_ys (the longest run of evenly spaced row rules, with rules
+    a worn page lost inside it put back: see _bridge_missing_rules), columns
     (the spans between vertical rules inside that run) and frame_bottom
     (where those column rules end: the bottom of the table), all as page
     fractions. `page` is a path or a PIL image. Also says how far the page's
@@ -2363,7 +2432,9 @@ def detect_grid(page):
 
     suggestion = {"ruled_ys": [], "columns": [], "estimated_ys": 0}
     centre = width / 2
-    rows = sorted(h_rules, key=lambda r: r["a"] + r["b"] * centre)
+    # The paper's own top and bottom edge can show as a rule; it is no row's.
+    rows = sorted((r for r in h_rules if 0.004 * height < r["a"] + r["b"] * centre < 0.996 * height),
+                  key=lambda r: r["a"] + r["b"] * centre)
     ys = [r["a"] + r["b"] * centre for r in rows]
     if len(ys) >= 3:
         # A rule on warped paper, or printed twice, can come back as two
@@ -2379,6 +2450,7 @@ def detect_grid(page):
             kept.append((rule, y))
         rows = [rule for rule, _ in kept]
         ys = [y for _, y in kept]
+        rows, ys = _bridge_missing_rules(rows, ys)
     if len(ys) >= 3:
         gaps = np.diff(ys)
         typical = float(np.median(gaps))
@@ -2684,20 +2756,38 @@ def fit_geometry(image, geometry, found=None):
     ty = printed[0] - sy * ruled[0]
 
     # A faded or damaged rule can cut the ruled run short, and its top then
-    # lies rows below the table's. Rows Staff already placed on the printed
-    # rules are never traded for a fit that puts fewer of them there.
-    reach = 0.25 * sy * float(np.median(np.diff(ruled)))
+    # lies rows below the table's. A first row line Staff already placed on
+    # the printed rules is never traded for one that puts fewer rows there.
+    pitch = float(np.median(np.diff(printed)))
     horizontal = np.asarray(found["horizontal"] or printed, dtype=float)
 
-    def row_hits(scale, shift):
-        lines = shift + scale * np.asarray(ruled)
-        return int(np.sum(np.abs(horizontal[None, :] - lines[:, None]).min(axis=1) <= reach))
+    def rows_on_rules(scale, shift):
+        """The printed rules the grid's row lines meet, placed by (scale, shift).
 
-    # A tie goes to Staff: when the markers already sit on as many printed
-    # rules as the fit would put them on, they are left where Staff put them.
-    # A header band as tall as a row lies in the ruled run, and matching rules
-    # alone cannot tell it from the first row; Staff's placement can.
-    if row_hits(1.0, 0.0) >= row_hits(sy, ty):
+        Row by row down the grid, each row's height taken from the grid but
+        laid from the rule the line before it met: the template's rows come
+        from another page, and a few pixels off in each would add up to a
+        whole row by the bottom of a long table.
+        """
+        y, hits = shift + scale * ruled[0], 0
+        for k in range(len(ruled)):
+            nearest = float(horizontal[np.abs(horizontal - y).argmin()])
+            if abs(nearest - y) <= 0.3 * pitch:
+                hits += 1
+                y = nearest
+            if k + 1 < len(ruled):
+                y += scale * (ruled[k + 1] - ruled[k])
+        return hits
+
+    # A tie goes to Staff: when the markers lead onto as many printed rules
+    # as the fit would put them on, they stay where Staff put them. A header
+    # band as tall as a row lies in the ruled run, and matching rules alone
+    # cannot tell it from the first row; Staff's placement can - when its
+    # first row line is on a printed rule. One that is not (the template's,
+    # drawn on another page) has no placement to trust.
+    staff, page = rows_on_rules(1.0, 0.0), rows_on_rules(sy, ty)
+    on_rule = float(np.abs(horizontal - ruled[0]).min()) <= 0.3 * pitch
+    if staff > page or (staff == page and on_rule):
         sy, ty = 1.0, 0.0
     y_hits = len(printed)
 
@@ -2899,6 +2989,8 @@ def _rows_from_page(fitted, found, writing=None, template_rows=None):
     # Rows estimated down to the next printed rule end at the table's column
     # lines: below them is paper, a footer or a signature line, not rows.
     estimated = int(suggestion.get("estimated_ys", 0))
+    # The run's guessed lines: down to the next rule, which may be the frame.
+    guessed = {round(y, 5) for y in run[len(run) - estimated:]} if estimated else set()
     frame = suggestion.get("frame_bottom")
     frame = float(frame) if frame is not None else None
     if estimated and frame is not None:
@@ -2906,7 +2998,9 @@ def _rows_from_page(fitted, found, writing=None, template_rows=None):
 
     reach = 0.35 * pitch
     if ruled[0] < run[0] - reach:
-        head, body = [y for y in ruled if y < run[0] - reach], run
+        # Lines above the run are rows the page lost its rules for; a line
+        # less than most of a row above it would only make a sliver.
+        head, body = [y for y in ruled if y < run[0] - 0.6 * pitch], run
     else:
         start = min(range(len(run)), key=lambda k: abs(run[k] - ruled[0]))
         if abs(run[start] - ruled[0]) > reach or len(run) - start < 2:
@@ -2933,6 +3027,15 @@ def _rows_from_page(fitted, found, writing=None, template_rows=None):
         tail.append(y)
 
     rows = _within_page(head + body + tail)
+    # Past the template's own rows, a line the page does not print, one only
+    # guessed down to the table's frame, one below the frame (its outer
+    # border) or the paper's very edge is a blank band under the last row,
+    # not another row.
+    while len(rows) - 1 > template_rows and len(rows) > 2 and (
+            rows[-1] >= 1.0 - 0.005 or round(rows[-1], 5) in guessed
+            or (frame is not None and rows[-1] > frame + 0.25 * pitch)
+            or not any(abs(h - rows[-1]) <= 0.2 * pitch for h in horizontal)):
+        rows.pop()
     top, bottom = rows[0], rows[-1]
     geometry = {
         **fitted,
@@ -3088,9 +3191,14 @@ def snap_page(page_path, geometry):
     found = detect_grid(image)
     fitted, fit = fit_geometry(image, geometry, found=found)
     if fit["fitted"]:
-        fitted = _snap_to_lines(fitted, found["vertical"], found["horizontal"])
+        # The page's own rows first, from the fit's even grid: lines pulled
+        # one by one onto the nearest rule first would look uneven to it.
+        # Rows taken from the page already lie on its rules (or between
+        # them, where it lost one), so only the columns are snapped then.
         fitted, fit["rows"] = _rows_from_page(fitted, found,
                                               template_rows=max(0, len(geometry.get("ruled_ys") or []) - 1))
+        fitted = _snap_to_lines(fitted, found["vertical"],
+                                [] if fit["rows"]["from_page"] else found["horizontal"])
         fitted = _keep_shortened_columns(geometry, fitted)
         tilt = round(float(found.get("tilt") or 0.0), 1)
         if abs(tilt) >= SNAP_TILT:

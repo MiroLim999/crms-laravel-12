@@ -2872,9 +2872,11 @@
     }
 
     // Each page of a PDF has its own layout: markers, row lines, tilt and
-    // Ctrl+Z history (page number -> state). A page never opened starts from
-    // the template, as for a file just opened; going back to a page finds it
-    // as it was left.
+    // Ctrl+Z history (page number -> state). Going back to a page finds it as
+    // it was left. A page never opened starts as a copy of the page just left:
+    // pages of one book sit much alike, and Snap to table finds a page whose
+    // printed lines are faint or creased far better from there than from the
+    // template. It is a copy, not a link: each page changes on its own.
     const pageLayouts = new Map();
 
     function savePageLayout(page) {
@@ -2886,13 +2888,18 @@
         });
     }
 
-    function showPageLayout(page) {
+    function showPageLayout(page, { copyFrom = null } = {}) {
         const saved = pageLayouts.get(page);
         fieldHistory = [];
         currentFieldSnapshot = null;
         if (!saved) {
+            // The page left behind's markers and rows, as this page's own
+            // starting point: what Snap and Detect may move, as from the
+            // template. Its amber marks belonged to the other page.
+            const start = pageLayouts.get(copyFrom)?.grid;
             rowsSource = null;
-            setGrid(templateBoxes, templateRows, { remember: true });
+            if (start) setGrid(start.boxes, start.rows, { tilts: start.tilts, remember: true });
+            else setGrid(templateBoxes, templateRows, { remember: true });
             return;
         }
         setGrid(saved.grid.boxes, saved.grid.rows, {
@@ -2924,10 +2931,11 @@
         updatePageBar();
         try {
             clearDetection();
-            savePageLayout(scanPageNumber);
+            const left = scanPageNumber;
+            savePageLayout(left);
             await marker.load(scanFile, { page });
             scanPageNumber = page;
-            showPageLayout(page);
+            showPageLayout(page, { copyFrom: left });
             clearOcrError();
             updateScanNotices();
             showScanContext();
@@ -6610,8 +6618,8 @@
 
     /**
      * Go on with another page of the same PDF once one is saved: Align starts
-     * again from the template's markers, as for a file just opened, and the
-     * file is not uploaded again.
+     * from a copy of the saved page's markers (or that page's own, if it was
+     * opened before), and the file is not uploaded again.
      */
     async function continueWithPage(pageNumber) {
         const button = el('nextPageContinueBtn');
@@ -6627,7 +6635,8 @@
             requiredInput(document, '#documentPageId').value = '';
             requiredInput(document, '#ocrModelKey').value = '';
 
-            savePageLayout(scanPageNumber);
+            const left = scanPageNumber;
+            savePageLayout(left);
             await marker.load(scanFile, { page: pageNumber });
             scanPageNumber = pageNumber;
             recordSubmitting = false;
@@ -6636,7 +6645,7 @@
             showScanContext();
             showStep('mark');
             resetFieldHistory();
-            showPageLayout(pageNumber);
+            showPageLayout(pageNumber, { copyFrom: left });
             fetchSnapLines();
             window.bootstrap.Modal.getInstance(el('nextPageModal'))?.hide();
             window.requestAnimationFrame(() => marker.resetZoom());

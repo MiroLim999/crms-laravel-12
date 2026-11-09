@@ -109,6 +109,8 @@ class Ledger:
             "fields": [],
         }
         self.rows, self.cols = rows, cols
+        # The page's own row rules (pixels), whatever the template says.
+        self.page_ys = ys
 
     def detector(self, _image):
         return [dict(line) for line in self.detected]
@@ -621,6 +623,89 @@ class RowsFromThePageTest(unittest.TestCase):
         frame = lm.detect_grid(ledger.image)["suggestion"]["frame_bottom"]
 
         self.assertAlmostEqual(self.page_rules(ledger)[-1], frame * ledger.image.height, delta=2)
+
+    # Worn and creased pages (the user's 2-page PDF, 2026-11-09): Snap took rows 9-20 of a
+    # 20-row table for the whole table when the rules of rows 2-8 came out too faint, and on
+    # the clean page before it kept the template's rows, drifting a row off by the bottom.
+
+    # Row heights (px) down two of the user's sample pages, measured: rows are a little
+    # taller near the top of a page photographed at a slant. The template was drawn on the
+    # second page.
+    PAGE_ROWS = [40, 39, 40, 39, 41, 41, 42, 44, 40, 38, 39, 38, 39, 38, 38, 36, 35, 36, 38, 38]
+    TEMPLATE_PAGE_ROWS = [40, 41, 43, 40, 42, 45, 45, 45, 43, 44, 40, 44, 41, 40, 44, 43, 42, 43, 43, 34]
+
+    def real_page(self, lost=()):
+        """A page with the measured rows, the template's grid from the other page laid over it
+        0.4 row high, and the row rules in `lost` too faint to find."""
+        mean = float(np.mean(self.PAGE_ROWS))
+        ledger = Ledger(cols=4, rows=20, header=1.3, cycle=[g / mean for g in self.PAGE_ROWS])
+        pitch, height = 32.0, ledger.image.height
+        ys = [ledger.page_ys[0] - 0.4 * pitch]
+        for gap in self.TEMPLATE_PAGE_ROWS:
+            ys.append(ys[-1] + gap / mean * pitch)
+        ruled = [min(1.0, y / height) for y in ys]
+        ledger.geometry = {
+            **ledger.geometry,
+            "ruled_ys": ruled,
+            "columns": [{**column, "box": [column["box"][0], ruled[0], column["box"][2], ruled[-1] - ruled[0]]}
+                        for column in ledger.geometry["columns"]],
+        }
+        for k in lost:
+            self.erase_rule(ledger, ledger.page_ys[k])
+        return ledger
+
+    def assertRowsOnThePage(self, ledger, snapped):
+        ys = [y * ledger.image.height for y in snapped["geometry"]["ruled_ys"]]
+        self.assertEqual(len(ledger.page_ys), len(ys), "row lines")
+        for k, (y, expected) in enumerate(zip(ys, ledger.page_ys)):
+            self.assertAlmostEqual(expected, y, delta=3, msg=f"row line {k}")
+
+    def test_template_rows_from_another_page_follow_this_pages_rows(self):
+        # The template's lines touch some of this page's rules by chance; the page's own run
+        # leads onto every one of them.
+        ledger = self.real_page()
+
+        snapped = self.snap(ledger)
+
+        self.assertRowsOnThePage(ledger, snapped)
+        self.assertTrue(snapped["fit"]["rows"]["from_page"])
+
+    def test_rules_lost_inside_the_table_are_put_back(self):
+        for lost in ((4, 5, 6), (2, 4, 5, 9)):
+            with self.subTest(lost=lost):
+                ledger = self.real_page(lost)
+
+                snapped = self.snap(ledger)
+
+                self.assertRowsOnThePage(ledger, snapped)
+                self.assertEqual(list(lost), snapped["fit"]["rows"]["estimated"])
+
+    def test_rules_lost_inside_the_table_are_read_row_for_row_by_detect(self):
+        ledger = Ledger(cols=4, rows=12, header=1.3, pitch_err=0.05)
+        for lost in (4, 5, 6):
+            self.erase_rule(ledger, ledger.page_ys[lost])
+
+        self.assertEqual((12 * 4, 0, 0, 0), ledger.rows_of(ledger.run("detect")))
+
+    def test_no_rows_past_the_template_in_a_blank_band_under_the_table(self):
+        # The table's bottom border lies two rows below its last printed row: the band
+        # between is not rows the template has.
+        ledger = Ledger(cols=4, rows=12, header=1.3, tpl_rows=10)
+        self.erase_rule(ledger, ledger.page_ys[11])
+
+        self.assertEqual(10, self.rows(self.snap(ledger)["geometry"]))
+
+    def test_only_gaps_between_rows_are_bridged(self):
+        rules = [{"lo": 0, "hi": 100}] * 8
+
+        _, ys = lm._bridge_missing_rules(rules[:6], [0, 10, 20, 50, 60, 70])
+        self.assertEqual([0, 10, 20, 30, 40, 50, 60, 70], [round(y) for y in ys])
+        # A gap at either end of the rules is the header, a margin or the paper below.
+        for ys in ([0, 10, 20, 30, 60], [0, 30, 40, 50, 60]):
+            self.assertEqual(ys, lm._bridge_missing_rules(rules[:5], ys)[1])
+        # Too tall to be rows the page lost, or not a whole number of rows.
+        for ys in ([0, 10, 20, 80, 90, 100], [0, 10, 20, 45, 55, 65]):
+            self.assertEqual(ys, lm._bridge_missing_rules(rules[:6], ys)[1])
 
 
 @unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
