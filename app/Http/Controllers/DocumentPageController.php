@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\ProcessDocumentPage;
+use App\Models\CivilRecord;
 use App\Models\DocumentPage;
 use App\Models\DocumentTemplate;
 use App\Models\OcrSetting;
@@ -57,11 +58,16 @@ class DocumentPageController extends Controller
             // The rendered page exactly as it was aligned, so outlines and markers
             // share one pixel grid.
             'page' => ['required', 'file', 'mimes:png', 'max:40960'],
+            'scan' => ['sometimes', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'batch_key' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
             'model' => ['nullable', 'string', 'max:255'],
             // Detect: straighten the page and fit the template to it, outline
             // every line, and stop before reading so Staff can check first.
             'detect' => ['sometimes', 'boolean'],
+            'defer_scan' => ['sometimes', 'boolean'],
             ...GeometryInput::rules(),
+        ], [
+            'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
         ]);
 
         $geometry = GeometryInput::checked($validated['geometry']);
@@ -84,15 +90,38 @@ class DocumentPageController extends Controller
             'ocr_model_key' => $this->modelChoice->resolve($validated['model'] ?? null),
         ]);
 
-        $path = Storage::disk('local')->putFileAs($page->directory(), $image, 'page.png');
+        $disk = Storage::disk('local');
+        $path = $disk->putFileAs($page->directory(), $image, 'page.png');
         $page->forceFill(['image_path' => $path])->save();
 
-        ProcessDocumentPage::dispatch(
-            $page->getKey(),
-            $request->boolean('detect') ? ProcessDocumentPage::MODE_DETECT : ProcessDocumentPage::MODE_FULL,
-        );
+        $workspaceScanPath = null;
+        $scan = $request->file('scan');
+        if ($scan instanceof UploadedFile) {
+            $batchKey = $validated['batch_key'] ?? 'batch-' . $page->getKey();
+            $ext = strtolower($scan->getClientOriginalExtension() ?: ($scan->extension() ?: 'bin'));
+            $safeName = sprintf('%d-%s.%s', $page->getKey(), preg_replace('/[^A-Za-z0-9_-]/', '_', pathinfo($scan->getClientOriginalName(), PATHINFO_FILENAME)) ?: 'scan', $ext);
+            $workspaceScanPath = $disk->putFileAs('documents/workspace/' . $batchKey, $scan, $safeName);
+            $disk->put($page->directory() . '/workspace_scan.json', json_encode([
+                'path' => $workspaceScanPath,
+                'name' => $scan->getClientOriginalName(),
+                'mime' => $scan->getMimeType(),
+                'batch_key' => $batchKey,
+            ], JSON_UNESCAPED_SLASHES));
+        }
 
-        return response()->json($this->payload($page->fresh()), 202);
+        if (! $request->boolean('defer_scan')) {
+            ProcessDocumentPage::dispatch(
+                $page->getKey(),
+                $request->boolean('detect') ? ProcessDocumentPage::MODE_DETECT : ProcessDocumentPage::MODE_FULL,
+            );
+        }
+
+        $payload = $this->payload($page->fresh());
+        if ($workspaceScanPath !== null) {
+            $payload['workspaceScanPath'] = $workspaceScanPath;
+        }
+
+        return response()->json($payload, 202);
     }
 
     /**
@@ -154,7 +183,13 @@ class DocumentPageController extends Controller
         $this->authorizePage($request, $page);
         GeometryInput::hydrate($request);
 
-        if (! in_array($page->status, [DocumentPage::STATUS_DETECTED, DocumentPage::STATUS_READY], true)) {
+        if (! in_array($page->status, [
+            DocumentPage::STATUS_QUEUED,
+            DocumentPage::STATUS_DETECTED,
+            DocumentPage::STATUS_READY,
+            DocumentPage::STATUS_CANCELLED,
+            DocumentPage::STATUS_FAILED,
+        ], true)) {
             return response()->json(['message' => 'This page is still being processed.'], 409);
         }
 
@@ -776,6 +811,8 @@ class DocumentPageController extends Controller
      */
     private function payload(DocumentPage $page): array
     {
+        $lines = $page->hasLines() ? $page->lines()->get() : collect();
+
         return [
             'id' => $page->getKey(),
             'status' => $page->status,
@@ -794,8 +831,66 @@ class DocumentPageController extends Controller
             'model' => $page->ocr_model_label,
             'modelKey' => $page->ocr_model_key,
             'threshold' => OcrSetting::threshold(),
-            'lines' => $page->hasLines() ? $page->lines()->get()->map->toClient()->values() : [],
+            'lines' => $lines->map->toClient()->values(),
+            'existingRecord' => $page->status === DocumentPage::STATUS_READY
+                ? $this->findExistingRecordForPage($page, $lines)
+                : null,
         ];
+    }
+
+    /**
+     * Check whether the OCR-extracted text on this page matches an existing
+     * CivilRecord for the same template ("Is it existing? -> Data Extracted Rejected").
+     *
+     * @param  Collection<int, PageLine>  $lines
+     * @return array{id: int, title: string, url: string, submittedAt: string|null}|null
+     */
+    private function findExistingRecordForPage(DocumentPage $page, Collection $lines): ?array
+    {
+        $extracted = $lines
+            ->map(fn (PageLine $l) => mb_strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $l->ocr_text))))
+            ->filter(fn (string $text) => $text !== '' && mb_strlen($text) >= 2)
+            ->values();
+
+        if ($extracted->isEmpty()) {
+            return null;
+        }
+
+        $candidates = CivilRecord::with('fields')
+            ->where('document_template_id', $page->document_template_id)
+            ->latest('id')
+            ->limit(150)
+            ->get();
+
+        foreach ($candidates as $record) {
+            $recordValues = $record->fields
+                ->flatMap(fn ($f) => [
+                    mb_strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $f->ocr_text))),
+                    mb_strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $f->verified_value))),
+                ])
+                ->filter(fn (string $v) => $v !== '')
+                ->unique();
+
+            if ($recordValues->isEmpty()) {
+                continue;
+            }
+
+            $matchedCount = $extracted->filter(fn (string $val) => $recordValues->contains($val))->count();
+            $totalExtracted = $extracted->count();
+            $ratio = $totalExtracted > 0 ? ($matchedCount / $totalExtracted) : 0.0;
+
+            if (($totalExtracted >= 2 && $matchedCount >= 2 && $ratio >= 0.8)
+                || ($totalExtracted === 1 && $matchedCount === 1)) {
+                return [
+                    'id' => (int) $record->getKey(),
+                    'title' => $record->title(),
+                    'url' => route('records.show', $record),
+                    'submittedAt' => $record->submitted_at?->toIso8601String(),
+                ];
+            }
+        }
+
+        return null;
     }
 
     /**

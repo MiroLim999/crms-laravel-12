@@ -177,18 +177,50 @@
             </div>
 
             @if ($currentType)
+                <div class="document-upload-mode-bar" role="radiogroup" aria-label="Choose upload mode">
+                    <div class="document-upload-mode-header">
+                        <span class="document-upload-mode-label">Upload mode</span>
+                        <span class="document-upload-mode-hint" id="uploadModeHint">Upload and process one document at a time</span>
+                    </div>
+                    <div class="document-upload-mode-grid">
+                        <label class="document-upload-mode-option is-active" for="uploadModeSingle" data-mode-card="single">
+                            <input type="radio" class="visually-hidden" name="uploadMode" id="uploadModeSingle" value="single" checked autocomplete="off">
+                            <span class="document-type-option__icon" aria-hidden="true">
+                                <i class="icon-base bx bx-file"></i>
+                            </span>
+                            <span class="document-type-select__value">Single Upload</span>
+                            <i class="icon-base bx bx-check document-type-option__check document-upload-mode-option__check" aria-hidden="true"></i>
+                        </label>
+
+                        <label class="document-upload-mode-option" for="uploadModeBatch" data-mode-card="batch">
+                            <input type="radio" class="visually-hidden" name="uploadMode" id="uploadModeBatch" value="batch" autocomplete="off">
+                            <span class="document-type-option__icon" aria-hidden="true">
+                                <i class="icon-base bx bx-copy"></i>
+                            </span>
+                            <span class="document-type-select__value">Batch File Upload</span>
+                            <i class="icon-base bx bx-check document-type-option__check document-upload-mode-option__check" aria-hidden="true"></i>
+                        </label>
+                    </div>
+                </div>
+
                 <label for="scanFile" class="document-dropzone" id="documentDropzone" tabindex="0">
                     <span class="document-dropzone__icon" aria-hidden="true">
                         <i class="icon-base bx bx-cloud-upload"></i>
                     </span>
-                    <span class="document-dropzone__title">Drop the scan here</span>
-                    <span class="btn btn-primary document-dropzone__button">Choose file</span>
+                    <span class="document-dropzone__title" id="dropzoneTitle">Drop the scan here</span>
+                    <span class="document-dropzone__actions">
+                        <span class="btn btn-primary document-dropzone__button" id="dropzoneButton">Choose file</span>
+                        <button type="button" class="btn btn-outline-primary document-dropzone__folder-btn d-none" id="dropzoneFolderButton">
+                            <i class="icon-base bx bx-archive icon-sm me-1" aria-hidden="true"></i>Upload folder
+                        </button>
+                    </span>
                     <span class="document-dropzone__formats" aria-label="Accepted formats">
                         <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>BMP</span>
                     </span>
                 </label>
                 <input type="file" id="scanFile" class="visually-hidden"
                        accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp">
+                <input type="file" id="scanFolder" class="visually-hidden" webkitdirectory directory multiple>
             @else
                 {{-- Not a file input yet: clicking or dropping here opens the type list. --}}
                 <div class="document-dropzone is-disabled" id="documentDropzone" aria-disabled="true" data-requires-type>
