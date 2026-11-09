@@ -146,7 +146,7 @@ export class LineOverlay {
      */
     constructor({
         container, onSelect = null, preview = false, onBackground = null, onEdit = null, onModeChange = null,
-        onDraftChange = null, selectWhileEditing = false,
+        onDraftChange = null, selectWhileEditing = false, drawnMode = 'box',
     }) {
         this.container = container;
         this.onSelect = onSelect;
@@ -157,6 +157,9 @@ export class LineOverlay {
         // Align lets another line be picked mid-edit; Verify keeps the one
         // being corrected until it is saved or cancelled.
         this.selectWhileEditing = selectWhileEditing;
+        // The tool a closed drawing of an existing line hands over to:
+        // 'box' (stretch it) in Align; Verify, which has no Stretch, keeps a box.
+        this.drawnMode = drawnMode;
         this._justDragged = false;
         this.width = 1;
         this.height = 1;
@@ -189,7 +192,7 @@ export class LineOverlay {
             const target = event.target instanceof Element ? event.target : null;
             if (target?.closest('.line-overlay__edit')) return;
             const group = target?.closest('.line-marker');
-            if (group) this.onSelect?.(Number(group.dataset.index));
+            if (group) this.onSelect?.(Number(group.dataset.index), event);
             else this.onBackground?.();
         });
         this.root.addEventListener('keydown', (event) => {
@@ -247,10 +250,14 @@ export class LineOverlay {
      * numbered in the order they were drawn. An empty list clears them.
      *
      * @param {number[][][]} polygons  Page pixels.
+     * @param {{numbered?: boolean}} [options]  false: a single box for one
+     *        field (Verify's Draw again) needs no number.
      */
-    setPending(polygons) {
+    setPending(polygons, { numbered = true } = {}) {
         const size = Math.max(9, this.height / 90);
         this.pendingLayer.replaceChildren(...polygons.flatMap((polygon, index) => {
+            const shape = svg('polygon', { class: 'line-pending__shape', points: polygonPoints(polygon) });
+            if (!numbered) return [shape];
             const bounds = polygonBounds(polygon);
             const number = svg('text', {
                 class: 'line-pending__number',
@@ -260,7 +267,7 @@ export class LineOverlay {
                 'aria-hidden': 'true',
             });
             number.textContent = String(index + 1);
-            return [svg('polygon', { class: 'line-pending__shape', points: polygonPoints(polygon) }), number];
+            return [shape, number];
         }));
     }
 
@@ -288,6 +295,13 @@ export class LineOverlay {
     }
 
     /** The row's lines turn orange; the current one green. */
+    /** Lines picked for something (Verify's Group fields): outlined on their own. */
+    setPicked(indexes) {
+        const picked = new Set(indexes);
+        this.groups.forEach((group, index) => group.classList.toggle('is-picked', picked.has(index)));
+        indexes.forEach((index) => this.groups[index] && this.linesLayer.appendChild(this.groups[index]));
+    }
+
     setSelection(indexes, currentIndex = null) {
         const selected = new Set(indexes);
         this.groups.forEach((group, index) => {
@@ -431,7 +445,7 @@ export class LineOverlay {
             this.onEdit?.(drawn, true);
             return true;
         }
-        this.setEditMode('box');
+        this.setEditMode(this.drawnMode);
         this.onEdit?.(this.editedPolygon(), true);
         return true;
     }
@@ -511,6 +525,8 @@ export class LineOverlay {
 
         group.classList.toggle('is-adjusted', Boolean(line.adjusted));
         group.classList.toggle('is-unsaved', Boolean(line.unsaved));
+        // A crop deleted in Verify is off the page until it is drawn again.
+        group.classList.toggle('is-crop-deleted', Boolean(line.cropDeleted));
         group.querySelector('.line-marker__shape').setAttribute('points', polygonPoints(line.polygon));
         group.querySelector('.line-adjusted-mark')?.remove();
 

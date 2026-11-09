@@ -55,20 +55,19 @@
                             </div>
 
                             {{-- A PDF of many pages: one page is aligned, read and saved at a time. ✓: saved already. --}}
-                            <div class="input-group input-group-sm marker-page-controls d-none" role="group"
-                                id="scanPageBar" aria-label="Pages of this PDF">
-                                <button type="button" class="btn btn-icon btn-outline-secondary" id="scanPagePrevBtn"
+                            <div class="input-group input-group-sm marker-page-controls d-none" role="group" id="scanPageBar"
+                                 aria-label="Pages of this PDF">
+                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="scanPagePrevBtn"
                                     aria-label="Previous page" title="Previous page">
                                     <i class="icon-base bx bx-chevron-left icon-sm" aria-hidden="true"></i>
                                 </button>
                                 <div class="dropdown marker-page-dropdown">
-                                    <button type="button"
-                                        class="btn btn-outline-secondary dropdown-toggle marker-page-select"
+                                    <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle marker-tool-button marker-page-select"
                                         id="scanPageSelect" data-bs-toggle="dropdown" aria-expanded="false"
                                         aria-label="Page to read"></button>
                                     <div class="dropdown-menu marker-page-menu" id="scanPageMenu"></div>
                                 </div>
-                                <button type="button" class="btn btn-icon btn-outline-secondary" id="scanPageNextBtn"
+                                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="scanPageNextBtn"
                                     aria-label="Next page" title="Next page">
                                     <i class="icon-base bx bx-chevron-right icon-sm" aria-hidden="true"></i>
                                 </button>
@@ -504,8 +503,7 @@
                         <header class="validation-pane__header">
                             <div class="min-w-0">
                                 <span class="validation-pane__eyebrow">Source</span>
-                                <h3 class="h5 mb-1" id="originalDocumentTitle">Original document</h3>
-                                <span class="validation-file-name" id="validationFileName">Document</span>
+                                <h3 class="h5 mb-0" id="originalDocumentTitle">Original document</h3>
                             </div>
 
                             <div class="validation-pane__tools">
@@ -515,6 +513,12 @@
                                     title="Drag a box over writing that has no reading. TrOCR reads that box alone.">
                                     <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i><span>Add missed
                                         field</span>
+                                </button>
+                                {{-- Pick several fields and make them one new person. --}}
+                                <button type="button" class="btn btn-sm btn-outline-primary validation-add-field"
+                                        id="groupFieldsBtn" aria-pressed="false"
+                                        title="Pick fields on the page or in the list, then group them as a new person">
+                                    <i class="icon-base bx bx-group icon-sm me-1" aria-hidden="true"></i><span>Group fields</span>
                                 </button>
                                 <div class="btn-group marker-zoom-controls" role="group"
                                     aria-label="Original document zoom controls">
@@ -557,12 +561,34 @@
                                 <button type="button" class="btn btn-sm btn-text-secondary"
                                     id="addFieldCancel">Cancel</button>
                                 <button type="button" class="btn btn-sm btn-primary" id="addFieldRead" disabled>
-                                    <i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i><span>Read
-                                        boxes</span>
+                                    <i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i>
+                                    <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                                    <span class="add-field-read__label">Read boxes</span>
                                 </button>
                             </div>
                             <div class="line-edit-toolbar__status" id="addFieldStatus" role="status" aria-live="polite">
                             </div>
+                        </div>
+
+                        {{-- Shown while fields are picked to become one new person. --}}
+                        <div class="line-edit-toolbar add-field-toolbar group-fields-toolbar d-none" id="groupFieldsToolbar" role="toolbar"
+                             aria-label="Group fields as a new person">
+                            <div class="line-edit-toolbar__copy">
+                                <span class="line-edit-toolbar__eyebrow">New person</span>
+                                <strong id="groupFieldsCount">No fields picked</strong>
+                            </div>
+                            <label class="visually-hidden" for="groupFieldsName">Name of the new person</label>
+                            <input type="text" class="form-control form-control-sm group-fields-toolbar__name" id="groupFieldsName"
+                                   maxlength="120" autocomplete="off" placeholder="Name (optional)">
+                            <div class="line-edit-toolbar__actions">
+                                <button type="button" class="btn btn-sm btn-text-secondary" id="groupFieldsCancel">Cancel</button>
+                                <button type="button" class="btn btn-sm btn-primary" id="groupFieldsApply" disabled>
+                                    <i class="icon-base bx bx-group icon-sm me-1" aria-hidden="true"></i>
+                                    <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                                    <span>Group as person</span>
+                                </button>
+                            </div>
+                            <div class="line-edit-toolbar__status" id="groupFieldsStatus" role="status" aria-live="polite"></div>
                         </div>
 
                         {{-- Shown while a reviewer redraws one line's outline. --}}
@@ -577,18 +603,8 @@
                                 <label class="btn btn-outline-secondary" for="lineEditDraw"
                                     title="Draw a new outline: click points or hold and trace; Enter or double-click closes it">Draw</label>
                                 <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditRectangle"
-                                    value="rectangle">
-                                <label class="btn btn-outline-secondary" for="lineEditRectangle"
-                                    title="Drag a box over the writing">Rectangle</label>
-                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditBox" value="box"
-                                    checked>
-                                <label class="btn btn-outline-secondary" for="lineEditBox"
-                                    title="Stretch the outline by its handles">Stretch</label>
-                                <input type="radio" class="btn-check" name="verifyLineMode" id="lineEditPoints"
-                                    value="points">
-                                <label class="btn btn-outline-secondary" for="lineEditPoints"
-                                    title="Drag corners; drag a dot between corners to add one; Delete removes one">Move
-                                    points</label>
+                                       value="rectangle" checked>
+                                <label class="btn btn-outline-secondary" for="lineEditRectangle" title="Drag a box over the writing">Rectangle</label>
                             </div>
                             <div class="line-edit-toolbar__actions">
                                 <button type="button" class="btn btn-sm btn-text-secondary"
@@ -601,6 +617,32 @@
                             </div>
                             <div class="line-edit-toolbar__status" id="lineEditStatus" role="status" aria-live="polite">
                             </div>
+                        </div>
+
+                        {{-- Shown while a field whose crop was deleted is drawn again: Save and re-read reads the box. --}}
+                        <div class="line-edit-toolbar redraw-field-toolbar d-none" id="redrawFieldToolbar" role="toolbar"
+                             aria-label="Draw the field again">
+                            <div class="line-edit-toolbar__copy">
+                                <span class="line-edit-toolbar__eyebrow">Draw again</span>
+                                <strong id="redrawFieldName"></strong>
+                            </div>
+                            <div class="btn-group btn-group-sm" role="radiogroup" aria-label="How to mark the writing">
+                                <input type="radio" class="btn-check" name="redrawFieldMode" id="redrawFieldDraw" value="draw">
+                                <label class="btn btn-outline-secondary" for="redrawFieldDraw"
+                                       title="Click round the writing or hold and trace; Enter or double-click closes it">Draw</label>
+                                <input type="radio" class="btn-check" name="redrawFieldMode" id="redrawFieldRectangle"
+                                       value="rectangle" checked>
+                                <label class="btn btn-outline-secondary" for="redrawFieldRectangle" title="Drag a box over the writing">Rectangle</label>
+                            </div>
+                            <div class="line-edit-toolbar__actions">
+                                <button type="button" class="btn btn-sm btn-text-secondary" id="redrawFieldCancel">Later</button>
+                                <button type="button" class="btn btn-sm btn-primary" id="redrawFieldSave" disabled>
+                                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
+                                    <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                                    <span>Save and re-read</span>
+                                </button>
+                            </div>
+                            <div class="line-edit-toolbar__status" id="redrawFieldStatus" role="status" aria-live="polite"></div>
                         </div>
 
                         <div class="doc-viewport validation-doc-viewport" id="validationDocViewport">
@@ -846,6 +888,33 @@
         </div>
     </div>
 
+    {{-- Confirm deleting a field's crop with Delete or Backspace (Verify) --}}
+    <div class="modal fade" id="deleteCropModal" tabindex="-1"
+         aria-labelledby="deleteCropModalTitle" aria-describedby="deleteCropModalDescription"
+         aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
+            <div class="modal-content leave-scan-modal">
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-danger" aria-hidden="true">
+                        <i class="icon-base bx bx-trash"></i>
+                    </span>
+                    <h5 class="modal-title" id="deleteCropModalTitle">Delete this crop?</h5>
+                    <p class="leave-scan-modal__text" id="deleteCropModalDescription"></p>
+
+                    <div class="leave-scan-modal__actions">
+                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal"
+                                id="deleteCropCancelBtn">
+                            Keep it
+                        </button>
+                        <button type="button" class="btn btn-danger" id="deleteCropConfirmBtn">
+                            Delete crop
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- Confirm leaving a scan that is not submitted (Cancel, or a link out) --}}
     <div class="modal fade" id="leaveScanModal" tabindex="-1" aria-labelledby="leaveScanModalTitle"
         aria-describedby="leaveScanModalDescription" aria-hidden="true">
@@ -981,6 +1050,7 @@
             detectionSummary,
             flagExplanation,
             FLAG_NO_ROW,
+        FLAG_REDRAW,
             geometryMarkers,
             SOURCE_MANUAL,
             gridNotes,
@@ -1039,6 +1109,7 @@
             lineRestoreUrl: @json(route('documents.pages.lines.restore', ['page' => '__PAGE__', 'line' => '__LINE__'])),
             lineStoreUrl: @json(route('documents.pages.lines.store', ['page' => '__PAGE__'])),
             linePlaceUrl: @json(route('documents.pages.lines.place', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+        lineRedrawUrl: @json(route('documents.pages.lines.redraw', ['page' => '__PAGE__', 'line' => '__LINE__'])),
             pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
             // The pages of one file already saved; 64 zeros stand in for its fingerprint.
             sourcePagesUrl: @json(route('documents.sources.pages', ['hash' => str_repeat('0', 64)])),
@@ -1126,13 +1197,26 @@
 
         const lineOverlay = new LineOverlay({
             container: el('validationFieldOverlay'),
-            onSelect: (index) => activateValidationField(index, 'marker'),
+        onSelect: (index, event) => {
+            // Picking fields for a new person: a click adds or takes one away.
+            if (groupingFields || (event && (event.ctrlKey || event.metaKey || event.shiftKey))) {
+                togglePickedField(index);
+                return;
+            }
+            activateValidationField(index, 'marker');
+        },
             onModeChange: (mode) => showVerifyLineMode(mode),
-            onDraftChange: (points) => (addingMissedField ? showAddFieldDraft(points) : showVerifyDraft(points)),
+        // Verify has no Stretch tool: a closed drawing waits as a box to save.
+        drawnMode: 'rectangle',
+        onDraftChange: (points) => (addingMissedField
+            ? showAddFieldDraft(points)
+            : redrawingLineId !== null ? showRedrawDraft(points) : showVerifyDraft(points)),
             // Only a new box (Add missed field) arrives here finished and with no
             // line being edited; a redrawn outline is saved by Save and re-read.
             onEdit: (polygon, final) => {
-                if (final && addingMissedField && !lineOverlay.editing) addPendingBox(polygon);
+            if (!final || lineOverlay.editing) return;
+            if (addingMissedField) addPendingBox(polygon);
+            else if (redrawingLineId !== null) holdRedrawBox(polygon);
             },
         });
 
@@ -5335,8 +5419,20 @@
             return validationRowByIndex.get(index) ?? null;
         }
 
+    // Names Staff gave people in Verify, by page and person ("12:person-21").
+    // Shown in Verify only: the record keeps each field's value as before.
+    const personNameOverrides = new Map();
+    const personNameKey = (group) => `${processedPage?.id ?? ''}:${group.id}`;
+
         function groupIdentity(group) {
             if (group.kind !== 'person') return `${group.indexes.length} document field${group.indexes.length === 1 ? '' : 's'}`;
+        const given = personNameOverrides.get(personNameKey(group));
+        if (given) return given;
+        return automaticIdentity(group);
+    }
+
+    /** The person's name as read from the page, before any name Staff typed. */
+    function automaticIdentity(group) {
 
             // The field the layout says holds the person's name.
             const named = group.indexes.find((index) => (
@@ -5401,6 +5497,7 @@
 
             activeValidationIndex = null;
             stopAddingMissedField();
+        stopGroupingFields();
             target.width = source.width;
             target.height = source.height;
             context.fillStyle = '#ffffff';
@@ -5412,7 +5509,6 @@
             lineOverlay.setLines(processedPage, cropped);
             validationMarker.resetZoom();
             el('validationDocViewport').scrollTo({ top: 0, left: 0 });
-            el('validationFileName').textContent = scanLabel();
 
             window.requestAnimationFrame(() => {
                 validationMarker.layout();
@@ -5653,6 +5749,11 @@
                 const input = requiredInput(row, '.verified');
                 const checkbox = requiredInput(row, '.validation-verified');
 
+            if (checked && cropped[index]?.cropDeleted) {
+                setValidationFieldError(index, 'Draw this field again first; its crop was deleted.');
+                firstBlankIndex ??= index;
+                return;
+            }
                 if (checked && !canVerifyValue(input.value)) {
                     checkbox.checked = false;
                     row.classList.remove('is-verified');
@@ -5707,9 +5808,15 @@
                     </div>
                     <div class="validation-field__reading">
                         <span class="validation-field__reading-text">TrOCR read: <span></span></span>
+                    <span class="validation-field__tools">
                         <button type="button" class="btn btn-link btn-sm validation-field__adjust">
                             <i class="icon-base bx bx-shape-polygon" aria-hidden="true"></i>Adjust outline
                         </button>
+                        <button type="button" class="btn btn-link btn-sm validation-field__adjust validation-field__delete-crop"
+                                title="The crop took in the wrong writing: delete it and draw this field again">
+                            <i class="icon-base bx bx-trash" aria-hidden="true"></i>Delete crop
+                        </button>
+                    </span>
                     </div>
                     <div class="validation-field__hint d-none"></div>
                     <div class="validation-field__type d-none"></div>
@@ -5757,13 +5864,26 @@
                 else startOutlineEdit(index);
             });
 
-            // A field the reviewer added, or one between two rows: its person, column, Remove.
+        // Every table field: its person and column (and Remove where it can go).
             const placement = fieldPlacementControls(index);
             if (placement) requiredPart(row, '.validation-field__reading').after(placement);
 
-            // A field with Person and Column says it there (an empty Person is
-            // outlined red), not in a red note.
-            const explanation = placement ? '' : flagExplanation(item.flags ?? []);
+        // Delete crop: for a crop that took in the wrong writing. A field with
+        // Remove already has its own way out, so it is not offered twice.
+        const deleteCrop = requiredPart(row, '.validation-field__delete-crop');
+        if (isRemovableField(item) || item.cropDeleted) {
+            deleteCrop.remove();
+        } else {
+            deleteCrop.setAttribute('aria-label', `Delete the crop of ${displayName} and draw it again`);
+            deleteCrop.addEventListener('click', (event) => {
+                event.stopPropagation();
+                askToDeleteCrop(index);
+            });
+        }
+
+        // A field the reviewer added, or one between two rows, says it in its
+        // Person and Column (an empty Person is outlined red), not in a red note.
+        const explanation = placement && isRemovableField(item) ? '' : flagExplanation(item.flags ?? []);
             if (explanation) {
                 row.classList.add('has-line-flag');
                 const flag = requiredPart(row, '.validation-field__flag');
@@ -5801,7 +5921,72 @@
                 requiredPart(row, '.validation-field__ocr-error').classList.remove('d-none');
             }
 
-            row.addEventListener('click', () => activateValidationField(index, 'row'));
+        if (item.cropDeleted) {
+            // Nothing to check until the field is drawn again: one clean line
+            // with the name, what happened, and the one thing to do.
+            row.classList.add('is-crop-deleted');
+            ['.validation-field__reading', '.validation-field__place', '.validation-field__hint', '.validation-field__type',
+                '.validation-field__flag', '.validation-field__ocr-error'].forEach((selector) => row.querySelector(selector)?.remove());
+            row.classList.remove('has-line-flag', 'has-ocr-error', 'needs-review');
+
+            const entry = requiredPart(row, '.validation-field__entry');
+            const placeholder = document.createElement('span');
+            placeholder.className = 'validation-field__crop validation-field__crop-deleted';
+            placeholder.innerHTML = '<i class="icon-base bx bx-trash" aria-hidden="true"></i>Crop deleted';
+            const picture = row.querySelector('img.validation-field__crop');
+            if (picture) picture.replaceWith(placeholder);
+            else entry.prepend(placeholder);
+
+            // The value box stays in the row (the list reads it) but is not shown.
+            input.value = '';
+            input.disabled = true;
+            input.classList.add('d-none');
+            checkbox.disabled = true;
+
+            // What to do next, in step with the Draw again bar above the page
+            // (see showRedrawState): Draw again, then draw on the page, then
+            // Save and re-read.
+            const actions = document.createElement('div');
+            actions.className = 'validation-field__redraw';
+            actions.innerHTML = `
+                <button type="button" class="btn btn-sm btn-danger validation-field__draw-again">
+                    <i class="icon-base bx bx-edit-alt icon-sm me-1" aria-hidden="true"></i>Draw again
+                </button>
+                <span class="validation-field__redraw-hint" role="status">
+                    <i class="icon-base bx bx-chevron-left" aria-hidden="true"></i>Draw a box on the page
+                </span>
+                <button type="button" class="btn btn-sm btn-primary validation-field__redraw-save">
+                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
+                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                    Save and re-read
+                </button>`;
+            const again = requiredPart(actions, '.validation-field__draw-again');
+            again.setAttribute('aria-label', `Draw ${displayName} again`);
+            again.addEventListener('click', (event) => {
+                event.stopPropagation();
+                startRedrawField(index);
+            });
+            requiredPart(actions, '.validation-field__redraw-save').addEventListener('click', (event) => {
+                event.stopPropagation();
+                saveRedrawnField();
+            });
+            row.dataset.redraw = 'idle';
+            entry.append(actions);
+        }
+
+        row.addEventListener('click', (event) => {
+            const modifier = event.ctrlKey || event.metaKey || event.shiftKey;
+            // While picking, the value box, the tick and the buttons still work as usual.
+            const onControl = event.target instanceof Element
+                && event.target.closest('input, select, textarea, button, label, a');
+            if (modifier || (groupingFields && !onControl)) {
+                event.preventDefault();
+                togglePickedField(index);
+                return;
+            }
+            activateValidationField(index, 'row');
+        });
+        row.classList.toggle('is-picked', pickedLineIds.has(item.lineId));
             row.addEventListener('focusin', () => activateValidationField(index, 'row'));
             row.addEventListener('keydown', (event) => {
                 if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
@@ -5866,16 +6051,20 @@
             requiredPart(section, '.validation-record-group__copy strong').textContent = group.label;
             requiredPart(section, '.validation-record-group__copy small').textContent = groupIdentity(group);
 
-            const reviewCount = group.indexes.filter((index) => (
+        // A deleted crop is not something to review but something to do.
+        const redrawCount = group.indexes.filter((index) => cropped[index]?.cropDeleted).length;
+        const reviewCount = group.indexes.filter((index) => !cropped[index]?.cropDeleted && (
                 normaliseConfidence(readings[index]) < config.threshold || cropped[index]?.needsReview
             )).length;
             const missing = missingRequired(group);
             const review = requiredPart(section, '.validation-record-group__review');
             review.textContent = [
+            redrawCount > 0 ? `${redrawCount} to draw again` : null,
                 reviewCount > 0 ? `${reviewCount} to review` : null,
                 missing.length > 0 ? `${missing.length} missing` : null,
             ].filter(Boolean).join(' · ') || 'Ready to review';
             review.classList.toggle('has-review', reviewCount > 0 || missing.length > 0);
+        review.classList.toggle('has-redraw', redrawCount > 0);
 
             const body = requiredPart(section, '.validation-record-group__body');
             if (missing.length > 0) {
@@ -5886,6 +6075,9 @@
                 body.appendChild(note);
             }
             if (group.kind === 'person') {
+            body.appendChild(personNameControl(group, section));
+        }
+        if (group.kind === 'person') {
                 const bulk = document.createElement('div');
                 const checkboxId = `verifyGroup-${group.id}`;
                 bulk.className = 'validation-record-group__bulk';
@@ -6026,6 +6218,8 @@
         function startOutlineEdit(index) {
             if (!processedPage || !cropped[index]) return;
             stopAddingMissedField();
+        stopRedrawField();
+        stopGroupingFields();
             // Moving to another field keeps the tools open, so they do not close and reopen.
             cancelOutlineEdit({ hide: false });
 
@@ -6035,7 +6229,7 @@
             // The tools slide down above the page, in the document pane; the field list does not move.
             slideToolbar(el('lineEditToolbar'), true);
             showLineEditStatus('');
-            const mode = document.querySelector('input[name="verifyLineMode"]:checked')?.value ?? 'box';
+        const mode = document.querySelector('input[name="verifyLineMode"]:checked')?.value ?? 'rectangle';
             lineOverlay.beginEdit(index, mode);
             showVerifyLineMode(mode);
         }
@@ -6167,6 +6361,7 @@
                 row.classList.toggle('is-verified', previous.verified);
             });
             lineOverlay.setLines(processedPage, cropped);
+        showPickedFields();
             updateVerificationSummary();
 
             const index = cropped.findIndex((item) => item.lineId === focusLineId);
@@ -6231,7 +6426,12 @@
             lineOverlay.setPending(pendingBoxes);
             const read = el('addFieldRead');
             read.disabled = count === 0 || readingPendingBoxes;
-            read.querySelector('span').textContent = count === 0 ? 'Read boxes' : `Read ${count} box${count === 1 ? '' : 'es'}`;
+        read.querySelector('.add-field-read__label').textContent = readingPendingBoxes
+            ? 'Reading…'
+            : count === 0 ? 'Read boxes' : `Read ${count} box${count === 1 ? '' : 'es'}`;
+        // A spinner in place of the scan icon while the boxes are read.
+        read.querySelector('.bx-scan')?.classList.toggle('d-none', readingPendingBoxes);
+        read.querySelector('.spinner-border')?.classList.toggle('d-none', !readingPendingBoxes);
             showAddFieldStatus(message ?? (count === 0
                 ? `${ADD_MODE_HINTS[addFieldMode()]} Nothing is read until you press Read.`
                 : `${count} box${count === 1 ? '' : 'es'} ready. Mark another, or press Read (Enter). Ctrl+Z takes back the last one.`));
@@ -6245,6 +6445,8 @@
         function startAddingMissedField() {
             if (!processedPage || recordSubmitting) return;
             cancelOutlineEdit();
+        stopRedrawField();
+        stopGroupingFields();
             addingMissedField = true;
             pendingBoxes = [];
             el('addMissedFieldBtn').classList.add('active');
@@ -6316,6 +6518,7 @@
             }
 
             readingPendingBoxes = false;
+        showPendingBoxes();
             el('addFieldCancel').disabled = false;
             el('addFieldToolbar').querySelectorAll('input[name="addFieldMode"]').forEach((input) => { input.disabled = false; });
 
@@ -6396,6 +6599,531 @@
             }
         }
 
+    // ------------------------------------------------------ delete crop
+    // A crop that took in the wrong writing (two lines overlapping, a word
+    // cut off) is deleted, and the field must be drawn again: the new box is
+    // cropped and read by TrOCR at once, and stays in the same person and
+    // column. Submit waits until every deleted crop is drawn again.
+
+    let redrawingLineId = null;
+    let savingRedraw = false;
+
+    const REDRAW_MODE_HINTS = {
+        rectangle: 'Drag a box over this field’s writing only, then press Save and re-read.',
+        draw: 'Click round this field’s writing or hold and trace; Enter or double-click closes it.',
+    };
+    const REDRAW_READY_HINT = 'Box ready. Press Save and re-read (Enter), or drag again to replace it.';
+    // The box drawn for the field, waiting for Save and re-read (page pixels).
+    let redrawBox = null;
+
+    function redrawFieldMode() {
+        return document.querySelector('input[name="redrawFieldMode"]:checked')?.value ?? 'rectangle';
+    }
+
+    function showRedrawStatus(message, isError = false) {
+        const status = el('redrawFieldStatus');
+        status.textContent = message;
+        status.title = message;
+        status.classList.toggle('is-error', isError);
+    }
+
+    function showRedrawDraft(points) {
+        if (points === 0) {
+            showRedrawStatus(REDRAW_MODE_HINTS.draw);
+            return;
+        }
+        showRedrawStatus(points < 3
+            ? `${points} point${points === 1 ? '' : 's'}. At least 3 to make an outline.`
+            : `${points} points. Enter or double-click closes it.`);
+    }
+
+    function armRedrawDrawing() {
+        if (redrawingLineId === null || savingRedraw) return;
+        lineOverlay.beginDraw(redrawFieldMode());
+        showRedrawStatus(redrawBox ? REDRAW_READY_HINT : REDRAW_MODE_HINTS[redrawFieldMode()]);
+    }
+
+    /** The box for the field, shown on the page until it is saved; null clears it. */
+    function setRedrawBox(polygon) {
+        redrawBox = polygon;
+        // One box for one field: no number on it.
+        lineOverlay.setPending(polygon ? [polygon] : [], { numbered: false });
+        el('redrawFieldSave').disabled = !polygon || savingRedraw;
+        showRedrawState();
+    }
+
+    /** Save and re-read: a spinner in place of the tick while the box is cropped and read. */
+    function setRedrawSaving(saving) {
+        savingRedraw = saving;
+        const button = el('redrawFieldSave');
+        button.disabled = saving || !redrawBox;
+        button.querySelector('.bx-check')?.classList.toggle('d-none', saving);
+        button.querySelector('.spinner-border')?.classList.toggle('d-none', !saving);
+        el('redrawFieldCancel').disabled = saving;
+        el('redrawFieldToolbar').querySelectorAll('input[name="redrawFieldMode"]').forEach((input) => { input.disabled = saving; });
+        showRedrawState();
+    }
+
+    async function deleteFieldCrop(index) {
+        const item = cropped[index];
+        if (!item || !processedPage) return;
+        try {
+            const { response, payload } = await sendLineRequest(
+                verifyLineUrl(config.lineRedrawUrl, item.lineId), 'POST', { needed: true },
+            );
+            if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
+            const fromHeight = validationRow(index)?.offsetHeight ?? 0;
+            applyLineUpdate(payload.line, payload.flags ?? {});
+            animateFieldChange(item.lineId, fromHeight);
+            pushVerifyUndo({ kind: 'cropDeleted', id: item.lineId });
+            const fresh = cropped.findIndex((candidate) => candidate.lineId === item.lineId);
+            if (fresh >= 0) startRedrawField(fresh);
+        } catch (error) {
+            const button = validationRow(index)?.querySelector('.validation-field__delete-crop');
+            if (button instanceof HTMLButtonElement) button.disabled = false;
+            setValidationFieldError(index, error.message || 'The crop could not be deleted.');
+        }
+    }
+
+    /**
+     * Each deleted row's next step, in step with the Draw again bar: 'idle'
+     * (Draw again), 'drawing' (draw a box on the page), 'ready' (Save and
+     * re-read) or 'saving' (its spinner).
+     */
+    function showRedrawState() {
+        el('verifyRows').querySelectorAll('.validation-field.is-crop-deleted').forEach((row) => {
+            const item = cropped[Number(row.dataset.fieldIndex)];
+            const current = item && item.lineId === redrawingLineId;
+            const state = !current ? 'idle' : savingRedraw ? 'saving' : redrawBox ? 'ready' : 'drawing';
+            row.dataset.redraw = state;
+            const save = row.querySelector('.validation-field__redraw-save');
+            if (save instanceof HTMLButtonElement) save.disabled = state === 'saving';
+        });
+    }
+
+    /**
+     * Ease a field's row from its old height to its new one and flash its new
+     * state, so deleting (or putting back) a crop moves instead of jumping.
+     * `fromHeight` is the row's height before the list was rebuilt.
+     */
+    function animateFieldChange(lineId, fromHeight) {
+        const index = cropped.findIndex((candidate) => candidate.lineId === lineId);
+        const row = index >= 0 ? validationRow(index) : null;
+        if (!row || !fromHeight || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+        row.classList.add('is-changing');
+        const toHeight = row.offsetHeight;
+        if (Math.abs(toHeight - fromHeight) > 1) {
+            row.style.overflow = 'hidden';
+            row.animate(
+                [{ height: `${fromHeight}px` }, { height: `${toHeight}px` }],
+                { duration: 360, easing: 'cubic-bezier(.22, .8, .24, 1)' },
+            ).finished.catch(() => {}).finally(() => { row.style.overflow = ''; });
+        }
+        window.setTimeout(() => row.classList.remove('is-changing'), 700);
+    }
+
+    function startRedrawField(index) {
+        const item = cropped[index];
+        if (!processedPage || !item?.cropDeleted || recordSubmitting) return;
+        stopAddingMissedField();
+        stopGroupingFields();
+        cancelOutlineEdit();
+        redrawingLineId = item.lineId;
+        setRedrawBox(null);
+        activateValidationField(index, 'marker');
+        const group = validationGroupForField(index);
+        el('redrawFieldName').textContent = group?.kind === 'person'
+            ? `${item.heading || item.label} · ${group.label}`
+            : (item.heading || item.label);
+        slideToolbar(el('redrawFieldToolbar'), true);
+        armRedrawDrawing();
+        showRedrawState();
+        // Bring its old outline into view once the bar has slid down.
+        window.setTimeout(() => {
+            if (redrawingLineId === item.lineId) revealValidationMarker(index);
+        }, 300);
+    }
+
+    /** Close the tool; the field still waits to be drawn again. */
+    function stopRedrawField() {
+        if (redrawingLineId === null || savingRedraw) return;
+        redrawingLineId = null;
+        setRedrawBox(null);
+        if (lineOverlay.isAddingNew()) lineOverlay.cancelEdit();
+        slideToolbar(el('redrawFieldToolbar'), false);
+        showRedrawState();
+    }
+
+    /** A box was closed on the page: it waits for Save and re-read; another drag replaces it. */
+    function holdRedrawBox(polygon) {
+        if (redrawingLineId === null || savingRedraw) return;
+        setRedrawBox(polygon);
+        armRedrawDrawing();
+    }
+
+    /** Save and re-read: the box is cropped, kept in the field's own person and column, and read. */
+    async function saveRedrawnField() {
+        const lineId = redrawingLineId;
+        if (lineId === null || savingRedraw) return;
+        // A drawing left open is the box.
+        if (lineOverlay.isDrawing() && !lineOverlay.finishDrawing()) {
+            showRedrawStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+            return;
+        }
+        if (!redrawBox) {
+            showRedrawStatus('Draw a box over the writing first.', true);
+            return;
+        }
+        if (lineOverlay.isAddingNew()) lineOverlay.cancelEdit();
+        setRedrawSaving(true);
+        showRedrawStatus('Cropping the new box and reading it…');
+        try {
+            const { response, payload } = await sendLineRequest(
+                verifyLineUrl(config.lineUpdateUrl, lineId), 'PUT', { polygon: redrawBox, keep_place: true },
+            );
+            if (!payload?.line) throw new Error(responseErrorMessage(response, payload));
+            setRedrawSaving(false);
+            stopRedrawField();
+            const fromHeight = validationRow(cropped.findIndex((candidate) => candidate.lineId === lineId))?.offsetHeight ?? 0;
+            applyLineUpdate(payload.line, payload.flags ?? {});
+            animateFieldChange(lineId, fromHeight);
+            if (!response.ok) {
+                showOcrLineWarning(payload.line.id, payload.message || 'The box was saved, but TrOCR could not read it. Type the value.');
+            }
+        } catch (error) {
+            setRedrawSaving(false);
+            armRedrawDrawing();
+            showRedrawStatus(error.message || 'The box could not be read. Draw it again.', true);
+        }
+    }
+
+    // Delete crop (the button, or Delete / Backspace on the selected field)
+    // asks first. The keys never act while typing in a box, so correcting a
+    // typo never deletes a crop.
+    let cropToDelete = null;
+
+    function askToDeleteCrop(index) {
+        const item = cropped[index];
+        if (!item || item.cropDeleted || !processedPage) return;
+        cropToDelete = item.lineId;
+        const group = validationGroupForField(index);
+        const name = item.heading || item.label;
+        el('deleteCropModalDescription').textContent = `${name}${group?.kind === 'person' ? ` · ${group.label}` : ''} `
+            + 'will have to be drawn again before you can submit. Ctrl+Z takes it back.';
+        window.bootstrap.Modal.getOrCreateInstance(el('deleteCropModal')).show();
+    }
+
+    el('deleteCropModal').addEventListener('shown.bs.modal', () => el('deleteCropCancelBtn').focus());
+    el('deleteCropModal').addEventListener('hidden.bs.modal', () => { cropToDelete = null; });
+    el('deleteCropConfirmBtn').addEventListener('click', () => {
+        const index = cropped.findIndex((item) => item.lineId === cropToDelete);
+        window.bootstrap.Modal.getOrCreateInstance(el('deleteCropModal')).hide();
+        if (index >= 0) deleteFieldCrop(index);
+    });
+    document.addEventListener('keydown', (event) => {
+        if (!['Delete', 'Backspace'].includes(event.key) || event.ctrlKey || event.metaKey || event.altKey) return;
+        if (!processedPage || el('step-verify').classList.contains('d-none')) return;
+        if (addingMissedField || groupingFields || redrawingLineId !== null || editingLineIndex !== null || recordSubmitting) return;
+        if (document.querySelector('.modal.show')) return;
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.matches('input, textarea, select, button') || target.isContentEditable)) return;
+        if (activeValidationIndex === null) return;
+        event.preventDefault();
+        askToDeleteCrop(activeValidationIndex);
+    });
+
+    el('redrawFieldCancel').addEventListener('click', stopRedrawField);
+    el('redrawFieldSave').addEventListener('click', saveRedrawnField);
+    document.querySelectorAll('input[name="redrawFieldMode"]').forEach((input) => {
+        input.addEventListener('change', () => {
+            if (!(input instanceof HTMLInputElement) || !input.checked) return;
+            // A drawing of three points or more is kept as the box, not lost.
+            if (lineOverlay.isDrawing() && lineOverlay.finishDrawing()) return;
+            armRedrawDrawing();
+            // Off the button, so Enter and Esc reach the drawing.
+            input.blur();
+        });
+    });
+    document.addEventListener('keydown', (event) => {
+        if (redrawingLineId === null || savingRedraw) return;
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.matches('input:not([type="radio"]), textarea, select') || target.isContentEditable)) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            // Esc drops a drawing, then the waiting box, then closes the tool.
+            if (lineOverlay.isDrawing()) armRedrawDrawing();
+            else if (redrawBox) {
+                setRedrawBox(null);
+                armRedrawDrawing();
+            } else stopRedrawField();
+        } else if (event.key === 'Enter') {
+            event.preventDefault();
+            if (lineOverlay.isDrawing()) {
+                if (!lineOverlay.finishDrawing()) {
+                    showRedrawStatus('This drawing is not an outline yet: it needs at least 3 points, with some height and width.', true);
+                }
+            } else if (redrawBox) {
+                saveRedrawnField();
+            }
+        } else if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z') {
+            event.preventDefault();
+            // Ctrl+Z takes back the newest thing first: a point of the drawing,
+            // then the waiting box, then the deleted crop itself.
+            if (lineOverlay.isDrawing() && lineOverlay.undoDrawStep()) return;
+            if (redrawBox) {
+                setRedrawBox(null);
+                armRedrawDrawing();
+                return;
+            }
+            undoVerifyChange();
+        }
+    });
+
+    // ------------------------------------------------------ group fields
+    // Pick fields (on the page or in the list) and make them one new person,
+    // each keeping its column. The person can be named; every person can.
+
+    let groupingFields = false;
+    let groupingBusy = false;
+    // By line id, so a pick survives the list being rebuilt.
+    const pickedLineIds = new Set();
+
+    /** Only table fields belong to a person row; a layout box's fields keep their place. */
+    function canJoinPerson(item) {
+        const columns = processedPage?.geometry?.columns ?? [];
+        const rows = Math.max(0, (processedPage?.geometry?.ruled_ys?.length ?? 0) - 1);
+        return Boolean(item) && columns.length > 0 && rows > 0 && !['template', 'field'].includes(item.source);
+    }
+
+    /** The column a field keeps when it moves: one on the page, one removed in Align, or none. */
+    function columnPlacementOf(item) {
+        if (item.gridColumn !== null) return { column_index: item.gridColumn };
+        const onPage = new Set((processedPage?.geometry?.columns ?? []).map((column) => nameKey(column.name)));
+        const removedInAlign = config.boxes.some((box) => (
+            box.kind === 'column' && !onPage.has(nameKey(box.name)) && nameKey(box.name) === nameKey(item.label)
+        ));
+        return removedInAlign ? { column_name: item.label } : {};
+    }
+
+    function showGroupFieldsStatus(message, isError = false) {
+        const status = el('groupFieldsStatus');
+        status.textContent = message;
+        status.title = message;
+        status.classList.toggle('is-error', isError);
+    }
+
+    /** The picks on the page and in the list, and the strip's count and button. */
+    function showPickedFields() {
+        const indexes = cropped
+            .map((item, index) => (pickedLineIds.has(item.lineId) ? index : null))
+            .filter((index) => index !== null);
+        lineOverlay.setPicked(indexes);
+        el('verifyRows').querySelectorAll('.validation-field').forEach((row) => {
+            const item = cropped[Number(row.dataset.fieldIndex)];
+            row.classList.toggle('is-picked', Boolean(item && pickedLineIds.has(item.lineId)));
+        });
+        // Each group header says how many of its fields are picked.
+        el('verifyRows').querySelectorAll('.validation-record-group').forEach((section) => {
+            const group = validationGroups.find((candidate) => candidate.id === section.dataset.groupId);
+            const count = group ? group.indexes.filter((index) => pickedLineIds.has(cropped[index]?.lineId)).length : 0;
+            section.classList.toggle('has-picked', count > 0);
+            const title = section.querySelector('.validation-record-group__copy strong');
+            if (title) title.dataset.picked = count > 0 ? `${count} picked` : '';
+        });
+
+        const count = indexes.length;
+        el('groupFieldsCount').textContent = count === 0 ? 'No fields picked' : `${count} field${count === 1 ? '' : 's'} picked`;
+        el('groupFieldsApply').disabled = count === 0 || groupingBusy;
+        if (!groupingBusy) {
+            showGroupFieldsStatus(count === 0
+                ? 'Click the fields of one person on the page or in the list. Click again to take one away.'
+                : 'Pick more, or press Group as person (Enter). Esc cancels.');
+        }
+    }
+
+    function togglePickedField(index) {
+        const item = cropped[index];
+        if (!item || groupingBusy) return;
+        if (!canJoinPerson(item)) {
+            if (!groupingFields) startGroupingFields();
+            showGroupFieldsStatus('This field belongs to a box of the layout, not to a row of the table, so it cannot join a person.', true);
+            return;
+        }
+        if (!groupingFields) startGroupingFields();
+        if (pickedLineIds.has(item.lineId)) pickedLineIds.delete(item.lineId);
+        else pickedLineIds.add(item.lineId);
+        showPickedFields();
+    }
+
+    function startGroupingFields() {
+        if (!processedPage || recordSubmitting || groupingFields) return;
+        stopAddingMissedField();
+        stopRedrawField();
+        cancelOutlineEdit();
+        groupingFields = true;
+        el('groupFieldsBtn').classList.add('active');
+        el('groupFieldsBtn').setAttribute('aria-pressed', 'true');
+        el('groupFieldsName').value = '';
+        slideToolbar(el('groupFieldsToolbar'), true);
+        el('validationFieldOverlay').classList.add('is-picking');
+        showPickedFields();
+    }
+
+    /** Close the strip; nothing picked is kept. */
+    function stopGroupingFields() {
+        if (!groupingFields || groupingBusy) return;
+        groupingFields = false;
+        pickedLineIds.clear();
+        el('groupFieldsBtn').classList.remove('active');
+        el('groupFieldsBtn').setAttribute('aria-pressed', 'false');
+        slideToolbar(el('groupFieldsToolbar'), false);
+        el('validationFieldOverlay').classList.remove('is-picking');
+        showPickedFields();
+    }
+
+    function setGroupingBusy(busy) {
+        groupingBusy = busy;
+        const button = el('groupFieldsApply');
+        button.disabled = busy || pickedLineIds.size === 0;
+        button.querySelector('.bx-group')?.classList.toggle('d-none', busy);
+        button.querySelector('.spinner-border')?.classList.toggle('d-none', !busy);
+        el('groupFieldsCancel').disabled = busy;
+        el('groupFieldsName').disabled = busy;
+    }
+
+    /**
+     * Group as person: the first field starts a new person (a new row past the
+     * table's last), the others join it. Each keeps its column; what was typed
+     * and ticked stays. One Ctrl+Z puts them all back.
+     */
+    async function groupPickedFields() {
+        if (groupingBusy || !processedPage) return;
+        const items = cropped
+            .filter((item) => pickedLineIds.has(item.lineId) && canJoinPerson(item))
+            .sort((a, b) => a.x - b.x || a.y - b.y);
+        if (items.length === 0) return;
+
+        setGroupingBusy(true);
+        showGroupFieldsStatus(`Grouping ${items.length} field${items.length === 1 ? '' : 's'}…`);
+        const name = el('groupFieldsName').value.trim();
+        const moved = [];
+        const before = [];
+        let flags = {};
+        let newRow = null;
+        let failure = null;
+        for (const item of items) {
+            const column = columnPlacementOf(item);
+            try {
+                const { response, payload } = await sendLineRequest(
+                    verifyLineUrl(config.linePlaceUrl, item.lineId), 'PATCH',
+                    newRow === null ? { new_person: true, ...column } : { row: newRow, ...column },
+                );
+                if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
+                newRow ??= payload.line.row;
+                moved.push(payload.line);
+                flags = payload.flags ?? flags;
+                if (item.gridRow !== null) before.push({ id: item.lineId, row: item.gridRow, column });
+            } catch (error) {
+                failure = error.message || 'A field could not be moved.';
+                break;
+            }
+        }
+
+        setGroupingBusy(false);
+        if (moved.length > 0) {
+            const byId = new Map(moved.map((line) => [line.id, line]));
+            if (name && newRow !== null) personNameOverrides.set(`${processedPage.id}:person-${newRow}`, name);
+            groupingFields = true; // still open while the list is rebuilt
+            pickedLineIds.clear();
+            rebuildVerifyLines(processedPage.lines.map((line) => byId.get(line.id) ?? line), flags,
+                // 'marker': the list scrolls to the new person, at its end.
+                { focusLineId: moved[0].id, focusFrom: 'marker' });
+            if (before.length > 0) pushVerifyUndo({ kind: 'grouped', moves: before });
+        }
+        if (failure) {
+            showGroupFieldsStatus(moved.length > 0
+                ? `${moved.length} of ${items.length} fields were grouped; then: ${failure}`
+                : failure, true);
+            return;
+        }
+        stopGroupingFields();
+    }
+
+    /** The person's name at the top of their fields: what Verify calls them. */
+    function personNameControl(group, section) {
+        const wrap = document.createElement('div');
+        wrap.className = 'validation-record-group__name';
+        const inputId = `personName-${group.id}`;
+        wrap.innerHTML = `
+            <label for="${inputId}">Name</label>
+            <input type="text" class="form-control form-control-sm" id="${inputId}" maxlength="120" autocomplete="off">
+            <small></small>`;
+        const input = requiredInput(wrap, 'input');
+        const note = requiredPart(wrap, 'small');
+        const automatic = automaticIdentity(group);
+        const key = personNameKey(group);
+        input.value = personNameOverrides.get(key) ?? '';
+        input.placeholder = /^\d+ fields?$/.test(automatic) ? 'Type a name' : automatic;
+        const showNote = () => {
+            note.textContent = input.value.trim() ? 'Named by you' : 'From the page';
+        };
+        showNote();
+
+        const apply = () => {
+            const value = input.value.trim();
+            if (value) personNameOverrides.set(key, value);
+            else personNameOverrides.delete(key);
+            showNote();
+            // The header and every Person list show the new name at once.
+            const shown = groupIdentity(group);
+            const header = section.querySelector('.validation-record-group__copy small');
+            if (header) header.textContent = shown;
+            const row = Number(cropped[group.indexes[0]]?.personGroup);
+            const number = String(row).padStart(2, '0');
+            el('verifyRows').querySelectorAll(`select[aria-label^="Person"] option[value="${row}"]`).forEach((option) => {
+                option.textContent = /^\d+ fields?$/.test(shown) ? number : `${number} · ${shown}`;
+            });
+        };
+        input.addEventListener('click', (event) => event.stopPropagation());
+        input.addEventListener('change', apply);
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                input.blur();
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                input.value = personNameOverrides.get(key) ?? '';
+                input.blur();
+            }
+        });
+        return wrap;
+    }
+
+    el('groupFieldsBtn').addEventListener('click', () => (groupingFields ? stopGroupingFields() : startGroupingFields()));
+    el('groupFieldsCancel').addEventListener('click', stopGroupingFields);
+    el('groupFieldsApply').addEventListener('click', groupPickedFields);
+    el('groupFieldsName').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            groupPickedFields();
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (!groupingFields || groupingBusy) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            stopGroupingFields();
+            return;
+        }
+        const target = event.target;
+        if (target instanceof HTMLElement && target.matches('input, textarea, select')) return;
+        if (event.key === 'Enter' && pickedLineIds.size > 0) {
+            event.preventDefault();
+            groupPickedFields();
+        }
+    });
+
         // Ctrl+Z in Verify takes back the last change to the added fields: the
         // fields just read, a removal, or a move to another person or column.
         const verifyUndo = [];
@@ -6426,6 +7154,30 @@
                     if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
                     rebuildVerifyLines([...processedPage.lines, payload.line].sort((a, b) => a.position - b.position),
                         payload.flags ?? {}, { focusLineId: payload.line.id });
+            } else if (entry.kind === 'grouped') {
+                // Every field back to the person and column it came from.
+                const lines = new Map();
+                let flags = {};
+                for (const move of entry.moves) {
+                    const { response, payload } = await sendLineRequest(
+                        verifyLineUrl(config.linePlaceUrl, move.id), 'PATCH', { row: move.row, ...move.column },
+                    );
+                    if (response.ok && payload?.line) {
+                        lines.set(payload.line.id, payload.line);
+                        flags = payload.flags ?? flags;
+                    }
+                }
+                rebuildVerifyLines(processedPage.lines.map((line) => lines.get(line.id) ?? line), flags,
+                    { focusLineId: entry.moves[0]?.id ?? null });
+            } else if (entry.kind === 'cropDeleted') {
+                // The old crop and reading come back, unless it was drawn again since.
+                if (!processedPage.lines.some((line) => line.id === entry.id && (line.flags ?? []).includes(FLAG_REDRAW))) return;
+                if (redrawingLineId === entry.id) stopRedrawField();
+                const { response, payload } = await sendLineRequest(verifyLineUrl(config.lineRedrawUrl, entry.id), 'POST', { needed: false });
+                if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
+                const fromHeight = validationRow(cropped.findIndex((candidate) => candidate.lineId === entry.id))?.offsetHeight ?? 0;
+                applyLineUpdate(payload.line, payload.flags ?? {});
+                animateFieldChange(entry.id, fromHeight);
                 } else if (entry.kind === 'moved') {
                     const { response, payload } = await sendLineRequest(
                         verifyLineUrl(config.linePlaceUrl, entry.id), 'PATCH', { row: entry.row, ...entry.column },
@@ -6444,7 +7196,7 @@
         }
 
         document.addEventListener('keydown', (event) => {
-            if (addingMissedField || !processedPage || el('step-verify').classList.contains('d-none')) return;
+        if (addingMissedField || redrawingLineId !== null || !processedPage || el('step-verify').classList.contains('d-none')) return;
             if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'z') return;
             const target = event.target;
             // Typing keeps the browser's own undo.
@@ -6455,17 +7207,29 @@
         });
 
         /**
-         * Person, Column and Remove under a field the reviewer added, or one that
-         * fell between two rows. The others are moved with Adjust outline.
+     * A field the reviewer added, or one that fell between two rows, while it
+     * belongs to no person yet: it can be removed outright. Once it joins a
+     * person it is like every other field there (Delete crop, no Remove).
+     */
+    function isRemovableField(item) {
+        if (!item || item.gridRow !== null) return false;
+        return item.source === SOURCE_MANUAL || Boolean(item.flags?.includes(FLAG_NO_ROW));
+    }
+
+    /**
+     * Person and Column under every field of a table, to say whose it is and
+     * which column it is; Remove too under a field the reviewer added or one
+     * that fell between two rows. Fields of a layout box have neither.
          */
         function fieldPlacementControls(index) {
             const item = cropped[index];
-            const added = item?.source === SOURCE_MANUAL;
-            if (!item || !(added || item.flags.includes(FLAG_NO_ROW))) return null;
+        if (!item) return null;
+        const removable = isRemovableField(item);
 
             const columns = processedPage?.geometry?.columns ?? [];
             const rows = Math.max(0, (processedPage?.geometry?.ruled_ys?.length ?? 0) - 1);
             const ledger = columns.length > 0 && rows > 0 && !['template', 'field'].includes(item.source);
+        if (!ledger && !removable) return null;
 
             const controls = document.createElement('div');
             controls.className = 'validation-field__place';
@@ -6546,6 +7310,8 @@
             }
             controls.append(end);
 
+        if (!removable) return controls;
+
             const remove = document.createElement('button');
             remove.type = 'button';
             remove.className = 'btn btn-sm btn-outline-danger validation-field__remove';
@@ -6604,7 +7370,7 @@
                 if (!(input instanceof HTMLInputElement) || !input.checked) return;
                 // Leaving Draw keeps a drawing of three points or more.
                 if (input.value !== 'draw' && lineOverlay.isDrawing() && lineOverlay.finishDrawing()) {
-                    if (input.value !== 'box') lineOverlay.setEditMode(input.value);
+                lineOverlay.setEditMode(input.value);
                 } else {
                     lineOverlay.setEditMode(input.value);
                 }
@@ -6632,9 +7398,6 @@
             } else if (command && !event.shiftKey && event.key.toLowerCase() === 'z' && lineOverlay.isDrawing()) {
                 event.preventDefault();
                 lineOverlay.undoDrawStep();
-            } else if (['Delete', 'Backspace'].includes(event.key) && lineOverlay.editing?.mode === 'points') {
-                event.preventDefault();
-                lineOverlay.deleteActivePoint();
             }
         });
 
@@ -6997,6 +7760,17 @@
             clearValidationSubmitError();
             const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
             rows.forEach((row) => clearValidationFieldError(Number(row.dataset.fieldIndex)));
+
+        // A deleted crop must be drawn again and read before anything is submitted.
+        const toRedraw = cropped.map((item, index) => (item.cropDeleted ? index : null)).filter((index) => index !== null);
+        if (toRedraw.length > 0) {
+            showValidationSubmitError(toRedraw.length === 1
+                ? 'One field has a deleted crop. Draw it again before submitting.'
+                : `${toRedraw.length} fields have a deleted crop. Draw them again before submitting.`);
+            toRedraw.forEach((index) => setValidationFieldError(index, 'Press Draw again and mark this field on the page.'));
+            activateValidationField(toRedraw[0], 'marker');
+            return;
+        }
 
             const verifiedIndexes = rows
                 .filter((row) => requiredInput(row, '.validation-verified').checked)

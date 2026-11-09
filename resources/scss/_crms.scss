@@ -2656,6 +2656,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     display: flex;
   }
 
+  // The arrows are the same 30 px squares as the zoom buttons.
+  .btn-icon {
+    justify-content: center;
+    padding: 0;
+  }
+
   .marker-page-select {
     inline-size: auto;
     min-inline-size: 8.75rem;
@@ -3233,16 +3239,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   padding: .9rem 1rem;
   background: var(--bs-paper-bg);
   border-block-end: 1px solid var(--bs-border-color);
-}
-
-.validation-file-name {
-  display: block;
-  max-inline-size: 22rem;
-  overflow: hidden;
-  color: var(--bs-secondary-color);
-  font-size: .75rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .validation-doc-viewport {
@@ -4511,6 +4507,270 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-inline-start: 3px solid var(--bs-danger);
 }
 
+// Adjust outline and Delete crop, side by side under the value box.
+.validation-field__tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-self: start;
+  gap: .25rem .5rem;
+
+  .validation-field__adjust {
+    gap: .1rem;
+  }
+}
+
+.validation-field__delete-crop.validation-field__adjust {
+  color: var(--bs-danger);
+}
+
+// A deleted crop: a dashed gap where the picture was, a locked value box,
+// and Draw again beside the red note.
+.validation-field__crop-deleted {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .35rem;
+  inline-size: 100%;
+  min-block-size: 2.5rem;
+  padding: .25rem .5rem;
+  color: var(--bs-danger);
+  background: rgba(var(--bs-danger-rgb), .06);
+  border: 1px dashed rgba(var(--bs-danger-rgb), .5);
+  border-radius: .3rem;
+  font-size: .75rem;
+  font-weight: 600;
+}
+
+// A deleted crop: the whole row turns red and shrinks to one line, with the
+// one thing left to do. It beats the green of the row you are on.
+.validation-field.is-crop-deleted,
+.validation-field.is-crop-deleted.is-active,
+.validation-field.is-crop-deleted.is-invalid,
+.validation-field.is-crop-deleted:hover {
+  background: rgba(var(--bs-danger-rgb), .07);
+  box-shadow: inset .2rem 0 0 var(--bs-danger);
+}
+
+.validation-field.is-crop-deleted {
+  padding-block: .6rem;
+
+  .validation-field__identity {
+    align-self: center;
+    min-block-size: 0;
+  }
+
+  .validation-field__number {
+    color: #fff;
+    background: var(--bs-danger);
+  }
+
+  .validation-field__entry {
+    align-self: center;
+    min-block-size: 0;
+  }
+
+  // The tick has nothing to confirm until the field is read again.
+  .validation-field__check {
+    visibility: hidden;
+  }
+
+  .validation-field__draw-again {
+    justify-self: start;
+    padding: .3rem .7rem;
+    font-size: .75rem;
+    white-space: nowrap;
+  }
+}
+
+// What a change looks like as it happens (see animateFieldChange): the row
+// fades in from a stronger tint, and its parts slide in one after the other.
+@keyframes field-change-flash {
+  from {
+    background-color: rgba(var(--bs-danger-rgb), .2);
+  }
+}
+
+@keyframes field-change-in {
+  from {
+    opacity: 0;
+    transform: translateY(-.35rem) scale(.96);
+  }
+}
+
+.validation-field.is-changing {
+  animation: field-change-flash .7s ease-out;
+
+  .validation-field__number,
+  .validation-field__name {
+    animation: field-change-in .32s ease-out both;
+  }
+
+  .validation-field__crop,
+  .validation-field__entry .form-control {
+    animation: field-change-in .36s .06s ease-out both;
+  }
+
+  .validation-field__draw-again,
+  .validation-field__reading {
+    animation: field-change-in .36s .14s ease-out both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .validation-field.is-changing,
+  .validation-field.is-changing * {
+    animation: none !important;
+  }
+}
+
+// The deleted outline is off the page until the field is drawn again.
+.line-marker.is-crop-deleted {
+  display: none;
+}
+
+// What the deleted row offers next (see showRedrawState).
+.validation-field__redraw {
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
+
+  > * {
+    display: none;
+  }
+
+  .validation-field__redraw-save .spinner-border {
+    display: none;
+  }
+}
+
+.validation-field[data-redraw="idle"] .validation-field__draw-again,
+.validation-field[data-redraw="drawing"] .validation-field__redraw-hint,
+.validation-field[data-redraw="ready"] .validation-field__redraw-save,
+.validation-field[data-redraw="saving"] .validation-field__redraw-save {
+  display: inline-flex;
+  align-items: center;
+}
+
+.validation-field[data-redraw="saving"] .validation-field__redraw-save {
+  .bx-check {
+    display: none;
+  }
+
+  .spinner-border {
+    display: inline-block;
+  }
+}
+
+.validation-field__redraw-save {
+  padding: .3rem .7rem;
+  font-size: .75rem;
+  white-space: nowrap;
+}
+
+// "Draw a box on the page", pointing left at the page, gently pulsing.
+@keyframes redraw-hint-pulse {
+  50% {
+    opacity: .55;
+  }
+}
+
+.validation-field__redraw-hint {
+  gap: .15rem;
+  color: var(--bs-danger);
+  font-size: .75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: redraw-hint-pulse 1.6s ease-in-out infinite;
+
+  .bx {
+    font-size: 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .validation-field__redraw-hint {
+    animation: none;
+  }
+}
+
+// Group fields: the picked fields, on the page and in the list.
+.line-marker.is-picked .line-marker__shape,
+.line-marker.is-picked.is-selected .line-marker__shape,
+.line-marker.is-picked.is-selected.is-current .line-marker__shape {
+  fill: rgba(var(--bs-info-rgb), .22);
+  stroke: var(--bs-info);
+  stroke-width: 2.4px;
+}
+
+// While picking, every table outline shows it can be clicked.
+.validation-field-overlay.is-picking .line-marker {
+  cursor: copy;
+}
+
+.validation-field.is-picked,
+.validation-field.is-picked.is-active {
+  background: rgba(var(--bs-info-rgb), .1);
+  box-shadow: inset .2rem 0 0 var(--bs-info);
+}
+
+// "2 picked" beside a person's name, so picks in a closed group are not lost.
+.validation-record-group.has-picked .validation-record-group__copy strong::after {
+  content: attr(data-picked);
+  margin-inline-start: .45rem;
+  padding: .05rem .4rem;
+  color: #fff;
+  background: var(--bs-info);
+  border-radius: .3rem;
+  font-size: .625rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.group-fields-toolbar__name {
+  flex: 0 1 12rem;
+  min-inline-size: 8rem;
+}
+
+// A person's name, above their fields: typed by Staff or read from the page.
+.validation-record-group__name {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .45rem 1rem .45rem 1.35rem;
+  border-block-end: 1px solid var(--bs-border-color);
+
+  label {
+    flex: 0 0 auto;
+    color: var(--bs-heading-color);
+    font-size: .75rem;
+    font-weight: 600;
+  }
+
+  .form-control {
+    flex: 0 1 18rem;
+    min-inline-size: 0;
+  }
+
+  small {
+    color: var(--bs-secondary-color);
+    font-size: .6875rem;
+  }
+}
+
+// Draw again: red, where Add missed field is blue.
+.redraw-field-toolbar {
+  background: rgba(var(--bs-danger-rgb), .06);
+  border-block-end-color: rgba(var(--bs-danger-rgb), .3);
+
+  .line-edit-toolbar__eyebrow {
+    color: var(--bs-danger);
+  }
+
+  .line-edit-toolbar__status {
+    border-block-start-color: rgba(var(--bs-danger-rgb), .2);
+  }
+}
+
 // The template's hint for this value, and a value that does not fit its field
 // (a date, a number, one of a list): pointed out, never blocking.
 .validation-field__hint {
@@ -4790,6 +5050,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   &.has-review {
     color: var(--crms-warning-text-d);
+  }
+
+  // A deleted crop waiting to be drawn again outranks the rest.
+  &.has-redraw {
+    color: var(--bs-danger);
+    font-weight: 600;
   }
 }
 
