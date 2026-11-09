@@ -53,6 +53,13 @@
                         </div>
 
                         <div class="marker-toolbar__actions">
+                            {{-- Hides the row lines and column frames to look at the page itself; on at every visit. --}}
+                            <div class="form-check form-switch marker-grid-toggle"
+                                 title="Show or hide the row lines and column frames over the page">
+                                <input class="form-check-input" type="checkbox" role="switch" id="showGridToggle" checked>
+                                <label class="form-check-label" for="showGridToggle">Grid lines</label>
+                            </div>
+
                             <div class="dropdown">
                                 <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle marker-help-button" data-bs-toggle="dropdown"
                                         aria-expanded="false" aria-label="Show editor shortcuts">
@@ -3193,6 +3200,12 @@
         el('docViewport').scrollTo({ top: 0, left: 0 });
         clearOcrError();
     }
+
+    // Grid lines off: the row lines and column frames are hidden (not removed),
+    // so Staff can see the page's own lines; header fields stay.
+    el('showGridToggle').addEventListener('change', (event) => {
+        el('fieldOverlay').classList.toggle('is-grid-hidden', !event.target.checked);
+    });
 
     el('resetFieldsBtn').addEventListener('click', () => {
         const layoutChanged = !fieldsMatchTemplate();

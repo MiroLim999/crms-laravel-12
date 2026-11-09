@@ -3565,27 +3565,27 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     position: absolute;
     inset-inline: 0;
     inset-block-start: 0;
-    border-block-start: 1.5px dashed #0e9aa7;
+    // 2px, a deeper teal and a thin light edge, so the line shows on dark,
+    // aged paper as well as on white.
+    border-block-start: 2px dashed #0a8a96;
+    filter: drop-shadow(0 0 .5px rgba(255, 255, 255, .9));
     transform: translateY(-50%);
   }
 
+  // Every grip shows in full, so each row line can be found and dragged.
   .row-line__grip {
     position: absolute;
     inset-block-start: 0;
-    inline-size: .8rem;
-    block-size: .55rem;
-    background-color: #0e9aa7;
-    border: 1.5px solid var(--bs-paper-bg);
+    inline-size: .95rem;
+    block-size: .65rem;
+    background-color: #0a8a96;
+    border: 1.5px solid #fff;
     border-radius: 50rem;
-    box-shadow: 0 1px 2px rgba(var(--crms-shadow-rgb), .3);
+    box-shadow: 0 1px 3px rgba(var(--crms-shadow-rgb), .45);
     cursor: ns-resize;
     pointer-events: auto;
     touch-action: none;
     transform: translate(-50%, -50%);
-    // Faint until the line is pointed at, selected or dragged, so the table's
-    // edges stay clean but the grips can still be found.
-    opacity: .3;
-    transition: opacity .12s ease;
 
     &.is-start {
       inset-inline-start: 0;
@@ -3619,14 +3619,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   &:hover,
-  &.is-selected,
-  &.is-dragging {
-    .row-line__grip {
-      opacity: 1;
-    }
-  }
-
-  &:hover,
   &.is-dragging {
     .row-line__rule {
       border-block-start: 2px solid var(--bs-danger);
@@ -3635,6 +3627,40 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     .row-line__grip {
       background-color: var(--bs-danger);
     }
+  }
+}
+
+// The Align toolbar's Grid lines switch: off hides the row lines and the
+// column frames (they keep their places), so the page's own lines show.
+.marker-grid-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  min-block-size: 0;
+  margin: 0 .25rem 0 0;
+  padding-inline-start: 0;
+  white-space: nowrap;
+
+  .form-check-input {
+    float: none;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .form-check-label {
+    font-size: .8125rem;
+    cursor: pointer;
+  }
+}
+
+.field-overlay.is-grid-hidden {
+  .row-line-layer {
+    display: none;
+  }
+
+  .field-box.is-column,
+  .field-box.is-column * {
+    visibility: hidden !important;
   }
 }
 
@@ -3972,8 +3998,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 // Ledger column markers in the Align step: aligned like any field, but read
 // line by line, so they read as a frame rather than a crop box.
 .field-box.is-column {
+  // 2px and a deeper teal, so the frames show on dark, aged paper.
+  border-width: 2px;
   border-style: dashed;
-  border-color: #0e9aa7;
+  border-color: #0a8a96;
   background-color: rgba(14, 154, 167, .06);
 
   .field-box-label {
