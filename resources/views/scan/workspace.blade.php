@@ -2838,6 +2838,7 @@
             scanFile = file;
             scanFingerprint = null;
             savedPages = new Map();
+            pageLayouts.clear();
             clearDetection();
             // It opens at its first page not saved yet.
             const [pageCount] = await Promise.all([pdf ? marker.pdfPageCount(file) : 1, lookUpSavedPages(file)]);
@@ -2869,10 +2870,47 @@
         }
     }
 
+    // Each page of a PDF has its own layout: markers, row lines, tilt and
+    // Ctrl+Z history (page number -> state). A page never opened starts from
+    // the template, as for a file just opened; going back to a page finds it
+    // as it was left.
+    const pageLayouts = new Map();
+
+    function savePageLayout(page) {
+        pageLayouts.set(page, {
+            grid: gridState(),
+            autoFields: new Map(autoFields),
+            rowsSource,
+            history: [...fieldHistory],
+        });
+    }
+
+    function showPageLayout(page) {
+        const saved = pageLayouts.get(page);
+        fieldHistory = [];
+        currentFieldSnapshot = null;
+        if (!saved) {
+            rowsSource = null;
+            setGrid(templateBoxes, templateRows, { remember: true });
+            return;
+        }
+        setGrid(saved.grid.boxes, saved.grid.rows, {
+            estimated: saved.grid.estimated,
+            byHand: saved.grid.byHand,
+            tilts: saved.grid.tilts,
+        });
+        autoFields = new Map(saved.autoFields);
+        rowsSource = saved.rowsSource;
+        fieldHistory = [...saved.history];
+        currentFieldSnapshot = gridState();
+        updateGridCard();
+    }
+
     /**
-     * Another page of the PDF, in Align. The markers and row lines stay where
-     * they are, like a sheet laid over the book: only the page under them
-     * changes. What Detect found belongs to the page before, so it is let go.
+     * Another page of the PDF, in Align. Each page keeps its own markers, row
+     * lines and tilt, as scans are never turned alike: the page being left is
+     * remembered, and the one shown comes with its own layout. What Detect
+     * found belongs to the page before, so it is let go.
      */
     async function turnToPage(pageNumber) {
         const page = Math.min(scanPageCount, Math.max(1, Math.trunc(Number(pageNumber)) || 1));
@@ -2885,8 +2923,10 @@
         updatePageBar();
         try {
             clearDetection();
+            savePageLayout(scanPageNumber);
             await marker.load(scanFile, { page });
             scanPageNumber = page;
+            showPageLayout(page);
             clearOcrError();
             updateScanNotices();
             showScanContext();
@@ -6582,6 +6622,7 @@
             requiredInput(document, '#documentPageId').value = '';
             requiredInput(document, '#ocrModelKey').value = '';
 
+            savePageLayout(scanPageNumber);
             await marker.load(scanFile, { page: pageNumber });
             scanPageNumber = pageNumber;
             recordSubmitting = false;
@@ -6590,8 +6631,7 @@
             showScanContext();
             showStep('mark');
             resetFieldHistory();
-            rowsSource = null;
-            setGrid(templateBoxes, templateRows, { remember: true });
+            showPageLayout(pageNumber);
             fetchSnapLines();
             window.bootstrap.Modal.getInstance(el('nextPageModal'))?.hide();
             window.requestAnimationFrame(() => marker.resetZoom());
