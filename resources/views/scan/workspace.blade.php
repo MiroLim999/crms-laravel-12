@@ -661,6 +661,7 @@
                     <p class="mb-2" id="resetFieldsModalDescription">
                         Restore all field markers and row lines to the positions and sizes configured in the original template?
                     </p>
+                    <p class="small mb-2 d-none" id="resetFieldsModalPage"></p>
                     <p class="small text-muted mb-0">
                         Added or copied fields, columns and rows will be removed, and deleted ones will be restored.
                     </p>
@@ -2845,6 +2846,7 @@
             scanFile = file;
             scanFingerprint = null;
             savedPages = new Map();
+            pageLayouts.clear();
             clearDetection();
             // It opens at its first page not saved yet.
             const [pageCount] = await Promise.all([pdf ? marker.pdfPageCount(file) : 1, lookUpSavedPages(file)]);
@@ -2876,10 +2878,54 @@
         }
     }
 
+    // Each page of a PDF has its own layout: markers, row lines, tilt and
+    // Ctrl+Z history (page number -> state). Going back to a page finds it as
+    // it was left. A page never opened starts as a copy of the page just left:
+    // pages of one book sit much alike, and Snap to table finds a page whose
+    // printed lines are faint or creased far better from there than from the
+    // template. It is a copy, not a link: each page changes on its own.
+    const pageLayouts = new Map();
+
+    function savePageLayout(page) {
+        pageLayouts.set(page, {
+            grid: gridState(),
+            autoFields: new Map(autoFields),
+            rowsSource,
+            history: [...fieldHistory],
+        });
+    }
+
+    function showPageLayout(page, { copyFrom = null } = {}) {
+        const saved = pageLayouts.get(page);
+        fieldHistory = [];
+        currentFieldSnapshot = null;
+        if (!saved) {
+            // The page left behind's markers and rows, as this page's own
+            // starting point: what Snap and Detect may move, as from the
+            // template. Its amber marks belonged to the other page.
+            const start = pageLayouts.get(copyFrom)?.grid;
+            rowsSource = null;
+            if (start) setGrid(start.boxes, start.rows, { tilts: start.tilts, remember: true });
+            else setGrid(templateBoxes, templateRows, { remember: true });
+            return;
+        }
+        setGrid(saved.grid.boxes, saved.grid.rows, {
+            estimated: saved.grid.estimated,
+            byHand: saved.grid.byHand,
+            tilts: saved.grid.tilts,
+        });
+        autoFields = new Map(saved.autoFields);
+        rowsSource = saved.rowsSource;
+        fieldHistory = [...saved.history];
+        currentFieldSnapshot = gridState();
+        updateGridCard();
+    }
+
     /**
-     * Another page of the PDF, in Align. The markers and row lines stay where
-     * they are, like a sheet laid over the book: only the page under them
-     * changes. What Detect found belongs to the page before, so it is let go.
+     * Another page of the PDF, in Align. Each page keeps its own markers, row
+     * lines and tilt, as scans are never turned alike: the page being left is
+     * remembered, and the one shown comes with its own layout. What Detect
+     * found belongs to the page before, so it is let go.
      */
     async function turnToPage(pageNumber) {
         const page = Math.min(scanPageCount, Math.max(1, Math.trunc(Number(pageNumber)) || 1));
@@ -2892,8 +2938,11 @@
         updatePageBar();
         try {
             clearDetection();
+            const left = scanPageNumber;
+            savePageLayout(left);
             await marker.load(scanFile, { page });
             scanPageNumber = page;
+            showPageLayout(page, { copyFrom: left });
             clearOcrError();
             updateScanNotices();
             showScanContext();
@@ -3217,6 +3266,10 @@
             return;
         }
 
+        // Each page has its own layout: only this one is reset.
+        const pageNote = el('resetFieldsModalPage');
+        pageNote.textContent = `Only page ${scanPageNumber} is reset. The other pages keep their own layouts.`;
+        pageNote.classList.toggle('d-none', !multiPage());
         window.bootstrap.Modal.getOrCreateInstance(el('resetFieldsModal')).show();
     });
     el('confirmResetFieldsBtn').addEventListener('click', () => {
@@ -6578,8 +6631,8 @@
 
     /**
      * Go on with another page of the same PDF once one is saved: Align starts
-     * again from the template's markers, as for a file just opened, and the
-     * file is not uploaded again.
+     * from a copy of the saved page's markers (or that page's own, if it was
+     * opened before), and the file is not uploaded again.
      */
     async function continueWithPage(pageNumber) {
         const button = el('nextPageContinueBtn');
@@ -6595,6 +6648,8 @@
             requiredInput(document, '#documentPageId').value = '';
             requiredInput(document, '#ocrModelKey').value = '';
 
+            const left = scanPageNumber;
+            savePageLayout(left);
             await marker.load(scanFile, { page: pageNumber });
             scanPageNumber = pageNumber;
             recordSubmitting = false;
@@ -6603,8 +6658,7 @@
             showScanContext();
             showStep('mark');
             resetFieldHistory();
-            rowsSource = null;
-            setGrid(templateBoxes, templateRows, { remember: true });
+            showPageLayout(pageNumber, { copyFrom: left });
             fetchSnapLines();
             window.bootstrap.Modal.getInstance(el('nextPageModal'))?.hide();
             window.requestAnimationFrame(() => marker.resetZoom());
