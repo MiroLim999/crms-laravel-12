@@ -654,6 +654,7 @@
                     <p class="mb-2" id="resetFieldsModalDescription">
                         Restore all field markers and row lines to the positions and sizes configured in the original template?
                     </p>
+                    <p class="small mb-2 d-none" id="resetFieldsModalPage"></p>
                     <p class="small text-muted mb-0">
                         Added or copied fields, columns and rows will be removed, and deleted ones will be restored.
                     </p>
@@ -3244,6 +3245,10 @@
             return;
         }
 
+        // Each page has its own layout: only this one is reset.
+        const pageNote = el('resetFieldsModalPage');
+        pageNote.textContent = `Only page ${scanPageNumber} is reset. The other pages keep their own layouts.`;
+        pageNote.classList.toggle('d-none', !multiPage());
         window.bootstrap.Modal.getOrCreateInstance(el('resetFieldsModal')).show();
     });
     el('confirmResetFieldsBtn').addEventListener('click', () => {
