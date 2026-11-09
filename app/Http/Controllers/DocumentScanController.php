@@ -148,6 +148,11 @@ class DocumentScanController extends Controller
             // Rectangle fields, then ledger columns. Staff align both the same way.
             'boxes' => $template->markerBoxes(),
             'ruledYs' => $template->isLedger() ? array_values($template->ruled_ys) : [],
+            // A spread's second page: its own markers and row lines. Null for one page.
+            'pageTwo' => $template->hasSecondPage() ? [
+                'boxes' => $template->forPage(2)->markerBoxes(),
+                'ruledYs' => $template->forPage(2)->isLedger() ? array_values($template->forPage(2)->ruled_ys) : [],
+            ] : null,
             'activeModel' => OcrModel::active(),
             // Empty unless a Super Admin has allowed it, in which case the reading
             // step offers a picker instead of silently using the promoted model.
@@ -188,6 +193,10 @@ class DocumentScanController extends Controller
             'fields.*.height' => ['required', 'numeric', 'min:0.00001', 'max:1'],
             // The processed page whose outlined lines these fields were read from.
             'document_page_id' => ['nullable', 'integer'],
+            // A spread (a layout with a second page): the second page's outlined
+            // page, and which page each field was read from.
+            'document_page_id_two' => ['nullable', 'integer'],
+            'fields.*.page' => ['nullable', 'integer', 'in:1,2'],
             'fields.*.line_id' => ['nullable', 'integer', 'distinct'],
             // Staff chose "Submit anyway" when asked about missing required fields.
             'allow_missing' => ['sometimes', 'boolean'],
@@ -222,6 +231,15 @@ class DocumentScanController extends Controller
         // field's name (a ledger line: its column's). A field Staff added
         // themselves has no template settings.
         $settingsByName = $template->settingsByName();
+
+        // A PDF of two pages is one record: row N of page 2 carries on row N of
+        // page 1. Page 2 is read with the layout's own second page, or, for a
+        // layout of one page, with the first page's (as Staff adjusted it).
+        $onSecondPage = fn (array $field) => (int) ($field['page'] ?? 1) === 2;
+        $fieldsOne = array_filter($validated['fields'], fn (array $field) => !$onSecondPage($field));
+        $fieldsTwo = array_filter($validated['fields'], $onSecondPage);
+        $secondPage = $fieldsTwo !== [] || !empty($validated['document_page_id_two']);
+        $layoutTwo = $template->forPage(2);
 
         $coordinateErrors = [];
         foreach ($validated['fields'] as $index => $field) {
@@ -261,12 +279,21 @@ class DocumentScanController extends Controller
             throw ValidationException::withMessages(['scan' => $message]);
         }
 
-        [$page, $linesById] = $this->pageLinesFor($request, $validated, $templateId);
+        [$page, $linesOne] = $this->pageLinesFor($request, [...$validated, 'fields' => $fieldsOne], $templateId);
+        [$pageTwo, $linesTwo] = $secondPage
+            ? $this->pageLinesFor($request, [
+                ...$validated,
+                'fields' => $fieldsTwo,
+                'document_page_id' => $validated['document_page_id_two'] ?? null,
+            ], $templateId)
+            : [null, collect()];
+        $linesById = $linesOne->union($linesTwo);
 
         // A crop deleted in Verify must be drawn again and read first.
-        $toRedraw = $page?->lines
-            ->filter(fn (PageLine $line) => in_array(PageLine::FLAG_REDRAW, $line->flags ?? [], true))
-            ->count() ?? 0;
+        $toRedraw = collect([$page, $pageTwo])->filter()
+            ->sum(fn (DocumentPage $each) => $each->lines
+                ->filter(fn (PageLine $line) => in_array(PageLine::FLAG_REDRAW, $line->flags ?? [], true))
+                ->count());
         if ($toRedraw > 0) {
             throw ValidationException::withMessages([
                 'fields' => $toRedraw === 1
@@ -278,8 +305,17 @@ class DocumentScanController extends Controller
         // Some certificates do leave a required field blank, so a missing one
         // is not refused outright: Staff must confirm it first.
         $missingRequired = [
-            ...$this->missingRequiredFields($template, $validated['fields'], $linesById),
-            ...$this->missingRegisterRows($template, $page, $validated['fields'], $linesById),
+            ...$this->missingRequiredFields($template, $fieldsOne, $linesOne),
+            ...$this->missingRegisterRows($template, $page, $fieldsOne, $linesOne),
+            ...($secondPage ? array_map(
+                fn (string $message) => 'Page 2 · '.$message,
+                [
+                    // The first page's own fields (a title, a page number) are not asked of
+                    // page 2 when it is read with the first page's layout.
+                    ...($template->hasSecondPage() ? $this->missingRequiredFields($layoutTwo, $fieldsTwo, $linesTwo) : []),
+                    ...$this->missingRegisterRows($layoutTwo, $pageTwo, $fieldsTwo, $linesTwo),
+                ],
+            ) : []),
         ];
         if ($missingRequired !== [] && !$request->boolean('allow_missing')) {
             // One message per field, so the workspace can list them when it asks.
@@ -329,9 +365,10 @@ class DocumentScanController extends Controller
 
         $copiedFiles = [];
         $gridChanges = $this->gridChanges($template, $page);
+        $gridChangesTwo = $secondPage ? $this->gridChanges($layoutTwo, $pageTwo) : [];
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $savedBefore, &$copiedFiles) {
+            $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $pageTwo, $linesById, $missingRequired, $gridChanges, $gridChangesTwo, $source, $savedBefore, &$copiedFiles) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -343,6 +380,7 @@ class DocumentScanController extends Controller
                     // Field outlines are fractions of the page as outlined,
                     // which Detect may have straightened.
                     'scan_rotation' => $page?->deskew_degrees,
+                    'scan_rotation_two' => $pageTwo?->deskew_degrees,
                     'source_name' => $source['name'],
                     'source_page' => $source['page'],
                     'source_page_count' => $source['page_count'],
@@ -359,10 +397,14 @@ class DocumentScanController extends Controller
                 if ($page !== null) {
                     $record->update(['page_image_path' => $this->keepPageImage($record, $page, $copiedFiles)]);
                 }
+                if ($pageTwo !== null) {
+                    $record->update(['page_image_path_two' => $this->keepPageImage($record, $pageTwo, $copiedFiles, 'page-two.png')]);
+                }
 
                 foreach (array_values($validated['fields']) as $index => $field) {
                     $line = isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null;
                     $settings = $settingsByName[$this->templateNameKey($field, $line)] ?? null;
+                    $fieldPage = (int) ($field['page'] ?? 1) === 2 ? $pageTwo : $page;
 
                     $record->fields()->create([
                         'name' => $field['name'],
@@ -380,7 +422,8 @@ class DocumentScanController extends Controller
                         'width' => $field['width'],
                         'height' => $field['height'],
                         'sort_order' => $index,
-                        ...($line ? $this->lineAttributes($record, $page, $line, $index, $copiedFiles) : []),
+                        'page' => (int) ($field['page'] ?? 1) === 2 ? 2 : 1,
+                        ...($line && $fieldPage ? $this->lineAttributes($record, $fieldPage, $line, $index, $copiedFiles) : []),
                     ]);
                 }
 
@@ -402,6 +445,8 @@ class DocumentScanController extends Controller
                         // This page's grid against the template's: rows, and
                         // columns Staff added or removed in Align.
                         ...($gridChanges !== [] ? ['grid_changes' => $gridChanges] : []),
+                        ...($gridChangesTwo !== [] ? ['grid_changes_page_two' => $gridChangesTwo] : []),
+                        ...($pageTwo !== null ? ['pages' => 2] : []),
                         ...($source['page'] !== null ? [
                             'source_page' => $source['page'],
                             'source_page_count' => $source['page_count'],
@@ -422,9 +467,11 @@ class DocumentScanController extends Controller
         // The record now holds its own copies of every crop it kept, and of the
         // page image. The page's working files (image, remaining crops,
         // overlay) are no longer needed.
-        if ($page !== null) {
-            $disk->deleteDirectory($page->directory());
-            $page->delete();
+        foreach ([$page, $pageTwo] as $working) {
+            if ($working !== null) {
+                $disk->deleteDirectory($working->directory());
+                $working->delete();
+            }
         }
         if ($workspaceScanToClean !== null) {
             $disk->delete($workspaceScanToClean);
@@ -443,6 +490,12 @@ class DocumentScanController extends Controller
                 'redirect' => $redirect,
                 // The workspace marks this page saved and offers the next one.
                 'record' => $this->sourcePagePayload($record),
+                // What the "Saved" summary shows.
+                'summary' => [
+                    'title' => $record->title(),
+                    'fields' => $record->fields->count(),
+                    'corrected' => $record->fields->filter->wasCorrected()->count(),
+                ],
             ], 201);
         }
 
@@ -828,10 +881,10 @@ class DocumentScanController extends Controller
      *
      * @param  list<string>  $copiedFiles
      */
-    private function keepPageImage(CivilRecord $record, DocumentPage $page, array &$copiedFiles): ?string
+    private function keepPageImage(CivilRecord $record, DocumentPage $page, array &$copiedFiles, string $name = 'page.png'): ?string
     {
         $disk = Storage::disk('local');
-        $path = sprintf('records/%d/page.png', $record->getKey());
+        $path = sprintf('records/%d/%s', $record->getKey(), $name);
 
         if (!$disk->exists($page->image_path) || !$disk->copy($page->image_path, $path)) {
             return null;

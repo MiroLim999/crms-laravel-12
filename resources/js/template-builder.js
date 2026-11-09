@@ -168,6 +168,23 @@ const initialBoxes = [
     ...normaliseColumns(config.initialColumns),
 ];
 const baselineRuledYs = normaliseRuledYs(config.baselineRuledYs);
+// A spread: the second page has a layout of its own, edited beside the first
+// (see "pages of the layout" below).
+const pageTwoBaselineBoxes = [
+    ...normaliseBoxes(config.pageTwo?.fields),
+    ...normaliseColumns(config.pageTwo?.columns),
+];
+const pageTwoBaselineRuledYs = normaliseRuledYs(config.pageTwo?.ruledYs);
+let activeLayoutPage = 1;
+let secondPageEnabled = Boolean(config.pageTwo);
+// The page not being edited, set aside: markers, row lines and the amber ones.
+const parkedPages = {
+    1: null,
+    2: secondPageEnabled
+        ? { boxes: pageTwoBaselineBoxes.map((box) => ({ ...box })), ruledYs: [...pageTwoBaselineRuledYs], estimated: [] }
+        : null,
+};
+let currentSample = null;
 // Printed row lines of a ruled register, page fractions, top to bottom.
 let ruledYs = normaliseRuledYs(config.initialRuledYs);
 groupingModeInput.value = initialGroupingMode;
@@ -235,8 +252,10 @@ attachMarqueeSelection({
 });
 
 function layoutMatchesBaseline() {
-    return snapshot(marker.toJSON()) === snapshot(baselineBoxes)
-        && JSON.stringify(ruledYs) === JSON.stringify(baselineRuledYs)
+    const boxes = activeLayoutPage === 2 ? pageTwoBaselineBoxes : baselineBoxes;
+    const rows = activeLayoutPage === 2 ? pageTwoBaselineRuledYs : baselineRuledYs;
+    return snapshot(marker.toJSON()) === snapshot(boxes)
+        && JSON.stringify(ruledYs) === JSON.stringify(rows)
         && groupingModeInput.value === baselineGroupingMode;
 }
 
@@ -922,20 +941,17 @@ function validateFields() {
     return true;
 }
 
-function serialiseFields() {
-    const container = element('fieldInputs');
-    container.replaceChildren();
-
-    const boxes = marker.toJSON();
+/** One page's layout as the server takes it: fields, ledger columns and row lines. */
+function layoutPayload(boxes, rows) {
     const fields = boxes.filter((box) => !isColumn(box)).map((box) => ({
-            name: box.name.trim(),
-            x: box.x.toFixed(5),
-            y: box.y.toFixed(5),
-            width: box.w.toFixed(5),
-            height: box.h.toFixed(5),
-            angle: normaliseAngle(box.angle),
-            ...templatePersonPayload(box, groupingModeInput.value === 'custom'),
-            ...settingsPayload(box),
+        name: box.name.trim(),
+        x: box.x.toFixed(5),
+        y: box.y.toFixed(5),
+        width: box.w.toFixed(5),
+        height: box.h.toFixed(5),
+        angle: normaliseAngle(box.angle),
+        ...templatePersonPayload(box, groupingModeInput.value === 'custom'),
+        ...settingsPayload(box),
     }));
     // Left to right: a ledger row is read in column order.
     const columns = boxes
@@ -948,11 +964,28 @@ function serialiseFields() {
             ...settingsPayload(box),
         }));
 
+    return {
+        fields,
+        columns,
+        ruled_ys: columns.length > 0 ? rows.map((y) => Number(y.toFixed(5))) : [],
+    };
+}
+
+function serialiseFields() {
+    const container = element('fieldInputs');
+    container.replaceChildren();
+
+    // Whichever page is open is set aside with the other, then both are sent.
+    parkActivePage();
+    const one = layoutPayload(parkedPages[1].boxes, parkedPages[1].ruledYs);
+
     // One JSON input each avoids PHP's max_input_vars truncating large layouts.
     [
-        ['fields_json', fields],
-        ['columns_json', columns],
-        ['ruled_ys_json', columns.length > 0 ? ruledYs.map((y) => Number(y.toFixed(5))) : []],
+        ['fields_json', one.fields],
+        ['columns_json', one.columns],
+        ['ruled_ys_json', one.ruled_ys],
+        // The spread's second page, or nothing for a layout of one page.
+        ['page_two_json', secondPageEnabled && parkedPages[2] ? layoutPayload(parkedPages[2].boxes, parkedPages[2].ruledYs) : null],
     ].forEach(([name, value]) => {
         const input = document.createElement('input');
         input.type = 'hidden';
@@ -997,7 +1030,8 @@ async function openSample(file, { pendingUpload = true } = {}) {
     clearBuilderError();
 
     try {
-        const measurement = await marker.load(file);
+        const measurement = await marker.load(file, { page: activeLayoutPage });
+        currentSample = file;
         sampleLoaded = true;
         forgetSampleGrid();
         loadPrintedLines();
@@ -1169,10 +1203,10 @@ viewport.addEventListener('drop', (event) => selectDroppedSample(event.dataTrans
 function restoreBaseline() {
     invalidFieldIndexes.clear();
     groupingModeInput.value = baselineGroupingMode;
-    ruledYs = [...baselineRuledYs];
+    ruledYs = [...(activeLayoutPage === 2 ? pageTwoBaselineRuledYs : baselineRuledYs)];
     selectedRule = null;
     estimatedYs = new Set();
-    replaceBoxes(baselineBoxes);
+    replaceBoxes(activeLayoutPage === 2 ? pageTwoBaselineBoxes : baselineBoxes);
     marker.resetZoom();
     viewport.scrollTo({ top: 0, left: 0 });
     clearBuilderError();
@@ -2131,6 +2165,97 @@ async function snapToTable() {
 }
 
 element('snapTableBtn', HTMLButtonElement).addEventListener('click', snapToTable);
+
+// ------------------------------------------------------ pages of the layout
+// A register spread has two pages with a layout each: Page 1 and Page 2 here.
+// Row N of both is one person when Staff scan the pair.
+
+/** Set the page being edited aside, to come back to. */
+function parkActivePage() {
+    parkedPages[activeLayoutPage] = {
+        boxes: cloneBoxes(marker.toJSON()),
+        ruledYs: [...ruledYs],
+        estimated: [...estimatedYs],
+    };
+}
+
+function updateLayoutPageUI() {
+    const tabs = element('layoutPageTabs');
+    tabs.classList.toggle('d-none', !secondPageEnabled);
+    element('layoutPageOneBtn', HTMLButtonElement).classList.toggle('active', activeLayoutPage === 1);
+    element('layoutPageTwoBtn', HTMLButtonElement).classList.toggle('active', activeLayoutPage === 2);
+    element('addSecondPageBtn', HTMLButtonElement).classList.toggle('d-none', secondPageEnabled);
+    const remove = element('removeSecondPageBtn', HTMLButtonElement);
+    remove.classList.toggle('d-none', !secondPageEnabled);
+    remove.dataset.confirming = '';
+    const removeLabel = remove.querySelector('span');
+    removeLabel.textContent = 'Page 2';
+}
+
+async function showLayoutPage(page) {
+    if (page === activeLayoutPage || (page === 2 && !secondPageEnabled)) return;
+
+    parkActivePage();
+    activeLayoutPage = page;
+    const slot = parkedPages[page] ?? { boxes: [], ruledYs: [], estimated: [] };
+    invalidFieldIndexes.clear();
+    selectedRule = null;
+    clearBuilderError();
+
+    // The sample's own page, when it has one.
+    if (currentSample) {
+        try {
+            await marker.load(currentSample, { page });
+            forgetSampleGrid();
+            loadPrintedLines();
+        } catch (error) {
+            showBuilderError(error instanceof Error ? error.message : 'That page of the sample could not be shown.');
+        }
+    }
+
+    ruledYs = [...slot.ruledYs];
+    estimatedYs = new Set(slot.estimated);
+    // Undo belongs to a page: the other page's steps would put its markers here.
+    history.steps = [];
+    history.current = null;
+    previousMarkerCount = 0;
+    replaceBoxes(slot.boxes);
+    updateLayoutPageUI();
+    window.requestAnimationFrame(() => marker.resetZoom());
+}
+
+element('layoutPageOneBtn', HTMLButtonElement).addEventListener('click', () => showLayoutPage(1));
+element('layoutPageTwoBtn', HTMLButtonElement).addEventListener('click', () => showLayoutPage(2));
+
+element('addSecondPageBtn', HTMLButtonElement).addEventListener('click', async () => {
+    secondPageEnabled = true;
+    parkedPages[2] = { boxes: [], ruledYs: [], estimated: [] };
+    updateLayoutPageUI();
+    await showLayoutPage(2);
+});
+
+// Asked first, in the button itself: a second click within a few seconds removes it.
+element('removeSecondPageBtn', HTMLButtonElement).addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    if (!(button instanceof HTMLButtonElement)) return;
+
+    if (button.dataset.confirming !== '1') {
+        button.dataset.confirming = '1';
+        const label = button.querySelector('span');
+        label.textContent = 'Click again to remove page 2';
+        window.setTimeout(() => {
+            if (button.dataset.confirming === '1') updateLayoutPageUI();
+        }, 4000);
+        return;
+    }
+
+    if (activeLayoutPage === 2) await showLayoutPage(1);
+    secondPageEnabled = false;
+    parkedPages[2] = null;
+    updateLayoutPageUI();
+});
+
+updateLayoutPageUI();
 
 marker.setBoxes(cloneBoxes(initialBoxes));
 renderLedgerGrid();

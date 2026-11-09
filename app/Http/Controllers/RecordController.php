@@ -127,13 +127,15 @@ class RecordController extends Controller
      * that scan() serves; the scan card draws its boxes over this one. The same
      * access rule as the scan.
      */
-    public function pageImage(CivilRecord $record)
+    public function pageImage(CivilRecord $record, int $page = 1)
     {
-        abort_if($record->page_image_path === null, 404);
-        abort_unless(Storage::disk('local')->exists($record->page_image_path), 404);
+        // The second page of a spread has its own image.
+        $path = $page === 2 ? $record->page_image_path_two : $record->page_image_path;
+        abort_if($path === null, 404);
+        abort_unless(Storage::disk('local')->exists($path), 404);
 
         return Response::file(
-            Storage::disk('local')->path($record->page_image_path),
+            Storage::disk('local')->path($path),
             ['Content-Type' => 'image/png', 'X-Content-Type-Options' => 'nosniff'],
         );
     }

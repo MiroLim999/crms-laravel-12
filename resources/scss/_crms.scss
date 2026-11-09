@@ -1826,6 +1826,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   flex-wrap: nowrap;
   align-items: center;
   gap: .35rem;
+  // Room for each file's × above its top right corner.
+  padding-block-start: .45rem;
+  padding-inline-end: .45rem;
   margin-inline-start: auto;
   max-inline-size: 100%;
   overflow-x: auto;
@@ -2854,6 +2857,59 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   >.bx {
     font-size: 1.125rem;
+  }
+}
+
+.saved-summary {
+  grid-column: 1 / -1;
+  margin: 0 0 1.25rem;
+  padding: .25rem .75rem;
+  background: var(--bs-gray-100);
+  border-radius: .5rem;
+
+  >div {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-block: .4rem;
+
+    &+div {
+      border-block-start: 1px solid var(--bs-border-color);
+    }
+  }
+
+  dt {
+    color: var(--bs-secondary-color);
+    font-size: .8125rem;
+    font-weight: 400;
+  }
+
+  dd {
+    margin: 0;
+    font-size: .8125rem;
+    font-weight: 600;
+    text-align: end;
+  }
+}
+
+.saved-summary-list {
+  grid-column: 1 / -1;
+  max-block-size: 8rem;
+  margin: -.5rem 0 1.25rem;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: .8125rem;
+
+  li {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-block: .2rem;
+  }
+
+  small {
+    color: var(--bs-secondary-color);
   }
 }
 
@@ -4838,6 +4894,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: .45rem;
+
+  // The model name is the longest value: it takes a row of its own.
+  >span:first-child {
+    grid-column: 1 / -1;
+  }
 
   >span {
     display: flex;
@@ -9077,6 +9138,14 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
+.record-scan-page {
+  position: relative;
+
+  +.record-scan-page {
+    margin-block-start: .5rem;
+  }
+}
+
 .record-scan-overlay {
   position: absolute;
   inset: 0;
@@ -10041,4 +10110,161 @@ $dashboard-reveal-step: 40ms;
   &.is-offline {
     background: var(--bs-danger);
   }
+}
+
+// A two-page document: its pages one above the other, beside the page being
+// worked on. Click a page, or step up and down.
+.page-rail {
+  position: absolute;
+  z-index: 6;
+  inset-block-start: 50%;
+  inset-inline-start: .6rem;
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+  gap: .25rem;
+  padding: .3rem;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: .6rem;
+  box-shadow: 0 .25rem .75rem rgba(var(--bs-dark-rgb, 33, 37, 41), .12);
+  transform: translateY(-50%);
+}
+
+.page-rail__pages {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+.page-rail__nudge,
+.page-rail__page {
+  position: relative;
+  display: grid;
+  min-inline-size: 2.6rem;
+  place-items: center;
+  padding: .3rem .4rem;
+  color: var(--bs-body-color);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: .4rem;
+  line-height: 1.1;
+
+  &:hover:not(:disabled) {
+    background: var(--bs-gray-100);
+  }
+
+  &:disabled {
+    opacity: .45;
+  }
+}
+
+.page-rail__page {
+  border-color: var(--bs-border-color);
+
+  small {
+    color: var(--bs-secondary-color);
+    font-size: .6rem;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  strong {
+    font-size: 1rem;
+  }
+
+  &.is-active {
+    color: var(--bs-primary);
+    background: var(--bs-primary-bg-subtle, rgba(var(--bs-primary-rgb), .1));
+    border-color: var(--bs-primary);
+  }
+}
+
+.page-rail__flip {
+  transform: rotate(180deg);
+}
+
+.page-rail__check {
+  position: absolute;
+  inset-block-start: -.45rem;
+  inset-inline-end: -.45rem;
+  color: #fff;
+  background: var(--bs-success);
+  border-radius: 50%;
+  font-size: .8rem;
+}
+
+// The builder's toolbar also carries the Page 1 / Page 2 switch: it wraps
+// rather than squeezing the sample name and zoom together.
+.template-builder-canvas-card .marker-toolbar__primary {
+  flex-wrap: wrap;
+  row-gap: .45rem;
+
+  >* {
+    flex-shrink: 0;
+  }
+}
+
+// Before scanning: a small × on a queued file's top right corner removes it.
+.batch-queue-chip {
+  position: relative;
+
+  &.has-remove {
+    margin-inline-end: .2rem;
+  }
+}
+
+.batch-queue-chip__remove {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: -.45rem;
+  inset-inline-end: -.45rem;
+  display: grid;
+  inline-size: 1.05rem;
+  block-size: 1.05rem;
+  place-items: center;
+  color: var(--bs-secondary-color);
+  background: var(--bs-paper-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(var(--crms-ink-rgb), .12);
+  cursor: pointer;
+  opacity: .85;
+  transition: color .15s ease, background-color .15s ease, border-color .15s ease, opacity .15s ease;
+
+  .bx {
+    font-size: .8rem;
+  }
+
+  &:hover,
+  &:focus-visible {
+    color: #fff;
+    background: var(--bs-danger);
+    border-color: var(--bs-danger);
+    opacity: 1;
+    outline: none;
+  }
+}
+
+// Verify, two-page document: which page each field is on. The other page's
+// fields sit in the same person, a little quieter.
+.validation-field__page {
+  display: inline-block;
+  margin-block-start: .2rem;
+  margin-inline-start: .25rem;
+  padding: .1rem .35rem;
+  color: var(--bs-primary);
+  background: rgba(var(--bs-primary-rgb), .1);
+  border-radius: .3rem;
+  font-size: .625rem;
+  font-weight: 600;
+
+  &.is-other {
+    color: var(--bs-secondary-color);
+    background: var(--bs-gray-100);
+  }
+}
+
+.validation-field.is-other-page {
+  background: rgba(var(--crms-ink-rgb), .015);
 }

@@ -39,7 +39,7 @@ class DocumentTemplate extends Model
 
     protected $fillable = [
         'name', 'doc_type', 'document_type_id', 'page_ratio', 'description',
-        'grouping_mode', 'columns', 'ruled_ys',
+        'grouping_mode', 'columns', 'ruled_ys', 'page_two',
         'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
         'is_active', 'created_by', 'parent_id',
     ];
@@ -52,6 +52,7 @@ class DocumentTemplate extends Model
             'grouping_mode' => 'string',
             'columns' => 'array',
             'ruled_ys' => 'array',
+            'page_two' => 'array',
             'is_active' => 'boolean',
             'sample_size' => 'integer',
             'revision' => 'integer',
@@ -66,6 +67,49 @@ class DocumentTemplate extends Model
     public function isInUse(): bool
     {
         return $this->is_active || $this->records()->exists() || $this->pages()->exists();
+    }
+
+    /**
+     * Whether the layout covers a spread: a second page with its own columns,
+     * row lines and fields. Row N of the first page and row N of the second
+     * are one person, saved as one record.
+     */
+    public function hasSecondPage(): bool
+    {
+        $layout = $this->page_two;
+
+        return is_array($layout) && (($layout['columns'] ?? []) !== [] || ($layout['fields'] ?? []) !== []);
+    }
+
+    public function pageCount(): int
+    {
+        return $this->hasSecondPage() ? 2 : 1;
+    }
+
+    /**
+     * One page's layout as a template of its own, so everything that reads a
+     * layout (markers, ledger checks, settings) works on either page. Page 2
+     * is a copy that is never saved.
+     */
+    public function forPage(int $page): static
+    {
+        if ($page < 2 || ! $this->hasSecondPage()) {
+            return $this;
+        }
+
+        $layout = $this->page_two;
+        $copy = $this->replicate();
+        $copy->setAttribute($copy->getKeyName(), $this->getKey());
+        $copy->forceFill([
+            'columns' => ($layout['columns'] ?? []) ?: null,
+            'ruled_ys' => ($layout['ruled_ys'] ?? []) ?: null,
+            'page_two' => null,
+        ]);
+        $copy->setRelation('fields', collect($layout['fields'] ?? [])->values()->map(
+            fn (array $field) => new DocumentTemplateField($field),
+        ));
+
+        return $copy;
     }
 
     /**
@@ -132,6 +176,17 @@ class DocumentTemplate extends Model
      * @return array<string, array{role: string|null, required: bool, type: string, options: list<string>|null, hint: string|null}>
      */
     public function settingsByName(): array
+    {
+        $settings = $this->pageSettingsByName();
+        if ($this->hasSecondPage()) {
+            $settings += $this->forPage(2)->pageSettingsByName();
+        }
+
+        return $settings;
+    }
+
+    /** The settings of this layout's own page (see settingsByName()). */
+    private function pageSettingsByName(): array
     {
         $settings = [];
         foreach ($this->fields as $field) {

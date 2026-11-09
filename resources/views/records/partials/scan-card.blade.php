@@ -1,7 +1,12 @@
 @php($markerFields = $markerFields ?? $record->fields)
 {{-- The boxes are fractions of the page as it was outlined, which Detect may have
      straightened: draw them over that image when the record kept it, else the upload. --}}
-@php($scanImageUrl = $record->page_image_path ? route('records.page-image', $record) : route('records.scan', $record))
+@php($scanPages = $record->page_image_path_two
+    ? [
+        ['number' => 1, 'url' => route('records.page-image', [$record, 1])],
+        ['number' => 2, 'url' => route('records.page-image', [$record, 2])],
+    ]
+    : [['number' => 1, 'url' => $record->page_image_path ? route('records.page-image', $record) : route('records.scan', $record)]])
 
 <x-card class="record-scan-card" bodyClass="p-0" title="Original scan"
         subtitle="Select a value to locate its source.">
@@ -16,18 +21,23 @@
 
         <div class="record-scan-viewport" data-scan-viewport>
             <div class="record-scan-stage" data-scan-stage>
-                <img src="{{ $scanImageUrl }}"
-                     alt="Original scanned certificate" data-scan-image>
-                <div class="record-scan-overlay" aria-label="Captured field positions">
-                    @foreach ($markerFields as $field)
-                        @if ($field->x !== null && $field->y !== null && $field->width !== null && $field->height !== null)
-                            <button type="button" class="btn btn-outline-warning record-scan-marker"
-                                    data-scan-marker="{{ $field->getKey() }}"
-                                    aria-label="{{ $field->name }}"
-                                    style="--field-x: {{ (float) $field->x * 100 }}%; --field-y: {{ (float) $field->y * 100 }}%; --field-w: {{ (float) $field->width * 100 }}%; --field-h: {{ (float) $field->height * 100 }}%;"></button>
-                        @endif
-                    @endforeach
-                </div>
+                {{-- One page, or the two pages of a spread one above the other. --}}
+                @foreach ($scanPages as $scanPage)
+                    <div class="record-scan-page">
+                        <img src="{{ $scanPage['url'] }}"
+                             alt="{{ count($scanPages) > 1 ? 'Original scan, page '.$scanPage['number'] : 'Original scanned certificate' }}" data-scan-image>
+                        <div class="record-scan-overlay" aria-label="Captured field positions">
+                            @foreach ($markerFields->filter(fn ($field) => (int) ($field->page ?? 1) === $scanPage['number']) as $field)
+                                @if ($field->x !== null && $field->y !== null && $field->width !== null && $field->height !== null)
+                                    <button type="button" class="btn btn-outline-warning record-scan-marker"
+                                            data-scan-marker="{{ $field->getKey() }}"
+                                            aria-label="{{ $field->name }}"
+                                            style="--field-x: {{ (float) $field->x * 100 }}%; --field-y: {{ (float) $field->y * 100 }}%; --field-w: {{ (float) $field->width * 100 }}%; --field-h: {{ (float) $field->height * 100 }}%;"></button>
+                                @endif
+                            @endforeach
+                        </div>
+                    </div>
+                @endforeach
             </div>
         </div>
         <div class="record-scan-card__footer">

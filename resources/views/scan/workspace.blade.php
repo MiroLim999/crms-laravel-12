@@ -16,6 +16,20 @@
         <div class="field-marker-comparison-grid">
             <div class="field-marker-document-pane">
                 <x-card class="document-canvas-card" bodyClass="p-0">
+                    {{-- The pages of a two-page document, one above the other. Moved into
+                         the page being worked on by showStep(). --}}
+                    <nav id="pageRail" class="page-rail d-none" aria-label="Pages of this document">
+                        <button type="button" class="page-rail__nudge" id="pageRailUp" aria-label="Previous page"
+                            title="Previous page">
+                            <i class="icon-base bx bx-chevron-down page-rail__flip" aria-hidden="true"></i>
+                        </button>
+                        <div class="page-rail__pages" id="pageRailPages" role="list"></div>
+                        <button type="button" class="page-rail__nudge" id="pageRailDown" aria-label="Next page"
+                            title="Next page">
+                            <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
+                        </button>
+                    </nav>
+
                     {{-- Batch Queue banner: sits inside the document card above the toolbar --}}
                     <div id="batchQueueBanner" class="batch-queue-banner d-none" aria-live="polite" data-phase="queuing">
                         <div class="batch-queue-banner__body">
@@ -178,6 +192,11 @@
                 <div class="document-scan-notice d-none" id="scanSidewaysNotice" role="alert">
                     <i class="icon-base bx bx-error" aria-hidden="true"></i>
                     <span id="scanSidewaysMessage"></span>
+                </div>
+                {{-- A PDF of several pages read with a layout of one page. --}}
+                <div class="document-scan-notice is-info d-none" id="scanLayoutNotice" role="status">
+                    <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
+                    <span id="scanLayoutMessage"></span>
                 </div>
                 <div class="document-scan-notice d-none" id="scanPagesNotice" role="status">
                     <i class="icon-base bx bx-check-circle" aria-hidden="true"></i>
@@ -866,7 +885,7 @@
         </div>
     </div>
 
-    {{-- The last record was saved: stay on Scan, no redirect to Records. --}}
+    {{-- Everything was saved: a summary, then back to Scan or on to Records. --}}
     <div class="modal fade" id="recordSavedModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"
         aria-labelledby="recordSavedModalTitle" aria-describedby="recordSavedModalDescription" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
@@ -877,8 +896,12 @@
                     </span>
                     <h5 class="modal-title" id="recordSavedModalTitle">Saved</h5>
                     <p class="leave-scan-modal__text mb-2" id="recordSavedModalDescription">The record was saved.</p>
-                    <p class="leave-scan-modal__text" id="recordSavedModalTime"></p>
+                    <dl class="saved-summary" id="recordSavedSummary"></dl>
+                    <ul class="saved-summary-list d-none" id="recordSavedList"></ul>
                     <div class="leave-scan-modal__actions">
+                        <a href="{{ route('records.index') }}" class="btn btn-label-secondary" id="recordSavedRecordsBtn">
+                            <i class="icon-base bx bx-folder-open icon-sm me-1" aria-hidden="true"></i>View records
+                        </a>
                         <button type="button" class="btn btn-primary" id="recordSavedScanBtn">
                             <i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i>Scan another
                         </button>
@@ -1092,6 +1115,8 @@
             typeLabel: @json($docType->label()),
             boxes: @json($boxes),
             ruledYs: @json($ruledYs),
+            // The second page of a spread layout (its own markers and row lines), or null.
+            pageTwo: @json($pageTwo ?? null),
             templateId: @json($template->getKey()),
             groupingMode: @json(
                 $template->grouping_mode instanceof \BackedEnum
@@ -1250,26 +1275,56 @@
             ...markerColumnMetadata({ kind, columnIndex }),
             ...markerAngleMetadata({ angle }),
         }));
-        const templateBoxes = config.boxes.map((box) => ({
-            name: box.name,
-            x: +box.x,
-            y: +box.y,
-            w: +box.w,
-            h: +box.h,
-            ...markerPersonMetadata(box),
-            ...markerColumnMetadata(box),
-            ...markerAngleMetadata(box),
-        }));
-        const templateColumns = templateBoxes.filter((box) => box.kind === 'column');
-
+        // A spread (a layout with a second page) has one layout per page. The ones
+        // below follow the page being aligned or verified: useLayout() points
+        // config.boxes, templateBoxes and the rest at it.
+        const nameKey = (name) => String(name ?? '').trim().toLowerCase();
+        const pageLayouts = [
+            { boxes: config.boxes, ruledYs: config.ruledYs },
+            ...(config.pageTwo ? [{ boxes: config.pageTwo.boxes, ruledYs: config.pageTwo.ruledYs }] : []),
+        ];
+        let templateBoxes = [];
+        let templateColumns = [];
         // What each template field and ledger column holds and how its value is
         // checked (Template Builder settings), by name: a line is read under its
         // field's or column's name.
-        const nameKey = (name) => String(name ?? '').trim().toLowerCase();
-        const templateSettings = new Map(config.boxes.map((box) => [nameKey(box.name), box]));
-        const settingsFor = (index) => templateSettings.get(nameKey(cropped[index]?.label)) ?? null;
+        let templateSettings = new Map();
+        const settingsFor = (index) => {
+            const item = cropped[index];
+            // A field of the other page of a two-page document: that page's layout.
+            const settings = item?.otherPage
+                ? pageSettings[Math.min(item.spreadPage, pageSettings.length) - 1]
+                : templateSettings;
+            return settings.get(nameKey(item?.label)) ?? null;
+        };
         // The template's own rectangle fields: never turned into columns.
-        const templateFieldNames = new Set(config.boxes.filter((box) => box.kind !== 'column').map((box) => nameKey(box.name)));
+        let templateFieldNames = new Set();
+        let templateRows = [];
+        let layoutPageNumber = 0;
+        const pageSettings = pageLayouts.map((layout) => new Map(layout.boxes.map((box) => [nameKey(box.name), box])));
+
+        function useLayout(pageNumber = 1) {
+            const layout = pageLayouts[Math.min(Math.max(1, pageNumber), pageLayouts.length) - 1];
+            if (layoutPageNumber === pageNumber) return;
+            layoutPageNumber = pageNumber;
+            config.boxes = layout.boxes;
+            config.ruledYs = layout.ruledYs;
+            templateBoxes = layout.boxes.map((box) => ({
+                name: box.name,
+                x: +box.x,
+                y: +box.y,
+                w: +box.w,
+                h: +box.h,
+                ...markerPersonMetadata(box),
+                ...markerColumnMetadata(box),
+                ...markerAngleMetadata(box),
+            }));
+            templateColumns = templateBoxes.filter((box) => box.kind === 'column');
+            templateSettings = new Map(layout.boxes.map((box) => [nameKey(box.name), box]));
+            templateFieldNames = new Set(layout.boxes.filter((box) => box.kind !== 'column').map((box) => nameKey(box.name)));
+            templateRows = layout.ruledYs.map(Number);
+        }
+        useLayout(1);
 
         // ------------------------------------------------------------ ledger rows
         // The ledger's row lines on this page (page fractions, top to bottom). They
@@ -1277,8 +1332,7 @@
         // or stretched; Snap to table takes them from the page; Staff can move,
         // add or remove them. Nothing here changes the template.
         // As the Rows and Columns card is shown: the template has columns and row lines.
-        const isLedger = config.ruledYs.length >= 2;
-        const templateRows = config.ruledYs.map(Number);
+        const isLedger = pageLayouts.some((layout) => layout.ruledYs.length >= 2);
         let gridRows = [...templateRows];
         // How many degrees each row line is turned beyond the table's own tilt
         // (one per line, in step with gridRows): paper is curved, and no two
@@ -2827,7 +2881,10 @@
             }));
         }
 
+        let currentStepName = 'upload';
+
         function showStep(name) {
+            currentStepName = name;
             Object.entries(steps).forEach(([key, node]) => node.classList.toggle('d-none', key !== name));
 
             const batchBanner = document.getElementById('batchQueueBanner');
@@ -2840,6 +2897,13 @@
                     verifyHeader?.parentNode?.insertBefore(batchBanner, verifyHeader);
                 }
             }
+
+            const pageRail = document.getElementById('pageRail');
+            const railHost = name === 'mark'
+                ? document.querySelector('#step-mark .document-canvas-card')
+                : name === 'verify' ? document.querySelector('#step-verify .validation-document-pane') : null;
+            if (pageRail && railHost && pageRail.parentNode !== railHost) railHost.appendChild(pageRail);
+            updatePageRail();
 
             const marking = name === 'mark';
             const focusedWorkspace = marking || name === 'verify';
@@ -2918,6 +2982,17 @@
             } else if (multiPage() && others.length > 0) {
                 message = `Saved already: page${others.length === 1 ? '' : 's'} ${pageRanges(others)} of ${scanPageCount}.`;
             }
+            // A PDF of several pages with a layout of one: say why every page shows the same columns.
+            const batchItem = batchState.active ? batchState.items[batchState.currentIndex] : null;
+            const filePages = batchItem ? batchItem.pageCount : scanPageCount;
+            const oneLayout = filePages > 1 && !config.pageTwo;
+            el('scanLayoutMessage').textContent = !oneLayout ? '' : filePages === 2
+                ? `This layout has one page, so page 2 starts from page 1's columns: move, add or remove them to fit page 2's table. `
+                    + `Row 1 of both pages is one person, and both pages are saved as one record. `
+                    + `To start page 2 from its own columns, add Page 2 to the layout in Template Builder and publish it.`
+                : `This layout has one page, so every page of this PDF starts from the same columns and is saved as its own record.`;
+            el('scanLayoutNotice').classList.toggle('d-none', !oneLayout);
+
             el('scanPagesMessage').textContent = message;
             const link = el('scanPagesRecordLink');
             link.classList.toggle('d-none', !here);
@@ -2931,7 +3006,9 @@
 
         /** ‹ Page 3 of 12 › in the Align toolbar, for a PDF of many pages; ✓: saved already. */
         function updatePageBar() {
-            el('scanPageBar').classList.toggle('d-none', !multiPage());
+            updatePageRail();
+            // The rail beside the page turns the pages; this bar stays hidden.
+            el('scanPageBar').classList.add('d-none');
             if (!multiPage()) return;
 
             // A real dropdown, so a saved page can show a green check icon.
@@ -3021,8 +3098,16 @@
                 if (pageCount <= 1 && file.size > MAX_SCAN_BYTES) {
                     throw new Error('Choose a document smaller than 20 MB. A PDF of many pages may be larger: only the page being read is sent.');
                 }
+                // A PDF of two pages: one document, its rows running across both pages.
+                if (pdf && pageCount === 2) {
+                    scanFileInput.value = '';
+                    await startBatchQueue([file], { single: true });
+                    return;
+                }
                 scanPageCount = pageCount;
                 scanPageNumber = firstUnsavedPage(pageCount, savedPages);
+                pageGrids = new Map();
+                useLayout(1);
                 await marker.load(file, { page: scanPageNumber });
                 updateScanNotices();
                 showScanContext();
@@ -3046,10 +3131,71 @@
             }
         }
 
+        // Each page of the PDF keeps its own markers and row lines (page number ->
+        // grid): its columns are aligned, and snapped, apart from the others.
+        let pageGrids = new Map();
+
+        function parkPageGrid() {
+            pageGrids.set(scanPageNumber, { ...gridState(), autoFields: new Map(autoFields), rowsSource });
+        }
+
+        /** A page aligned before comes back as it was left; a new one starts from the layout. */
+        function restorePageGrid(page) {
+            resetFieldHistory();
+            const saved = pageGrids.get(page);
+            if (!saved) {
+                rowsSource = null;
+                setGrid(templateBoxes, templateRows, { remember: true });
+                return;
+            }
+            rowsSource = saved.rowsSource;
+            setGrid(saved.boxes, saved.rows, { tilts: saved.tilts, estimated: saved.estimated, byHand: saved.byHand });
+            autoFields = new Map(saved.autoFields);
+        }
+
+        /**
+         * Another page of the PDF, in Align. Each page has its own markers and row
+         * lines: the ones left on this page stay with it, and the page turned to
+         * shows its own (the layout's, the first time). What Detect found belongs
+         * to the page before, so it is let go.
+         */
+        async function turnToPage(pageNumber) {
+            const page = Math.min(scanPageCount, Math.max(1, Math.trunc(Number(pageNumber)) || 1));
+            if (!scanFile || page === scanPageNumber || pageTurning || scanInProgress) {
+                updatePageBar();
+                return;
+            }
+
+            pageTurning = true;
+            updatePageBar();
+            try {
+                clearDetection();
+                parkPageGrid();
+                await marker.load(scanFile, { page });
+                scanPageNumber = page;
+                restorePageGrid(page);
+                clearOcrError();
+                updateScanNotices();
+                showScanContext();
+                fetchSnapLines();
+                window.requestAnimationFrame(() => marker.resetZoom());
+            } catch (error) {
+                showOcrError(error.message || `Page ${page} could not be opened.`);
+            } finally {
+                pageTurning = false;
+                updatePageBar();
+            }
+        }
+
+        el('scanPagePrevBtn').addEventListener('click', () => turnToPage(scanPageNumber - 1));
+        el('scanPageNextBtn').addEventListener('click', () => turnToPage(scanPageNumber + 1));
+
         // ---------------------------------------------------------------- Upload Mode & Batch Queue System
         let uploadMode = 'single';
         let batchState = {
             active: false,
+            // One document of two pages, worked through the same queue: no banner.
+            single: false,
             key: null,
             phase: 'idle', // 'queuing' | 'scanning' | 'verifying' | 'done'
             items: [],     // { file, name, status, pageId, page, workspaceScanPath, recordUrl, error, boxes, rows, tilts }
@@ -3106,6 +3252,19 @@
 
             if (!batchState.active || batchState.items.length === 0) {
                 banner.classList.add('d-none');
+                updatePageRail();
+                return;
+            }
+            if (batchState.single) {
+                // One two-page document: its pages are the rail's, not a queue.
+                banner.classList.add('d-none');
+                document.getElementById('batchAddMoreBtn')?.classList.add('d-none');
+                document.getElementById('saveQueueNextBtn')?.classList.add('d-none');
+                const scanButton = document.getElementById('scanNowBtn');
+                scanButton?.classList.remove('d-none');
+                const scanLabel = document.getElementById('scanNowBtnLabel');
+                if (scanLabel) scanLabel.textContent = 'Scan with OCR';
+                updatePageRail();
                 return;
             }
             banner.classList.remove('d-none');
@@ -3162,7 +3321,11 @@
                 }
                 if (scanNowBtn) {
                     scanNowBtn.classList.toggle('d-none', !allSaved);
-                    if (scanNowLabel) scanNowLabel.textContent = `Scan All Queued Documents (${total})`;
+                    if (scanNowLabel) {
+                        // The pages of a two-page file are one document.
+                        const documents = new Set(batchState.items.map((it) => it.group ?? it)).size;
+                        scanNowLabel.textContent = `Scan All Queued Documents (${documents})`;
+                    }
                 }
             } else if (batchState.phase === 'scanning') {
                 if (phaseTitle) phaseTitle.textContent = `Scanning all queued documents with OCR (${readyCount} of ${total} scanned)...`;
@@ -3202,7 +3365,7 @@
                     chip.className = `batch-queue-chip ${badgeInfo.cls}${isCurrent ? ' is-current' : ''}`;
                     chip.setAttribute('role', 'listitem');
                     chip.disabled = !canInteract;
-                    chip.draggable = canInteract && batchState.items.length > 1;
+                    chip.draggable = canInteract && batchState.items.length > 1 && !item.group;
                     chip.title = canInteract ? `${item.name} — Drag to change priority, or right-click to delete` : item.name;
                     chip.innerHTML = `
                         <span class="batch-queue-chip__index">${index + 1}</span>
@@ -3212,6 +3375,29 @@
                             <span>${badgeInfo.text}</span>
                         </span>
                     `;
+
+                    // Before scanning, a small × removes the file (right click still does too).
+                    if (batchState.phase === 'queuing' && canInteract) {
+                        chip.classList.add('has-remove');
+                        const remove = document.createElement('span');
+                        remove.className = 'batch-queue-chip__remove';
+                        remove.setAttribute('role', 'button');
+                        remove.tabIndex = 0;
+                        remove.title = item.group ? 'Remove this file (both pages)' : 'Remove this file';
+                        remove.setAttribute('aria-label', `Remove ${item.name}`);
+                        remove.innerHTML = '<i class="icon-base bx bx-x" aria-hidden="true"></i>';
+                        const ask = (event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            openBatchDocumentModal(index);
+                        };
+                        remove.addEventListener('click', ask);
+                        remove.addEventListener('pointerdown', (event) => event.stopPropagation());
+                        remove.addEventListener('keydown', (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') ask(event);
+                        });
+                        chip.appendChild(remove);
+                    }
 
                     chip.addEventListener('dragstart', (event) => {
                         if (!chip.draggable) return;
@@ -3242,9 +3428,7 @@
 
                         const activeItem = batchState.items[batchState.currentIndex];
                         if (batchState.phase === 'queuing' && activeItem && !activeItem.boxes) {
-                            activeItem.boxes = cloneBoxes(marker.toJSON());
-                            activeItem.rows = [...gridRows];
-                            activeItem.tilts = [...rowTilts];
+                            parkBatchItem(activeItem);
                         }
 
                         const [movedItem] = batchState.items.splice(draggedBatchIndex, 1);
@@ -3283,6 +3467,87 @@
                 const activeChip = chipsContainer.querySelector('.batch-queue-chip.is-current');
                 activeChip?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
             }
+            updatePageRail();
+        }
+
+        /**
+         * The pages of the open two-page document, one above the other: click one,
+         * or step up and down. Hidden for any other document.
+         */
+        function updatePageRail() {
+            const rail = document.getElementById('pageRail');
+            if (!rail) return;
+
+            // One file of several pages, opened on its own: Align turns its pages
+            // (each saved as its own record), so the rail is Align's alone.
+            if (!batchState.active) {
+                const show = multiPage() && currentStepName === 'mark';
+                rail.classList.toggle('d-none', !show);
+                if (!show) return;
+                const busy = pageTurning || scanInProgress || recordSubmitting;
+                renderPageRail(
+                    Array.from({ length: scanPageCount }, (_, index) => ({
+                        number: index + 1,
+                        active: index + 1 === scanPageNumber,
+                        done: savedPages.has(index + 1),
+                    })),
+                    busy,
+                    (number) => turnToPage(number),
+                );
+                return;
+            }
+
+            // In a queue: the pages of the file on screen are its entries.
+            const item = batchState.items[batchState.currentIndex] ?? null;
+            const pages = item
+                ? batchState.items.filter((it) => it.file === item.file).sort((a, b) => a.pageNumber - b.pageNumber)
+                : [];
+            rail.classList.toggle('d-none', pages.length < 2);
+            if (pages.length < 2) return;
+
+            const busy = batchState.phase === 'scanning' || scanInProgress || recordSubmitting;
+            const ticked = (page) => (page.group
+                ? Object.entries(page.group.verifyState ?? {}).some(([key, entry]) => key.startsWith(`${page.pageNumber}:`) && entry.verified)
+                : Object.values(page.verifyState ?? {}).some((entry) => entry.verified));
+            const done = (page) => (batchState.phase === 'verifying'
+                ? ['imported', 'rejected'].includes(page.status) || ticked(page)
+                : page.status === 'saved');
+            renderPageRail(
+                pages.map((page) => ({ number: page.pageNumber, active: page === item, done: done(page), page })),
+                busy,
+                (number) => {
+                    const target = pages.find((page) => page.pageNumber === number);
+                    const index = batchState.items.indexOf(target);
+                    // An imported or rejected page cannot be opened again.
+                    if (index !== -1 && index !== batchState.currentIndex
+                        && !(batchState.phase === 'verifying' && ['imported', 'rejected'].includes(target.status))) {
+                        switchToBatchItem(index);
+                    }
+                },
+            );
+        }
+
+        /** The rail's page buttons, and up / down to the page before or after. */
+        function renderPageRail(pages, busy, open) {
+            el('pageRailPages').replaceChildren(...pages.map((page) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = `page-rail__page${page.active ? ' is-active' : ''}`;
+                button.setAttribute('role', 'listitem');
+                button.disabled = busy;
+                button.title = `Page ${page.number} of ${pages.length}`;
+                if (page.active) button.setAttribute('aria-current', 'page');
+                button.innerHTML = `<small>Page</small><strong>${page.number}</strong>${page.done ? '<i class="icon-base bx bx-check page-rail__check" aria-hidden="true"></i>' : ''}`;
+                button.addEventListener('click', () => { if (!page.active) open(page.number); });
+                return button;
+            }));
+            el('pageRailPages').querySelector('.is-active')?.scrollIntoView({ block: 'nearest' });
+
+            const position = pages.findIndex((page) => page.active);
+            el('pageRailUp').disabled = busy || position <= 0;
+            el('pageRailDown').disabled = busy || position >= pages.length - 1;
+            el('pageRailUp').onclick = () => { if (pages[position - 1]) open(pages[position - 1].number); };
+            el('pageRailDown').onclick = () => { if (pages[position + 1]) open(pages[position + 1].number); };
         }
 
         let draggedBatchIndex = null;
@@ -3300,7 +3565,11 @@
             const openBtn = document.getElementById('batchDocOpenBtn');
 
             if (titleEl) titleEl.textContent = `Priority #${index + 1} · ${item.name}`;
-            if (descEl) descEl.textContent = `Remove "${item.name}" from the batch queue?`;
+            if (descEl) {
+                descEl.textContent = item.group
+                    ? `Remove "${item.group.name}" from the batch queue? Both of its pages are removed: they are one record.`
+                    : `Remove "${item.name}" from the batch queue?`;
+            }
             if (openBtn) openBtn.classList.add('d-none');
             if (modalEl) {
                 window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -3311,9 +3580,7 @@
             if (batchState.phase === 'queuing' && idx !== batchState.currentIndex) {
                 const currentItem = batchState.items[batchState.currentIndex];
                 if (currentItem) {
-                    currentItem.boxes = cloneBoxes(marker.toJSON());
-                    currentItem.rows = [...gridRows];
-                    currentItem.tilts = [...rowTilts];
+                    parkBatchItem(currentItem);
                 }
                 await openBatchQueueItem(idx);
             } else if (batchState.phase === 'verifying' && idx !== batchState.currentIndex) {
@@ -3331,16 +3598,17 @@
             const targetItem = batchState.items[deleteIdx];
             if (!targetItem) return;
 
-            const wasCurrent = deleteIdx === batchState.currentIndex;
+            // Both pages of a two-page document go together: they are one record.
+            const targets = targetItem.group ? targetItem.group.items : [targetItem];
             const currentItem = batchState.items[batchState.currentIndex];
+            const wasCurrent = targets.includes(currentItem);
             if (!wasCurrent && batchState.phase === 'queuing' && currentItem) {
-                currentItem.boxes = cloneBoxes(marker.toJSON());
-                currentItem.rows = [...gridRows];
-                currentItem.tilts = [...rowTilts];
+                parkBatchItem(currentItem);
             }
 
-            if (targetItem.pageId) {
-                fetch(config.pageCancelUrl.replace('__PAGE__', String(targetItem.pageId)), {
+            targets.forEach((target) => {
+                if (!target.pageId) return;
+                fetch(config.pageCancelUrl.replace('__PAGE__', String(target.pageId)), {
                     method: 'POST',
                     headers: {
                         'X-CSRF-TOKEN': config.csrf,
@@ -3349,12 +3617,14 @@
                     },
                     credentials: 'same-origin',
                 }).catch(() => {});
-            }
+            });
 
-            batchState.items.splice(deleteIdx, 1);
+            const firstIdx = Math.min(...targets.map((target) => batchState.items.indexOf(target)));
+            batchState.items = batchState.items.filter((item) => !targets.includes(item));
 
             if (batchState.items.length === 0) {
                 batchState.active = false;
+                batchState.single = false;
                 batchState.phase = 'idle';
                 batchState.currentIndex = 0;
                 scanFile = null;
@@ -3365,7 +3635,7 @@
             }
 
             if (wasCurrent) {
-                const nextIndex = Math.min(deleteIdx, batchState.items.length - 1);
+                const nextIndex = Math.min(firstIdx, batchState.items.length - 1);
                 if (batchState.phase === 'verifying') {
                     await openBatchVerifyItem(nextIndex);
                 } else {
@@ -3428,7 +3698,7 @@
             return collected.length > 0 ? collected : Array.from(dataTransfer.files || []);
         }
 
-        async function startBatchQueue(fileList) {
+        async function startBatchQueue(fileList, { single = false } = {}) {
             const validFiles = Array.from(fileList || []).filter((file) => {
                 if (!SUPPORTED_SCAN_EXT.test(file.name)) {
                     return false;
@@ -3447,27 +3717,55 @@
 
             if (!batchState.active) {
                 batchState.active = true;
+                batchState.single = single;
                 batchState.key = 'batch_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
                 batchState.phase = 'queuing';
                 batchState.items = [];
                 batchState.currentIndex = 0;
             }
 
-            validFiles.forEach((file) => {
-                batchState.items.push({
-                    file,
-                    name: file.name,
-                    status: 'pending',
-                    pageId: null,
-                    page: null,
-                    workspaceScanPath: null,
-                    recordUrl: null,
-                    error: null,
-                    boxes: null,
-                    rows: null,
-                    tilts: null,
-                });
+            const newItem = (file, extra = {}) => ({
+                file,
+                name: file.name,
+                status: 'pending',
+                pageId: null,
+                page: null,
+                workspaceScanPath: null,
+                recordUrl: null,
+                error: null,
+                boxes: null,
+                rows: null,
+                tilts: null,
+                group: null,
+                pageNumber: 1,
+                pageCount: 1,
+                ...extra,
             });
+
+            for (const file of validFiles) {
+                // A PDF of two pages, for a layout that covers both: its pages are
+                // queued together and saved as one record.
+                let pageCount = 1;
+                if (isPdfFile(file)) {
+                    pageCount = await marker.pdfPageCount(file).catch(() => 1);
+                }
+                // A PDF of two pages is one document: row N of page 2 carries on row N of page 1.
+                if (pageCount === 2) {
+                    const group = { name: file.name, file, items: [] };
+                    [1, 2].forEach((pageNumber) => {
+                        const item = newItem(file, { name: `${file.name} · page ${pageNumber}`, group, pageNumber, pageCount });
+                        group.items.push(item);
+                        batchState.items.push(item);
+                    });
+                } else if (pageCount > 1) {
+                    // Any other PDF of several pages: each page is queued, and saved, on its own.
+                    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+                        batchState.items.push(newItem(file, { name: `${file.name} · page ${pageNumber}`, pageNumber, pageCount }));
+                    }
+                } else {
+                    batchState.items.push(newItem(file));
+                }
+            }
 
             scanFileInput.value = '';
             await openBatchQueueItem(batchState.currentIndex);
@@ -3488,11 +3786,14 @@
                 scanFingerprint = null;
                 savedPages = new Map();
                 clearDetection();
-                await marker.load(item.file, { page: 1 });
+                useLayout(item.group ? item.pageNumber : 1);
+                await marker.load(item.file, { page: item.pageNumber });
                 scanPageCount = 1;
                 scanPageNumber = 1;
                 updateScanNotices();
-                el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${index + 1}/${batchState.items.length}) · ${item.name}`;
+                el('workspaceContextDetail').textContent = batchState.single
+                    ? `${config.typeLabel} · ${item.group.name} · Page ${item.pageNumber} of 2`
+                    : `${config.typeLabel} · Batch (${index + 1}/${batchState.items.length}) · ${item.name}`;
                 el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
                 showStep('mark');
                 guardBackButton();
@@ -3501,8 +3802,11 @@
 
                 if (item.boxes && item.rows) {
                     setGrid(item.boxes, item.rows, { tilts: item.tilts });
+                    autoFields = item.autoFields ? new Map(item.autoFields) : new Map();
+                    if (!item.autoFields) rememberAutoFields(templateBoxes);
                 } else {
-                    setGrid(templateBoxes, templateRows);
+                    // Where the layout puts each field: Snap moves the fields not moved by hand.
+                    setGrid(templateBoxes, templateRows, { remember: true });
                 }
                 fetchSnapLines();
                 renderBatchQueueBanner();
@@ -3523,6 +3827,63 @@
             scanFileInput.click();
         });
 
+        /**
+         * Keep what Staff did to the page on screen with its queue entry: its
+         * markers and row lines, and where the layout (or Snap) put each field,
+         * so Snap still knows which fields were moved by hand. Each page keeps
+         * its own.
+         */
+        function parkBatchItem(item) {
+            if (!item) return;
+            item.boxes = cloneBoxes(marker.toJSON());
+            item.rows = [...gridRows];
+            item.tilts = [...rowTilts];
+            item.autoFields = new Map(autoFields);
+        }
+
+        /**
+         * Store the page on screen for the queue: the aligned page as it stands,
+         * and (once per file) the scan itself. Throws when it cannot be saved.
+         */
+        async function saveCurrentBatchItem() {
+            const item = batchState.items[batchState.currentIndex];
+            if (!item) return;
+
+            parkBatchItem(item);
+
+            const form = new FormData();
+            form.set('document_template_id', String(config.templateId));
+            form.set('geometry_json', JSON.stringify(currentGeometry()));
+            form.set('page', await canvasBlob(marker.canvas), 'page.png');
+            // The second page of a two-page file shares the scan its first page stores.
+            if (!item.group || item.pageNumber === 1) form.set('scan', item.file, item.file.name);
+            form.set('batch_key', batchState.key);
+            form.set('defer_scan', '1');
+            if (modelSelect instanceof HTMLSelectElement) form.set('model', modelSelect.value);
+
+            const response = await fetch(config.pagesUrl, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: form,
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            if (!response.ok || !payload?.id) {
+                throw new Error(responseErrorMessage(response, payload));
+            }
+
+            item.pageId = payload.id;
+            item.page = payload;
+            item.workspaceScanPath = payload.workspaceScanPath || null;
+            item.status = 'saved';
+        }
+
         document.getElementById('saveQueueNextBtn')?.addEventListener('click', async () => {
             if (scanInProgress || !batchState.active) return;
 
@@ -3542,40 +3903,7 @@
             renderBatchQueueBanner();
 
             try {
-                item.boxes = cloneBoxes(marker.toJSON());
-                item.rows = [...gridRows];
-                item.tilts = [...rowTilts];
-
-                const form = new FormData();
-                form.set('document_template_id', String(config.templateId));
-                form.set('geometry_json', JSON.stringify(currentGeometry()));
-                form.set('page', await canvasBlob(marker.canvas), 'page.png');
-                form.set('scan', item.file, item.file.name);
-                form.set('batch_key', batchState.key);
-                form.set('defer_scan', '1');
-                if (modelSelect instanceof HTMLSelectElement) form.set('model', modelSelect.value);
-
-                const response = await fetch(config.pagesUrl, {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRF-TOKEN': config.csrf,
-                        'X-Requested-With': 'XMLHttpRequest',
-                        Accept: 'application/json',
-                    },
-                    credentials: 'same-origin',
-                    body: form,
-                });
-                const payload = (response.headers.get('content-type') || '').includes('application/json')
-                    ? await response.json()
-                    : null;
-                if (!response.ok || !payload?.id) {
-                    throw new Error(responseErrorMessage(response, payload));
-                }
-
-                item.pageId = payload.id;
-                item.page = payload;
-                item.workspaceScanPath = payload.workspaceScanPath || null;
-                item.status = 'saved';
+                await saveCurrentBatchItem();
                 renderBatchQueueBanner();
 
                 // Move to next unsaved document if any
@@ -3598,14 +3926,51 @@
             }
         });
 
+        /**
+         * A two-page document is scanned straight from Align: every page not stored
+         * yet is stored first, as it is aligned now (a page never opened keeps the
+         * layout's markers). Returns false when a page could not be stored.
+         */
+        async function saveUnsavedPages() {
+            const startIndex = batchState.currentIndex;
+            for (let index = 0; index < batchState.items.length; index += 1) {
+                const item = batchState.items[index];
+                // The page on screen is stored as it stands; the others as they were left.
+                if (item.pageId && index !== startIndex) continue;
+                if (index !== batchState.currentIndex) {
+                    const leaving = batchState.items[batchState.currentIndex];
+                    if (leaving) {
+                        parkBatchItem(leaving);
+                    }
+                    await openBatchQueueItem(index);
+                }
+                const message = markerSetValidationMessage(marker.toJSON());
+                if (message) {
+                    showOcrError(`Page ${item.pageNumber}: ${message}`);
+                    return false;
+                }
+                item.status = 'saving';
+                try {
+                    await saveCurrentBatchItem();
+                } catch (error) {
+                    item.status = 'pending';
+                    showOcrError(`Page ${item.pageNumber}: ${error.message || 'It could not be stored.'}`);
+                    return false;
+                }
+            }
+            return true;
+        }
+
         async function runBatchScanAll() {
             if (scanInProgress || !batchState.active) return;
 
             const itemsToScan = batchState.items.filter((it) => it.pageId);
             const total = itemsToScan.length;
             if (total === 0) return;
+            const unit = batchState.single ? 'pages' : 'documents';
+            const title = batchState.single ? 'Scanning both pages' : 'Scanning batch';
 
-            scanStartedAt = performance.now();
+            if (scanStartedAt === null) scanStartedAt = performance.now();
             batchState.phase = 'scanning';
             itemsToScan.forEach((it) => {
                 it.status = 'scanning';
@@ -3629,11 +3994,11 @@
                 progress = openProgressModal();
                 stopOcrProgress();
                 ocrProgress = 0;
-                el('ocrProgressFields').textContent = `0 of ${total} documents scanned`;
+                el('ocrProgressFields').textContent = `0 of ${total} ${unit} scanned`;
                 setOcrProgress(
                     4,
-                    `Scanning batch (0 of ${total} complete)`,
-                    `Queueing all ${total} documents in the batch for OCR processing...`,
+                    `${title} (0 of ${total} complete)`,
+                    `Queueing all ${total} ${unit} for OCR processing...`,
                 );
                 timeoutId = window.setTimeout(() => controller.abort(), 30 * 60 * 1000);
 
@@ -3717,13 +4082,13 @@
                     }
 
                     const overallPct = 4 + (sumFraction / total) * 92;
-                    el('ocrProgressFields').textContent = `${readyCount} of ${total} documents scanned`;
+                    el('ocrProgressFields').textContent = `${readyCount} of ${total} ${unit} scanned`;
                     setOcrProgress(
                         Math.max(ocrProgress, overallPct),
-                        `Scanning batch (${readyCount} of ${total} complete)`,
+                        `${title} (${readyCount} of ${total} complete)`,
                         activeItemName
-                            ? `${activeStageLabel} across ${total} batch documents (currently processing ${activeItemName}).`
-                            : `Processing all ${total} documents in the batch...`,
+                            ? `${activeStageLabel} across ${total} ${unit} (currently processing ${activeItemName}).`
+                            : `Processing all ${total} ${unit}...`,
                     );
 
                     if (readyCount === total) {
@@ -3765,14 +4130,14 @@
                     }
                 }
 
-                el('ocrProgressFields').textContent = `${total} of ${total} documents scanned`;
-                await completeOcrProgress('Batch scan complete', 'Opening the first document for validation.');
+                el('ocrProgressFields').textContent = `${total} of ${total} ${unit} scanned`;
+                await completeOcrProgress(batchState.single ? 'Scan complete' : 'Batch scan complete', batchState.single ? 'Opening page 1 for validation.' : 'Opening the first document for validation.');
                 batchState.phase = 'verifying';
                 finishScanTimer();
                 await openBatchVerifyItem(0);
             } catch (error) {
                 if (!run.cancelled) {
-                    showOcrError(error.message || 'Batch scan failed.');
+                    showOcrError(error.message || (batchState.single ? 'The scan failed.' : 'Batch scan failed.'));
                 }
                 batchState.items.forEach((it) => {
                     if (it.status === 'scanning') it.status = 'saved';
@@ -3809,11 +4174,63 @@
             el('summaryScanTime').textContent = formatScanDuration(lastScanMs);
         }
 
+        /** Open the page a field of a two-page document is on, with the field selected. */
+        async function showFieldOnItsPage(index) {
+            const entry = cropped[index];
+            const current = batchState.active ? batchState.items[batchState.currentIndex] : null;
+            const target = current?.group?.items.find((page) => page.pageNumber === entry?.spreadPage);
+            if (!entry || !target || target === current) return;
+            await switchToBatchItem(batchState.items.indexOf(target));
+            const at = cropped.findIndex((candidate) => !candidate.otherPage && candidate.lineId === entry.lineId);
+            if (at === -1) return;
+            // After the page has opened its first person (next frame), select this field.
+            await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
+            activateValidationField(at, 'marker');
+        }
+
         // The item whose rows are on screen, so its entries can be kept when switching files.
         let verifyRenderedItem = null;
 
+        /**
+         * What Verify lists. For a page of a two-page document, the other page's
+         * fields come after this page's, so row N of both pages is one person in
+         * the list whichever page is on screen. Only this page's lines are drawn
+         * over it (they are first, so their indexes match the outlines).
+         */
+        let currentPageItemCount = 0;
+
+        function buildCropped(page) {
+            const item = batchState.active ? batchState.items[batchState.currentIndex] : null;
+            const group = item?.group ?? null;
+            const own = verificationItems(page.lines, page)
+                .map((entry) => (group ? { ...entry, spreadPage: item.pageNumber } : entry));
+            currentPageItemCount = own.length;
+            const other = group ? group.items.find((candidate) => candidate !== item) : null;
+            if (!other?.page?.lines) return own;
+            const theirs = verificationItems(other.page.lines, other.page)
+                .map((entry) => ({ ...entry, spreadPage: other.pageNumber, otherPage: true }));
+            return [...own, ...theirs];
+        }
+
+        /** The lines drawn over the page on screen: its own, never the other page's. */
+        const linesOnScreen = () => cropped.slice(0, currentPageItemCount);
+
+        /** Where a field of a two-page document is kept between page switches. */
+        const spreadKey = (entry) => `${entry?.spreadPage ?? 1}:${entry?.lineId}`;
+
         function saveVerifyState(item) {
             if (!item || item !== verifyRenderedItem) return;
+            if (item.group) {
+                // Both pages' fields are on screen: keep them all, by page and line.
+                item.group.verifyState ??= {};
+                validationRowByIndex.forEach((row, index) => {
+                    const input = row.querySelector('.verified');
+                    const checkbox = row.querySelector('.validation-verified');
+                    if (!(input instanceof HTMLInputElement) || !(checkbox instanceof HTMLInputElement) || !cropped[index]) return;
+                    item.group.verifyState[spreadKey(cropped[index])] = { value: input.value, verified: checkbox.checked };
+                });
+                return;
+            }
             const saved = {};
             validationRowByIndex.forEach((row, index) => {
                 const input = row.querySelector('.verified');
@@ -3825,7 +4242,9 @@
         }
 
         function restoreVerifyState(item) {
-            const saved = item?.verifyState;
+            const saved = item?.group
+                ? Object.fromEntries(cropped.map((entry, index) => [index, item.group.verifyState?.[spreadKey(entry)]]).filter(([, entry]) => entry))
+                : item?.verifyState;
             if (!saved) return;
             Object.entries(saved).forEach(([index, entry]) => {
                 const row = validationRowByIndex.get(Number(index));
@@ -3858,18 +4277,21 @@
             scanFile = item.file;
             const page = item.page;
 
+            useLayout(item.group ? item.pageNumber : 1);
             await marker.loadFromUrl(page.imageUrl);
             if (item.boxes && item.rows) {
                 setGrid(geometryMarkers(page.geometry, page), page.geometry?.ruled_ys ?? item.rows);
             }
 
             processedPage = page;
-            cropped = verificationItems(page.lines, page);
+            cropped = buildCropped(page);
             readings = cropped.map((entry) => entry.reading);
             requiredInput(document, '#ocrModelKey').value = (page.modelKey || '').trim();
             requiredInput(document, '#documentPageId').value = String(page.id);
             el('summaryModel').textContent = page.model || '—';
-            el('workspaceContextDetail').textContent = `${config.typeLabel} · Verify (${index + 1}/${batchState.items.length}) · ${item.name}`;
+            el('workspaceContextDetail').textContent = batchState.single
+                ? `${config.typeLabel} · Verify · ${item.group.name} · Page ${item.pageNumber} of 2`
+                : `${config.typeLabel} · Verify (${index + 1}/${batchState.items.length}) · ${item.name}`;
             el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
 
             clearValidationSubmitError();
@@ -3911,7 +4333,8 @@
             banner?.classList.remove('d-none');
 
             if (batchState.active && batchState.items[batchState.currentIndex]) {
-                batchState.items[batchState.currentIndex].status = 'rejected';
+                const rejected = batchState.items[batchState.currentIndex];
+                (rejected.group ? rejected.group.items : [rejected]).forEach((page) => { page.status = 'rejected'; });
                 renderBatchQueueBanner();
             }
 
@@ -3942,8 +4365,10 @@
             if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
             document.getElementById('validationExistingBanner')?.classList.add('d-none');
 
-            if (processedPage?.id) {
-                fetch(config.pageCancelUrl.replace('__PAGE__', String(processedPage.id)), {
+            const rejectedItem = batchState.active ? batchState.items[batchState.currentIndex] : null;
+            const cancelIds = new Set([processedPage?.id, ...(rejectedItem?.group?.items ?? []).map((page) => page.pageId)].filter(Boolean));
+            cancelIds.forEach((pageId) => {
+                fetch(config.pageCancelUrl.replace('__PAGE__', String(pageId)), {
                     method: 'POST',
                     headers: {
                         'X-CSRF-TOKEN': config.csrf,
@@ -3952,11 +4377,11 @@
                     },
                     credentials: 'same-origin',
                 }).catch(() => {});
-            }
+            });
 
             if (batchState.active) {
                 const currentItem = batchState.items[batchState.currentIndex];
-                if (currentItem) currentItem.status = 'rejected';
+                if (currentItem) (currentItem.group ? currentItem.group.items : [currentItem]).forEach((page) => { page.status = 'rejected'; });
                 renderBatchQueueBanner();
 
                 const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && !['imported', 'rejected'].includes(it.status));
@@ -3975,6 +4400,7 @@
                 }
 
                 batchState.active = false;
+                batchState.single = false;
                 batchState.phase = 'idle';
                 batchState.items = [];
                 batchState.currentIndex = 0;
@@ -4921,6 +5347,17 @@
         el('scanNowBtn').addEventListener('click', async () => {
             if (scanInProgress) return;
             if (batchState.active && batchState.phase === 'queuing') {
+                if (batchState.single) {
+                    scanStartedAt = performance.now();
+                    clearOcrError();
+                    el('scanNowBtn').disabled = true;
+                    const stored = await saveUnsavedPages();
+                    el('scanNowBtn').disabled = false;
+                    if (!stored) {
+                        scanStartedAt = null;
+                        return;
+                    }
+                }
                 await runBatchScanAll();
                 return;
             }
@@ -5035,7 +5472,7 @@
                 }
 
                 processedPage = page;
-                cropped = verificationItems(page.lines, page);
+                cropped = buildCropped(page);
                 readings = cropped.map((item) => item.reading);
                 requiredInput(document, '#ocrModelKey').value = page.modelKey.trim();
                 requiredInput(document, '#documentPageId').value = String(page.id);
@@ -5183,10 +5620,16 @@
                 // A field added under no column goes before the column to its right,
                 // whose order it shares.
                 const betweenColumns = box.gridColumn === null && box.gridRow !== null;
-                personGroups.get(personGroup).push({ index, order: personFieldOrder - (betweenColumns ? 0.5 : 0) });
+                // On a two-page document, page 2's fields follow page 1's in their person.
+                const pageOffset = box.spreadPage === 2 ? 1000 : 0;
+                personGroups.get(personGroup).push({ index, order: pageOffset + personFieldOrder - (betweenColumns ? 0.5 : 0) });
             });
 
             const groups = [];
+            // A two-page document's own fields: page 1's, then page 2's.
+            const byPage = (a, b) => (cropped[a]?.spreadPage ?? 1) - (cropped[b]?.spreadPage ?? 1) || a - b;
+            detailIndexes.sort(byPage);
+            unplacedIndexes.sort(byPage);
             if (detailIndexes.length > 0) {
                 groups.push({
                     id: 'document-details',
@@ -5406,7 +5849,7 @@
 
         function buildValidationGroups() {
             // A ledger's rows are its people, so its lines always group by row.
-            return config.groupingMode === 'custom' || templateColumns.length > 0
+            return config.groupingMode === 'custom' || templateColumns.length > 0 || cropped.some((item) => item.otherPage)
                 ? buildCustomValidationGroups()
                 : buildAutomaticValidationGroups();
         }
@@ -5506,7 +5949,7 @@
 
             cancelOutlineEdit();
             validationMarker.setBoxes([]);
-            lineOverlay.setLines(processedPage, cropped);
+            lineOverlay.setLines(processedPage, linesOnScreen());
             validationMarker.resetZoom();
             el('validationDocViewport').scrollTo({ top: 0, left: 0 });
 
@@ -5707,8 +6150,15 @@
             el('verifiedCount').textContent = `${verified} of ${total}`;
             el('verifiedProgress').setAttribute('aria-valuenow', String(percentage));
             el('verifiedProgressBar').style.width = `${percentage}%`;
-            el('submitVerifiedCount').textContent = String(verified);
-            el('submitBtn').disabled = verified === 0 || recordSubmitting;
+            // A two-page document is submitted whole: the other page's ticks count too.
+            const item = batchState.active ? batchState.items[batchState.currentIndex] : null;
+            const otherPage = item?.group && !cropped.some((entry) => entry.otherPage)
+                ? item.group.items.find((page) => page !== item)
+                : null;
+            const otherVerified = Object.values(otherPage?.verifyState ?? {})
+                .filter((entry) => entry.verified && entry.value.trim() !== '').length;
+            el('submitVerifiedCount').textContent = String(verified + otherVerified);
+            el('submitBtn').disabled = verified + otherVerified === 0 || recordSubmitting;
             updateValidationGroupSummaries();
             updateValidationMarkerStates();
         }
@@ -5840,6 +6290,14 @@
             const displayName = validationFieldLabel(group, columnIndex, item.heading || item.label || reading.name);
             requiredPart(row, '.validation-field__name').textContent = displayName;
             requiredPart(row, `label[for="${inputId}"]`).textContent = `Verified value for ${displayName}`;
+            // A two-page document lists both pages: each field says which page it is on.
+            if (item.spreadPage) {
+                const pageTag = document.createElement('span');
+                pageTag.className = `validation-field__page${item.otherPage ? ' is-other' : ''}`;
+                pageTag.textContent = `Page ${item.spreadPage}`;
+                requiredPart(row, '.validation-field__confidence').after(pageTag);
+                if (item.otherPage) row.classList.add('is-other-page');
+            }
 
             const badge = requiredPart(row, '.validation-field__confidence');
             badge.textContent = `${confidence.toFixed(1)}%`;
@@ -5865,7 +6323,7 @@
             });
 
         // Every table field: its person and column (and Remove where it can go).
-            const placement = fieldPlacementControls(index);
+            const placement = item.otherPage ? null : fieldPlacementControls(index);
             if (placement) requiredPart(row, '.validation-field__reading').after(placement);
 
         // Delete crop: for a crop that took in the wrong writing. A field with
@@ -5879,6 +6337,22 @@
                 event.stopPropagation();
                 askToDeleteCrop(index);
             });
+        }
+
+        // A field of the other page: its value and tick are here, but its outline
+        // is on that page, so its tools are too.
+        if (item.otherPage) {
+            row.querySelectorAll('.validation-field__adjust').forEach((button) => button.remove());
+            const show = document.createElement('button');
+            show.type = 'button';
+            show.className = 'btn btn-link btn-sm validation-field__adjust validation-field__show-page';
+            show.innerHTML = `<i class="icon-base bx bx-file" aria-hidden="true"></i>Show on page ${item.spreadPage}`;
+            show.setAttribute('aria-label', `Show ${displayName} on page ${item.spreadPage}`);
+            show.addEventListener('click', (event) => {
+                event.stopPropagation();
+                showFieldOnItsPage(index);
+            });
+            requiredPart(row, '.validation-field__tools').append(show);
         }
 
         // A field the reviewer added, or one between two rows, says it in its
@@ -6216,6 +6690,11 @@
         }
 
         function startOutlineEdit(index) {
+            // The other page's fields are changed on that page.
+            if (cropped[index]?.otherPage) {
+                showFieldOnItsPage(index);
+                return;
+            }
             if (!processedPage || !cropped[index]) return;
             stopAddingMissedField();
         stopRedrawField();
@@ -6348,7 +6827,7 @@
                 const flags = flagsById[candidate.id];
                 return Array.isArray(flags) ? { ...candidate, flags } : candidate;
             });
-            cropped = verificationItems(processedPage.lines, processedPage);
+            cropped = buildCropped(processedPage);
             readings = cropped.map((item) => item.reading);
 
             renderVerifyRows();
@@ -6360,7 +6839,7 @@
                 requiredInput(row, '.validation-verified').checked = previous.verified;
                 row.classList.toggle('is-verified', previous.verified);
             });
-            lineOverlay.setLines(processedPage, cropped);
+            lineOverlay.setLines(processedPage, linesOnScreen());
         showPickedFields();
             updateVerificationSummary();
 
@@ -6665,6 +7144,11 @@
     }
 
     async function deleteFieldCrop(index) {
+        // The other page's fields are changed on that page.
+        if (cropped[index]?.otherPage) {
+            showFieldOnItsPage(index);
+            return;
+        }
         const item = cropped[index];
         if (!item || !processedPage) return;
         try {
@@ -6724,6 +7208,11 @@
     }
 
     function startRedrawField(index) {
+        // The other page's fields are changed on that page.
+        if (cropped[index]?.otherPage) {
+            showFieldOnItsPage(index);
+            return;
+        }
         const item = cropped[index];
         if (!processedPage || !item?.cropDeleted || recordSubmitting) return;
         stopAddingMissedField();
@@ -6804,6 +7293,11 @@
     let cropToDelete = null;
 
     function askToDeleteCrop(index) {
+        // The other page's fields are changed on that page.
+        if (cropped[index]?.otherPage) {
+            showFieldOnItsPage(index);
+            return;
+        }
         const item = cropped[index];
         if (!item || item.cropDeleted || !processedPage) return;
         cropToDelete = item.lineId;
@@ -6943,6 +7437,11 @@
     }
 
     function togglePickedField(index) {
+        // The other page's fields are changed on that page.
+        if (cropped[index]?.otherPage) {
+            showFieldOnItsPage(index);
+            return;
+        }
         const item = cropped[index];
         if (!item || groupingBusy) return;
         if (!canJoinPerson(item)) {
@@ -7462,7 +7961,9 @@
         function requiredNotSubmitted(verifiedIndexes) {
             const checkedIndexes = new Set(verifiedIndexes);
             const checkedNames = new Set(verifiedIndexes.map((index) => nameKey(cropped[index]?.label)));
-            const missing = config.boxes
+            const onScreen = batchState.active ? batchState.items[batchState.currentIndex] : null;
+            const borrowedLayout = Boolean(onScreen?.group) && onScreen.pageNumber === 2 && !config.pageTwo;
+            const missing = borrowedLayout ? [] : config.boxes
                 .filter((box) => box.kind !== 'column' && box.required !== false && !checkedNames.has(nameKey(box.name)))
                 .map((box) => box.name);
 
@@ -7669,13 +8170,50 @@
             window.bootstrap.Modal.getOrCreateInstance(el('nextPageModal')).show();
         }
 
+        // One entry per record saved in this visit (a batch saves several).
+        const savedSummaries = [];
+
         function showRecordSaved() {
-            el('recordSavedModalDescription').textContent = batchState.active
-                ? 'All the documents in this batch were saved.'
-                : 'The record was saved.';
-            el('recordSavedModalTime').textContent = lastScanMs === null
-                ? ''
-                : `Scan took ${formatScanDuration(lastScanMs)}.`;
+            const count = savedSummaries.length;
+            const fields = savedSummaries.reduce((sum, entry) => sum + entry.fields, 0);
+            const corrected = savedSummaries.reduce((sum, entry) => sum + entry.corrected, 0);
+            el('recordSavedModalTitle').textContent = count > 1 ? 'Batch saved' : 'Record saved';
+            el('recordSavedModalDescription').textContent = count > 1
+                ? `${count} documents were saved to the records archive.`
+                : 'The document was saved to the records archive.';
+
+            const rows = [
+                ['Documents saved', String(count)],
+                ['Fields saved', String(fields)],
+                ['Corrected by you', `${corrected} of ${fields}`],
+                ...(lastScanMs === null ? [] : [['Scan time', formatScanDuration(lastScanMs)]]),
+            ];
+            const summary = el('recordSavedSummary');
+            summary.replaceChildren(...rows.map(([label, value]) => {
+                const row = document.createElement('div');
+                const term = document.createElement('dt');
+                const detail = document.createElement('dd');
+                term.textContent = label;
+                detail.textContent = value;
+                row.append(term, detail);
+                return row;
+            }));
+
+            const list = el('recordSavedList');
+            list.classList.toggle('d-none', count < 2);
+            list.replaceChildren(...savedSummaries.map((entry) => {
+                const item = document.createElement('li');
+                const link = document.createElement('a');
+                link.href = entry.url;
+                link.target = '_blank';
+                link.rel = 'noopener';
+                link.textContent = entry.title || entry.name;
+                const meta = document.createElement('small');
+                meta.textContent = `${entry.fields} fields`;
+                item.append(link, meta);
+                return item;
+            }));
+
             window.bootstrap.Modal.getOrCreateInstance(el('recordSavedModal')).show();
         }
 
@@ -7706,6 +8244,7 @@
                 requiredInput(document, '#documentPageId').value = '';
                 requiredInput(document, '#ocrModelKey').value = '';
 
+                pageGrids.delete(scanPageNumber);
                 await marker.load(scanFile, { page: pageNumber });
                 scanPageNumber = pageNumber;
                 recordSubmitting = false;
@@ -7713,9 +8252,7 @@
                 updateScanNotices();
                 showScanContext();
                 showStep('mark');
-                resetFieldHistory();
-                rowsSource = null;
-                setGrid(templateBoxes, templateRows, { remember: true });
+                restorePageGrid(pageNumber);
                 fetchSnapLines();
                 window.bootstrap.Modal.getInstance(el('nextPageModal'))?.hide();
                 window.requestAnimationFrame(() => marker.resetZoom());
@@ -7747,6 +8284,52 @@
             }
         }
 
+        /** One checked field as the server takes it; `page` is 1, or 2 on a spread's second page. */
+        function spreadFieldPayload(reading, crop, value, page, { personGroup = null, personFieldOrder = null } = {}) {
+            // Read with the first page's columns, page 2's fields would share their names.
+            const name = String(reading.name ?? '');
+            return {
+                verified: '1',
+                name: page === 2 && !config.pageTwo ? `${name} · page 2` : name,
+                ocr_text: String(reading.text ?? ''),
+                ocr_confidence: normaliseConfidence(reading).toFixed(1),
+                verified_value: value,
+                person_group: personGroup,
+                // Page 2's fields come after page 1's within their person.
+                person_field_order: personGroup === null || personFieldOrder === null
+                    ? null
+                    : personFieldOrder + (page === 2 ? 100 : 0),
+                x: Number(crop.x ?? 0).toFixed(5),
+                y: Number(crop.y ?? 0).toFixed(5),
+                width: Number(crop.w ?? 0).toFixed(5),
+                height: Number(crop.h ?? 0).toFixed(5),
+                // The record keeps this line's outline and the exact crop TrOCR read.
+                line_id: crop.lineId ?? null,
+                page,
+            };
+        }
+
+        /**
+         * The checked fields of a page of a two-page document that is not on
+         * screen: what was ticked when it was left, read again from its lines.
+         */
+        function storedPageFields(item) {
+            const state = item?.verifyState;
+            if (!state || !item.page) return [];
+            const items = verificationItems(item.page.lines, item.page);
+            return Object.entries(state)
+                .filter(([, entry]) => entry.verified && entry.value.trim() !== '')
+                .map(([index, entry]) => ({ crop: items[Number(index)], entry }))
+                .filter(({ crop }) => crop && !crop.cropDeleted)
+                .map(({ crop, entry }) => ({
+                    sourceIndex: undefined,
+                    field: spreadFieldPayload(crop.reading, crop, entry.value.trim(), item.pageNumber, {
+                        personGroup: Number.isInteger(crop.personGroup) && crop.personGroup > 0 ? crop.personGroup : null,
+                        personFieldOrder: Number.isInteger(crop.personFieldOrder) ? crop.personFieldOrder : null,
+                    }),
+                }));
+        }
+
         // What Staff last chose to go ahead with, so answering one question
         // ("Submit anyway", "Save again") keeps the answer to the other.
         let lastSubmitChoices = { allowMissing: false, allowDuplicate: false };
@@ -7756,6 +8339,15 @@
         async function submitRecord({ allowMissing = false, allowDuplicate = false } = {}) {
             if (recordSubmitting) return;
             lastSubmitChoices = { allowMissing, allowDuplicate };
+
+            // A two-page document is one record: the other page's checked fields go with this page's.
+            const currentBatchItem = batchState.active ? batchState.items[batchState.currentIndex] : null;
+            const group = currentBatchItem?.group ?? null;
+            if (group) saveVerifyState(currentBatchItem);
+            const otherItem = group ? group.items.find((page) => page !== currentBatchItem) : null;
+            // Both pages' fields are in the list (see buildCropped); only a page that
+            // could not be listed is read from what was kept for it.
+            const otherFields = cropped.some((entry) => entry.otherPage) ? [] : storedPageFields(otherItem);
 
             clearValidationSubmitError();
             const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
@@ -7776,7 +8368,7 @@
                 .filter((row) => requiredInput(row, '.validation-verified').checked)
                 .map((row) => Number(row.dataset.fieldIndex));
 
-            if (verifiedIndexes.length === 0) {
+            if (verifiedIndexes.length === 0 && otherFields.length === 0) {
                 showValidationSubmitError('Check Verified on at least one field before submitting.');
                 if (rows[0]) {
                     const firstIndex = Number(rows[0].dataset.fieldIndex);
@@ -7817,51 +8409,80 @@
 
             const form = el('submitForm');
             const data = new FormData(form);
-            const currentBatchItem = batchState.active ? batchState.items[batchState.currentIndex] : null;
-            if (currentBatchItem?.workspaceScanPath) {
-                data.set('workspace_scan_path', currentBatchItem.workspaceScanPath);
+            // The scan is stored once, with the first page of a two-page file.
+            const scanOwner = group ? group.items.find((page) => page.pageNumber === 1) : currentBatchItem;
+            if (scanOwner?.workspaceScanPath) {
+                data.set('workspace_scan_path', scanOwner.workspaceScanPath);
             } else {
                 data.set('scan', scanFile, scanFile.name);
             }
             if (allowMissing) data.set('allow_missing', '1');
             if (allowDuplicate) data.set('allow_duplicate', '1');
             // Which file, and which of its pages, this record is.
-            data.set('source_name', scanFile.name);
-            data.set('source_page', String(scanPageNumber));
-            data.set('source_page_count', String(scanPageCount));
-            if (scanFingerprint) data.set('source_hash', scanFingerprint);
+            if (group) {
+                const pageOne = group.items.find((page) => page.pageNumber === 1);
+                const pageTwo = group.items.find((page) => page.pageNumber === 2);
+                data.set('source_name', group.name);
+                data.set('source_page', '1');
+                data.set('source_page_count', '2');
+                data.set('document_page_id', String(pageOne.page.id));
+                data.set('document_page_id_two', String(pageTwo.page.id));
+                try {
+                    group.fingerprint ??= await fileFingerprint(group.file);
+                    if (group.fingerprint) data.set('source_hash', group.fingerprint);
+                } catch (error) {
+                    console.warn('The file fingerprint could not be worked out:', error);
+                }
+            } else if (currentBatchItem && currentBatchItem.pageCount > 1) {
+                data.set('source_name', currentBatchItem.file.name);
+                data.set('source_page', String(currentBatchItem.pageNumber));
+                data.set('source_page_count', String(currentBatchItem.pageCount));
+                try {
+                    currentBatchItem.file.crmsFingerprint ??= await fileFingerprint(currentBatchItem.file);
+                    data.set('source_hash', currentBatchItem.file.crmsFingerprint);
+                } catch (error) {
+                    console.warn('The file fingerprint could not be worked out:', error);
+                }
+            } else {
+                data.set('source_name', scanFile.name);
+                data.set('source_page', String(scanPageNumber));
+                data.set('source_page_count', String(scanPageCount));
+                if (scanFingerprint) data.set('source_hash', scanFingerprint);
+            }
 
             const personGroups = validationGroups.filter((candidate) => candidate.kind === 'person');
-            const submittedFields = verifiedIndexes.map((sourceIndex) => {
+            const here = group ? currentBatchItem.pageNumber : 1;
+            const thisPageFields = verifiedIndexes.map((sourceIndex) => {
                 const reading = readings[sourceIndex];
                 const crop = cropped[sourceIndex];
-                const group = validationGroupForField(sourceIndex);
-                const personGroup = group?.kind === 'person'
-                    ? personGroups.findIndex((candidate) => candidate.id === group.id) + 1
-                    : null;
-                const personFieldOrder = group?.kind === 'person'
-                    ? group.indexes.indexOf(sourceIndex)
-                    : null;
+                const personGroup = validationGroupForField(sourceIndex);
                 const row = validationRow(sourceIndex);
                 const value = row instanceof HTMLElement
                     ? requiredInput(row, '.verified').value.trim()
                     : '';
+                // On a spread, row N of both pages is one person: the person is the
+                // row itself, and page 2's fields follow page 1's within it.
+                const inRow = group && Number.isInteger(crop.personGroup) && crop.personGroup > 0;
+                const placed = personGroup?.kind === 'person';
                 return {
-                    verified: '1',
-                    name: String(reading.name ?? ''),
-                    ocr_text: String(reading.text ?? ''),
-                    ocr_confidence: normaliseConfidence(reading).toFixed(1),
-                    verified_value: value,
-                    person_group: personGroup,
-                    person_field_order: personFieldOrder,
-                    x: Number(crop.x ?? 0).toFixed(5),
-                    y: Number(crop.y ?? 0).toFixed(5),
-                    width: Number(crop.w ?? 0).toFixed(5),
-                    height: Number(crop.h ?? 0).toFixed(5),
-                    // The record keeps this line's outline and the exact crop TrOCR read.
-                    line_id: crop.lineId ?? null,
+                    sourceIndex,
+                    field: spreadFieldPayload(reading, crop, value, crop.spreadPage ?? here, {
+                        personGroup: inRow
+                            ? crop.personGroup
+                            : (placed ? personGroups.findIndex((candidate) => candidate.id === personGroup.id) + 1 : null),
+                        personFieldOrder: inRow && Number.isInteger(crop.personFieldOrder)
+                            ? crop.personFieldOrder
+                            : (placed ? personGroup.indexes.indexOf(sourceIndex) : null),
+                    }),
                 };
             });
+            const entries = group
+                // Page 1's fields first, then page 2's.
+                ? [...thisPageFields, ...otherFields].sort((a, b) => a.field.page - b.field.page)
+                : thisPageFields;
+            const submittedFields = entries.map((entry) => entry.field);
+            // The error messages come back by position in the list sent: only this page's can be shown.
+            const submittedSources = entries.map((entry) => entry.sourceIndex ?? undefined);
             data.set('fields_json', JSON.stringify(submittedFields));
 
             const button = el('submitBtn');
@@ -7874,7 +8495,7 @@
             button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Submitting verified fields...';
 
             try {
-                if (!currentBatchItem?.workspaceScanPath) {
+                if (!scanOwner?.workspaceScanPath) {
                     const scanUpload = await scanForRecord();
                     data.set('scan', scanUpload, scanUpload.name);
                 }
@@ -7913,7 +8534,7 @@
                         askToSubmitWithoutRequired(payload.errors.missing_required);
                         return;
                     }
-                    applyServerFieldErrors(payload?.errors, verifiedIndexes);
+                    applyServerFieldErrors(payload?.errors, submittedSources);
                     throw new Error(submissionErrorMessage(response, payload));
                 }
 
@@ -7921,9 +8542,19 @@
                     throw new Error('The record was saved, but the archive location was not returned. Open Records Archive to confirm it.');
                 }
 
+                savedSummaries.push({
+                    name: group?.name || currentBatchItem?.name || scanFile?.name || 'Document',
+                    title: payload.summary?.title || '',
+                    url: payload.redirect,
+                    fields: payload.summary?.fields ?? verifiedIndexes.length,
+                    corrected: payload.summary?.corrected ?? 0,
+                });
+
                 if (batchState.active && currentBatchItem) {
-                    currentBatchItem.status = 'imported';
-                    currentBatchItem.recordUrl = payload.redirect;
+                    (group ? group.items : [currentBatchItem]).forEach((page) => {
+                        page.status = 'imported';
+                        page.recordUrl = payload.redirect;
+                    });
                     renderBatchQueueBanner();
 
                     const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && !['imported', 'rejected'].includes(it.status));

@@ -19,6 +19,16 @@
         $currentGroupingMode = old('grouping_mode', $template?->grouping_mode ?? 'auto');
         $workingColumns = old('columns_json') ? json_decode(old('columns_json'), true) : $columns;
         $workingRuledYs = old('ruled_ys_json') ? json_decode(old('ruled_ys_json'), true) : $ruledYs;
+        // The second page of a spread. After a failed save, what was sent comes back.
+        $workingPageTwo = $pageTwo ?? null;
+        if (old('page_two_json') !== null) {
+            $sentTwo = json_decode((string) old('page_two_json'), true);
+            $workingPageTwo = is_array($sentTwo) ? [
+                'fields' => $sentTwo['fields'] ?? [],
+                'columns' => $sentTwo['columns'] ?? [],
+                'ruledYs' => $sentTwo['ruled_ys'] ?? [],
+            ] : null;
+        }
         $builderConfig = [
             'initialFields' => $workingFields,
             'baselineFields' => $fields,
@@ -29,6 +39,8 @@
             'detectGridUrl' => route('templates.detect-grid'),
             'testLayoutUrl' => route('templates.test-layout'),
             'snapUrl' => route('templates.snap'),
+            // The second page of a spread: its own fields, columns and row lines. Null for one page.
+            'pageTwo' => $workingPageTwo,
             'csrf' => csrf_token(),
             'initialGroupingMode' => $currentGroupingMode,
             'baselineGroupingMode' => $template?->grouping_mode ?? 'auto',
@@ -132,6 +144,22 @@
                                         title="Outline the sample with this layout, as Detect does for Staff (nothing is saved)">
                                     <i class="icon-base bx bx-radar icon-sm" aria-hidden="true"></i>
                                     <span>Test on sample</span>
+                                </button>
+
+                                {{-- A register spread: a layout for each of its two pages. --}}
+                                <div class="btn-group btn-group-sm d-none" role="group" id="layoutPageTabs" aria-label="Page of the layout">
+                                    <button type="button" class="btn btn-outline-primary active" id="layoutPageOneBtn">Page 1</button>
+                                    <button type="button" class="btn btn-outline-primary" id="layoutPageTwoBtn">Page 2</button>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="addSecondPageBtn"
+                                        title="For a register spread: give the second page its own columns and rows">
+                                    <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
+                                    <span>Page 2</span>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger d-none" id="removeSecondPageBtn"
+                                        title="Remove page 2: go back to a layout of one page" aria-label="Remove page 2">
+                                    <i class="icon-base bx bx-trash icon-sm" aria-hidden="true"></i>
+                                    <span>Page 2</span>
                                 </button>
 
                                 <span class="marker-toolbar__divider" aria-hidden="true"></span>

@@ -363,9 +363,12 @@ function initRecordDetail(root) {
 
         window.requestAnimationFrame(() => {
             if (viewport instanceof HTMLElement) {
+                // Measured on screen, as the marker may sit on either page of a spread.
+                const markerBox = marker.getBoundingClientRect();
+                const viewBox = viewport.getBoundingClientRect();
                 viewport.scrollTo({
-                    left: Math.max(0, marker.offsetLeft + marker.offsetWidth / 2 - viewport.clientWidth / 2),
-                    top: Math.max(0, marker.offsetTop + marker.offsetHeight / 2 - viewport.clientHeight / 2),
+                    left: Math.max(0, viewport.scrollLeft + markerBox.left - viewBox.left + markerBox.width / 2 - viewport.clientWidth / 2),
+                    top: Math.max(0, viewport.scrollTop + markerBox.top - viewBox.top + markerBox.height / 2 - viewport.clientHeight / 2),
                     behavior: 'smooth',
                 });
             }

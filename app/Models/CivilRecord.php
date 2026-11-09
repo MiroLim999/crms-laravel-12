@@ -27,7 +27,7 @@ class CivilRecord extends Model
 
     protected $fillable = [
         'doc_type', 'document_type_id', 'document_template_id', 'status',
-        'scan_path', 'scan_mime', 'scan_rotation', 'page_image_path', 'ocr_model_key', 'created_by',
+        'scan_path', 'scan_mime', 'scan_rotation', 'page_image_path', 'page_image_path_two', 'scan_rotation_two', 'ocr_model_key', 'created_by',
         'submitted_by', 'submitted_at',
         // The file the scan came from, and which of its pages (see sourceLabel()).
         'source_name', 'source_page', 'source_page_count', 'source_hash',
@@ -61,9 +61,12 @@ class CivilRecord extends Model
     public function sourceLabel(): ?string
     {
         $name = filled($this->source_name) ? (string) $this->source_name : null;
-        $page = $this->source_page_count > 1 && $this->source_page !== null
-            ? "Page {$this->source_page} of {$this->source_page_count}"
-            : null;
+        $page = match (true) {
+            // Both pages of a two-page spread are this one record.
+            $this->page_image_path_two !== null => 'Pages 1–2',
+            $this->source_page_count > 1 && $this->source_page !== null => "Page {$this->source_page} of {$this->source_page_count}",
+            default => null,
+        };
 
         $parts = array_filter([$page, $name]);
 

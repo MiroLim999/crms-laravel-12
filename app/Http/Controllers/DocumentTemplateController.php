@@ -20,6 +20,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\File;
@@ -245,7 +246,39 @@ class DocumentTemplateController extends Controller
             'parent' => $template->parent()->first(['id', 'name']),
             'columns' => array_values($template->columns ?? []),
             'ruledYs' => array_values($template->ruled_ys ?? []),
+            'pageTwo' => $this->pageTwoForBuilder($template),
         ]);
+    }
+
+    /**
+     * The second page in the shapes the builder uses for the first: fields with
+     * their settings, ledger columns and row lines. Null for a single page.
+     *
+     * @return array{fields: list<array<string, mixed>>, columns: list<array<string, mixed>>, ruledYs: list<float>}|null
+     */
+    private function pageTwoForBuilder(DocumentTemplate $template): ?array
+    {
+        if (! $template->hasSecondPage()) {
+            return null;
+        }
+
+        $second = $template->forPage(2);
+
+        return [
+            'fields' => $second->fields->map(fn (DocumentTemplateField $f) => [
+                'name' => $f->name,
+                'x' => $f->x,
+                'y' => $f->y,
+                'width' => $f->width,
+                'height' => $f->height,
+                'angle' => $f->angle,
+                'person_group' => $f->person_group,
+                'person_field_order' => $f->person_field_order,
+                ...$f->settings(),
+            ])->all(),
+            'columns' => array_values($second->columns ?? []),
+            'ruledYs' => array_values($second->ruled_ys ?? []),
+        ];
     }
 
     public function update(Request $request, DocumentTemplate $template): RedirectResponse
@@ -281,6 +314,7 @@ class DocumentTemplateController extends Controller
                 'grouping_mode' => $validated['grouping_mode'],
                 'columns' => $validated['columns'],
                 'ruled_ys' => $validated['ruled_ys'],
+                'page_two' => $validated['page_two'],
             ]);
             $template->forceFill(['revision' => $template->revision + 1]);
 
@@ -538,6 +572,104 @@ class DocumentTemplateController extends Controller
             'page_ratio' => ['nullable', 'numeric', 'min:0.1', 'max:10'],
             'grouping_mode' => ['required', Rule::in(['auto', 'custom'])],
             'publish' => ['sometimes', 'boolean'],
+            ...$this->layoutRules((string) $request->input('grouping_mode')),
+        ], [
+            'sample_document.mimes' => 'The sample must be a PDF, PNG, JPG, WEBP or BMP file.',
+        ]);
+
+        // Without one (an older form or an API call), the shape it had stays.
+        $validated['page_ratio'] = round((float) ($validated['page_ratio']
+            ?? $template?->page_ratio ?? DocumentTemplate::DEFAULT_PAGE_RATIO), 5);
+        $ratio = $validated['page_ratio'];
+        $validated['fields'] = array_values($validated['fields'] ?? []);
+        [$validated['columns'], $validated['ruled_ys']] = $this->checkedLedgerGrid(
+            $validated['columns'] ?? [],
+            $validated['ruled_ys'] ?? [],
+            $validated['fields'],
+            $ratio,
+        );
+
+        $fieldErrors = $this->fieldErrors($validated['fields'], $validated['grouping_mode'], $ratio);
+
+        if ($fieldErrors !== []) {
+            throw ValidationException::withMessages($fieldErrors);
+        }
+
+        $validated['fields'] = $this->canonicalizePersonGrouping(
+            $validated['fields'],
+            $validated['grouping_mode'],
+        );
+        $validated['page_two'] = $this->validatedPageTwo($request->input('page_two'), $validated);
+
+        return $validated;
+    }
+
+    /**
+     * The second page of a spread, checked as a layout of its own: the same
+     * rules as the first page, and no name used on both pages (a saved field
+     * is found by its name).
+     *
+     * @param  array<string, mixed>  $validated  the first page, already checked
+     * @return array{columns: list<array<string, mixed>>, ruled_ys: list<float>, fields: list<array<string, mixed>>}|null
+     */
+    private function validatedPageTwo(mixed $input, array $validated): ?array
+    {
+        if (! is_array($input) || $input === []) {
+            return null;
+        }
+
+        $mode = $validated['grouping_mode'];
+        $ratio = $validated['page_ratio'];
+
+        try {
+            $page = Validator::make($input, $this->layoutRules($mode))->validate();
+            $fields = array_values($page['fields'] ?? []);
+            [$columns, $ruled] = $this->checkedLedgerGrid($page['columns'] ?? [], $page['ruled_ys'] ?? [], $fields, $ratio);
+
+            $errors = $this->fieldErrors($fields, $mode, $ratio);
+            if ($errors !== []) {
+                throw ValidationException::withMessages($errors);
+            }
+        } catch (ValidationException $exception) {
+            $messages = [];
+            foreach ($exception->errors() as $key => $list) {
+                $messages['page_two.'.$key] = array_map(fn (string $message) => 'Page 2: '.$message, $list);
+            }
+            throw ValidationException::withMessages($messages);
+        }
+
+        $fields = $this->canonicalizePersonGrouping($fields, $mode);
+
+        $names = fn (array $fields, ?array $columns) => [
+            ...array_map(fn ($field) => mb_strtolower(trim((string) $field['name'])), $fields),
+            ...array_map(fn ($column) => mb_strtolower(trim((string) $column['name'])), $columns ?? []),
+        ];
+        $shared = array_intersect(
+            $names($validated['fields'], $validated['columns']),
+            $names($fields, $columns),
+        );
+        if ($shared !== []) {
+            throw ValidationException::withMessages([
+                'page_two' => 'Page 2 reuses a name from page 1 ('.implode(', ', array_unique($shared)).'). '
+                    .'Name each field and column once across both pages.',
+            ]);
+        }
+
+        return [
+            'columns' => $columns ?? [],
+            'ruled_ys' => $ruled ?? [],
+            'fields' => $this->fieldRows($fields),
+        ];
+    }
+
+    /**
+     * The rules for one page's layout: fields, ledger columns and row lines.
+     *
+     * @return array<string, mixed>
+     */
+    private function layoutRules(string $groupingMode): array
+    {
+        return [
             // A ruled register may be described entirely by its ledger grid.
             'fields' => ['nullable', 'array', 'max:'.Limits::MAX_FIELDS],
             'columns' => ['nullable', 'array', 'max:60'],
@@ -559,14 +691,14 @@ class DocumentTemplateController extends Controller
             // Degrees clockwise about the field's own centre.
             'fields.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
             'fields.*.person_group' => [
-                Rule::excludeIf(fn () => $request->input('grouping_mode') !== 'custom'),
+                Rule::excludeIf(fn () => $groupingMode !== 'custom'),
                 'nullable',
                 'integer',
                 'min:1',
                 'max:'.Limits::MAX_FIELDS,
             ],
             'fields.*.person_field_order' => [
-                Rule::excludeIf(fn () => $request->input('grouping_mode') !== 'custom'),
+                Rule::excludeIf(fn () => $groupingMode !== 'custom'),
                 'nullable',
                 'integer',
                 'min:0',
@@ -574,24 +706,19 @@ class DocumentTemplateController extends Controller
             ],
             ...$this->settingsRules('fields.*'),
             ...$this->settingsRules('columns.*'),
-        ], [
-            'sample_document.mimes' => 'The sample must be a PDF, PNG, JPG, WEBP or BMP file.',
-        ]);
+        ];
+    }
 
-        // Without one (an older form or an API call), the shape it had stays.
-        $validated['page_ratio'] = round((float) ($validated['page_ratio']
-            ?? $template?->page_ratio ?? DocumentTemplate::DEFAULT_PAGE_RATIO), 5);
-        $ratio = $validated['page_ratio'];
-        $validated['fields'] = array_values($validated['fields'] ?? []);
-        [$validated['columns'], $validated['ruled_ys']] = $this->checkedLedgerGrid(
-            $validated['columns'] ?? [],
-            $validated['ruled_ys'] ?? [],
-            $validated['fields'],
-            $ratio,
-        );
-
+    /**
+     * Markers past the page edge, and person groups left half-set.
+     *
+     * @param  list<array<string, mixed>>  $fields
+     * @return array<string, string>
+     */
+    private function fieldErrors(array $fields, string $groupingMode, float $ratio): array
+    {
         $fieldErrors = [];
-        foreach ($validated['fields'] as $index => $field) {
+        foreach ($fields as $index => $field) {
             if ((float) $field['x'] + (float) $field['width'] > 1.00001) {
                 $fieldErrors["fields.{$index}.width"] = 'This field marker extends beyond the document width.';
             }
@@ -608,7 +735,7 @@ class DocumentTemplateController extends Controller
                 $fieldErrors["fields.{$index}.angle"] = 'This field marker is tilted past the edge of the document.';
             }
 
-            if ($validated['grouping_mode'] === 'custom') {
+            if ($groupingMode === 'custom') {
                 $hasGroup = isset($field['person_group']);
                 $hasOrder = isset($field['person_field_order']);
 
@@ -622,24 +749,27 @@ class DocumentTemplateController extends Controller
 
         $fieldErrors = [
             ...$fieldErrors,
-            ...$this->settingsErrors('fields', $validated['fields'], $validated['grouping_mode'] === 'custom'),
+            ...$this->settingsErrors('fields', $fields, $groupingMode === 'custom'),
         ];
 
-        if ($fieldErrors !== []) {
-            throw ValidationException::withMessages($fieldErrors);
-        }
 
-        $validated['fields'] = $this->canonicalizePersonGrouping(
-            $validated['fields'],
-            $validated['grouping_mode'],
-        );
-
-        return $validated;
+        return $fieldErrors;
     }
 
     private function hydrateJsonFields(Request $request): void
     {
         $this->hydrateLedgerGrid($request);
+
+        if ($request->has('page_two_json')) {
+            try {
+                $pageTwo = json_decode((string) $request->input('page_two_json'), true, 64, JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                throw ValidationException::withMessages([
+                    'page_two' => 'The second page layout could not be read. Refresh the page and try again.',
+                ]);
+            }
+            $request->merge(['page_two' => is_array($pageTwo) ? $pageTwo : null]);
+        }
 
         if (! $request->filled('fields_json')) {
             return;
@@ -912,9 +1042,24 @@ class DocumentTemplateController extends Controller
         // own copy of the box they were cropped with.
         $template->fields()->delete();
 
-        foreach (array_values($fields) as $index => $field) {
+        foreach ($this->fieldRows($fields) as $row) {
+            $template->fields()->create($row);
+        }
+    }
+
+    /**
+     * Validated fields as the rows a layout stores: a table row for the first
+     * page, the same attributes inside page_two for the second.
+     *
+     * @param  list<array<string, mixed>>  $fields
+     * @return list<array<string, mixed>>
+     */
+    private function fieldRows(array $fields): array
+    {
+        return array_map(function (array $field, int $index) {
             $settings = $this->settingsOf($field);
-            $template->fields()->create([
+
+            return [
                 'name' => $field['name'],
                 'x' => $field['x'],
                 'y' => $field['y'],
@@ -923,14 +1068,14 @@ class DocumentTemplateController extends Controller
                 'angle' => round((float) ($field['angle'] ?? 0), 1),
                 'sort_order' => $index,
                 'is_required' => $settings['required'],
-                'person_group' => $field['person_group'],
-                'person_field_order' => $field['person_field_order'],
+                'person_group' => $field['person_group'] ?? null,
+                'person_field_order' => $field['person_field_order'] ?? null,
                 'role' => $settings['role'],
                 'value_type' => $settings['type'],
                 'options' => $settings['options'],
                 'hint' => $settings['hint'],
-            ]);
-        }
+            ];
+        }, array_values($fields), array_keys(array_values($fields)));
     }
 
     /**
@@ -955,6 +1100,7 @@ class DocumentTemplateController extends Controller
             'grouping_mode' => $validated['grouping_mode'],
             'columns' => $validated['columns'],
             'ruled_ys' => $validated['ruled_ys'],
+            'page_two' => $validated['page_two'],
             'is_active' => false,
             'created_by' => $request->user()->getKey(),
             'parent_id' => $parent?->getKey(),
@@ -1067,11 +1213,32 @@ class DocumentTemplateController extends Controller
             ])->all(),
         );
 
-        return $saved !== $this->layoutSignature(
+        $changed = $saved !== $this->layoutSignature(
             $validated['grouping_mode'],
             $validated['columns'] ?? [],
             $validated['ruled_ys'] ?? [],
             $validated['fields'],
+        );
+
+        return $changed || $this->pageTwoSignature($template->page_two) !== $this->pageTwoSignature($validated['page_two'] ?? null);
+    }
+
+    /** The second page's layout, rounded the way the first page's is. */
+    private function pageTwoSignature(?array $pageTwo): string
+    {
+        if (! is_array($pageTwo) || $pageTwo === []) {
+            return '';
+        }
+
+        return $this->layoutSignature(
+            'page-two',
+            $pageTwo['columns'] ?? [],
+            $pageTwo['ruled_ys'] ?? [],
+            array_map(fn (array $field) => [
+                ...$field,
+                'required' => $field['is_required'] ?? true,
+                'type' => $field['value_type'] ?? 'text',
+            ], $pageTwo['fields'] ?? []),
         );
     }
 
