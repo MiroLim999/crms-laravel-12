@@ -149,6 +149,13 @@
                             </div>
 
                             <div class="marker-toolbar__actions">
+                                {{-- Hides the row lines and every field box to look at the sample itself; on at every visit. --}}
+                                <div class="form-check form-switch marker-grid-toggle"
+                                     title="Show or hide the row lines and field boxes over the page">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="showGridToggle" checked>
+                                    <label class="form-check-label" for="showGridToggle">Grid lines</label>
+                                </div>
+
                                 <div class="dropdown">
                                     <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle marker-help-button" data-bs-toggle="dropdown"
                                             aria-expanded="false" aria-label="Show editor shortcuts">

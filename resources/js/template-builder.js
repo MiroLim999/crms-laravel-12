@@ -1178,6 +1178,12 @@ function restoreBaseline() {
     clearBuilderError();
 }
 
+// Grid lines off: the row lines and every field box are hidden (not removed),
+// so the sample shows as scanned.
+element('showGridToggle', HTMLInputElement).addEventListener('change', (event) => {
+    overlay.classList.toggle('is-grid-hidden', !event.target.checked);
+});
+
 element('resetFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
     const layoutChanged = !layoutMatchesBaseline();
     const zoomChanged = Math.abs(marker.zoom - 1) > 0.001;
