@@ -1414,17 +1414,54 @@ class LineOutlinePipelineTest extends TestCase
             ->assertJsonValidationErrors('row');
     }
 
-    public function test_a_field_of_a_layout_box_is_not_moved_into_the_table(): void
+    public function test_a_field_of_a_layout_box_joins_a_person_but_never_the_table(): void
     {
         $page = $this->processedPage();
+        $columns = count($page->geometry['columns']);
+        $rows = count($page->geometry['ruled_ys']) - 1;
         $field = $this->makeLine($page, ['source' => PageLine::SOURCE_FIELD, 'column_index' => null, 'column_name' => 'Remarks', 'row' => 1]);
+        $route = route('documents.pages.lines.place', ['page' => $page, 'line' => $field]);
 
-        $this->actingAs($page->creator)
-            ->patchJson(route('documents.pages.lines.place', ['page' => $page, 'line' => $field]), [
-                'column_index' => 0,
-                'row' => 1,
-            ])
-            ->assertUnprocessable();
+        // It joins person 1 and keeps its name and line number: it is not a cell.
+        $this->actingAs($page->creator)->patchJson($route, ['column_index' => 0, 'row' => 1])
+            ->assertOk()
+            ->assertJsonPath('line.column', 'Remarks')
+            ->assertJsonPath('line.columnIndex', null)
+            ->assertJsonPath('line.row', 1)
+            ->assertJsonPath('line.personGroup', 1)
+            // After the person's columns.
+            ->assertJsonPath('line.personFieldOrder', $columns);
+
+        // Group fields: it starts a new person past the table's last row ...
+        $person = $this->actingAs($page->creator)->patchJson($route, ['new_person' => true])
+            ->assertOk()
+            ->json('line.personGroup');
+        $this->assertGreaterThan($rows, $person);
+
+        // ... which a table field can join, and the next new person comes after it.
+        $name = $page->lines()->where('column_name', 'Name')->where('row', 1)->firstOrFail();
+        $nameRoute = route('documents.pages.lines.place', ['page' => $page, 'line' => $name]);
+        $this->actingAs($page->creator)->patchJson($nameRoute, ['row' => $person, 'column_index' => 0])
+            ->assertOk()
+            ->assertJsonPath('line.row', $person);
+        $this->actingAs($page->creator)->patchJson($nameRoute, ['new_person' => true, 'column_index' => 0])
+            ->assertOk()
+            ->assertJsonPath('line.row', $person + 1);
+
+        // Ctrl+Z: back to the page's details.
+        $this->actingAs($page->creator)->patchJson($route, ['page_details' => true])
+            ->assertOk()
+            ->assertJsonPath('line.personGroup', null)
+            ->assertJsonPath('line.personFieldOrder', null)
+            ->assertJsonPath('line.column', 'Remarks');
+
+        // A person is needed, and only one way at once.
+        $this->actingAs($page->creator)->patchJson($route, [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('row');
+        $this->actingAs($page->creator)->patchJson($route, ['page_details' => true, 'row' => 1])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('page_details');
     }
 
     public function test_a_hand_drawn_line_is_cropped_and_placed_in_its_ledger_cell(): void

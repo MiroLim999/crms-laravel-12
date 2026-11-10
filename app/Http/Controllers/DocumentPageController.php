@@ -516,6 +516,9 @@ class DocumentPageController extends Controller
      * Put a ledger line in another person's row or another column (Verify):
      * a field the reviewer added, or one that fell between two rows. Nothing
      * is cropped or read again; only where it belongs changes.
+     *
+     * A field of a layout box (Province, Year…) can join a person too, or go
+     * back to the page's details: see placeFieldInPerson().
      */
     public function placeLine(Request $request, DocumentPage $page, PageLine $line): JsonResponse
     {
@@ -527,7 +530,7 @@ class DocumentPageController extends Controller
             return response()->json(['message' => 'This page is still being processed.'], 409);
         }
         if ($line->belongsToField()) {
-            return response()->json(['message' => 'This field belongs to a box of the layout, not to a row of the table.'], 422);
+            return $this->placeFieldInPerson($request, $page, $line);
         }
 
         $columns = $page->geometry['columns'] ?? [];
@@ -537,7 +540,7 @@ class DocumentPageController extends Controller
         $removedColumns = $this->columnsRemovedInAlign($page);
         // A person started by hand sits past the table's last row. Those rows
         // stay choosable for the lines already in them.
-        $lastRow = max($rows, (int) $page->lines()->max('row'));
+        $lastRow = $this->lastPerson($page, $rows);
         $validated = $request->validate([
             'row' => ['required_without:new_person', 'nullable', 'integer', 'min:1', 'max:'.max(1, $lastRow)],
             'new_person' => ['nullable', 'boolean', 'prohibits:row'],
@@ -701,6 +704,66 @@ class DocumentPageController extends Controller
     private function lineFlags(DocumentPage $page): Collection
     {
         return $page->lines()->get()->mapWithKeys(fn (PageLine $l) => [$l->getKey() => $l->flags ?? []]);
+    }
+
+    /**
+     * A field of a layout box (Province, Year, Volume No.…) joins a person in
+     * Verify (Group fields), or goes back to the page's details (Ctrl+Z).
+     *
+     * Only its person changes. Its name, its line number within the box, its
+     * crop and its reading stay, so the record keeps it under its own name; it
+     * never becomes a cell of the table. It sits after the person's columns.
+     */
+    private function placeFieldInPerson(Request $request, DocumentPage $page, PageLine $line): JsonResponse
+    {
+        $columns = $page->geometry['columns'] ?? [];
+        $rows = max(0, count($page->geometry['ruled_ys'] ?? []) - 1);
+        if ($columns === [] || $rows === 0) {
+            return response()->json(['message' => 'This page has no table, so there is no person for the field to join.'], 422);
+        }
+
+        $lastPerson = $this->lastPerson($page, $rows);
+        $validated = $request->validate([
+            'row' => ['required_without_all:new_person,page_details', 'nullable', 'integer', 'min:1', 'max:'.max(1, $lastPerson)],
+            'new_person' => ['nullable', 'boolean', 'prohibits:row'],
+            'page_details' => ['nullable', 'boolean', 'prohibits:row,new_person'],
+            'field_order' => ['nullable', 'integer', 'min:0', 'max:'.Limits::MAX_FIELDS],
+        ]);
+
+        if ($request->boolean('page_details')) {
+            $person = null;
+        } elseif ($request->boolean('new_person')) {
+            if ($lastPerson >= Limits::MAX_FIELDS) {
+                return response()->json(['message' => 'This page already has the most people it can hold.'], 422);
+            }
+            $person = $lastPerson + 1;
+        } else {
+            $person = (int) $validated['row'];
+        }
+
+        $line->forceFill([
+            'person_group' => $person,
+            'person_field_order' => $person === null ? null : (int) ($validated['field_order'] ?? count($columns)),
+        ])->save();
+
+        return response()->json([
+            'line' => $line->fresh()->toClient(),
+            'flags' => $this->lineFlags($page),
+        ]);
+    }
+
+    /**
+     * The page's last person: the table's last row, or a person started by
+     * hand past it, whether a table line or a layout box's field started them.
+     */
+    private function lastPerson(DocumentPage $page, int $rows): int
+    {
+        $tableLines = (int) $page->lines()->max('row');
+        $fields = (int) $page->lines()
+            ->whereIn('source', [PageLine::SOURCE_TEMPLATE, PageLine::SOURCE_FIELD])
+            ->max('person_group');
+
+        return max($rows, $tableLines, $fields);
     }
 
     /**

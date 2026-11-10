@@ -7225,12 +7225,18 @@
     // By line id, so a pick survives the list being rebuilt.
     const pickedLineIds = new Set();
 
-    /** Only table fields belong to a person row; a layout box's fields keep their place. */
+    /**
+     * Any field can join a person on a page with a table: a table field, or a
+     * layout box's field (Province, Year…). Without a table there are no people.
+     */
     function canJoinPerson(item) {
         const columns = processedPage?.geometry?.columns ?? [];
         const rows = Math.max(0, (processedPage?.geometry?.ruled_ys?.length ?? 0) - 1);
-        return Boolean(item) && columns.length > 0 && rows > 0 && !['template', 'field'].includes(item.source);
+        return Boolean(item) && columns.length > 0 && rows > 0;
     }
+
+    /** A layout box's field: it joins a person by its person alone, never as a cell of the table. */
+    const isLayoutBoxField = (item) => ['template', 'field'].includes(item?.source);
 
     /** The column a field keeps when it moves: one on the page, one removed in Align, or none. */
     function columnPlacementOf(item) {
@@ -7283,7 +7289,7 @@
         if (!item || groupingBusy) return;
         if (!canJoinPerson(item)) {
             if (!groupingFields) startGroupingFields();
-            showGroupFieldsStatus('This field belongs to a box of the layout, not to a row of the table, so it cannot join a person.', true);
+            showGroupFieldsStatus('This page has no table, so there are no people to group fields into.', true);
             return;
         }
         if (!groupingFields) startGroupingFields();
@@ -7335,9 +7341,10 @@
      */
     async function groupPickedFields() {
         if (groupingBusy || !processedPage) return;
+        // Table fields first, left to right, then the layout boxes' fields.
         const items = cropped
             .filter((item) => pickedLineIds.has(item.lineId) && canJoinPerson(item))
-            .sort((a, b) => a.x - b.x || a.y - b.y);
+            .sort((a, b) => Number(isLayoutBoxField(a)) - Number(isLayoutBoxField(b)) || a.x - b.x || a.y - b.y);
         if (items.length === 0) return;
 
         setGroupingBusy(true);
@@ -7349,17 +7356,27 @@
         let newRow = null;
         let failure = null;
         for (const item of items) {
-            const column = columnPlacementOf(item);
+            const boxField = isLayoutBoxField(item);
+            // A layout box's field keeps its name: only its person changes.
+            const column = boxField ? {} : columnPlacementOf(item);
             try {
                 const { response, payload } = await sendLineRequest(
                     verifyLineUrl(config.linePlaceUrl, item.lineId), 'PATCH',
                     newRow === null ? { new_person: true, ...column } : { row: newRow, ...column },
                 );
                 if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
-                newRow ??= payload.line.row;
+                newRow ??= boxField ? payload.line.personGroup : payload.line.row;
                 moved.push(payload.line);
                 flags = payload.flags ?? flags;
-                if (item.gridRow !== null) before.push({ id: item.lineId, row: item.gridRow, column });
+                if (boxField) {
+                    // Ctrl+Z: back to the person it had (none: the page's details).
+                    before.push({
+                        id: item.lineId,
+                        boxField: true,
+                        person: Number.isInteger(item.personGroup) ? item.personGroup : null,
+                        order: Number.isInteger(item.personFieldOrder) ? item.personFieldOrder : null,
+                    });
+                } else if (item.gridRow !== null) before.push({ id: item.lineId, row: item.gridRow, column });
             } catch (error) {
                 failure = error.message || 'A field could not be moved.';
                 break;
@@ -7495,8 +7512,14 @@
                 const lines = new Map();
                 let flags = {};
                 for (const move of entry.moves) {
+                    let body = { row: move.row, ...move.column };
+                    if (move.boxField) {
+                        body = move.person === null
+                            ? { page_details: true }
+                            : { row: move.person, ...(move.order === null ? {} : { field_order: move.order }) };
+                    }
                     const { response, payload } = await sendLineRequest(
-                        verifyLineUrl(config.linePlaceUrl, move.id), 'PATCH', { row: move.row, ...move.column },
+                        verifyLineUrl(config.linePlaceUrl, move.id), 'PATCH', body,
                     );
                     if (response.ok && payload?.line) {
                         lines.set(payload.line.id, payload.line);
