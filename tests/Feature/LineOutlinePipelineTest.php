@@ -995,7 +995,7 @@ class LineOutlinePipelineTest extends TestCase
             ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
             ->assertOk()
             ->assertSee('ruledYs: []', escape: false)
-            ->assertSee('<span>Submit <span id="submitVerifiedCount">0</span> verified</span>', escape: false)
+            ->assertSee('<span><span id="submitLabelHead">Submit</span> <span id="submitVerifiedCount">0</span> verified</span>', escape: false)
             ->assertSee('id="lineEditToolbar"', escape: false);
 
         $this->ledgerTemplate();

@@ -3368,6 +3368,24 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   min-block-size: 34rem;
 }
 
+// A document of several pages: what Submit does on this page, above the buttons.
+.validation-pages-note {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem 1rem;
+  color: var(--bs-body-color);
+  font-size: .8125rem;
+  background: rgba(var(--bs-primary-rgb), .07);
+  border-block-start: 1px solid var(--bs-border-color);
+
+  i {
+    color: var(--bs-primary);
+    font-size: 1.1rem;
+  }
+}
+
 .validation-pane {
   display: flex;
   min-inline-size: 0;
@@ -3404,6 +3422,32 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   background-size: 1rem 1rem;
   border: 0;
   border-radius: 0;
+}
+
+// A document of several pages: which page is in view, and how many are checked.
+.validation-page-pill {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  padding: .15rem .65rem;
+  color: var(--bs-primary);
+  font-size: .75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  background: rgba(var(--bs-primary-rgb), .1);
+  border-radius: 999px;
+}
+
+// Verify's page beside the one being verified: the outlines stay light, so it
+// reads as the other half of the same document, and a click verifies it.
+.validation-companion .line-overlay .line-marker__shape {
+  fill: rgba(var(--bs-secondary-rgb), .05);
+  stroke: rgba(var(--bs-secondary-rgb), .45);
+}
+
+.validation-companion .line-overlay .line-marker.is-verified .line-marker__shape {
+  fill: rgba(40, 199, 111, .1);
+  stroke: rgba(40, 199, 111, .72);
 }
 
 .validation-field-overlay {

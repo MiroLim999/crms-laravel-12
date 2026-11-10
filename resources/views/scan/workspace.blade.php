@@ -530,7 +530,11 @@
                     <section class="card validation-pane validation-document-pane" aria-labelledby="originalDocumentTitle">
                         <header class="validation-pane__header">
                             <div class="min-w-0">
-                                <span class="validation-pane__eyebrow">Source</span>
+                                <div class="d-flex align-items-center flex-wrap column-gap-2">
+                                    <span class="validation-pane__eyebrow">Source</span>
+                                    {{-- A document of several pages: which page is in view and how many are checked. --}}
+                                    <span class="validation-page-pill d-none" id="validationPagePill" role="status"></span>
+                                </div>
                                 <h3 class="h5 mb-0" id="originalDocumentTitle">Original document</h3>
                             </div>
 
@@ -673,10 +677,32 @@
                             <div class="line-edit-toolbar__status" id="redrawFieldStatus" role="status" aria-live="polite"></div>
                         </div>
 
+                        {{-- A document of two pages (a register's left and right) is one document: both
+                             pages sit side by side in the one scroll container, so one set of scrollbars
+                             and one zoom move them together. Click the other page to verify it instead. --}}
                         <div class="doc-viewport validation-doc-viewport" id="validationDocViewport">
-                            <div class="doc-stage" id="validationDocStage">
-                                <canvas id="validationPageCanvas"></canvas>
-                                <div class="field-overlay validation-field-overlay" id="validationFieldOverlay"></div>
+                            <div class="doc-spread" id="validationSpread">
+                                <div class="doc-spread__page doc-spread__page--main" id="validationMainPage">
+                                    <div class="doc-spread__label d-none" id="validationMainLabel"></div>
+                                    <div class="doc-stage" id="validationDocStage">
+                                        <canvas id="validationPageCanvas"></canvas>
+                                        <div class="field-overlay validation-field-overlay" id="validationFieldOverlay"></div>
+                                    </div>
+                                </div>
+
+                                <div class="doc-spread__page doc-spread__page--companion validation-companion d-none"
+                                     id="validationCompanionPage" title="Verify this page instead">
+                                    <div class="doc-spread__label" id="validationCompanionLabel"></div>
+                                    <div class="doc-stage" id="validationCompanionStage">
+                                        <canvas id="validationCompanionCanvas"></canvas>
+                                        <div class="field-overlay validation-field-overlay" id="validationCompanionOverlay"></div>
+                                        <button type="button" class="btn btn-primary doc-spread__switch" id="validationCompanionSwitch"
+                                                aria-label="Verify this page instead">
+                                            <i class="icon-base bx bx-edit-alt me-1" aria-hidden="true"></i>
+                                            <span>Verify this page</span>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -734,6 +760,12 @@
                         </div>
                         <div class="validation-result-list" id="verifyRows"></div>
 
+                        {{-- A document of several pages: what Submit does on this page. --}}
+                        <div class="validation-pages-note d-none" id="validationPagesNote" role="status">
+                            <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
+                            <span id="validationPagesNoteText"></span>
+                        </div>
+
                         <footer class="validation-submit-bar">
                             <div class="validation-lock-copy">
                                 <i class="icon-base bx bx-lock-alt" aria-hidden="true"></i>
@@ -748,7 +780,7 @@
                                     <i class="icon-base bx bx-check-shield icon-sm me-1"></i>
                                     {{-- One inline span: .btn is a flex container, which drops the
                                     spaces between separate text and element children. --}}
-                                    <span>Submit <span id="submitVerifiedCount">0</span> verified</span>
+                                    <span><span id="submitLabelHead">Submit</span> <span id="submitVerifiedCount">0</span> verified</span>
                                 </button>
                             </div>
                         </footer>
@@ -1207,6 +1239,21 @@
             readOnly: true,
             onSelectionChange: handleValidationMarkerSelection,
             onZoomChange: updateValidationZoomUI,
+        });
+
+        // A document's other page, beside the one being verified: read-only, fitted
+        // to half the width and zoomed with it; a click verifies it instead.
+        const validationCompanionMarker = new FieldMarker({
+            canvas: el('validationCompanionCanvas'),
+            overlay: el('validationCompanionOverlay'),
+            fitViewport: el('validationDocViewport'),
+            fitShare: 0.5,
+            readOnly: true,
+        });
+        validationMarker.linked = [validationCompanionMarker];
+        const companionLines = new LineOverlay({
+            container: el('validationCompanionOverlay'),
+            preview: true,
         });
 
         const lineOverlay = new LineOverlay({
@@ -3386,7 +3433,8 @@
 
             const savedCount = batchState.items.filter((it) => ['saved', 'scanning', 'ready', 'verifying', 'imported', 'rejected'].includes(it.status)).length;
             const readyCount = batchState.items.filter((it) => ['ready', 'verifying', 'imported', 'rejected'].includes(it.status)).length;
-            const importedCount = batchState.items.filter((it) => ['imported', 'rejected'].includes(it.status)).length;
+            // Pages are what is aligned and scanned one by one; documents are what is imported.
+            const unit = batchGroups().length === total ? 'document' : 'page';
 
             const stageOrder = ['queuing', 'scanning', 'verifying'];
             const activeStageIdx = stageOrder.indexOf(batchState.phase);
@@ -3406,7 +3454,7 @@
                 if (phaseTitle) {
                     phaseTitle.textContent = allSaved
                         ? 'All documents saved in workspace queue — ready to scan all'
-                        : `Align & save each document to queue (${savedCount} of ${total} saved)`;
+                        : `Align & save each ${unit} to queue (${savedCount} of ${total} saved)`;
                 }
                 if (counter) counter.textContent = `${savedCount} / ${total} saved`;
                 updateProgress(Math.round((savedCount / total) * 100));
@@ -3426,16 +3474,21 @@
                     if (scanNowLabel) scanNowLabel.textContent = `Scan All Queued Documents (${total})`;
                 }
             } else if (batchState.phase === 'scanning') {
-                if (phaseTitle) phaseTitle.textContent = `Scanning all queued documents with OCR (${readyCount} of ${total} scanned)...`;
-                if (counter) counter.textContent = `${readyCount} / ${total} scanned`;
+                if (phaseTitle) phaseTitle.textContent = `Scanning all queued documents with OCR (${readyCount} of ${total} ${unit}s scanned)...`;
+                if (counter) counter.textContent = `${readyCount} / ${total} ${unit}s scanned`;
                 updateProgress(Math.round((readyCount / total) * 100));
                 if (addMoreBtn) addMoreBtn.classList.add('d-none');
                 if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
                 if (scanNowBtn) scanNowBtn.classList.remove('d-none');
             } else if (batchState.phase === 'verifying') {
-                if (phaseTitle) phaseTitle.textContent = `Validate & import each document (${importedCount} of ${total} imported)`;
-                if (counter) counter.textContent = `${importedCount} / ${total} imported`;
-                updateProgress(Math.round((importedCount / total) * 100));
+                // A PDF of many pages is one document: it is imported once, all its pages together.
+                const documents = batchGroups();
+                const importedDocuments = documents.filter((group) => (
+                    group.items.every((it) => ['imported', 'rejected'].includes(it.status))
+                )).length;
+                if (phaseTitle) phaseTitle.textContent = `Validate & import each document (${importedDocuments} of ${documents.length} imported)`;
+                if (counter) counter.textContent = `${importedDocuments} / ${documents.length} imported`;
+                updateProgress(Math.round((importedDocuments / documents.length) * 100));
                 if (addMoreBtn) addMoreBtn.classList.add('d-none');
                 if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
             }
@@ -3462,7 +3515,12 @@
                         rejected: { cls: 'is-failed', icon: 'bx-x-circle', text: 'Rejected (Existing)' },
                         failed: { cls: 'is-failed', icon: 'bx-error-circle', text: 'Failed' },
                     };
-                    const badgeInfo = badgeMap[item.status] || badgeMap.pending;
+                    const badgeInfo = { ...(badgeMap[item.status] || badgeMap.pending) };
+                    // A document of several pages says how many of them are checked.
+                    if (group.items.length > 1 && batchState.phase === 'verifying' && ['verifying', 'checked'].includes(item.status)) {
+                        const checkedPages = group.items.filter((it) => it.staged || it.status === 'imported').length;
+                        badgeInfo.text = `${checkedPages}/${group.items.length} pages checked`;
+                    }
                     const isCurrent = group.indices.includes(batchState.currentIndex);
                     const canInteract = batchState.phase !== 'scanning' && !(batchState.phase === 'verifying' && group.items.every((it) => ['imported', 'rejected'].includes(it.status)));
 
@@ -4174,8 +4232,17 @@
             const item = batchState.items[index];
             if (!item || !item.page) return;
 
+            // Leaving a page keeps what was typed and ticked on it, and a page only
+            // looked at goes back to "Scanned" instead of staying "Validating".
+            const leaving = batchState.items[batchState.currentIndex];
+            if (leaving && leaving !== item) {
+                keepVerifyDraft(leaving);
+                if (leaving.status === 'verifying' && !leaving.staged) leaving.status = 'ready';
+            }
+
             batchState.currentIndex = index;
             useLayoutForPage(item.pageNo ?? 1);
+            // A page opened again is checked again: it may have changed since.
             item.staged = null;
             if (item.status !== 'imported') {
                 item.status = 'verifying';
@@ -4201,6 +4268,7 @@
 
             clearValidationSubmitError();
             renderVerifyRows();
+            restoreVerifyDraft(item);
             showGridNotes(page);
             showStep('verify');
             prepareValidationComparison();
@@ -5822,6 +5890,173 @@
                 .map((box) => box.name);
         }
 
+        // ------------------------------------------- a document of several pages
+        // A PDF of many pages is one document (one record). In Verify its pages sit
+        // side by side, two at a time like an open book (1-2, 3-4): the page being
+        // verified has the live outlines, its partner sits beside it, read-only.
+        // Click the partner to verify that page instead; each page keeps what was
+        // typed and ticked on it, so going back loses nothing.
+
+        /** The queued pages of one document, in page order. */
+        function documentPagesOf(item) {
+            return item?.group && item.pageTotal > 1
+                ? batchState.items.filter((it) => it.group === item.group).sort((a, b) => a.pageNo - b.pageNo)
+                : [];
+        }
+
+        /** The other page of this page's pair, once it has been scanned. */
+        function verifyPartnerOf(item) {
+            const pages = documentPagesOf(item);
+            if (pages.length < 2) return null;
+            const first = item.pageNo % 2 === 1 ? item.pageNo : item.pageNo - 1;
+            const wanted = item.pageNo === first ? first + 1 : first;
+            const mate = pages.find((it) => it.pageNo === wanted);
+            return mate?.page?.imageUrl && mate.status !== 'failed' ? mate : null;
+        }
+
+        /** The queued page being verified, while a batch is in Verify. */
+        function currentVerifyItem() {
+            return batchState.active && batchState.phase === 'verifying'
+                ? batchState.items[batchState.currentIndex] ?? null
+                : null;
+        }
+
+        const pageIsChecked = (item) => Boolean(item.staged) || item.status === 'imported';
+
+        /**
+         * What the Submit button and the note beside it promise: on a page with
+         * another still to check it moves on ("Continue to page 2"), and only the
+         * last one saves the record, so nothing is saved before that.
+         */
+        function updateSubmitLabel(item, pages) {
+            const head = el('submitLabelHead');
+            const note = el('validationPagesNote');
+            note.classList.toggle('d-none', pages.length < 2);
+            if (pages.length < 2) {
+                head.textContent = 'Submit';
+                return;
+            }
+
+            const next = pages.find((it) => it !== item && !pageIsChecked(it));
+            const all = pages.length === 2 ? 'Both pages are' : 'All pages are';
+            if (next) {
+                head.textContent = `Next: page ${next.pageNo} ·`;
+                el('validationPagesNoteText').textContent = `${all} saved together as one record once the last page is checked. Nothing is saved yet.`;
+            } else {
+                head.textContent = 'Save record ·';
+                el('validationPagesNoteText').textContent = `Saving puts ${pages.length === 2 ? 'both pages' : 'all pages'} together as one record.`;
+            }
+        }
+
+        /** The page labels, the partner's place and the Submit wording; before the outlines are drawn. */
+        function setVerifySpreadLayout(item) {
+            const pages = documentPagesOf(item);
+            const mate = verifyPartnerOf(item);
+            const pill = el('validationPagePill');
+
+            if (pages.length > 1) {
+                const checked = pages.filter((it) => it !== item && pageIsChecked(it)).length;
+                pill.textContent = `Page ${item.pageNo} of ${pages.length} · ${checked} of ${pages.length} checked`;
+                pill.classList.remove('d-none');
+            } else if (!item && multiPage()) {
+                pill.textContent = `Page ${scanPageNumber} of ${scanPageCount}`;
+                pill.classList.remove('d-none');
+            } else {
+                pill.classList.add('d-none');
+            }
+
+            const mainLabel = el('validationMainLabel');
+            mainLabel.classList.toggle('d-none', pages.length < 2);
+            if (pages.length > 1) mainLabel.textContent = `Page ${item.pageNo} · verifying`;
+
+            // One page fills the width; two share it.
+            validationMarker.fitShare = mate ? 0.5 : 1;
+            el('validationCompanionPage').classList.toggle('d-none', !mate);
+            if (mate) {
+                // Pages stay where they are in the book: the lower page on the left.
+                el('validationCompanionPage').style.order = mate.pageNo < item.pageNo ? '-1' : '1';
+                el('validationCompanionLabel').textContent = pageIsChecked(mate)
+                    ? `Page ${mate.pageNo} · checked ✓`
+                    : `Page ${mate.pageNo} · not checked yet`;
+            }
+            updateSubmitLabel(item, pages);
+        }
+
+        let verifyCompanionToken = 0;
+
+        /** Draw the partner page and its outlines beside the page being verified. */
+        async function loadVerifyCompanion(item) {
+            const token = ++verifyCompanionToken;
+            const mate = verifyPartnerOf(item);
+            if (!mate) {
+                companionLines.clear();
+                return;
+            }
+
+            try {
+                await validationCompanionMarker.loadFromUrl(mate.page.imageUrl);
+            } catch (error) {
+                console.warn(`Page ${mate.pageNo} could not be shown beside the page:`, error);
+                if (token === verifyCompanionToken) {
+                    el('validationCompanionPage').classList.add('d-none');
+                    validationMarker.fitShare = 1;
+                    validationMarker.resetZoom();
+                }
+                return;
+            }
+            if (token !== verifyCompanionToken) return;
+
+            const entries = verificationItems(mate.page.lines, mate.page);
+            companionLines.setLines(mate.page, entries);
+            // What was checked on that page shows green.
+            const checked = new Set((mate.staged?.fields ?? []).map((field) => field.line_id));
+            entries.forEach((entry, index) => companionLines.setVerified(index, checked.has(entry.lineId)));
+            // Same zoom for both, so the pair stays level.
+            window.requestAnimationFrame(() => validationMarker.resetZoom());
+        }
+
+        /** What was typed and ticked on a page, kept while another page is shown. */
+        function keepVerifyDraft(item) {
+            if (!item || !processedPage || processedPage !== item.page) return;
+            const draft = new Map();
+            cropped.forEach((entry, index) => {
+                const row = validationRow(index);
+                if (!row) return;
+                draft.set(entry.lineId, {
+                    value: requiredInput(row, '.verified').value,
+                    verified: requiredInput(row, '.validation-verified').checked,
+                });
+            });
+            item.verifyDraft = draft;
+        }
+
+        function restoreVerifyDraft(item) {
+            const draft = item?.verifyDraft;
+            if (!draft) return;
+            cropped.forEach((entry, index) => {
+                const previous = draft.get(entry.lineId);
+                const row = validationRow(index);
+                if (!previous || !row) return;
+                requiredInput(row, '.verified').value = previous.value;
+                requiredInput(row, '.validation-verified').checked = previous.verified;
+                row.classList.toggle('is-verified', previous.verified);
+            });
+            updateVerificationSummary();
+        }
+
+        let switchingVerifyPage = false;
+        el('validationCompanionPage').addEventListener('click', async () => {
+            const item = currentVerifyItem();
+            const mate = verifyPartnerOf(item);
+            if (!mate || switchingVerifyPage || recordSubmitting || undoingVerifyChange) return;
+            switchingVerifyPage = true;
+            try {
+                await openBatchVerifyItem(batchState.items.indexOf(mate));
+            } finally {
+                switchingVerifyPage = false;
+            }
+        });
+
         function prepareValidationComparison() {
             const source = el('pageCanvas');
             const target = el('validationPageCanvas');
@@ -5831,6 +6066,8 @@
                 throw new Error('The original document could not be prepared for comparison. Please scan again.');
             }
 
+            const spreadItem = currentVerifyItem();
+            setVerifySpreadLayout(spreadItem);
             activeValidationIndex = null;
             stopAddingMissedField();
         stopGroupingFields();
@@ -5853,6 +6090,7 @@
                     ?? validationGroups[0];
                 if (initialGroup) activateValidationGroup(initialGroup.id, 'initial');
             });
+            loadVerifyCompanion(spreadItem);
         }
 
         function handleValidationMarkerSelection(indexes, context = {}) {
@@ -5899,9 +6137,15 @@
             if (!bounds) return;
 
             const viewport = el('validationDocViewport');
+            // The page may not start at the viewport's corner: the other page of a
+            // spread can sit to its left, and a label above it.
+            const stage = el('validationDocStage').getBoundingClientRect();
+            const view = viewport.getBoundingClientRect();
+            const offsetLeft = stage.left - view.left - viewport.clientLeft + viewport.scrollLeft;
+            const offsetTop = stage.top - view.top - viewport.clientTop + viewport.scrollTop;
             viewport.scrollTo({
-                left: Math.max(0, (bounds.left + bounds.right) / 2 - viewport.clientWidth / 2),
-                top: Math.max(0, (bounds.top + bounds.bottom) / 2 - viewport.clientHeight / 2),
+                left: Math.max(0, offsetLeft + (bounds.left + bounds.right) / 2 - viewport.clientWidth / 2),
+                top: Math.max(0, offsetTop + (bounds.top + bounds.bottom) / 2 - viewport.clientHeight / 2),
                 behavior: 'smooth',
             });
         }
@@ -8342,6 +8586,7 @@
                         item.status = 'imported';
                         item.recordUrl = payload.redirect;
                         item.staged = null;
+                        item.verifyDraft = null;
                     });
                     renderBatchQueueBanner();
 
