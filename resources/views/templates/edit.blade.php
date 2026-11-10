@@ -219,9 +219,42 @@
                         @enderror
 
                         <div class="doc-viewport" id="docViewport">
-                            <div class="template-builder-canvas-note" id="sampleHint" role="status">
+                            {{-- Fields placed with no sample open: the small reminder. --}}
+                            <div class="template-builder-canvas-note d-none" id="sampleHint" role="status">
                                 <i class="icon-base bx bx-cloud-upload" aria-hidden="true"></i>
                                 <span><strong>Blank preview</strong> &mdash; choose a sample PDF or image to align markers precisely.</span>
+                            </div>
+                            {{-- Nothing on the page yet: a sample can be dropped anywhere in this area, or chosen
+                                 here. The picture shows what happens: a page lands, then its fields are marked. --}}
+                            <div class="template-dropzone {{ $template?->sample_path ? 'd-none' : '' }}" id="sampleDropzone">
+                                <div class="template-dropzone__panel">
+                                    <div class="template-dropzone__art" aria-hidden="true">
+                                        <span class="template-dropzone__tray"></span>
+                                        <span class="template-dropzone__sheet">
+                                            <span class="template-dropzone__line"></span>
+                                            <span class="template-dropzone__line"></span>
+                                            <span class="template-dropzone__line"></span>
+                                            <span class="template-dropzone__line"></span>
+                                            <span class="template-dropzone__marker template-dropzone__marker--1"></span>
+                                            <span class="template-dropzone__marker template-dropzone__marker--2"></span>
+                                            <span class="template-dropzone__marker template-dropzone__marker--3"></span>
+                                        </span>
+                                    </div>
+                                    <p class="template-dropzone__title">
+                                        <span class="template-dropzone__when-idle">Drop a sample document here</span>
+                                        <span class="template-dropzone__when-dragging">Release to open it</span>
+                                    </p>
+                                    <p class="template-dropzone__text">
+                                        A scan or PDF of the form. You mark where each field is on top of it.
+                                    </p>
+                                    <label for="sampleScan" class="btn btn-primary template-dropzone__button">
+                                        <i class="icon-base bx bx-cloud-upload icon-sm me-1" aria-hidden="true"></i>Choose sample
+                                    </label>
+                                    <span class="document-dropzone__formats" aria-label="Accepted formats">
+                                        <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>BMP</span>
+                                    </span>
+                                    <p class="template-dropzone__note">Up to 20 MB. No sample? Add a field on the right to start on a blank page.</p>
+                                </div>
                             </div>
                             {{-- Two pages side by side when the layout has a page 2: the page being edited is
                                  live, the other shows its own layout, and a click on it edits that page. --}}

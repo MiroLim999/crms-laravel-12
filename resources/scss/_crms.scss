@@ -9644,6 +9644,228 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
+// Nothing on the page and no sample yet: the drop area stands in for the blank
+// page. The page keeps its place underneath (only hidden), so the markers'
+// fit-to-width sums do not change when it comes back.
+.template-builder-canvas-card .doc-viewport.is-empty {
+  overflow: hidden;
+  // The scrollbar's strip beside the drop area, in the drop area's colour.
+  background: var(--bs-paper-bg);
+
+  .doc-spread {
+    visibility: hidden;
+  }
+}
+
+// A drop anywhere in the page area opens the file, so the dashed frame fills
+// it. Clicks pass through to nothing; only the button takes them.
+.template-dropzone {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  display: flex;
+  padding: 1rem;
+  background: var(--bs-paper-bg);
+  pointer-events: none;
+}
+
+.template-dropzone__panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  text-align: center;
+  background: radial-gradient(circle at 50% 0%, rgba(105, 108, 255, .1), transparent 50%);
+  border: 2px dashed rgba(105, 108, 255, .28);
+  border-radius: .75rem;
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+
+// The picture: a page drops into its place, then three fields are marked on it.
+.template-dropzone__art {
+  position: relative;
+  inline-size: 7rem;
+  block-size: 7.75rem;
+  margin-block-end: 1.1rem;
+}
+
+.template-dropzone__tray {
+  position: absolute;
+  inset: 1rem .55rem 0;
+  background: rgba(105, 108, 255, .07);
+  border: 2px dashed rgba(105, 108, 255, .38);
+  border-radius: .55rem;
+  animation: template-dropzone-tray 4.2s ease-in-out infinite;
+}
+
+.template-dropzone__sheet {
+  position: absolute;
+  inset-block-start: 1.55rem;
+  inset-inline-start: 50%;
+  inline-size: 4.5rem;
+  block-size: 5.65rem;
+  margin-inline-start: -2.25rem;
+  padding: .75rem .55rem 0;
+  // A sheet of paper is white in the dark theme too.
+  background: #fdfdfe;
+  border: 1px solid rgba(67, 89, 113, .22);
+  border-radius: .3rem;
+  box-shadow: 0 .35rem .9rem rgba(67, 89, 113, .2);
+  animation: template-dropzone-sheet 4.2s cubic-bezier(.3, .7, .3, 1) infinite;
+}
+
+.template-dropzone__line {
+  display: block;
+  block-size: .3rem;
+  margin-block-end: .62rem;
+  background: rgba(67, 89, 113, .24);
+  border-radius: 1rem;
+
+  &:nth-child(1) { inline-size: 62%; }
+  &:nth-child(2) { inline-size: 88%; }
+  &:nth-child(3) { inline-size: 46%; }
+  &:nth-child(4) { inline-size: 74%; }
+}
+
+.template-dropzone__marker {
+  position: absolute;
+  inset-inline-start: .3rem;
+  block-size: .74rem;
+  background: rgba(105, 108, 255, .16);
+  border: 1.5px solid var(--bs-primary);
+  border-radius: 2px;
+  opacity: 0;
+
+  &--1 { inset-block-start: .52rem; inline-size: 2.75rem; animation: template-dropzone-marker-1 4.2s ease-out infinite; }
+  &--2 { inset-block-start: 1.44rem; inline-size: 3.75rem; animation: template-dropzone-marker-2 4.2s ease-out infinite; }
+  &--3 { inset-block-start: 3.28rem; inline-size: 3.2rem; animation: template-dropzone-marker-3 4.2s ease-out infinite; }
+}
+
+@keyframes template-dropzone-sheet {
+  0% { opacity: 0; transform: translateY(-2.75rem) rotate(-8deg); }
+  14% { opacity: 1; }
+  30% { transform: translateY(.18rem) rotate(.5deg); }
+  37%, 88% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: scale(.96); }
+}
+
+@keyframes template-dropzone-tray {
+  0%, 27%, 46%, 100% { border-color: rgba(105, 108, 255, .38); transform: none; }
+  34% { border-color: var(--bs-primary); transform: scale(1.05); }
+}
+
+// One after another, once the page has landed.
+@each $marker, $start in (1: 44%, 2: 54%, 3: 64%) {
+  @keyframes template-dropzone-marker-#{$marker} {
+    0%, #{$start} { opacity: 0; transform: scale(.7); }
+    #{$start + 6%}, 88% { opacity: 1; transform: none; }
+    100% { opacity: 0; }
+  }
+}
+
+@keyframes template-dropzone-hover {
+  from { transform: translateY(-1.5rem) rotate(-5deg); }
+  to { transform: translateY(-1rem) rotate(-3deg); }
+}
+
+.template-dropzone__title {
+  margin: 0;
+  color: var(--bs-heading-color);
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.template-dropzone__when-dragging {
+  display: none;
+}
+
+.template-dropzone__text {
+  max-inline-size: 26rem;
+  margin: .35rem 0 0;
+  color: var(--bs-secondary-color);
+  font-size: .875rem;
+}
+
+.template-dropzone__button {
+  margin-block-start: 1.1rem;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.template-dropzone__note {
+  margin: .85rem 0 0;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+}
+
+// A file is held over the page area: the page waits above its place.
+.doc-viewport.is-dragging {
+  .template-dropzone__panel {
+    background-color: rgba(105, 108, 255, .05);
+    border-color: var(--bs-primary);
+    box-shadow: inset 0 0 0 3px rgba(105, 108, 255, .08);
+  }
+
+  .template-dropzone__sheet {
+    opacity: 1;
+    animation: template-dropzone-hover .7s ease-in-out infinite alternate;
+  }
+
+  .template-dropzone__tray {
+    border-color: var(--bs-primary);
+    animation: none;
+  }
+
+  .template-dropzone__marker {
+    animation: none;
+  }
+
+  .template-dropzone__when-idle {
+    display: none;
+  }
+
+  .template-dropzone__when-dragging {
+    display: inline;
+    color: var(--bs-primary);
+  }
+}
+
+// No movement wanted: the finished picture, a page with its fields marked.
+@media (prefers-reduced-motion: reduce) {
+  .template-dropzone__sheet,
+  .template-dropzone__tray,
+  .template-dropzone__marker,
+  .doc-viewport.is-dragging .template-dropzone__sheet {
+    animation: none;
+  }
+
+  .template-dropzone__marker {
+    opacity: 1;
+  }
+}
+
+// Short or narrow page areas: a smaller picture and no last line.
+@media (max-height: 640px), (max-width: 575.98px) {
+  .template-dropzone__panel {
+    padding: 1rem;
+  }
+
+  .template-dropzone__art {
+    margin-block: -.75rem -.1rem;
+    transform: scale(.72);
+  }
+
+  .template-dropzone__title {
+    font-size: 1.15rem;
+  }
+
+  .template-dropzone__note {
+    display: none;
+  }
+}
+
 .template-builder-side-panel {
   position: sticky;
   top: .75rem;
@@ -9710,21 +9932,6 @@ $dashboard-reveal-step: 40ms;
 .template-builder-field-list {
   max-block-size: min(40vh, 22rem);
   overscroll-behavior: contain;
-
-  // A new layout starts with no fields: say what to do next.
-  &:empty {
-    padding: .9rem 1rem;
-    color: var(--bs-secondary-color);
-    background: rgba(var(--crms-ink-rgb), .03);
-    border: 1px dashed var(--bs-border-color);
-    border-radius: var(--bs-border-radius);
-    font-size: .8125rem;
-    text-align: center;
-
-    &::before {
-      content: "No fields yet. Choose a sample, then use Detect from sample for a ruled table, or type a name below and add a field.";
-    }
-  }
 }
 
 // Person rows card body: the buttons, the groups, then Back to automatic.

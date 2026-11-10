@@ -188,6 +188,8 @@ let clipboard = [];
 let pasteSequence = 0;
 let invalidFieldIndexes = new Set();
 let sampleLoaded = false;
+// The layout's stored sample is still being fetched: no drop area meanwhile.
+let sampleExpected = Boolean(config.sample?.url);
 // Keep the exact file represented by the preview. Some browsers can display a
 // dropped/selected File even when their file input is later reconstructed or
 // loses its FileList, which used to produce a saved layout with no sample.
@@ -300,6 +302,22 @@ function handleMarkerChange(boxes) {
     renderLedgerGrid();
     updateLedgerChecks(boxes);
     updateResetUI();
+    updateSampleHint(boxes);
+}
+
+/**
+ * What the page area says while no sample is open. With nothing on the page
+ * it is the drop area (in place of the blank page); once a field or a row
+ * line is there, the blank page shows with a small reminder in its corner.
+ */
+function updateSampleHint(boxes = marker.toJSON()) {
+    const waiting = !sampleLoaded && !sampleExpected;
+    const empty = waiting && boxes.length === 0 && ruledYs.length === 0;
+    element('sampleDropzone').classList.toggle('d-none', !empty);
+    element('sampleHint').classList.toggle('d-none', !waiting || empty);
+    viewport.classList.toggle('is-empty', empty);
+    // The drop area has its own Choose sample button: not twice.
+    fileLabel.classList.toggle('d-none', empty);
 }
 
 function personGroups(boxes) {
@@ -503,7 +521,8 @@ function renderFieldList(boxes) {
     const list = element('fieldList');
     let items = [...list.querySelectorAll('.template-builder-field-item')];
 
-    if (items.length !== boxes.length) {
+    // Also on a new layout, which starts with no fields: the list says so.
+    if (items.length !== boxes.length || list.childElementCount === 0) {
         list.replaceChildren();
 
         if (boxes.length === 0) {
@@ -1063,9 +1082,16 @@ async function openSample(file, { pendingUpload = true } = {}) {
         element('sampleFileName').textContent = measurement?.pageCount > 1
             ? `${file.name} (${measurement.pageCount} pages)`
             : file.name;
-        element('sampleHint').classList.add('d-none');
+        updateSampleHint();
         window.requestAnimationFrame(() => marker.resetZoom());
-        await updateSpread();
+        // A PDF of exactly two pages, picked or dropped on a layout of one page: both pages
+        // side by side (a register's left and right pages). The switch can be turned off.
+        if (pendingUpload && samplePageCount === 2 && !twoPage && !twoPageToggle.checked) {
+            twoPageToggle.checked = true;
+            await applyTwoPageToggle();
+        } else {
+            await updateSpread();
+        }
     } catch (error) {
         fileInput.value = '';
         showBuilderError(error instanceof Error ? error.message : 'That sample could not be opened.');
@@ -1095,7 +1121,7 @@ async function removePickedSample() {
     sampleLoaded = false;
     forgetSampleGrid();
     element('sampleFileName').textContent = 'Choose sample';
-    element('sampleHint').classList.remove('d-none');
+    updateSampleHint();
     window.requestAnimationFrame(() => marker.resetZoom());
 }
 
@@ -1144,6 +1170,9 @@ async function openStoredSample() {
         showBuilderError(error instanceof Error
             ? error.message
             : 'The stored sample document could not be loaded.');
+    } finally {
+        sampleExpected = false;
+        updateSampleHint();
     }
 }
 
@@ -1219,6 +1248,8 @@ fileLabel.addEventListener('keydown', (event) => {
 ['dragleave', 'drop'].forEach((eventName) => {
     viewport.addEventListener(eventName, (event) => {
         event.preventDefault();
+        // Still over the page area, only over another part of it.
+        if (eventName === 'dragleave' && event.relatedTarget instanceof Node && viewport.contains(event.relatedTarget)) return;
         viewport.classList.remove('is-dragging');
     });
 });
@@ -2244,7 +2275,9 @@ async function switchPage(page) {
     await updateSpread();
 }
 
-twoPageToggle.addEventListener('change', async () => {
+twoPageToggle.addEventListener('change', applyTwoPageToggle);
+
+async function applyTwoPageToggle() {
     if (twoPageToggle.checked) {
         twoPage = true;
         // A page 2 with nothing on it starts from page 1's markers: the pages are often alike.
@@ -2260,7 +2293,7 @@ twoPageToggle.addEventListener('change', async () => {
         await updateSpread();
     }
     updateResetUI();
-});
+}
 element('docCompanionPage').addEventListener('click', () => switchPage(3 - activePage));
 
 marker.setBoxes(cloneBoxes(initialBoxes));
