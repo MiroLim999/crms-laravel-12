@@ -72,6 +72,7 @@ class DocumentTemplateController extends Controller
             'fields' => $type->defaultFields(),
             'columns' => [],
             'ruledYs' => [],
+            'pageTwoChoices' => $this->pageTwoChoices($type->getKey(), null),
         ]);
     }
 
@@ -168,9 +169,11 @@ class DocumentTemplateController extends Controller
     {
         $validated = $this->validatePayload($request);
         $documentType = DocumentTypeDefinition::findOrFail($validated['document_type_id']);
+        $pageTwo = $this->validatedPageTwo($request, $validated, null);
 
-        $template = DB::transaction(function () use ($validated, $request, $documentType) {
+        $template = DB::transaction(function () use ($validated, $request, $documentType, $pageTwo) {
             $template = $this->createLayout($request, $validated, $documentType);
+            $this->savePageTwo($request, $template, $pageTwo, $documentType);
 
             if ($validated['publish'] ?? false) {
                 $this->publishTemplate($template);
@@ -217,7 +220,185 @@ class DocumentTemplateController extends Controller
             'parent' => $template->parent()->first(['id', 'name']),
             'columns' => array_values($template->columns ?? []),
             'ruledYs' => array_values($template->ruled_ys ?? []),
+            'pageTwoChoices' => $this->pageTwoChoices($template->document_type_id, $template),
+            'pageTwo' => $this->pageTwoForBuilder($template),
         ]);
+    }
+
+    /**
+     * The linked page 2 layout in the builder's own shape, to draw beside page 1.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function pageTwoForBuilder(DocumentTemplate $template): ?array
+    {
+        $linked = $template->pageTwoTemplate()->with('fields')->first();
+        if ($linked === null) {
+            return null;
+        }
+
+        return [
+            'name' => $linked->name,
+            'grouping_mode' => $linked->grouping_mode ?: 'auto',
+            'fields' => $linked->fields->map(fn (DocumentTemplateField $f) => [
+                'name' => $f->name,
+                'x' => $f->x,
+                'y' => $f->y,
+                'width' => $f->width,
+                'height' => $f->height,
+                'angle' => $f->angle,
+                'person_group' => $f->person_group,
+                'person_field_order' => $f->person_field_order,
+                ...$f->settings(),
+            ])->all(),
+            'columns' => array_values($linked->columns ?? []),
+            'ruled_ys' => array_values($linked->ruled_ys ?? []),
+        ];
+    }
+
+    /**
+     * The page 2 layout the builder sent with a two-page layout (`page_two_json`:
+     * fields, columns, ruled_ys and grouping_mode), checked like any layout, or
+     * null when the layout has no page 2 of its own.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>|null
+     */
+    private function validatedPageTwo(Request $request, array $validated, ?DocumentTemplate $main): ?array
+    {
+        if (! $request->filled('page_two_json')) {
+            return null;
+        }
+
+        try {
+            $layout = json_decode((string) $request->input('page_two_json'), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw ValidationException::withMessages(['page_two_json' => 'Page 2 of this layout could not be read. Reload the builder and try again.']);
+        }
+
+        if (! is_array($layout)) {
+            throw ValidationException::withMessages(['page_two_json' => 'Page 2 of this layout must be a valid layout.']);
+        }
+
+        // A layout with nothing on it is no page 2: any page 2 saved before is dropped.
+        if (($layout['fields'] ?? []) === [] && ($layout['columns'] ?? []) === []) {
+            return ['empty' => true];
+        }
+
+        $linked = $main?->pageTwoTemplate;
+        $sub = Request::create('/', 'POST', [
+            'name' => Str::limit(($validated['name'] ?? 'Layout').' - page 2', 120, ''),
+            'document_type_id' => $validated['document_type_id'],
+            'doc_type' => $validated['doc_type'],
+            'page_ratio' => $validated['page_ratio'],
+            'grouping_mode' => ($layout['grouping_mode'] ?? 'auto') === 'custom' ? 'custom' : 'auto',
+            'fields_json' => json_encode($layout['fields'] ?? []),
+            'columns_json' => json_encode($layout['columns'] ?? []),
+            'ruled_ys_json' => json_encode($layout['ruled_ys'] ?? []),
+        ]);
+        $sub->setUserResolver($request->getUserResolver());
+
+        try {
+            $checked = $this->validatePayload($sub, $linked);
+        } catch (ValidationException $exception) {
+            throw ValidationException::withMessages([
+                'page_two_json' => 'Page 2: '.collect($exception->errors())->flatten()->first(),
+            ]);
+        }
+
+        return $checked;
+    }
+
+    /**
+     * Whether page 2's markers differ from the page 2 layout this layout links to.
+     *
+     * @param  array<string, mixed>|null  $pageTwo
+     */
+    private function pageTwoChanged(DocumentTemplate $template, ?array $pageTwo): bool
+    {
+        if ($pageTwo === null) {
+            return false;
+        }
+
+        $linked = $template->pageTwoTemplate?->loadMissing('fields');
+        if ($linked === null) {
+            return ! ($pageTwo['empty'] ?? false);
+        }
+
+        return ($pageTwo['empty'] ?? false) || $this->layoutChanged($linked, $pageTwo);
+    }
+
+    /**
+     * Save page 2's layout beside `$main` and link it: the linked layout is
+     * changed in place, or saved as a new version when records or pages in
+     * progress were read with it, or created when there is none.
+     *
+     * @param  array<string, mixed>|null  $pageTwo
+     */
+    private function savePageTwo(
+        Request $request,
+        DocumentTemplate $main,
+        ?array $pageTwo,
+        DocumentTypeDefinition $documentType,
+        ?DocumentTemplate $linkedBefore = null,
+    ): void {
+        if ($pageTwo === null) {
+            return;
+        }
+
+        if ($pageTwo['empty'] ?? false) {
+            $main->forceFill(['page_two_template_id' => null])->save();
+
+            return;
+        }
+
+        $linked = $linkedBefore ?? $main->pageTwoTemplate()->first();
+        if ($linked === null) {
+            $created = $this->createLayout($request, $pageTwo, $documentType);
+            $main->forceFill(['page_two_template_id' => $created->getKey()])->save();
+
+            return;
+        }
+
+        $linked->loadMissing('fields');
+        if (! $this->layoutChanged($linked, $pageTwo)) {
+            $main->forceFill(['page_two_template_id' => $linked->getKey()])->save();
+
+            return;
+        }
+
+        if ($linked->isInUse()) {
+            $version = $this->createLayout($request, $pageTwo, $documentType, $linked);
+            $main->forceFill(['page_two_template_id' => $version->getKey()])->save();
+
+            return;
+        }
+
+        $linked->fill([
+            'columns' => $pageTwo['columns'],
+            'ruled_ys' => $pageTwo['ruled_ys'],
+            'grouping_mode' => $pageTwo['grouping_mode'],
+        ]);
+        $linked->forceFill(['revision' => $linked->revision + 1])->save();
+        $this->syncFields($linked, $pageTwo['fields']);
+        $main->forceFill(['page_two_template_id' => $linked->getKey()])->save();
+    }
+
+    /**
+     * The layouts that can be page 2 of a spread: others of the same certificate
+     * type that do not have a page 2 of their own.
+     *
+     * @return \Illuminate\Support\Collection<int, DocumentTemplate>
+     */
+    private function pageTwoChoices(int $documentTypeId, ?DocumentTemplate $template)
+    {
+        return DocumentTemplate::query()
+            ->where('document_type_id', $documentTypeId)
+            ->whereNull('page_two_template_id')
+            ->when($template, fn ($query) => $query->whereKeyNot($template->getKey()))
+            ->orderByDesc('is_active')
+            ->orderBy('name')
+            ->get(['id', 'name', 'revision', 'is_active']);
     }
 
     public function update(Request $request, DocumentTemplate $template): RedirectResponse
@@ -226,14 +407,15 @@ class DocumentTemplateController extends Controller
         $documentType = DocumentTypeDefinition::findOrFail($validated['document_type_id']);
         $opened = $request->filled('revision') ? $request->integer('revision') : null;
         $this->guardRevision($opened, $template->revision);
+        $pageTwo = $this->validatedPageTwo($request, $validated, $template);
 
         // Records keep the layout they were read with: new markers or field
         // settings on a layout in use become a new version.
-        if ($template->isInUse() && $this->layoutChanged($template, $validated)) {
-            return $this->saveAsNewVersion($request, $template, $validated, $documentType);
+        if ($template->isInUse() && ($this->layoutChanged($template, $validated) || $this->pageTwoChanged($template, $pageTwo))) {
+            return $this->saveAsNewVersion($request, $template, $validated, $documentType, $pageTwo);
         }
 
-        DB::transaction(function () use ($template, $validated, $documentType, $opened) {
+        DB::transaction(function () use ($request, $template, $validated, $documentType, $opened, $pageTwo) {
             // Checked again under a lock: two saves at the same moment cannot
             // both pass the check above.
             $this->guardRevision(
@@ -253,11 +435,13 @@ class DocumentTemplateController extends Controller
                 'grouping_mode' => $validated['grouping_mode'],
                 'columns' => $validated['columns'],
                 'ruled_ys' => $validated['ruled_ys'],
+                'page_two_template_id' => $validated['page_two_template_id'],
             ]);
             $template->forceFill(['revision' => $template->revision + 1]);
 
             $before = $template->fields()->count();
             $this->syncFields($template, $validated['fields']);
+            $this->savePageTwo($request, $template, $pageTwo, $documentType);
 
             $ledger = $validated['columns']
                 ? ', '.count($validated['columns']).' ledger columns, '.count($validated['ruled_ys']).' ruled lines'
@@ -509,6 +693,16 @@ class DocumentTemplateController extends Controller
             // The page's width : height as the builder drew it: its sample's shape.
             'page_ratio' => ['nullable', 'numeric', 'min:0.1', 'max:10'],
             'grouping_mode' => ['required', Rule::in(['auto', 'custom'])],
+            // The layout of page 2, when a spread's two pages are laid out
+            // differently: another layout of the same certificate type.
+            'page_two_template_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('document_templates', 'id')
+                    ->where('document_type_id', $request->integer('document_type_id'))
+                    ->whereNull('page_two_template_id')
+                    ->when($template, fn ($rule) => $rule->whereNot('id', $template->getKey())),
+            ],
             'publish' => ['sometimes', 'boolean'],
             // A ruled register may be described entirely by its ledger grid.
             'fields' => ['nullable', 'array', 'max:'.Limits::MAX_FIELDS],
@@ -548,7 +742,13 @@ class DocumentTemplateController extends Controller
             ...$this->settingsRules('columns.*'),
         ], [
             'sample_document.mimes' => 'The sample must be a PDF, PNG, JPG, WEBP or BMP file.',
+            'page_two_template_id.exists' => 'Choose another layout of this certificate type for page 2. A layout that has a page 2 of its own cannot be one.',
         ]);
+        $validated['page_two_template_id'] = $validated['page_two_template_id'] ?? null;
+        // Page 2 drawn in the builder (page_two_json) replaces any layout chosen from the list.
+        if ($request->filled('page_two_json')) {
+            $validated['page_two_template_id'] = $template?->page_two_template_id;
+        }
 
         // Without one (an older form or an API call), the shape it had stays.
         $validated['page_ratio'] = round((float) ($validated['page_ratio']
@@ -927,6 +1127,7 @@ class DocumentTemplateController extends Controller
             'grouping_mode' => $validated['grouping_mode'],
             'columns' => $validated['columns'],
             'ruled_ys' => $validated['ruled_ys'],
+            'page_two_template_id' => $validated['page_two_template_id'] ?? null,
             'is_active' => false,
             'created_by' => $request->user()->getKey(),
             'parent_id' => $parent?->getKey(),
@@ -972,11 +1173,13 @@ class DocumentTemplateController extends Controller
         DocumentTemplate $template,
         array $validated,
         DocumentTypeDefinition $documentType,
+        ?array $pageTwo = null,
     ): RedirectResponse {
         $publish = (bool) ($validated['publish'] ?? false);
 
-        $version = DB::transaction(function () use ($request, $template, $validated, $documentType, $publish) {
+        $version = DB::transaction(function () use ($request, $template, $validated, $documentType, $publish, $pageTwo) {
             $version = $this->createLayout($request, $validated, $documentType, $template);
+            $this->savePageTwo($request, $version, $pageTwo, $documentType, $template->pageTwoTemplate);
 
             if ($publish) {
                 $this->publishTemplate($version);
@@ -1044,7 +1247,7 @@ class DocumentTemplateController extends Controller
             $validated['columns'] ?? [],
             $validated['ruled_ys'] ?? [],
             $validated['fields'],
-        );
+        ) || $template->page_two_template_id !== ($validated['page_two_template_id'] ?? null);
     }
 
     /**

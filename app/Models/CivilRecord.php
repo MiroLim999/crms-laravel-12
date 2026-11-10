@@ -86,6 +86,12 @@ class CivilRecord extends Model
         return $this->hasMany(RecordField::class, 'record_id')->orderBy('sort_order')->orderBy('id');
     }
 
+    /** Pages 2 and on of a record saved from a multi-page spread (page 1 is the record's own). */
+    public function extraPages(): HasMany
+    {
+        return $this->hasMany(RecordPage::class, 'record_id')->orderBy('page_no');
+    }
+
     public function template(): BelongsTo
     {
         return $this->belongsTo(DocumentTemplate::class, 'document_template_id');

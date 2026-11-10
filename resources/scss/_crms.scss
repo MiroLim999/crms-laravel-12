@@ -2506,6 +2506,88 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// Align: a PDF of two or more pages opens as a spread, two pages side by side
+// in the one scroll container, so one set of scrollbars moves both.
+.doc-spread {
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  // Zoomed pages grow past the box: the viewport's one scrollbar covers both.
+  inline-size: max-content;
+  min-inline-size: 100%;
+}
+
+.doc-spread__page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.doc-spread__label {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 3;
+  padding: .2rem .6rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  font-weight: 600;
+  background: var(--bs-body-bg);
+  border-radius: .35rem;
+  margin-block-end: .25rem;
+}
+
+.doc-spread__page--main .doc-spread__label {
+  color: var(--bs-primary);
+}
+
+// The page beside the working one: read-only, and a click works on it instead.
+.doc-spread__page--companion {
+  cursor: pointer;
+  opacity: .92;
+
+  .doc-stage,
+  .field-overlay,
+  .field-box {
+    pointer-events: none;
+  }
+
+  &:hover {
+    opacity: 1;
+
+    .doc-spread__label {
+      color: var(--bs-primary);
+    }
+
+    .doc-spread__switch {
+      opacity: 1;
+    }
+  }
+}
+
+.doc-spread__switch {
+  position: absolute;
+  inset-block-end: 1rem;
+  inset-inline: 0;
+  inline-size: max-content;
+  margin-inline: auto;
+  padding: .45rem .9rem;
+  color: #fff;
+  font-size: .8rem;
+  font-weight: 600;
+  background: var(--bs-primary);
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 .25rem .75rem rgba(var(--crms-shadow-rgb), .25);
+  opacity: 0;
+  transition: opacity .15s ease;
+  pointer-events: none;
+
+  &:focus-visible {
+    opacity: 1;
+  }
+}
+
 .document-side-panel {
   position: sticky;
   top: 1.25rem;

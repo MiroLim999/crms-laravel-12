@@ -2,6 +2,8 @@
 {{-- The boxes are fractions of the page as it was outlined, which Detect may have
      straightened: draw them over that image when the record kept it, else the upload. --}}
 @php($scanImageUrl = $record->page_image_path ? route('records.page-image', $record) : route('records.scan', $record))
+{{-- A record saved from a spread has more than one page: tabs switch the image and its boxes. --}}
+@php($extraPages = $record->relationLoaded('extraPages') ? $record->extraPages : collect())
 
 <x-card class="record-scan-card" bodyClass="p-0" title="Original scan"
         subtitle="Select a value to locate its source.">
@@ -14,6 +16,18 @@
             </div>
         </x-slot:actions>
 
+        @if ($extraPages->isNotEmpty())
+            <div class="btn-group btn-group-sm m-2" role="group" aria-label="Pages of this record">
+                <button type="button" class="btn btn-outline-primary active" data-scan-page-tab="1"
+                        data-src="{{ $scanImageUrl }}" data-full="{{ route('records.scan', $record) }}">Page 1</button>
+                @foreach ($extraPages as $extraPage)
+                    <button type="button" class="btn btn-outline-primary" data-scan-page-tab="{{ $extraPage->page_no }}"
+                            data-src="{{ $extraPage->page_image_path ? route('records.extra-page-image', [$record, $extraPage->page_no]) : route('records.extra-page-scan', [$record, $extraPage->page_no]) }}"
+                            data-full="{{ route('records.extra-page-scan', [$record, $extraPage->page_no]) }}">Page {{ $extraPage->page_no }}</button>
+                @endforeach
+            </div>
+        @endif
+
         <div class="record-scan-viewport" data-scan-viewport>
             <div class="record-scan-stage" data-scan-stage>
                 <img src="{{ $scanImageUrl }}"
@@ -23,6 +37,8 @@
                         @if ($field->x !== null && $field->y !== null && $field->width !== null && $field->height !== null)
                             <button type="button" class="btn btn-outline-warning record-scan-marker"
                                     data-scan-marker="{{ $field->getKey() }}"
+                                    data-scan-page="{{ $field->page_no ?? 1 }}"
+                                    @if (($field->page_no ?? 1) !== 1) hidden @endif
                                     aria-label="{{ $field->name }}"
                                     style="--field-x: {{ (float) $field->x * 100 }}%; --field-y: {{ (float) $field->y * 100 }}%; --field-w: {{ (float) $field->width * 100 }}%; --field-h: {{ (float) $field->height * 100 }}%;"></button>
                         @endif
@@ -32,7 +48,7 @@
         </div>
         <div class="record-scan-card__footer">
             <span><i class="icon-base bx bx-target-lock" aria-hidden="true"></i> Selected field</span>
-            <a href="{{ route('records.scan', $record) }}" target="_blank" rel="noopener">Open full size</a>
+            <a href="{{ route('records.scan', $record) }}" target="_blank" rel="noopener" data-scan-full>Open full size</a>
         </div>
     @else
         <div class="p-3">

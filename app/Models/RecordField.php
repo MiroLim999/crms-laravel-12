@@ -11,7 +11,7 @@ class RecordField extends Model
     use HasFactory;
 
     protected $fillable = [
-        'record_id', 'name', 'ocr_text', 'ocr_confidence', 'verified_value',
+        'record_id', 'page_no', 'name', 'ocr_text', 'ocr_confidence', 'verified_value',
         'is_required', 'person_group', 'person_field_order', 'role',
         'crop_path', 'x', 'y', 'width', 'height', 'sort_order',
         'polygon', 'line_column', 'line_row', 'line_flags',
@@ -22,6 +22,7 @@ class RecordField extends Model
         return [
             'ocr_confidence' => 'float',
             'is_required' => 'boolean',
+            'page_no' => 'integer',
             'person_group' => 'integer',
             'person_field_order' => 'integer',
             'x' => 'float',

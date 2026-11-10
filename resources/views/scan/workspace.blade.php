@@ -164,11 +164,33 @@
                         </div>
                     </div>
 
+                    {{-- A PDF of two or more pages opens as a spread: the pair's other page sits
+                         beside the one being aligned. Click it to work on it instead. --}}
+                    {{-- Both pages sit in the one scroll container, so one set of scrollbars moves them together. --}}
                     <div class="doc-viewport" id="docViewport">
-                        <div class="doc-stage" id="docStage">
-                            <canvas id="pageCanvas"></canvas>
-                            <div class="field-overlay" id="fieldOverlay">
-                                <div class="field-selection-marquee" id="staffFieldSelectionMarquee" aria-hidden="true">
+                        <div class="doc-spread" id="docSpread">
+                            <div class="doc-spread__page doc-spread__page--main" id="docMainPage">
+                                <div class="doc-spread__label d-none" id="docMainLabel"></div>
+                                <div class="doc-stage" id="docStage">
+                                    <canvas id="pageCanvas"></canvas>
+                                    <div class="field-overlay" id="fieldOverlay">
+                                        <div class="field-selection-marquee" id="staffFieldSelectionMarquee" aria-hidden="true">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="doc-spread__page doc-spread__page--companion d-none" id="docCompanionPage"
+                                title="Work on this page instead">
+                                <div class="doc-spread__label" id="docCompanionLabel"></div>
+                                <div class="doc-stage" id="docCompanionStage">
+                                    <canvas id="companionCanvas"></canvas>
+                                    <div class="field-overlay" id="companionOverlay"></div>
+                                    <button type="button" class="doc-spread__switch" id="docCompanionSwitch"
+                                        aria-label="Work on this page instead">
+                                        <i class="icon-base bx bx-edit-alt me-1" aria-hidden="true"></i>
+                                        <span>Align this page</span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1087,6 +1109,8 @@
             boxes: @json($boxes),
             ruledYs: @json($ruledYs),
             templateId: @json($template->getKey()),
+            // A spread's page 2 laid out differently: its own template, boxes and row lines (or null).
+            pageTwo: @json($pageTwo ?? null),
             groupingMode: @json(
                 $template->grouping_mode instanceof \BackedEnum
                 ? $template->grouping_mode->value
@@ -1230,7 +1254,7 @@
             ...markerColumnMetadata({ kind, columnIndex }),
             ...markerAngleMetadata({ angle }),
         }));
-        const templateBoxes = config.boxes.map((box) => ({
+        const boxesOfLayout = (boxes) => boxes.map((box) => ({
             name: box.name,
             x: +box.x,
             y: +box.y,
@@ -1240,16 +1264,17 @@
             ...markerColumnMetadata(box),
             ...markerAngleMetadata(box),
         }));
-        const templateColumns = templateBoxes.filter((box) => box.kind === 'column');
+        let templateBoxes = boxesOfLayout(config.boxes);
+        let templateColumns = templateBoxes.filter((box) => box.kind === 'column');
 
         // What each template field and ledger column holds and how its value is
         // checked (Template Builder settings), by name: a line is read under its
         // field's or column's name.
         const nameKey = (name) => String(name ?? '').trim().toLowerCase();
-        const templateSettings = new Map(config.boxes.map((box) => [nameKey(box.name), box]));
+        let templateSettings = new Map(config.boxes.map((box) => [nameKey(box.name), box]));
         const settingsFor = (index) => templateSettings.get(nameKey(cropped[index]?.label)) ?? null;
         // The template's own rectangle fields: never turned into columns.
-        const templateFieldNames = new Set(config.boxes.filter((box) => box.kind !== 'column').map((box) => nameKey(box.name)));
+        let templateFieldNames = new Set(config.boxes.filter((box) => box.kind !== 'column').map((box) => nameKey(box.name)));
 
         // ------------------------------------------------------------ ledger rows
         // The ledger's row lines on this page (page fractions, top to bottom). They
@@ -1257,9 +1282,34 @@
         // or stretched; Snap to table takes them from the page; Staff can move,
         // add or remove them. Nothing here changes the template.
         // As the Rows and Columns card is shown: the template has columns and row lines.
-        const isLedger = config.ruledYs.length >= 2;
-        const templateRows = config.ruledYs.map(Number);
+        let isLedger = config.ruledYs.length >= 2;
+        let templateRows = config.ruledYs.map(Number);
         let gridRows = [...templateRows];
+
+        // A spread whose pages are laid out differently: page 1 uses the layout
+        // the workspace opened with, page 2 (and every even page) its own.
+        const mainLayout = {
+            templateId: config.templateId,
+            boxes: config.boxes,
+            ruledYs: config.ruledYs,
+            groupingMode: config.groupingMode,
+        };
+        const layoutFor = (pageNumber) => (pageNumber % 2 === 0 && config.pageTwo ? config.pageTwo : mainLayout);
+
+        /** Align and read with this layout from here on: its markers, row lines, field settings and id. */
+        function useLayoutForPage(pageNumber) {
+            const layout = layoutFor(pageNumber);
+            config.templateId = layout.templateId;
+            config.boxes = layout.boxes;
+            config.ruledYs = layout.ruledYs;
+            config.groupingMode = layout.groupingMode;
+            templateBoxes = boxesOfLayout(config.boxes);
+            templateColumns = templateBoxes.filter((box) => box.kind === 'column');
+            templateSettings = new Map(config.boxes.map((box) => [nameKey(box.name), box]));
+            templateFieldNames = new Set(config.boxes.filter((box) => box.kind !== 'column').map((box) => nameKey(box.name)));
+            isLedger = config.ruledYs.length >= 2;
+            templateRows = config.ruledYs.map(Number);
+        }
         // How many degrees each row line is turned beyond the table's own tilt
         // (one per line, in step with gridRows): paper is curved, and no two
         // printed rules run quite alike. Staff set one by selecting its line and
@@ -3003,6 +3053,7 @@
                 }
                 scanPageCount = pageCount;
                 scanPageNumber = firstUnsavedPage(pageCount, savedPages);
+                useLayoutForPage(scanPageNumber);
                 await marker.load(file, { page: scanPageNumber });
                 updateScanNotices();
                 showScanContext();
@@ -3012,6 +3063,7 @@
                 rowsSource = null;
                 setGrid(templateBoxes, templateRows, { remember: true });
                 fetchSnapLines();
+                resetSpread();
 
                 // The marking section was hidden while the file loaded, so fit only
                 // after it becomes measurable in the layout.
@@ -3025,6 +3077,168 @@
                 dropzone.removeAttribute('aria-busy');
             }
         }
+
+        // ---------------------------------------------------------------- two pages at a time
+        // A PDF of two or more pages opens as a spread, like an open book: pages
+        // 1-2, then 3-4. The page being aligned has the live markers; the other
+        // page of its pair sits beside it, read-only, showing the alignment it was
+        // given. Click it (or "Align this page") to work on it instead. Each page
+        // keeps its own markers and row lines, and is still saved as its own record.
+        const companionMarker = new FieldMarker({
+            canvas: el('companionCanvas'),
+            overlay: el('companionOverlay'),
+            // It shares the page's scroll container: fitted to half its width,
+            // zoomed with the page, and scrolled by the same scrollbars.
+            fitViewport: el('docViewport'),
+            fitShare: 0.5,
+            readOnly: true,
+        });
+        marker.linked = [companionMarker];
+        let pageAlign = new Map(); // page number -> { boxes, rows, tilts }
+        let companionPage = null;
+        let companionFile = null;
+        let companionLoadToken = 0;
+
+        /** The other page of this page's pair, or null: a lone last page has no partner. */
+        function companionPageFor(page) {
+            if (!multiPage()) return null;
+            const first = page % 2 === 1 ? page : page - 1;
+            const other = page === first ? first + 1 : first;
+            return other >= 1 && other <= scanPageCount ? other : null;
+        }
+
+        /** The queued page paired with the one being aligned (pages 1-2, 3-4), or null. */
+        function batchPartner() {
+            if (!batchState.active || batchState.phase !== 'queuing') return null;
+            const current = batchState.items[batchState.currentIndex];
+            if (!current?.group || !(current.pageTotal > 1)) return null;
+            const first = current.pageNo % 2 === 1 ? current.pageNo : current.pageNo - 1;
+            const wanted = current.pageNo === first ? first + 1 : first;
+            const index = batchState.items.findIndex((it) => it.group === current.group && it.pageNo === wanted);
+            return index === -1 ? null : { index, item: batchState.items[index] };
+        }
+
+        /** Keep the markers and row lines this page has now, to restore when it is turned to again. */
+        function rememberPageAlignment() {
+            if (!scanFile || !multiPage()) return;
+            pageAlign.set(scanPageNumber, {
+                boxes: cloneBoxes(marker.toJSON()),
+                rows: [...gridRows],
+                tilts: [...rowTilts],
+            });
+        }
+
+        function resetSpread() {
+            pageAlign = new Map();
+            companionPage = null;
+            companionFile = null;
+            companionLoadToken += 1;
+            updateSpread();
+        }
+
+        /** Show the page beside the one being aligned, with the alignment it has so far. */
+        async function updateSpread() {
+            // In a batch the partner is the neighbouring page of the same document.
+            const mate = batchPartner();
+            const other = mate ? mate.item.pageNo : companionPageFor(scanPageNumber);
+            const pane = el('docCompanionPage');
+            const mainNumber = mate ? batchState.items[batchState.currentIndex].pageNo : scanPageNumber;
+
+            const wasSpread = el('docViewport').classList.contains('is-spread');
+            el('docViewport').classList.toggle('is-spread', other !== null);
+            pane.classList.toggle('d-none', other === null);
+            // One page fills the width; two share it.
+            marker.fitShare = other === null ? 1 : 0.5;
+            if (wasSpread !== (other !== null)) marker.resetZoom();
+            el('docMainLabel').classList.toggle('d-none', !multiPage() && !mate);
+            el('docMainLabel').textContent = `Page ${mainNumber} · aligning`;
+
+            if (other === null) {
+                companionPage = null;
+                companionFile = null;
+                companionLoadToken += 1;
+                return;
+            }
+
+            // Pages stay where they are in the book: the lower page on the left.
+            const companionLeft = other < mainNumber;
+            pane.style.order = companionLeft ? '-1' : '1';
+            const saved = mate ? mate.item.status === 'saved' : savedPages.has(other);
+            el('docCompanionLabel').textContent = `Page ${other}${saved ? ' · saved' : ''} — click to align`;
+            el('docCompanionSwitch').classList.toggle('d-none', pageTurning || scanInProgress);
+
+            const token = ++companionLoadToken;
+            const companionSource = mate ? mate.item.file : scanFile;
+            if (companionPage !== other || companionFile !== companionSource) {
+                companionPage = other;
+                companionFile = companionSource;
+                try {
+                    await companionMarker.load(companionSource, { page: mate ? 1 : other });
+                } catch (error) {
+                    console.warn(`Page ${other} could not be shown beside the page:`, error);
+                    companionPage = null;
+                    return;
+                }
+                if (token !== companionLoadToken) return;
+            }
+
+            companionMarker.setBoxes((mate ? mate.item.boxes : pageAlign.get(other)?.boxes) ?? []);
+            // Same zoom as the page being aligned, so the pair stays level.
+            window.requestAnimationFrame(() => marker.resetZoom());
+        }
+
+        /**
+         * Another page of the PDF, in Align. This page's markers and row lines are
+         * kept for when it is turned to again. A page not aligned yet starts from
+         * the markers on the page before, like a sheet laid over the book: only the
+         * page under them changes. What Detect found belongs to the page before,
+         * so it is let go.
+         */
+        async function turnToPage(pageNumber) {
+            const page = Math.min(scanPageCount, Math.max(1, Math.trunc(Number(pageNumber)) || 1));
+            if (!scanFile || page === scanPageNumber || pageTurning || scanInProgress) {
+                updatePageBar();
+                return;
+            }
+
+            pageTurning = true;
+            updatePageBar();
+            try {
+                rememberPageAlignment();
+                clearDetection();
+                await marker.load(scanFile, { page });
+                const layoutChanged = layoutFor(page) !== layoutFor(scanPageNumber);
+                scanPageNumber = page;
+                useLayoutForPage(page);
+                const kept = pageAlign.get(page);
+                if (kept) setGrid(kept.boxes, kept.rows, { tilts: kept.tilts });
+                // A page laid out differently starts from its own layout, not the page before's markers.
+                else if (layoutChanged) setGrid(templateBoxes, templateRows, { remember: true });
+                clearOcrError();
+                updateScanNotices();
+                showScanContext();
+                fetchSnapLines();
+                window.requestAnimationFrame(() => marker.resetZoom());
+                await updateSpread();
+            } catch (error) {
+                showOcrError(error.message || `Page ${page} could not be opened.`);
+            } finally {
+                pageTurning = false;
+                updatePageBar();
+                el('docCompanionSwitch').classList.toggle('d-none', companionPageFor(scanPageNumber) === null);
+            }
+        }
+
+        el('scanPagePrevBtn').addEventListener('click', () => turnToPage(scanPageNumber - 1));
+        el('scanPageNextBtn').addEventListener('click', () => turnToPage(scanPageNumber + 1));
+        el('docCompanionPage').addEventListener('click', () => {
+            const mate = batchPartner();
+            if (mate) {
+                if (!pageTurning && !scanInProgress) openBatchDocument(mate.index);
+            } else if (companionPage !== null) {
+                turnToPage(companionPage);
+            }
+        });
 
         // ---------------------------------------------------------------- Upload Mode & Batch Queue System
         let uploadMode = 'single';
@@ -3079,6 +3293,30 @@
             if (!(event.currentTarget instanceof HTMLInputElement)) return;
             startBatchQueue(event.currentTarget.files);
         });
+
+        /** The queue's documents: a PDF of many pages is one document, its pages kept side by side. */
+        function batchGroups() {
+            const groups = [];
+            const byKey = new Map();
+            batchState.items.forEach((item, index) => {
+                const key = item.group ?? `solo-${index}`;
+                let group = byKey.get(key);
+                if (!group) {
+                    group = { key, indices: [], items: [] };
+                    byKey.set(key, group);
+                    groups.push(group);
+                }
+                group.indices.push(index);
+                group.items.push(item);
+            });
+            return groups;
+        }
+
+        /** One status for a document: what still needs attention wins. */
+        function groupStatus(group) {
+            const order = ['failed', 'saving', 'scanning', 'verifying', 'checked', 'pending', 'saved', 'ready', 'rejected', 'imported'];
+            return order.find((status) => group.items.some((it) => it.status === status)) ?? 'pending';
+        }
 
         function renderBatchQueueBanner() {
             const banner = document.getElementById('batchQueueBanner');
@@ -3161,7 +3399,14 @@
 
             if (chipsContainer) {
                 chipsContainer.innerHTML = '';
-                batchState.items.forEach((item, index) => {
+                const groups = batchGroups();
+                groups.forEach((group, index) => {
+                    const first = group.items[0];
+                    const item = {
+                        ...first,
+                        status: groupStatus(group),
+                        name: group.items.length > 1 ? `${first.sourceName ?? first.name} (${group.items.length} pages)` : first.name,
+                    };
                     const badgeMap = {
                         pending: { cls: 'is-pending', icon: 'bx-time-five', text: 'Pending' },
                         saving: { cls: 'is-working', icon: 'bx-refresh', text: 'Saving' },
@@ -3169,19 +3414,20 @@
                         scanning: { cls: 'is-working', icon: 'bx-radar', text: 'Scanning' },
                         ready: { cls: 'is-ready', icon: 'bx-scan', text: 'Scanned' },
                         verifying: { cls: 'is-verifying', icon: 'bx-edit-alt', text: 'Validating' },
+                        checked: { cls: 'is-verifying', icon: 'bx-check', text: 'Page checked' },
                         imported: { cls: 'is-imported', icon: 'bx-check-shield', text: 'Imported' },
                         rejected: { cls: 'is-failed', icon: 'bx-x-circle', text: 'Rejected (Existing)' },
                         failed: { cls: 'is-failed', icon: 'bx-error-circle', text: 'Failed' },
                     };
                     const badgeInfo = badgeMap[item.status] || badgeMap.pending;
-                    const isCurrent = index === batchState.currentIndex;
-                    const canInteract = batchState.phase !== 'scanning' && !(batchState.phase === 'verifying' && ['imported', 'rejected'].includes(item.status));
+                    const isCurrent = group.indices.includes(batchState.currentIndex);
+                    const canInteract = batchState.phase !== 'scanning' && !(batchState.phase === 'verifying' && group.items.every((it) => ['imported', 'rejected'].includes(it.status)));
 
                     // The chip opens its document on click; the small × beside it removes it.
                     const chip = document.createElement('div');
                     chip.className = `batch-queue-chip ${badgeInfo.cls}${isCurrent ? ' is-current' : ''}${canInteract ? '' : ' is-locked'}`;
                     chip.setAttribute('role', 'listitem');
-                    chip.draggable = canInteract && batchState.items.length > 1;
+                    chip.draggable = canInteract && groups.length > 1;
 
                     const openBtn = document.createElement('button');
                     openBtn.type = 'button';
@@ -3208,7 +3454,7 @@
                         removeBtn.innerHTML = '<i class="icon-base bx bx-x" aria-hidden="true"></i>';
                         removeBtn.addEventListener('click', (event) => {
                             event.stopPropagation();
-                            openBatchDocumentModal(index);
+                            openBatchDocumentModal(group.indices[0]);
                         });
                         chip.appendChild(removeBtn);
                     }
@@ -3247,8 +3493,11 @@
                             activeItem.tilts = [...rowTilts];
                         }
 
-                        const [movedItem] = batchState.items.splice(draggedBatchIndex, 1);
-                        batchState.items.splice(index, 0, movedItem);
+                        // Whole documents move: a PDF's pages stay together.
+                        const reordered = batchGroups();
+                        const [movedGroup] = reordered.splice(draggedBatchIndex, 1);
+                        reordered.splice(index, 0, movedGroup);
+                        batchState.items = reordered.flatMap((g) => g.items);
                         batchState.currentIndex = Math.max(0, batchState.items.indexOf(activeItem));
                         draggedBatchIndex = null;
 
@@ -3268,7 +3517,11 @@
 
                     openBtn.addEventListener('click', () => {
                         if (batchChipDidDrag || !canInteract) return;
-                        openBatchDocument(index);
+                        if (isCurrent) return;
+                        // The page still to do, else the first.
+                        const done = batchState.phase === 'verifying' ? ['imported', 'rejected', 'checked'] : ['saved'];
+                        const target = group.items.findIndex((it) => !done.includes(it.status));
+                        openBatchDocument(group.indices[target === -1 ? 0 : target]);
                     });
 
                     chipsContainer.appendChild(chip);
@@ -3303,7 +3556,8 @@
                 const node = document.getElementById(id);
                 if (node) node.textContent = text;
             };
-            setText('batchDocumentName', item.name);
+            const pagesInDoc = item.group ? batchState.items.filter((it) => it.group === item.group).length : 1;
+            setText('batchDocumentName', pagesInDoc > 1 ? `${item.sourceName ?? item.name} (${pagesInDoc} pages)` : item.name);
             setText('batchDocumentMeta', `Priority ${index + 1} of ${total} · ${statusText}`);
 
             const notes = [];
@@ -3357,8 +3611,9 @@
             selectedBatchModalIndex = null;
             const targetItem = batchState.items[deleteIdx];
             if (!targetItem) return;
+            const removing = batchState.items.filter((it) => it === targetItem || (targetItem.group && it.group === targetItem.group));
 
-            const wasCurrent = deleteIdx === batchState.currentIndex;
+            const wasCurrent = removing.includes(batchState.items[batchState.currentIndex]);
             const currentItem = batchState.items[batchState.currentIndex];
             if (!wasCurrent && batchState.phase === 'queuing' && currentItem) {
                 currentItem.boxes = cloneBoxes(marker.toJSON());
@@ -3366,8 +3621,9 @@
                 currentItem.tilts = [...rowTilts];
             }
 
-            if (targetItem.pageId) {
-                fetch(config.pageCancelUrl.replace('__PAGE__', String(targetItem.pageId)), {
+            removing.forEach((gone) => {
+                if (!gone.pageId) return;
+                fetch(config.pageCancelUrl.replace('__PAGE__', String(gone.pageId)), {
                     method: 'POST',
                     headers: {
                         'X-CSRF-TOKEN': config.csrf,
@@ -3376,9 +3632,9 @@
                     },
                     credentials: 'same-origin',
                 }).catch(() => {});
-            }
+            });
 
-            batchState.items.splice(deleteIdx, 1);
+            batchState.items = batchState.items.filter((it) => !removing.includes(it));
 
             if (batchState.items.length === 0) {
                 batchState.active = false;
@@ -3456,16 +3712,63 @@
         }
 
         async function startBatchQueue(fileList) {
-            const validFiles = Array.from(fileList || []).filter((file) => {
+            // A PDF may be large (only one page of it is ever sent); an image may not.
+            const picked = Array.from(fileList || []).filter((file) => {
                 if (!SUPPORTED_SCAN_EXT.test(file.name)) {
                     return false;
                 }
-                if (file.size > 20 * 1024 * 1024) {
-                    alert(`${file.name} is larger than 20 MB and was skipped.`);
+                const limit = isPdfFile(file) ? MAX_PDF_BYTES : MAX_SCAN_BYTES;
+                if (file.size > limit) {
+                    alert(`${file.name} is larger than ${limit / 1024 / 1024} MB and was skipped.`);
                     return false;
                 }
                 return true;
             });
+
+            // Each page of a PDF is its own document in the queue, cut out with
+            // its original quality, so it is aligned, scanned and saved on its own.
+            const validFiles = [];
+            const pageInfo = new Map(); // file -> { group, pageNo, pageTotal, sourceName }
+            let groupSeq = 0;
+            const groupStamp = Date.now().toString(36);
+            if (picked.some(isPdfFile)) {
+                dropzone.classList.add('is-loading');
+                dropzone.setAttribute('aria-busy', 'true');
+            }
+            try {
+                for (const file of picked) {
+                    const group = `${groupStamp}-${groupSeq += 1}`;
+                    if (!isPdfFile(file)) {
+                        pageInfo.set(file, { group, pageNo: 1, pageTotal: 1, sourceName: file.name });
+                        validFiles.push(file);
+                        continue;
+                    }
+                    try {
+                        const pages = await marker.pdfPageCount(file);
+                        if (pages <= 1) {
+                            pageInfo.set(file, { group, pageNo: 1, pageTotal: 1, sourceName: file.name });
+                            validFiles.push(file);
+                            continue;
+                        }
+                        for (let page = 1; page <= pages; page += 1) {
+                            const pageFile = await pdfPageFile(file, page);
+                            pageInfo.set(pageFile, { group, pageNo: page, pageTotal: pages, sourceName: file.name });
+                            validFiles.push(pageFile);
+                        }
+                    } catch (error) {
+                        console.warn(`${file.name} could not be split into pages:`, error);
+                        if (file.size > MAX_SCAN_BYTES) {
+                            alert(`${file.name} could not be opened page by page, and is too large to queue whole. It was skipped.`);
+                        } else {
+                            pageInfo.set(file, { group, pageNo: 1, pageTotal: 1, sourceName: file.name });
+                            validFiles.push(file);
+                        }
+                    }
+                }
+            } finally {
+                dropzone.classList.remove('is-loading');
+                dropzone.removeAttribute('aria-busy');
+            }
 
             if (validFiles.length === 0) {
                 scanFileInput.value = '';
@@ -3481,9 +3784,14 @@
             }
 
             validFiles.forEach((file) => {
+                const info = pageInfo.get(file) ?? { group: `${groupStamp}-${groupSeq += 1}`, pageNo: 1, pageTotal: 1, sourceName: file.name };
                 batchState.items.push({
                     file,
                     name: file.name,
+                    group: info.group,
+                    pageNo: info.pageNo,
+                    pageTotal: info.pageTotal,
+                    sourceName: info.sourceName,
                     status: 'pending',
                     pageId: null,
                     page: null,
@@ -3515,9 +3823,11 @@
                 scanFingerprint = null;
                 savedPages = new Map();
                 clearDetection();
+                useLayoutForPage(item.pageNo ?? 1);
                 await marker.load(item.file, { page: 1 });
                 scanPageCount = 1;
                 scanPageNumber = 1;
+                resetSpread();
                 updateScanNotices();
                 el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${index + 1}/${batchState.items.length}) · ${item.name}`;
                 el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
@@ -3822,6 +4132,8 @@
             if (!item || !item.page) return;
 
             batchState.currentIndex = index;
+            useLayoutForPage(item.pageNo ?? 1);
+            item.staged = null;
             if (item.status !== 'imported') {
                 item.status = 'verifying';
             }
@@ -3881,7 +4193,10 @@
             banner?.classList.remove('d-none');
 
             if (batchState.active && batchState.items[batchState.currentIndex]) {
-                batchState.items[batchState.currentIndex].status = 'rejected';
+                const rejected = batchState.items[batchState.currentIndex];
+                batchState.items
+                    .filter((it) => it === rejected || (rejected.group && it.group === rejected.group))
+                    .forEach((it) => { it.status = 'rejected'; it.staged = null; });
                 renderBatchQueueBanner();
             }
 
@@ -6978,8 +7293,10 @@
                 requiredInput(document, '#documentPageId').value = '';
                 requiredInput(document, '#ocrModelKey').value = '';
 
+                rememberPageAlignment();
                 await marker.load(scanFile, { page: pageNumber });
                 scanPageNumber = pageNumber;
+                useLayoutForPage(pageNumber);
                 recordSubmitting = false;
                 el('submitBtn').innerHTML = SUBMIT_IDLE_HTML;
                 updateScanNotices();
@@ -6987,8 +7304,10 @@
                 showStep('mark');
                 resetFieldHistory();
                 rowsSource = null;
-                setGrid(templateBoxes, templateRows, { remember: true });
+                const kept = pageAlign.get(pageNumber);
+                setGrid(kept?.boxes ?? templateBoxes, kept?.rows ?? templateRows, kept ? { tilts: kept.tilts } : { remember: true });
                 fetchSnapLines();
+                updateSpread();
                 window.bootstrap.Modal.getInstance(el('nextPageModal'))?.hide();
                 window.requestAnimationFrame(() => marker.resetZoom());
             } catch (error) {
@@ -7078,6 +7397,8 @@
 
             const form = el('submitForm');
             const data = new FormData(form);
+            // The layout this page was aligned and read with (page 2 may have its own).
+            data.set('document_template_id', String(config.templateId));
             const currentBatchItem = batchState.active ? batchState.items[batchState.currentIndex] : null;
             if (currentBatchItem?.workspaceScanPath) {
                 data.set('workspace_scan_path', currentBatchItem.workspaceScanPath);
@@ -7124,6 +7445,73 @@
                 };
             });
             data.set('fields_json', JSON.stringify(submittedFields));
+
+            // A document of several pages is one record: each page is checked in
+            // turn, and the record is sent once the last page is checked.
+            let combined = false;
+            const documentPages = currentBatchItem?.group && currentBatchItem.pageTotal > 1
+                ? batchState.items.filter((it) => it.group === currentBatchItem.group).sort((a, b) => a.pageNo - b.pageNo)
+                : [];
+            if (documentPages.length > 1) {
+                const rowMarker = /· row (\d+)/;
+                const parsedRows = submittedFields.map((field) => Number(String(field.name).match(rowMarker)?.[1] ?? 0));
+                currentBatchItem.staged = {
+                    fields: submittedFields,
+                    pageId: processedPage.id,
+                    modelKey: (processedPage.modelKey || '').trim(),
+                    rowSpan: Math.max(Math.max(0, (processedPage.geometry?.ruled_ys?.length ?? 0) - 1), ...parsedRows),
+                    personCount: personGroups.length,
+                };
+
+                const waiting = documentPages.find((it) => !it.staged);
+                if (waiting) {
+                    currentBatchItem.status = 'checked';
+                    renderBatchQueueBanner();
+                    await openBatchVerifyItem(batchState.items.indexOf(waiting));
+                    return;
+                }
+
+                // Pages after the first carry on the row and person numbers of the page before,
+                // so the record reads as one table with unique field names.
+                let rowOffset = 0;
+                let personOffset = 0;
+                const ordered = documentPages.map((item) => {
+                    const fields = item.staged.fields.map((field) => {
+                        let name = String(field.name);
+                        if (item.pageNo > 1) {
+                            name = rowMarker.test(name)
+                                ? name.replace(rowMarker, (_, row) => `· row ${Number(row) + rowOffset}`)
+                                : `${name} · page ${item.pageNo}`;
+                        }
+                        return {
+                            ...field,
+                            name,
+                            person_group: field.person_group == null ? null : field.person_group + personOffset,
+                        };
+                    });
+                    rowOffset += item.staged.rowSpan;
+                    personOffset += item.staged.personCount;
+                    return { item, fields };
+                });
+
+                const [first, ...others] = ordered;
+                data.set('fields_json', JSON.stringify(first.fields));
+                // The record is page 1's layout; the server reads the other pages with its page 2 layout.
+                data.set('document_template_id', String(mainLayout.templateId));
+                data.set('document_page_id', String(first.item.staged.pageId));
+                data.set('ocr_model_key', first.item.staged.modelKey);
+                data.set('workspace_scan_path', first.item.workspaceScanPath ?? '');
+                data.set('source_name', first.item.sourceName ?? scanFile.name);
+                data.set('source_page', String(first.item.pageNo));
+                data.set('source_page_count', String(first.item.pageTotal));
+                data.set('extra_pages_json', JSON.stringify(others.map(({ item, fields }) => ({
+                    document_page_id: item.staged.pageId,
+                    workspace_scan_path: item.workspaceScanPath,
+                    source_page: item.pageNo,
+                    fields,
+                }))));
+                combined = true;
+            }
 
             const button = el('submitBtn');
             const idleButton = button.innerHTML;
@@ -7174,7 +7562,8 @@
                         askToSubmitWithoutRequired(payload.errors.missing_required);
                         return;
                     }
-                    applyServerFieldErrors(payload?.errors, verifiedIndexes);
+                    // Field numbers of a document sent as one record do not match this page's.
+                    if (!combined) applyServerFieldErrors(payload?.errors, verifiedIndexes);
                     throw new Error(submissionErrorMessage(response, payload));
                 }
 
@@ -7183,8 +7572,11 @@
                 }
 
                 if (batchState.active && currentBatchItem) {
-                    currentBatchItem.status = 'imported';
-                    currentBatchItem.recordUrl = payload.redirect;
+                    (combined ? documentPages : [currentBatchItem]).forEach((item) => {
+                        item.status = 'imported';
+                        item.recordUrl = payload.redirect;
+                        item.staged = null;
+                    });
                     renderBatchQueueBanner();
 
                     const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && !['imported', 'rejected'].includes(it.status));

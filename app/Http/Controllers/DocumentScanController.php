@@ -56,6 +56,9 @@ class DocumentScanController extends Controller
     /** More pages than any register book has: a typed page number past it is refused. */
     private const MAX_SOURCE_PAGES = 10000;
 
+    /** Pages after the first that one record may hold (a spread is two pages in all). */
+    private const MAX_EXTRA_PAGES = 9;
+
     /**
      * Step 1 with no type chosen: the workspace's first step, the drop area
      * waiting for a type. Someone who has scanned before goes straight to the
@@ -148,6 +151,8 @@ class DocumentScanController extends Controller
             // Rectangle fields, then ledger columns. Staff align both the same way.
             'boxes' => $template->markerBoxes(),
             'ruledYs' => $template->isLedger() ? array_values($template->ruled_ys) : [],
+            // A spread's page 2 laid out differently: its own layout, or null.
+            'pageTwo' => $this->pageTwoLayout($template),
             'activeModel' => OcrModel::active(),
             // Empty unless a Super Admin has allowed it, in which case the reading
             // step offers a picker instead of silently using the promoted model.
@@ -157,11 +162,40 @@ class DocumentScanController extends Controller
     }
 
     /**
+     * What the workspace needs to align and read page 2 of a spread with its own
+     * layout: the same shape as the main layout's boxes, row lines and id.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function pageTwoLayout(DocumentTemplate $template): ?array
+    {
+        if ($template->page_two_template_id === null) {
+            return null;
+        }
+
+        $pageTwo = DocumentTemplate::with(['fields', 'documentTypeDefinition'])->find($template->page_two_template_id);
+        if ($pageTwo === null) {
+            return null;
+        }
+
+        return [
+            'templateId' => $pageTwo->getKey(),
+            'name' => $pageTwo->name,
+            'boxes' => $pageTwo->markerBoxes(),
+            'ruledYs' => $pageTwo->isLedger() ? array_values($pageTwo->ruled_ys) : [],
+            'groupingMode' => $pageTwo->grouping_mode instanceof \BackedEnum
+                ? $pageTwo->grouping_mode->value
+                : ($pageTwo->grouping_mode ?? 'auto'),
+        ];
+    }
+
+    /**
      * Step 3: persist the verified record and lock it.
      */
     public function store(Request $request): RedirectResponse|JsonResponse
     {
         $this->hydrateJsonFields($request);
+        $this->hydrateExtraPages($request);
 
         $validated = $request->validate([
             'doc_type' => ['required', 'string', 'exists:document_types,key'],
@@ -199,6 +233,25 @@ class DocumentScanController extends Controller
             'source_hash' => ['nullable', 'string', 'regex:/^[0-9a-f]{64}$/'],
             // Staff chose "Save again" when told this page is already saved.
             'allow_duplicate' => ['sometimes', 'boolean'],
+            // A spread saved as one record: its pages after the first, each with
+            // the page it was read from and its own verified fields.
+            'extra_pages' => ['sometimes', 'array', 'max:' . self::MAX_EXTRA_PAGES],
+            'extra_pages.*.document_page_id' => ['required', 'integer'],
+            'extra_pages.*.workspace_scan_path' => ['required', 'string', 'max:500'],
+            'extra_pages.*.source_page' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_SOURCE_PAGES],
+            'extra_pages.*.fields' => ['required', 'array', 'min:1', 'max:' . Limits::MAX_FIELDS],
+            'extra_pages.*.fields.*.verified' => ['required', 'accepted'],
+            'extra_pages.*.fields.*.name' => ['required', 'string', 'max:500', 'distinct:ignore_case'],
+            'extra_pages.*.fields.*.ocr_text' => ['nullable', 'string', 'max:2000'],
+            'extra_pages.*.fields.*.ocr_confidence' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'extra_pages.*.fields.*.verified_value' => ['required', 'string', 'max:2000'],
+            'extra_pages.*.fields.*.person_group' => ['nullable', 'integer', 'min:1', 'max:' . Limits::MAX_FIELDS * self::MAX_EXTRA_PAGES],
+            'extra_pages.*.fields.*.person_field_order' => ['nullable', 'integer', 'min:0', 'max:' . (Limits::MAX_FIELDS - 1)],
+            'extra_pages.*.fields.*.x' => ['required', 'numeric', 'min:0', 'max:1'],
+            'extra_pages.*.fields.*.y' => ['required', 'numeric', 'min:0', 'max:1'],
+            'extra_pages.*.fields.*.width' => ['required', 'numeric', 'min:0.00001', 'max:1'],
+            'extra_pages.*.fields.*.height' => ['required', 'numeric', 'min:0.00001', 'max:1'],
+            'extra_pages.*.fields.*.line_id' => ['nullable', 'integer', 'distinct'],
         ], [
             'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
             'source_hash.regex' => 'The file fingerprint is not valid. Open the file again.',
@@ -263,10 +316,19 @@ class DocumentScanController extends Controller
 
         [$page, $linesById] = $this->pageLinesFor($request, $validated, $templateId);
 
+        // The pages after the first, when a spread is saved as one record.
+        $pageTwoTemplate = $template->page_two_template_id !== null
+            ? (DocumentTemplate::with(['documentTypeDefinition', 'fields'])->find($template->page_two_template_id) ?? $template)
+            : $template;
+        $extraPages = $this->prepareExtraPages($request, $validated, (int) $pageTwoTemplate->getKey());
+
         // A crop deleted in Verify must be drawn again and read first.
-        $toRedraw = $page?->lines
+        $toRedraw = ($page?->lines
             ->filter(fn (PageLine $line) => in_array(PageLine::FLAG_REDRAW, $line->flags ?? [], true))
-            ->count() ?? 0;
+            ->count() ?? 0)
+            + collect($extraPages)->sum(fn (array $extra) => $extra['page']->lines
+                ->filter(fn (PageLine $line) => in_array(PageLine::FLAG_REDRAW, $line->flags ?? [], true))
+                ->count());
         if ($toRedraw > 0) {
             throw ValidationException::withMessages([
                 'fields' => $toRedraw === 1
@@ -280,6 +342,16 @@ class DocumentScanController extends Controller
         $missingRequired = [
             ...$this->missingRequiredFields($template, $validated['fields'], $linesById),
             ...$this->missingRegisterRows($template, $page, $validated['fields'], $linesById),
+            ...collect($extraPages)->flatMap(fn (array $extra) => [
+                ...$this->prefixed(
+                    "Page {$extra['number']}: ",
+                    $this->missingRequiredFields($pageTwoTemplate, $extra['fields'], $extra['lines']),
+                ),
+                ...$this->prefixed(
+                    "Page {$extra['number']}: ",
+                    $this->missingRegisterRows($pageTwoTemplate, $extra['page'], $extra['fields'], $extra['lines']),
+                ),
+            ])->all(),
         ];
         if ($missingRequired !== [] && !$request->boolean('allow_missing')) {
             // One message per field, so the workspace can list them when it asks.
@@ -331,7 +403,7 @@ class DocumentScanController extends Controller
         $gridChanges = $this->gridChanges($template, $page);
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $savedBefore, &$copiedFiles) {
+            $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $savedBefore, $extraPages, $pageTwoTemplate, &$copiedFiles) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -384,6 +456,50 @@ class DocumentScanController extends Controller
                     ]);
                 }
 
+                // Pages 2 and on of a spread: each keeps its own scan and page
+                // image, and its fields carry the page they were read from.
+                $nextIndex = count($validated['fields']);
+                $extraSettings = $pageTwoTemplate->settingsByName();
+                foreach ($extraPages as $extra) {
+                    $number = $extra['number'];
+                    $extraPath = 'scans/' . bin2hex(random_bytes(20)) . '.' . $extra['ext'];
+                    Storage::disk('local')->copy($extra['scan_path'], $extraPath);
+                    $copiedFiles[] = $extraPath;
+
+                    $record->extraPages()->create([
+                        'page_no' => $number,
+                        'scan_path' => $extraPath,
+                        'scan_mime' => Storage::disk('local')->mimeType($extraPath) ?: 'application/octet-stream',
+                        'scan_rotation' => $extra['page']->deskew_degrees,
+                        'page_image_path' => $this->keepPageImage($record, $extra['page'], $copiedFiles, "page-{$number}.png"),
+                        'source_page' => $extra['source_page'],
+                    ]);
+
+                    foreach ($extra['fields'] as $field) {
+                        $line = isset($field['line_id']) ? $extra['lines']->get((int) $field['line_id']) : null;
+                        $settings = $extraSettings[$this->templateNameKey($field, $line)] ?? null;
+
+                        $record->fields()->create([
+                            'page_no' => $number,
+                            'name' => $field['name'],
+                            'ocr_text' => $field['ocr_text'] ?? null,
+                            'ocr_confidence' => $field['ocr_confidence'] ?? null,
+                            'verified_value' => $field['verified_value'],
+                            'is_required' => $settings['required'] ?? true,
+                            'role' => $settings['role'] ?? null,
+                            'person_group' => $field['person_group'] ?? null,
+                            'person_field_order' => $field['person_field_order'] ?? null,
+                            'x' => $field['x'],
+                            'y' => $field['y'],
+                            'width' => $field['width'],
+                            'height' => $field['height'],
+                            'sort_order' => $nextIndex,
+                            ...($line ? $this->lineAttributes($record, $extra['page'], $line, $nextIndex, $copiedFiles) : []),
+                        ]);
+                        $nextIndex++;
+                    }
+                }
+
                 $record->load('fields');
 
                 $corrected = $record->fields->filter->wasCorrected()->count();
@@ -402,6 +518,7 @@ class DocumentScanController extends Controller
                         // This page's grid against the template's: rows, and
                         // columns Staff added or removed in Align.
                         ...($gridChanges !== [] ? ['grid_changes' => $gridChanges] : []),
+                        ...($extraPages !== [] ? ['pages' => count($extraPages) + 1] : []),
                         ...($source['page'] !== null ? [
                             'source_page' => $source['page'],
                             'source_page_count' => $source['page_count'],
@@ -426,10 +543,14 @@ class DocumentScanController extends Controller
             $disk->deleteDirectory($page->directory());
             $page->delete();
         }
-        if ($workspaceScanToClean !== null) {
-            $disk->delete($workspaceScanToClean);
-            $batchFolder = dirname($workspaceScanToClean);
-            if ($batchFolder !== 'documents/workspace' && $disk->files($batchFolder) === []) {
+        foreach ($extraPages as $extra) {
+            $disk->deleteDirectory($extra['page']->directory());
+            $extra['page']->delete();
+        }
+        foreach (array_filter([$workspaceScanToClean, ...array_column($extraPages, 'scan_path')]) as $cleanPath) {
+            $disk->delete($cleanPath);
+            $batchFolder = dirname($cleanPath);
+            if ($batchFolder !== 'documents/workspace' && $disk->exists($batchFolder) && $disk->files($batchFolder) === []) {
                 $disk->deleteDirectory($batchFolder);
             }
         }
@@ -552,6 +673,101 @@ class DocumentScanController extends Controller
         }
 
         $request->merge(['fields' => $fields]);
+    }
+
+    /** A spread saved as one record: the pages after the first, sent as JSON beside fields_json. */
+    private function hydrateExtraPages(Request $request): void
+    {
+        if (!$request->filled('extra_pages_json')) {
+            return;
+        }
+
+        try {
+            $pages = json_decode((string) $request->input('extra_pages_json'), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw ValidationException::withMessages([
+                'extra_pages' => 'The other pages could not be read. Return to validation and try again.',
+            ]);
+        }
+
+        if (!is_array($pages)) {
+            throw ValidationException::withMessages(['extra_pages' => 'The other pages must be a valid list.']);
+        }
+
+        $request->merge(['extra_pages' => $pages]);
+    }
+
+    /**
+     * The pages after the first, checked like the first: their coordinates, the
+     * processed page and lines each field points at, and a scan file the
+     * workspace saved. Pages are numbered 2, 3, ... in the order sent.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return list<array{number: int, page: DocumentPage, lines: Collection<int, PageLine>, fields: array<int, array<string, mixed>>, scan_path: string, ext: string, source_page: ?int}>
+     */
+    private function prepareExtraPages(Request $request, array $validated, int $templateId): array
+    {
+        $disk = Storage::disk('local');
+        $prepared = [];
+        $errors = [];
+
+        foreach (array_values($validated['extra_pages'] ?? []) as $position => $extra) {
+            foreach (array_values($extra['fields']) as $index => $field) {
+                if ((float) $field['x'] + (float) $field['width'] > 1.00001) {
+                    $errors["extra_pages.{$position}.fields.{$index}.width"] = 'This field marker extends beyond the document width.';
+                }
+                if ((float) $field['y'] + (float) $field['height'] > 1.00001) {
+                    $errors["extra_pages.{$position}.fields.{$index}.height"] = 'This field marker extends beyond the document height.';
+                }
+            }
+
+            $scanPath = (string) $extra['workspace_scan_path'];
+            if (
+                !str_starts_with($scanPath, 'documents/workspace/')
+                || str_contains($scanPath, '..')
+                || !$disk->exists($scanPath)
+            ) {
+                throw ValidationException::withMessages([
+                    "extra_pages.{$position}.workspace_scan_path" => 'Choose a valid scanned document to submit.',
+                ]);
+            }
+
+            [$page, $lines] = $this->pageLinesFor($request, [
+                'fields' => $extra['fields'],
+                'document_page_id' => $extra['document_page_id'],
+            ], $templateId);
+
+            if ($page === null) {
+                throw ValidationException::withMessages([
+                    "extra_pages.{$position}.document_page_id" => 'The outlined page these fields came from is missing. Scan the page again.',
+                ]);
+            }
+
+            $prepared[] = [
+                'number' => $position + 2,
+                'page' => $page,
+                'lines' => $lines,
+                'fields' => array_values($extra['fields']),
+                'scan_path' => $scanPath,
+                'ext' => strtolower(pathinfo($scanPath, PATHINFO_EXTENSION)) ?: 'bin',
+                'source_page' => isset($extra['source_page']) ? (int) $extra['source_page'] : null,
+            ];
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+
+        return $prepared;
+    }
+
+    /**
+     * @param  list<string>  $messages
+     * @return list<string>
+     */
+    private function prefixed(string $prefix, array $messages): array
+    {
+        return array_map(fn (string $message) => $prefix . $message, $messages);
     }
 
     // ------------------------------------------------------------------ internals
@@ -828,10 +1044,10 @@ class DocumentScanController extends Controller
      *
      * @param  list<string>  $copiedFiles
      */
-    private function keepPageImage(CivilRecord $record, DocumentPage $page, array &$copiedFiles): ?string
+    private function keepPageImage(CivilRecord $record, DocumentPage $page, array &$copiedFiles, string $name = 'page.png'): ?string
     {
         $disk = Storage::disk('local');
-        $path = sprintf('records/%d/page.png', $record->getKey());
+        $path = sprintf('records/%d/%s', $record->getKey(), $name);
 
         if (!$disk->exists($page->image_path) || !$disk->copy($page->image_path, $path)) {
             return null;

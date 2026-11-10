@@ -222,11 +222,16 @@ export class FieldMarker {
      * @param {(zoom: number) => void} [options.onZoomChange]
      * @param {(boxes: Array) => void} [options.onDrag]  While markers are dragged, before onChange.
      * @param {boolean} [options.fieldSettings]  Keep markerFieldSettings() in toJSON() (Template Builder).
+     * @param {HTMLElement|null} [options.fitViewport] Element the page is fitted to; the viewport by default.
+     *        A page shown beside another in one scroll container fits to that container without owning it.
+     * @param {number} [options.fitShare] Share of the fit width one page takes at 100% (0.5: two pages side by side).
      */
     constructor({
         canvas,
         overlay,
         viewport = null,
+        fitViewport = null,
+        fitShare = 1,
         readOnly = false,
         onChange = null,
         onSelectionChange = null,
@@ -237,6 +242,10 @@ export class FieldMarker {
         this.canvas = canvas;
         this.overlay = overlay;
         this.viewport = viewport;
+        this.fitViewport = fitViewport;
+        this.fitShare = fitShare;
+        // Markers shown in the same scroll container: they zoom with this one.
+        this.linked = [];
         this.readOnly = readOnly;
         this.onChange = onChange;
         this.onSelectionChange = onSelectionChange;
@@ -268,7 +277,7 @@ export class FieldMarker {
         this._suppressPanClick = false;
 
         // Boxes are positioned in display pixels, so a resize has to reposition them.
-        this._onResize = () => this.viewport ? this._applyZoom() : this.layout();
+        this._onResize = () => (this.fitViewport ?? this.viewport) ? this._applyZoom() : this.layout();
         // On a Mac, Ctrl + click is a right click: its menu would cover a Ctrl + drag.
         this._onContextMenu = (event) => {
             if (event.ctrlKey) event.preventDefault();
@@ -821,21 +830,40 @@ export class FieldMarker {
         const localY = focalEvent ? focalEvent.clientY - viewportRect.top : this.viewport.clientHeight / 2;
         const oldWidth = this.canvas.clientWidth || 1;
         const oldHeight = this.canvas.clientHeight || 1;
-        const documentX = (this.viewport.scrollLeft + localX) / oldWidth;
-        const documentY = (this.viewport.scrollTop + localY) / oldHeight;
+        // The page may not start at the viewport's corner (a spread: page 2 sits right of page 1).
+        const stageOffset = () => {
+            const stageRect = this.canvas.parentElement.getBoundingClientRect();
+            const viewRect = this.viewport.getBoundingClientRect();
+            return {
+                left: stageRect.left - viewRect.left - this.viewport.clientLeft + this.viewport.scrollLeft,
+                top: stageRect.top - viewRect.top - this.viewport.clientTop + this.viewport.scrollTop,
+            };
+        };
+        const before = stageOffset();
+        const documentX = (this.viewport.scrollLeft + localX - before.left) / oldWidth;
+        const documentY = (this.viewport.scrollTop + localY - before.top) / oldHeight;
 
         this.zoom = next;
+        this.linked.forEach((other) => {
+            other.zoom = next;
+            other._applyZoom();
+        });
         this._applyZoom();
 
-        this.viewport.scrollLeft = documentX * this.canvas.clientWidth - localX;
-        this.viewport.scrollTop = documentY * this.canvas.clientHeight - localY;
+        const after = stageOffset();
+        this.viewport.scrollLeft = documentX * this.canvas.clientWidth + after.left - localX;
+        this.viewport.scrollTop = documentY * this.canvas.clientHeight + after.top - localY;
         this.onZoomChange?.(this.zoom);
     }
 
     _applyZoom() {
-        if (!this.viewport || !this.canvas.width || !this.canvas.height) return;
+        const fitTo = this.fitViewport ?? this.viewport;
+        if (!fitTo || !this.canvas.width || !this.canvas.height) return;
 
-        const available = Math.max(1, this.viewport.clientWidth - 2);
+        // Two pages side by side share the width, less the gap between them.
+        const share = this.fitShare > 0 && this.fitShare < 1 ? this.fitShare : 1;
+        const gap = share < 1 ? 8 : 0;
+        const available = Math.max(1, (fitTo.clientWidth - 2) * share - gap);
         const fitWidth = Math.min(this.canvas.width, available);
         const width = fitWidth * this.zoom;
         const height = width * (this.canvas.height / this.canvas.width);

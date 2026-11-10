@@ -77,6 +77,7 @@ class RecordController extends Controller
     {
         $record->load([
             'fields',
+            'extraPages',
             'documentTypeDefinition',
             'changeRequests.requester',
             'changeRequests.reviewer',
@@ -135,6 +136,32 @@ class RecordController extends Controller
         return Response::file(
             Storage::disk('local')->path($record->page_image_path),
             ['Content-Type' => 'image/png', 'X-Content-Type-Options' => 'nosniff'],
+        );
+    }
+
+    /** The page image of page 2 and on of a record saved from a spread. */
+    public function extraPageImage(CivilRecord $record, int $pageNo)
+    {
+        $page = $record->extraPages()->where('page_no', $pageNo)->firstOrFail();
+        abort_if($page->page_image_path === null, 404);
+        abort_unless(Storage::disk('local')->exists($page->page_image_path), 404);
+
+        return Response::file(
+            Storage::disk('local')->path($page->page_image_path),
+            ['Content-Type' => 'image/png', 'X-Content-Type-Options' => 'nosniff'],
+        );
+    }
+
+    /** The stored upload of page 2 and on of a record saved from a spread. */
+    public function extraPageScan(CivilRecord $record, int $pageNo)
+    {
+        $page = $record->extraPages()->where('page_no', $pageNo)->firstOrFail();
+        abort_if($page->scan_path === null, 404);
+        abort_unless(Storage::disk('local')->exists($page->scan_path), 404);
+
+        return Response::file(
+            Storage::disk('local')->path($page->scan_path),
+            ['Content-Type' => $page->scan_mime ?? 'application/octet-stream', 'X-Content-Type-Options' => 'nosniff'],
         );
     }
 }

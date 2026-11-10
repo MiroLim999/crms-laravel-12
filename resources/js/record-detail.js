@@ -345,10 +345,31 @@ function initRecordDetail(root) {
         suppressPanClick = false;
     }, true);
 
+    // A record saved from a spread: one image at a time, with only its page's boxes.
+    const scanImage = root.querySelector('[data-scan-image]');
+    const fullSizeLink = root.querySelector('[data-scan-full]');
+    let shownPage = '1';
+    const showScanPage = (page) => {
+        const tab = root.querySelector(`[data-scan-page-tab="${page}"]`);
+        if (!(tab instanceof HTMLElement) || !(scanImage instanceof HTMLImageElement)) return;
+
+        shownPage = String(page);
+        scanImage.src = tab.dataset.src ?? scanImage.src;
+        if (fullSizeLink instanceof HTMLAnchorElement && tab.dataset.full) fullSizeLink.href = tab.dataset.full;
+        root.querySelectorAll('[data-scan-page-tab]').forEach((other) => other.classList.toggle('active', other === tab));
+        root.querySelectorAll('[data-scan-marker]').forEach((box) => {
+            box.hidden = (box.dataset.scanPage ?? '1') !== shownPage;
+        });
+    };
+    root.querySelectorAll('[data-scan-page-tab]').forEach((tab) => {
+        tab.addEventListener('click', () => showScanPage(tab.dataset.scanPageTab));
+    });
+
     const activateField = (fieldId, scrollRow = false) => {
         const row = root.querySelector(`[data-record-field="${fieldId}"]`);
         const marker = root.querySelector(`[data-scan-marker="${fieldId}"]`);
         if (!(row instanceof HTMLElement) || !(marker instanceof HTMLElement)) return;
+        if ((marker.dataset.scanPage ?? '1') !== shownPage) showScanPage(marker.dataset.scanPage ?? '1');
 
         setOriginalComparison(true);
         root.querySelectorAll('.record-field-row.is-active, .record-scan-marker.is-active')

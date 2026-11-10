@@ -9,6 +9,7 @@
         $published = (bool) $template?->is_active;
         $usage ??= ['published' => false, 'records' => 0, 'pages' => 0];
         $parent ??= null;
+        $pageTwoChoices ??= collect();
         // Published, or read by records or pages in progress: saving new markers
         // makes a new version, so what was read with this one stays as it was.
         $inUse = $template !== null && ($usage['published'] || $usage['records'] > 0 || $usage['pages'] > 0);
@@ -26,6 +27,8 @@
             'baselineColumns' => $columns,
             'initialRuledYs' => is_array($workingRuledYs) ? $workingRuledYs : [],
             'baselineRuledYs' => $ruledYs,
+            // The layout of page 2 of a two-page spread, drawn beside page 1 (null: one page).
+            'pageTwo' => $pageTwo ?? null,
             'detectGridUrl' => route('templates.detect-grid'),
             'testLayoutUrl' => route('templates.test-layout'),
             'csrf' => csrf_token(),
@@ -149,6 +152,15 @@
                             </div>
 
                             <div class="marker-toolbar__actions">
+                                {{-- A register's left and right pages are laid out differently: both pages side by side,
+                                     each with its own markers, saved as page 1 and page 2 of this layout. --}}
+                                <div class="form-check form-switch marker-grid-toggle"
+                                     title="Lay out page 2 of a two-page spread beside page 1">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="twoPageToggle"
+                                           @checked(! empty($pageTwo))>
+                                    <label class="form-check-label" for="twoPageToggle">Two pages</label>
+                                </div>
+
                                 {{-- Hides the row lines and every field box to look at the sample itself; on at every visit. --}}
                                 <div class="form-check form-switch marker-grid-toggle"
                                      title="Show or hide the row lines and field boxes over the page">
@@ -211,11 +223,31 @@
                                 <i class="icon-base bx bx-cloud-upload" aria-hidden="true"></i>
                                 <span><strong>Blank preview</strong> &mdash; choose a sample PDF or image to align markers precisely.</span>
                             </div>
-                            <div class="doc-stage" id="docStage">
-                                <canvas id="pageCanvas" width="900" height="1200"></canvas>
-                                <div class="field-overlay" id="fieldOverlay">
-                                    <div class="field-selection-marquee" id="fieldSelectionMarquee"
-                                         aria-hidden="true"></div>
+                            {{-- Two pages side by side when the layout has a page 2: the page being edited is
+                                 live, the other shows its own layout, and a click on it edits that page. --}}
+                            <div class="doc-spread" id="docSpread">
+                                <div class="doc-spread__page doc-spread__page--main" id="docMainPage">
+                                    <div class="doc-spread__label d-none" id="docMainLabel"></div>
+                                    <div class="doc-stage" id="docStage">
+                                        <canvas id="pageCanvas" width="900" height="1200"></canvas>
+                                        <div class="field-overlay" id="fieldOverlay">
+                                            <div class="field-selection-marquee" id="fieldSelectionMarquee"
+                                                 aria-hidden="true"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="doc-spread__page doc-spread__page--companion d-none" id="docCompanionPage"
+                                     title="Edit this page's layout instead">
+                                    <div class="doc-spread__label" id="docCompanionLabel"></div>
+                                    <div class="doc-stage" id="docCompanionStage">
+                                        <canvas id="companionCanvas" width="900" height="1200"></canvas>
+                                        <div class="field-overlay" id="companionOverlay"></div>
+                                        <button type="button" class="doc-spread__switch" id="docCompanionSwitch"
+                                                aria-label="Edit this page's layout instead">
+                                            <i class="icon-base bx bx-edit-alt me-1" aria-hidden="true"></i>
+                                            <span>Edit this page</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -231,7 +263,7 @@
                             layout, or when the name or notes came back with an error.
                         --}}
                         @php
-                            $detailsOpen = ! $template || $errors->hasAny(['name', 'description']);
+                            $detailsOpen = ! $template || $errors->hasAny(['name', 'description', 'page_two_template_id']);
                             $personRowsOpen = $currentGroupingMode === 'custom';
                         @endphp
                         <section class="card card-disclosure template-builder-details-card mb-3"
@@ -253,6 +285,29 @@
                                                value="{{ old('name', $template?->name ?? $docType->label()) }}"
                                                class="form-control form-control-sm @error('name') is-invalid @enderror" required>
                                         @error('name')
+                                            <div class="invalid-feedback">{{ $message }}</div>
+                                        @enderror
+                                    </div>
+
+                                    {{-- A register's left and right pages are often laid out differently: this
+                                         layout is page 1, and another layout of the type is page 2. --}}
+                                    <div class="mb-3">
+                                        <label for="page_two_template_id" class="form-label">Page 2 format</label>
+                                        <select id="page_two_template_id" name="page_two_template_id"
+                                                class="form-select form-select-sm @error('page_two_template_id') is-invalid @enderror">
+                                            <option value="">Same as this layout</option>
+                                            @foreach ($pageTwoChoices as $choice)
+                                                <option value="{{ $choice->getKey() }}"
+                                                        @selected((string) old('page_two_template_id', $template?->page_two_template_id) === (string) $choice->getKey())>
+                                                    {{ $choice->name }}{{ $choice->is_active ? ' (published)' : '' }}
+                                                </option>
+                                            @endforeach
+                                        </select>
+                                        <div class="form-text">
+                                            For a two-page spread whose pages are laid out differently: this layout is
+                                            page 1, the one chosen here is page 2. Build page 2 as its own layout first.
+                                        </div>
+                                        @error('page_two_template_id')
                                             <div class="invalid-feedback">{{ $message }}</div>
                                         @enderror
                                     </div>

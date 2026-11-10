@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property list<array{name: string, box: list<float>}>|null $columns
  * @property list<float>|null $ruled_ys
  * @property int|null $parent_id
+ * @property int|null $page_two_template_id
  * @property int $revision
  */
 class DocumentTemplate extends Model
@@ -41,7 +42,7 @@ class DocumentTemplate extends Model
         'name', 'doc_type', 'document_type_id', 'page_ratio', 'description',
         'grouping_mode', 'columns', 'ruled_ys',
         'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
-        'is_active', 'created_by', 'parent_id',
+        'is_active', 'created_by', 'parent_id', 'page_two_template_id',
     ];
 
     protected function casts(): array
@@ -179,6 +180,24 @@ class DocumentTemplate extends Model
     }
 
     /** The layout this one was copied from, as a new version or a duplicate. */
+    /**
+     * The layout of page 2 when a document is a two-page spread whose pages are
+     * laid out differently (a register's left and right pages). This layout
+     * describes page 1; null means page 2 uses this layout too.
+     */
+    public function pageTwoTemplate(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'page_two_template_id');
+    }
+
+    /** The layout Staff align and read page `$pageNumber` of a spread with: even pages use page 2's, when set. */
+    public function layoutForPage(int $pageNumber): self
+    {
+        return $pageNumber % 2 === 0 && $this->page_two_template_id !== null
+            ? ($this->pageTwoTemplate ?? $this)
+            : $this;
+    }
+
     public function parent(): BelongsTo
     {
         return $this->belongsTo(self::class, 'parent_id');

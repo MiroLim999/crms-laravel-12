@@ -173,7 +173,7 @@ let ruledYs = normaliseRuledYs(config.initialRuledYs);
 groupingModeInput.value = initialGroupingMode;
 
 // Markers, person-row mode and row lines, undone together (Ctrl+Z).
-const history = new LayoutHistory();
+let history = new LayoutHistory();
 let restoringHistory = false;
 // Ledger grid state (see "ledger grid" below).
 let coveredFieldIndexes = [];
@@ -191,6 +191,9 @@ let sampleLoaded = false;
 // dropped/selected File even when their file input is later reconstructed or
 // loses its FileList, which used to produce a saved layout with no sample.
 let pendingSampleFile = null;
+// The sample as opened (its pages are drawn side by side in a two-page layout).
+let sampleFile = null;
+let samplePageCount = 1;
 
 function resizeBlankCanvas() {
     const longEdge = 1600;
@@ -204,15 +207,15 @@ function resizeBlankCanvas() {
     }
 }
 
-function drawBlankPage() {
-    const context = canvas.getContext('2d');
+function drawBlankPage(target = canvas) {
+    const context = target.getContext('2d');
     if (!context) throw new Error('The document preview could not be created.');
 
     context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillRect(0, 0, target.width, target.height);
     context.strokeStyle = '#d9dee3';
     context.lineWidth = 2;
-    context.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+    context.strokeRect(1, 1, target.width - 2, target.height - 2);
 }
 
 resizeBlankCanvas();
@@ -234,10 +237,33 @@ attachMarqueeSelection({
     marquee: element('fieldSelectionMarquee'),
 });
 
+// A layout of two pages (a register's left and right pages): each page has its
+// own markers, row lines and person-row mode, and its own saved baseline.
+const twoPageToggle = element('twoPageToggle', HTMLInputElement);
+const savedPageTwo = config.pageTwo && typeof config.pageTwo === 'object' ? config.pageTwo : null;
+const pageTwoBaseline = {
+    boxes: savedPageTwo
+        ? [...normaliseBoxes(savedPageTwo.fields), ...normaliseColumns(savedPageTwo.columns)]
+        : [],
+    ruledYs: savedPageTwo ? normaliseRuledYs(savedPageTwo.ruled_ys) : [],
+    grouping: savedPageTwo?.grouping_mode === 'custom' ? 'custom' : 'auto',
+};
+const pageBaselines = {
+    1: { boxes: baselineBoxes, ruledYs: baselineRuledYs, grouping: baselineGroupingMode },
+    2: pageTwoBaseline,
+};
+const pageLayouts = {
+    1: null,
+    2: { boxes: cloneBoxes(pageTwoBaseline.boxes), ruledYs: [...pageTwoBaseline.ruledYs], grouping: pageTwoBaseline.grouping },
+};
+let twoPage = twoPageToggle.checked;
+let activePage = 1;
+
 function layoutMatchesBaseline() {
-    return snapshot(marker.toJSON()) === snapshot(baselineBoxes)
-        && JSON.stringify(ruledYs) === JSON.stringify(baselineRuledYs)
-        && groupingModeInput.value === baselineGroupingMode;
+    const baseline = pageBaselines[activePage];
+    return snapshot(marker.toJSON()) === snapshot(baseline.boxes)
+        && JSON.stringify(ruledYs) === JSON.stringify(baseline.ruledYs)
+        && groupingModeInput.value === baseline.grouping;
 }
 
 function updateResetUI() {
@@ -922,11 +948,8 @@ function validateFields() {
     return true;
 }
 
-function serialiseFields() {
-    const container = element('fieldInputs');
-    container.replaceChildren();
-
-    const boxes = marker.toJSON();
+/** A layout's markers and row lines as the server takes them. */
+function layoutPayload(boxes, ruled, grouping) {
     const fields = boxes.filter((box) => !isColumn(box)).map((box) => ({
             name: box.name.trim(),
             x: box.x.toFixed(5),
@@ -934,7 +957,7 @@ function serialiseFields() {
             width: box.w.toFixed(5),
             height: box.h.toFixed(5),
             angle: normaliseAngle(box.angle),
-            ...templatePersonPayload(box, groupingModeInput.value === 'custom'),
+            ...templatePersonPayload(box, grouping === 'custom'),
             ...settingsPayload(box),
     }));
     // Left to right: a ledger row is read in column order.
@@ -948,11 +971,37 @@ function serialiseFields() {
             ...settingsPayload(box),
         }));
 
+    return {
+        fields,
+        columns,
+        ruled_ys: columns.length > 0 ? ruled.map((y) => Number(y.toFixed(5))) : [],
+        grouping_mode: grouping === 'custom' ? 'custom' : 'auto',
+    };
+}
+
+function serialiseFields() {
+    const container = element('fieldInputs');
+    container.replaceChildren();
+
+    // Page 1 is the layout itself; page 2, when there is one, rides along.
+    if (twoPage) storeActivePage();
+    const first = twoPage
+        ? pageLayouts[1]
+        : { boxes: marker.toJSON(), ruledYs, grouping: groupingModeInput.value };
+    groupingModeInput.value = first.grouping === 'custom' ? 'custom' : 'auto';
+    const { fields, columns, ruled_ys: ruledList } = layoutPayload(first.boxes, first.ruledYs, first.grouping);
+
     // One JSON input each avoids PHP's max_input_vars truncating large layouts.
     [
         ['fields_json', fields],
         ['columns_json', columns],
-        ['ruled_ys_json', columns.length > 0 ? ruledYs.map((y) => Number(y.toFixed(5))) : []],
+        ['ruled_ys_json', ruledList],
+        // Page 2 of a two-page layout; an empty one removes a page 2 saved before.
+        ...(twoPage || savedPageTwo
+            ? [['page_two_json', twoPage
+                ? layoutPayload(pageLayouts[2].boxes, pageLayouts[2].ruledYs, pageLayouts[2].grouping)
+                : { fields: [], columns: [], ruled_ys: [], grouping_mode: 'auto' }]]
+            : []),
     ].forEach(([name, value]) => {
         const input = document.createElement('input');
         input.type = 'hidden';
@@ -997,7 +1046,13 @@ async function openSample(file, { pendingUpload = true } = {}) {
     clearBuilderError();
 
     try {
-        const measurement = await marker.load(file);
+        let measurement = await marker.load(file);
+        sampleFile = file;
+        samplePageCount = measurement?.pageCount ?? 1;
+        // Editing page 2: that page of the sample, when it has one.
+        if (activePage > 1 && samplePageCount >= activePage) {
+            measurement = await marker.load(file, { page: activePage }) ?? measurement;
+        }
         sampleLoaded = true;
         forgetSampleGrid();
         loadPrintedLines();
@@ -1005,10 +1060,11 @@ async function openSample(file, { pendingUpload = true } = {}) {
         updatePickedSampleUI();
         // Only a PDF's first page is drawn, as for Staff.
         element('sampleFileName').textContent = measurement?.pageCount > 1
-            ? `${file.name} (page 1 of ${measurement.pageCount})`
+            ? `${file.name} (${measurement.pageCount} pages)`
             : file.name;
         element('sampleHint').classList.add('d-none');
         window.requestAnimationFrame(() => marker.resetZoom());
+        await updateSpread();
     } catch (error) {
         fileInput.value = '';
         showBuilderError(error instanceof Error ? error.message : 'That sample could not be opened.');
@@ -1033,6 +1089,8 @@ async function removePickedSample() {
     resizeBlankCanvas();
     drawBlankPage();
     marker.layout();
+    sampleFile = null;
+    samplePageCount = 1;
     sampleLoaded = false;
     forgetSampleGrid();
     element('sampleFileName').textContent = 'Choose sample';
@@ -1167,12 +1225,13 @@ fileLabel.addEventListener('keydown', (event) => {
 viewport.addEventListener('drop', (event) => selectDroppedSample(event.dataTransfer?.files?.[0]));
 
 function restoreBaseline() {
+    const baseline = pageBaselines[activePage];
     invalidFieldIndexes.clear();
-    groupingModeInput.value = baselineGroupingMode;
-    ruledYs = [...baselineRuledYs];
+    groupingModeInput.value = baseline.grouping;
+    ruledYs = [...baseline.ruledYs];
     selectedRule = null;
     estimatedYs = new Set();
-    replaceBoxes(baselineBoxes);
+    replaceBoxes(baseline.boxes);
     marker.resetZoom();
     viewport.scrollTo({ top: 0, left: 0 });
     clearBuilderError();
@@ -1294,8 +1353,20 @@ form.querySelectorAll('button[type="submit"][data-publish]').forEach((button) =>
 const initialText = new Map(['name', 'description'].map((id) => [id, element(id).value]));
 let leavingBySave = false;
 
+/** Whether the page not being edited differs from what is saved. */
+function otherPageChanged() {
+    if (!twoPage || pageLayouts[3 - activePage] === null) return false;
+    const other = pageLayouts[3 - activePage];
+    const baseline = pageBaselines[3 - activePage];
+    return snapshot(other.boxes) !== snapshot(baseline.boxes)
+        || JSON.stringify(other.ruledYs) !== JSON.stringify(baseline.ruledYs)
+        || other.grouping !== baseline.grouping;
+}
+
 function hasUnsavedChanges() {
     return !layoutMatchesBaseline()
+        || otherPageChanged()
+        || twoPage !== (savedPageTwo !== null)
         || pendingSampleFile !== null
         || [...initialText].some(([id, value]) => element(id).value !== value);
 }
@@ -2070,7 +2141,123 @@ async function testLayout() {
 
 element('testLayoutBtn', HTMLButtonElement).addEventListener('click', testLayout);
 
+// ------------------------------------------------------------- two pages
+// Page 1 and page 2 sit side by side in the one scroll box. The page being
+// edited is live (the usual markers, row lines and person rows); the other
+// shows its own layout and is edited by clicking it. Each page keeps its own
+// markers, row lines and person-row mode while the other is on screen.
+const companionMarker = new FieldMarker({
+    canvas: element('companionCanvas', HTMLCanvasElement),
+    overlay: element('companionOverlay'),
+    fitViewport: viewport,
+    fitShare: 0.5,
+    readOnly: true,
+    fieldSettings: true,
+});
+marker.linked = [companionMarker];
+
+/** What page being edited has now, kept for when it is turned to again. */
+function storeActivePage() {
+    pageLayouts[activePage] = {
+        boxes: cloneBoxes(marker.toJSON()),
+        ruledYs: [...ruledYs],
+        grouping: groupingModeInput.value === 'custom' ? 'custom' : 'auto',
+    };
+}
+
+/** Draw `page` of the sample (or a blank page) on a canvas through its marker. */
+async function drawSamplePage(target, page) {
+    if (sampleFile && samplePageCount >= page) {
+        await target.load(sampleFile, { page });
+        return;
+    }
+    target.canvas.width = canvas.width;
+    target.canvas.height = canvas.height;
+    drawBlankPage(target.canvas);
+    target.layout();
+}
+
+async function updateSpread() {
+    const pane = element('docCompanionPage');
+    const spread = element('docSpread');
+    spread.classList.toggle('is-spread', twoPage);
+    pane.classList.toggle('d-none', !twoPage);
+    element('docMainLabel').classList.toggle('d-none', !twoPage);
+    marker.fitShare = twoPage ? 0.5 : 1;
+
+    if (!twoPage) {
+        window.requestAnimationFrame(() => marker.resetZoom());
+        return;
+    }
+
+    const other = 3 - activePage;
+    // Page 1 on the left, as in a book.
+    pane.style.order = other < activePage ? '-1' : '1';
+    element('docMainLabel').textContent = `Page ${activePage} · editing`;
+    element('docCompanionLabel').textContent = `Page ${other} — click to edit`;
+    element('docCompanionSwitch').classList.remove('d-none');
+
+    try {
+        await drawSamplePage(companionMarker, other);
+    } catch (error) {
+        console.warn(`Page ${other} of the sample could not be shown beside the page:`, error);
+    }
+    companionMarker.setBoxes(cloneBoxes(pageLayouts[other].boxes));
+    window.requestAnimationFrame(() => marker.resetZoom());
+}
+
+/** Edit the other page: its sample page, markers, row lines and person-row mode. */
+async function switchPage(page) {
+    if (!twoPage || page === activePage) return;
+
+    storeActivePage();
+    activePage = page;
+    try {
+        await drawSamplePage(marker, page);
+    } catch (error) {
+        showBuilderError(error instanceof Error ? error.message : `Page ${page} of the sample could not be opened.`);
+    }
+
+    const layout = pageLayouts[page];
+    invalidFieldIndexes.clear();
+    groupingModeInput.value = layout.grouping;
+    ruledYs = [...layout.ruledYs];
+    selectedRule = null;
+    estimatedYs = new Set();
+    previousMarkerCount = 0;
+    replaceBoxes(layout.boxes);
+    // Undo steps belong to the page they were made on.
+    history = new LayoutHistory();
+    previousMarkerCount = layout.boxes.length;
+    history.record(layoutState());
+    forgetSampleGrid();
+    if (sampleLoaded) loadPrintedLines();
+    clearBuilderError();
+    updateResetUI();
+    await updateSpread();
+}
+
+twoPageToggle.addEventListener('change', async () => {
+    if (twoPageToggle.checked) {
+        twoPage = true;
+        // A page 2 with nothing on it starts from page 1's markers: the pages are often alike.
+        if (pageLayouts[2].boxes.length === 0 && pageLayouts[1] === null) {
+            pageLayouts[2] = { boxes: cloneBoxes(marker.toJSON()), ruledYs: [...ruledYs], grouping: groupingModeInput.value === 'custom' ? 'custom' : 'auto' };
+        }
+        pageLayouts[1] = null;
+        await updateSpread();
+    } else {
+        if (activePage === 2) await switchPage(1);
+        twoPage = false;
+        pageLayouts[1] = null;
+        await updateSpread();
+    }
+    updateResetUI();
+});
+element('docCompanionPage').addEventListener('click', () => switchPage(3 - activePage));
+
 marker.setBoxes(cloneBoxes(initialBoxes));
 renderLedgerGrid();
 window.requestAnimationFrame(() => marker.resetZoom());
+updateSpread();
 openStoredSample();
