@@ -1547,9 +1547,27 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
     .document-dropzone__title {
       color: var(--bs-secondary-color);
-      font-size: 1rem;
-      font-weight: 500;
     }
+
+    .document-dropzone__button {
+      color: var(--bs-secondary-color);
+      background: var(--bs-gray-200, #e9ecef);
+      border-color: transparent;
+      box-shadow: none;
+    }
+  }
+}
+
+// Upload mode shown before a type is chosen: same look, grayed, not usable.
+.document-upload-mode-bar.is-disabled {
+  opacity: .55;
+  filter: grayscale(1);
+  pointer-events: none;
+  user-select: none;
+
+  .document-upload-mode-option {
+    background: rgba(var(--crms-ink-rgb), .02);
+    cursor: default;
   }
 }
 
