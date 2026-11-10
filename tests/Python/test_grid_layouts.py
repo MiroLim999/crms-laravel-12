@@ -709,6 +709,110 @@ class RowsFromThePageTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
+class SmallPageGridTest(unittest.TestCase):
+    """A whole register page drawn small (the user's 2splitpages.pdf, 2026-11-11).
+
+    Its joined-up handwriting is only 5 px tall there, so every line of it came back as a
+    "rule" a third of a row above the real one, and a few faint rules were not found at all.
+    The Template Builder's Detect from sample found the last 8 of page 1's 20 rows, and no
+    rows on page 2.
+    """
+
+    WIDTH, HEIGHT, PITCH, TOP, ROWS = 1200, 1000, 42, 120, 20
+    EDGES = [40, 200, 520, 840, 1160]
+
+    def page(self, writing=False, lost=(), short_rows=0):
+        """The table; `lost` row rules left out, the others ending `short_rows` px before the frame."""
+        image = Image.new("RGB", (self.WIDTH, self.HEIGHT), (PAPER,) * 3)
+        draw = ImageDraw.Draw(image)
+        ys = [self.TOP + k * self.PITCH for k in range(self.ROWS + 1)]
+        header = self.TOP - 60
+        draw.line([(self.EDGES[0], header), (self.EDGES[-1], header)], fill=(RULE,) * 3, width=2)
+        for k, y in enumerate(ys):
+            if k not in lost:
+                draw.line([(self.EDGES[0], y), (self.EDGES[-1] - short_rows, y)], fill=(RULE,) * 3, width=1)
+        for x in self.EDGES:
+            draw.line([(x, header), (x, ys[-1])], fill=(RULE,) * 3, width=2)
+        if writing:
+            # Two words in every cell, each a 5 px band a third of a row above its rule.
+            for y in ys[1:]:
+                for left, right in zip(self.EDGES, self.EDGES[1:]):
+                    middle = (left + right) // 2
+                    for x0, x1 in ((left + 12, middle - 20), (middle + 20, right - 12)):
+                        draw.rectangle([x0, y - 14, x1, y - 10], fill=(INK,) * 3)
+        return image, ys
+
+    def suggested(self, image):
+        suggestion = lm.detect_grid(image)["suggestion"]
+        return [y * self.HEIGHT for y in suggestion["ruled_ys"]], suggestion["columns"]
+
+    def assertWholeTable(self, image, ys, delta=2.0):
+        found, columns = self.suggested(image)
+        self.assertEqual(self.ROWS, len(found) - 1, "every row of the table")
+        for expected, y in zip(ys, found):
+            self.assertAlmostEqual(expected, y, delta=delta)
+        self.assertEqual(len(self.EDGES) - 1, len(columns))
+        self.assertAlmostEqual(self.EDGES[0], columns[0]["box"][0] * self.WIDTH, delta=3)
+        self.assertAlmostEqual(self.EDGES[-1], (columns[-1]["box"][0] + columns[-1]["box"][2]) * self.WIDTH, delta=3)
+
+    def test_lines_of_writing_are_not_row_rules(self):
+        image, ys = self.page(writing=True)
+
+        found = lm.detect_grid(image)
+        self.assertWholeTable(image, ys)
+        # The magnetic lines the builder and Snap use have no line of writing among them either.
+        for y in found["horizontal"]:
+            self.assertFalse(any(abs(y * self.HEIGHT - (rule - 12)) <= 3 for rule in ys[1:]), y * self.HEIGHT)
+
+    def test_writing_and_faint_rules_together_still_give_the_whole_table(self):
+        image, ys = self.page(writing=True, lost=(8, 11, 15, 16, 17))
+
+        self.assertWholeTable(image, ys)
+
+    def test_a_thick_frame_rule_is_print(self):
+        rules = [{"thickness": 1.0, "covered": 900, "lo": 40, "hi": 1160} for _ in range(8)]
+        frame = {"thickness": 4.0, "covered": 1121, "lo": 40, "hi": 1160}
+        written = {"thickness": 5.0, "covered": 800, "lo": 40, "hi": 1160}
+
+        self.assertEqual(rules + [frame], lm._without_writing(rules + [frame, written]))
+
+    def test_a_stray_line_does_not_cut_the_table_in_two(self):
+        # A fold seen only at the right of the page, 11 px below a rule the page lost.
+        image, ys = self.page(lost=(8,))
+        ImageDraw.Draw(image).line([(800, ys[8] + 11), (1160, ys[8] + 11)], fill=(RULE,) * 3, width=1)
+
+        self.assertWholeTable(image, ys)
+
+    def test_stray_lines_are_told_from_rows_of_another_height(self):
+        ys = [100.0, 142, 184, 226, 268, 310, 352, 394, 436]
+        rules = [{"y": y} for y in ys]
+
+        def kept(lines):
+            return lm._drop_stray_rules([{"y": y} for y in lines], lines)[1]
+
+        # Between two rules two rows apart, fitting neither: dropped.
+        self.assertEqual(ys[:4] + ys[5:], kept(ys[:4] + [279.0] + ys[5:]))
+        # Inside a row: dropped.
+        self.assertEqual(ys, kept(ys[:4] + [245.0] + ys[4:]))
+        # A printed rule with one tall row below it stays where it is printed.
+        self.assertEqual(ys[:4] + [262.0] + ys[5:], kept(ys[:4] + [262.0] + ys[5:]))
+        # Evenly ruled: nothing to drop.
+        self.assertEqual((rules, ys), lm._drop_stray_rules(rules, ys))
+
+    def test_columns_reach_a_frame_the_row_rules_stop_short_of(self):
+        image, ys = self.page(short_rows=20)
+
+        self.assertWholeTable(image, ys)
+
+    def test_a_short_line_beside_the_frame_is_no_column(self):
+        # The shadow of the book's spine: half the table tall, 14 px inside the frame.
+        image, ys = self.page()
+        ImageDraw.Draw(image).line([(self.EDGES[0] + 14, ys[9]), (self.EDGES[0] + 14, ys[-1])], fill=(RULE,) * 3, width=1)
+
+        self.assertWholeTable(image, ys)
+
+
+@unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
 class GridPastThePageTest(unittest.TestCase):
     def test_the_geometry_detect_saves_ends_where_the_page_does(self):
         # The template has 4 more rows than the page, so rules are estimated past its bottom edge.

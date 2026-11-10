@@ -350,6 +350,57 @@ export function addColumn(boxes, column, selected = null, first = null) {
     return { boxes: next, index: next.length - 1 };
 }
 
+/**
+ * The columns a page's printed table has, put onto the columns already in the
+ * layout. Detect from sample finds each page's own column lines; a page 2 that
+ * started as a copy of page 1 must not keep page 1's column positions.
+ *
+ * Existing columns keep their name and settings and take the printed position
+ * (x, width) and the rows' top and height. With the same number of columns
+ * they pair by order; otherwise each printed column takes the unused existing
+ * column it overlaps most (at least half its width), and a printed column
+ * with no such partner is new (`created`, in order). Existing columns left
+ * without a printed column are dropped.
+ *
+ * @param {object[]} existing  The layout's columns (any order).
+ * @param {{x: number, w: number}[]} printed  The page's printed columns.
+ * @param {number} top  First row line.
+ * @param {number} bottom  Last row line.
+ * @returns {{columns: object[], created: number[]}} one box per printed
+ *          column, left to right; `created` are the indexes of the new ones
+ */
+export function fitColumnsToPrinted(existing, printed, top, bottom) {
+    const sorted = [...existing].sort((a, b) => a.x - b.x);
+    const wanted = [...printed].sort((a, b) => a.x - b.x);
+    const used = new Set();
+    const created = [];
+
+    const columns = wanted.map((column, index) => {
+        let match = null;
+        if (sorted.length === wanted.length) {
+            match = index;
+        } else {
+            let best = 0.5 * column.w;
+            sorted.forEach((candidate, at) => {
+                if (used.has(at)) return;
+                const overlap = Math.min(candidate.x + candidate.w, column.x + column.w) - Math.max(candidate.x, column.x);
+                if (overlap > best) {
+                    best = overlap;
+                    match = at;
+                }
+            });
+        }
+        if (match === null) {
+            created.push(index);
+            return { x: column.x, y: top, w: column.w, h: bottom - top, kind: 'column' };
+        }
+        used.add(match);
+        return { ...sorted[match], x: column.x, y: top, w: column.w, h: bottom - top };
+    });
+
+    return { columns, created };
+}
+
 /** How much of a field's width may lie over the table's columns for it to become one. */
 const COLUMN_OVERLAP = 0.25;
 

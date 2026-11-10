@@ -9710,6 +9710,21 @@ $dashboard-reveal-step: 40ms;
 .template-builder-field-list {
   max-block-size: min(40vh, 22rem);
   overscroll-behavior: contain;
+
+  // A new layout starts with no fields: say what to do next.
+  &:empty {
+    padding: .9rem 1rem;
+    color: var(--bs-secondary-color);
+    background: rgba(var(--crms-ink-rgb), .03);
+    border: 1px dashed var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    font-size: .8125rem;
+    text-align: center;
+
+    &::before {
+      content: "No fields yet. Choose a sample, then use Detect from sample for a ruled table, or type a name below and add a field.";
+    }
+  }
 }
 
 // Person rows card body: the buttons, the groups, then Back to automatic.

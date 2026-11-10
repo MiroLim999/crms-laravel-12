@@ -682,9 +682,11 @@ def _rule_pixels(gray, length=60):
 def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near=0.0):
     """Straight printed rules along one axis.
 
-    Returns (rules, pixels). Rules are {"a", "b", "lo", "hi"} where the rule
-    is v = a + b*u, u being x for horizontal rules and y for vertical ones,
-    and [lo, hi] the extent along u. `pixels` marks every rule fragment long
+    Returns (rules, pixels). Rules are {"a", "b", "lo", "hi", "covered",
+    "thickness"} where the rule is v = a + b*u, u being x for horizontal rules
+    and y for vertical ones, [lo, hi] the extent along u, "covered" how many
+    pixels of that extent the rule was actually found on and "thickness" its
+    mean thickness there. `pixels` marks every rule fragment long
     enough to be print rather than handwriting, including fragments too short
     or too bent to join a fitted rule; those still have to be erased.
 
@@ -763,7 +765,8 @@ def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near
     for rule in merged:
         covered = len(np.unique(rule["u"]))
         if covered >= min_span:
-            rules.append({"a": rule["a"], "b": rule["b"], "lo": rule["lo"], "hi": rule["hi"]})
+            rules.append({"a": rule["a"], "b": rule["b"], "lo": rule["lo"], "hi": rule["hi"],
+                          "covered": int(covered), "thickness": len(rule["u"]) / covered})
             thicknesses.append(float(np.median([member["thickness"] for member in rule["members"]])))
             for member in rule["members"]:
                 pixels[member["window"]] |= member["mask"]
@@ -2411,11 +2414,88 @@ def _bridge_missing_rules(rules, ys):
     return out_rules, out_ys
 
 
+# A line of writing taken for a rule is at least this many times as thick as
+# the page's hairline rules, and this many pixels thick.
+WRITING_THICKNESS = 2.0
+WRITING_MIN_THICKNESS = 3.5
+
+# Print is found along nearly all of a rule's length; a line of writing has
+# the gaps between its words.
+PRINT_COVERAGE = 0.9
+
+
+def _without_writing(rules):
+    """Row rules without the lines of writing a small page passes off as rules.
+
+    On a page drawn small (a whole register page some 1,200 px tall) a line
+    of joined-up handwriting is only a few pixels tall, thin enough for the
+    thin-line test, and its words string together into a "rule" running a
+    third of a row above the real one. Those cut the evenly ruled run the
+    table is found by into pieces: on one such sample only the last 8 of 20
+    rows were found, and on its facing page none at all.
+
+    Such a line is told from print by two things together: it is at least
+    twice as thick as the page's hairline rules (on that sample 4 to 5 px
+    against 2), and it is broken between the words, where print - a thick
+    frame or header rule included - runs unbroken.
+    """
+    if len(rules) < 4:
+        return rules
+    hairline = float(np.percentile([rule["thickness"] for rule in rules], 25))
+    limit = max(WRITING_MIN_THICKNESS, WRITING_THICKNESS * hairline)
+    return [rule for rule in rules
+            if rule["thickness"] < limit or rule["covered"] >= PRINT_COVERAGE * (rule["hi"] - rule["lo"] + 1)]
+
+
+def _drop_stray_rules(rules, ys):
+    """Row rules without the lines that lie off the table's rhythm.
+
+    A fold, a tear or a rule seen only at one end of the page (and so
+    measured askew) comes back as a line somewhere inside a row. Left in, it
+    ends the evenly ruled run there. A line is dropped when the two lines
+    around it are a whole number of rows apart, each of them begins or ends
+    an ordinary row on its other side, and the line itself fits neither side:
+    it is no whole number of rows from the line above it, nor from the one
+    below. (A printed rule with one tall row beside it stays.)
+
+    `rules` and `ys` go together (sorted by y, in pixels). Returns both.
+    """
+    rules, ys = list(rules), list(ys)
+
+    def whole_rows(gap, row, tolerance):
+        k = int(round(gap / row))
+        return 1 <= k <= MAX_BRIDGED_ROWS and abs(gap / k - row) <= tolerance * row
+
+    while len(ys) >= 5:
+        gaps = np.diff(ys)
+        typical = float(np.median(gaps))
+        if typical <= 0:
+            break
+        normal = [0.75 * typical <= gap <= 1.25 * typical for gap in gaps]
+        stray = None
+        for i in range(2, len(ys) - 2):
+            if not (normal[i - 2] and normal[i + 1]):
+                continue
+            # The rows around the line, without the two gaps it makes itself.
+            near = [gaps[j] for j in range(max(0, i - 5), min(len(gaps), i + 5)) if normal[j] and j not in (i - 1, i)]
+            row = float(np.median(near))
+            if whole_rows(ys[i + 1] - ys[i - 1], row, 0.12) \
+                    and not whole_rows(gaps[i - 1], row, 0.15) and not whole_rows(gaps[i], row, 0.15):
+                stray = i
+                break
+        if stray is None:
+            break
+        del rules[stray], ys[stray]
+    return rules, ys
+
+
 def detect_grid(page):
     """Printed rules on a page: a template sample, or a document being scanned.
 
     Suggests ruled_ys (the longest run of evenly spaced row rules, with rules
-    a worn page lost inside it put back: see _bridge_missing_rules), columns
+    a worn page lost inside it put back: see _bridge_missing_rules; lines of
+    writing and stray lines are left out first: see _without_writing and
+    _drop_stray_rules), columns
     (the spans between vertical rules inside that run) and frame_bottom
     (where those column rules end: the bottom of the table), all as page
     fractions. `page` is a path or a PIL image. Also says how far the page's
@@ -2428,6 +2508,7 @@ def detect_grid(page):
     gray = np.asarray(image, dtype=np.uint8)
     h_evidence, v_evidence = _rule_pixels(gray)
     h_rules, _ = _find_rules(h_evidence, "h", 0.2 * width)
+    h_rules = _without_writing(h_rules)
     v_rules, _ = _find_rules(v_evidence, "v", 0.15 * height)
 
     suggestion = {"ruled_ys": [], "columns": [], "estimated_ys": 0}
@@ -2450,6 +2531,7 @@ def detect_grid(page):
             kept.append((rule, y))
         rows = [rule for rule, _ in kept]
         ys = [y for _, y in kept]
+        rows, ys = _drop_stray_rules(rows, ys)
         rows, ys = _bridge_missing_rules(rows, ys)
     if len(ys) >= 3:
         gaps = np.diff(ys)
@@ -2500,12 +2582,29 @@ def detect_grid(page):
                 if r["lo"] <= top + 0.5 * span and r["hi"] >= top + 0.5 * span
                 and r["hi"] - r["lo"] >= 0.5 * span
             ]
-            crossing = [(x, r) for x, r in crossing if lo_x - 6 <= x <= hi_x + 6]
-            xs = sorted(x for x, _ in crossing)
+            if first > 0:
+                # Faint row rules can all stop short of the table's frame; the
+                # rule above the first row (the header's) still reaches it.
+                lo_x = min(lo_x, rows[first - 1]["lo"])
+                hi_x = max(hi_x, rows[first - 1]["hi"])
+            crossing = sorted(((x, r) for x, r in crossing if lo_x - 6 <= x <= hi_x + 6),
+                              key=lambda found: found[0])
             if crossing:
                 suggestion["frame_bottom"] = round(float(np.median([r["hi"] for _, r in crossing])) / height, 5)
+            # Two lines closer than half a row are no column: the much shorter
+            # one is a fold or the shadow of the book's spine beside the frame.
+            lines = []
+            for x, r in crossing:
+                length = r["hi"] - r["lo"]
+                if lines and x - lines[-1][0] <= max(8.0, 0.5 * typical):
+                    if length < 0.8 * lines[-1][1]:
+                        continue
+                    if lines[-1][1] < 0.8 * length:
+                        lines[-1] = (x, length)
+                        continue
+                lines.append((x, length))
             deduped = []
-            for x in xs:
+            for x, _ in lines:
                 if not deduped or x - deduped[-1] > 8:
                     deduped.append(x)
             for left, right in zip(deduped[:-1], deduped[1:]):

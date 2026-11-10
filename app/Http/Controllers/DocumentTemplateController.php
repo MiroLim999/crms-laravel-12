@@ -68,8 +68,8 @@ class DocumentTemplateController extends Controller
         return view('templates.edit', [
             'template' => null,
             'docType' => $type,
-            // Start from the prototype's field boxes rather than a blank page.
-            'fields' => $type->defaultFields(),
+            // A new layout starts empty: the admin adds the fields this document has.
+            'fields' => [],
             'columns' => [],
             'ruledYs' => [],
             'pageTwoChoices' => $this->pageTwoChoices($type->getKey(), null),

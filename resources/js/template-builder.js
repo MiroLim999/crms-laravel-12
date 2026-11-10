@@ -10,6 +10,7 @@ import {
     columnBand,
     distributeRuledYs,
     fieldsOverLedger,
+    fitColumnsToPrinted,
     followFirstAndLastLine,
     gridTilt,
     insertRuledY,
@@ -1772,30 +1773,36 @@ async function detectLedgerGrid() {
         const bottom = detected[detected.length - 1];
         let next = boxes;
 
-        if (ledgerColumns(boxes).length === 0 && Array.isArray(payload.columns) && payload.columns.length > 0) {
-            // Name each column after the topmost field already sitting in it.
+        const printed = (Array.isArray(payload.columns) ? payload.columns : [])
+            .map((column) => ({ x: column.box[0], w: column.box[2] }));
+
+        if (printed.length > 0) {
+            // This page's own column lines. Columns already in the layout (page 2
+            // starts as a copy of page 1's) keep their names and settings but
+            // move onto this page's printed columns.
             const fields = boxes.filter((box) => !isColumn(box));
-            const taken = new Set(boxes.map((box) => box.name.trim().toLocaleLowerCase()));
-            const columns = payload.columns.map((column, index) => {
-                const [x, , w] = column.box;
+            const fitted = fitColumnsToPrinted(boxes.filter(isColumn), printed, top, bottom);
+            const taken = new Set(fields.map((box) => box.name.trim().toLocaleLowerCase()));
+            fitted.columns.forEach((column, index) => {
+                if (!fitted.created.includes(index)) taken.add(column.name.trim().toLocaleLowerCase());
+            });
+            fitted.created.forEach((index) => {
+                // Name a new column after the topmost field already sitting in it.
+                const column = fitted.columns[index];
                 const inside = fields
-                    .filter((field) => field.x + field.w / 2 >= x && field.x + field.w / 2 <= x + w)
+                    .filter((field) => field.x + field.w / 2 >= column.x && field.x + field.w / 2 <= column.x + column.w)
                     .sort((a, b) => a.y - b.y)[0];
                 const fieldName = inside?.name?.trim();
-                return {
+                fitted.columns[index] = {
+                    ...column,
                     name: uniqueName(fieldName ? `${fieldName} column` : `Column ${index + 1}`, taken),
-                    x,
-                    y: top,
-                    w,
-                    h: bottom - top,
                     personGroup: null,
                     personFieldOrder: null,
-                    kind: 'column',
                 };
             });
-            next = [...boxes, ...columns];
+            next = [...fields, ...fitted.columns];
         } else {
-            // Keep the admin's columns; stretch them over the detected rows.
+            // No column lines found: keep the admin's columns, stretched over the detected rows.
             next = boxes.map((box) => (isColumn(box) ? { ...box, y: top, h: bottom - top } : box));
         }
 
