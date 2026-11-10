@@ -111,7 +111,7 @@ not depend on page-auth.scss (no longer loaded here).
             font-weight: 600;
             letter-spacing: .06em;
             text-transform: uppercase;
-            font-size: .8rem;
+            font-size: 1.15rem;
             line-height: 1.3;
         }
 
@@ -252,7 +252,6 @@ not depend on page-auth.scss (no longer loaded here).
 
             <aside class="auth-brand">
                 <div class="auth-brand-top">
-                    <img src="{{ asset('assets/img/crms-logo.png') }}" alt="" aria-hidden="true">
                     <span>Civil Registry<br>Management System</span>
                 </div>
 
@@ -262,7 +261,7 @@ not depend on page-auth.scss (no longer loaded here).
                 </div>
 
                 <div>
-                    <div class="auth-eyebrow">Civil Registry Management System</div>
+                    
                     <h2>Every record, safely in one place.</h2>
                     <p>Scan civil registry documents, extract their data with OCR, and keep every record organized and searchable.</p>
                     <div class="auth-brand-foot">Office of the City Civil Registrar · City of Maasin</div>
