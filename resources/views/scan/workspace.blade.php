@@ -113,8 +113,7 @@
                                     <div><span><kbd>[</kbd> or <kbd>]</kbd></span><small>Tilt selected 0.5°
                                             (<kbd>Shift</kbd>: 5°)</small></div>
                                     <div><span>Double-click the knob</span><small>Straighten</small></div>
-                                    <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>C</kbd> /
-                                            <kbd>V</kbd></span><small>Copy / paste selected</small></div>
+                                    <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>C</kbd> / <kbd>V</kbd></span><small>Copy / paste selected</small></div>
                                     <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Delete selected</small>
                                     </div>
                                     <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>Z</kbd></span><small>Undo last
