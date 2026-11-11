@@ -3,15 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\DocumentType;
-use App\Jobs\TestTemplateLayout;
 use App\Models\DocumentTemplate;
 use App\Models\User;
 use App\Services\Lines\LineMarkers;
-use App\Services\Lines\LineMarkersException;
 use App\Support\MarkerBounds;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -27,12 +25,6 @@ class TemplateBuilderGridChecksTest extends TestCase
     private const COLUMNS = [
         ['name' => "Child's Name", 'box' => [0.1, 0.2, 0.3, 0.6]],
         ['name' => 'Date of Birth', 'box' => [0.4, 0.2, 0.2, 0.6]],
-    ];
-
-    private const TEST_GEOMETRY = [
-        'columns' => [['name' => "Child's Name", 'box' => [0.1, 0.2, 0.3, 0.6]]],
-        'ruled_ys' => [0.2, 0.5, 0.8],
-        'fields' => [],
     ];
 
     /** @param  array<string, mixed>  $overrides */
@@ -146,149 +138,19 @@ class TemplateBuilderGridChecksTest extends TestCase
             ->assertJsonPath('lines.vertical', [0.05, 0.5]);
     }
 
-    public function test_testing_a_layout_answers_at_once_with_an_id_to_poll(): void
+    public function test_the_removed_test_on_sample_leaves_nothing_behind(): void
     {
-        Storage::fake('local');
-        Queue::fake();
-        $admin = User::factory()->superAdmin()->create();
-
-        $response = $this->actingAs($admin)
-            ->post(route('templates.test-layout'), [
-                'page' => UploadedFile::fake()->image('sample.png', 400, 300),
-                'geometry_json' => json_encode(self::TEST_GEOMETRY, JSON_THROW_ON_ERROR),
-            ])
-            ->assertAccepted()
-            ->assertJsonPath('status', 'queued');
-
-        $id = $response->json('id');
-        $this->assertTrue(Str::isUuid($id));
-        $this->assertSame(route('templates.test-layout.status', $id), $response->json('statusUrl'));
-        Storage::disk('local')->assertExists(TestTemplateLayout::directory($id).'/page.png');
-        Queue::assertPushed(TestTemplateLayout::class, fn (TestTemplateLayout $job) => $job->testId === $id
-            && $job->geometry['ruled_ys'] === self::TEST_GEOMETRY['ruled_ys']);
-
-        $this->actingAs($admin)->getJson(route('templates.test-layout.status', $id))
-            ->assertOk()
-            ->assertExactJson(['status' => 'queued']);
-
-        Storage::disk('local')->put(TestTemplateLayout::directory($id).'/started', '');
-        $this->actingAs($admin)->getJson(route('templates.test-layout.status', $id))
-            ->assertExactJson(['status' => 'running']);
-    }
-
-    public function test_the_layout_is_tested_on_its_sample_without_keeping_anything(): void
-    {
-        Storage::fake('local');
-        $this->app->instance(LineMarkers::class, new class extends LineMarkers
-        {
-            public function detect(string $pagePath, array $geometry, string $outDirectory): array
-            {
-                file_put_contents($outDirectory.'/lines.json', '{}');
-
-                return [
-                    'size' => [400, 300],
-                    'deskew' => 0.0,
-                    'fit' => ['fitted' => true],
-                    'geometry' => $geometry,
-                    'notes' => [['code' => 'lines_below_grid', 'count' => 2, 'rows' => 1], ['code' => 'made_up']],
-                    // line_markers.py reports how many lines were left out.
-                    'ignored' => 1,
-                    'lines' => [
-                        ['source' => 'kraken', 'column' => "Child's Name", 'column_index' => 0, 'row' => 1,
-                            'polygon' => [[1, 2], [3, 2], [3, 4]], 'bbox' => [1, 2, 2, 2], 'crop' => 'c.png', 'flags' => ['no_row', 'other']],
-                    ],
-                ];
-            }
-        });
-
-        $admin = User::factory()->superAdmin()->create();
-        // The test queue runs the job at once, so the result is ready.
-        $id = $this->actingAs($admin)
-            ->post(route('templates.test-layout'), [
-                'page' => UploadedFile::fake()->image('sample.png', 400, 300),
-                'geometry_json' => json_encode(self::TEST_GEOMETRY, JSON_THROW_ON_ERROR),
-            ])
-            ->assertAccepted()
-            ->json('id');
-
-        $response = $this->actingAs($admin)->getJson(route('templates.test-layout.status', $id))
-            ->assertOk()
-            ->assertJsonPath('status', 'done')
-            ->assertJsonPath('fit.fitted', true)
-            ->assertJsonPath('image', null)
-            ->assertJsonPath('ignored', 1)
-            ->assertJsonPath('notes', [['code' => 'lines_below_grid', 'count' => 2, 'rows' => 1]])
-            ->assertJsonPath('lines.0.flags', ['no_row'])
-            ->assertJsonPath('lines.0.row', 1);
-
-        $this->assertSame([0.2, 0.5, 0.8], $response->json('geometry.ruled_ys'));
-        // The sample is a real register page: gone once the result is shown.
-        $this->assertSame([], Storage::disk('local')->allFiles(TestTemplateLayout::ROOT));
-        $this->actingAs($admin)->getJson(route('templates.test-layout.status', $id))->assertNotFound();
-
-        $staff = User::factory()->staff()->create();
-        $this->actingAs($staff)
-            ->post(route('templates.test-layout'), [
-                'page' => UploadedFile::fake()->image('sample.png', 400, 300),
-                'geometry_json' => json_encode(self::TEST_GEOMETRY, JSON_THROW_ON_ERROR),
-            ])
-            ->assertForbidden();
-        $this->actingAs($staff)->getJson(route('templates.test-layout.status', $id))->assertForbidden();
-    }
-
-    public function test_a_test_that_line_detection_refuses_reports_why(): void
-    {
-        Storage::fake('local');
-        $this->app->instance(LineMarkers::class, new class extends LineMarkers
-        {
-            public function detect(string $pagePath, array $geometry, string $outDirectory): array
-            {
-                throw new LineMarkersException('Line detection failed: no table found.');
-            }
-        });
-        $admin = User::factory()->superAdmin()->create();
-
-        $id = $this->actingAs($admin)
-            ->post(route('templates.test-layout'), [
-                'page' => UploadedFile::fake()->image('sample.png', 400, 300),
-                'geometry_json' => json_encode(self::TEST_GEOMETRY, JSON_THROW_ON_ERROR),
-            ])
-            ->json('id');
-
-        $this->actingAs($admin)->getJson(route('templates.test-layout.status', $id))
-            ->assertUnprocessable()
-            ->assertExactJson(['message' => 'Line detection failed: no table found.']);
-        $this->assertSame([], Storage::disk('local')->allFiles(TestTemplateLayout::ROOT));
-    }
-
-    public function test_abandoned_layout_tests_are_pruned(): void
-    {
+        // "Test on sample" was removed (2026-11-11): its pages, kept under
+        // template-tests/, are register pages and go with the next prune.
         Storage::fake('local');
         $disk = Storage::disk('local');
-        $stale = TestTemplateLayout::directory((string) Str::uuid());
-        $fresh = TestTemplateLayout::directory((string) Str::uuid());
-        $disk->put($stale.'/page.png', 'png');
-        $disk->put($fresh.'/page.png', 'png');
-        touch($disk->path($stale), now()->subDays(2)->getTimestamp());
+        $disk->put('template-tests/'.Str::uuid().'/page.png', 'png');
 
         $this->artisan('documents:prune-pages')->assertSuccessful();
 
-        $disk->assertMissing($stale);
-        $disk->assertExists($fresh.'/page.png');
-    }
-
-    public function test_a_broken_layout_is_not_tested(): void
-    {
-        $this->actingAs(User::factory()->superAdmin()->create())
-            ->postJson(route('templates.test-layout'), [
-                'page' => UploadedFile::fake()->image('sample.png', 400, 300),
-                'geometry_json' => json_encode([
-                    'columns' => [['name' => 'A', 'box' => [0.1, 0.2, 0.3, 0.6]]],
-                    'ruled_ys' => [],
-                    'fields' => [],
-                ], JSON_THROW_ON_ERROR),
-            ])
-            ->assertJsonValidationErrors('geometry.ruled_ys');
+        $disk->assertMissing('template-tests');
+        $this->assertFalse(Route::has('templates.test-layout'));
+        $this->assertFalse(Route::has('templates.test-layout.status'));
     }
 
     public function test_marker_bounds_count_the_turned_corners(): void

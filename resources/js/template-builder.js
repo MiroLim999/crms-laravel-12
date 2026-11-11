@@ -8,6 +8,7 @@ import {
 import {
     clampRuledY,
     columnBand,
+    columnsAtPageTilt,
     distributeRuledYs,
     fieldsOverLedger,
     fitColumnsToPrinted,
@@ -17,6 +18,7 @@ import {
     isColumn,
     ledgerGridProblems,
     remapRuledYs,
+    rowsWithinFrame,
     sameBand,
     tiltColumns,
 } from './ledger-grid';
@@ -33,8 +35,7 @@ import {
     layoutUndoIsBlocked,
 } from './template-builder-shortcuts';
 import { LayoutHistory } from './template-history';
-import { summariseTest, testFindings, testLineStatus } from './layout-test';
-import { gridNotes } from './line-geometry';
+import { guessedRowCount, publishProblems } from './layout-publish-checks';
 import { setDisclosureExpanded } from './disclosure-motion';
 
 const configNode = document.getElementById('templateBuilderConfig');
@@ -1431,7 +1432,8 @@ form.addEventListener('submit', (event) => {
         return;
     }
 
-    if (coveredFieldIndexes.length > 0 && !window.confirm(
+    // Asked once: not again when the save check sends the form on.
+    if (!saveChecked && coveredFieldIndexes.length > 0 && !window.confirm(
         `${coveredFieldIndexes.length === 1 ? '1 field covers' : `${coveredFieldIndexes.length} fields cover`} ledger cells. `
         + 'Staff scans would read the handwriting under them as those fields, and those rows would lose their cells.\n\n'
         + 'OK: save anyway.\nCancel: go back and move or remove them.',
@@ -1440,13 +1442,16 @@ form.addEventListener('submit', (event) => {
         return;
     }
 
-    if (publishIntent.value === '1' && ledgerColumns().length > 0 && !sampleLoaded && !window.confirm(
-        'This ledger has no sample page, so its row lines have not been checked against a real page.\n\n'
-        + 'OK: publish anyway.\nCancel: go back and add a sample.',
-    )) {
-        event.preventDefault();
-        return;
+    // Publishing, or keeping guessed row lines, is asked first (#saveCheckModal).
+    if (!saveChecked) {
+        const check = saveCheck();
+        if (check.publishing || check.guessed > 0) {
+            event.preventDefault();
+            openSaveCheck(check);
+            return;
+        }
     }
+    saveChecked = false;
 
     leavingBySave = true;
     serialiseFields();
@@ -1455,6 +1460,103 @@ form.addEventListener('submit', (event) => {
         button.disabled = true;
     });
 });
+
+// ------------------------------------------------------------ save check
+//
+// Before a save that publishes: the same checks the server makes (a sample,
+// real column names, a Name column), and a last "Publish for Staff?". Before
+// any save: row lines still amber (guessed by Detect) are pointed out.
+
+/** Set once the admin answered the save check, for the submit it starts. */
+let saveChecked = false;
+
+function saveCheck() {
+    if (twoPage) storeActivePage();
+    const pages = twoPage
+        ? [pageLayouts[1], pageLayouts[2]]
+        : [{ boxes: marker.toJSON(), ruledYs, estimated: [...estimatedYs] }];
+    const layoutChanged = !layoutMatchesBaseline()
+        || otherPageChanged()
+        || twoPage !== (savedPageTwo !== null);
+    // A published layout saved without new markers stays published: nothing to publish.
+    const publishing = publishIntent.value === '1' && !(config.published && !layoutChanged);
+
+    return {
+        publishing,
+        problems: publishing
+            ? publishProblems({ hasSample: sampleLoaded, pages: pages.map((page) => page.boxes) })
+            : [],
+        // Only a page with columns keeps its row lines (see layoutPayload).
+        guessed: guessedRowCount(
+            pages.map((page) => ({ ruledYs: page.boxes.some(isColumn) ? page.ruledYs : [], estimated: page.estimated })),
+            ruleKey,
+        ),
+    };
+}
+
+function openSaveCheck({ publishing, problems, guessed }) {
+    const modal = element('saveCheckModal');
+    const list = element('saveCheckList');
+    const confirm = element('saveCheckConfirmBtn', HTMLButtonElement);
+    const draft = element('saveCheckDraftBtn', HTMLButtonElement);
+    const guessNote = guessed > 0
+        ? `${guessed === 1 ? '1 row line is' : `${guessed} row lines are`} amber: Detect guessed `
+            + `${guessed === 1 ? 'it' : 'them'} where the printed line was faint or missing. Check each against the sample `
+            + '(drag or nudge it) so Staff rows are cut in the right place.'
+        : null;
+
+    let kicker = 'Before saving';
+    let title = 'Some row lines are guesses';
+    let lead = '';
+    let items = guessNote ? [guessNote] : [];
+
+    if (publishing && problems.length > 0) {
+        kicker = 'Publish for Staff';
+        title = 'Not ready to publish yet';
+        lead = 'Fix these first, or save it as a draft for now:';
+        items = [...problems, ...items];
+    } else if (publishing) {
+        kicker = 'Publish for Staff';
+        title = 'Publish this layout for Staff?';
+        lead = config.published
+            ? 'Staff get the new version as soon as it is saved. Records already read keep the old one.'
+            : 'Staff can scan with this layout as soon as it is saved. Other published layouts of this type stay published.';
+    } else {
+        // Only the guessed rows to tell: said in the lead, no list.
+        lead = guessNote ?? '';
+        items = [];
+    }
+
+    element('saveCheckKicker').textContent = kicker;
+    element('saveCheckKicker').className = `text-uppercase small fw-semibold mb-1 ${publishing ? 'text-success' : 'text-warning'}`;
+    element('saveCheckTitle').textContent = title;
+    element('saveCheckLead').textContent = lead;
+    list.replaceChildren(...items.map((text) => {
+        const item = document.createElement('li');
+        item.className = 'mb-1';
+        item.textContent = text;
+        return item;
+    }));
+    list.classList.toggle('d-none', items.length === 0);
+
+    const blocked = publishing && problems.length > 0;
+    confirm.classList.toggle('d-none', blocked);
+    confirm.textContent = publishing ? 'Publish for Staff' : 'Save anyway';
+    confirm.className = `btn ${publishing ? 'btn-success' : 'btn-primary'}${blocked ? ' d-none' : ''}`;
+    draft.classList.toggle('d-none', !blocked);
+
+    window.bootstrap.Modal.getOrCreateInstance(modal).show();
+}
+
+function submitAfterCheck(publish) {
+    window.bootstrap.Modal.getInstance(element('saveCheckModal'))?.hide();
+    publishIntent.value = publish ? '1' : '0';
+    saveChecked = true;
+    form.requestSubmit();
+}
+
+element('saveCheckConfirmBtn', HTMLButtonElement).addEventListener('click', () => submitAfterCheck(publishIntent.value === '1'));
+element('saveCheckDraftBtn', HTMLButtonElement).addEventListener('click', () => submitAfterCheck(false));
 
 // Explicitly attach the file that produced the current preview. Native file
 // inputs already contribute it in the common case; set() also covers dropped
@@ -1543,7 +1645,7 @@ function renderLedgerGrid() {
     summary.textContent = columns.length === 0 && ruledYs.length === 0
         ? 'No grid yet: each field is read as one rectangle.'
         : estimated > 0
-            ? `${estimated} line${estimated === 1 ? '' : 's'} below the last printed rule ${estimated === 1 ? 'is' : 'are'} estimated (amber): check ${estimated === 1 ? 'it' : 'them'} against the page.`
+            ? `${estimated} line${estimated === 1 ? '' : 's'} ${estimated === 1 ? 'is' : 'are'} guessed (amber): Detect could not see ${estimated === 1 ? 'its' : 'their'} printed line. Check ${estimated === 1 ? 'it' : 'them'} against the page.`
             : '';
     summary.classList.toggle('d-none', summary.textContent === '');
 
@@ -1799,7 +1901,9 @@ async function detectLedgerGrid() {
         if (!printedLines) usePrintedLines(payload.lines);
 
         const boxes = marker.toJSON();
-        const detected = normaliseRuledYs(payload.ruled_ys);
+        const found = normaliseRuledYs(payload.ruled_ys);
+        // Lines below the table's frame (a signature line, the margin) are no rows.
+        const detected = rowsWithinFrame(found, payload.frame_bottom);
         const top = detected[0];
         const bottom = detected[detected.length - 1];
         let next = boxes;
@@ -1831,16 +1935,22 @@ async function detectLedgerGrid() {
                     personFieldOrder: null,
                 };
             });
-            next = [...fields, ...fitted.columns];
+            // A page scanned a little turned: the columns turn with it, as Snap does.
+            next = columnsAtPageTilt([...fields, ...fitted.columns], payload.tilt, pageAspect());
         } else {
             // No column lines found: keep the admin's columns, stretched over the detected rows.
             next = boxes.map((box) => (isColumn(box) ? { ...box, y: top, h: bottom - top } : box));
         }
 
-        // Lines below the last printed rule are Detect's estimate: shown
-        // amber until each is checked (moved or nudged) against the page.
-        const estimated = Math.max(0, Math.min(detected.length, Number(payload.estimated_ys) || 0));
-        estimatedYs = new Set(detected.slice(detected.length - estimated).map(ruleKey));
+        // Lines below the last printed rule, and lines put back where a printed
+        // rule was too faint to find, are Detect's guesses: shown amber until
+        // each is checked (moved or nudged) against the page.
+        const estimated = Math.max(0, Math.min(found.length, Number(payload.estimated_ys) || 0));
+        const guessed = new Set([
+            ...found.slice(found.length - estimated),
+            ...normaliseRuledYs(Array.isArray(payload.bridged_ys) ? payload.bridged_ys : []),
+        ].map(ruleKey));
+        estimatedYs = new Set(detected.map(ruleKey).filter((key) => guessed.has(key)));
         selectedRule = null;
         ruledYs = detected;
         replaceBoxes(next);
@@ -1969,216 +2079,6 @@ element('removeCoveredFieldsBtn', HTMLButtonElement).addEventListener('click', (
     replaceBoxes(marker.toJSON().filter((_, index) => !covered.has(index)));
 });
 
-// ------------------------------------------------------------ test on sample
-//
-// Outline the sample with the layout as it stands, saved or not, exactly as
-// Detect does it for Staff: the page straightened, the markers fitted to its
-// table, every line cut and put in a row. Nothing is read, and the server
-// deletes its copy of the sample once the result is shown.
-
-const TEST_COLOURS = {
-    placed: ['rgba(14, 154, 167, .16)', '#0e9aa7'],
-    field: ['rgba(105, 108, 255, .16)', '#696cff'],
-    shared: ['rgba(255, 171, 0, .22)', '#e59500'],
-    'no-row': ['rgba(255, 62, 29, .2)', '#ff3e1d'],
-};
-
-// How often the builder asks whether the test has finished, and when it stops.
-const TEST_POLL_MS = 1500;
-const TEST_GIVE_UP_MS = 15 * 60 * 1000;
-
-/** The markers as the server's line detection takes them (page fractions). */
-function testGeometry() {
-    const boxes = marker.toJSON();
-    const columns = boxes.filter(isColumn);
-    return {
-        columns: columns.map((box) => ({ name: box.name.trim(), box: [box.x, box.y, box.w, box.h], ...markerAngleMetadata(box) })),
-        ruled_ys: columns.length > 0 ? ruledYs : [],
-        fields: boxes.filter((box) => !isColumn(box)).map((box) => ({
-            name: box.name.trim(),
-            box: [box.x, box.y, box.w, box.h],
-            ...(groupingModeInput.value === 'custom' && positiveInteger(box.personGroup) !== null
-                ? { person_group: positiveInteger(box.personGroup), person_field_order: nonNegativeInteger(box.personFieldOrder) ?? 0 }
-                : {}),
-            ...markerAngleMetadata(box),
-        })),
-    };
-}
-
-function loadImage(source) {
-    return new Promise((resolve, reject) => {
-        const image = new Image();
-        image.onload = () => resolve(image);
-        image.onerror = () => reject(new Error('The tested page could not be shown.'));
-        image.src = source;
-    });
-}
-
-/** The page with every outline over it, and the row lines the test fitted. */
-async function drawTest(result) {
-    const target = element('layoutTestCanvas', HTMLCanvasElement);
-    const page = result.image ? await loadImage(result.image) : canvas;
-    const [width, height] = Array.isArray(result.size) ? result.size : [page.width, page.height];
-    target.width = width;
-    target.height = height;
-    const context = target.getContext('2d');
-    context.drawImage(page, 0, 0, width, height);
-
-    const fitted = result.geometry ?? {};
-    const columns = Array.isArray(fitted.columns) ? fitted.columns : [];
-    if (columns.length > 0) {
-        const left = Math.min(...columns.map((column) => column.box[0])) * width;
-        const right = Math.max(...columns.map((column) => column.box[0] + column.box[2])) * width;
-        context.save();
-        context.strokeStyle = 'rgba(14, 154, 167, .7)';
-        context.setLineDash([8, 5]);
-        context.lineWidth = 1.5;
-        (fitted.ruled_ys ?? []).forEach((y) => {
-            context.beginPath();
-            context.moveTo(left, y * height);
-            context.lineTo(right, y * height);
-            context.stroke();
-        });
-        context.restore();
-    }
-
-    context.lineWidth = 2;
-    result.lines.forEach((line) => {
-        if (!Array.isArray(line.polygon) || line.polygon.length < 3) return;
-        const [fill, stroke] = TEST_COLOURS[testLineStatus(line)];
-        context.beginPath();
-        line.polygon.forEach(([x, y], index) => (index === 0 ? context.moveTo(x, y) : context.lineTo(x, y)));
-        context.closePath();
-        context.fillStyle = fill;
-        context.fill();
-        context.strokeStyle = stroke;
-        context.stroke();
-    });
-}
-
-function showTestResult(result) {
-    const requiredColumns = ledgerColumns()
-        .filter((box) => markerFieldSettings(box).required !== false)
-        .map((box) => box.name);
-    const summary = summariseTest(result, requiredColumns);
-    const columns = new Set(result.lines.map((line) => line.column).filter(Boolean)).size;
-
-    element('layoutTestSummary').textContent = [
-        `${summary.lines} ${summary.lines === 1 ? 'line' : 'lines'}`,
-        summary.rows > 0 ? `${summary.rows} ${summary.rows === 1 ? 'row' : 'rows'}` : null,
-        `${columns} ${columns === 1 ? 'column or field' : 'columns and fields'}`,
-        summary.noRow + summary.shared > 0 ? `${summary.noRow + summary.shared} to review` : 'none to review',
-    ].filter(Boolean).join(' · ');
-
-    const findings = [
-        ...testFindings(summary),
-        ...gridNotes(result.notes).map((text) => ({ level: 'warning', text })),
-    ];
-    element('layoutTestFindings').replaceChildren(...(findings.length > 0 ? findings : [{
-        level: 'ok',
-        text: 'Every line landed in a row and a column. Check the outlines below against the page.',
-    }]).map((finding) => {
-        const item = document.createElement('li');
-        item.className = `is-${finding.level}`;
-        item.textContent = finding.text;
-        return item;
-    }));
-}
-
-/** The JSON of a Test layout reply, or an error saying why it failed. */
-async function testReply(response) {
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload) {
-        const firstError = payload?.errors ? Object.values(payload.errors).flat()[0] : null;
-        throw new Error(firstError || payload?.message || `The test failed with HTTP ${response.status}.`);
-    }
-    return payload;
-}
-
-/**
- * Test layout runs in the background queue, so the app stays usable while
- * it does. Poll until its result is ready, as the Verify step does.
- */
-async function waitForTest(started, statusText) {
-    const begun = Date.now();
-    let payload = started;
-    while (payload.status !== 'done') {
-        if (Date.now() - begun > TEST_GIVE_UP_MS) {
-            throw new Error('The test took too long. Check that the queue worker is running, then try again.');
-        }
-        statusText.textContent = payload.status === 'queued'
-            ? 'Waiting for the background worker. If this stays, check that the queue worker is running.'
-            : 'Outlining every line on the sample. This takes about half a minute.';
-        await new Promise((resolve) => window.setTimeout(resolve, TEST_POLL_MS));
-        payload = await testReply(await window.fetch(started.statusUrl, {
-            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-        }));
-    }
-    if (!Array.isArray(payload.lines)) {
-        throw new Error('The test finished without a result. Try again.');
-    }
-    return payload;
-}
-
-async function testLayout() {
-    if (!sampleLoaded) {
-        showBuilderError('Choose a sample page first: the layout is tested on it.');
-        return;
-    }
-    const blocking = updateLedgerChecks().find((problem) => problem.blocking);
-    if (blocking) {
-        openCard('ledgerCardToggle');
-        showBuilderError(blocking.message);
-        return;
-    }
-    if (marker.toJSON().length === 0) {
-        showBuilderError('Add a field or a ledger column to test.');
-        return;
-    }
-
-    const button = element('testLayoutBtn', HTMLButtonElement);
-    const status = element('layoutTestStatus');
-    const statusText = element('layoutTestStatusText');
-    button.disabled = true;
-    clearBuilderError();
-    status.classList.remove('d-none', 'is-error');
-    status.querySelector('.spinner-border')?.classList.remove('d-none');
-    statusText.textContent = 'Outlining every line on the sample. This takes about half a minute.';
-    element('layoutTestResult').classList.add('d-none');
-    window.bootstrap.Modal.getOrCreateInstance(element('layoutTestModal')).show();
-
-    try {
-        const blob = await new Promise((resolve, reject) => {
-            canvas.toBlob((result) => (result ? resolve(result) : reject(new Error('The sample could not be prepared.'))), 'image/png');
-        });
-        const data = new FormData();
-        data.set('page', blob, 'sample.png');
-        data.set('geometry_json', JSON.stringify(testGeometry()));
-
-        const started = await testReply(await window.fetch(config.testLayoutUrl, {
-            method: 'POST',
-            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': config.csrf, 'X-Requested-With': 'XMLHttpRequest' },
-            credentials: 'same-origin',
-            body: data,
-        }));
-        const payload = await waitForTest(started, statusText);
-
-        await drawTest(payload);
-        showTestResult(payload);
-        status.classList.add('d-none');
-        element('layoutTestResult').classList.remove('d-none');
-    } catch (error) {
-        status.classList.add('is-error');
-        status.querySelector('.spinner-border')?.classList.add('d-none');
-        statusText.textContent = error instanceof Error ? error.message : 'The layout could not be tested.';
-    } finally {
-        button.disabled = false;
-    }
-}
-
-element('testLayoutBtn', HTMLButtonElement).addEventListener('click', testLayout);
-
 // ------------------------------------------------------------- two pages
 // Page 1 and page 2 sit side by side in the one scroll box. The page being
 // edited is live (the usual markers, row lines and person rows); the other
@@ -2200,6 +2100,8 @@ function storeActivePage() {
         boxes: cloneBoxes(marker.toJSON()),
         ruledYs: [...ruledYs],
         grouping: groupingModeInput.value === 'custom' ? 'custom' : 'auto',
+        // Row lines still shown amber (guessed, not checked): they stay amber on return.
+        estimated: [...estimatedYs],
     };
 }
 
@@ -2261,7 +2163,7 @@ async function switchPage(page) {
     groupingModeInput.value = layout.grouping;
     ruledYs = [...layout.ruledYs];
     selectedRule = null;
-    estimatedYs = new Set();
+    estimatedYs = new Set(layout.estimated ?? []);
     previousMarkerCount = 0;
     replaceBoxes(layout.boxes);
     // Undo steps belong to the page they were made on.

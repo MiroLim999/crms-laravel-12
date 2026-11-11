@@ -369,6 +369,38 @@ export function addColumn(boxes, column, selected = null, first = null) {
  * @returns {{columns: object[], created: number[]}} one box per printed
  *          column, left to right; `created` are the indexes of the new ones
  */
+/**
+ * Row lines found on a sample, without those below the table's frame: a
+ * signature line or a margin rule under the table can pass for more rows.
+ * `frameBottom` is where the page's column rules end (Detect's frame_bottom),
+ * null when unknown. A line up to half a row below it stays (the frame's own
+ * bottom rule sits there). At least the first two lines are always kept.
+ *
+ * @param {number[]} ys  Row lines, top to bottom, page fractions.
+ * @param {number|null|undefined} frameBottom
+ * @returns {number[]}
+ */
+export function rowsWithinFrame(ys, frameBottom) {
+    const bottom = Number(frameBottom);
+    if (ys.length < 3 || !Number.isFinite(bottom) || bottom <= 0) return ys;
+    const gaps = ys.slice(1).map((y, index) => y - ys[index]);
+    const row = median(gaps) ?? 0;
+    const kept = ys.filter((y) => y <= bottom + 0.5 * row);
+    return kept.length >= 2 ? kept : ys.slice(0, 2);
+}
+
+/**
+ * Columns Detect fitted on a page scanned a little turned, turned with it: they
+ * are measured upright, at the table's middle, so they are set upright first
+ * and then turned as one table by the page's tilt (degrees clockwise). A tilt
+ * under a tenth of a degree is no tilt (as Snap to table, SNAP_TILT).
+ */
+export function columnsAtPageTilt(boxes, tilt, aspect = 1) {
+    const degrees = Math.round((Number(tilt) || 0) * 10) / 10;
+    const upright = boxes.map((box) => (isColumn(box) ? { ...box, angle: 0 } : box));
+    return Math.abs(degrees) >= 0.1 ? tiltColumns(upright, degrees, aspect) : upright;
+}
+
 export function fitColumnsToPrinted(existing, printed, top, bottom) {
     const sorted = [...existing].sort((a, b) => a.x - b.x);
     const wanted = [...printed].sort((a, b) => a.x - b.x);

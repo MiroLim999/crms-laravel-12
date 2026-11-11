@@ -54,8 +54,8 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 | Component | Stack | Primary Responsibilities |
 | :--- | :--- | :--- |
 | **Web Application** | Laravel 12, Blade, Bootstrap 5 (SNEAT), Vite, MySQL | User interfaces, authentication, template builder, verification workspace, record archival, change request moderation, audit logging, reporting. |
-| **Queue Worker** | `php artisan queue:work` (database queue), `ml/line_markers.py`, Kraken in `ml/.venv-kraken` | Runs the page job queued by **Detect** and **Scan with OCR**: straightens the page, fits the template to it, outlines every handwritten line, crops along the outlines and sends the crops to the OCR service. Also runs the Template Builder's **Test on sample**. Without a running worker, pages wait at "Waiting for the line detector". |
-| **Scheduler** | `php artisan schedule:work` | Runs `documents:prune-pages` every hour, which deletes aligned pages nobody submitted (and abandoned Test on sample folders) once they are older than `LINE_MARKERS_KEEP_HOURS` (default 24). |
+| **Queue Worker** | `php artisan queue:work` (database queue), `ml/line_markers.py`, Kraken in `ml/.venv-kraken` | Runs the page job queued by **Detect** and **Scan with OCR**: straightens the page, fits the template to it, outlines every handwritten line, crops along the outlines and sends the crops to the OCR service. Without a running worker, pages wait at "Waiting for the line detector". |
+| **Scheduler** | `php artisan schedule:work` | Runs `documents:prune-pages` every hour, which deletes aligned pages nobody submitted once they are older than `LINE_MARKERS_KEEP_HOURS` (default 24). |
 | **OCR Microservice** | FastAPI, PyTorch, Hugging Face `transformers`, Pillow | TrOCR handwriting inference in batches of 16 crops, model inventory discovery, signed direct-upload ingestion, model lifecycle management. |
 
 ### Architectural Highlights
@@ -65,7 +65,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 3. **Shared Service Key**: Binding to loopback keeps other machines out, but not other programs on the same computer (for example another site on XAMPP's `localhost`). So every call from Laravel carries the header `X-CRMS-Service-Key`, a secret both sides read from `.env` (`OCR_UPLOAD_SECRET`, or `APP_KEY` when that is empty). FastAPI compares it in constant time and answers **401** without it. Only `/health` stays open, and `/add_model` keeps its own signed ticket.
 4. **Batched Reading**: The OCR service reads a page's crops 16 at a time in one GPU pass instead of one by one: 40 crops took **6.14 s → 2.99 s** on an RTX 4050 laptop, with identical text and confidence. A crop that cannot be decoded becomes an error row on its own, and if a whole batch fails (for example out of GPU memory) that batch is read again one crop at a time.
 5. **Decoupled Process Lifecycles**: Laravel never spawns, restarts, or terminates the Python OCR daemon. The OCR workspace actively monitors reachability via asynchronous health polling.
-6. **Slow Work Never Blocks the Website**: On Windows, `php artisan serve` handles one request at a time. Everything slow (Detect, Scan with OCR and the Template Builder's Test on sample, 15–60 s each) therefore runs on the queue worker while the browser polls for the result, so other pages keep loading.
+6. **Slow Work Never Blocks the Website**: On Windows, `php artisan serve` handles one request at a time. Everything slow (Detect and Scan with OCR, 15–60 s each) therefore runs on the queue worker while the browser polls for the result, so other pages keep loading.
 7. **Separate Python Environment for Line Detection**: Kraken needs a newer PyTorch than the TrOCR service, so `ml/line_markers.py` runs in its own environment (`ml/.venv-kraken`, CPU). The queue worker calls it as a local subprocess; Kraken's model ships inside its package, so nothing is downloaded at run time.
 8. **GPU When It Works, CPU When It Does Not**: The OCR service reads on an NVIDIA card when there is one (`OCR_DEVICE=auto`). It runs one small calculation on the card when it loads a model, and if that fails (a driver too old, a card the CUDA build does not support, out of memory), or the card fails in the middle of a request, it switches to the CPU, logs why, and reads the remaining crops there, so no line is lost.
 
@@ -112,9 +112,8 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Field Settings**: Select a field or ledger column to set what it **holds** (the person's name or the entry number, one of each per person), its **value** (text, a date, a number, or one of a list of choices), a **hint** for Staff, and whether it is **required**. Verify and the records archive use these. They replace the one layout the code used to know by heart (an 11-column birth register whose third column was the child's name). The existing birth ledger's entry-number and child's-name columns were marked when the settings came in.
 - **Layouts in Use Keep Their Versions**: A layout that is published, or that records or unsubmitted pages were read with, is never changed in place. Saving changed markers, row lines or field settings makes a **new version**, so every record keeps the layout it was read with. **Save as new draft** leaves the published one live; **Save & publish new version** swaps it in. Its name, notes and sample only describe it and are saved in place. The editor says when a layout is in use. A save made from an older copy of the editor (another admin saved in between) is refused rather than overwriting the newer version. **Duplicate** in the template library makes a draft copy, sample included.
 - **Layouts Records Use Cannot Be Deleted**: Deleting a layout that any record was read with is refused ("This layout was used by N records…"), and the template library explains why instead of offering the delete, so every record keeps pointing at its layout. Pages still in progress do not block a delete; they are only unlinked, then pruned.
-- **Ledger Grid Tools**: Moving or stretching the columns as a table carries their row lines along, exactly as the Align step does, and columns sitting on the first and last row line follow those lines. Each row line has a grip on the table's left and right edges, drawn by the same code as the Align step (`row-lines.js`); only the grips take the pointer, so a column under a line can still be dragged. Drag a grip to move its line, or click it and nudge with the arrow keys (<kbd>Shift</kbd>: 10 px) or press <kbd>Delete</kbd>; double-click a grip to remove its line. <kbd>Shift</kbd>+drag moves every line. **+** puts a line under the selected one, **−** removes it, and typing a row count and pressing <kbd>Enter</kbd> spaces that many rows evenly between the first and last line. Once a sample is open, row lines and marker edges snap to its printed rules (<kbd>Alt</kbd>: place freely). Lines Detect estimated below the last printed rule are drawn amber until checked. **Make selected fields** turns a column back into a field. Undo (<kbd>Ctrl</kbd>+<kbd>Z</kbd>) covers row lines as well as markers. Arrow keys also nudge selected markers.
-- **Grid Checks**: The ledger card lists what is wrong while you work. Row lines outside the columns, or almost on top of each other, stop the save, and the server refuses them too. A column that spans other rows than the rest is a warning. A field that covers the middle of ledger cells is reported (**Select them** / **Remove them**), because line detection would read that handwriting as the field and the rows would lose those cells; saving asks first. A tilted marker whose corner leaves the page is refused, and publishing a ledger without a sample asks first.
-- **Test on Sample**: Runs Detect on the sample with the layout as it stands, saved or not (about half a minute). It shows every outlined line on the page and the fitted row lines, with the lines that fall between rows, lines sharing a cell, rows missing required cells, written lines outside every marker, and the grid notes. Nothing is read. The test runs on the queue worker, like Detect, so other pages stay usable meanwhile; until the worker picks it up the builder says "Waiting for the background worker". The copy of the sample made for the test is deleted as soon as the result is shown.
+- **Ledger Grid Tools**: Moving or stretching the columns as a table carries their row lines along, exactly as the Align step does, and columns sitting on the first and last row line follow those lines. Each row line has a grip on the table's left and right edges, drawn by the same code as the Align step (`row-lines.js`); only the grips take the pointer, so a column under a line can still be dragged. Drag a grip to move its line, or click it and nudge with the arrow keys (<kbd>Shift</kbd>: 10 px) or press <kbd>Delete</kbd>; double-click a grip to remove its line. <kbd>Shift</kbd>+drag moves every line. **+** puts a line under the selected one, **−** removes it, and typing a row count and pressing <kbd>Enter</kbd> spaces that many rows evenly between the first and last line. Once a sample is open, row lines and marker edges snap to its printed rules (<kbd>Alt</kbd>: place freely). Lines Detect guessed (below the last printed rule, or where a printed rule was too faint to find) are drawn amber until checked, and saving with amber lines asks first. Detect also turns the columns to the sample's tilt and leaves out lines below the table's frame. **Make selected fields** turns a column back into a field. Undo (<kbd>Ctrl</kbd>+<kbd>Z</kbd>) covers row lines as well as markers. Arrow keys also nudge selected markers.
+- **Grid Checks**: The ledger card lists what is wrong while you work. Row lines outside the columns, or almost on top of each other, stop the save, and the server refuses them too. A column that spans other rows than the rest is a warning. A field that covers the middle of ledger cells is reported (**Select them** / **Remove them**), because line detection would read that handwriting as the field and the rows would lose those cells; saving asks first. A tilted marker whose corner leaves the page is refused. Publishing needs a sample, real column names (no "Column 3") and a column or field that holds the person's name; the Publish window lists what is missing, and the server checks the same.
 - **Unsaved Changes**: Leaving the builder with unsaved changes (closing the tab, going back, following a link) asks first.
 
 ### 4. Immutable Record Archival & Change Request Governance
@@ -200,7 +199,7 @@ crms-laravel-12/
 │   │   ├── Controllers/                # Gated web controllers (Scan, Record, ChangeRequest, etc.)
 │   │   ├── Middleware/                 # EnsureAccountIsActive, EnsurePasswordIsChanged
 │   │   └── Requests/                   # Form validation request classes
-│   ├── Jobs/                           # ProcessDocumentPage (Detect / outline / read), TestTemplateLayout (Test on sample)
+│   ├── Jobs/                           # ProcessDocumentPage (Detect / outline / read)
 │   ├── Models/                         # Eloquent models (CivilRecord, RecordField, DocumentPage, PageLine, AuditLog, etc.)
 │   ├── Providers/                      # AuthServiceProvider (Capability Matrix Gate definitions)
 │   ├── Services/                       # Business logic (AuditLogger, ChangeRequestService, etc.)
@@ -405,7 +404,7 @@ CRMS needs **four processes** running, plus MySQL (start it in the XAMPP Control
 | Scheduler | `php artisan schedule:work` | – |
 | OCR service | `python -m uvicorn ml.api.main:app --host 127.0.0.1 --port 8001` | [8001](http://127.0.0.1:8001) |
 
-> **Do not skip the queue worker.** `php artisan serve` starts the website only. Detect, Scan with OCR and the Template Builder's Test on sample queue a background job, and without a worker the page stays on **"Waiting for the line detector"** (or **"Waiting for the background worker"** in the builder).
+> **Do not skip the queue worker.** `php artisan serve` starts the website only. Detect and Scan with OCR queue a background job, and without a worker the page stays on **"Waiting for the line detector"**.
 >
 > **The scheduler** deletes, every hour, the aligned pages nobody submitted once they are older than `LINE_MARKERS_KEEP_HOURS` (default 24). They are unsubmitted civil registry scans, so without it they stay on disk.
 
@@ -439,7 +438,7 @@ Run **Ctrl+Shift+B** (or `.\serve.ps1`) again: it only starts what is not runnin
 | Symptom | What stopped |
 | :--- | :--- |
 | "This site can't be reached" at 127.0.0.1:8000 | web app |
-| Detect or Scan stays on "Waiting for the line detector", or Test on sample on "Waiting for the background worker" | queue worker |
+| Detect or Scan stays on "Waiting for the line detector" | queue worker |
 | Unsubmitted pages pile up in `storage\app\private\pages` | scheduler |
 | Scan fails with an OCR / TrOCR connection error, or the OCR workspace shows the engine offline | OCR service |
 
@@ -846,7 +845,7 @@ tests/
 │   ├── RecordArchiveFilterTest.php          # Records filters: bad dates, Philippine days
 │   ├── RecordDetailPresentationTest.php     # Includes the straightened page kept with a record
 │   ├── ReportExportTest.php                 # Includes CSV injection and Philippine time in the CSV
-│   ├── TemplateBuilderGridChecksTest.php    # Grid checks, tilted markers, printed rules, test on sample (queued)
+│   ├── TemplateBuilderGridChecksTest.php    # Grid checks, tilted markers, printed rules
 │   ├── TemplateFieldSettingsTest.php        # Roles, value types, required fields, record identity
 │   ├── TemplateVersioningTest.php           # New versions of layouts in use, stale saves, duplicates
 │   └── UserManagementTest.php
@@ -854,7 +853,6 @@ tests/
 │   ├── change-request.test.js
 │   ├── field-marker.test.js
 │   ├── icon-coverage.test.js
-│   ├── layout-test.test.js                  # Test-on-sample summary
 │   ├── ledger-grid.test.js                  # Row lines following the table, row tools, adding a column, grid checks
 │   ├── line-geometry.test.js
 │   ├── person-grouping.test.js
@@ -937,7 +935,7 @@ vendor\bin\pint --test                   # Verify PHP code style
 | `LINE_MARKERS_PYTHON` | *(Empty: uses `ml/.venv-kraken`)* | Python interpreter that runs `ml/line_markers.py`. |
 | `LINE_MARKERS_TIMEOUT` | `600` | Seconds one page's line detection may take. |
 | `LINE_MARKERS_DEVICE` | `auto` | Where Kraken runs: `auto` (the GPU when `ml/.venv-kraken` has CUDA PyTorch, else the CPU), `cuda`, or `cpu`. |
-| `LINE_MARKERS_KEEP_HOURS` | `24` | Unsubmitted pages, and abandoned Test on sample folders, older than this are removed by `documents:prune-pages`. |
+| `LINE_MARKERS_KEEP_HOURS` | `24` | Unsubmitted pages, older than this are removed by `documents:prune-pages`. |
 | `OCR_BROWSER_ORIGIN_REGEX` | *(Loopback regex)* | Allowed browser origins regex for CORS upload requests. |
 | `CRMS_CONFIDENCE_THRESHOLD` | `80` | Default OCR confidence threshold below which fields flag for review. |
 | `CRMS_REPORTING_TIMEZONE` | `Asia/Manila` | Timezone every page and the CSV show times in, and whose days the date filters and dashboard use. Stored times stay UTC. |

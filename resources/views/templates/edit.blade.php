@@ -29,8 +29,9 @@
             'baselineRuledYs' => $ruledYs,
             // The layout of page 2 of a two-page spread, drawn beside page 1 (null: one page).
             'pageTwo' => $pageTwo ?? null,
+            // Already published: a save that changes nothing is not a new publish.
+            'published' => $published,
             'detectGridUrl' => route('templates.detect-grid'),
-            'testLayoutUrl' => route('templates.test-layout'),
             'csrf' => csrf_token(),
             'initialGroupingMode' => $currentGroupingMode,
             'baselineGroupingMode' => $template?->grouping_mode ?? 'auto',
@@ -65,7 +66,7 @@
                     @endif
                     @if ($parent)
                         <a href="{{ route('templates.edit', $parent) }}" class="template-builder-page__parent">
-                            Based on “{{ $parent->name }}”
+                            {{ $template?->is_version ? 'New version of' : 'Based on' }} “{{ $parent->name }}”
                         </a>
                     @endif
                 </div>
@@ -129,12 +130,6 @@
                                         <span>Delete sample</span>
                                     </button>
                                 @endif
-
-                                <button type="button" class="btn btn-sm btn-outline-primary template-test-button" id="testLayoutBtn"
-                                        title="Outline the sample with this layout, as Detect does for Staff (nothing is saved)">
-                                    <i class="icon-base bx bx-radar icon-sm" aria-hidden="true"></i>
-                                    <span>Test on sample</span>
-                                </button>
 
                                 <span class="marker-toolbar__divider" aria-hidden="true"></span>
                                 <div class="btn-group marker-zoom-controls" role="group" aria-label="Document zoom controls">
@@ -323,27 +318,38 @@
                                     </div>
 
                                     {{-- A register's left and right pages are often laid out differently: this
-                                         layout is page 1, and another layout of the type is page 2. --}}
-                                    <div class="mb-3">
-                                        <label for="page_two_template_id" class="form-label">Page 2 format</label>
-                                        <select id="page_two_template_id" name="page_two_template_id"
-                                                class="form-select form-select-sm @error('page_two_template_id') is-invalid @enderror">
-                                            <option value="">Same as this layout</option>
-                                            @foreach ($pageTwoChoices as $choice)
-                                                <option value="{{ $choice->getKey() }}"
-                                                        @selected((string) old('page_two_template_id', $template?->page_two_template_id) === (string) $choice->getKey())>
-                                                    {{ $choice->name }}{{ $choice->is_active ? ' (published)' : '' }}
-                                                </option>
-                                            @endforeach
-                                        </select>
-                                        <div class="form-text">
-                                            For a two-page spread whose pages are laid out differently: this layout is
-                                            page 1, the one chosen here is page 2. Build page 2 as its own layout first.
+                                         layout is page 1, and page 2 is its own (hidden) layout. It can start as a
+                                         copy of another layout; changing it later never changes that layout. --}}
+                                    @if ($pageTwo ?? null)
+                                        <div class="mb-3">
+                                            <span class="form-label d-block">Page 2</span>
+                                            <div class="form-text mt-0">
+                                                This layout has its own page 2. Turn on <strong>Two pages</strong> above to change it,
+                                                or turn it off and save to remove it.
+                                            </div>
                                         </div>
-                                        @error('page_two_template_id')
-                                            <div class="invalid-feedback">{{ $message }}</div>
-                                        @enderror
-                                    </div>
+                                    @else
+                                        <div class="mb-3">
+                                            <label for="page_two_template_id" class="form-label">Copy page 2 from</label>
+                                            <select id="page_two_template_id" name="page_two_template_id"
+                                                    class="form-select form-select-sm @error('page_two_template_id') is-invalid @enderror">
+                                                <option value="">None: page 2 is laid out like page 1</option>
+                                                @foreach ($pageTwoChoices as $choice)
+                                                    <option value="{{ $choice->getKey() }}"
+                                                            @selected((string) old('page_two_template_id') === (string) $choice->getKey())>
+                                                        {{ $choice->name }}{{ $choice->is_active ? ' (published)' : '' }}
+                                                    </option>
+                                                @endforeach
+                                            </select>
+                                            <div class="form-text">
+                                                For a two-page spread whose pages are laid out differently. Saving copies the
+                                                chosen layout as this layout's page 2; the chosen layout itself stays as it is.
+                                            </div>
+                                            @error('page_two_template_id')
+                                                <div class="invalid-feedback">{{ $message }}</div>
+                                            @enderror
+                                        </div>
+                                    @endif
 
                                     <div>
                                         <label for="description" class="form-label">Notes</label>
@@ -708,35 +714,26 @@
         </div>
     @endif
 
-    <div class="modal fade" id="layoutTestModal" tabindex="-1" aria-labelledby="layoutTestTitle" aria-hidden="true">
-        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    {{-- Asked before a save that publishes, or that keeps guessed (amber) row lines.
+         template-builder.js fills it in. --}}
+    <div class="modal fade" id="saveCheckModal" tabindex="-1" aria-labelledby="saveCheckTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <div>
-                        <h2 class="modal-title h5" id="layoutTestTitle">Test on the sample</h2>
-                        <small class="text-muted">What Detect makes of the sample with this layout, saved or not. Nothing is read or stored.</small>
+                        <div class="text-uppercase small fw-semibold mb-1" id="saveCheckKicker">Before saving</div>
+                        <h2 class="modal-title h5" id="saveCheckTitle">Save this layout?</h2>
                     </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="layout-test__status" id="layoutTestStatus" role="status" aria-live="polite">
-                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-                        <span id="layoutTestStatusText">Outlining every line on the sample. This takes about half a minute.</span>
-                    </div>
-                    <div class="layout-test d-none" id="layoutTestResult">
-                        <p class="layout-test__summary" id="layoutTestSummary"></p>
-                        <ul class="layout-test__findings" id="layoutTestFindings"></ul>
-                        <div class="layout-test__legend" aria-hidden="true">
-                            <span class="is-placed">In a row</span>
-                            <span class="is-field">Field</span>
-                            <span class="is-shared">Shares a cell</span>
-                            <span class="is-no-row">Between rows</span>
-                            <span class="is-rule">Row line, fitted</span>
-                        </div>
-                        <div class="layout-test__page">
-                            <canvas id="layoutTestCanvas" role="img" aria-label="The sample with every outlined line"></canvas>
-                        </div>
-                    </div>
+                    <p class="mb-2" id="saveCheckLead"></p>
+                    <ul class="mb-0 ps-3" id="saveCheckList"></ul>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Go back</button>
+                    <button type="button" class="btn btn-outline-secondary d-none" id="saveCheckDraftBtn">Save as draft</button>
+                    <button type="button" class="btn btn-primary" id="saveCheckConfirmBtn">Save</button>
                 </div>
             </div>
         </div>

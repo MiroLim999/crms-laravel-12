@@ -177,7 +177,7 @@ CRMS is five programs working together on one computer.
 | # | Part | What it does | Started by (Windows) | Docker container |
 | :--- | :--- | :--- | :--- | :--- |
 | 1 | **Website** | Every screen and every permission check | `php artisan serve` (port 8000) | `web` (http://localhost:8080) |
-| 2 | **Queue worker** | Runs the slow jobs: Detect, Scan with OCR, Test on sample | `php artisan queue:work --timeout=900 --tries=1` | `worker` |
+| 2 | **Queue worker** | Runs the slow jobs: Detect, Scan with OCR | `php artisan queue:work --timeout=900 --tries=1` | `worker` |
 | 3 | **Scheduler** | Every hour, deletes pages nobody submitted (after 24 hours) | `php artisan schedule:work` | `scheduler` |
 | 4 | **OCR service** | Reads line images with TrOCR | `python -m uvicorn ml.api.main:app --port 8001` | `ocr` (port 8081) |
 | 5 | **Database** | Stores users, records, templates, audit log, job queue | MySQL (XAMPP or standalone) | `mysql` (no outside port) |
@@ -288,13 +288,13 @@ What each module contains:
  │   ├── Template Builder
  │   │   ├── Document types: add, rename, archive, restore, delete
  │   │   ├── Layouts: fields or ledger grid, sample page, field settings, people
- │   │   └── Test on sample, grid checks, versions, publish
+ │   │   └── grid checks, versions, publish checks
  │   └── OCR Workspace
  │       ├── Service status (online or offline, GPU or CPU)
  │       ├── Models: add, activate, rename, delete, colour, rescan
  │       └── Model performance chart (test-set scores)
  └── BACKGROUND SERVICES
-     ├── Queue worker: the page job (Detect, Scan, Read) and the Test on sample job
+     ├── Queue worker: the page job (Detect, Scan, Read)
      ├── Line detector: Kraken; finds and cuts the lines
      ├── OCR service: TrOCR; reads the lines
      └── Scheduler: deletes unsubmitted pages every hour
@@ -394,7 +394,7 @@ crms-laravel-12/
 │   │   ├── Controllers/                 17 controllers, one per screen area
 │   │   ├── Middleware/                  account active? password changed?
 │   │   └── Requests/                    form checks: sign-in, new and edited users
-│   ├── Jobs/                            background jobs: page processing, Test on sample
+│   ├── Jobs/                            background job: page processing
 │   ├── Models/                          15 models, one per database table
 │   ├── Providers/                       the permission rules (AuthServiceProvider)
 │   ├── Services/                        business rules: audit log, change requests,
@@ -632,9 +632,12 @@ A **template** (also called a layout) tells CRMS where each value sits on a docu
 - **Field settings**: what the field **holds** (the person's name or the entry number), its **value type** (text, date, number, or one of a list of choices), a **hint** for Staff, and whether it is **required**.
 - **Person grouping**: which fields belong to which person.
 - **Grid checks**: row lines outside the columns or on top of each other stop the save; a field covering ledger cells is reported.
-- **Test on sample**: runs Detect on the sample with the layout as it stands (about half a minute, in the background) and shows every outlined line and every problem. Nothing is read.
 - **Versions**: a layout that is published, or that any record or page was read with, is never changed in place. Saving new markers or settings makes a **new version**, so every record keeps pointing at the exact layout it was read with. A save made from an outdated copy of the editor is refused.
-- **One published layout per type.** Duplicate makes a draft copy. A layout used by records cannot be deleted.
+- **Several published layouts per type** (books printed in different years): Staff pick one on the Document step, and their choice is remembered. Publishing a new version replaces the version it was saved from; other layouts stay published. **Unpublish** (⋮ menu) takes a layout away from Staff.
+- **Publish checks**: a layout is published only with a sample page, real column names (no "Column 3") and a column or field that holds the person's name. The Publish window lists what is missing; the server checks the same.
+- **Two pages**: page 2 of a spread is its own hidden layout that belongs to its main layout alone. Duplicates and new versions get their own copy, so changing one never changes another. It is not listed, published or deleted by itself.
+- **Detect from sample** follows the page's tilt, leaves out lines below the table's frame, and shows guessed rows (faint or missing printed lines) in amber; saving with amber rows asks first.
+- Duplicate makes a draft copy. A layout used by records cannot be deleted, and a published one is unpublished first.
 - No paper size to set: layouts store the page's shape (width ÷ height), and the Align step warns when a scan looks sideways.
 - Leaving with unsaved changes asks first.
 
@@ -661,7 +664,7 @@ Every user can change their own password here (opened from the initials badge at
 
 | Command | What it does | When |
 | :--- | :--- | :--- |
-| `documents:prune-pages` | Deletes aligned pages nobody submitted, and abandoned Test on sample folders, once untouched for 24 hours | Every hour, by the scheduler |
+| `documents:prune-pages` | Deletes aligned pages nobody submitted, once untouched for 24 hours | Every hour, by the scheduler |
 | `crms:export-training` | Exports verified line images and their corrected text as a TrOCR training CSV | By hand |
 | `crms:export-training --test-set=<name>` | Exports the same lines as a local test set, to measure a model on **real** lines on this computer | By hand (not run yet; see [11.2](#112-limitations)) |
 | `python ml/test_finetuned.py --model <name>` | Scores a model: CER, WER, exact match, reading time | By hand |
@@ -771,7 +774,7 @@ Only `pending` requests can be decided. Approved, rejected and withdrawn request
 ### 5.6 A template's life
 
 ```
- create (draft) --> edit --> Test on sample --> Publish --> Staff scan with it
+ create (draft) --> edit --> Publish --> Staff scan with it
                                                    |
                        change while in use: saved as a NEW VERSION (the old one keeps
                        its records); "Save as new draft" or "Save & publish new version"
@@ -798,7 +801,6 @@ All files are under `storage/app/private/` (outside the public web folder) and a
 | Original upload | `scans/` | On submit | Never (records cannot be deleted) |
 | Page as read, and line images | `records/{id}/page.png`, `records/{id}/crops/` | On submit | Never |
 | Template sample | `template-samples/` | On upload | When replaced or deleted |
-| Test on sample | `template-tests/{id}/` | When the test starts | When the result is shown, or after 24 hours |
 | Training export | `training-exports/<time>/`, or `ml/datasets/<name>/` | By the command | By hand |
 | AI models | `ml/models/<name>/` (about 1.3 GB each, not in git) | Add model, or copied by hand | Delete in the OCR Workspace |
 
@@ -1226,7 +1228,7 @@ In order of value for the defense and for real use:
 | Reports and CSV | `app/Http/Controllers/ReportController.php` |
 | User accounts | `app/Http/Controllers/UserController.php`, `app/Services/UserProvisioner.php` |
 | Audit log | `app/Services/AuditLogger.php`, `app/Models/AuditLog.php`, `app/Http/Controllers/AuditLogController.php` |
-| Template Builder | `app/Http/Controllers/DocumentTemplateController.php`, `DocumentTypeDefinitionController.php`, `app/Jobs/TestTemplateLayout.php`, `resources/js/template-builder.js` |
+| Template Builder | `app/Http/Controllers/DocumentTemplateController.php`, `DocumentTypeDefinitionController.php`, `resources/js/template-builder.js` |
 | OCR Workspace | `app/Http/Controllers/OcrModelController.php`, `OcrUploadController.php`, `app/Services/Ocr/`, `resources/js/ocr-workspace.js` |
 | Clean-up and training export | `app/Console/Commands/`, `routes/console.php` |
 | Database structure | `database/migrations/`, `app/Models/` |

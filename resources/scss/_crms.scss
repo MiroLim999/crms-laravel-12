@@ -1744,6 +1744,28 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// The layout picker's options are links: no underline, a visible keyboard focus.
+.document-layout-option {
+  text-decoration: none;
+
+  &:hover,
+  &:focus {
+    color: var(--bs-heading-color);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--bs-primary);
+    outline-offset: 2px;
+  }
+}
+
+.document-layout-option__name {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .document-upload-mode-option__check {
   flex: 0 0 auto;
   margin-inline-start: auto;
@@ -10116,103 +10138,6 @@ $dashboard-reveal-step: 40ms;
   border: 1px solid var(--bs-border-color);
   border-radius: var(--bs-border-radius);
   box-shadow: 0 .15rem .65rem rgba(var(--crms-shadow-rgb), .07);
-}
-
-// Test on sample: what Detect makes of the sample with the layout.
-.layout-test__status {
-  display: flex;
-  align-items: center;
-  gap: .6rem;
-  padding: 1.25rem .5rem;
-  color: var(--bs-secondary-color);
-
-  &.is-error {
-    color: var(--bs-danger);
-  }
-}
-
-.layout-test__summary {
-  margin-block-end: .5rem;
-  font-weight: 600;
-}
-
-.layout-test__findings {
-  margin-block-end: .75rem;
-  padding-inline-start: 1.1rem;
-  font-size: .8125rem;
-  line-height: 1.45;
-
-  li+li {
-    margin-block-start: .2rem;
-  }
-
-  .is-warning {
-    color: var(--crms-warning-text-c);
-  }
-
-  .is-ok {
-    color: var(--crms-info-text);
-  }
-}
-
-.layout-test__legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .35rem 1rem;
-  margin-block-end: .6rem;
-  color: var(--bs-secondary-color);
-  font-size: .75rem;
-
-  span::before {
-    display: inline-block;
-    inline-size: .75rem;
-    block-size: .75rem;
-    margin-inline-end: .35rem;
-    vertical-align: -.1rem;
-    content: "";
-    border: 2px solid currentColor;
-    border-radius: .15rem;
-  }
-
-  .is-placed::before {
-    color: #0e9aa7;
-    background: rgba(14, 154, 167, .16);
-  }
-
-  .is-field::before {
-    color: #696cff;
-    background: rgba(105, 108, 255, .16);
-  }
-
-  .is-shared::before {
-    color: #e59500;
-    background: rgba(255, 171, 0, .22);
-  }
-
-  .is-no-row::before {
-    color: #ff3e1d;
-    background: rgba(255, 62, 29, .2);
-  }
-
-  .is-rule::before {
-    block-size: 0;
-    color: #0e9aa7;
-    border-width: 2px 0 0;
-    border-style: dashed;
-  }
-}
-
-.layout-test__page {
-  overflow: auto;
-  background: var(--bs-gray-100);
-  border: 1px solid var(--bs-border-color);
-  border-radius: .4rem;
-
-  canvas {
-    display: block;
-    inline-size: 100%;
-    block-size: auto;
-  }
 }
 
 // A layout in use: saving new markers makes a new version instead.

@@ -680,6 +680,17 @@ class RowsFromThePageTest(unittest.TestCase):
                 self.assertRowsOnThePage(ledger, snapped)
                 self.assertEqual(list(lost), snapped["fit"]["rows"]["estimated"])
 
+    def test_rules_put_back_are_listed_for_the_builder(self):
+        # The Template Builder shows them amber, to be checked against the sample.
+        self.assertEqual([], lm.detect_grid(self.real_page().image)["suggestion"]["bridged_ys"])
+
+        ledger = self.real_page((4, 5, 6))
+        bridged = lm.detect_grid(ledger.image)["suggestion"]["bridged_ys"]
+
+        self.assertEqual(3, len(bridged))
+        for y, k in zip(bridged, (4, 5, 6)):
+            self.assertAlmostEqual(ledger.page_ys[k], y * ledger.image.height, delta=3)
+
     def test_rules_lost_inside_the_table_are_read_row_for_row_by_detect(self):
         ledger = Ledger(cols=4, rows=12, header=1.3, pitch_err=0.05)
         for lost in (4, 5, 6):

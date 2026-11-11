@@ -128,7 +128,11 @@ class TemplateFieldSettingsTest extends TestCase
 
     public function test_staff_receive_the_settings_with_the_markers(): void
     {
-        $this->actingAs($this->admin)->post(route('templates.store'), $this->payload(['publish' => 1]));
+        Storage::fake('local');
+        $this->actingAs($this->admin)->post(route('templates.store'), $this->payload([
+            'publish' => 1,
+            'sample_document' => UploadedFile::fake()->image('register.png', 1200, 900),
+        ]));
 
         $this->actingAs(User::factory()->staff()->create())
             ->get(route('documents.workspace', ['type' => DocumentType::Death->value]))

@@ -32,14 +32,19 @@ class LedgerTemplateAndExportTest extends TestCase
 
     public function test_a_ledger_template_stores_columns_and_ruled_lines_instead_of_row_rectangles(): void
     {
+        Storage::fake('local');
         $this->actingAs(User::factory()->superAdmin()->create())->post(route('templates.store'), [
             'name' => 'Register of births 1950s',
             'doc_type' => DocumentType::Birth->value,
             'page_ratio' => 11 / 8.5,
             'grouping_mode' => 'auto',
             'fields_json' => json_encode([], JSON_THROW_ON_ERROR),
-            'columns_json' => json_encode(self::COLUMNS, JSON_THROW_ON_ERROR),
+            'columns_json' => json_encode([
+                [...self::COLUMNS[0], 'role' => 'name'],
+                self::COLUMNS[1],
+            ], JSON_THROW_ON_ERROR),
             'ruled_ys_json' => json_encode([0.2, 0.35, 0.5, 0.65, 0.8], JSON_THROW_ON_ERROR),
+            'sample_document' => UploadedFile::fake()->image('register.png', 1200, 900),
             'publish' => 1,
         ])->assertRedirect()->assertSessionHasNoErrors();
 

@@ -10,6 +10,7 @@ use App\Models\OcrModel;
 use App\Models\PageLine;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -41,10 +42,12 @@ class TwoPageRecordTest extends TestCase
             ], JSON_THROW_ON_ERROR),
             'columns_json' => '[]',
             'ruled_ys_json' => '[]',
+            'sample_document' => UploadedFile::fake()->image('register.png', 1200, 900),
             'publish' => 1,
         ])->assertSessionHasNoErrors();
 
         $this->template = DocumentTemplate::firstOrFail();
+        $this->assertTrue($this->template->is_active);
         $this->staff = User::factory()->staff()->create();
     }
 
@@ -227,12 +230,18 @@ class TwoPageRecordTest extends TestCase
             'ruled_ys_json' => '[]',
         ])->assertSessionHasNoErrors();
 
-        // The published layout is in use, so the link is saved as a new version.
+        // The published layout is in use, so the link is saved as a new version,
+        // with its own copy of the chosen layout as page 2.
         $withPageTwo = DocumentTemplate::whereNotNull('page_two_template_id')->firstOrFail();
-        $this->assertSame($right->getKey(), $withPageTwo->page_two_template_id);
-        $this->assertSame($right->getKey(), $withPageTwo->layoutForPage(2)->getKey());
+        $pageTwo = $withPageTwo->pageTwoTemplate;
+        $this->assertNotSame($right->getKey(), $pageTwo->getKey());
+        $this->assertTrue($pageTwo->is_page_two);
+        $this->assertSame(['Informant'], $pageTwo->fields()->pluck('name')->all());
+        $this->assertSame($pageTwo->getKey(), $withPageTwo->layoutForPage(2)->getKey());
         $this->assertSame($withPageTwo->getKey(), $withPageTwo->layoutForPage(1)->getKey());
         $this->assertSame($withPageTwo->getKey(), $withPageTwo->layoutForPage(3)->getKey());
+        // The chosen layout stays a layout of its own.
+        $this->assertFalse($right->refresh()->is_page_two);
 
         // A layout is not its own page 2.
         $this->actingAs($admin)->put(route('templates.update', $withPageTwo), [

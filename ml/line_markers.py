@@ -2493,7 +2493,8 @@ def detect_grid(page):
     """Printed rules on a page: a template sample, or a document being scanned.
 
     Suggests ruled_ys (the longest run of evenly spaced row rules, with rules
-    a worn page lost inside it put back: see _bridge_missing_rules; lines of
+    a worn page lost inside it put back - listed again in bridged_ys - see
+    _bridge_missing_rules; lines of
     writing and stray lines are left out first: see _without_writing and
     _drop_stray_rules), columns
     (the spans between vertical rules inside that run) and frame_bottom
@@ -2533,6 +2534,9 @@ def detect_grid(page):
         ys = [y for _, y in kept]
         rows, ys = _drop_stray_rules(rows, ys)
         rows, ys = _bridge_missing_rules(rows, ys)
+    # A line put back by _bridge_missing_rules borrows the rule above it: the
+    # same rule twice in a row marks it. The builder shows those lines amber.
+    bridged = {i for i in range(1, len(rows)) if rows[i] is rows[i - 1]}
     if len(ys) >= 3:
         gaps = np.diff(ys)
         typical = float(np.median(gaps))
@@ -2571,6 +2575,8 @@ def detect_grid(page):
             run = run + estimated
             suggestion["estimated_ys"] = len(estimated)
             suggestion["ruled_ys"] = [round(y / height, 5) for y in run]
+            # Lines inside the run put back where the printed rule was too faint.
+            suggestion["bridged_ys"] = [round(ys[i] / height, 5) for i in range(first, last + 1) if i in bridged]
 
             top, bottom = run[0], run[-1]
             span = bottom - top
