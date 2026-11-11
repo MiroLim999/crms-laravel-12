@@ -71,7 +71,7 @@
             <div class="record-summary-item">
                 <span>Later corrections</span>
                 <strong>{{ $postSubmissionChangeCount }}</strong>
-                <small>Approved after submission</small>
+                <small>Saved after submission</small>
             </div>
         </section>
 
@@ -131,7 +131,7 @@
                                                 <strong>{{ filled($field->verified_value) ? $field->verified_value : 'Not recorded' }}</strong>
                                                 @if ($changes->isNotEmpty())
                                                     <span class="record-field-row__change-note">
-                                                        Updated by request #{{ $changes->last()['request']->getKey() }}
+                                                        Updated by correction #{{ $changes->last()['request']->getKey() }}
                                                     </span>
                                                 @endif
                                             </div>

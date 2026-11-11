@@ -82,7 +82,7 @@
                                     </a>
                                     @if ($record->isLocked())
                                         <i class="icon-base bx bx-lock-alt icon-sm text-muted ms-1"
-                                           title="Locked — changes need a change request"></i>
+                                           title="Locked — change values with Correct record"></i>
                                     @endif
                                     <div>
                                         <small class="text-muted">

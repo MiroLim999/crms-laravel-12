@@ -745,7 +745,7 @@
                         <footer class="validation-submit-bar">
                             <div class="validation-lock-copy">
                                 <i class="icon-base bx bx-lock-alt" aria-hidden="true"></i>
-                                <span>Submitted fields are locked. Corrections require an approved change request.</span>
+                                <span>Submitted fields are locked. Change them later with Correct record on the record page.</span>
                             </div>
 
                             <div class="validation-submit-actions">

@@ -550,7 +550,7 @@ class DocumentScanController extends Controller
         }
 
         $redirect = route('records.show', $record);
-        $message = 'Record submitted and locked. Further changes need a change request.';
+        $message = 'Record submitted and locked. Change it later with Correct record.';
 
         if ($request->expectsJson()) {
             return response()->json([

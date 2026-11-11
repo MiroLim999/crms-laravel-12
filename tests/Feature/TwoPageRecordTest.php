@@ -147,6 +147,69 @@ class TwoPageRecordTest extends TestCase
         $response->assertJsonPath('redirect', route('records.show', $record));
     }
 
+    /**
+     * Batch mode sends a two-page ledger as one record: page 2's people are
+     * numbered after page 1's and its row names carry on ("· row 21"), but its
+     * lines keep their own row. The CSV joins the pages by that row.
+     */
+    public function test_a_two_page_ledger_downloads_as_one_csv_row_per_person(): void
+    {
+        $page = function (string $name, string $column, array $values, int $personOffset, int $rowOffset): array {
+            [$documentPage, , $scan] = $this->readPage($name);
+            $documentPage->lines()->delete();
+            $fields = [];
+            foreach ($values as $index => $value) {
+                $row = $index + 1;
+                $line = $documentPage->lines()->create([
+                    'position' => $index, 'column_name' => $column, 'column_index' => 0, 'row' => $row,
+                    'source' => 'kraken', 'polygon' => [[10, 10], [50, 10], [50, 30], [10, 30]],
+                    'bbox' => [10, 10, 40, 20], 'crop_path' => $documentPage->directory()."/crops/{$row}.png", 'flags' => [],
+                ]);
+                Storage::disk('local')->put($line->crop_path, 'crop');
+                $fields[] = [
+                    ...$this->field("{$column} · row ".($row + $rowOffset), $value, $line),
+                    'person_group' => $row + $personOffset,
+                    'person_field_order' => 0,
+                ];
+            }
+
+            return [$documentPage, $scan, $fields];
+        };
+
+        [$first, $firstScan, $firstFields] = $page('ledger-1', 'Name', ['Ana Cruz', 'Ben Reyes'], 0, 0);
+        [$second, $secondScan, $secondFields] = $page('ledger-2', 'Father', ['Pedro Cruz', 'Jose Reyes'], 2, 20);
+
+        $this->actingAs($this->account)->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                'doc_type' => DocumentType::Death->value,
+                'document_template_id' => $this->template->getKey(),
+                'ocr_model_key' => 'test-model',
+                'workspace_scan_path' => $firstScan,
+                'allow_missing' => true,
+                'document_page_id' => $first->getKey(),
+                'fields' => $firstFields,
+                'extra_pages' => [[
+                    'document_page_id' => $second->getKey(),
+                    'workspace_scan_path' => $secondScan,
+                    'source_page' => 2,
+                    'fields' => $secondFields,
+                ]],
+            ])
+            ->assertCreated();
+
+        $record = CivilRecord::firstOrFail();
+        $csv = $this->actingAs($this->account)->get(route('records.csv', $record))->assertOk()->streamedContent();
+        $rows = array_map(
+            fn (string $line) => str_getcsv($line, ',', '"', ''),
+            array_values(array_filter(preg_split('/\r?\n/', preg_replace('/^\x{FEFF}/u', '', $csv)))),
+        );
+
+        $this->assertSame(['Record ID', 'Document type', 'Row', 'Name', 'Father'], $rows[0]);
+        $this->assertSame(['1', 'Ana Cruz', 'Pedro Cruz'], array_slice($rows[1], 2));
+        $this->assertSame(['2', 'Ben Reyes', 'Jose Reyes'], array_slice($rows[2], 2));
+        $this->assertCount(3, $rows);
+    }
+
     public function test_a_single_page_record_has_no_extra_pages(): void
     {
         [$first, $firstLine, $firstScan] = $this->readPage('only');
