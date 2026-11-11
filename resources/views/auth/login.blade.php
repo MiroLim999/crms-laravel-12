@@ -49,6 +49,6 @@
 
     {{-- No "create an account" link: accounts are provisioned by an administrator. --}}
     <p class="text-center text-muted small mb-0">
-        Accounts are issued by your administrator. There is no public sign-up.
+        Need access? Please contact your system administrator.
     </p>
 @endsection
