@@ -826,22 +826,24 @@ export class FieldMarker {
      *
      * @param {HTMLElement} pane  The page's wrapper (label and page) inside the viewport.
      */
-    focusOn(pane, { duration = 420, margin = 12 } = {}) {
+    focusOn(pane, { duration = 420, margin = 12, fitCanvas = this.canvas, zoom = null, pad = null } = {}) {
         const viewport = this.viewport;
         const stage = this.canvas.parentElement;
-        if (!viewport || !pane || !this.canvas.clientWidth || !this.canvas.clientHeight) return this.zoom;
+        if (!viewport || !pane || !fitCanvas.clientWidth || !fitCanvas.clientHeight) return this.zoom;
 
         this._stopFocus?.();
 
-        // The page at 100%, and what sits above it (the label) at any zoom.
-        const baseWidth = this.canvas.clientWidth / this.zoom;
-        const baseHeight = this.canvas.clientHeight / this.zoom;
-        const chrome = Math.max(0, pane.offsetHeight - stage.offsetHeight);
+        // The page being fitted (this one, or one linked to it) at 100%, and
+        // what sits above it (the label) at any zoom.
+        const baseWidth = fitCanvas.clientWidth / this.zoom;
+        const baseHeight = fitCanvas.clientHeight / this.zoom;
+        const chrome = Math.max(0, pane.offsetHeight - fitCanvas.parentElement.offsetHeight);
         const fit = Math.min(
             (viewport.clientWidth - margin * 2) / baseWidth,
             (viewport.clientHeight - margin * 2 - chrome) / baseHeight,
         );
-        const target = Math.round(clamp(fit, this.minZoom, this.maxZoom) * 100) / 100;
+        // A zoom asked for (back to 1: both pages of a spread in view) wins over the fit.
+        const target = Math.round(clamp(zoom ?? fit, this.minZoom, this.maxZoom) * 100) / 100;
         const start = this.zoom;
         const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
@@ -854,8 +856,8 @@ export class FieldMarker {
             y: (viewNow.top + viewNow.height / 2 - stageNow.top) / Math.max(1, stageNow.height),
         };
         const padFrom = this._pad ?? { across: 0, down: 0 };
-        // Room each side that lets the page reach the middle.
-        const padTo = {
+        // Room each side that lets the page reach the middle (none, for both pages).
+        const padTo = pad ?? {
             across: Math.max(0, (viewport.clientWidth - baseWidth * target) / 2),
             down: Math.max(0, (viewport.clientHeight - chrome - baseHeight * target) / 2),
         };
@@ -915,6 +917,11 @@ export class FieldMarker {
         frame = requestAnimationFrame(step);
 
         return target;
+    }
+
+    /** True while focusOn() is moving the view: its zoom changes are its own, not the user's. */
+    get gliding() {
+        return Boolean(this._stopFocus) || Boolean(this._focusing);
     }
 
     /**

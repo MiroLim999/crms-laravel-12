@@ -3496,6 +3496,114 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   color: var(--bs-primary);
 }
 
+// Two pages side by side need the room: the pages take the larger share of
+// the width, and the field list keeps its own least width (31rem), where its
+// rows still fit: the "Verify all" row loses its long hint, and the note under
+// the list goes above the buttons, so Save record is never cut off.
+@media (min-width: 992px) {
+  .validation-comparison-grid.is-two-page {
+    grid-template-columns: minmax(0, 1.4fr) minmax(31rem, .9fr);
+
+    .validation-record-group__bulk {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .validation-record-group__bulk-copy {
+      grid-column: 1;
+
+      small {
+        display: none;
+      }
+    }
+
+    .validation-record-group__bulk-action {
+      grid-column: 2;
+    }
+
+    .validation-submit-bar {
+      flex-wrap: wrap;
+      row-gap: .4rem;
+    }
+
+    .validation-lock-copy {
+      flex: 1 1 100%;
+      max-inline-size: none;
+    }
+
+    .validation-submit-actions {
+      flex: 1 1 auto;
+      justify-content: flex-end;
+    }
+  }
+}
+
+// A click on a page zooms in on it; on the page zoomed in on, back out.
+.doc-spread.is-joined .doc-stage {
+  cursor: zoom-in;
+}
+
+.doc-spread.is-joined.is-page-focused[data-focus="0"] #validationMainPage .doc-stage,
+.doc-spread.is-joined.is-page-focused[data-focus="1"] #validationCompanionPage .doc-stage {
+  cursor: zoom-out;
+}
+
+// Page 1 / Both / Page 2 above the pages.
+.verify-page-view .btn {
+  padding-inline: .6rem;
+  white-space: nowrap;
+}
+
+// The person's row goes on, out of view, on the other page: a button at that
+// edge, level with the row, slides there. It fades and slides in and out.
+.verify-row-hint {
+  position: absolute;
+  // Above the pages' outlines and edit handles.
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: .15rem;
+  padding: .3rem .6rem;
+  font-size: .75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border-radius: 999px;
+  box-shadow: 0 .25rem .75rem rgba(var(--crms-shadow-rgb), .3);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(0, -50%) scale(.92);
+  transition: opacity .2s ease, transform .2s ease, top .25s ease;
+
+  i {
+    font-size: 1rem;
+  }
+
+  &.is-right {
+    transform: translate(-100%, -50%) scale(.92);
+
+    .verify-row-hint__before {
+      display: none;
+    }
+  }
+
+  &.is-left .verify-row-hint__after {
+    display: none;
+  }
+
+  &.is-shown {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(0, -50%) scale(1);
+
+    &.is-right {
+      transform: translate(-100%, -50%) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
 // Inside a person of a two-page document: where each page's fields begin.
 .validation-page-divider {
   display: flex;

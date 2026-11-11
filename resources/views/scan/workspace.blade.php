@@ -528,6 +528,17 @@
                                         title="Pick fields on the page or in the list, then group them as a new person">
                                     <i class="icon-base bx bx-group icon-sm me-1" aria-hidden="true"></i><span>Group fields</span>
                                 </button>
+                                {{-- A two-page register: which page fills the view, or both side by side.
+                                     A click on a page does the same. --}}
+                                <div class="btn-group verify-page-view d-none" role="group" id="verifyPageView"
+                                    aria-label="Pages in view">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-verify-view="0"
+                                        aria-pressed="false" title="Zoom in on the left page">Page 1</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary active" data-verify-view="both"
+                                        aria-pressed="true" title="Both pages side by side">Both</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-verify-view="1"
+                                        aria-pressed="false" title="Zoom in on the right page">Page 2</button>
+                                </div>
                                 <div class="btn-group marker-zoom-controls" role="group"
                                     aria-label="Original document zoom controls">
                                     <button type="button"
@@ -681,11 +692,19 @@
                                 </div>
                             </div>
                         </div>
+                        {{-- The person's row goes on, out of view, on the other page: one click slides there. --}}
+                        <button type="button" class="btn btn-sm btn-primary verify-row-hint" id="verifyRowHint"
+                            tabindex="-1" aria-hidden="true">
+                            <i class="icon-base bx bx-chevron-left verify-row-hint__before" aria-hidden="true"></i>
+                            <span></span>
+                            <i class="icon-base bx bx-chevron-right verify-row-hint__after" aria-hidden="true"></i>
+                        </button>
 
                         <footer class="validation-pane__hint">
                             <i class="icon-base bx bx-scan" aria-hidden="true"></i>
                             Orange shows the complete person row; green identifies the exact field;
                             red outlines need review.
+                            <span class="d-none" id="verifyZoomTip">Click a page to zoom in on it.</span>
                             Hold <kbd>Ctrl</kbd> (<kbd>⌘</kbd> on a Mac) and scroll to zoom or drag to move.
                         </footer>
                     </section>
@@ -1177,6 +1196,11 @@
         // set, `cropped` holds both pages' fields (each with its pageIndex) and
         // processedPage is the page of the field being worked on.
         let verifyDoc = null;
+        // Of a two-page document in Verify: the page (0, 1) zoomed in on, or null
+        // (both side by side), and the zoom it was fitted at (zoomed by hand since,
+        // it is no longer "in focus").
+        let verifyFocus = null;
+        let verifyFocusZoom = null;
         let editingLineIndex = null;
         // Verify's Add missed field: a box is being drawn, or is being read.
         let addingMissedField = false;
@@ -5104,6 +5128,12 @@
             el('validationZoomResetBtn').textContent = `${Math.round(zoom * 100)}%`;
             // Edit handles are sized in page pixels; keep them a constant size on screen.
             lineOverlay?.refresh();
+            // Zoomed by hand (the buttons, Ctrl + wheel): no page is "in focus" any more.
+            if (verifyFocus !== null && !validationMarker.gliding && Math.abs(zoom - verifyFocusZoom) > 0.011) {
+                verifyFocus = null;
+                verifyFocusZoom = null;
+            }
+            if (verifyDoc) updateVerifyPageView();
         }
 
         el('zoomOutBtn').addEventListener('click', () => marker.zoomBy(-0.1));
@@ -5111,7 +5141,8 @@
         el('zoomResetBtn').addEventListener('click', () => marker.resetZoom());
         el('validationZoomOutBtn').addEventListener('click', () => validationMarker.zoomBy(-0.1));
         el('validationZoomInBtn').addEventListener('click', () => validationMarker.zoomBy(0.1));
-        el('validationZoomResetBtn').addEventListener('click', () => validationMarker.resetZoom());
+        // 100%: both pages of a two-page document, easing back; one page, at once.
+        el('validationZoomResetBtn').addEventListener('click', () => (verifyDoc ? showVerifyBoth() : validationMarker.resetZoom()));
 
         function restoreTemplateFields() {
             rowsSource = null;
@@ -6555,7 +6586,15 @@
             validationMarker.fitShare = mate ? 0.5 : 1;
             el('validationCompanionPage').classList.toggle('d-none', !mate);
             el('validationCompanionPage').classList.remove('is-live');
-            el('validationSpread').classList.remove('is-joined');
+            el('validationCompanionPage').title = 'Verify this page instead';
+            el('validationSpread').classList.remove('is-joined', 'is-page-focused');
+            // One page (or a batch's pages, verified one at a time): the usual layout.
+            document.querySelector('#step-verify .validation-comparison-grid')?.classList.remove('is-two-page');
+            el('verifyPageView').classList.add('d-none');
+            el('verifyZoomTip').classList.add('d-none');
+            verifyFocus = null;
+            verifyFocusZoom = null;
+            updateRowHint();
             if (mate) {
                 // Pages stay where they are in the book: the lower page on the left.
                 el('validationCompanionPage').style.order = mate.pageNo < item.pageNo ? '-1' : '1';
@@ -6712,8 +6751,16 @@
             companion.classList.remove('d-none');
             companion.classList.add('is-live');
             companion.style.order = '1';
+            // Both pages are verified where they are: a click zooms in, no tooltip needed.
+            companion.title = '';
             el('validationCompanionLabel').textContent = `Page ${second.number}`;
             el('validationSpread').classList.add('is-joined');
+            // The pages get the larger share of the width, and start side by side.
+            document.querySelector('#step-verify .validation-comparison-grid')?.classList.add('is-two-page');
+            el('verifyPageView').querySelector('[data-verify-view="0"]').textContent = `Page ${first.number}`;
+            el('verifyPageView').querySelector('[data-verify-view="1"]').textContent = `Page ${second.number}`;
+            verifyFocus = null;
+            verifyFocusZoom = null;
 
             el('submitLabelHead').textContent = 'Save record ·';
             el('validationPagesNote').classList.remove('d-none');
@@ -6727,8 +6774,11 @@
             lineOverlay.setLines(processedPage, cropped);
             validationMarker.resetZoom();
             el('validationDocViewport').scrollTo({ top: 0, left: 0 });
+            updateVerifyPageView();
 
             window.requestAnimationFrame(() => {
+                // The wider share of the width is laid out now: fit both pages to it.
+                validationMarker.resetZoom();
                 validationMarker.layout();
                 validationCompanionMarker.layout();
                 updateValidationMarkerStates();
@@ -6737,6 +6787,202 @@
                 if (initialGroup) activateValidationGroup(initialGroup.id, 'initial');
             });
         }
+
+        // -------------------------------------------- two pages in view (Verify)
+        // A two-page document starts with both pages side by side. A click on a
+        // page (or Page 1 / Page 2 above) zooms in until that page fills the view,
+        // with one easing motion; a second click, Both, or 100% goes back. A
+        // person's row runs across both pages: when part of it is out of view, a
+        // button at that edge, level with the row, slides there.
+        const verifyPaneOf =(side) => el(side === 0 ? 'validationMainPage' : 'validationCompanionPage');
+        const verifyCanvasOf = (side) => (side === 0 ? validationMarker : validationCompanionMarker).canvas;
+
+        /** A page is zoomed in on, at the zoom it was fitted at. */
+        function verifyFocusIsCurrent() {
+            return verifyFocus !== null && verifyFocusZoom !== null
+                && (validationMarker.gliding || Math.abs(validationMarker.zoom - verifyFocusZoom) <= 0.011);
+        }
+
+        function focusVerifyPage(side, { animate = true } = {}) {
+            if (!verifyDoc) return;
+            verifyFocus = side;
+            verifyFocusZoom = validationMarker.focusOn(verifyPaneOf(side), {
+                fitCanvas: verifyCanvasOf(side),
+                duration: animate ? 420 : 0,
+            });
+            updateVerifyPageView();
+        }
+
+        function showVerifyBoth({ animate = true } = {}) {
+            verifyFocus = null;
+            verifyFocusZoom = null;
+            validationMarker.focusOn(el('validationSpread'), {
+                zoom: 1,
+                pad: { across: 0, down: 0 },
+                duration: animate ? 420 : 0,
+            });
+            updateVerifyPageView();
+        }
+
+        /** Page 1 / Both / Page 2: which is in view, and the cursor that says what a click does. */
+        function updateVerifyPageView() {
+            const control = el('verifyPageView');
+            control.classList.toggle('d-none', !verifyDoc);
+            el('verifyZoomTip').classList.toggle('d-none', !verifyDoc);
+            const focused = verifyFocusIsCurrent();
+            const current = focused ? String(verifyFocus) : (Math.abs(validationMarker.zoom - 1) <= 0.011 ? 'both' : null);
+            control.querySelectorAll('[data-verify-view]').forEach((button) => {
+                const on = button.dataset.verifyView === current;
+                button.classList.toggle('active', on);
+                button.setAttribute('aria-pressed', String(on));
+            });
+            el('validationSpread').classList.toggle('is-page-focused', focused);
+            el('validationSpread').dataset.focus = focused ? String(verifyFocus) : '';
+            scheduleRowHint();
+        }
+
+        el('verifyPageView').addEventListener('click', (event) => {
+            const button = event.target instanceof Element ? event.target.closest('[data-verify-view]') : null;
+            if (!button || !verifyDoc) return;
+            if (button.dataset.verifyView === 'both') showVerifyBoth();
+            else focusVerifyPage(Number(button.dataset.verifyView));
+        });
+
+        // A click on a page, beside every outline: zoom in on it, or back out.
+        el('validationSpread').addEventListener('click', (event) => {
+            if (!verifyDoc || !(event.target instanceof Element)) return;
+            if (addingMissedField || groupingFields || redrawingLineId !== null || editingLineIndex !== null || recordSubmitting) return;
+            if (event.target.closest('.line-marker, .line-overlay.is-editing, button, a, input, select')) return;
+            const pane = event.target.closest('#validationMainPage, #validationCompanionPage');
+            if (!pane) return;
+            const side = pane.id === 'validationMainPage' ? 0 : 1;
+            if (verifyFocusIsCurrent() && verifyFocus === side) showVerifyBoth();
+            else focusVerifyPage(side);
+        });
+
+        /**
+         * Where some fields' outlines are, in the viewport's scrolled space, one
+         * box per page they are on: [{ side, left, right, top, bottom }]. A page
+         * may not start at the viewport's corner: the other page of a spread can
+         * sit to its left, and a label above it.
+         */
+        function placedVerifyBoxes(indexes) {
+            const viewport = el('validationDocViewport');
+            const view = viewport.getBoundingClientRect();
+            return splitBySide(indexes).flatMap((locals, side) => {
+                const bounds = locals.length > 0 ? verifyOverlays[side].displayBounds(locals) : null;
+                if (!bounds) return [];
+                const stage = el(side === 0 ? 'validationDocStage' : 'validationCompanionStage').getBoundingClientRect();
+                const left = stage.left - view.left - viewport.clientLeft + viewport.scrollLeft;
+                const top = stage.top - view.top - viewport.clientTop + viewport.scrollTop;
+                return [{
+                    side,
+                    left: left + bounds.left,
+                    right: left + bounds.right,
+                    top: top + bounds.top,
+                    bottom: top + bounds.bottom,
+                }];
+            });
+        }
+
+        /** How much of a box the viewport shows, in square pixels. */
+        function visibleArea(box) {
+            const viewport = el('validationDocViewport');
+            const width = Math.min(box.right, viewport.scrollLeft + viewport.clientWidth) - Math.max(box.left, viewport.scrollLeft);
+            const height = Math.min(box.bottom, viewport.scrollTop + viewport.clientHeight) - Math.max(box.top, viewport.scrollTop);
+            return Math.max(0, width) * Math.max(0, height);
+        }
+
+        /** Slide the view to a box (centred on it), keeping the zoom. */
+        function slideVerifyViewTo(box) {
+            const viewport = el('validationDocViewport');
+            const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            viewport.scrollTo({
+                left: Math.max(0, (box.left + box.right) / 2 - viewport.clientWidth / 2),
+                top: Math.max(0, (box.top + box.bottom) / 2 - viewport.clientHeight / 2),
+                behavior: smooth ? 'smooth' : 'auto',
+            });
+        }
+
+        // The edge button: shown while the person's row goes on out of view.
+        let rowHintFrame = 0;
+        function scheduleRowHint() {
+            if (rowHintFrame) return;
+            rowHintFrame = window.requestAnimationFrame(() => {
+                rowHintFrame = 0;
+                updateRowHint();
+            });
+        }
+
+        function updateRowHint() {
+            const hint = el('verifyRowHint');
+            const hide = () => {
+                hint.classList.remove('is-shown');
+                hint.setAttribute('aria-hidden', 'true');
+                hint.tabIndex = -1;
+            };
+            const group = verifyDoc
+                ? validationGroups.find((candidate) => candidate.id === activeValidationGroupId)
+                : null;
+            if (!group || group.kind !== 'person') return hide();
+            // A part of the row is in view when most of it shows: a sliver of the
+            // other page at the edge does not count.
+            const shownShare = (box) => visibleArea(box) / Math.max(1, (box.right - box.left) * (box.bottom - box.top));
+            const placed = placedVerifyBoxes(group.indexes);
+            const shown = placed.find((box) => shownShare(box) >= 0.5);
+            const hidden = placed.find((box) => shownShare(box) < 0.35);
+            if (!shown || !hidden) return hide();
+
+            // Level with the row, just inside the edge the rest of it is past.
+            const viewport = el('validationDocViewport');
+            const view = viewport.getBoundingClientRect();
+            const pane = viewport.parentElement.getBoundingClientRect();
+            const middle = (shown.top + shown.bottom) / 2 - viewport.scrollTop;
+            const toRight = hidden.left >= shown.left;
+            hint.style.top = `${view.top - pane.top + Math.min(viewport.clientHeight - 22, Math.max(22, middle))}px`;
+            hint.style.left = `${(toRight ? view.right - 14 : view.left + 14) - pane.left}px`;
+            hint.classList.toggle('is-right', toRight);
+            hint.classList.toggle('is-left', !toRight);
+            const number = verifyDoc.pages[hidden.side].number;
+            hint.querySelector('span').textContent = `Page ${number}`;
+            hint.title = `${group.label}'s row goes on on page ${number}`;
+            hint.dataset.side = String(hidden.side);
+            hint.setAttribute('aria-hidden', 'false');
+            hint.tabIndex = 0;
+            hint.classList.add('is-shown');
+        }
+
+        el('verifyRowHint').addEventListener('click', () => {
+            const side = Number(el('verifyRowHint').dataset.side);
+            if (!verifyDoc || !Number.isInteger(side)) return;
+            if (verifyFocusIsCurrent()) {
+                focusVerifyPage(side);
+                return;
+            }
+            const group = validationGroups.find((candidate) => candidate.id === activeValidationGroupId);
+            const box = group ? placedVerifyBoxes(group.indexes).find((candidate) => candidate.side === side) : null;
+            if (box) slideVerifyViewTo(box);
+        });
+
+        el('validationDocViewport').addEventListener('scroll', scheduleRowHint, { passive: true });
+
+        // The side bar opening or closing, or the window resized: a page in focus
+        // is fitted to the new room once it has settled.
+        let verifyRoom = null;
+        let verifyRefitTimer = 0;
+        new ResizeObserver(() => {
+            const viewport = el('validationDocViewport');
+            const room = { width: viewport.clientWidth, height: viewport.clientHeight };
+            const before = verifyRoom;
+            verifyRoom = room;
+            scheduleRowHint();
+            if (!before || !verifyDoc || !verifyFocusIsCurrent()) return;
+            if (Math.abs(room.width - before.width) < 4 && Math.abs(room.height - before.height) < 4) return;
+            window.clearTimeout(verifyRefitTimer);
+            verifyRefitTimer = window.setTimeout(() => {
+                if (verifyFocusIsCurrent()) focusVerifyPage(verifyFocus, { animate: false });
+            }, 150);
+        }).observe(el('validationDocViewport'));
 
         function handleValidationMarkerSelection(indexes, context = {}) {
             if (syncingValidationSelection) return;
@@ -6778,40 +7024,37 @@
         }
 
         function revealValidationLines(indexes) {
-            const viewport = el('validationDocViewport');
-            const view = viewport.getBoundingClientRect();
-            // The lines on each page, in the viewport's scrolled space. A page may
-            // not start at the viewport's corner: the other page of a spread can
-            // sit to its left, and a label above it.
-            const placed = splitBySide(indexes).flatMap((locals, side) => {
-                const bounds = locals.length > 0 ? verifyOverlays[side].displayBounds(locals) : null;
-                if (!bounds) return [];
-                const stage = el(side === 0 ? 'validationDocStage' : 'validationCompanionStage').getBoundingClientRect();
-                const left = stage.left - view.left - viewport.clientLeft + viewport.scrollLeft;
-                const top = stage.top - view.top - viewport.clientTop + viewport.scrollTop;
-                return [{
-                    left: left + bounds.left,
-                    right: left + bounds.right,
-                    top: top + bounds.top,
-                    bottom: top + bounds.bottom,
-                }];
-            });
+            const placed = placedVerifyBoxes(indexes);
             if (placed.length === 0) return;
 
-            // A person across both pages: the middle of their whole row, or, zoomed
-            // in too far to see it all, of its first page's part.
+            // One page zoomed in on: it is in view whole, so only a field of the
+            // other page moves the view, by bringing that page in.
+            if (verifyDoc && verifyFocusIsCurrent()) {
+                if (!placed.some((box) => box.side === verifyFocus)) focusVerifyPage(placed[0].side);
+                return;
+            }
+
+            // A person across both pages: their whole row when it fits across the
+            // view; zoomed in further, the part of it most in view (else the first).
+            const viewport = el('validationDocViewport');
             const across = Math.max(...placed.map((box) => box.right)) - Math.min(...placed.map((box) => box.left));
-            const shown = across <= viewport.clientWidth ? placed : [placed[0]];
-            const left = Math.min(...shown.map((box) => box.left));
-            const right = Math.max(...shown.map((box) => box.right));
-            const top = Math.min(...placed.map((box) => box.top));
-            const bottom = Math.max(...placed.map((box) => box.bottom));
-            const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            viewport.scrollTo({
-                left: Math.max(0, (left + right) / 2 - viewport.clientWidth / 2),
-                top: Math.max(0, (top + bottom) / 2 - viewport.clientHeight / 2),
-                behavior: smooth ? 'smooth' : 'auto',
-            });
+            const shown = across <= viewport.clientWidth
+                ? placed
+                : [[...placed].sort((a, b) => visibleArea(b) - visibleArea(a))[0]];
+            const target = {
+                left: Math.min(...shown.map((box) => box.left)),
+                right: Math.max(...shown.map((box) => box.right)),
+                top: Math.min(...shown.map((box) => box.top)),
+                bottom: Math.max(...shown.map((box) => box.bottom)),
+            };
+
+            // Already in view: the view stays still, so nothing jumps.
+            const margin = 8;
+            const inView = target.left >= viewport.scrollLeft + margin
+                && target.right <= viewport.scrollLeft + viewport.clientWidth - margin
+                && target.top >= viewport.scrollTop + margin
+                && target.bottom <= viewport.scrollTop + viewport.clientHeight - margin;
+            if (!inView) slideVerifyViewTo(target);
         }
 
         function revealValidationMarker(index) {
@@ -6909,6 +7152,8 @@
             });
             const group = validationGroups.find((candidate) => candidate.id === activeValidationGroupId);
             lineOverlay.setSelection(group?.indexes ?? [], activeValidationIndex);
+            // The person may now run on, out of view, on the other page.
+            scheduleRowHint();
         }
 
         function clearValidationFieldError(index) {
