@@ -246,13 +246,4 @@ class TemplateVersioningTest extends TestCase
         Storage::disk('local')->assertExists([$published->sample_path, $version->sample_path]);
     }
 
-    public function test_only_super_admins_duplicate_layouts(): void
-    {
-        $layout = $this->layout();
-
-        $this->actingAs(User::factory()->staff()->create())
-            ->post(route('templates.duplicate', $layout))
-            ->assertForbidden();
-        $this->assertSame(1, DocumentTemplate::count());
-    }
 }

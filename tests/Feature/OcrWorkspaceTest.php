@@ -21,7 +21,7 @@ use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
- * The OCR workspace: choose the model Staff scan with, and manage what is installed.
+ * The OCR workspace: choose the model scans use, and manage what is installed.
  *
  * The OCR service is faked throughout. These tests are about Laravel's half of the
  * contract - authorization, direct-upload registration, the durable registry,
@@ -68,36 +68,6 @@ class OcrWorkspaceTest extends TestCase
     }
 
     // ------------------------------------------------------------------ authorization
-
-    /**
-     * Every route in the workspace is Super Admin only.
-     *
-     * Direct uploads also require signed tickets, while the remaining lifecycle
-     * calls rely on this gate and the service's loopback binding.
-     */
-    public function test_every_workspace_route_is_super_admin_only(): void
-    {
-        $this->fakeHealthyService();
-
-        $routes = [
-            ['get', route('ocr.index')],
-            ['post', route('ocr.rescan')],
-            ['post', route('ocr.settings')],
-            ['post', route('ocr.models.activate', 'trocr-v1')],
-            ['get', route('ocr.engine.status')],
-            ['post', route('ocr.uploads.authorize')],
-            ['post', route('ocr.register')],
-            ['post', route('ocr.rename', 'trocr-v1')],
-            ['delete', route('ocr.destroy', 'trocr-v1')],
-        ];
-
-        foreach ([User::factory()->staff()->create(), User::factory()->admin()->create()] as $user) {
-            foreach ($routes as [$method, $url]) {
-                $this->actingAs($user)->$method($url)
-                    ->assertForbidden("{$user->roleSlug()->value} must not reach {$method} {$url}");
-            }
-        }
-    }
 
     /**
      * The removed surface stays removed. A named route that no longer exists throws,
@@ -173,7 +143,7 @@ class OcrWorkspaceTest extends TestCase
             ->assertSee('TrOCR v1')
             ->assertSee('Activate model')
             ->assertSee('Rescan models')
-            // Nothing activated yet, so the panel has to say Staff cannot scan.
+            // Nothing activated yet, so the panel has to say nothing can be scanned.
             ->assertSee('No model is active yet')
             // The removed panels, the stripped tabs and the old PowerShell setup
             // panel must not come back.
@@ -251,7 +221,7 @@ class OcrWorkspaceTest extends TestCase
         $model = OcrModel::firstWhere('key', 'trocr-v1');
 
         $this->assertNotNull($model);
-        $this->assertFalse($model->is_active, 'Installing must not silently change what Staff use.');
+        $this->assertFalse($model->is_active, 'Installing must not silently change what scans use.');
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'ocr_model.added',
             'user_id' => $actor->getKey(),
@@ -413,102 +383,16 @@ class OcrWorkspaceTest extends TestCase
     // --------------------------------------------------------------------- save settings
 
     /**
-     * Saving the settings is what makes Staff scanning use a model. Until then a
-     * model is just a folder on disk.
-     */
-    public function test_saving_settings_is_what_makes_staff_scanning_use_a_model(): void
-    {
-        $this->fakeHealthyService();
-        $actor = $this->superAdmin();
-
-        $this->assertNull(OcrModel::active());
-
-        $this->actingAs($actor)
-            ->post(route('ocr.settings'), ['model' => 'trocr-v1'])
-            ->assertRedirect(route('ocr.index'))
-            ->assertSessionHas('success');
-
-        $active = OcrModel::active();
-
-        $this->assertNotNull($active);
-        $this->assertSame('trocr-v1', $active->key);
-
-        $this->assertDatabaseHas('audit_logs', [
-            'action' => 'ocr_model.activated',
-            'user_id' => $actor->getKey(),
-        ]);
-    }
-
-    public function test_saving_settings_persists_the_staff_choice_flag_and_threshold(): void
-    {
-        $this->fakeHealthyService();
-        $actor = $this->superAdmin();
-
-        $this->actingAs($actor)
-            ->post(route('ocr.settings'), [
-                'model' => 'trocr-v1',
-                'allow_staff_model_choice' => '1',
-                'confidence_review_threshold' => 65,
-            ])
-            ->assertSessionHas('success');
-
-        OcrSetting::forgetCached();
-
-        $this->assertTrue(OcrSetting::staffMayChooseModel());
-        $this->assertSame(65.0, OcrSetting::threshold());
-
-        $this->assertDatabaseHas('audit_logs', ['action' => 'ocr_settings.updated']);
-    }
-
-    /**
-     * An empty threshold clears the override rather than storing zero, so the
-     * documented CRMS_CONFIDENCE_THRESHOLD fallback keeps working.
-     */
-    public function test_clearing_the_threshold_falls_back_to_config(): void
-    {
-        $this->fakeHealthyService();
-        $actor = $this->superAdmin();
-
-        config(['crms.confidence_review_threshold' => 80.0]);
-
-        $this->actingAs($actor)->post(route('ocr.settings'), [
-            'model' => 'trocr-v1',
-            'confidence_review_threshold' => 65,
-        ]);
-
-        $this->actingAs($actor)->post(route('ocr.settings'), [
-            'model' => 'trocr-v1',
-            'confidence_review_threshold' => '',
-        ]);
-
-        OcrSetting::forgetCached();
-
-        $this->assertNull(OcrSetting::current()->confidence_review_threshold);
-        $this->assertSame(80.0, OcrSetting::threshold());
-    }
-
-    public function test_settings_are_refused_for_a_model_the_service_cannot_serve(): void
-    {
-        $this->fakeHealthyService();
-
-        $this->actingAs($this->superAdmin())
-            ->post(route('ocr.settings'), ['model' => 'ghost-model'])
-            ->assertSessionHas('error');
-
-        $this->assertNull(OcrModel::active());
-    }
-
-    /**
-     * Exactly one model may be in use: saving a second demotes the first, so Staff
-     * are never scanning against an ambiguous target.
+     * Exactly one model may be in use: activating a second demotes the first, so
+     * scans are never run against an ambiguous target.
      */
     public function test_saving_a_different_model_demotes_the_previous_one(): void
     {
         $this->fakeHealthyService();
         $actor = $this->superAdmin();
 
-        $this->actingAs($actor)->post(route('ocr.settings'), ['model' => 'trocr-v1']);
-        $this->actingAs($actor)->post(route('ocr.settings'), ['model' => 'base']);
+        $this->actingAs($actor)->post(route('ocr.models.activate', 'trocr-v1'));
+        $this->actingAs($actor)->post(route('ocr.models.activate', 'base'));
 
         $this->assertSame('base', OcrModel::active()->key);
         $this->assertSame(1, OcrModel::where('is_active', true)->count());
@@ -519,7 +403,7 @@ class OcrWorkspaceTest extends TestCase
         $this->fakeHealthyService();
         $actor = $this->superAdmin();
 
-        $this->actingAs($actor)->post(route('ocr.settings'), ['model' => 'trocr-v1']);
+        $this->actingAs($actor)->post(route('ocr.models.activate', 'trocr-v1'));
 
         $this->actingAs($actor)
             ->post(route('ocr.rename', 'trocr-v1'), ['new_name' => 'renamed'])
@@ -663,71 +547,20 @@ class OcrWorkspaceTest extends TestCase
             ->assertJson(['reachable' => true, 'device' => 'cuda']);
     }
 
-    // ----------------------------------------------------------------- staff-side choice
+    // ----------------------------------------------------------------- scan model
 
     /**
-     * Off by default: every reading in the archive comes from the one model a Super
-     * Admin selected, and the scanning page offers no way to deviate.
+     * A model key sent with a scan is ignored: every scan reads with the active
+     * model, so a stale tab cannot quietly swap the model behind a record.
      */
-    public function test_staff_cannot_choose_a_model_unless_the_setting_allows_it(): void
-    {
-        $this->fakeHealthyService();
-        $staff = User::factory()->staff()->create();
-
-        OcrModel::create(['key' => 'trocr-v1', 'label' => 'TrOCR v1', 'is_active' => true]);
-        $this->seedTemplate();
-
-        $this->actingAs($staff)
-            ->get(route('documents.workspace', ['type' => 'birth']))
-            ->assertOk()
-            ->assertDontSee('id="modelSelect"', escape: false);
-
-        // A key posted anyway is ignored, even one the service could serve, and
-        // the page is read with the promoted model instead.
-        $this->alignPage($staff, 'base')
-            ->assertAccepted()
-            ->assertJsonPath('modelKey', 'trocr-v1');
-
-        $this->assertSame('trocr-v1', DocumentPage::firstOrFail()->ocr_model_key);
-    }
-
-    public function test_staff_may_pick_an_installed_model_when_the_setting_allows_it(): void
+    public function test_a_model_key_sent_with_a_scan_is_ignored(): void
     {
         $this->fakeHealthyService();
 
         OcrModel::create(['key' => 'trocr-v1', 'label' => 'TrOCR v1', 'is_active' => true]);
-        OcrSetting::create(['allow_staff_model_choice' => true]);
-        OcrSetting::forgetCached();
         $this->seedTemplate();
 
-        $staff = User::factory()->staff()->create();
-
-        $this->actingAs($staff)
-            ->get(route('documents.workspace', ['type' => 'birth']))
-            ->assertOk()
-            ->assertSee('id="modelSelect"', escape: false);
-
-        $this->alignPage($staff, 'base')
-            ->assertAccepted()
-            ->assertJsonPath('modelKey', 'base');
-
-        $this->assertSame('base', DocumentPage::firstOrFail()->ocr_model_key);
-    }
-
-    /**
-     * A model the service cannot serve is never honoured, however it arrives. A
-     * stale tab must not quietly swap the model behind a record.
-     */
-    public function test_an_unknown_model_key_falls_back_to_the_selected_model(): void
-    {
-        $this->fakeHealthyService();
-
-        OcrModel::create(['key' => 'trocr-v1', 'label' => 'TrOCR v1', 'is_active' => true]);
-        OcrSetting::create(['allow_staff_model_choice' => true]);
-        OcrSetting::forgetCached();
-        $this->seedTemplate();
-
-        $this->alignPage(User::factory()->staff()->create(), 'ghost-model')
+        $this->alignPage(User::factory()->superAdmin()->create(), 'ghost-model')
             ->assertAccepted()
             ->assertJsonPath('modelKey', 'trocr-v1');
 
@@ -747,12 +580,12 @@ class OcrWorkspaceTest extends TestCase
      * is stored with the model it will be read with; the job that would outline
      * and read it is only queued, so Kraken never runs here.
      */
-    private function alignPage(User $staff, string $model): TestResponse
+    private function alignPage(User $account, string $model): TestResponse
     {
         Storage::fake('local');
         Queue::fake();
 
-        $response = $this->actingAs($staff)
+        $response = $this->actingAs($account)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.pages.store'), [
                 'document_template_id' => DocumentTemplate::activeFor(DocumentType::Birth)->getKey(),

@@ -173,7 +173,7 @@
                         <div class="doc-stage" id="docStage">
                             <canvas id="pageCanvas"></canvas>
                             <div class="field-overlay" id="fieldOverlay">
-                                <div class="field-selection-marquee" id="staffFieldSelectionMarquee" aria-hidden="true">
+                                <div class="field-selection-marquee" id="scanFieldSelectionMarquee" aria-hidden="true">
                                 </div>
                             </div>
                         </div>
@@ -199,7 +199,7 @@
 
             <div class="document-side-panel field-marker-controls-pane">
                 {{--
-                What Staff should know about the scan itself, shown only when
+                What to know about the scan itself, shown only when
                 it applies: it may be sideways; this page (or file) may be
                 saved already; or other pages of this PDF are.
                 --}}
@@ -219,7 +219,7 @@
                 {{--
                 The fields to read, in order. On a ledger page the table's
                 rows are set here too: they start as the template's, Snap
-                to table takes them from the page, and Staff can add, move
+                to table takes them from the page, and the user can add, move
                 or remove rows and columns. The template is not changed.
                 The tips are behind the ?.
                 --}}
@@ -336,30 +336,6 @@
                         </div>
                     </div>
                 </div>
-
-                {{--
-                Only rendered when a Super Admin has allowed Staff to choose.
-                Otherwise every reading in the archive comes from the one promoted
-                model, and there is nothing here to decide.
-                --}}
-                @if ($selectableModels !== [])
-                    <x-card title="OCR model" class="mb-4">
-                        <label for="modelSelect" class="form-label visually-hidden">
-                            Model to read with
-                        </label>
-                        <select class="form-select" id="modelSelect">
-                            @foreach ($selectableModels as $model)
-                                <option value="{{ $model['key'] }}" @selected($model['is_active'])>
-                                    {{ $model['label'] }}@if ($model['is_active']) (default)@endif
-                                </option>
-                            @endforeach
-                        </select>
-                        <p class="small text-muted mb-0 mt-2">
-                            The record stores whichever model produced its readings. Switching
-                            here affects this document only.
-                        </p>
-                    </x-card>
-                @endif
 
                 <div class="ocr-action-status d-none" id="ocrActionStatus" role="alert" aria-live="assertive">
                     <i class="icon-base bx bx-error" aria-hidden="true"></i>
@@ -867,7 +843,7 @@
         </div>
     </div>
 
-    {{-- This page of this file is saved already: Staff decide whether to save it again. --}}
+    {{-- This page of this file is saved already: the user decides whether to save it again. --}}
     <div class="modal fade" id="duplicatePageModal" tabindex="-1" aria-labelledby="duplicatePageModalTitle"
         aria-describedby="duplicatePageModalDescription" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
@@ -1186,7 +1162,6 @@
             return node;
         };
         const steps = { upload: el('step-upload'), mark: el('step-mark'), verify: el('step-verify') };
-        const modelSelect = document.getElementById('modelSelect');
         const scanFileInput = requiredInput(document, '#scanFile');
         const selectAllFieldsInput = requiredInput(document, '#selectAllFields');
 
@@ -1227,7 +1202,7 @@
         attachMarqueeSelection({
             marker,
             overlay: markerOverlay,
-            marquee: el('staffFieldSelectionMarquee'),
+            marquee: el('scanFieldSelectionMarquee'),
         });
 
         // Zoom and pan for the Verify page. It holds no boxes: the outlines are
@@ -1296,7 +1271,7 @@
 
         // What Detect found on this page and the markers it fitted. Scan with OCR
         // reads Detect's crops only while the markers are still exactly these;
-        // once Staff move one, the page is outlined again from their markers.
+        // once a marker is moved, the page is outlined again from the markers.
         let detection = null;
 
         const cloneBoxes = (boxes) => boxes.map(({
@@ -1336,7 +1311,7 @@
         // ------------------------------------------------------------ ledger rows
         // The ledger's row lines on this page (page fractions, top to bottom). They
         // start as the template's and go with the columns when the table is moved
-        // or stretched; Snap to table takes them from the page; Staff can move,
+        // or stretched; Snap to table takes them from the page; the user can move,
         // add or remove them. Nothing here changes the template.
         // As the Rows and Columns card is shown: the template has columns and row lines.
         let isLedger = config.ruledYs.length >= 2;
@@ -1369,12 +1344,12 @@
         }
         // How many degrees each row line is turned beyond the table's own tilt
         // (one per line, in step with gridRows): paper is curved, and no two
-        // printed rules run quite alike. Staff set one by selecting its line and
+        // printed rules run quite alike. One is set by selecting its line and
         // using Tilt; Snap to table, Detect and Reset start every line at 0.
         let rowTilts = templateRows.map(() => 0);
         // Row lines with no printed line under them (rowKey), drawn amber.
         let estimatedRows = new Set();
-        // Staff moved, added or removed a row line themselves: Detect keeps theirs.
+        // A row line was moved, added or removed by hand: Detect keeps those.
         let rowsByHand = false;
         // What the last Snap to table said about where the rows came from.
         let rowsSource = null;
@@ -1485,8 +1460,8 @@
          * Snap to table and Detect, by Reset, and by undo.
          */
         // Where each rectangle field was last placed by the template, Snap or Detect
-        // (name -> box). A field that differs from it was moved by Staff, and Snap
-        // to table leaves such a field where Staff put it.
+        // (name -> box). A field that differs from it was moved by hand, and Snap
+        // to table leaves such a field where it was put.
         let autoFields = new Map();
 
         const sameBox = (a, b) => ['x', 'y', 'w', 'h'].every((key) => Math.abs((a[key] ?? 0) - (b[key] ?? 0)) < 0.0005)
@@ -1499,7 +1474,7 @@
             });
         }
 
-        /** The names of the fields as they stand now that Staff placed (or added) by hand. */
+        /** The names of the fields as they stand now that were placed (or added) by hand. */
         function handPlacedFields(boxes = marker.toJSON()) {
             return new Set(boxes
                 .filter((box) => box.kind !== 'column')
@@ -1773,7 +1748,7 @@
         }
 
         /**
-         * A column Staff add for this page: it splits the selected column, or goes
+         * A column added for this page: it splits the selected column, or goes
          * at the right of the table. Its cells are read under the name they give it.
          */
         function addLedgerColumn() {
@@ -1815,8 +1790,8 @@
 
         /**
          * Where a column goes when the table has none left: over the table's rows,
-         * at the left of the template's table and a typical column wide. Staff
-         * then drag it into place and add its rows.
+         * at the left of the template's table and a typical column wide. The user
+         * then drags it into place and adds its rows.
          */
         function firstColumnPlace() {
             const top = gridRows[0];
@@ -1875,7 +1850,7 @@
         }
 
         function handleMarkerChange(boxes) {
-            // A field Staff stretched down two or more rows of the table is read row
+            // A field stretched down two or more rows of the table is read row
             // by row, as a column. Setting the markers again runs this once more,
             // with the columns, so the move and the change are one undo step.
             if (!settingGrid && isLedger) {
@@ -1973,7 +1948,7 @@
             updateScanNotices();
             fetchSnapLines();
             // The markers and row lines Detect fitted (the page's own rows, unless
-            // Staff set theirs by hand), as one change Ctrl+Z can take back.
+            // rows set by hand stay), as one change Ctrl+Z can take back.
             const rows = page.geometry?.ruled_ys ?? gridRows;
             rowsSource = null;
             setGrid(geometryMarkers(page.geometry, page), rows, {
@@ -2979,7 +2954,7 @@
         }
 
         /**
-         * What Staff should know about the scan itself. Any paper size is fine
+         * What to know about the scan itself. Any paper size is fine
          * (markers are page fractions), but a tall scan of wide pages, or the
          * other way round, is likely sideways. And this page (or this file) may
          * be saved already, or other pages of this PDF may be.
@@ -3991,7 +3966,6 @@
                 form.set('scan', item.file, item.file.name);
                 form.set('batch_key', batchState.key);
                 form.set('defer_scan', '1');
-                if (modelSelect instanceof HTMLSelectElement) form.set('model', modelSelect.value);
 
                 const response = await fetch(config.pagesUrl, {
                     method: 'POST',
@@ -4091,7 +4065,6 @@
                         signal: controller.signal,
                         body: JSON.stringify({
                             geometry_json: JSON.stringify(item.page?.geometry || currentGeometry()),
-                            model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null,
                         }),
                     });
                     const triggeredPayload = (triggerRes.headers.get('content-type') || '').includes('application/json')
@@ -4396,7 +4369,7 @@
         });
 
         // Once a scan is open, leaving would lose the markers and the checked
-        // values, so Staff are asked first. Not while the record is being
+        // values, so the user is asked first. Not while the record is being
         // submitted, or after, when it opens the record.
         let leaveTo = null;
         let leaving = false;
@@ -4689,7 +4662,7 @@
         }
 
     // Grid lines off: the row lines and every field box are hidden (not
-    // removed), so Staff can see the page as scanned.
+    // removed), so the page can be seen as scanned.
     el('showGridToggle').addEventListener('change', (event) => {
         el('fieldOverlay').classList.toggle('is-grid-hidden', !event.target.checked);
     });
@@ -5051,7 +5024,7 @@
 
         /**
          * The markers and row lines as they stand, as the geometry the server
-         * works with. Rows Staff set by hand are marked, so Detect keeps them.
+         * works with. Rows set by hand are marked, so Detect keeps them.
          */
         function currentGeometry() {
             return alignedGeometry(marker.toJSON(), gridRows, { keepRows: rowsByHand });
@@ -5130,8 +5103,8 @@
                 // one undoable change (Ctrl+Z) like any marker edit.
                 const rows = payload.geometry?.ruled_ys ?? gridRows;
                 rowsSource = payload.rows ?? null;
-                // Fields Staff moved (or added) stay where they put them: Snap only
-                // fits the table and the fields they have not touched.
+                // Fields moved (or added) by hand stay where they were put: Snap only
+                // fits the table and the fields not touched.
                 const before = marker.toJSON();
                 const kept = handPlacedFields(before);
                 const keptBoxes = new Map(before.filter((box) => kept.has(nameKey(box.name)) && box.kind !== 'column')
@@ -5142,7 +5115,7 @@
                     estimated: (payload.rows?.estimated ?? []).filter((index) => rows[index] !== undefined)
                         .map((index) => rowKey(rows[index])),
                 });
-                // The fields Snap placed are the new starting point; the ones kept are still Staff's.
+                // The fields Snap placed are the new starting point; the ones kept stay as placed by hand.
                 rememberAutoFields(snapped, kept);
                 if (keptBoxes.size > 0) {
                     showGridMessage(`Snap left ${keptBoxes.size} field${keptBoxes.size === 1 ? '' : 's'} you moved where ${keptBoxes.size === 1 ? 'it is' : 'they are'}.`);
@@ -5170,9 +5143,6 @@
             form.set('document_template_id', String(config.templateId));
             form.set('geometry_json', JSON.stringify(currentGeometry()));
             form.set('page', await canvasBlob(marker.canvas), 'page.png');
-            // Absent unless Staff choice is enabled; the server falls back to the
-            // promoted model and re-checks that the key is one it allows.
-            if (modelSelect instanceof HTMLSelectElement) form.set('model', modelSelect.value);
             if (detect) form.set('detect', '1');
 
             const response = await fetch(config.pagesUrl, {
@@ -5215,7 +5185,6 @@
                 signal,
                 body: JSON.stringify({
                     geometry_json: JSON.stringify(currentGeometry()),
-                    model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null,
                 }),
             });
             const payload = (response.headers.get('content-type') || '').includes('application/json')
@@ -5229,7 +5198,7 @@
 
         /**
          * Whether that page can be outlined again instead of sent afresh: Detect
-         * ran, its page is still usable, and Staff have only moved the markers on
+         * ran, its page is still usable, and only the markers have moved on
          * it (the page shown is the one the server holds).
          */
         function canReoutline() {
@@ -5248,7 +5217,7 @@
                 },
                 credentials: 'same-origin',
                 signal,
-                body: JSON.stringify({ model: modelSelect instanceof HTMLSelectElement ? modelSelect.value : null }),
+                body: JSON.stringify({}),
             });
             const payload = (response.headers.get('content-type') || '').includes('application/json')
                 ? await response.json()
@@ -5402,7 +5371,7 @@
                     // Saves still on their way are part of what is read.
                     await lineSaveQueue;
                     setLineEditing(false);
-                    // The outlines Staff just checked are the ones read.
+                    // The outlines just checked are the ones read.
                     setOcrPhase(72, 95, 6, 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
                     payload = await readDetectedPage(controller.signal);
                 } else if (canReoutline()) {
@@ -5823,7 +5792,7 @@
             return validationRowByIndex.get(index) ?? null;
         }
 
-    // Names Staff gave people in Verify, by page and person ("12:person-21").
+    // Names given to people in Verify, by page and person ("12:person-21").
     // Shown in Verify only: the record keeps each field's value as before.
     const personNameOverrides = new Map();
     const personNameKey = (group) => `${processedPage?.id ?? ''}:${group.id}`;
@@ -5835,7 +5804,7 @@
         return automaticIdentity(group);
     }
 
-    /** The person's name as read from the page, before any name Staff typed. */
+    /** The person's name as read from the page, before any name typed in Verify. */
     function automaticIdentity(group) {
 
             // The field the layout says holds the person's name.
@@ -5862,7 +5831,7 @@
         }
 
         /**
-         * The template's ledger columns on this page's grid. A column Staff removed
+         * The template's ledger columns on this page's grid. A column removed
          * in Align is not expected in any row (the removal goes to the audit log).
          */
         function columnsOnThisPage() {
@@ -8088,7 +8057,7 @@
 
                 const columnsHere = new Set(checkedHere.map((index) => nameKey(cropped[index]?.label)));
                 const row = Number(cropped[group.indexes[0]]?.personGroup);
-                // A column Staff shortened in Align is not asked for in the rows it leaves out.
+                // A column shortened in Align is not asked for in the rows it leaves out.
                 const left = requiredColumns
                     .filter((box) => !columnsHere.has(nameKey(box.name)) && (shortened.get(nameKey(box.name))?.has(row) ?? true))
                     .map((box) => box.name);
@@ -8337,7 +8306,7 @@
             }
         }
 
-        // What Staff last chose to go ahead with, so answering one question
+        // What the user last chose to go ahead with, so answering one question
         // ("Submit anyway", "Save again") keeps the answer to the other.
         let lastSubmitChoices = { allowMissing: false, allowDuplicate: false };
 

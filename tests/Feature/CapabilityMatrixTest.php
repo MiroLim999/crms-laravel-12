@@ -2,177 +2,92 @@
 
 namespace Tests\Feature;
 
-use App\Enums\RoleSlug;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
- * The capability matrix from docs/roles.md, asserted end to end.
- *
- * This is the load-bearing test in the suite. The separation of duties it guards
- * is what makes the audit trail legally meaningful:
- *
- *   - Admin must never be able to enter or edit record data.
- *   - Staff must never reach oversight functions.
- *   - Templates and OCR model management are Super Admin only.
- *
- * If a change makes one of these fail, the change is wrong - not the test.
+ * CRMS has one account, the Super Admin (docs/SUPER-ADMIN-ONLY-PLAN.md). It opens
+ * every page; a guest is sent to sign in; the pages that only existed for the
+ * removed roles are gone.
  */
 class CapabilityMatrixTest extends TestCase
 {
     use RefreshDatabase;
 
     /**
-     * Every gated route, with the status each role must receive.
-     *
-     * @return array<string, array{string, int, int, int}>
+     * @return array<string, array{string}>
      */
-    public static function routeMatrix(): array
+    public static function pages(): array
     {
-        //                                  route              staff admin super
         return [
-            'upload & process documents' => ['documents.create', 200, 403, 200],
-            'search records archive' => ['records.index', 200, 200, 200],
-            'change requests' => ['change-requests.index', 200, 200, 200],
-            // Legacy bookmark: oversight users are redirected to the consolidated Dashboard.
-            'analytics dashboard' => ['analytics.index', 403, 302, 302],
-            'generate reports' => ['reports.index', 403, 200, 200],
-            'manage user accounts' => ['users.index', 403, 200, 200],
-            'view audit log' => ['audit.index', 403, 200, 200],
-            'document template builder' => ['templates.index', 403, 403, 200],
-            'OCR model management' => ['ocr.index', 403, 403, 200],
+            'dashboard' => ['dashboard'],
+            'new document' => ['documents.create'],
+            'records archive' => ['records.index'],
+            'corrections' => ['change-requests.index'],
+            'reports' => ['reports.index'],
+            'audit log' => ['audit.index'],
+            'template builder' => ['templates.index'],
+            'OCR workspace' => ['ocr.index'],
+            'settings' => ['settings.edit'],
         ];
     }
 
-    #[DataProvider('routeMatrix')]
-    public function test_route_access_matches_the_capability_matrix(
-        string $route,
-        int $staff,
-        int $admin,
-        int $superAdmin,
-    ): void {
-        $expected = [
-            RoleSlug::Staff->value => $staff,
-            RoleSlug::Admin->value => $admin,
-            RoleSlug::SuperAdmin->value => $superAdmin,
-        ];
-
-        foreach ($expected as $slug => $status) {
-            $user = User::factory()->role(RoleSlug::from($slug))->create();
-
-            $this->actingAs($user)
-                ->get(route($route))
-                ->assertStatus($status, "{$slug} on {$route} should be {$status}");
-        }
-    }
-
-    /**
-     * The abilities themselves, independent of routing. Guards against someone
-     * loosening a gate while leaving the routes alone.
-     *
-     * @return array<string, array{string, bool, bool, bool}>
-     */
-    public static function abilityMatrix(): array
+    #[DataProvider('pages')]
+    public function test_the_account_opens_every_page(string $route): void
     {
-        //                            ability                    staff admin super
-        return [
-            'documents.process' => ['documents.process', true, false, true],
-            'change-requests.create' => ['change-requests.create', true, false, true],
-            'records.view' => ['records.view', true, true, true],
-            'change-requests.moderate' => ['change-requests.moderate', false, true, true],
-            'analytics.view' => ['analytics.view', false, true, true],
-            'users.manage' => ['users.manage', false, true, true],
-            'audit.view' => ['audit.view', false, true, true],
-            'reports.generate' => ['reports.generate', false, true, true],
-            'templates.manage' => ['templates.manage', false, false, true],
-            'ocr.manage' => ['ocr.manage', false, false, true],
-        ];
+        $this->actingAs(User::factory()->create())
+            ->get(route($route))
+            ->assertOk();
     }
 
-    #[DataProvider('abilityMatrix')]
-    public function test_abilities_match_the_capability_matrix(
-        string $ability,
-        bool $staff,
-        bool $admin,
-        bool $superAdmin,
-    ): void {
+    #[DataProvider('pages')]
+    public function test_a_guest_is_sent_to_sign_in(string $route): void
+    {
+        $this->get(route($route))->assertRedirect(route('login'));
+    }
+
+    public function test_the_account_has_every_ability(): void
+    {
+        $user = User::factory()->create();
+
         foreach ([
-            RoleSlug::Staff->value => $staff,
-            RoleSlug::Admin->value => $admin,
-            RoleSlug::SuperAdmin->value => $superAdmin,
-        ] as $slug => $allowed) {
-            $user = User::factory()->role(RoleSlug::from($slug))->create();
-
-            $this->assertSame(
-                $allowed,
-                $user->can($ability),
-                "{$slug} should ".($allowed ? 'have' : 'NOT have')." '{$ability}'",
-            );
+            'documents.process', 'change-requests.create', 'records.view', 'audit.view',
+            'reports.generate', 'templates.manage', 'ocr.manage',
+        ] as $ability) {
+            $this->assertTrue($user->can($ability), "The account should have '{$ability}'.");
         }
     }
 
     /**
-     * The single most important guarantee in the system: Admin does people and
-     * oversight, never data entry.
+     * @return array<string, array{string}>
      */
-    public function test_admin_can_never_enter_record_data(): void
+    public static function removedPages(): array
     {
-        $admin = User::factory()->admin()->create();
-
-        $this->assertFalse($admin->canEnterData());
-
-        foreach (['documents.process', 'change-requests.create'] as $ability) {
-            $this->assertFalse(
-                $admin->can($ability),
-                "Admin must not have '{$ability}'. Data entry belongs to Staff.",
-            );
-        }
+        return [
+            'user accounts' => ['/users'],
+            'new account' => ['/users/create'],
+            'old analytics link' => ['/analytics'],
+        ];
     }
 
-    public function test_deactivated_accounts_lose_every_ability(): void
+    #[DataProvider('removedPages')]
+    public function test_pages_of_the_removed_roles_are_gone(string $url): void
     {
-        $user = User::factory()->superAdmin()->inactive()->create();
-
-        foreach (array_column(self::abilityMatrix(), 0) as $ability) {
-            $this->assertFalse(
-                $user->can($ability),
-                "A deactivated Super Admin must not retain '{$ability}'.",
-            );
-        }
+        $this->actingAs(User::factory()->create())
+            ->get($url)
+            ->assertNotFound();
     }
 
-    public function test_only_super_admin_may_provision_admin_accounts(): void
+    public function test_the_sidebar_has_no_user_accounts_and_shows_corrections(): void
     {
-        $admin = User::factory()->admin()->create();
-        $superAdmin = User::factory()->superAdmin()->create();
-
-        // Admin user management covers Staff only.
-        $this->assertTrue($admin->can('users.manage-role', RoleSlug::Staff));
-        $this->assertFalse($admin->can('users.manage-role', RoleSlug::Admin));
-        $this->assertFalse($admin->can('users.manage-role', RoleSlug::SuperAdmin));
-
-        foreach (RoleSlug::cases() as $slug) {
-            $this->assertTrue($superAdmin->can('users.manage-role', $slug));
-        }
-    }
-
-    public function test_admin_cannot_modify_a_super_admin(): void
-    {
-        $admin = User::factory()->admin()->create();
-        $superAdmin = User::factory()->superAdmin()->create();
-        $staff = User::factory()->staff()->create();
-
-        $this->assertFalse($admin->can('users.update', $superAdmin));
-        $this->assertTrue($admin->can('users.update', $staff));
-        $this->assertTrue($superAdmin->can('users.update', $superAdmin));
-    }
-
-    public function test_guests_are_redirected_to_login(): void
-    {
-        foreach (array_column(self::routeMatrix(), 0) as $route) {
-            $this->get(route($route))->assertRedirect(route('login'));
-        }
+        $this->actingAs(User::factory()->create())
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertDontSee('User Accounts')
+            ->assertSee('Corrections')
+            ->assertSee('Reports &amp; history', false)
+            ->assertDontSee('Signed in as');
     }
 }

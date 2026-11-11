@@ -30,13 +30,10 @@ use Throwable;
  * The digitisation flow: pick a certificate type, then upload, align, verify
  * and submit in the workspace.
  *
- * Staff and Super Admin only. Admin has no route into this controller at all -
- * data entry is not an oversight function.
- *
  * The page itself is handled by DocumentPageController: finishing Align uploads
  * the aligned page, and a queue job (ProcessDocumentPage) outlines every
  * handwritten line, crops along the outlines and reads each crop with TrOCR
- * (Detect stops before the reading, so Staff can check the outlines first).
+ * (Detect stops before the reading, so the user can check the outlines first).
  * Verify reviews those readings. Submitting (store) saves the checked values and
  * copies the page image and the crops into the record, so the archive keeps the
  * very images the model read.
@@ -111,11 +108,11 @@ class DocumentScanController extends Controller
     }
 
     /**
-     * Step 2: the workspace, where Staff upload the scan, align the markers and
+     * Step 2: the workspace, where the user uploads the scan, align the markers and
      * verify what was read.
      *
-     * The aligned page is uploaded as soon as Staff finish Align, before they
-     * decide to submit; the original file follows only with the submission. A
+     * The aligned page is uploaded as soon as Align is finished, before the
+     * user decides to submit; the original file follows only with the submission. A
      * page nobody submits is deleted by documents:prune-pages (hourly) once it
      * has gone untouched for LINE_MARKERS_KEEP_HOURS, 24 by default.
      */
@@ -134,7 +131,7 @@ class DocumentScanController extends Controller
         if ($template === null) {
             return redirect()->route('documents.create')->with(
                 'error',
-                "No active template for {$type->label()}. A Super Admin must publish one first.",
+                "No active template for {$type->label()}. Publish one in Template Builder first.",
             );
         }
 
@@ -148,15 +145,12 @@ class DocumentScanController extends Controller
             'health' => $this->ocr->recentHealth(),
             'docType' => $type,
             'template' => $template,
-            // Rectangle fields, then ledger columns. Staff align both the same way.
+            // Rectangle fields, then ledger columns. Both are aligned the same way.
             'boxes' => $template->markerBoxes(),
             'ruledYs' => $template->isLedger() ? array_values($template->ruled_ys) : [],
             // A spread's page 2 laid out differently: its own layout, or null.
             'pageTwo' => $this->pageTwoLayout($template),
             'activeModel' => OcrModel::active(),
-            // Empty unless a Super Admin has allowed it, in which case the reading
-            // step offers a picker instead of silently using the promoted model.
-            'selectableModels' => $this->selectableModels(),
             'threshold' => OcrSetting::threshold(),
         ]);
     }
@@ -223,7 +217,7 @@ class DocumentScanController extends Controller
             // The processed page whose outlined lines these fields were read from.
             'document_page_id' => ['nullable', 'integer'],
             'fields.*.line_id' => ['nullable', 'integer', 'distinct'],
-            // Staff chose "Submit anyway" when asked about missing required fields.
+            // The user chose "Submit anyway" when asked about missing required fields.
             'allow_missing' => ['sometimes', 'boolean'],
             // The file this scan is a page of (the workspace sends the page alone,
             // cut out of the file): its name, the page, and the file's SHA-256.
@@ -231,7 +225,7 @@ class DocumentScanController extends Controller
             'source_page' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_SOURCE_PAGES, 'required_with:source_page_count,source_hash'],
             'source_page_count' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_SOURCE_PAGES],
             'source_hash' => ['nullable', 'string', 'regex:/^[0-9a-f]{64}$/'],
-            // Staff chose "Save again" when told this page is already saved.
+            // The user chose "Save again" when told this page is already saved.
             'allow_duplicate' => ['sometimes', 'boolean'],
             // A spread saved as one record: its pages after the first, each with
             // the page it was read from and its own verified fields.
@@ -264,7 +258,7 @@ class DocumentScanController extends Controller
         $template = DocumentTemplate::with(['documentTypeDefinition', 'fields'])->find($templateId);
 
         // Archiving only stops new scans from starting (create/workspace). A scan
-        // already verified by Staff can still be submitted, so no work is lost.
+        // already verified can still be submitted, so no work is lost.
         if ($template?->document_type_id !== $documentType->getKey()) {
             throw ValidationException::withMessages([
                 'document_template_id' => 'The selected template does not belong to this document type.',
@@ -272,8 +266,8 @@ class DocumentScanController extends Controller
         }
 
         // What each field holds and whether it is required, by its template
-        // field's name (a ledger line: its column's). A field Staff added
-        // themselves has no template settings.
+        // field's name (a ledger line: its column's). A field the user added
+        // by hand has no template settings.
         $settingsByName = $template->settingsByName();
 
         $coordinateErrors = [];
@@ -295,7 +289,7 @@ class DocumentScanController extends Controller
             throw ValidationException::withMessages($coordinateErrors);
         }
 
-        // This page of this exact file is saved already: say so first. Staff may
+        // This page of this exact file is saved already: say so first. The user may
         // save it again ("Save again"), which the audit log notes.
         $savedBefore = $this->savedSourcePage($source);
         if ($savedBefore !== null && !$request->boolean('allow_duplicate')) {
@@ -338,7 +332,7 @@ class DocumentScanController extends Controller
         }
 
         // Some certificates do leave a required field blank, so a missing one
-        // is not refused outright: Staff must confirm it first.
+        // is not refused outright: the user must confirm it first.
         $missingRequired = [
             ...$this->missingRequiredFields($template, $validated['fields'], $linesById),
             ...$this->missingRegisterRows($template, $page, $validated['fields'], $linesById),
@@ -513,10 +507,10 @@ class DocumentScanController extends Controller
                         'corrected_fields' => $corrected,
                         'outlined_fields' => $record->fields->whereNotNull('polygon')->count(),
                         'ocr_model' => $validated['ocr_model_key'],
-                        // Left out on purpose: Staff confirmed with "Submit anyway".
+                        // Left out on purpose: the user confirmed with "Submit anyway".
                         ...($missingRequired !== [] ? ['missing_required_fields' => $missingRequired] : []),
                         // This page's grid against the template's: rows, and
-                        // columns Staff added or removed in Align.
+                        // columns added or removed in Align.
                         ...($gridChanges !== [] ? ['grid_changes' => $gridChanges] : []),
                         ...($extraPages !== [] ? ['pages' => count($extraPages) + 1] : []),
                         ...($source['page'] !== null ? [
@@ -865,7 +859,7 @@ class DocumentScanController extends Controller
      * nothing submitted at all. The page is removed once the record is saved,
      * so those rows would have to be scanned again.
      *
-     * Only the columns on this page's grid count. A column Staff removed in
+     * Only the columns on this page's grid count. A column removed in
      * Align is not on the page, so it is not asked for in every row (the
      * removal is in the audit log instead), and a column they added has
      * cells like any other.
@@ -930,7 +924,7 @@ class DocumentScanController extends Controller
                 continue;
             }
 
-            // A column Staff shortened in Align is not asked for in the rows it leaves out.
+            // A column shortened in Align is not asked for in the rows it leaves out.
             $askedHere = array_filter($required, fn(string $key) => !isset($shortened[$key])
                 || in_array($row, $shortened[$key], true), ARRAY_FILTER_USE_KEY);
             $left = array_values(array_diff_key($askedHere, $submitted[$row]));
@@ -951,7 +945,7 @@ class DocumentScanController extends Controller
     }
 
     /**
-     * The ledger columns on this page's grid, as Staff left them in Align (and
+     * The ledger columns on this page's grid, as they were left in Align (and
      * Detect fitted them). A page without a grid of its own has the template's.
      *
      * @return list<string>
@@ -972,7 +966,7 @@ class DocumentScanController extends Controller
 
     /**
      * How this page's ledger grid differs from its template's, for the audit
-     * log: its rows, and the columns Staff added or removed in Align. Empty
+     * log: its rows, and the columns added or removed in Align. Empty
      * when they match. The template itself is never changed.
      *
      * @return array{rows?: int, template_rows?: int, columns_added?: list<string>, columns_removed?: list<string>}
@@ -1087,14 +1081,6 @@ class DocumentScanController extends Controller
             'line_row' => $line->row,
             'line_flags' => $line->flags ?: [],
         ];
-    }
-
-    /**
-     * @return list<array{key: string, label: string, is_active: bool}>
-     */
-    private function selectableModels(): array
-    {
-        return $this->modelChoice->selectable();
     }
 
     /**

@@ -46,7 +46,7 @@ const ROTATE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="fals
 /**
  * Return the portable part of a marker box.
  *
- * Person metadata is optional because Staff may add ad-hoc fields while marking
+ * Person metadata is optional because the user may add ad-hoc fields while marking
  * a document. Keeping it beside the coordinates lets a template's explicit
  * validation groups survive moves, renames, undo, and cropping.
  */
@@ -68,7 +68,7 @@ const FIELD_ROLES = ['name', 'entry'];
 const VALUE_TYPES = ['date', 'number', 'choice'];
 
 /**
- * What a Template Builder field holds and how Staff check its value, present
+ * What a Template Builder field holds and how Verify checks its value, present
  * only where it differs from the defaults (any value, text, required, no hint):
  * role 'name' or 'entry', type 'date', 'number' or 'choice' with its options,
  * a hint, and required: false.

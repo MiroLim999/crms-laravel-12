@@ -6,7 +6,7 @@ The detailed reference for developers and maintainers. For the overview, see the
 
 - [System Architecture](#system-architecture)
 - [Features in Detail](#features-in-detail)
-- [Role-Based Access Control & Capability Matrix](#role-based-access-control--capability-matrix)
+- [One Account (Super Admin)](#one-account-super-admin)
 - [Project Directory Structure](#project-directory-structure)
 - [Prerequisites & Requirements](#prerequisites--requirements)
 - [Installation & Setup](#installation--setup)
@@ -108,7 +108,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Any Paper Size**: There is no paper size or orientation to set. Markers are saved as fractions of the page, so they land on every scan's own shape: Letter, Long bond, Legal, A4, A3 or any other size, wide or tall. The builder draws on the sample's own page (without a sample, on a wide Short / Letter sheet) and saves that page's shape (`page_ratio`, width : height). The server uses it to check that tilted markers stay on the page, and the Align step uses it to tell Staff when a scan looks **sideways** (tall where the layout's pages are wide, or the other way round). A PDF with more than one page is read from page 1 only; the builder and the Align step both say so.
 - **Sample Document Upload**: Direct upload of a PDF, PNG, JPG, WEBP or BMP sample, rendered with PDF.js for canvas alignment.
 - **Custom Document Types**: Super Admins can define custom certificate classifications with distinct icons, validation rules, and active states.
-- **Archiving a Document Type**: A type that is no longer used can be archived from its menu in the Template Builder (**Archive (hide from Staff)**). Staff can no longer start a scan of it, and the builder stops offering new layouts for it, but its records and layouts are kept. A scan Staff already started can still be submitted, so no work is lost. The type stays in the list marked **Archived**, with **Restore for Staff** to bring it back. Archiving and restoring are written to the audit log.
+- **Archiving a Document Type**: A type that is no longer used can be archived from its menu in the Template Builder (**Archive (hide it)**). It can no longer start a scan of it, and the builder stops offering new layouts for it, but its records and layouts are kept. A scan Staff already started can still be submitted, so no work is lost. The type stays in the list marked **Archived**, with **Restore for Staff** to bring it back. Archiving and restoring are written to the audit log.
 - **Field Settings**: Select a field or ledger column to set what it **holds** (the person's name or the entry number, one of each per person), its **value** (text, a date, a number, or one of a list of choices), a **hint** for Staff, and whether it is **required**. Verify and the records archive use these. They replace the one layout the code used to know by heart (an 11-column birth register whose third column was the child's name). The existing birth ledger's entry-number and child's-name columns were marked when the settings came in.
 - **Layouts in Use Keep Their Versions**: A layout that is published, or that records or unsubmitted pages were read with, is never changed in place. Saving changed markers, row lines or field settings makes a **new version**, so every record keeps the layout it was read with. **Save as new draft** leaves the published one live; **Save & publish new version** swaps it in. Its name, notes and sample only describe it and are saved in place. The editor says when a layout is in use. A save made from an older copy of the editor (another admin saved in between) is refused rather than overwriting the newer version. **Duplicate** in the template library makes a draft copy, sample included.
 - **Layouts Records Use Cannot Be Deleted**: Deleting a layout that any record was read with is refused ("This layout was used by N records…"), and the template library explains why instead of offering the delete, so every record keeps pointing at its layout. Pages still in progress do not block a delete; they are only unlinked, then pruned.
@@ -117,72 +117,47 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Unsaved Changes**: Leaving the builder with unsaved changes (closing the tab, going back, following a link) asks first.
 
 ### 4. Immutable Record Archival & Change Request Governance
-- **Permanent Record Locking**: Once verified and submitted by Staff, records are sealed against direct in-place modification.
-- **Formal Change-Request Workflow**: Staff initiate modification requests detailing justifications and proposed field values. Admins or Super Admins review, approve, or reject changes.
+- **Permanent Record Locking**: Once verified and submitted, records are sealed against direct in-place modification.
+- **Correct Record**: On a record, **Correct record** opens a form with every value; change the wrong ones, optionally give a reason, and **Save correction** changes the record at once. It is stored as a change request that is approved the moment it is saved (`ChangeRequestService::correct()`), so the record's **Change history** and the dashboard keep working. The old and new values go to the Audit Log as `record.corrected`. The sidebar's **Corrections** page lists them, read-only.
+- **Download CSV**: A record's **Download CSV** button gives that document's checked values (corrections included), one row per person, for import into the client's old system. Columns follow the layout's field names, page 1 then page 2; fields that belong to no person repeat on every row. The pages of a two-page document join by their row on the page (`record_fields.line_row`), so row 5 of page 1 and row 5 of page 2 are one CSV row. UTF-8 with a byte-order mark, so Excel shows ñ correctly; each download is in the Audit Log as `record.exported` (`app/Services/RecordCsv.php`).
 - **Data Integrity Constraints**: Mandatory captured fields cannot be blanked during correction; all historical iterations remain auditable.
-- **Safe Against Double Clicks**: Approve, reject and withdraw re-read the request under a database row lock before deciding, and opening a request locks the record first, so two reviewers (or one double-click) cannot both approve and reject a request, and a record cannot get two pending requests. The buttons also disable after the first click. A rejection note of any allowed length (up to 2,000 characters) is kept in the audit entry.
+- **Safe Against Double Clicks**: Saving a correction locks the record row first, so two saves of one record take turns. The Save button also disables after the first click.
 - **The Record Shows the Page That Was Read**: A submitted record keeps the page image its boxes were measured on (straightened, when Detect straightened a tilted page) and draws its value boxes on it, so each box sits on its handwriting. (Drawn over the original upload instead, a 3° tilt put the boxes about one line off.) **Open full size** still opens the original upload, and records submitted before this change keep showing their upload.
 - **Archive Search & Filters**: Search by any verified value, and filter by document type and submission date. A bad filter from an edited URL (an impossible date, a list where one value belongs) is left out with a message under it, instead of an error page.
-- **One Record Status**: Every record is saved as **Submitted**, and therefore locked, the moment Staff submit it. The unused "Draft" status was removed.
+- **One Record Status**: Every record is saved as **Submitted**, and therefore locked, the moment it is submitted. The unused "Draft" status was removed.
 
 ### 5. OCR Model Management & Benchmark Provenance
 - **Multi-Model Registry**: Live model scanning from `ml/models/`, support for custom checkpoints and the baseline `microsoft/trocr-base-handwritten`.
 - **Benchmark Provenance Radar**: Visualizes Character Error Rate (CER), Word Error Rate (WER), and Exact Match metrics strictly from locked test-split reports (`evaluation-report.json`) verified against model weight SHA-256 hashes. CRMS never fabricates benchmark statistics from operational scans.
 - **Base Model Comparison**: The base model gets benchmark figures too, when `ml/models/base/` holds its own `evaluation-report.json`, so the OCR Workspace and the Dashboard can compare the active model with the unmodified Microsoft model.
-- **Operator Selection Flexibility**: Global model assignment from the Models panel. A stored setting (`ocr_settings.allow_staff_model_choice`) can let Staff select another installed model during digitisation; the OCR Workspace has no screen for that setting at present.
+- **One Active Model**: Every scan reads with the model activated in the Models panel. (The old "Staff may choose the model" setting and its `ocr_settings.allow_staff_model_choice` column were removed on 2026-11-11.)
 
 ### 6. Tamper-Evident Audit Trail
-- **Append-Only Logging**: Comprehensive activity logs recording actor ID, name, role, IP address, user agent, action verb, and before/after diffs.
+- **Append-Only Logging**: Comprehensive activity logs recording actor ID, name, IP address, user agent, action verb, and before/after diffs.
 - **Automatic Secret Redaction**: Sensitive attributes (passwords, tokens, credentials) are stripped before persistence.
 
 ### 7. Analytics & Administrative Oversight
-- **Role-Tailored Dashboards**: Staff see their own submissions and activity. Admin and Super Admin see KPI summaries, digitisation volume and trend, document type distribution, OCR quality (average confidence, correction rate, fields below the confidence threshold), a **Processing and staff activity** panel, and an OCR performance radar comparing the active model with the base model (labelled with the test set it was scored on, because those scores are not accuracy on real scans; OCR Quality is that).
-- **Processing and Staff Activity**: how many Detect and Scan runs finished, failed or were cancelled, the average time of each, TrOCR's reading speed in milliseconds per line, and one row per person who can scan (records submitted, pages scanned, last sign-in), with the active-account count and a link to Manage users. These come from the `page_runs` table, which `ProcessDocumentPage` writes to for every run (who, mode, outcome, total time, reading time, line count, model). It exists because a cancelled page is deleted at once and every other unsubmitted page after a day, so `document_pages` cannot be counted later. It holds no document text or images. Runs before the table existed are not counted, and a failed run has no time (the worker cannot say how long it ran).
-- **A Reporting Period per Panel**: Each dashboard panel (volume and trend, OCR quality, change requests, processing and staff activity) has its own period: the last 30 days, the last 90 days, the last 12 months (the default, in whole calendar months), or custom dates. The trend compares a period with the one of the same length before it. A bad period in an edited URL shows a message on that panel and the default period, instead of an error page.
+- **One Dashboard**: KPI summaries, digitisation volume and trend, document type distribution, OCR quality (average confidence, correction rate, fields below the confidence threshold), a **Processing** panel, a **Corrections** panel (corrections saved in the period, records corrected, fields changed), **Recent changes**, and an OCR performance radar comparing the active model with the base model (labelled with the test set it was scored on, because those scores are not accuracy on real scans; OCR Quality is that).
+- **Processing**: how many Detect and Scan runs finished, failed or were cancelled, the average time of each, and TrOCR's reading speed in milliseconds per line. These come from the `page_runs` table, which `ProcessDocumentPage` writes to for every run (mode, outcome, total time, reading time, line count, model). It exists because a cancelled page is deleted at once and every other unsubmitted page after a day, so `document_pages` cannot be counted later. It holds no document text or images. Runs before the table existed are not counted, and a failed run has no time (the worker cannot say how long it ran).
+- **A Reporting Period per Panel**: Each dashboard panel (volume and trend, OCR quality, corrections, processing) has its own period: the last 30 days, the last 90 days, the last 12 months (the default, in whole calendar months), or custom dates. The trend compares a period with the one of the same length before it. A bad period in an edited URL shows a message on that panel and the default period, instead of an error page.
 - **Philippine Time Everywhere**: Times are stored in UTC and shown in `CRMS_REPORTING_TIMEZONE` (default `Asia/Manila`) on every page and in the CSV export, through one helper (`App\Support\LocalTime`). The date filters on Records, Audit Log and Reports all use Philippine days, so a record submitted at 7:30 AM on 2 October is found under 2 October.
-- **Filterable Reports with Streaming CSV Export**: Reports filter by document type, date range and submitting user, and export the matching records as a CSV that is written in chunks of 200 straight to the download, never built in memory.
+- **Filterable Reports with Streaming CSV Export**: Reports filter by document type and date range, and export the matching records as a CSV that is written in chunks of 200 straight to the download, never built in memory.
 - **Light List Pages**: The Records list, the Reports page and the CSV export load only what they show (each record's title field and its average confidence), not every field of every record. With 15 register records of 242 fields each, the Records list went from 3,651 loaded rows to 36, and Reports from 3,653 to 38.
 - **Safe CSV Export**: A text cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading `'`, so Excel shows it as text instead of running it as a formula ("CSV injection"). Number columns are unchanged.
 - **Light, Dark or System Colour Mode**: The picker in the top bar (sun, moon or screen icon) switches every page. **System** follows the operating system's setting. The choice is saved in that browser and applied before the page first paints, so there is no flash of the wrong colours; charts and canvases redraw in the new colours.
-- **Secure Account Management**: Controlled staff/admin provisioning (no public sign-ups), auto-generated temporary passwords, mandatory first-login password rotation, soft deactivation, and protection against accidental Super Admin demotion.
+- **One Account**: No sign-up page and no user management. The account chooses its own password at the first sign-in, edits its name and email in **Account Settings → Your details**, and a forgotten password is reset with `php artisan crms:reset-password`.
 
 ---
 
-## Role-Based Access Control & Capability Matrix
+## One Account (Super Admin)
 
-CRMS enforces a strict separation of duties verified end-to-end in the test suite (`tests/Feature/CapabilityMatrixTest.php`):
+The client runs CRMS on one offline PC with one account, the Super Admin. The Staff and Admin roles, the User Accounts page, change-request approval, account deactivation and the demo logins were removed on 2026-11-11 (`docs/SUPER-ADMIN-ONLY-PLAN.md`).
 
-| Capability / Resource | Staff | Admin | Super Admin | Route / Gate |
-| :--- | :---: | :---: | :---: | :--- |
-| **Upload & Process Documents** | **Yes** | No | **Yes** | `documents.create`, `can:documents.process` |
-| **Verify & Submit Records** | **Yes** | No | **Yes** | `documents.store`, `can:documents.process` |
-| **Search & View Record Archive** | **Yes** | **Yes** | **Yes** | `records.index`, `can:records.view` |
-| **Propose Change Requests** | **Yes** | No | **Yes** | `records.change-requests.create`, `can:change-requests.create` |
-| **Approve / Reject Change Requests** | No | **Yes** | **Yes** | `change-requests.approve`, `can:change-requests.moderate` |
-| **See Analytics (on the Dashboard)** | No | **Yes** | **Yes** | `analytics.index`, `can:analytics.view` |
-| **Generate & Export CSV Reports** | No | **Yes** | **Yes** | `reports.index`, `can:reports.generate` |
-| **Manage User Accounts & Roles** | No | **Yes** | **Yes** | `users.index`, `can:users.manage` |
-| **View Tamper-Evident Audit Log** | No | **Yes** | **Yes** | `audit.index`, `can:audit.view` |
-| **Document Template Builder** | No | No | **Yes** | `templates.index`, `can:templates.manage` |
-| **OCR Model & Engine Workspace** | No | No | **Yes** | `ocr.index`, `can:ocr.manage` |
-
-> **Note on Separation of Duties**: Administrators perform supervisory and oversight functions and cannot perform primary data entry or directly edit civil records. Record corrections must strictly traverse the authenticated change request moderation pipeline.
-
-Each row is one ability in `app/Providers/AuthServiceProvider.php`; the roles are in `app/Enums/RoleSlug.php`. `CapabilityMatrixTest` checks every row, both the ability and the pages it guards. If a rule changes, change the provider, the test and this table together. The sidebar menu is built from the same abilities, so nobody sees a link they cannot follow, but every route still checks its ability itself.
-
-Every signed-in account can also open the Dashboard, change its own password in Settings, and open the change requests list (Staff see only their own requests, Admin and Super Admin see all of them). Whoever made a request can withdraw it while it is pending.
-
-### Account Rules
-
-There is no sign-up page. The first Super Admin is created by `SuperAdminSeeder`, and every other account is created by an Admin or a Super Admin.
-
-| Action | Super Admin | Admin | Ability |
-| :--- | :--- | :--- | :--- |
-| Create an account | With any role | Staff accounts only | `users.manage-role` |
-| Edit an account, reset its password or reactivate it | Any account | Staff accounts only | `users.update` |
-| Deactivate an account | Any account except their own | Staff accounts only | `users.deactivate` |
-
-A deactivated account can do nothing, whatever its role. Accounts are deactivated, never deleted, so the audit log always points at a real person. No ability lets an Admin enter or edit record values, and none should be added: that separation of duties is what makes the audit log meaningful.
+- **Roles**: `app/Enums/RoleSlug.php` has one case, `SuperAdmin`. The `roles` table keeps its one row so the permission checks have one place to ask.
+- **Abilities**: `app/Providers/AuthServiceProvider.php` defines `documents.process`, `change-requests.create`, `records.view`, `audit.view`, `reports.generate`, `templates.manage` and `ocr.manage`, and each one asks only "is this the Super Admin?". Routes and views keep their `can:` checks, so a new page still needs an ability.
+- **Tests**: `tests/Feature/CapabilityMatrixTest.php` checks that the account opens every page, a guest is sent to sign in, and `/users` and `/analytics` give Not Found.
+- **The account**: `SuperAdminSeeder` makes it only when it is missing (running `db:seed` again never resets it), with the password from `config/crms.php` and "choose a new password" switched on. `php artisan crms:reset-password` gives it a new temporary password, printed once, and asks for a new one at the next sign-in.
+- **Old data**: the migration `2026_11_11_000200_remove_staff_and_admin_accounts` moved the other accounts' records and change requests to the Super Admin and deleted those accounts. Audit Log entries keep the person's name (`actor_name`, `actor_role`).
 
 ---
 
@@ -219,7 +194,7 @@ crms-laravel-12/
 ├── database/
 │   ├── factories/                      # Model factories for testing and seeding
 │   ├── migrations/                     # Database migrations (records, templates, audit logs, OCR)
-│   └── seeders/                        # RoleSeeder, SuperAdminSeeder, DocumentTemplateSeeder, DemoUsersSeeder
+│   └── seeders/                        # RoleSeeder, SuperAdminSeeder, DocumentTemplateSeeder
 ├── finetuning-kaggle/
 │   ├── trocr-finetuning-code.ipynb     # Kaggle fine-tuning notebook, from the base model; writes both CRMS reports
 │   └── trocr-sequential-finetuning.ipynb # Continues a fine-tuned model on new samples (see section 5b)
@@ -384,12 +359,7 @@ Before building, this copies the PDF.js worker from `node_modules` into `public/
 > **Security Warning**: This password is public (it is written here). Change it right after the first login: initials badge at the top right → **Account Settings**. CRMS does not force the change for this account. To customize default bootstrap credentials before running seeders, specify `CRMS_SUPER_ADMIN_EMAIL` and `CRMS_SUPER_ADMIN_PASSWORD` in your `.env`.
 
 #### Optional Demo Accounts
-For development evaluation, you can seed demo Staff and Admin accounts:
-```bash
-php artisan db:seed --class=DemoUsersSeeder
-```
-* **Staff**: `staff@crms.test` / `password123`
-* **Admin**: `admin@crms.test` / `password123`
+At the first sign-in CRMS asks you to choose your own password. **Forgot the password?** Run `php artisan crms:reset-password` on the CRMS computer: it prints a temporary password once, and asks for a new one at the next sign-in.
 
 ---
 
@@ -526,7 +496,7 @@ After `npm run build`, press **Ctrl+F5** in the browser.
 php artisan migrate                              # Apply new migrations
 php artisan migrate:status                       # Which migrations have run
 php artisan migrate --seed                       # First setup: tables, roles, default templates, Super Admin
-php artisan db:seed --class=DemoUsersSeeder      # Demo Staff and Admin accounts
+php artisan crms:reset-password                  # Forgot the password: prints a temporary one
 ```
 
 ### Line Detection (Kraken)
@@ -701,7 +671,7 @@ Its ZIP (`trocr-sequential.zip`) holds the model, `evaluation-report.json` and `
 ### 6. Installing Models into the Web Application
 1. Log in as **Super Admin** and navigate to the **OCR Workspace**.
 2. Click **Add model** and upload either a `.zip` archive or the loose files: `config.json`, `model.safetensors` (or `pytorch_model.bin`), the tokenizer files, and optionally `evaluation-report.json` and `base-evaluation-report.json`. The notebook's `trocr-finetuned.zip` already holds all of them.
-3. In the **Models** panel, click **Activate** next to it and confirm. Staff scan with the active model from then on. Use **Rescan models** after copying a model folder into `ml/models/` by hand.
+3. In the **Models** panel, click **Activate** next to it and confirm. Scans use the active model from then on. Use **Rescan models** after copying a model folder into `ml/models/` by hand.
 
 ---
 
@@ -831,24 +801,25 @@ tests/
 │   ├── AuditLogTest.php
 │   ├── AuditLogViewerTest.php               # Includes times shown in Philippine time
 │   ├── AuthenticationTest.php
-│   ├── CapabilityMatrixTest.php
+│   ├── CapabilityMatrixTest.php             # The one account opens every page; removed pages give Not Found
 │   ├── ChangeRequestPresentationTest.php
-│   ├── ChangeRequestWorkflowTest.php        # Includes long rejection notes and decisions under a row lock
+│   ├── ChangeRequestWorkflowTest.php        # Correct record: values change at once, old and new kept
 │   ├── DocumentTemplateBuilderTest.php      # Includes refusing to delete a layout records use
-│   ├── DocumentTypeArchiveTest.php          # Archiving hides a type from Staff scanning but keeps it; restoring
+│   ├── DocumentTypeArchiveTest.php          # Archiving hides a type from scanning but keeps it; restoring
 │   ├── DocumentUploadWorkflowTest.php       # Includes the missing-required-fields confirmation and TIFF refusal
 │   ├── LedgerTemplateAndExportTest.php      # Ledger grids, training CSV export
 │   ├── LineOutlinePipelineTest.php          # Page job, Detect, outlines, manual fixes
 │   ├── OcrClientTest.php                    # Every call to the OCR service carries the service key
 │   ├── OcrModelPerformanceTest.php
 │   ├── OcrWorkspaceTest.php
+│   ├── RecordCsvExportTest.php              # Download CSV: one row per person, two pages joined, ñ, formula guard
 │   ├── RecordArchiveFilterTest.php          # Records filters: bad dates, Philippine days
 │   ├── RecordDetailPresentationTest.php     # Includes the straightened page kept with a record
 │   ├── ReportExportTest.php                 # Includes CSV injection and Philippine time in the CSV
 │   ├── TemplateBuilderGridChecksTest.php    # Grid checks, tilted markers, printed rules
 │   ├── TemplateFieldSettingsTest.php        # Roles, value types, required fields, record identity
-│   ├── TemplateVersioningTest.php           # New versions of layouts in use, stale saves, duplicates
-│   └── UserManagementTest.php
+│   ├── SingleAccountTest.php                # Your details, first-sign-in password, crms:reset-password
+│   └── TemplateVersioningTest.php           # New versions of layouts in use, stale saves, duplicates
 ├── JavaScript/                 # Node.js unit tests (SNEAT controls, shortcuts, markers, line geometry)
 │   ├── change-request.test.js
 │   ├── field-marker.test.js

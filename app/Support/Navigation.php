@@ -33,17 +33,13 @@ class Navigation
                 'items' => [
                     self::item('New Document', 'documents.create', 'bx-scan', 'documents.process'),
                     self::item('Records Archive', 'records.index', 'bx-archive', 'records.view'),
-                    self::item('Change Requests', 'change-requests.index', 'bx-git-pull-request', anyOf: [
-                        'change-requests.create',
-                        'change-requests.moderate',
-                    ]),
+                    self::item('Corrections', 'change-requests.index', 'bx-edit', 'records.view'),
                 ],
             ],
             [
-                'header' => 'Oversight',
+                'header' => 'Reports & history',
                 'items' => [
                     self::item('Reports', 'reports.index', 'bx-file', 'reports.generate'),
-                    self::item('User Accounts', 'users.index', 'bx-user', 'users.manage'),
                     self::item('Audit Log', 'audit.index', 'bx-history', 'audit.view'),
                 ],
             ],
@@ -85,21 +81,13 @@ class Navigation
             default => true,
         };
 
-        $badge = null;
-        if ($route === 'change-requests.index' && Gate::allows('change-requests.moderate')) {
-            $pendingCount = \App\Models\ChangeRequest::where('status', \App\Enums\ChangeRequestStatus::Pending)->count();
-            if ($pendingCount > 0) {
-                $badge = ['count' => $pendingCount, 'class' => 'bg-warning text-dark'];
-            }
-        }
-
         return [
             'label' => $label,
             'route' => $route,
             'icon' => $icon,
             'visible' => $visible && Route::has($route),
             'active' => self::isActive($route),
-            'badge' => $badge,
+            'badge' => null,
         ];
     }
 

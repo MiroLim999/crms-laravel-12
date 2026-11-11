@@ -13,7 +13,7 @@ class DocumentTypeArchiveTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_an_archived_type_is_hidden_from_staff_scanning_but_kept(): void
+    public function test_an_archived_type_is_hidden_from_scanning_but_kept(): void
     {
         $this->seed(DocumentTemplateSeeder::class);
         $type = DocumentTypeDefinition::where('key', DocumentType::Birth->value)->firstOrFail();
@@ -25,14 +25,14 @@ class DocumentTypeArchiveTest extends TestCase
         $this->assertTrue($type->fresh()->isArchived());
         $this->assertDatabaseHas('audit_logs', ['action' => 'document-type.archived']);
 
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
 
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->get(route('documents.create'))
             ->assertOk()
             ->assertDontSee(route('documents.workspace', ['type' => $type->key]), escape: false);
 
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->get(route('documents.workspace', ['type' => $type->key]))
             ->assertRedirect(route('documents.create'));
     }
@@ -49,21 +49,9 @@ class DocumentTypeArchiveTest extends TestCase
 
         $this->assertFalse($type->fresh()->isArchived());
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('documents.workspace', ['type' => $type->key]))
             ->assertOk();
-    }
-
-    public function test_staff_cannot_archive_a_type(): void
-    {
-        $this->seed(DocumentTemplateSeeder::class);
-        $type = DocumentTypeDefinition::where('key', DocumentType::Birth->value)->firstOrFail();
-
-        $this->actingAs(User::factory()->staff()->create())
-            ->post(route('templates.document-types.archive', $type))
-            ->assertForbidden();
-
-        $this->assertFalse($type->fresh()->isArchived());
     }
 
     public function test_template_builder_lists_archived_types_with_a_restore_action(): void
@@ -76,6 +64,6 @@ class DocumentTypeArchiveTest extends TestCase
             ->get(route('templates.index'))
             ->assertOk()
             ->assertSee('Archived')
-            ->assertSee('Restore for Staff');
+            ->assertSee('Restore');
     }
 }

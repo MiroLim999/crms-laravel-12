@@ -58,7 +58,7 @@ class LedgerTemplateAndExportTest extends TestCase
         $this->assertSame(1, $template->columnBoxes()[1]['columnIndex']);
     }
 
-    public function test_tilted_fields_and_a_tilted_grid_are_saved_and_offered_to_staff(): void
+    public function test_tilted_fields_and_a_tilted_grid_are_saved_and_offered_to_the_scan(): void
     {
         $this->actingAs(User::factory()->superAdmin()->create())->post(route('templates.store'), [
             'name' => 'Tilted register',
@@ -165,17 +165,13 @@ class LedgerTemplateAndExportTest extends TestCase
             ->assertJson(['ruled_ys' => [0.2, 0.3, 0.4], 'estimated_ys' => 1]);
 
         $this->assertSame([], Storage::disk('local')->allFiles('template-grid'));
-
-        $this->actingAs(User::factory()->staff()->create())
-            ->post(route('templates.detect-grid'), ['image' => UploadedFile::fake()->image('sample.png', 400, 300)])
-            ->assertForbidden();
     }
 
     public function test_training_export_writes_the_exact_crops_with_their_corrected_text(): void
     {
         Storage::fake('local');
         $this->seed(DocumentTemplateSeeder::class);
-        $user = User::factory()->staff()->create();
+        $user = User::factory()->superAdmin()->create();
         $record = CivilRecord::create([
             'doc_type' => DocumentType::Birth->value,
             'status' => RecordStatus::Submitted,
@@ -219,7 +215,7 @@ class LedgerTemplateAndExportTest extends TestCase
     {
         Storage::fake('local');
         $this->seed(DocumentTemplateSeeder::class);
-        $user = User::factory()->staff()->create();
+        $user = User::factory()->superAdmin()->create();
         $record = CivilRecord::create([
             'doc_type' => DocumentType::Birth->value,
             'status' => RecordStatus::Submitted,
@@ -241,11 +237,11 @@ class LedgerTemplateAndExportTest extends TestCase
         try {
             $this->artisan('crms:export-training', ['--test-set' => $name])
                 ->expectsOutputToContain('Wrote 2 real line(s) from 1 record(s)')
-                ->expectsOutputToContain('Staff changed the reading of 1 of them')
+                ->expectsOutputToContain('The reading was changed for 1 of them')
                 ->assertSuccessful();
 
             $rows = array_map('str_getcsv', file($root.'/manifest.csv', FILE_IGNORE_NEW_LINES));
-            $this->assertSame(['filename', 'label', 'split', 'source', 'record_id', 'staff_corrected'], $rows[0]);
+            $this->assertSame(['filename', 'label', 'split', 'source', 'record_id', 'hand_corrected'], $rows[0]);
             $this->assertCount(3, $rows);
             $this->assertSame(['Juan Dela Cruz', 'test', 'crms', (string) $record->getKey(), '1'], array_slice($rows[1], 1));
             $this->assertSame(['Cebu', 'test', 'crms', (string) $record->getKey(), '0'], array_slice($rows[2], 1));
@@ -263,7 +259,7 @@ class LedgerTemplateAndExportTest extends TestCase
     public function test_unsubmitted_pages_are_pruned_with_their_files(): void
     {
         Storage::fake('local');
-        $user = User::factory()->staff()->create();
+        $user = User::factory()->superAdmin()->create();
         $make = function (string $age) use ($user) {
             $page = DocumentPage::create([
                 'created_by' => $user->getKey(), 'status' => 'ready', 'image_path' => 'x',

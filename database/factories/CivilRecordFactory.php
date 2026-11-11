@@ -29,7 +29,7 @@ class CivilRecordFactory extends Factory
             'doc_type' => $type->value,
             'status' => RecordStatus::Submitted->value,
             'ocr_model_key' => 'base',
-            'created_by' => fn () => User::factory()->staff(),
+            'created_by' => fn () => User::factory(),
         ];
     }
 

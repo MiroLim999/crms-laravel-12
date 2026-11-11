@@ -21,8 +21,6 @@ class User extends Authenticatable
         'password',
         'role_id',
         'must_change_password',
-        'is_active',
-        'created_by',
     ];
 
     protected $hidden = [
@@ -35,7 +33,6 @@ class User extends Authenticatable
         return [
             'password' => 'hashed',
             'must_change_password' => 'boolean',
-            'is_active' => 'boolean',
             'password_changed_at' => 'datetime',
             'last_login_at' => 'datetime',
         ];
@@ -48,11 +45,6 @@ class User extends Authenticatable
         return $this->belongsTo(Role::class);
     }
 
-    public function creator(): BelongsTo
-    {
-        return $this->belongsTo(self::class, 'created_by');
-    }
-
     public function auditLogs(): HasMany
     {
         return $this->hasMany(AuditLog::class);
@@ -60,8 +52,7 @@ class User extends Authenticatable
 
     // ------------------------------------------------------------ role identity
     //
-    // All role checks funnel through here. Do not compare role slugs inline
-    // elsewhere in the app.
+    // There is one role, the Super Admin. Role checks still funnel through here.
 
     public function roleSlug(): ?RoleSlug
     {
@@ -75,36 +66,9 @@ class User extends Authenticatable
         return $mine !== null && in_array($mine, $slugs, true);
     }
 
-    public function isStaff(): bool
-    {
-        return $this->hasRole(RoleSlug::Staff);
-    }
-
-    public function isAdmin(): bool
-    {
-        return $this->hasRole(RoleSlug::Admin);
-    }
-
     public function isSuperAdmin(): bool
     {
         return $this->hasRole(RoleSlug::SuperAdmin);
-    }
-
-    /**
-     * May perform data entry: upload/process documents, verify and submit records,
-     * and raise change requests. Staff and Super Admin only - never Admin.
-     */
-    public function canEnterData(): bool
-    {
-        return $this->roleSlug()?->canEnterData() ?? false;
-    }
-
-    /**
-     * May perform oversight: approvals, analytics, user management, audit log, reports.
-     */
-    public function hasOversight(): bool
-    {
-        return $this->roleSlug()?->hasOversight() ?? false;
     }
 
     // ------------------------------------------------------------------ helpers

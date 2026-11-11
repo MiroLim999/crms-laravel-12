@@ -24,7 +24,7 @@ class TwoPageRecordTest extends TestCase
 
     private DocumentTemplate $template;
 
-    private User $staff;
+    private User $account;
 
     protected function setUp(): void
     {
@@ -48,7 +48,7 @@ class TwoPageRecordTest extends TestCase
 
         $this->template = DocumentTemplate::firstOrFail();
         $this->assertTrue($this->template->is_active);
-        $this->staff = User::factory()->staff()->create();
+        $this->account = User::factory()->superAdmin()->create();
     }
 
     /**
@@ -60,7 +60,7 @@ class TwoPageRecordTest extends TestCase
     {
         $page = DocumentPage::create([
             'document_template_id' => $this->template->getKey(),
-            'created_by' => $this->staff->getKey(),
+            'created_by' => $this->account->getKey(),
             'status' => DocumentPage::STATUS_READY,
             'image_path' => "documents/pages/{$scanName}.png",
             'width' => 800,
@@ -102,7 +102,7 @@ class TwoPageRecordTest extends TestCase
         [$first, $firstLine, $firstScan] = $this->readPage('page-1');
         [$second, $secondLine, $secondScan] = $this->readPage('page-2');
 
-        $response = $this->actingAs($this->staff)->withHeader('Accept', 'application/json')
+        $response = $this->actingAs($this->account)->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 'doc_type' => DocumentType::Death->value,
                 'document_template_id' => $this->template->getKey(),
@@ -140,8 +140,8 @@ class TwoPageRecordTest extends TestCase
         Storage::disk('local')->assertMissing($secondScan);
 
         // Each page's scan is served for the record page.
-        $this->actingAs($this->staff)->get(route('records.extra-page-scan', [$record, 2]))->assertOk();
-        $this->actingAs($this->staff)->get(route('records.show', $record))
+        $this->actingAs($this->account)->get(route('records.extra-page-scan', [$record, 2]))->assertOk();
+        $this->actingAs($this->account)->get(route('records.show', $record))
             ->assertOk()->assertSee('data-scan-page-tab="2"', escape: false);
 
         $response->assertJsonPath('redirect', route('records.show', $record));
@@ -151,7 +151,7 @@ class TwoPageRecordTest extends TestCase
     {
         [$first, $firstLine, $firstScan] = $this->readPage('only');
 
-        $this->actingAs($this->staff)->withHeader('Accept', 'application/json')
+        $this->actingAs($this->account)->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 'doc_type' => DocumentType::Death->value,
                 'document_template_id' => $this->template->getKey(),
@@ -172,9 +172,9 @@ class TwoPageRecordTest extends TestCase
     {
         [$first, $firstLine, $firstScan] = $this->readPage('p1');
         [$second, $secondLine, $secondScan] = $this->readPage('p2');
-        $second->update(['created_by' => User::factory()->staff()->create()->getKey()]);
+        $second->update(['created_by' => User::factory()->superAdmin()->create()->getKey()]);
 
-        $this->actingAs($this->staff)->withHeader('Accept', 'application/json')
+        $this->actingAs($this->account)->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 'doc_type' => DocumentType::Death->value,
                 'document_template_id' => $this->template->getKey(),
@@ -266,10 +266,10 @@ class TwoPageRecordTest extends TestCase
         // Page 2 was aligned and scanned under the right-page layout.
         $second->update(['document_template_id' => $right->getKey()]);
 
-        $this->actingAs($this->staff)->get(route('documents.workspace', ['type' => DocumentType::Death->value]))
+        $this->actingAs($this->account)->get(route('documents.workspace', ['type' => DocumentType::Death->value]))
             ->assertOk()->assertSee('"templateId":'.$right->getKey(), escape: false);
 
-        $this->actingAs($this->staff)->withHeader('Accept', 'application/json')
+        $this->actingAs($this->account)->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 'doc_type' => DocumentType::Death->value,
                 'document_template_id' => $this->template->getKey(),
@@ -291,7 +291,7 @@ class TwoPageRecordTest extends TestCase
         // A page 2 read with the wrong layout is refused.
         [$wrong, $wrongLine, $wrongScan] = $this->readPage('lp3');
         [$other, $otherLine, $otherScan] = $this->readPage('lp4');
-        $this->actingAs($this->staff)->withHeader('Accept', 'application/json')
+        $this->actingAs($this->account)->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 'doc_type' => DocumentType::Death->value,
                 'document_template_id' => $this->template->getKey(),

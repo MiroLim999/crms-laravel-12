@@ -15,14 +15,12 @@ use App\Services\DashboardAnalytics;
 use Database\Seeders\DocumentTemplateSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /**
- * Analytics are consolidated into the role-aware dashboard. Staff receive only
- * their own work summary; Admin and Super Admin receive the CRM overview for
- * a reporting period they choose for each panel.
+ * Analytics are consolidated into the dashboard: the one account sees the CRM
+ * overview for a reporting period it chooses for each panel.
  */
 class AnalyticsDashboardTest extends TestCase
 {
@@ -34,53 +32,34 @@ class AnalyticsDashboardTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_the_legacy_analytics_url_remains_gated_and_redirects_oversight_users(): void
+    public function test_the_account_sees_the_full_dashboard(): void
     {
-        $this->actingAs(User::factory()->staff()->create())
-            ->get(route('analytics.index'))
-            ->assertForbidden();
-
-        foreach ([User::factory()->admin()->create(), User::factory()->superAdmin()->create()] as $user) {
-            $this->actingAs($user)
-                ->get(route('analytics.index', ['period' => '90']))
-                ->assertRedirect(route('dashboard', ['period' => '90']));
-        }
-    }
-
-    public function test_dashboard_content_is_role_aware(): void
-    {
-        $staff = $this->actingAs(User::factory()->staff()->create())
+        $response = $this->actingAs(User::factory()->create())
             ->get(route('dashboard'))
             ->assertOk()
-            ->assertSee('Your submissions this month')
-            ->assertDontSee('Reporting period');
+            ->assertSee('New document')
+            ->assertSee('Reporting period')
+            ->assertSee('Total digitized records')
+            ->assertSee('Digitization Volume &amp; Trend', escape: false)
+            ->assertSee('OCR Quality')
+            ->assertSee('Corrections')
+            ->assertSee('Recent changes')
+            ->assertSee('View report')
+            ->assertDontSee('Your submissions this month')
+            ->assertDontSee('Manage users')
+            ->assertDontSee('accounts active')
+            ->assertDontSee('Processing and staff activity');
 
-        $this->assertNull($staff->viewData('analytics'));
-
-        foreach ([User::factory()->admin()->create(), User::factory()->superAdmin()->create()] as $user) {
-            $response = $this->actingAs($user)
-                ->get(route('dashboard'))
-                ->assertOk()
-                ->assertSee('Reporting period')
-                ->assertSee('Total digitized records')
-                ->assertSee('Digitization Volume &amp; Trend', escape: false)
-                ->assertSee('OCR Quality')
-                ->assertSee('Change requests')
-                ->assertSee('Recent changes')
-                // The total card's links say where they go.
-                ->assertSee('View report')
-                ->assertSee('Manage users');
-
-            $this->assertNotNull($response->viewData('analytics'));
-        }
+        $this->assertNotNull($response->viewData('analytics'));
+        $this->assertNotNull($response->viewData('scanTypes'));
     }
 
     public function test_it_counts_digitized_records_and_ocr_quality_signals(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
 
-        $submitted = $this->record($staff, DocumentType::Birth);
+        $submitted = $this->record($account, DocumentType::Birth);
 
         $submitted->fields()->create([
             'name' => 'Child Full Name',
@@ -95,7 +74,7 @@ class AnalyticsDashboardTest extends TestCase
             'ocr_confidence' => 70.0,
         ]);
 
-        $analytics = $this->actingAs(User::factory()->admin()->create())
+        $analytics = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard'))
             ->assertOk()
             // The chip says what it counts.
@@ -113,13 +92,13 @@ class AnalyticsDashboardTest extends TestCase
     public function test_twelve_months_is_the_default_period_in_whole_calendar_months(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
 
-        $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
+        $this->record($account, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
         // Before the window, which starts on 1 Sep 2025.
-        $this->record($staff, DocumentType::Death, ['submitted_at' => Carbon::parse('2025-08-20 02:00:00')]);
+        $this->record($account, DocumentType::Death, ['submitted_at' => Carbon::parse('2025-08-20 02:00:00')]);
 
-        $response = $this->actingAs(User::factory()->admin()->create())
+        $response = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard'))
             ->assertOk()
             ->assertSee('Showing <strong>1 Sep 2025 – 11 Aug 2026</strong>', escape: false)
@@ -145,14 +124,14 @@ class AnalyticsDashboardTest extends TestCase
     public function test_the_total_card_shows_what_the_archive_holds_by_type(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
 
-        $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
-        $this->record($staff, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-08-06 02:00:00')]);
+        $this->record($account, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
+        $this->record($account, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-08-06 02:00:00')]);
         // Long before the trend's period, and still in the archive.
-        $this->record($staff, DocumentType::Death, ['submitted_at' => Carbon::parse('2024-03-01 02:00:00')]);
+        $this->record($account, DocumentType::Death, ['submitted_at' => Carbon::parse('2024-03-01 02:00:00')]);
 
-        $response = $this->actingAs(User::factory()->admin()->create())
+        $response = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard', ['trend_period' => '30']))
             ->assertOk()
             ->assertSee('66.7%')
@@ -170,11 +149,11 @@ class AnalyticsDashboardTest extends TestCase
     public function test_the_period_filter_scopes_every_period_chart(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $recentStaff = User::factory()->staff()->create();
-        $olderStaff = User::factory()->staff()->create();
-        $admin = User::factory()->admin()->create();
+        $recentAccount = User::factory()->superAdmin()->create();
+        $olderAccount = User::factory()->superAdmin()->create();
+        $admin = User::factory()->superAdmin()->create();
 
-        $recent = $this->record($recentStaff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
+        $recent = $this->record($recentAccount, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
         $recent->fields()->create([
             'name' => 'Child Full Name',
             'ocr_text' => 'Ana',
@@ -182,7 +161,7 @@ class AnalyticsDashboardTest extends TestCase
             'ocr_confidence' => 95.0,
         ]);
 
-        $older = $this->record($olderStaff, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-06-01 02:00:00')]);
+        $older = $this->record($olderAccount, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-06-01 02:00:00')]);
         $older->fields()->create([
             'name' => 'Deceased Full Name',
             'ocr_text' => 'Juan',
@@ -232,12 +211,12 @@ class AnalyticsDashboardTest extends TestCase
     public function test_the_trend_badge_compares_periods_of_the_same_length(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $staff = User::factory()->staff()->create();
-        $admin = User::factory()->admin()->create();
+        $account = User::factory()->superAdmin()->create();
+        $admin = User::factory()->superAdmin()->create();
 
         // The archive opens on 1 Aug 2024, before every earlier period below.
         foreach (['2026-08-01', '2026-08-10', '2026-07-01', '2026-06-05', '2025-06-15', '2024-08-01'] as $day) {
-            $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse($day.' 02:00:00')]);
+            $this->record($account, DocumentType::Birth, ['submitted_at' => Carbon::parse($day.' 02:00:00')]);
         }
 
         // The last 30 days against the 30 days before them: 2 against 1.
@@ -261,12 +240,12 @@ class AnalyticsDashboardTest extends TestCase
     public function test_the_trend_badge_waits_until_the_archive_covers_the_earlier_period(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $staff = User::factory()->staff()->create();
-        $admin = User::factory()->admin()->create();
+        $account = User::factory()->superAdmin()->create();
+        $admin = User::factory()->superAdmin()->create();
 
         // The archive opens on 20 Jul 2026, inside the last 30 days.
         foreach (['2026-07-20', '2026-08-05'] as $day) {
-            $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse($day.' 02:00:00')]);
+            $this->record($account, DocumentType::Birth, ['submitted_at' => Carbon::parse($day.' 02:00:00')]);
         }
 
         // Against a year the archive never saw, a comparison says nothing.
@@ -283,13 +262,13 @@ class AnalyticsDashboardTest extends TestCase
     public function test_the_correction_rate_counts_only_changes_made_while_verifying(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $staff = User::factory()->staff()->create();
-        $record = $this->record($staff, DocumentType::Birth);
+        $account = User::factory()->superAdmin()->create();
+        $record = $this->record($account, DocumentType::Birth);
 
         $fields = collect([
             ['Child Full Name', 'Maria Santos', 'Maria Santos'],
             ['Mother Full Name', 'Ana Reyes', 'Ana Reyes'],
-            // Staff fixed only the capital letters: still a correction.
+            // The user fixed only the capital letters: still a correction.
             ['Father Full Name', 'juan dela cruz', 'Juan dela Cruz'],
             ['Place of Birth', 'Manila', 'Manila'],
         ])->map(fn (array $field) => $record->fields()->create([
@@ -299,17 +278,15 @@ class AnalyticsDashboardTest extends TestCase
             'ocr_confidence' => 90.0,
         ]));
 
-        // Later, an approved change request rewrites two values staff had
+        // Later, a correction rewrites two values that were
         // accepted as read. That is an amendment, not a verification fix.
-        $service = app(ChangeRequestService::class);
-        $request = $service->open($record->load('fields'), [
+        app(ChangeRequestService::class)->correct($record->load('fields'), [
             $fields[0]->getKey() => 'Mariah Santos',
             $fields[1]->getKey() => 'Anna Reyes',
-        ], 'The register spells both names differently.', $staff);
-        $service->approve($request, User::factory()->admin()->create());
+        ], 'The register spells both names differently.', $account);
         $this->assertSame('Mariah Santos', $fields[0]->fresh()->verified_value);
 
-        $quality = $this->actingAs(User::factory()->admin()->create())
+        $quality = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard'))
             ->viewData('analytics')['ocr_quality'];
 
@@ -321,14 +298,14 @@ class AnalyticsDashboardTest extends TestCase
     public function test_each_document_type_keeps_its_own_colour(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
 
-        $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-01 02:00:00')]);
+        $this->record($account, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-01 02:00:00')]);
         foreach (['2026-08-02', '2026-08-03', '2026-08-04'] as $day) {
-            $this->record($staff, DocumentType::Death, ['submitted_at' => Carbon::parse($day.' 02:00:00')]);
+            $this->record($account, DocumentType::Death, ['submitted_at' => Carbon::parse($day.' 02:00:00')]);
         }
 
-        $response = $this->actingAs(User::factory()->admin()->create())->get(route('dashboard'));
+        $response = $this->actingAs(User::factory()->superAdmin()->create())->get(route('dashboard'));
         $line = fn (string $type) => collect($response->viewData('analytics')['trend']['series'])
             ->firstWhere('name', $type)['color'];
 
@@ -342,11 +319,11 @@ class AnalyticsDashboardTest extends TestCase
     public function test_the_trend_starts_at_the_first_record_and_leaves_out_empty_types(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $staff = User::factory()->staff()->create();
-        $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-06-15 02:00:00')]);
+        $account = User::factory()->superAdmin()->create();
+        $this->record($account, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-06-15 02:00:00')]);
 
         // The header gives the dates the chart covers, not the period's.
-        $trend = $this->actingAs(User::factory()->admin()->create())
+        $trend = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard'))
             ->assertSee('15 Jun – 11 Aug 2026')
             ->assertDontSee('The first archived record')
@@ -361,7 +338,7 @@ class AnalyticsDashboardTest extends TestCase
     public function test_a_bad_period_shows_its_message_and_the_default_period(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $admin = User::factory()->admin()->create();
+        $admin = User::factory()->superAdmin()->create();
 
         $cases = [
             [['period' => 'custom'], 'Choose the first day of the custom period.'],
@@ -400,14 +377,14 @@ class AnalyticsDashboardTest extends TestCase
     public function test_each_panel_keeps_its_own_period(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $recentStaff = User::factory()->staff()->create();
-        $olderStaff = User::factory()->staff()->create();
+        $recentAccount = User::factory()->superAdmin()->create();
+        $olderAccount = User::factory()->superAdmin()->create();
 
-        $this->record($recentStaff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
-        $this->record($olderStaff, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-06-01 02:00:00')]);
+        $this->record($recentAccount, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
+        $this->record($olderAccount, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-06-01 02:00:00')]);
 
         // Only the change requests panel is narrowed; the trend stays on 12 months.
-        $response = $this->actingAs(User::factory()->admin()->create())
+        $response = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard', ['requests_period' => '30']))
             ->assertOk();
 
@@ -423,75 +400,59 @@ class AnalyticsDashboardTest extends TestCase
             ->assertSee('/dashboard#panel-requests', escape: false)
             ->assertSee('/dashboard#panel-ocr', escape: false);
 
-        $this->actingAs(User::factory()->admin()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard', ['requests_period' => '30', 'ocr_period' => '90']))
             ->assertSee('<input type="hidden" name="requests_period" value="30">', escape: false)
             ->assertSee('<input type="hidden" name="ocr_period" value="90">', escape: false);
 
         // One panel's bad period leaves the others as chosen.
-        $response = $this->actingAs(User::factory()->admin()->create())
+        $response = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard', ['trend_period' => '7', 'ocr_period' => '30']))
             ->assertSee('Choose one of the listed periods.');
         $this->assertSame(['365', '30'], [$response->viewData('scopes')['trend']['period'], $response->viewData('scopes')['ocr']['period']]);
     }
 
-    public function test_processing_counts_runs_times_them_and_lists_what_each_person_did(): void
+    public function test_processing_counts_runs_and_times_them(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
-        $ana = User::factory()->staff()->create(['name' => 'Ana Staff']);
-        $ben = User::factory()->staff()->create(['name' => 'Ben Staff']);
-        User::factory()->staff()->create(['name' => 'Gone Staff', 'is_active' => false]);
+        $user = User::factory()->create();
 
-        $run = fn (User $user, string $mode, string $outcome, ?int $ms, string $when = '2026-08-10 02:00:00', ?int $readMs = null, ?int $lines = null) => PageRun::create([
+        $run = fn (string $mode, string $outcome, ?int $ms, string $when = '2026-08-10 02:00:00', ?int $readMs = null, ?int $lines = null) => PageRun::create([
             'user_id' => $user->getKey(), 'mode' => $mode, 'outcome' => $outcome, 'duration_ms' => $ms,
             'read_ms' => $readMs, 'lines' => $lines,
         ])->forceFill(['created_at' => Carbon::parse($when)])->save();
 
-        $run($ana, 'detect', 'completed', 20_000, lines: 100);
-        $run($ana, 'detect', 'completed', 30_000, lines: 100);
+        $run('detect', 'completed', 20_000, lines: 100);
+        $run('detect', 'completed', 30_000, lines: 100);
         // 40 s + 8 s reading 100 lines, and 2 s reading 50: (6_000 + 2_000) / 150 lines = 53 ms a line.
-        $run($ana, 'full', 'completed', 60_000, readMs: 6_000, lines: 100);
-        $run($ana, 'read', 'completed', 10_000, readMs: 2_000, lines: 50);
-        $run($ben, 'full', 'failed', null);
-        $run($ben, 'detect', 'cancelled', null);
+        $run('full', 'completed', 60_000, readMs: 6_000, lines: 100);
+        $run('read', 'completed', 10_000, readMs: 2_000, lines: 50);
+        $run('full', 'failed', null);
+        $run('detect', 'cancelled', null);
         // Outside the default 12 months: not counted.
-        $run($ana, 'full', 'completed', 999_000, '2024-01-01 02:00:00');
+        $run('full', 'completed', 999_000, '2024-01-01 02:00:00');
 
-        $this->record($ana, DocumentType::Birth);
-        $this->record($ana, DocumentType::Death);
-        $this->record($ben, DocumentType::Birth);
-
-        // Audit rows cannot be edited through the model, so the older one is inserted directly.
-        foreach (['2026-08-09 01:00:00', '2026-08-10 01:00:00'] as $signedIn) {
-            DB::table('audit_logs')->insert(['user_id' => $ana->getKey(), 'action' => 'auth.login', 'created_at' => $signedIn]);
-        }
-
-        $response = $this->actingAs(User::factory()->admin()->create())
+        $response = $this->actingAs($user)
             ->get(route('dashboard'))
             ->assertOk()
-            ->assertSee('Processing and staff activity');
+            ->assertSee('Processing');
         $processing = $response->viewData('analytics')['processing'];
 
         $this->assertSame([4, 1, 1], [$processing['completed'], $processing['failed'], $processing['cancelled']]);
         $this->assertSame(['runs' => 2, 'average_ms' => 25_000], $processing['detect']);
         $this->assertSame(['runs' => 2, 'average_ms' => 35_000], $processing['scan']);
         $this->assertSame(['lines' => 150, 'ms_per_line' => 53], $processing['reading']);
+        $this->assertArrayNotHasKey('staff', $processing);
 
-        // Most submissions first; the inactive account has no work, so it is left out.
-        $this->assertSame(['Ana Staff', 'Ben Staff'], array_column($processing['staff'], 'name'));
-        $this->assertSame([2, 2], [$processing['staff'][0]['submitted'], $processing['staff'][0]['scanned']]);
-        $this->assertSame([1, 0], [$processing['staff'][1]['submitted'], $processing['staff'][1]['scanned']]);
-        $this->assertSame('2026-08-10', $processing['staff'][0]['last_sign_in']->toDateString());
-        $this->assertNull($processing['staff'][1]['last_sign_in']);
-
-        $response->assertSee('Average Detect')->assertSee('25 s')->assertSee('35 s')->assertSee('53 ms / line')->assertSee('Never')
-            // The account counts and the link to them sit with the staff they describe.
-            ->assertSee('accounts active')->assertSee('Manage users')->assertDontSee('Active accounts');
+        $response->assertSee('Average Detect')->assertSee('25 s')->assertSee('35 s')->assertSee('53 ms / line')
+            ->assertSee('title="Runs cancelled"', false)
+            // No people table and no accounts line any more.
+            ->assertDontSee('Last sign-in')->assertDontSee('accounts active')->assertDontSee('Manage users');
     }
 
     public function test_processing_says_so_when_nothing_has_run_and_has_its_own_period(): void
     {
-        $response = $this->actingAs(User::factory()->admin()->create())
+        $response = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard', ['processing_period' => '30']))
             ->assertOk()
             ->assertSee('No Detect or Scan has run in this period.');
@@ -502,79 +463,61 @@ class AnalyticsDashboardTest extends TestCase
         $this->assertNull($response->viewData('analytics')['processing']['reading']['ms_per_line']);
     }
 
-    public function test_change_requests_show_the_queue_now_and_the_decisions_in_the_period(): void
+    public function test_corrections_are_counted_in_their_period(): void
     {
-        Carbon::setTestNow('2026-08-11 04:00:00');
-        $staff = User::factory()->staff()->create();
-        $admin = User::factory()->admin()->create();
+        $user = User::factory()->create();
         $service = app(ChangeRequestService::class);
 
-        // Opened at a set time. A is approved after 3 hours, B rejected after
-        // 10 minutes and E, long ago, after a day. C is withdrawn and D is
-        // still waiting.
-        $open = function (string $openedAt) use ($staff, $service) {
-            Carbon::setTestNow($openedAt);
-            $record = $this->record($staff, DocumentType::Birth);
-            $field = $record->fields()->create([
-                'name' => 'Child Full Name', 'ocr_text' => 'Ana Cruz', 'verified_value' => 'Ana Cruz', 'ocr_confidence' => 90.0,
-            ]);
-
-            return $service->open($record->load('fields'), [$field->getKey() => 'Anna Cruz'], 'A spelling fix.', $staff);
+        $correct = function (string $at, int $fieldCount) use ($user, $service): void {
+            Carbon::setTestNow($at);
+            $record = $this->record($user, DocumentType::Birth);
+            $values = [];
+            for ($n = 1; $n <= $fieldCount; $n++) {
+                $field = $record->fields()->create([
+                    'name' => "Field {$n}", 'ocr_text' => 'Ana Cruz', 'verified_value' => 'Ana Cruz', 'ocr_confidence' => 90.0,
+                ]);
+                $values[$field->getKey()] = 'Anna Cruz';
+            }
+            $service->correct($record->load('fields'), $values, null, $user);
         };
 
-        $a = $open('2026-08-01 02:00:00');
-        Carbon::setTestNow('2026-08-01 05:00:00');
-        $service->approve($a, $admin);
-
-        $b = $open('2026-08-05 02:00:00');
-        Carbon::setTestNow('2026-08-05 02:10:00');
-        $service->reject($b, $admin, 'Not what the register says.');
-
-        $c = $open('2026-08-06 02:00:00');
-        $service->withdraw($c, $staff);
-
-        $open('2026-08-07 02:00:00');
-
-        $e = $open('2026-05-01 02:00:00');
-        Carbon::setTestNow('2026-05-02 02:00:00');
-        $service->approve($e, $admin);
+        $correct('2026-08-01 02:00:00', 2);
+        $correct('2026-08-05 02:00:00', 1);
+        $correct('2026-05-01 02:00:00', 3);
 
         Carbon::setTestNow('2026-08-11 04:00:00');
 
-        // Twelve months holds all three decisions.
-        $response = $this->actingAs($admin)->get(route('dashboard'))->assertOk();
-        $requests = $response->viewData('analytics')['change_requests'];
+        // Twelve months holds all three.
+        $response = $this->actingAs($user)->get(route('dashboard'))->assertOk();
+        $this->assertSame(
+            ['corrections' => 3, 'records' => 3, 'fields' => 6],
+            $response->viewData('analytics')['corrections'],
+        );
+        $response->assertSee('corrections saved')
+            ->assertSee('All corrections')
+            ->assertSee(route('change-requests.index'))
+            ->assertDontSee('waiting for a decision');
 
-        $this->assertSame(1, $requests['waiting']);
-        $this->assertSame('2026-08-07 02:00:00', $requests['oldest_waiting_at']->format('Y-m-d H:i:s'));
-        $this->assertSame([2, 1, 1], [$requests['approved'], $requests['rejected'], $requests['withdrawn']]);
-        $response->assertSee('waiting for a decision')
-            ->assertSee('The oldest has waited 4 days.')
-            ->assertSee(route('change-requests.index', ['status' => 'pending']))
-            ->assertDontSee('Average wait');
-
-        // The last 30 days leave out E, but not the queue, which has no period.
-        $requests = $this->actingAs($admin)
-            ->get(route('dashboard', ['requests_period' => '30']))
-            ->viewData('analytics')['change_requests'];
-
-        $this->assertSame(1, $requests['waiting']);
-        $this->assertSame([1, 1, 1], [$requests['approved'], $requests['rejected'], $requests['withdrawn']]);
+        // The last 30 days leave out the May one.
+        $this->assertSame(
+            ['corrections' => 2, 'records' => 2, 'fields' => 3],
+            $this->actingAs($user)
+                ->get(route('dashboard', ['requests_period' => '30']))
+                ->viewData('analytics')['corrections'],
+        );
     }
 
-    public function test_change_requests_say_so_when_nothing_is_waiting_or_decided(): void
+    public function test_corrections_show_zero_when_there_are_none(): void
     {
-        $response = $this->actingAs(User::factory()->superAdmin()->create())
+        $response = $this->actingAs(User::factory()->create())
             ->get(route('dashboard'))
             ->assertOk()
-            ->assertSee('Nothing is waiting. You are all caught up.')
-            ->assertSee('All requests')
-            ->assertDontSee('The oldest has waited');
+            ->assertSee('corrections saved')
+            ->assertDontSee('Nothing is waiting');
 
-        $requests = $response->viewData('analytics')['change_requests'];
         $this->assertSame(
-            [0, 0, 0, 0],
-            [$requests['waiting'], $requests['approved'], $requests['rejected'], $requests['withdrawn']],
+            ['corrections' => 0, 'records' => 0, 'fields' => 0],
+            $response->viewData('analytics')['corrections'],
         );
     }
 
@@ -598,7 +541,7 @@ class AnalyticsDashboardTest extends TestCase
         $log('auth.login', 'Signed in as Super Admin.', '2026-08-09 02:00:00');
         $log('record.submitted', 'Submitted and locked a Birth record.', '2026-08-09 03:00:00');
 
-        $response = $this->actingAs(User::factory()->admin()->create())
+        $response = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard'))
             ->assertOk()
             ->assertSee('Recent changes')
@@ -660,9 +603,9 @@ class AnalyticsDashboardTest extends TestCase
             ->get(route('dashboard'))
             ->assertSeeInOrder(['<dt>added this month</dt>', '<dd data-dashboard-count>0</dd>', '<dt>last added</dt>', 'None yet'], escape: false);
 
-        $staff = User::factory()->staff()->create();
-        $this->record($staff, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-07-20 04:00:00')]);
-        $this->record($staff, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-08 04:00:00')]);
+        $account = User::factory()->superAdmin()->create();
+        $this->record($account, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-07-20 04:00:00')]);
+        $this->record($account, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-08 04:00:00')]);
 
         // Only August's record counts this month. The newest is three days old,
         // and its exact time is given in Manila.
@@ -672,28 +615,14 @@ class AnalyticsDashboardTest extends TestCase
             ->assertSee('title="8 Aug 2026, 12:00 PM">3 days ago</time>', escape: false);
     }
 
-    public function test_admin_gets_no_new_document_card_because_admin_cannot_scan(): void
-    {
-        $response = $this->actingAs(User::factory()->admin()->create())
-            ->get(route('dashboard'))
-            ->assertOk()
-            ->assertDontSee('dashboard-new-document')
-            ->assertDontSee(route('documents.create'));
-
-        $this->assertNull($response->viewData('scanTypes'));
-    }
     public function test_super_admin_uses_the_same_focused_crm_dashboard(): void
     {
-        User::factory()->staff()->create(['is_active' => false]);
-
         $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard'))
             ->assertOk()
             ->assertSee('Average OCR confidence')
             ->assertSee('Human correction rate')
-            // One of the two accounts is active; the count sits with the staff list.
-            ->assertSee('1 of 2 accounts active')
-            ->assertDontSee('Active accounts')
+            ->assertDontSee('accounts active')
             ->assertDontSee('Template usage and OCR review signals');
     }
 
@@ -725,7 +654,7 @@ class AnalyticsDashboardTest extends TestCase
         // The model in use has no test results; Base does.
         OcrModel::create(['key' => 'finetuned-v3', 'label' => 'Finetuned v3', 'is_active' => true]);
         $base = $this->evaluatedModel(['key' => 'base', 'label' => 'base'], 0.2, 0.6, 0.25);
-        $admin = User::factory()->admin()->create();
+        $admin = User::factory()->superAdmin()->create();
 
         $response = $this->actingAs($admin)
             ->get(route('dashboard'))
@@ -757,7 +686,7 @@ class AnalyticsDashboardTest extends TestCase
     {
         $this->assertDatabaseCount('ocr_settings', 0);
 
-        $this->actingAs(User::factory()->admin()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard'))
             ->assertOk();
 
@@ -820,13 +749,13 @@ class AnalyticsDashboardTest extends TestCase
     /**
      * @param  array<string, mixed>  $overrides
      */
-    private function record(User $staff, DocumentType $type, array $overrides = []): CivilRecord
+    private function record(User $account, DocumentType $type, array $overrides = []): CivilRecord
     {
         return CivilRecord::create([
             'doc_type' => $type->value,
             'status' => RecordStatus::Submitted->value,
-            'created_by' => $staff->getKey(),
-            'submitted_by' => $staff->getKey(),
+            'created_by' => $account->getKey(),
+            'submitted_by' => $account->getKey(),
             'submitted_at' => now(),
             ...$overrides,
         ]);

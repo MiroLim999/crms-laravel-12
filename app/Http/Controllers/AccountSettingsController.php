@@ -5,14 +5,12 @@ namespace App\Http\Controllers;
 use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\View\View;
 
 /**
- * Self-service account settings.
- *
- * Any signed-in role may change their own password here. Role and activation
- * status are not editable by the account holder - those belong to user management.
+ * Account settings: the account's own name, email and password.
  */
 class AccountSettingsController extends Controller
 {
@@ -21,6 +19,29 @@ class AccountSettingsController extends Controller
     public function edit(Request $request): View
     {
         return view('settings.edit', ['user' => $request->user()]);
+    }
+
+    public function updateProfile(Request $request): RedirectResponse
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->getKey())],
+        ]);
+
+        $validated['name'] = trim($validated['name']);
+        $validated['email'] = mb_strtolower(trim($validated['email']));
+
+        $user->fill($validated);
+
+        if (! $user->isDirty()) {
+            return back()->with('info', 'Nothing to save: your details were already like that.');
+        }
+
+        $this->audit->saveAndLog('user.updated', $user, 'Name or email changed from account settings.');
+
+        return back()->with('success', 'Your details have been saved.');
     }
 
     public function updatePassword(Request $request): RedirectResponse

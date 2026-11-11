@@ -1,83 +1,48 @@
 @extends('layouts.app')
 
-@section('title', 'Change Requests')
+@section('title', 'Corrections')
 
 @section('content')
     <main class="change-request-index">
-        <x-page-header title="Change Requests"
-                       :subtitle="$canModerate
-                           ? 'Review proposed corrections before they update a verified record.'
-                           : 'Track corrections you have proposed for verified records.'" />
+        <x-page-header title="Corrections"
+                       subtitle="Changes made to saved records. Each one keeps the old values." />
 
-        <section class="change-request-status-strip" aria-label="Change request status summary">
-            @foreach ($statuses as $status)
-                <a href="{{ route('change-requests.index', array_filter(['q' => $search, 'status' => $status->value])) }}"
-                   class="change-request-status-card {{ $selectedStatus === $status ? 'is-active' : '' }}"
-                   @if ($selectedStatus === $status) aria-current="page" @endif>
-                    <span class="change-request-status-card__label">{{ $status->label() }}</span>
-                    <strong>{{ $statusCounts->get($status->value, 0) }}</strong>
-                    <small>
-                        @switch($status)
-                            @case(\App\Enums\ChangeRequestStatus::Pending) Waiting for review @break
-                            @case(\App\Enums\ChangeRequestStatus::Approved) Applied to records @break
-                            @case(\App\Enums\ChangeRequestStatus::Rejected) Closed without changes @break
-                            @case(\App\Enums\ChangeRequestStatus::Withdrawn) Cancelled by requester @break
-                        @endswitch
-                    </small>
-                </a>
-            @endforeach
-        </section>
-
-        <x-card class="change-request-filter-card" title="Find a request">
+        <x-card class="change-request-filter-card" title="Find a correction">
             <form method="GET" action="{{ route('change-requests.index') }}" class="row g-3 align-items-end">
-                <div class="col-lg-7">
+                <div class="col-lg-10">
                     <label for="change-request-search" class="form-label">Search</label>
                     <input type="search" id="change-request-search" name="q" value="{{ $search }}"
                            class="form-control"
-                           placeholder="Request number, record type, reason{{ $canModerate ? ', or requester' : '' }}">
+                           placeholder="Correction number, record number, record type or reason">
                 </div>
-                <div class="col-sm-6 col-lg-3">
-                    <label for="change-request-status" class="form-label">Status</label>
-                    <select id="change-request-status" name="status" class="form-select">
-                        <option value="">All statuses</option>
-                        @foreach ($statuses as $status)
-                            <option value="{{ $status->value }}" @selected($selectedStatus === $status)>
-                                {{ $status->label() }}
-                            </option>
-                        @endforeach
-                    </select>
-                </div>
-                <div class="col-sm-6 col-lg-2 d-flex gap-2">
+                <div class="col-lg-2 d-flex gap-2">
                     <button class="btn btn-primary flex-grow-1" type="submit">
                         <i class="icon-base bx bx-search icon-sm me-1"></i> Search
                     </button>
-                    @if ($search !== '' || $selectedStatus)
+                    @if ($search !== '')
                         <a href="{{ route('change-requests.index') }}" class="btn btn-outline-secondary"
-                           aria-label="Clear filters">Reset</a>
+                           aria-label="Clear the search">Reset</a>
                     @endif
                 </div>
             </form>
         </x-card>
 
-        <x-card class="mt-4 change-request-list-card" title="Request queue"
-                :subtitle="$requests->total() . ' request(s) found'">
+        <x-card class="mt-4 change-request-list-card" title="All corrections"
+                :subtitle="$requests->total() . ' correction(s) found'">
             @if ($requests->isEmpty())
-                <x-empty-state icon="bx-git-pull-request" title="No requests match"
-                               :message="$search !== '' || $selectedStatus
-                                   ? 'Try clearing or widening the current filters.'
-                                   : ($canModerate
-                                       ? 'No corrections are waiting in the request queue.'
-                                       : 'You have not proposed any corrections yet.')" />
+                <x-empty-state icon="bx-edit" title="No corrections"
+                               :message="$search !== ''
+                                   ? 'Try clearing or widening the search.'
+                                   : 'Open a record and choose Correct record to change a saved value.'" />
             @else
                 <div class="table-responsive">
                     <table class="table table-hover align-middle change-request-table">
                         <thead>
                             <tr>
-                                <th>Request</th>
+                                <th>Correction</th>
                                 <th>Record</th>
-                                <th>Requested by</th>
+                                <th>Corrected by</th>
                                 <th>Changes</th>
-                                <th>Status</th>
                                 <th class="text-end"></th>
                             </tr>
                         </thead>
@@ -86,11 +51,19 @@
                                 <tr>
                                     <td>
                                         <a href="{{ route('change-requests.show', $changeRequest) }}" class="fw-semibold">
-                                            Request #{{ $changeRequest->getKey() }}
+                                            Correction #{{ $changeRequest->getKey() }}
                                         </a>
-                                        <div class="change-request-table__reason">
-                                            {{ Str::limit($changeRequest->reason, 72) }}
-                                        </div>
+                                        {{-- Older requests from before corrections were saved at once. --}}
+                                        @unless ($changeRequest->status === \App\Enums\ChangeRequestStatus::Approved)
+                                            <span class="badge {{ $changeRequest->status->badgeClass() }} ms-1">
+                                                {{ $changeRequest->status->label() }}
+                                            </span>
+                                        @endunless
+                                        @if (filled($changeRequest->reason))
+                                            <div class="change-request-table__reason">
+                                                {{ Str::limit($changeRequest->reason, 72) }}
+                                            </div>
+                                        @endif
                                     </td>
                                     <td>
                                         @if ($changeRequest->record)
@@ -115,16 +88,9 @@
                                         <span class="change-request-count">{{ $changeRequest->changeCount() }}</span>
                                         <small class="text-muted">value{{ $changeRequest->changeCount() === 1 ? '' : 's' }}</small>
                                     </td>
-                                    <td>
-                                        <span class="badge {{ $changeRequest->status->badgeClass() }}">
-                                            {{ $changeRequest->status->label() }}
-                                        </span>
-                                    </td>
                                     <td class="text-end">
                                         <a href="{{ route('change-requests.show', $changeRequest) }}"
-                                           class="btn btn-sm {{ $canModerate && $changeRequest->isOpen() ? 'btn-primary' : 'btn-outline-secondary' }}">
-                                            {{ $canModerate && $changeRequest->isOpen() ? 'Review' : 'View details' }}
-                                        </a>
+                                           class="btn btn-sm btn-outline-secondary">View details</a>
                                     </td>
                                 </tr>
                             @endforeach

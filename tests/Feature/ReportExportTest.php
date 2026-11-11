@@ -19,21 +19,13 @@ class ReportExportTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_staff_are_denied_the_report_page_and_the_export(): void
-    {
-        $staff = User::factory()->staff()->create();
-
-        $this->actingAs($staff)->get(route('reports.index'))->assertForbidden();
-        $this->actingAs($staff)->get(route('reports.export'))->assertForbidden();
-    }
-
     public function test_the_page_summarises_matching_records(): void
     {
-        $staff = User::factory()->staff()->create();
-        $this->record($staff, DocumentType::Birth, RecordStatus::Submitted);
-        $this->record($staff, DocumentType::Death, RecordStatus::Submitted);
+        $account = User::factory()->superAdmin()->create();
+        $this->record($account, DocumentType::Birth, RecordStatus::Submitted);
+        $this->record($account, DocumentType::Death, RecordStatus::Submitted);
 
-        $summary = $this->actingAs(User::factory()->admin()->create())
+        $summary = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('reports.index', ['doc_type' => DocumentType::Birth->value]))
             ->assertOk()
             ->viewData('summary');
@@ -43,9 +35,9 @@ class ReportExportTest extends TestCase
 
     public function test_the_export_streams_csv_of_the_filtered_records(): void
     {
-        $staff = User::factory()->staff()->create(['name' => 'Nina Staffer']);
+        $account = User::factory()->superAdmin()->create(['name' => 'Nina Encoder']);
 
-        $birth = $this->record($staff, DocumentType::Birth, RecordStatus::Submitted);
+        $birth = $this->record($account, DocumentType::Birth, RecordStatus::Submitted);
         $birth->fields()->create([
             'name' => 'Child Full Name',
             'ocr_text' => 'Ana Reyes',
@@ -53,10 +45,10 @@ class ReportExportTest extends TestCase
             'ocr_confidence' => 88.0,
         ]);
 
-        $death = $this->record($staff, DocumentType::Death, RecordStatus::Submitted);
+        $death = $this->record($account, DocumentType::Death, RecordStatus::Submitted);
         $death->fields()->create(['name' => 'Full Name', 'verified_value' => 'Pedro Cruz']);
 
-        $response = $this->actingAs(User::factory()->admin()->create())
+        $response = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('reports.export', ['doc_type' => DocumentType::Birth->value]))
             ->assertOk();
 
@@ -70,14 +62,14 @@ class ReportExportTest extends TestCase
         $this->assertCount(2, $lines);
         $this->assertStringNotContainsString('Registry number', $lines[0]);
         $this->assertStringContainsString('Ana Reyes', $lines[1]);
-        $this->assertStringContainsString('Nina Staffer', $lines[1]);
+        $this->assertStringContainsString('Nina Encoder', $lines[1]);
         $this->assertStringNotContainsString('Pedro Cruz', $csv);
     }
 
     public function test_the_export_keeps_excel_from_running_values_as_formulas(): void
     {
-        $staff = User::factory()->staff()->create();
-        $record = $this->record($staff, DocumentType::Birth, RecordStatus::Submitted);
+        $account = User::factory()->superAdmin()->create();
+        $record = $this->record($account, DocumentType::Birth, RecordStatus::Submitted);
         $record->fields()->create([
             'name' => 'Child Full Name',
             'ocr_text' => '=1+1',
@@ -85,7 +77,7 @@ class ReportExportTest extends TestCase
             'ocr_confidence' => 87.5,
         ]);
 
-        $csv = $this->actingAs(User::factory()->admin()->create())
+        $csv = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('reports.export'))
             ->assertOk()
             ->streamedContent();
@@ -103,10 +95,10 @@ class ReportExportTest extends TestCase
     {
         // 07:30 on 2 October in the Philippines, but still 1 October in UTC.
         $this->travelTo(Carbon::parse('2026-10-01 23:30:00', 'UTC'));
-        $record = $this->record(User::factory()->staff()->create(), DocumentType::Birth, RecordStatus::Submitted);
+        $record = $this->record(User::factory()->superAdmin()->create(), DocumentType::Birth, RecordStatus::Submitted);
         $this->travelBack();
 
-        $admin = User::factory()->admin()->create();
+        $admin = User::factory()->superAdmin()->create();
 
         $this->actingAs($admin)
             ->get(route('reports.index', ['from' => '2026-10-02']))
@@ -126,9 +118,9 @@ class ReportExportTest extends TestCase
 
     public function test_the_export_is_audit_logged_with_the_filters_used(): void
     {
-        $admin = User::factory()->admin()->create();
-        $staff = User::factory()->staff()->create();
-        $this->record($staff, DocumentType::Birth, RecordStatus::Submitted);
+        $admin = User::factory()->superAdmin()->create();
+        $account = User::factory()->superAdmin()->create();
+        $this->record($account, DocumentType::Birth, RecordStatus::Submitted);
 
         $this->actingAs($admin)
             ->get(route('reports.export', [
@@ -141,7 +133,7 @@ class ReportExportTest extends TestCase
 
         $this->assertNotNull($entry, 'Exporting a report must write an audit entry.');
         $this->assertSame($admin->getKey(), $entry->user_id);
-        $this->assertSame('admin', $entry->actor_role);
+        $this->assertSame('super_admin', $entry->actor_role);
         $this->assertSame(DocumentType::Birth->value, $entry->new_values['doc_type']);
         $this->assertSame('2026-01-01', $entry->new_values['from']);
 
@@ -151,7 +143,7 @@ class ReportExportTest extends TestCase
 
     public function test_an_unusable_date_range_is_rejected(): void
     {
-        $this->actingAs(User::factory()->admin()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('reports.index', ['from' => '2026-06-01', 'to' => '2026-01-01']))
             ->assertSessionHasErrors('to');
     }
@@ -169,13 +161,13 @@ class ReportExportTest extends TestCase
         return array_map(fn (string $line) => array_combine($header, str_getcsv($line)), $lines);
     }
 
-    private function record(User $staff, DocumentType $type, RecordStatus $status): CivilRecord
+    private function record(User $account, DocumentType $type, RecordStatus $status): CivilRecord
     {
         return CivilRecord::create([
             'doc_type' => $type->value,
             'status' => $status->value,
-            'created_by' => $staff->getKey(),
-            'submitted_by' => $status === RecordStatus::Submitted ? $staff->getKey() : null,
+            'created_by' => $account->getKey(),
+            'submitted_by' => $status === RecordStatus::Submitted ? $account->getKey() : null,
             'submitted_at' => $status === RecordStatus::Submitted ? now() : null,
         ]);
     }

@@ -5,8 +5,7 @@ test_finetuned.py share: finding a model, loading it, and scoring a reading.
 
 Each of them used to carry its own copy, so a fix to one copy left the others
 as they were. The confidence score most of all must be one calculation: the
-number a Super Admin sees while spot-checking must be the number Staff see while
-scanning.
+number shown while spot-checking must be the number shown while scanning.
 """
 
 import math

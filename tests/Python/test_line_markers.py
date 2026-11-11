@@ -240,7 +240,7 @@ class DetectorCacheTest(unittest.TestCase):
         self.assertEqual(1, self.runs)
         self.assertFalse(first["timings"]["detector_reused"])
 
-        # Staff moved the marker and scanned again: the page is unchanged.
+        # The user moved the marker and scanned again: the page is unchanged.
         again = self.scan(box=(0.2, 0.30, 0.3, 0.05))
         self.assertEqual(1, self.runs, "the detector ran a second time")
         self.assertTrue(again["timings"]["detector_reused"])
@@ -552,9 +552,9 @@ class DetectTest(unittest.TestCase):
         self.assertAlmostEqual(RULED[0], suggested[0] * HEIGHT, delta=2)
         self.assertAlmostEqual(RULED[0], fitted["ruled_ys"][0] * HEIGHT, delta=2)
 
-    def test_rows_staff_already_placed_on_the_rules_survive_a_faded_rule(self):
+    def test_rows_already_placed_on_the_rules_survive_a_faded_rule(self):
         # The third rule faded away: the evenly ruled run now starts two rows
-        # down, but Staff's rows already sit on every rule that is printed.
+        # down, but the user's rows already sit on every rule that is printed.
         image = Image.new("RGB", (WIDTH, HEIGHT), (PAPER,) * 3)
         draw = ImageDraw.Draw(image)
         for y in RULED:
@@ -706,7 +706,7 @@ class FieldLinesTest(unittest.TestCase):
 
 
 class TurnedMarkersTest(unittest.TestCase):
-    """Markers Staff tilted by hand: fields turn alone, the ledger grid turns with the page."""
+    """Markers the user tilted by hand: fields turn alone, the ledger grid turns with the page."""
 
     def test_a_turned_field_is_cropped_level(self):
         # A dark 200 x 12 px stroke of "writing", turned 12 degrees clockwise.
@@ -777,7 +777,7 @@ class TurnedMarkersTest(unittest.TestCase):
         for row in (1, 2, 3):
             page.word(f"name{row}", 70, 250, base_of(row))
             page.word(f"date{row}", 320, 480, base_of(row))
-        # The scan came out turned 3 degrees clockwise. Staff tilted each column
+        # The scan came out turned 3 degrees clockwise. The user tilted each column
         # marker 3 degrees and dragged it onto its column: its centre goes
         # where the turn of the page took it.
         page.image = page.image.rotate(-3, resample=Image.BICUBIC, fillcolor=(PAPER,) * 3)

@@ -38,24 +38,13 @@
                 <input type="date" id="to" name="to" value="{{ $filters['to'] }}"
                        class="form-control @error('to') is-invalid @enderror">
             </div>
-            <div class="col-sm-6 col-xl-3">
+            <div class="col-12 col-xl-6">
                 <label for="doc_type" class="form-label">Document type</label>
                 <select id="doc_type" name="doc_type" class="form-select @error('doc_type') is-invalid @enderror">
                     <option value="">All types</option>
                     @foreach ($documentTypes as $type)
                         <option value="{{ $type->value }}" @selected($filters['doc_type'] === $type->value)>
                             {{ $type->label() }}
-                        </option>
-                    @endforeach
-                </select>
-            </div>
-            <div class="col-sm-6 col-xl-3">
-                <label for="submitted_by" class="form-label">Submitted by</label>
-                <select id="submitted_by" name="submitted_by" class="form-select @error('submitted_by') is-invalid @enderror">
-                    <option value="">Anyone</option>
-                    @foreach ($dataEntryUsers as $person)
-                        <option value="{{ $person->id }}" @selected($filters['submitted_by'] === $person->id)>
-                            {{ $person->name }}
                         </option>
                     @endforeach
                 </select>
@@ -104,9 +93,6 @@
                                 </td>
                                 <td>
                                     {{ \App\Support\LocalTime::format($record->submitted_at ?? $record->created_at, 'j M Y') }}
-                                    <div>
-                                        <small class="text-muted">{{ ($record->submitter ?? $record->creator)?->name }}</small>
-                                    </div>
                                 </td>
                                 <td class="text-end">
                                     @if ($confidence === null)

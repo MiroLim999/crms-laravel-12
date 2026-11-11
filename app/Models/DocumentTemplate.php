@@ -68,7 +68,7 @@ class DocumentTemplate extends Model
     }
 
     /**
-     * Whether Staff use this layout: it is published, or records or pages in
+     * Whether this layout is in use: it is published, or records or pages in
      * progress were read with it. A layout in use is never changed in place:
      * saving new markers makes a new version, so records keep theirs.
      */
@@ -95,7 +95,7 @@ class DocumentTemplate extends Model
     /**
      * Column markers in the shape the field-marking UI consumes.
      *
-     * Staff align these like any other marker; the row lines are then placed
+     * These are aligned like any other marker; the row lines are then placed
      * inside them and snapped to each page's own printed rules.
      *
      * @return list<array<string, mixed>>
@@ -160,7 +160,7 @@ class DocumentTemplate extends Model
     }
 
     /**
-     * Every marker Staff align: rectangle fields, then ledger columns.
+     * Every marker the Align step shows: rectangle fields, then ledger columns.
      *
      * @return list<array<string, mixed>>
      */
@@ -216,7 +216,7 @@ class DocumentTemplate extends Model
         return $query->where('is_page_two', false);
     }
 
-    /** The layout Staff align and read page `$pageNumber` of a spread with: even pages use page 2's, when set. */
+    /** The layout page `$pageNumber` of a spread is aligned and read with: even pages use page 2's, when set. */
     public function layoutForPage(int $pageNumber): self
     {
         return $pageNumber % 2 === 0 && $this->page_two_template_id !== null
@@ -251,7 +251,7 @@ class DocumentTemplate extends Model
     }
 
     /**
-     * The template Staff get when starting a new document of this type.
+     * The template a new document of this type starts with.
      */
     public static function activeFor(DocumentType|DocumentTypeDefinition|string $type): ?self
     {

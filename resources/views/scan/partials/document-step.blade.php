@@ -74,7 +74,7 @@
         @if (! $activeModel)
             <div class="alert alert-warning document-upload-alert" role="alert">
                 <i class="icon-base bx bx-error" aria-hidden="true"></i>
-                <div>No OCR model is active. A Super Admin needs to activate one before scans are read.</div>
+                <div>No OCR model is active. Activate one in OCR Workspace before scanning.</div>
             </div>
         @endif
 

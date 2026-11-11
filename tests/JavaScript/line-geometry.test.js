@@ -40,7 +40,7 @@ test('the row lines go as the Align step holds them, with the columns as aligned
     assert.equal(geometry.keep_rows, undefined, 'rows nobody set by hand may be taken from the page');
 });
 
-test('rows Staff set by hand are marked, so Detect keeps them', () => {
+test('rows set by hand are marked, so Detect keeps them', () => {
     assert.equal(alignedGeometry(templateColumns, ruledYs, { keepRows: true }).keep_rows, true);
     // Without columns there are no rows to keep.
     assert.equal(alignedGeometry([], ruledYs, { keepRows: true }).keep_rows, undefined);
@@ -260,7 +260,7 @@ test('Snap to table says where the rows came from, in plain words', () => {
     assert.equal(snapRowsMessage({ from_page: false, reason: 'something_new', estimated: [] }), '');
 });
 
-test('grid notes are worded as questions for Staff', () => {
+test('grid notes are worded as questions for the user', () => {
     assert.deepEqual(gridNotes(null), []);
     assert.deepEqual(gridNotes([{ code: 'unknown', count: 3 }, { code: 'lines_below_grid', count: 0 }]), []);
 

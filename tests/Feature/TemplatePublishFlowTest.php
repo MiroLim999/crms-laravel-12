@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 /**
- * From the Template Builder to Staff's workspace (review of 2026-11-11):
+ * From the Template Builder to the scan workspace (review of 2026-11-11):
  *
  * - each layout has its own page 2: a copy or a new version never shares it;
  * - page 2 layouts are not listed, published, edited or deleted by themselves;
@@ -244,7 +244,7 @@ class TemplatePublishFlowTest extends TestCase
             'sample_document' => null,
             'publish' => 1,
             'publish_anyway' => 1,
-        ]))->assertSessionHasNoErrors()->assertSessionHas('success', 'Template created and published for Staff.');
+        ]))->assertSessionHasNoErrors()->assertSessionHas('success', 'Template created and published.');
 
         $this->assertTrue(DocumentTemplate::firstOrFail()->is_active);
         // The audit log keeps what was not done.
@@ -289,7 +289,7 @@ class TemplatePublishFlowTest extends TestCase
 
     // ------------------------------------------------ one published layout per type
 
-    public function test_publishing_a_layout_replaces_the_one_staff_use(): void
+    public function test_publishing_a_layout_replaces_the_one_in_use(): void
     {
         $first = $this->layout(['name' => '1970s books', 'publish' => 1]);
         $second = $this->layout(['name' => '1990s books', 'publish' => 1]);
@@ -298,7 +298,7 @@ class TemplatePublishFlowTest extends TestCase
         $this->assertTrue($second->refresh()->is_active);
         $this->assertSame(1, DocumentTemplate::where('document_type_id', $second->document_type_id)->where('is_active', true)->count());
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('documents.workspace', ['type' => 'birth']))
             ->assertOk()
             ->assertSee('templateId: '.$second->getKey().',', escape: false)

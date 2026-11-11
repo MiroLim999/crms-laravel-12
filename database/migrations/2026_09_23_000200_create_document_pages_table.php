@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Schema;
 /**
  * An aligned page waiting for, or holding the results of, line detection.
  *
- * Created when Staff finish the Align step. A background job outlines every
+ * Created when the Align step is finished. A background job outlines every
  * handwritten line, crops along the outlines, and reads each crop with TrOCR.
  * The results are stored here so reopening the Verify step never recomputes
  * them. Submitting the record copies what it needs and removes the page;
@@ -26,7 +26,7 @@ return new class extends Migration
             $table->string('status', 16)->default('queued');
             $table->text('error')->nullable();
 
-            // The aligned page image exactly as Staff saw it, on the local disk.
+            // The aligned page image exactly as it was shown, on the local disk.
             $table->string('image_path');
             $table->unsignedInteger('width');
             $table->unsignedInteger('height');

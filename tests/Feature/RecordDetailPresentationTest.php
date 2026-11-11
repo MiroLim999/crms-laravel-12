@@ -15,12 +15,12 @@ class RecordDetailPresentationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_staff_sees_grouped_verified_values_with_an_interactive_scan(): void
+    public function test_the_record_shows_grouped_verified_values_with_an_interactive_scan(): void
     {
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
         $record = CivilRecord::factory()
             ->ofType(DocumentType::Birth)
-            ->submitted($staff)
+            ->submitted($account)
             ->create([
                 'scan_path' => 'scans/birth-register.png',
                 'scan_mime' => 'image/png',
@@ -29,7 +29,7 @@ class RecordDetailPresentationTest extends TestCase
         $this->createPerson($record, 1, 0.20, '1', 'Juan Miguel D. Abad');
         $this->createPerson($record, 2, 0.35, '2', 'Maria Beatriz R. Solis');
 
-        $response = $this->actingAs($staff)->get(route('records.show', $record));
+        $response = $this->actingAs($account)->get(route('records.show', $record));
 
         $response
             ->assertOk()
@@ -59,8 +59,8 @@ class RecordDetailPresentationTest extends TestCase
 
     public function test_the_scan_card_draws_its_boxes_over_the_page_the_record_kept(): void
     {
-        $staff = User::factory()->staff()->create();
-        $kept = CivilRecord::factory()->ofType(DocumentType::Birth)->submitted($staff)->create([
+        $account = User::factory()->superAdmin()->create();
+        $kept = CivilRecord::factory()->ofType(DocumentType::Birth)->submitted($account)->create([
             'scan_path' => 'scans/tilted.png',
             'scan_mime' => 'image/png',
             'scan_rotation' => 3.269,
@@ -68,18 +68,18 @@ class RecordDetailPresentationTest extends TestCase
         ]);
         $this->createPerson($kept, 1, 0.20, '1', 'Juan Miguel D. Abad');
         // A record from before pages were kept shows the upload, as it did.
-        $older = CivilRecord::factory()->ofType(DocumentType::Birth)->submitted($staff)->create([
+        $older = CivilRecord::factory()->ofType(DocumentType::Birth)->submitted($account)->create([
             'scan_path' => 'scans/older.png',
             'scan_mime' => 'image/png',
         ]);
         $this->createPerson($older, 1, 0.20, '1', 'Maria Beatriz R. Solis');
 
-        $this->actingAs($staff)->get(route('records.show', $kept))
+        $this->actingAs($account)->get(route('records.show', $kept))
             ->assertOk()
             ->assertSee('<img src="'.route('records.page-image', $kept).'"', escape: false)
             ->assertDontSee('<img src="'.route('records.scan', $kept).'"', escape: false);
 
-        $this->actingAs($staff)->get(route('records.show', $older))
+        $this->actingAs($account)->get(route('records.show', $older))
             ->assertOk()
             ->assertSee('<img src="'.route('records.scan', $older).'"', escape: false)
             ->assertDontSee(route('records.page-image', $older), escape: false);
@@ -89,20 +89,20 @@ class RecordDetailPresentationTest extends TestCase
     {
         Storage::fake('local');
         Storage::disk('local')->put('records/7/page.png', 'straightened page');
-        $staff = User::factory()->staff()->create();
-        $kept = CivilRecord::factory()->submitted($staff)->create(['page_image_path' => 'records/7/page.png']);
+        $account = User::factory()->superAdmin()->create();
+        $kept = CivilRecord::factory()->submitted($account)->create(['page_image_path' => 'records/7/page.png']);
 
         $this->get(route('records.page-image', $kept))->assertRedirect(route('login'));
 
-        $this->actingAs($staff)->get(route('records.page-image', $kept))
+        $this->actingAs($account)->get(route('records.page-image', $kept))
             ->assertOk()
             ->assertHeader('Content-Type', 'image/png');
 
         // A record without one, and one whose file has gone, are not found.
-        $older = CivilRecord::factory()->submitted($staff)->create();
-        $lost = CivilRecord::factory()->submitted($staff)->create(['page_image_path' => 'records/8/page.png']);
-        $this->actingAs($staff)->get(route('records.page-image', $older))->assertNotFound();
-        $this->actingAs($staff)->get(route('records.page-image', $lost))->assertNotFound();
+        $older = CivilRecord::factory()->submitted($account)->create();
+        $lost = CivilRecord::factory()->submitted($account)->create(['page_image_path' => 'records/8/page.png']);
+        $this->actingAs($account)->get(route('records.page-image', $older))->assertNotFound();
+        $this->actingAs($account)->get(route('records.page-image', $lost))->assertNotFound();
     }
 
     public function test_legacy_coordinate_rows_are_inferred_as_people(): void

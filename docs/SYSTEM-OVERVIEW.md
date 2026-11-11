@@ -9,6 +9,12 @@
 | **Diagrams** | Plain text, so they show in VS Code's preview (Ctrl+Shift+V) and on GitHub without add-ons |
 | **Related files** | [README](../README.md) (installation), [DEVELOPER-GUIDE](DEVELOPER-GUIDE.md) (developer reference), [DOCKER-SETUP](DOCKER-SETUP.md) (Docker), [System-Evaluation.pdf](System-Evaluation.pdf) (blank user-evaluation forms) |
 
+> **Changed on 11 November 2026: one account only.** The client runs CRMS on one offline PC with one account, the
+> Super Admin. The Staff and Admin roles, User Accounts, change-request approval, account deactivation and the demo
+> logins were removed (branch `miro-dev5`, plan in [SUPER-ADMIN-ONLY-PLAN](SUPER-ADMIN-ONLY-PLAN.md)). Sections 2, 3.5.2,
+> 4.1, 4.2, 4.7, 4.8, 4.10, 4.14, 5.4 and 5.5 describe the new system. Other sections may still say "Staff" for the
+> person scanning; read it as "the user". **Any manuscript diagram or table with three user types now needs one.**
+
 > **About the numbers.** Every figure says where it comes from. "Measured" means a real run produced it. The AI accuracy figures come from a **synthetic** (computer-generated) test set, not from real registry pages. Section [7.7](#77-results) explains what that means and what not to claim.
 
 ## Contents
@@ -96,47 +102,47 @@ These rules shape the whole system. Each one is enforced in code, not only in th
 
 ## 2. Who uses it
 
-### 2.1 The three roles
+### 2.1 One account
 
-| Role | Typical person | Main job |
+CRMS runs on one offline PC with **one account, the Super Admin**. The person who signs in does everything: scans,
+verifies, corrects, reports, builds templates and manages the AI models. There are no other roles and no screen for
+managing users.
+
+| Account | Typical person | Main job |
 | :--- | :--- | :--- |
-| **Staff** | Registry clerk, encoder | Scan, verify and submit records; request corrections |
-| **Admin** | Supervisor | Approve or reject corrections, view the dashboard and reports, manage Staff accounts, read the audit log. **Cannot enter or edit record values.** |
-| **Super Admin** | System administrator | Everything Staff and Admin can do, plus the Template Builder, the OCR Workspace, and all accounts |
+| **Super Admin** | The registry's encoder or system administrator | Everything: New Document, Records Archive, Corrections, Reports, Audit Log, Template Builder, OCR Workspace, Account Settings |
 
-### 2.2 What each role can do
+### 2.2 What the account can do
 
-| Capability | Staff | Admin | Super Admin |
-| :--- | :---: | :---: | :---: |
-| Scan, verify and submit records (New Document) | ✔ | | ✔ |
-| Search and view the Records Archive | ✔ | ✔ | ✔ |
-| Request a correction (change request) | ✔ | | ✔ |
-| See change requests | own only | all | all |
-| Approve or reject a change request | | ✔ | ✔ |
-| Dashboard with analytics | own summary | ✔ | ✔ |
-| Reports and CSV export | | ✔ | ✔ |
-| Manage user accounts | | Staff accounts only | all accounts |
-| View the audit log | | ✔ | ✔ |
-| Template Builder | | | ✔ |
-| OCR Workspace (AI models) | | | ✔ |
-| Change own password | ✔ | ✔ | ✔ |
+| Capability | Super Admin |
+| :--- | :---: |
+| Scan, verify and submit records (New Document) | ✔ |
+| Search and view the Records Archive | ✔ |
+| Correct a saved record (Correct record) and see every correction | ✔ |
+| Download one record as CSV | ✔ |
+| Dashboard with analytics | ✔ |
+| Reports and CSV export | ✔ |
+| View the audit log | ✔ |
+| Template Builder | ✔ |
+| OCR Workspace (AI models) | ✔ |
+| Change own name, email and password | ✔ |
 
 Rules behind the table:
 
-- The permission rules live in one place (`app/Providers/AuthServiceProvider.php`) and an automated test checks every row (`tests/Feature/CapabilityMatrixTest.php`).
-- The sidebar shows only links the person may open, but every page also checks permission itself. Hiding a link is not the security.
-- A **deactivated** account can do nothing, whatever its role.
-- Whoever made a change request can **withdraw** it while it is still pending.
-- There is **no sign-up page**. The first Super Admin is created at installation; every other account is created by an Admin or a Super Admin.
-- Accounts are **deactivated, never deleted**, so the audit log always points to a real person.
-- Nobody can deactivate their own account.
+- Each page still checks a permission (`app/Providers/AuthServiceProvider.php`), and each permission asks only "is this
+  the Super Admin?". An automated test checks that the account opens every page and a guest is sent to sign in
+  (`tests/Feature/CapabilityMatrixTest.php`).
+- There is **no sign-up page** and no User Accounts page. The account is created at installation.
+- A saved record changes only through **Correct record**, which keeps the old values (see [4.8](#48-corrections)).
 
-### 2.3 Accounts at installation
+### 2.3 The account at installation
 
 | Account | Created by | Sign-in |
 | :--- | :--- | :--- |
-| Super Admin | `php artisan migrate --seed` | `superadmin@admin.com`, password `superadmin@admin.com`. This password is public. It must be changed by hand: the system does not force it. |
-| Demo Staff and Admin (testing only) | `php artisan db:seed --class=DemoUsersSeeder` | `staff@crms.test` and `admin@crms.test`, password `password123` |
+| Super Admin | `php artisan migrate --seed` | `superadmin@admin.com`, first password `superadmin@admin.com`. At the first sign-in CRMS asks for a new password. Running the seeder again never resets an existing account. |
+
+**Forgot the password?** On the CRMS computer run `php artisan crms:reset-password`. It prints a new temporary
+password once; at the next sign-in CRMS asks for a new one. The reset is written to the audit log.
 
 ---
 
@@ -313,28 +319,20 @@ What each module contains:
 
 ```
  CRMS
- ├── STAFF
- │   ├── Dashboard (own work)
- │   ├── New Document: Document > Align > Verify > Submit
- │   ├── Records Archive: search and view
- │   ├── Change Requests: request a correction, see and withdraw own requests
- │   └── Account Settings
- ├── ADMIN
- │   ├── Dashboard (analytics)
- │   ├── Records Archive: search and view
- │   ├── Change Requests: see all, approve or reject
- │   ├── Reports and CSV export
- │   ├── User Accounts (Staff accounts only)
- │   ├── Audit Log
- │   └── Account Settings
- └── SUPER ADMIN
-     ├── everything Staff can do
-     ├── everything Admin can do, for all accounts
+ └── SUPER ADMIN (the one account)
+     ├── Dashboard
+     ├── New Document: Document > Align > Verify > Submit
+     ├── Records Archive: search, view, Correct record, Download CSV
+     ├── Corrections: every correction, read-only
+     ├── Reports and CSV export
+     ├── Audit Log
+     ├── OCR Workspace
      ├── Template Builder
-     └── OCR Workspace
+     └── Account Settings: name, email, password
 ```
 
-An Admin cannot scan, verify or submit, and nobody can edit a submitted record directly (see [2.2](#22-what-each-role-can-do)).
+Nobody can edit a submitted record directly: **Correct record** saves a correction that keeps the old values
+(see [4.8](#48-corrections)).
 
 #### 3.5.3 Layer structure
 
@@ -463,51 +461,47 @@ Where each feature's code is, file by file, is listed in [section 12](#12-where-
 ## 4. The screens and features
 
 ```
- CRMS sidebar
- ├── Dashboard ............................ everyone (content depends on role)
+ CRMS sidebar (all for the one account, the Super Admin)
+ ├── Dashboard
  ├── Digitization
- │   ├── New Document ..................... Staff, Super Admin
- │   ├── Records Archive .................. everyone
- │   └── Change Requests .................. Staff (own), Admin, Super Admin
- ├── Oversight
- │   ├── Reports .......................... Admin, Super Admin
- │   ├── User Accounts .................... Admin, Super Admin
- │   └── Audit Log ........................ Admin, Super Admin
+ │   ├── New Document
+ │   ├── Records Archive
+ │   └── Corrections
+ ├── Reports & history
+ │   ├── Reports
+ │   └── Audit Log
  └── System
-     ├── OCR Workspace .................... Super Admin
-     └── Template Builder ................. Super Admin
+     ├── OCR Workspace
+     └── Template Builder
 
  Top bar: record search ("/" key), light / dark / system colours, account menu
           (Account Settings, Log out)
 ```
 
-### 4.1 Sign-in and accounts
+### 4.1 Sign-in and the account
 
 - Sign in with email and password. There is no sign-up page.
 - After **5 wrong attempts** for the same email from the same computer, sign-in is blocked for a short time, and the screen says how long.
-- A new account gets a **12-character temporary password**, shown once to the person who created it. At first sign-in the user must choose a new password before they can open anything else.
-- New passwords need **at least 8 characters, with letters and numbers**, and must differ from the temporary one.
-- A deactivated user is signed out on their next click.
+- At the **first sign-in** (and after `php artisan crms:reset-password`) the account must choose its own password before it can open anything else.
+- New passwords need **at least 8 characters, with letters and numbers**, and must differ from the current one.
 - Sessions are stored in the database and last 120 minutes by default. Passwords are stored as bcrypt hashes.
 - Every sign-in and sign-out is written to the audit log.
 
 ### 4.2 Dashboard
 
-**Staff** see their own work: records submitted this month, their pending change requests, their 5 latest submissions and their latest activity, plus quick actions.
-
-**Admin and Super Admin** see the oversight dashboard. Each panel has its own reporting period (last 30 days, last 90 days, last 12 months, or custom dates; the default is 12 months).
+One dashboard. Each panel has its own reporting period (last 30 days, last 90 days, last 12 months, or custom dates; the default is 12 months).
 
 | Panel | What it shows |
 | :--- | :--- |
 | Headline figures | Records archived (all time, this month, and in the period), the change against the previous period of the same length, and when the last record was submitted |
-| New document | Super Admin only (Admin cannot scan): which document types can be scanned now |
-| **OCR Quality** | Average confidence of the AI readings, the **correction rate** (share of values Staff changed while verifying) and how many values fell below the confidence threshold |
+| New document | Which document types can be scanned now |
+| **OCR Quality** | Average confidence of the AI readings, the **correction rate** (share of values changed while verifying) and how many values fell below the confidence threshold |
 | **OCR Performance** | A radar chart comparing the active model with Microsoft's base model, from their test-set reports |
 | **Digitization Volume & Trend** | Records archived per document type over time (by day for up to 90 days, by month beyond) |
 | Archive by type | Records per document type |
-| **Processing and staff activity** | Detect and Scan runs that finished, failed or were cancelled; their average time; reading speed in milliseconds per line; and per person: records submitted, pages scanned, last sign-in |
-| **Change requests** | How many are waiting, the oldest one, and how many were approved, rejected or withdrawn in the period |
-| **Recent changes** | The latest 5 audit entries, leaving out routine sign-ins and submissions |
+| **Processing** | Detect and Scan runs that finished, failed or were cancelled; their average time; reading speed in milliseconds per line |
+| **Corrections** | Corrections saved in the period, the records they changed, and how many fields |
+| **Recent changes** | The latest 5 audit entries, leaving out routine sign-ins, submissions and CSV downloads |
 
 Times are stored in UTC and shown in Philippine time (`Asia/Manila`) on every page and in the CSV export. A bad date typed into the address bar shows a message on that panel instead of an error page.
 
@@ -578,37 +572,43 @@ On submission CRMS:
 
 - **Search** by any verified value (the top bar's search, or press `/`), and filter by document type and submission date (Philippine days). 15 records per page.
 - The **record page** shows the values grouped by person, and the page that was read with each value's box drawn on its handwriting. **Open full size** opens the original upload.
-- It marks values that Staff corrected during verification and lists every approved change, field by field.
-- It is **read-only for everyone**, Super Admin included. The **Request a correction** button starts a change request.
+- It marks values that were corrected during verification and lists every later correction (**Change history**), field by field.
+- **Correct record** changes values (see [4.8](#48-corrections)).
+- **Download CSV** gives this document's checked values, corrections included, **one row per person**, for import
+  into the client's old system. The columns follow the layout's field names, page 1 then page 2; fields that belong
+  to no person (for example Page No.) repeat on every row. The two pages of a document join by row: row 5 of page 1
+  and row 5 of page 2 are one CSV row. The file is UTF-8 with a byte-order mark, so Excel shows ñ and accents, and
+  each download is in the audit log (`record.exported`).
 
-### 4.8 Change Requests
+### 4.8 Corrections
 
-1. Staff (or a Super Admin) open a record and choose **Request a correction**. They type the new values and a **reason** (10 to 2,000 characters). Only values that really differ are kept.
-2. The request is **pending**. A record can have only one pending request at a time. Admins and Super Admins see a count of pending requests on the sidebar.
-3. An Admin or Super Admin **approves** it (note optional), which writes the new values into the record, or **rejects** it (a note of 5 to 2,000 characters is required).
-4. The person who asked can **withdraw** it while it is pending.
-5. Required fields cannot be blanked. Every step is in the audit log, with the old and new values.
+1. On a record, choose **Correct record**. Every value is shown beside a box for the right value. A **reason** is
+   optional (up to 2,000 characters). Only values that really differ are kept.
+2. **Save correction** changes the record at once. Required fields cannot be blanked; a save with no real change is refused.
+3. The old and new values are kept: on the record's **Change history**, on the **Corrections** page (sidebar,
+   read-only), and in the audit log (`record.corrected`).
+4. Saving locks the record's database row first, so two saves of one record take turns.
 
-Approve, reject and withdraw lock the database row before deciding, so a double-click, or two reviewers at once, cannot both decide the same request.
+In the database a correction is a change request saved as already approved, so older requests (from before
+11 November 2026) and new corrections are listed together.
 
 ### 4.9 Reports
 
-- Filter records by document type, date range and the person who submitted them; see a summary and a list (25 per page).
+- Filter records by document type and date range; see a summary and a list (25 per page).
 - **Export CSV** writes the matching records: ID, type, status, main value, created and submitted (time and person), OCR model, number of fields, average confidence.
 - The file is written 200 records at a time straight to the download, so even the whole archive does not overload the computer.
 - A cell that starts with `=`, `+`, `-` or `@` gets a leading `'`, so Excel shows it as text instead of running it as a formula ("CSV injection").
 - Every export is written to the audit log with its filters (`report.generated`).
 
-### 4.10 User Accounts
+### 4.10 User Accounts (removed)
 
-- List, create, edit, reset password, deactivate and reactivate accounts. There is no delete.
-- Creating an account or resetting its password shows a new temporary password once, and the user must change it at next sign-in.
-- An Admin manages **Staff accounts only**. Only a Super Admin can create Admins or change Admin and Super Admin accounts.
+Removed on 11 November 2026: there is one account. Its name and email are changed in Account Settings
+([4.14](#414-account-settings)); a forgotten password is reset with `php artisan crms:reset-password`.
 
 ### 4.11 Audit Log
 
-- Every entry: when, who (name and role at that time), what action, a description, the values before and after, IP address and browser.
-- Filter by person, action, date range, and search the text. 25 entries per page.
+- Every entry: when, who (the name at that time; entries from before 11 November 2026 keep their Staff and Admin names), what action, a description, the values before and after, IP address and browser.
+- Filter by action and date range, and search the text. 25 entries per page.
 - **Append-only**: there is no screen or route to edit or delete an entry, and the code throws an error if anything tries.
 - Passwords and tokens are replaced by `[redacted]` before an entry is saved.
 - [Appendix B](#appendix-b-audit-log-actions) lists every action.
@@ -658,7 +658,8 @@ Two settings exist in the database but have **no screen** at present: letting St
 
 ### 4.14 Account Settings
 
-Every user can change their own password here (opened from the initials badge at the top right).
+Opened from the initials badge at the top right. **Your details** changes the account's name and email (the email must
+be unused; the change is in the audit log as `user.updated`), and **Change password** changes the password.
 
 ### 4.15 Background jobs and command-line tools
 
@@ -743,32 +744,30 @@ Every run, finished, failed or cancelled, adds a row to `page_runs` (who, mode, 
 ### 5.4 Correcting a locked record
 
 ```
-                    approve (Admin or Super Admin)        new values are written
-               +------------------------------------->  [approved]  into the record
-               |
- [pending] ----+---- reject (Admin or Super Admin, note required) ---> [rejected]
-               |
-               +---- withdraw (the person who asked) -----------------> [withdrawn]
+ record page --> Correct record --> change values (reason optional) --> Save correction
+                                                                            |
+             record updated at once  <-- one database transaction  <--------+
+             Change history + Corrections page + audit entry record.corrected (old and new values)
 ```
 
-Only `pending` requests can be decided. Approved, rejected and withdrawn requests are history and never change.
+A correction is stored as a change request with the status `approved`. Requests from before 11 November 2026 may
+also show `rejected` or `withdrawn`; those never changed the record.
 
-### 5.5 Creating an account
+### 5.5 Forgotten password
 
 ```
- Admin / Super Admin         CRMS                                   New user
- -------------------         ----                                   --------
- enters name, email,  --->   creates the account with a random
- role                        12-character temporary password,
-                             "must change password" on,
-                             audit entry user.created
- sees the temporary   <---   shows it once (never stored in
- password, hands it on       plain text, never in the log)
-                                                                    signs in
-                             blocks every page but             <--- with it
-                             "change password"
-                             saves the new password,           <--- chooses a new
-                             audit entry user.password_changed      password
+ Super Admin (on the CRMS PC)     CRMS                                  Sign-in page
+ ----------------------------     ----                                  ------------
+ php artisan crms:reset-password  gives the account a random 12-character
+                                  temporary password, "must change
+                                  password" on, audit entry
+                                  user.password_reset
+ sees the password once   <----   prints it (never stored in plain text)
+                                                                        signs in with it
+                                  blocks every page but "change   <---
+                                  password"
+                                  saves the new password, audit   <---  chooses a new one
+                                  entry user.password_changed
 ```
 
 ### 5.6 A template's life

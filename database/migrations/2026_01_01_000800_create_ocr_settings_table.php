@@ -21,8 +21,8 @@ return new class extends Migration
         Schema::create('ocr_settings', function (Blueprint $table) {
             $table->id();
 
-            // Whether Staff may pick a different model than the promoted one when
-            // they scan. Off means every reading in the registry came from the model
+            // Whether the scanner may pick a different model than the promoted one
+            // (column dropped on 2026-11-11). Off means every reading in the registry came from the model
             // a Super Admin approved, which is the stricter, auditable default.
             $table->boolean('allow_staff_model_choice')->default(false);
 

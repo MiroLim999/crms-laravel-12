@@ -130,7 +130,7 @@ MODEL_LABELS = {
 
 # Fallback default when the caller names no model. In CRMS this rarely applies:
 # Laravel sends the model marked active in the ocr_models table, which is the
-# real source of truth for what Staff scan against.
+# real source of truth for what scans run against.
 PREFERRED_DEFAULT = "TrOCR-fine-tune-10k-samples"
 
 # The upload is the only browser-to-service request. Restrict response access to

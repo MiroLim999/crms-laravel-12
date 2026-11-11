@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Schema;
  * Registry of TrOCR models known to CRMS.
  *
  * The weights themselves live on disk under Models/ and are owned by the FastAPI
- * service. This table holds what Laravel needs: which model is active for Staff
+ * service. This table holds what Laravel needs: which model is active for
  * scanning, plus notes and evaluation figures recorded by a Super Admin. Rows are
  * reconciled against the service's /models endpoint rather than being the source
  * of truth for existence.
@@ -26,7 +26,7 @@ return new class extends Migration
             $table->string('label')->nullable();
             $table->text('notes')->nullable();
 
-            // Exactly one row may be active. Staff scanning uses this model, which
+            // Exactly one row may be active. Scanning uses this model, which
             // is why it lives in the database rather than in the browser.
             $table->boolean('is_active')->default(false);
 

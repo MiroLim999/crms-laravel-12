@@ -30,7 +30,7 @@ class MultiPageSourceTest extends TestCase
 
     private DocumentTemplate $template;
 
-    private User $staff;
+    private User $account;
 
     protected function setUp(): void
     {
@@ -52,13 +52,13 @@ class MultiPageSourceTest extends TestCase
         ])->assertSessionHasNoErrors();
 
         $this->template = DocumentTemplate::firstOrFail();
-        $this->staff = User::factory()->staff()->create();
+        $this->account = User::factory()->superAdmin()->create();
     }
 
     /** @param  array<string, mixed>  $source */
     private function submitPage(array $source, string $name = 'Juan Cruz'): TestResponse
     {
-        return $this->actingAs($this->staff)
+        return $this->actingAs($this->account)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 'doc_type' => DocumentType::Death->value,
@@ -102,7 +102,7 @@ class MultiPageSourceTest extends TestCase
         $this->assertSame(3, $audit->new_values['source_page']);
         $this->assertSame(12, $audit->new_values['source_page_count']);
 
-        $this->actingAs($this->staff)->get(route('records.show', $record))
+        $this->actingAs($this->account)->get(route('records.show', $record))
             ->assertOk()
             ->assertSee('Page 3 of 12 · BIRTHS-1995.pdf');
     }
@@ -125,7 +125,7 @@ class MultiPageSourceTest extends TestCase
         $this->submitPage($this->page(3, hash: self::OTHER_BOOK))->assertCreated();
         $this->assertDatabaseCount('records', 3);
 
-        // Staff chose "Save again": saved, and the audit log says so.
+        // The user chose "Save again": saved, and the audit log says so.
         $this->submitPage([...$this->page(3), 'allow_duplicate' => '1'], 'Pedro Reyes')->assertCreated();
         $this->assertDatabaseCount('records', 4);
         $audit = AuditLog::where('action', 'record.submitted')->latest('id')->first();
@@ -142,7 +142,7 @@ class MultiPageSourceTest extends TestCase
             ->assertJsonPath('message', "This file is already saved as record #{$saved->getKey()}.");
     }
 
-    public function test_staff_are_told_which_pages_of_a_file_are_saved(): void
+    public function test_the_user_is_told_which_pages_of_a_file_are_saved(): void
     {
         $this->submitPage($this->page(1))->assertCreated();
         $this->submitPage($this->page(3))->assertCreated();
@@ -150,7 +150,7 @@ class MultiPageSourceTest extends TestCase
         $this->submitPage($this->page(2, hash: self::OTHER_BOOK))->assertCreated();
         $newest = CivilRecord::where('source_page', 3)->latest('id')->first();
 
-        $pages = $this->actingAs($this->staff)
+        $pages = $this->actingAs($this->account)
             ->getJson(route('documents.sources.pages', ['hash' => self::BOOK]))
             ->assertOk()
             ->json('pages');
@@ -160,16 +160,16 @@ class MultiPageSourceTest extends TestCase
         $this->assertSame($newest->getKey(), $pages[1]['recordId']);
         $this->assertSame('Pedro Reyes', $pages[1]['title']);
 
-        $this->actingAs($this->staff)
+        $this->actingAs($this->account)
             ->getJson(route('documents.sources.pages', ['hash' => str_repeat('b', 64)]))
             ->assertOk()
             ->assertExactJson(['pages' => []]);
 
         // Not a fingerprint at all.
-        $this->actingAs($this->staff)->getJson('/documents/sources/not-a-hash/pages')->assertNotFound();
+        $this->actingAs($this->account)->getJson('/documents/sources/not-a-hash/pages')->assertNotFound();
 
         // Admin does not process documents.
-        $this->actingAs(User::factory()->admin()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->getJson(route('documents.sources.pages', ['hash' => self::BOOK]))
             ->assertForbidden();
     }
@@ -203,13 +203,13 @@ class MultiPageSourceTest extends TestCase
         $record = CivilRecord::sole();
 
         // Without the page Detect kept, a PDF can only be opened in a new tab.
-        $this->actingAs($this->staff)->get(route('records.show', $record))
+        $this->actingAs($this->account)->get(route('records.show', $record))
             ->assertOk()
             ->assertSee('Open scanned PDF')
             ->assertDontSee('data-scan-image', escape: false);
 
         $record->update(['page_image_path' => 'records/'.$record->getKey().'/page.png']);
-        $this->actingAs($this->staff)->get(route('records.show', $record))
+        $this->actingAs($this->account)->get(route('records.show', $record))
             ->assertOk()
             ->assertSee('data-scan-image', escape: false)
             ->assertSee(route('records.page-image', $record), escape: false)

@@ -18,10 +18,10 @@ use Throwable;
  * Outline every handwritten line on a page, and/or read each outline.
  *
  * Three modes:
- *   full   - Scan with OCR on the markers as Staff aligned them: outline, crop, read.
+ *   full   - Scan with OCR on the markers as they were aligned: outline, crop, read.
  *   detect - the Detect button: straighten the page, fit the template to the
- *            page's own table, outline and crop. Nothing is read yet, so Staff
- *            can check the outlines first.
+ *            page's own table, outline and crop. Nothing is read yet, so the
+ *            user can check the outlines first.
  *   read   - Scan with OCR after Detect: read the crops Detect already made.
  *
  * Everything is saved, so the Verify step loads results instead of
@@ -37,7 +37,7 @@ class ProcessDocumentPage implements ShouldQueue
 
     public const MODE_READ = 'read';
 
-    /** A failed page is re-scanned by Staff, not retried behind their back. */
+    /** A failed page is re-scanned by the user, not retried behind their back. */
     public int $tries = 1;
 
     public int $timeout = 900;
@@ -134,14 +134,14 @@ class ProcessDocumentPage implements ShouldQueue
         }
     }
 
-    /** The page's status now, as Staff may have changed it meanwhile. */
+    /** The page's status now, as the user may have changed it meanwhile. */
     private function currentStatus(): ?string
     {
         return DocumentPage::whereKey($this->pageId)->value('status');
     }
 
     /**
-     * Discard a page Staff cancelled: its record, lines and files. Returns
+     * Discard a cancelled page: its record, lines and files. Returns
      * whether it was cancelled.
      */
     private function stopIfCancelled(DocumentPage $page): bool
@@ -184,7 +184,7 @@ class ProcessDocumentPage implements ShouldQueue
 
         DB::transaction(function () use ($page, $result) {
             // Detect straightens the page in place, and so does a scan whose
-            // ledger grid Staff tilted; that can change its size, and the
+            // ledger grid tilted by hand; that can change its size, and the
             // markers were moved onto the straightened page: keep both.
             if ($this->mode === self::MODE_DETECT || isset($result['deskew'])) {
                 [$width, $height] = $result['size'];

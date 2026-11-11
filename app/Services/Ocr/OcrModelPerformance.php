@@ -11,7 +11,7 @@ use App\Models\PageRun;
  *
  * Only complete, artifact-bound test-set evaluations imported from a model's
  * evaluation-report.json are shown. Production scans are deliberately excluded:
- * observed Staff corrections are not a controlled comparison between models.
+ * corrections made while verifying are not a controlled comparison between models.
  */
 class OcrModelPerformance
 {

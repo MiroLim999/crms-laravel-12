@@ -25,9 +25,9 @@ use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 /**
- * Document template builder - Super Admin only.
+ * Document template builder.
  *
- * Templates decide which fields Staff capture per certificate type and where the
+ * Templates decide which fields a scan captures per certificate type and where the
  * boxes start. Coordinates are fractions of the page so a layout works at any
  * scan resolution.
  *
@@ -142,7 +142,7 @@ class DocumentTemplateController extends Controller
 
         return match (true) {
             $problems !== [] => $redirect->with('error', $this->notPublishedMessage('Template saved as a draft', $problems)),
-            (bool) ($validated['publish'] ?? false) => $redirect->with('success', 'Template created and published for Staff.'),
+            (bool) ($validated['publish'] ?? false) => $redirect->with('success', 'Template created and published.'),
             default => $redirect->with('success', 'Template saved as a draft.'),
         };
     }
@@ -530,8 +530,8 @@ class DocumentTemplateController extends Controller
         return back()->with(
             'success',
             match (true) {
-                (bool) ($validated['publish'] ?? false) => 'Template saved and published for Staff.',
-                $template->is_active => 'Layout details saved. It stays published for Staff.',
+                (bool) ($validated['publish'] ?? false) => 'Template saved and published.',
+                $template->is_active => 'Layout details saved. It stays published.',
                 default => 'Template draft saved.',
             },
         );
@@ -539,7 +539,7 @@ class DocumentTemplateController extends Controller
 
     /**
      * The Publish button in the template library. Only one template per
-     * certificate type is published for Staff: it replaces the one before.
+     * certificate type is published: it replaces the one before.
      */
     public function activate(DocumentTemplate $template): RedirectResponse
     {
@@ -676,11 +676,11 @@ class DocumentTemplateController extends Controller
             return $redirect;
         }
 
-        // Staff may be scanning with it right now: another layout is published first.
+        // A scan may be using it right now: another layout is published first.
         if ($template->is_active) {
             return back()->with(
                 'error',
-                "'{$template->name}' is the layout Staff use. Publish another layout first, then delete this one.",
+                "'{$template->name}' is the published layout. Publish another layout first, then delete this one.",
             );
         }
 
@@ -728,7 +728,7 @@ class DocumentTemplateController extends Controller
 
         $message = "Layout '{$template->name}' was deleted.";
         if ($wasPublished) {
-            $message .= ' Publish another layout before Staff scan this document type again.';
+            $message .= ' Publish another layout before scanning this document type again.';
         }
 
         return redirect()->route('templates.index')->with('success', $message);
@@ -948,7 +948,7 @@ class DocumentTemplateController extends Controller
     /**
      * The ledger grid, checked and normalised: null when a layout has none.
      *
-     * Staff alignment places the row lines relative to the columns' band (the
+     * The Align step places the row lines relative to the columns' band (the
      * median top and bottom of the columns), so row lines far outside that
      * band mean the two were moved apart and would land on the wrong rows.
      *
@@ -1033,7 +1033,7 @@ class DocumentTemplateController extends Controller
     }
 
     /**
-     * Rules for what a field or column holds, and how Staff check its value.
+     * Rules for what a field or column holds, and how Verify checks its value.
      *
      * @return array<string, list<mixed>>
      */
@@ -1203,11 +1203,11 @@ class DocumentTemplateController extends Controller
     /** @param  list<string>  $problems */
     private function notPublishedMessage(string $lead, array $problems): string
     {
-        return $lead.'. It was not published for Staff yet: '.implode(' ', $problems);
+        return $lead.'. It was not published yet: '.implode(' ', $problems);
     }
 
     /**
-     * Publish the layout Staff receive, retiring the previous one atomically.
+     * Publish the layout scans use, retiring the previous one atomically.
      * The row lock prevents two simultaneous publishes from leaving two active
      * layouts for the same certificate type.
      *
@@ -1371,7 +1371,7 @@ class DocumentTemplateController extends Controller
         }
 
         return $redirect->with('success', $publish
-                ? 'Saved as a new version and published for Staff.'.$kept
+                ? 'Saved as a new version and published.'.$kept
                 : 'Saved as a new draft version.'.$kept.($template->is_active ? ' It stays published until you publish this draft.' : ''));
     }
 
@@ -1390,7 +1390,7 @@ class DocumentTemplateController extends Controller
     }
 
     /**
-     * Whether a save changes what Staff read with the layout: its markers,
+     * Whether a save changes what scans read with the layout: its markers,
      * field settings, row lines or person rows. Name, notes and sample (with
      * its page shape) only describe it.
      *

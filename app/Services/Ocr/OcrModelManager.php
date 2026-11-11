@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
  * Reconciles the OCR service's on-disk models with the durable CRMS registry.
  *
  * The weights are the service's business; this class owns the Laravel-side facts:
- * which model Staff scan with, who installed it, and whether a folder CRMS knew
+ * which model scans use, who installed it, and whether a folder CRMS knew
  * about has since disappeared.
  */
 class OcrModelManager
@@ -430,8 +430,8 @@ class OcrModelManager
     {
         if (OcrModel::where('key', $key)->where('is_active', true)->exists()) {
             throw new OcrServiceException(
-                "{$verb} is blocked while '{$key}' is the model Staff scan with. "
-                .'Select another model and save settings first.',
+                "{$verb} is blocked while '{$key}' is the model scans use. "
+                .'Activate another model first.',
             );
         }
     }

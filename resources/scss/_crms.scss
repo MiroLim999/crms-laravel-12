@@ -3559,7 +3559,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 // The Align step's Detect preview: outlines only, never in the way of the
-// markers Staff drag underneath.
+// markers dragged underneath.
 .line-overlay.is-preview {
   z-index: 1;
 
@@ -3928,7 +3928,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// What Staff should check about the grid as a whole (Detect summary and Verify).
+// What to check about the grid as a whole (Detect summary and Verify).
 .grid-notes {
   display: flex;
   align-items: flex-start;
@@ -4971,7 +4971,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   min-inline-size: 8rem;
 }
 
-// A person's name, above their fields: typed by Staff or read from the page.
+// A person's name, above their fields: typed in Verify or read from the page.
 .validation-record-group__name {
   display: flex;
   align-items: center;
@@ -8241,34 +8241,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.dashboard-processing__foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: .5rem;
-  margin-block-start: .75rem;
-  color: var(--bs-secondary-color);
-  font-size: .75rem;
-}
-
 // Says what the OCR Performance scores were measured on.
 .dashboard-perf__note {
   margin: .5rem 0 0;
   color: var(--bs-secondary-color);
   font-size: .6875rem;
   line-height: 1.35;
-}
-
-.dashboard-processing__table {
-  font-variant-numeric: tabular-nums;
-
-  th {
-    color: var(--bs-secondary-color);
-    font-size: .75rem;
-    font-weight: 500;
-    white-space: nowrap;
-  }
 }
 
 .dashboard-changes {

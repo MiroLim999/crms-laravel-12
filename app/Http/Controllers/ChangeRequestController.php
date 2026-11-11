@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\ChangeRequestStatus;
 use App\Exceptions\ChangeRequestException;
 use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
@@ -13,11 +12,11 @@ use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 /**
- * Corrections to locked records.
+ * Corrections to saved records (stored as change requests).
  *
- * Staff open requests, Admin and Super Admin decide them. Approving is what
- * applies the new values - a reviewer never edits a record directly, which is the
- * whole point of routing corrections through here.
+ * Saving a correction changes the record at once; the old and new values stay in
+ * the record's Change history and the Audit Log. The list and detail pages are
+ * read-only.
  */
 class ChangeRequestController extends Controller
 {
@@ -28,39 +27,23 @@ class ChangeRequestController extends Controller
 
     public function index(Request $request): View
     {
-        // Strings only. An edited URL can send ?q[]=x, an array, which would
-        // crash the string reads below.
-        $request->validate([
-            'q' => ['nullable', 'string'],
-            'status' => ['nullable', 'string'],
-        ], [], ['q' => 'search']);
+        // A string only. An edited URL can send ?q[]=x, an array, which would
+        // crash the string read below.
+        $request->validate(['q' => ['nullable', 'string']], [], ['q' => 'search']);
 
-        $user = $request->user();
         $search = trim($request->string('q')->toString());
-        $selectedStatus = ChangeRequestStatus::tryFrom($request->string('status')->toString());
 
-        $visibleRequests = ChangeRequest::query()
-            // Staff see their own requests; reviewers see everything.
-            ->when(! $user->can('change-requests.moderate'),
-                fn ($query) => $query->where('requested_by', $user->getKey()));
-
-        $statusCounts = (clone $visibleRequests)
-            ->selectRaw('status, COUNT(*) as aggregate')
-            ->groupBy('status')
-            ->pluck('aggregate', 'status')
-            ->map(fn ($count) => (int) $count);
-
-        $requests = (clone $visibleRequests)
-            ->with(['record.documentTypeDefinition', 'record.fields', 'record.template', 'requester', 'reviewer', 'items'])
-            ->when($search !== '', function ($query) use ($search, $user): void {
+        $corrections = ChangeRequest::query()
+            ->with(['record.documentTypeDefinition', 'record.fields', 'record.template', 'requester', 'items'])
+            ->when($search !== '', function ($query) use ($search): void {
                 $term = "%{$search}%";
 
-                $query->where(function ($query) use ($search, $term, $user): void {
+                $query->where(function ($query) use ($search, $term): void {
                     $query->where('reason', 'like', $term)
                         ->orWhereHas('record', function ($recordQuery) use ($search, $term): void {
                             $recordQuery->whereHas('documentTypeDefinition', fn ($typeQuery) => $typeQuery
-                                    ->where('name', 'like', $term)
-                                    ->orWhere('short_name', 'like', $term));
+                                ->where('name', 'like', $term)
+                                ->orWhere('short_name', 'like', $term));
 
                             if (ctype_digit($search)) {
                                 $recordQuery->orWhereKey((int) $search);
@@ -70,21 +53,14 @@ class ChangeRequestController extends Controller
                     if (ctype_digit($search)) {
                         $query->orWhereKey((int) $search);
                     }
-
-                    if ($user->can('change-requests.moderate')) {
-                        $query->orWhereHas('requester', fn ($requesterQuery) => $requesterQuery
-                            ->where('name', 'like', $term));
-                    }
                 });
             })
-            ->when($selectedStatus,
-                fn ($query) => $query->where('status', $selectedStatus->value))
-            ->orderByRaw("FIELD(status, 'pending') DESC")
             ->orderByDesc('created_at')
+            ->orderByDesc('id')
             ->paginate(15)
             ->withQueryString();
 
-        $recordHeadings = $requests->getCollection()
+        $recordHeadings = $corrections->getCollection()
             ->pluck('record')
             ->filter()
             ->unique('id')
@@ -95,40 +71,20 @@ class ChangeRequestController extends Controller
             });
 
         return view('change-requests.index', [
-            'requests' => $requests,
-            'statuses' => ChangeRequestStatus::cases(),
-            'statusCounts' => $statusCounts,
+            'requests' => $corrections,
             'recordHeadings' => $recordHeadings,
-            'selectedStatus' => $selectedStatus,
             'search' => $search,
-            'canModerate' => $user->can('change-requests.moderate'),
         ]);
     }
 
     /**
-     * Propose corrections to a locked record.
+     * The Correct record form.
      */
-    public function create(CivilRecord $record, Request $request): View|RedirectResponse
+    public function create(CivilRecord $record): View
     {
         $this->authorize('change-requests.create');
 
         $record->load(['fields', 'documentTypeDefinition']);
-
-        if ($pendingRequest = $record->changeRequests()
-            ->where('status', ChangeRequestStatus::Pending->value)
-            ->first()) {
-            if (! $request->user()->can('change-requests.moderate')
-                && $pendingRequest->requested_by !== $request->user()->getKey()) {
-                return redirect()
-                    ->route('records.show', $record)
-                    ->with('error', 'This record already has a change request waiting for review.');
-            }
-
-            return redirect()
-                ->route('change-requests.show', $pendingRequest)
-                ->with('info', 'This record already has a change request waiting for review.');
-        }
-
         $fieldGroups = $this->fieldGrouper->groups($record->fields, $record->template);
 
         return view('change-requests.create', [
@@ -144,18 +100,16 @@ class ChangeRequestController extends Controller
         $this->authorize('change-requests.create');
 
         $validated = $request->validate([
-            'reason' => ['required', 'string', 'min:10', 'max:2000'],
+            'reason' => ['nullable', 'string', 'max:2000'],
             'values' => ['nullable', 'array'],
             'values.*' => ['nullable', 'string', 'max:2000'],
-        ], [
-            'reason.min' => 'Explain the correction in a sentence or two — a reviewer needs the context.',
         ]);
 
         try {
-            $changeRequest = $this->service->open(
+            $this->service->correct(
                 $record->load('fields'),
                 $validated['values'] ?? [],
-                $validated['reason'],
+                $validated['reason'] ?? null,
                 $request->user(),
             );
         } catch (ChangeRequestException $e) {
@@ -163,19 +117,12 @@ class ChangeRequestController extends Controller
         }
 
         return redirect()
-            ->route('change-requests.show', $changeRequest)
-            ->with('success', 'Change request submitted for review.');
+            ->route('records.show', $record)
+            ->with('success', 'Correction saved.');
     }
 
-    public function show(ChangeRequest $changeRequest, Request $request): View
+    public function show(ChangeRequest $changeRequest): View
     {
-        // Staff may only read their own; reviewers may read all.
-        abort_unless(
-            $request->user()->can('change-requests.moderate')
-                || $changeRequest->requested_by === $request->user()->getKey(),
-            403,
-        );
-
         $changeRequest->load([
             'record.fields', 'record.template', 'record.documentTypeDefinition', 'requester', 'reviewer', 'items.field',
         ]);
@@ -202,56 +149,6 @@ class ChangeRequestController extends Controller
             'orphanItems' => $changeRequest->items->whereNull('field')->values(),
             'changedFields' => $changeRequest->items->pluck('field')->filter()->values(),
             'recordHeading' => $this->fieldGrouper->heading($record, $recordGroups),
-            'canModerate' => $request->user()->can('change-requests.moderate'),
         ]);
-    }
-
-    public function approve(Request $request, ChangeRequest $changeRequest): RedirectResponse
-    {
-        $this->authorize('change-requests.moderate');
-
-        $validated = $request->validate([
-            'decision_note' => ['nullable', 'string', 'max:2000'],
-        ]);
-
-        try {
-            $this->service->approve($changeRequest, $request->user(), $validated['decision_note'] ?? null);
-        } catch (ChangeRequestException $e) {
-            return back()->with('error', $e->getMessage());
-        }
-
-        return back()->with('success', 'Approved. The record has been updated.');
-    }
-
-    public function reject(Request $request, ChangeRequest $changeRequest): RedirectResponse
-    {
-        $this->authorize('change-requests.moderate');
-
-        $validated = $request->validate([
-            'decision_note' => ['required', 'string', 'min:5', 'max:2000'],
-        ], [
-            'decision_note.required' => 'Give a reason for rejecting, so the requester knows what to fix.',
-        ]);
-
-        try {
-            $this->service->reject($changeRequest, $request->user(), $validated['decision_note']);
-        } catch (ChangeRequestException $e) {
-            return back()->with('error', $e->getMessage());
-        }
-
-        return back()->with('success', 'Rejected. The record is unchanged.');
-    }
-
-    public function withdraw(Request $request, ChangeRequest $changeRequest): RedirectResponse
-    {
-        abort_unless($changeRequest->requested_by === $request->user()->getKey(), 403);
-
-        try {
-            $this->service->withdraw($changeRequest, $request->user());
-        } catch (ChangeRequestException $e) {
-            return back()->with('error', $e->getMessage());
-        }
-
-        return back()->with('success', 'Change request withdrawn.');
     }
 }

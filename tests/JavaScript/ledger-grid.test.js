@@ -104,7 +104,7 @@ test('columns sitting on the first and last line follow those lines', () => {
 });
 
 test('in the Align step a column within half a row of the first or last line follows it', () => {
-    // Staff align columns by hand, so their edges sit near the lines, not exactly on them.
+    // The user aligns columns by hand, so their edges sit near the lines, not exactly on them.
     const boxes = [column('A', 0.1, 0.203, 0.594), column('B', 0.2, 0.2, 0.6)];
     const next = followFirstAndLastLine(boxes, [0.2, 0.5, 0.8], [0.2, 0.5, 0.8, 0.95], 0.15 / 2);
 

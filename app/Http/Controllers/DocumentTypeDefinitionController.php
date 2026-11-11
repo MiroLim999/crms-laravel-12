@@ -71,7 +71,7 @@ class DocumentTypeDefinitionController extends Controller
     }
 
     /**
-     * Hide a type from Staff scanning without touching its records or layouts.
+     * Hide a type from scanning without touching its records or layouts.
      */
     public function archive(DocumentTypeDefinition $documentType): RedirectResponse
     {

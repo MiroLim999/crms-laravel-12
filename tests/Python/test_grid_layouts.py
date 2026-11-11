@@ -39,7 +39,7 @@ PAPER, INK, PRINT, RULE = 238, 20, 70, 120
 
 
 class Ledger:
-    """A synthetic ledger page, its written cells, and the template Staff would place on it."""
+    """A synthetic ledger page, its written cells, and the template the user would place on it."""
 
     def __init__(self, cols=4, rows=10, pitch=32, header=0.0, tpl_rows=None, pitch_err=0.0, dy=0.0,
                  unruled_bottom=0, cycle=None, no_h=False, no_v=False):
@@ -182,7 +182,7 @@ class RowGridTest(unittest.TestCase):
                 self.assertEveryRowRight(Ledger(dy=dy))
 
     def test_a_header_exactly_as_tall_as_a_row_when_the_markers_sit_on_the_first_entry(self):
-        # Rule matching cannot tell such a header from a row. Scan trusts Staff's placement.
+        # Rule matching cannot tell such a header from a row. Scan trusts the user's placement.
         self.assertEveryRowRight(Ledger(header=1.0, tpl_rows=12, pitch_err=0.02), ways=("scan",))
         # Detect leaves markers that already sit on as many printed rules as its fit would.
         self.assertEveryRowRight(Ledger(header=1.0, pitch_err=0.02))
@@ -204,13 +204,13 @@ class RowGridTest(unittest.TestCase):
 
 @unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
 class GridNotesTest(unittest.TestCase):
-    """When the grid may be wrong, Staff are told; nothing is fixed behind their back."""
+    """When the grid may be wrong, the user is told; nothing is fixed behind their back."""
 
     def codes(self, result):
         return {note["code"]: note for note in result["notes"]}
 
     def test_rows_below_the_template_are_reported_not_silently_dropped(self):
-        # A template of 10 rows over a page of 14: rows 11 to 14 are not read, and Staff are told.
+        # A template of 10 rows over a page of 14: rows 11 to 14 are not read, and the user is told.
         ledger = Ledger(cols=4, rows=14, header=1.3, tpl_rows=10)
         result = ledger.run("scan")
 
@@ -369,8 +369,8 @@ class WrittenWordIsNotARuleTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
-class StaffRemovedColumnsTest(unittest.TestCase):
-    """Staff may remove columns in Align and read only the rest.
+class RemovedColumnsTest(unittest.TestCase):
+    """The user may remove columns in Align and read only the rest.
 
     The removed columns' printed rules are still on the page, and the detector
     often runs one line from a removed column straight on into the kept column
@@ -544,7 +544,7 @@ class RowsFromThePageTest(unittest.TestCase):
         self.assertEqual(8, self.rows(result["geometry"]))
         self.assertEqual((8 * 4, 0, 0, 0), ledger.rows_of(result))
 
-    def test_rows_staff_set_by_hand_are_kept_by_detect(self):
+    def test_rows_set_by_hand_are_kept_by_detect(self):
         ledger = Ledger(cols=4, rows=14, header=1.3, tpl_rows=10)
         ledger.geometry["keep_rows"] = True
 
@@ -596,7 +596,7 @@ class RowsFromThePageTest(unittest.TestCase):
 
     def test_unruled_rows_with_writing_are_kept_by_detect(self):
         # The last two rows have no printed lines at all. Detect sees their writing and keeps the
-        # template's rows there; Snap cannot see writing, and leaves those rows for Staff to add.
+        # template's rows there; Snap cannot see writing, and leaves those rows for the user to add.
         ledger = Ledger(unruled_bottom=2)
 
         self.assertEqual(10, self.rows(ledger.run("detect")["geometry"]))

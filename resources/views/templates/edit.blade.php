@@ -60,7 +60,7 @@
                         {{ $template ? $template->name : 'New template layout' }}
                     </h1>
                     @if ($published)
-                        <span class="badge bg-label-success">Published for Staff</span>
+                        <span class="badge bg-label-success">Published</span>
                     @else
                         <span class="badge bg-label-secondary">Draft</span>
                     @endif
@@ -286,7 +286,7 @@
                 <div class="col-xl-3 col-lg-4">
                     <aside class="template-builder-side-panel">
                         {{--
-                            Cards as on the Staff Align panel: the ones used now and then
+                            Cards as on the Align panel: the ones used now and then
                             (details, rows and columns, person rows) start closed and open
                             from their header; tips sit behind a ?. Details open for a new
                             layout, or when the name or notes came back with an error.
@@ -387,7 +387,7 @@
                                             <li>Lines snap to the printed rules. Hold <kbd>Alt</kbd> to place one freely.</li>
                                             <li>The − and + buttons remove or add a row line. Type a number and press <kbd>Enter</kbd> to space that many rows evenly.</li>
                                             <li>Page scanned a little turned? Tilt turns the columns and row lines together.</li>
-                                            <li>Staff scans read each row on its own, so writing that crosses a rule is still read whole.</li>
+                                            <li>Scans read each row on its own, so writing that crosses a rule is still read whole.</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -475,7 +475,7 @@
                                         <strong>Tips</strong>
                                         <ul>
                                             <li>Keep each marker tight around one handwritten value.</li>
-                                            <li>Staff check the fields in this order.</li>
+                                            <li>Verify shows the fields in this order.</li>
                                             <li>Click a name to select its marker. Its settings show below the list.</li>
                                             <li>A field is read once. For something on every row of a table, select it and set Read as to Column.</li>
                                             <li><kbd>Ctrl</kbd> + <kbd>A</kbd> then <kbd>Delete</kbd> clears the page: every marker and the row lines. <kbd>Ctrl</kbd> + <kbd>Z</kbd> brings them back.</li>
@@ -557,7 +557,7 @@
                                     <div class="form-text">Separate them with commas. Verify points out any other value.</div>
                                 </div>
                                 <div class="mb-2">
-                                    <label class="form-label" for="fieldHint">Hint for Staff</label>
+                                    <label class="form-label" for="fieldHint">Hint</label>
                                     <input type="text" class="form-control form-control-sm" id="fieldHint"
                                            maxlength="200" placeholder="e.g. Month day, year">
                                 </div>
@@ -648,7 +648,7 @@
                                 </button>
                                 <button type="submit" class="btn btn-primary" data-publish="1">
                                     <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
-                                    Save &amp; publish for Staff
+                                    Save &amp; publish
                                 </button>
                             @endif
                         </div>

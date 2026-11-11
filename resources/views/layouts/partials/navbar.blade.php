@@ -7,7 +7,7 @@
 
     <div class="navbar-nav-right d-flex align-items-center" id="navbar-collapse">
 
-        {{-- Record search, for every signed-in role. Left off the Records Archive,
+        {{-- Record search. Left off the Records Archive,
              which has its own search beside its filters. Never filled in from the
              address bar: other pages use ?q= for their own searches. The "/" key
              and the empty-search check are in resources/js/record-search.js. --}}
@@ -76,7 +76,6 @@
                                 </div>
                                 <div class="flex-grow-1">
                                     <h6 class="mb-0">{{ $user->name }}</h6>
-                                    <small class="text-muted">{{ $user->role->name }}</small>
                                 </div>
                             </div>
                         </div>

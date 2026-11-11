@@ -3,11 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Enums\RecordStatus;
-use App\Enums\RoleSlug;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
-use App\Models\User;
 use App\Services\AuditLogger;
+use App\Support\CsvCell;
 use App\Support\LocalTime;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -40,7 +39,6 @@ class ReportController extends Controller
             'records' => $records,
             'summary' => $this->summary($filters),
             'documentTypes' => DocumentTypeDefinition::ordered(),
-            'dataEntryUsers' => $this->dataEntryUsers(),
         ]);
     }
 
@@ -100,7 +98,7 @@ class ReportController extends Controller
      */
     private function row(CivilRecord $record): array
     {
-        return array_map($this->safeCell(...), [
+        return array_map(CsvCell::safe(...), [
             $record->getKey(),
             $record->typeLabel(),
             $record->status->label(),
@@ -116,26 +114,10 @@ class ReportController extends Controller
     }
 
     /**
-     * Keep Excel from running a cell as a formula ("CSV injection").
-     *
-     * Most text here was typed by someone, so a value such as =HYPERLINK(...)
-     * would otherwise run when the file is opened. A leading apostrophe makes
-     * Excel show it as plain text. Numbers are not strings, so they pass through.
-     */
-    private function safeCell(mixed $value): mixed
-    {
-        if (! is_string($value) || $value === '') {
-            return $value;
-        }
-
-        return in_array($value[0], ['=', '+', '-', '@', "\t", "\r"], true) ? "'".$value : $value;
-    }
-
-    /**
      * Validated filter set, shared by the on-screen table and the export so the
      * two can never disagree about what "matching" means.
      *
-     * @return array{from: string|null, to: string|null, doc_type: string|null, status: string|null, submitted_by: int|null}
+     * @return array{from: string|null, to: string|null, doc_type: string|null, status: string|null}
      */
     private function filters(Request $request): array
     {
@@ -144,7 +126,6 @@ class ReportController extends Controller
             'to' => ['nullable', 'date', 'after_or_equal:from'],
             'doc_type' => ['nullable', 'string', 'exists:document_types,key'],
             'status' => ['nullable', 'string', 'in:'.implode(',', array_column(RecordStatus::cases(), 'value'))],
-            'submitted_by' => ['nullable', 'integer', 'exists:users,id'],
         ]);
 
         return [
@@ -152,7 +133,6 @@ class ReportController extends Controller
             'to' => $validated['to'] ?? null,
             'doc_type' => $validated['doc_type'] ?? null,
             'status' => $validated['status'] ?? null,
-            'submitted_by' => isset($validated['submitted_by']) ? (int) $validated['submitted_by'] : null,
         ];
     }
 
@@ -193,8 +173,7 @@ class ReportController extends Controller
                 'documentTypeDefinition',
                 fn (Builder $typeQuery) => $typeQuery->where('key', $type),
             ))
-            ->when($filters['status'], fn (Builder $q, $status) => $q->where('status', $status))
-            ->when($filters['submitted_by'], fn (Builder $q, $id) => $q->where('submitted_by', $id));
+            ->when($filters['status'], fn (Builder $q, $status) => $q->where('status', $status));
     }
 
     /**
@@ -208,22 +187,5 @@ class ReportController extends Controller
         return [
             'total' => $this->query($filters)->count(),
         ];
-    }
-
-    /**
-     * Accounts that can appear as a submitter. Admin never can, so listing every
-     * user would only offer choices that match nothing.
-     *
-     * @return Collection<int, User>
-     */
-    private function dataEntryUsers(): Collection
-    {
-        return User::query()
-            ->whereHas('role', fn ($q) => $q->whereIn('slug', [
-                RoleSlug::Staff->value,
-                RoleSlug::SuperAdmin->value,
-            ]))
-            ->orderBy('name')
-            ->get(['id', 'name', 'role_id']);
     }
 }

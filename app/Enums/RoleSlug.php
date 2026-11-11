@@ -3,22 +3,19 @@
 namespace App\Enums;
 
 /**
- * The three fixed CRMS roles.
+ * The CRMS role. There is one: the Super Admin, the only account on the PC.
  *
- * These slugs match the `roles.slug` column and are the single source of truth for
- * role identity in code. Never compare against raw strings elsewhere.
+ * The slug matches the `roles.slug` column. Staff and Admin were removed on
+ * 2026-11-11 (docs/SUPER-ADMIN-ONLY-PLAN.md); the role table stays so the
+ * permission checks keep one place to ask.
  */
 enum RoleSlug: string
 {
-    case Staff = 'staff';
-    case Admin = 'admin';
     case SuperAdmin = 'super_admin';
 
     public function label(): string
     {
         return match ($this) {
-            self::Staff => 'Staff',
-            self::Admin => 'Admin',
             self::SuperAdmin => 'Super Admin',
         };
     }
@@ -26,28 +23,7 @@ enum RoleSlug: string
     public function description(): string
     {
         return match ($this) {
-            self::Staff => 'Digitizes documents, verifies extracted records, and requests corrections.',
-            self::Admin => 'Oversees people and approvals. Cannot edit record values.',
-            self::SuperAdmin => 'Full access, including template building and OCR model management.',
+            self::SuperAdmin => 'Full access: scanning, records, reports, templates and OCR models.',
         };
-    }
-
-    /**
-     * Roles that may perform data entry (upload, verify, submit records).
-     *
-     * Admin is deliberately excluded: data entry belongs to Staff and corrections
-     * go through the change-request flow. See docs/roles.md.
-     */
-    public function canEnterData(): bool
-    {
-        return in_array($this, [self::Staff, self::SuperAdmin], true);
-    }
-
-    /**
-     * Roles with oversight duties (approvals, analytics, user management, audit, reports).
-     */
-    public function hasOversight(): bool
-    {
-        return in_array($this, [self::Admin, self::SuperAdmin], true);
     }
 }

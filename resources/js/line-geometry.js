@@ -3,7 +3,7 @@
  *
  * Pure functions, so they are unit-tested without a browser:
  *
- * - alignedGeometry(): turns the markers and row lines Staff aligned on the
+ * - alignedGeometry(): turns the markers and row lines aligned on the
  *   page into the geometry line detection runs on. Rectangle fields pass
  *   straight through; ledger columns keep their aligned boxes, and the row
  *   lines go as the Align step holds them (they follow the columns when the
@@ -34,9 +34,9 @@ function angleOf(marker) {
 
 /**
  * @param {Array<{name: string, x: number, y: number, w: number, h: number, kind?: string, columnIndex?: number, personGroup?: number, personFieldOrder?: number}>} aligned
- *        Markers as Staff left them (FieldMarker#toJSON()).
+ *        Markers as left in Align (FieldMarker#toJSON()).
  * @param {number[]} ruledYs The row lines as the Align step holds them, page fractions.
- * @param {{keepRows?: boolean}} [options] keepRows: Staff set the row lines by
+ * @param {{keepRows?: boolean}} [options] keepRows: the row lines were set by
  *        hand, so Detect keeps them instead of taking the page's rows.
  */
 export function alignedGeometry(aligned, ruledYs, { keepRows = false } = {}) {
@@ -266,11 +266,11 @@ function fieldBox(field, page) {
 }
 
 /**
- * What Staff should check about the grid as a whole, as sentences.
+ * What to check about the grid as a whole, as sentences.
  *
  * The page job reports these as codes with numbers (ml/line_markers.py,
  * _grid_notes); they are worded here so the wording can be tested. A note is a
- * question to Staff, never a verdict: the grid may be right.
+ * question for the user, never a verdict: the grid may be right.
  *
  * @param {Array<{code: string, count?: number, rows?: number|number[]}>|null|undefined} notes
  * @returns {string[]}

@@ -24,11 +24,11 @@ class DocumentUploadWorkflowTest extends TestCase
     /** The seeded Birth layout's required fields after "Child Full Name", in order. */
     private const OTHER_BIRTH_FIELDS = ['Date of Birth', 'Sex', 'Place of Birth', 'Father Full Name', 'Mother Full Name'];
 
-    public function test_staff_and_super_admin_receive_the_interactive_marker_workspace(): void
+    public function test_the_account_receives_the_interactive_marker_workspace(): void
     {
         $this->seed(DocumentTemplateSeeder::class);
 
-        foreach ([User::factory()->staff()->create(), User::factory()->superAdmin()->create()] as $user) {
+        foreach ([User::factory()->superAdmin()->create(), User::factory()->superAdmin()->create()] as $user) {
             $this->actingAs($user)
                 ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
                 ->assertOk()
@@ -38,7 +38,7 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('class="field-marker-document-pane"', escape: false)
                 ->assertSee('class="document-side-panel field-marker-controls-pane"', escape: false)
                 ->assertSee('id="docViewport"', escape: false)
-                ->assertSee('id="staffFieldSelectionMarquee"', escape: false)
+                ->assertSee('id="scanFieldSelectionMarquee"', escape: false)
                 ->assertSee('class="btn btn-sm btn-icon btn-outline-secondary rounded-pill layout-menu-toggle global-sidebar-toggle"', escape: false)
                 ->assertSee('aria-controls="layout-menu"', escape: false)
                 ->assertSee('id="zoomResetBtn"', escape: false)
@@ -102,19 +102,19 @@ class DocumentUploadWorkflowTest extends TestCase
         }
     }
 
-    public function test_staff_workspace_knows_the_layouts_page_shape_for_the_sideways_check(): void
+    public function test_scan_workspace_knows_the_layouts_page_shape_for_the_sideways_check(): void
     {
         $this->seed(DocumentTemplateSeeder::class);
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
         $template->update(['page_ratio' => 1.47817]);
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
             ->assertOk()
             ->assertSee('pageRatio: 1.47817', escape: false);
     }
 
-    public function test_staff_workspace_emits_custom_grouping_and_person_box_metadata(): void
+    public function test_scan_workspace_emits_custom_grouping_and_person_box_metadata(): void
     {
         $this->seed(DocumentTemplateSeeder::class);
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
@@ -140,7 +140,7 @@ class DocumentUploadWorkflowTest extends TestCase
             ]);
         }
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
             ->assertOk()
             ->assertSee('groupingMode: "custom"', escape: false)
@@ -165,7 +165,7 @@ class DocumentUploadWorkflowTest extends TestCase
             range(1, 451),
         );
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, $fields),
@@ -183,7 +183,7 @@ class DocumentUploadWorkflowTest extends TestCase
         $this->seed(DocumentTemplateSeeder::class);
         $this->registerTestModel();
 
-        $user = User::factory()->staff()->create();
+        $user = User::factory()->superAdmin()->create();
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
 
         $response = $this->actingAs($user)
@@ -222,7 +222,7 @@ class DocumentUploadWorkflowTest extends TestCase
         $field['person_group'] = 2;
         $field['person_field_order'] = 3;
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, [$field]),
@@ -248,7 +248,7 @@ class DocumentUploadWorkflowTest extends TestCase
         $field['person_group'] = 451;
         $field['person_field_order'] = 0;
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, [$field]),
@@ -274,7 +274,7 @@ class DocumentUploadWorkflowTest extends TestCase
         $payload['allow_missing'] = '1';
         unset($payload['fields']);
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), $payload)
             ->assertCreated();
@@ -291,7 +291,7 @@ class DocumentUploadWorkflowTest extends TestCase
         $this->seed(DocumentTemplateSeeder::class);
         $this->registerTestModel();
 
-        $user = User::factory()->staff()->create();
+        $user = User::factory()->superAdmin()->create();
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
         $unchecked = $this->verifiedField('Child Full Name', 'Maria Santos');
         $unchecked['verified'] = '0';
@@ -319,7 +319,7 @@ class DocumentUploadWorkflowTest extends TestCase
         $this->seed(DocumentTemplateSeeder::class);
         $this->registerTestModel();
 
-        $user = User::factory()->staff()->create();
+        $user = User::factory()->superAdmin()->create();
         $deathTemplate = DocumentTemplate::activeFor(DocumentType::Death);
 
         $this->actingAs($user)
@@ -341,7 +341,7 @@ class DocumentUploadWorkflowTest extends TestCase
         Storage::fake('local');
         $this->seed(DocumentTemplateSeeder::class);
 
-        $user = User::factory()->staff()->create();
+        $user = User::factory()->superAdmin()->create();
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
 
         $this->actingAs($user)
@@ -366,7 +366,7 @@ class DocumentUploadWorkflowTest extends TestCase
 
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, [
@@ -391,7 +391,7 @@ class DocumentUploadWorkflowTest extends TestCase
 
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), $this->submissionPayload($template, [
                 $this->verifiedField('Child Full Name', 'Maria Santos'),
@@ -411,7 +411,7 @@ class DocumentUploadWorkflowTest extends TestCase
 
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, [
@@ -440,7 +440,7 @@ class DocumentUploadWorkflowTest extends TestCase
         // Names are compared ignoring case.
         $fields[2]['name'] = 'SEX';
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), $this->submissionPayload($template, $fields))
             ->assertCreated();
@@ -455,9 +455,9 @@ class DocumentUploadWorkflowTest extends TestCase
         $this->seed(DocumentTemplateSeeder::class);
         $this->registerTestModel();
 
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
-        $page = $this->readPage($template, $staff);
+        $page = $this->readPage($template, $account);
         // Detect split the child's name into two written lines, which Verify
         // lists as "Child Full Name · line 1" and "· line 2".
         $lineFields = [];
@@ -477,7 +477,7 @@ class DocumentUploadWorkflowTest extends TestCase
             self::OTHER_BIRTH_FIELDS,
         );
 
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, [...$lineFields, ...$otherFields]),
@@ -489,10 +489,10 @@ class DocumentUploadWorkflowTest extends TestCase
     public function test_register_rows_left_incomplete_or_unticked_need_confirmation(): void
     {
         Storage::fake('local');
-        [$template, $page, $staff] = $this->registerPage();
+        [$template, $page, $account] = $this->registerPage();
 
         // Row 1 without its Date, row 4 complete, rows 2, 3 and 5 untouched.
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, [
@@ -514,7 +514,7 @@ class DocumentUploadWorkflowTest extends TestCase
     public function test_confirmed_register_rows_are_listed_in_the_audit_log(): void
     {
         Storage::fake('local');
-        [$template, $page, $staff] = $this->registerPage();
+        [$template, $page, $account] = $this->registerPage();
 
         // Rows 1, 3 and 4 complete, row 2 without its Date, row 5 untouched.
         $fields = [];
@@ -524,7 +524,7 @@ class DocumentUploadWorkflowTest extends TestCase
         }
         $fields[] = $this->cellField($page, 2, 'Name');
 
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, $fields),
@@ -543,7 +543,7 @@ class DocumentUploadWorkflowTest extends TestCase
     public function test_a_complete_register_page_is_not_asked_to_confirm(): void
     {
         Storage::fake('local');
-        [$template, $page, $staff] = $this->registerPage();
+        [$template, $page, $account] = $this->registerPage();
 
         $fields = [];
         foreach (range(1, 5) as $row) {
@@ -551,7 +551,7 @@ class DocumentUploadWorkflowTest extends TestCase
             $fields[] = $this->cellField($page, $row, 'Date');
         }
 
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, $fields),
@@ -563,8 +563,8 @@ class DocumentUploadWorkflowTest extends TestCase
     public function test_a_column_removed_in_align_is_not_asked_for_in_every_row_and_is_logged(): void
     {
         Storage::fake('local');
-        [$template, $page, $staff] = $this->registerPage();
-        // Staff removed the required Date column in Align, so the page was outlined without it.
+        [$template, $page, $account] = $this->registerPage();
+        // The user removed the required Date column in Align, so the page was outlined without it.
         $page->lines()->where('column_name', 'Date')->forceDelete();
         $page->update(['geometry' => [
             'columns' => [['name' => 'Name', 'box' => [0.05, 0.1, 0.45, 0.8]]],
@@ -573,7 +573,7 @@ class DocumentUploadWorkflowTest extends TestCase
         ]]);
         $page = $page->fresh('lines');
 
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, array_map(
@@ -592,8 +592,8 @@ class DocumentUploadWorkflowTest extends TestCase
     public function test_a_column_shortened_in_align_is_asked_for_only_in_the_rows_it_reaches(): void
     {
         Storage::fake('local');
-        [$template, $page, $staff] = $this->registerPage();
-        // Staff shortened the required Date column to rows 3-5, so rows 1-2 have no Date.
+        [$template, $page, $account] = $this->registerPage();
+        // The user shortened the required Date column to rows 3-5, so rows 1-2 have no Date.
         $page->lines()->where('column_name', 'Date')->whereIn('row', [1, 2])->forceDelete();
         $page->update(['geometry' => [
             'columns' => [
@@ -611,7 +611,7 @@ class DocumentUploadWorkflowTest extends TestCase
             $fields[] = $this->cellField($page, $row, 'Date');
         }
 
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, $fields),
@@ -624,8 +624,8 @@ class DocumentUploadWorkflowTest extends TestCase
     public function test_rows_and_columns_added_in_align_are_read_and_logged(): void
     {
         Storage::fake('local');
-        [$template, $page, $staff] = $this->registerPage();
-        // The page has two more rows than the template, and Staff added a Remarks column.
+        [$template, $page, $account] = $this->registerPage();
+        // The page has two more rows than the template, and the user added a Remarks column.
         $page->update(['geometry' => [
             'columns' => [
                 ['name' => 'Name', 'box' => [0.05, 0.1, 0.45, 0.85]],
@@ -649,7 +649,7 @@ class DocumentUploadWorkflowTest extends TestCase
             $fields[] = $this->cellField($page, $row, 'Date');
         }
 
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, $fields),
@@ -668,11 +668,11 @@ class DocumentUploadWorkflowTest extends TestCase
         );
     }
 
-    public function test_custom_document_type_can_complete_the_staff_submission_flow(): void
+    public function test_custom_document_type_can_complete_the_submission_flow(): void
     {
         Storage::fake('local');
         $this->registerTestModel();
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
         $type = DocumentTypeDefinition::create([
             'key' => 'custom-local-registry',
             'name' => 'Local Registry Form',
@@ -698,7 +698,7 @@ class DocumentUploadWorkflowTest extends TestCase
             'is_required' => true,
         ]);
 
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 ...$this->submissionPayload($template, [
@@ -727,7 +727,7 @@ class DocumentUploadWorkflowTest extends TestCase
     {
         $this->seed(DocumentTemplateSeeder::class);
         $this->registerTestModel();
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
 
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
         $template->fields()->delete();
@@ -739,22 +739,22 @@ class DocumentUploadWorkflowTest extends TestCase
             'ruled_ys' => [0.1, 0.26, 0.42, 0.58, 0.74, 0.9],
         ]);
 
-        $page = $this->readPage($template, $staff);
+        $page = $this->readPage($template, $account);
         foreach (range(1, 5) as $row) {
             foreach (['Name', 'Date'] as $columnIndex => $column) {
                 $this->pageLine($page, ['column_index' => $columnIndex, 'column_name' => $column, 'row' => $row]);
             }
         }
 
-        return [$template->fresh(['fields', 'documentTypeDefinition']), $page->fresh('lines'), $staff];
+        return [$template->fresh(['fields', 'documentTypeDefinition']), $page->fresh('lines'), $account];
     }
 
-    /** A page Staff scanned and the worker has read, ready to verify. */
-    private function readPage(DocumentTemplate $template, User $staff): DocumentPage
+    /** A page the user scanned and the worker has read, ready to verify. */
+    private function readPage(DocumentTemplate $template, User $account): DocumentPage
     {
         return DocumentPage::create([
             'document_template_id' => $template->getKey(),
-            'created_by' => $staff->getKey(),
+            'created_by' => $account->getKey(),
             'status' => DocumentPage::STATUS_READY,
             'image_path' => '',
             'width' => 800,

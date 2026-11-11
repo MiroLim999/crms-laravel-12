@@ -3,11 +3,11 @@
  *
  * A ruled register is described by its column markers and the y of every
  * printed row line (page fractions, top to bottom). The Align step starts
- * from the template's row lines and carries them along when Staff move or
- * stretch the columns' band - the median top and bottom of the columns. So a
+ * from the template's row lines and carries them along when the user moves or
+ * stretches the columns' band - the median top and bottom of the columns. So a
  * template is only right when its row lines sit where they belong inside
- * that band. These helpers keep the two together while an admin, or Staff
- * on one page, edit them.
+ * that band. These helpers keep the two together while the Template Builder,
+ * or Align on one page, edits them.
  *
  * Pure functions, so they are unit-tested without a browser.
  */
@@ -270,7 +270,7 @@ export function nearestLine(y, lines, reach) {
  * Columns that sat on the first or last row line keep sitting on it when the
  * lines change: the table's top is its first line, its bottom its last.
  * `attached` is how close a column's edge must be to count as on the line;
- * the Align step allows half a row, as Staff's columns are aligned by hand.
+ * the Align step allows half a row, as columns there are aligned by hand.
  * Returns the same array when no column moves.
  */
 export function followFirstAndLastLine(boxes, before, after, attached = ATTACHED) {
@@ -309,7 +309,7 @@ export const MIN_COLUMN_WIDTH = 0.01;
  * @param {object[]} boxes  Every marker (FieldMarker#toJSON()).
  * @param {object} column   The new column's own properties: name, kind, columnIndex.
  * A table with no columns left gets its first one at `first` ({x, y, w, h}),
- * when given: Staff then add or detect its rows.
+ * when given: its rows are then added or detected.
  *
  * @param {number|null} selected  Index of the selected column, if one is.
  * @param {object|null} first  Where the first column goes when there is none.
@@ -437,7 +437,7 @@ export function fitColumnsToPrinted(existing, printed, top, bottom) {
 const COLUMN_OVERLAP = 0.25;
 
 /**
- * Fields Staff added over the ledger's table and stretched down two or more of
+ * Fields added over the ledger's table and stretched down two or more of
  * its rows, turned into columns. Such a box is meant to be read row by row,
  * one cell per person, the way the table's own columns are, not as lines of
  * free text (which also runs neighbouring rows' short values together).
@@ -533,7 +533,7 @@ export function ledgerGridProblems(columns, ys, { minGap = MIN_ROW_GAP } = {}) {
     const tolerance = Math.max(0.01, row);
     if (ys[0] < band.top - tolerance || ys[ys.length - 1] > band.bottom + tolerance) {
         problems.push({
-            message: 'The row lines run outside the columns. Staff scans place the rows by the columns, '
+            message: 'The row lines run outside the columns. Scans place the rows by the columns, '
                 + 'so move the columns over the rows (or the rows into the columns).',
             blocking: true,
         });

@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\AccountSettingsController;
-use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordChangeController;
@@ -16,7 +15,6 @@ use App\Http\Controllers\OcrModelController;
 use App\Http\Controllers\OcrUploadController;
 use App\Http\Controllers\RecordController;
 use App\Http\Controllers\ReportController;
-use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -24,9 +22,9 @@ use Illuminate\Support\Facades\Route;
 | Authentication
 |--------------------------------------------------------------------------
 |
-| Sign-in only. There is deliberately no registration route: Staff and Admin
-| accounts are provisioned by a Super Admin, and the bootstrap Super Admin is
-| seeded. Do not add one.
+| Sign-in only. CRMS has one account, the Super Admin, made by the seeder.
+| There is deliberately no registration route. A forgotten password is reset
+| with `php artisan crms:reset-password`.
 |
 */
 
@@ -65,17 +63,14 @@ Route::middleware('auth')->group(function () {
 
     Route::get('dashboard', DashboardController::class)->name('dashboard');
 
-    // Self-service settings, available to every role.
+    // Your own name, email and password.
     Route::get('settings', [AccountSettingsController::class, 'edit'])->name('settings.edit');
+    Route::put('settings/profile', [AccountSettingsController::class, 'updateProfile'])
+        ->name('settings.profile.update');
     Route::put('settings/password', [AccountSettingsController::class, 'updatePassword'])
         ->name('settings.password.update');
 
-    /*
-     * Digitisation - Staff and Super Admin.
-     *
-     * Admin has no route in here at all. Data entry is not an oversight function,
-     * and the gate is the enforcement, not the missing nav link.
-     */
+    // Digitisation: scanning, Align and Verify.
     Route::middleware('can:documents.process')->group(function () {
         Route::get('documents/new', [DocumentScanController::class, 'create'])->name('documents.create');
         Route::get('documents/workspace', [DocumentScanController::class, 'workspace'])
@@ -138,14 +133,14 @@ Route::middleware('auth')->group(function () {
     });
 
     /*
-     * Archive - every signed-in role may read it.
-     *
-     * Read-only for everyone, including Super Admin. There is no update or destroy
-     * route: submitted records change only through an approved change request.
+     * Archive. There is no update or destroy route: a saved record changes only
+     * through a correction, which keeps the old values in its history.
      */
     Route::middleware('can:records.view')->group(function () {
         Route::get('records', [RecordController::class, 'index'])->name('records.index');
         Route::get('records/{record}', [RecordController::class, 'show'])->name('records.show');
+        // One document's checked values as CSV, one row per person, for the client's old system.
+        Route::get('records/{record}/csv', [RecordController::class, 'csv'])->name('records.csv');
         Route::get('records/{record}/scan', [RecordController::class, 'scan'])->name('records.scan');
         Route::get('records/{record}/page', [RecordController::class, 'pageImage'])->name('records.page-image');
         Route::get('records/{record}/pages/{pageNo}/page', [RecordController::class, 'extraPageImage'])
@@ -155,9 +150,8 @@ Route::middleware('auth')->group(function () {
     });
 
     /*
-     * Change requests - Staff propose, Admin and Super Admin decide.
-     *
-     * Approving is what writes the new values, which is why there is no direct
+     * Corrections (still named change requests in the code). Saving one changes the
+     * record at once and keeps the old and new values, so there is no plain
      * record-edit route anywhere in this file.
      */
     Route::get('change-requests', [ChangeRequestController::class, 'index'])
@@ -172,50 +166,10 @@ Route::middleware('auth')->group(function () {
             ->name('records.change-requests.store');
     });
 
-    Route::post('change-requests/{changeRequest}/withdraw', [ChangeRequestController::class, 'withdraw'])
-        ->name('change-requests.withdraw');
-
-    Route::middleware('can:change-requests.moderate')->group(function () {
-        Route::post('change-requests/{changeRequest}/approve', [ChangeRequestController::class, 'approve'])
-            ->name('change-requests.approve');
-        Route::post('change-requests/{changeRequest}/reject', [ChangeRequestController::class, 'reject'])
-            ->name('change-requests.reject');
-    });
-
-    /*
-     * Oversight - Admin and Super Admin.
-     *
-     * Analytics now live on the role-aware Dashboard. Keep the old gated URL as a
-     * redirect so saved bookmarks continue to work. Reports still list/export,
-     * and neither route is a write path to record values.
-     */
-    Route::get('analytics', [AnalyticsController::class, 'index'])
-        ->middleware('can:analytics.view')
-        ->name('analytics.index');
-
+    // Reports list and export records. Neither is a write path to record values.
     Route::middleware('can:reports.generate')->group(function () {
         Route::get('reports', [ReportController::class, 'index'])->name('reports.index');
         Route::get('reports/export', [ReportController::class, 'export'])->name('reports.export');
-    });
-
-    /*
-     * User management - Admin and Super Admin.
-     *
-     * Accounts are deactivated, never deleted, so the audit trail keeps pointing
-     * at a real row. There is deliberately no destroy route.
-     */
-    Route::middleware('can:users.manage')->group(function () {
-        Route::get('users', [UserController::class, 'index'])->name('users.index');
-        Route::get('users/create', [UserController::class, 'create'])->name('users.create');
-        Route::post('users', [UserController::class, 'store'])->name('users.store');
-        Route::get('users/{user}/edit', [UserController::class, 'edit'])->name('users.edit');
-        Route::put('users/{user}', [UserController::class, 'update'])->name('users.update');
-        Route::post('users/{user}/password', [UserController::class, 'resetPassword'])
-            ->name('users.password.reset');
-        Route::post('users/{user}/deactivate', [UserController::class, 'deactivate'])
-            ->name('users.deactivate');
-        Route::post('users/{user}/activate', [UserController::class, 'activate'])
-            ->name('users.activate');
     });
 
     /*
@@ -227,8 +181,8 @@ Route::middleware('auth')->group(function () {
         ->name('audit.index');
 
     /*
-     * Document template builder - Super Admin only. Templates decide which fields
-     * Staff capture, so changing one changes what the registry records.
+     * Document template builder. Templates decide which fields a scan captures,
+     * so changing one changes what the registry records.
      */
     Route::middleware('can:templates.manage')->group(function () {
         Route::post('templates/document-types', [DocumentTypeDefinitionController::class, 'store'])
@@ -264,27 +218,20 @@ Route::middleware('auth')->group(function () {
     });
 
     /*
-     * OCR workspace - Super Admin only, one page.
+     * OCR workspace, one page.
      *
-     * It decides which TrOCR model Staff scan with, manages the models installed
+     * It decides which TrOCR model scans use, manages the models installed
      * on disk, and presents read-only performance evidence. Fine-tuning, evaluation,
      * dataset preparation, and batch prediction are command-line work under ml/ -
      * deliberately not driven from here, and CRMS does not start or stop the service
      * process either.
      *
      * These routes still reach through to a service that has no authentication of
-     * its own and can delete ~1.3 GB of weights, which is why the gate never widens
-     * beyond Super Admin.
+     * its own and can delete ~1.3 GB of weights, which is why it stays behind its gate.
      */
     Route::middleware('can:ocr.manage')->prefix('ocr')->name('ocr.')->group(function () {
         Route::get('/', [OcrModelController::class, 'index'])->name('index');
         Route::post('rescan', [OcrModelController::class, 'rescan'])->name('rescan');
-
-        // The scanning settings: Staff model choice and the review threshold (it
-        // can still set the model too). The workspace has no form that posts here
-        // since the Scanning policy dialog was removed; activating a model goes
-        // through models/{key}/activate below.
-        Route::post('settings', [OcrModelController::class, 'saveSettings'])->name('settings');
 
         // Read-only. The workspace polls it so the page notices the service coming
         // up or going away without a manual refresh.

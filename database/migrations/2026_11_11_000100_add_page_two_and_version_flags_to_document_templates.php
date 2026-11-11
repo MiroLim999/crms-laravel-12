@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Schema;
  * - is_page_two: the layout is page 2 of one main layout (a two-page spread)
  *   and belongs to it alone. It is not listed, published or edited by itself.
  * - is_version: the layout was saved as a new version of its parent (not a
- *   duplicate), so publishing it replaces the parent for Staff.
+ *   duplicate), so publishing it replaces the parent.
  *
  * Page 2 layouts used to be shared: a new version or a duplicate pointed at
  * the same page 2 as the layout it came from, so editing one changed both.
@@ -24,7 +24,7 @@ return new class extends Migration
         Schema::table('document_templates', function (Blueprint $table) {
             $table->boolean('is_page_two')->default(false)->after('page_two_template_id');
             $table->boolean('is_version')->default(false)->after('parent_id');
-            // When it was last published: Staff's layout list puts the newest first.
+            // When it was last published: the layout list puts the newest first.
             $table->timestamp('published_at')->nullable()->after('is_active');
         });
 

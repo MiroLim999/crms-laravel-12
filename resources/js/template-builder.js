@@ -733,7 +733,7 @@ function useAutomaticPersonDetection() {
 
 // ------------------------------------------------------------- field settings
 //
-// What the selected fields hold and how Staff check their values in Verify.
+// What the selected fields hold and how Verify checks their values.
 // With several selected, a change applies to all of them (the role only fits
 // one field per person, so it is set one field at a time).
 
@@ -1081,7 +1081,7 @@ async function openSample(file, { pendingUpload = true } = {}) {
         loadPrintedLines();
         if (pendingUpload) pendingSampleFile = file;
         updatePickedSampleUI();
-        // Only a PDF's first page is drawn, as for Staff.
+        // Only a PDF's first page is drawn, as in the scan workspace.
         element('sampleFileName').textContent = measurement?.pageCount > 1
             ? `${file.name} (${measurement.pageCount} pages)`
             : file.name;
@@ -1192,7 +1192,7 @@ element('zoomOutBtn', HTMLButtonElement).addEventListener('click', () => marker.
 element('zoomInBtn', HTMLButtonElement).addEventListener('click', () => marker.zoomBy(0.1));
 element('zoomResetBtn', HTMLButtonElement).addEventListener('click', () => marker.resetZoom());
 
-// Side panel cards that open and close, as on the Staff Align panel: a click
+// Side panel cards that open and close, as on the Align panel: a click
 // anywhere on the header but the ? (the title button, for the keyboard).
 function setCardOpen(toggle, open) {
     toggle.setAttribute('aria-expanded', String(open));
@@ -1437,7 +1437,7 @@ form.addEventListener('submit', (event) => {
     // Asked once: not again when the save check sends the form on.
     if (!saveChecked && coveredFieldIndexes.length > 0 && !window.confirm(
         `${coveredFieldIndexes.length === 1 ? '1 field covers' : `${coveredFieldIndexes.length} fields cover`} ledger cells. `
-        + 'Staff scans would read the handwriting under them as those fields, and those rows would lose their cells.\n\n'
+        + 'Scans would read the handwriting under them as those fields, and those rows would lose their cells.\n\n'
         + 'OK: save anyway.\nCancel: go back and move or remove them.',
     )) {
         event.preventDefault();
@@ -1466,7 +1466,7 @@ form.addEventListener('submit', (event) => {
 // ------------------------------------------------------------ save check
 //
 // Before a save that publishes: the same checks the server makes (a sample,
-// real column names, a Name column), and a last "Publish for Staff?". Before
+// real column names, a Name column), and a last "Publish this layout?". Before
 // any save: row lines still amber (guessed by Detect) are pointed out.
 
 /** Set once the admin answered the save check, for the submit it starts. */
@@ -1504,7 +1504,7 @@ function openSaveCheck({ publishing, problems, guessed }) {
     const guessNote = guessed > 0
         ? `${guessed === 1 ? '1 row line is' : `${guessed} row lines are`} amber: Detect guessed `
             + `${guessed === 1 ? 'it' : 'them'} where the printed line was faint or missing. Check each against the sample `
-            + '(drag or nudge it) so Staff rows are cut in the right place.'
+            + '(drag or nudge it) so rows are cut in the right place.'
         : null;
 
     let kicker = 'Before saving';
@@ -1513,16 +1513,16 @@ function openSaveCheck({ publishing, problems, guessed }) {
     let items = guessNote ? [guessNote] : [];
 
     if (publishing && problems.length > 0) {
-        kicker = 'Publish for Staff';
+        kicker = 'Publish';
         title = 'Publish with these still missing?';
-        lead = 'Staff can scan with this layout, but these are not done yet. Go back to fix them, or publish it as it is:';
+        lead = 'You can scan with this layout, but these are not done yet. Go back to fix them, or publish it as it is:';
         items = [...problems, ...items];
     } else if (publishing) {
-        kicker = 'Publish for Staff';
-        title = 'Publish this layout for Staff?';
+        kicker = 'Publish';
+        title = 'Publish this layout?';
         lead = config.published
-            ? 'Staff get the new version as soon as it is saved. Records already read keep the old one.'
-            : 'Staff can scan with this layout as soon as it is saved. It replaces the layout they use now for this type.';
+            ? 'Scans use the new version as soon as it is saved. Records already read keep the old one.'
+            : 'Scans use this layout as soon as it is saved. It replaces the layout used now for this type.';
     } else {
         // Only the guessed rows to tell: said in the lead, no list.
         lead = guessNote ?? '';
@@ -1543,7 +1543,7 @@ function openSaveCheck({ publishing, problems, guessed }) {
 
     // Something missing: the admin may still publish it, and the server is told so.
     const anyway = publishing && problems.length > 0;
-    confirm.textContent = anyway ? 'Save and publish' : (publishing ? 'Publish for Staff' : 'Save anyway');
+    confirm.textContent = anyway ? 'Save and publish' : (publishing ? 'Publish' : 'Save anyway');
     confirm.className = `btn ${publishing ? 'btn-success' : 'btn-primary'}`;
     confirm.dataset.anyway = anyway ? '1' : '0';
     draft.classList.add('d-none');
@@ -1573,7 +1573,7 @@ form.addEventListener('formdata', (event) => {
         event.formData.set('sample_document', pendingSampleFile, pendingSampleFile.name);
     }
     // The page's shape, for the server's check that tilted markers stay on it
-    // and for Staff's "scan may be sideways" hint.
+    // and for the scan's "may be sideways" hint.
     event.formData.set('page_ratio', String(canvas.width / canvas.height));
 });
 
@@ -1589,7 +1589,7 @@ form.addEventListener('formdata', (event) => {
 // stretching the table carries its row lines along, and columns sitting on
 // the first and last line follow those lines when they move.
 
-// The row lines, drawn and dragged as in the Staff Align step: a grip on each
+// The row lines, drawn and dragged as in the Align step: a grip on each
 // end of the table selects and drags its line (Shift: every line), a
 // double-click on a grip removes it, and a line snaps onto the sample's
 // printed rules (Alt: place freely). Only the grips take the pointer, so the
@@ -1669,7 +1669,7 @@ function renderLedgerGrid() {
 
 // ---------------------------------------------------------------- table tilt
 // A page scanned a little turned: the columns and row lines turn together, in
-// tenths of a degree, as in the Staff Align step. The tilt is kept in the
+// tenths of a degree, as in the Align step. The tilt is kept in the
 // columns' own angles, so it is saved with the layout.
 const MAX_TILT = 10;
 

@@ -35,7 +35,7 @@ class AuditLogTest extends TestCase
 
     public function test_it_records_the_actor_and_their_role(): void
     {
-        $user = User::factory()->admin()->create();
+        $user = User::factory()->superAdmin()->create();
         $this->actingAs($user);
 
         app(AuditLogger::class)->log('user.created', $user, description: 'Provisioned an account.');
@@ -44,13 +44,13 @@ class AuditLogTest extends TestCase
 
         $this->assertSame($user->getKey(), $entry->user_id);
         $this->assertSame($user->name, $entry->actor_name);
-        $this->assertSame('admin', $entry->actor_role);
+        $this->assertSame('super_admin', $entry->actor_role);
         $this->assertSame(User::class, $entry->auditable_type);
     }
 
     public function test_it_redacts_secrets(): void
     {
-        $user = User::factory()->staff()->create();
+        $user = User::factory()->superAdmin()->create();
         $this->actingAs($user);
 
         app(AuditLogger::class)->log('user.updated', $user, old: [
@@ -75,7 +75,7 @@ class AuditLogTest extends TestCase
 
     public function test_save_and_log_records_only_what_moved(): void
     {
-        $user = User::factory()->staff()->create(['name' => 'Original Name']);
+        $user = User::factory()->superAdmin()->create(['name' => 'Original Name']);
         $this->actingAs($user);
 
         // Still dirty: Eloquent re-syncs originals on save, so the diff has to be
@@ -92,21 +92,21 @@ class AuditLogTest extends TestCase
 
     public function test_save_and_log_ignores_untouched_attributes(): void
     {
-        $user = User::factory()->staff()->create(['name' => 'Same Name']);
+        $user = User::factory()->superAdmin()->create(['name' => 'Same Name']);
         $this->actingAs($user);
 
-        $user->is_active = false;
-        app(AuditLogger::class)->saveAndLog('user.deactivated', $user);
+        $user->email = 'changed@example.test';
+        app(AuditLogger::class)->saveAndLog('user.updated', $user);
 
         $entry = AuditLog::latest('id')->first();
 
         $this->assertArrayNotHasKey('name', $entry->new_values);
-        $this->assertArrayHasKey('is_active', $entry->new_values);
+        $this->assertArrayHasKey('email', $entry->new_values);
     }
 
     public function test_the_actor_survives_deletion_of_their_account(): void
     {
-        $user = User::factory()->staff()->create(['name' => 'Departed Staffer']);
+        $user = User::factory()->superAdmin()->create(['name' => 'Departed Encoder']);
         $this->actingAs($user);
 
         app(AuditLogger::class)->log('record.submitted', description: 'Submitted a record.');
@@ -115,7 +115,7 @@ class AuditLogTest extends TestCase
         $entry = AuditLog::latest('id')->first();
 
         $this->assertNull($entry->user_id);
-        $this->assertSame('Departed Staffer', $entry->actor_name);
-        $this->assertSame('staff', $entry->actor_role);
+        $this->assertSame('Departed Encoder', $entry->actor_name);
+        $this->assertSame('super_admin', $entry->actor_role);
     }
 }

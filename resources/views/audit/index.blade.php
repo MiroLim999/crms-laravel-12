@@ -10,7 +10,7 @@
     <x-page-header title="Audit Log"
                    subtitle="Every state change, with actor, target, and before/after values.">
         <span class="badge bg-label-info d-inline-flex align-items-center py-2 px-3"
-              title="Entries cannot be edited or removed by anyone, including a Super Admin.">
+              title="Entries cannot be edited or removed by anyone.">
             <i class="icon-base bx bx-lock-alt icon-sm me-1" aria-hidden="true"></i> Append-only
         </span>
     </x-page-header>
@@ -18,22 +18,10 @@
     {{-- Filters --}}
     <x-card class="mb-4">
         <form method="GET" action="{{ route('audit.index') }}" class="row g-3 align-items-end">
-            <div class="col-sm-6 col-xl-2">
+            <div class="col-sm-6 col-xl-4">
                 <label for="q" class="form-label">Search</label>
                 <input type="search" id="q" name="q" value="{{ $filters['q'] ?? '' }}"
                        class="form-control" placeholder="Description or actor">
-            </div>
-            <div class="col-sm-6 col-xl-2">
-                <label for="actor" class="form-label">Actor</label>
-                <select id="actor" name="actor" class="form-select">
-                    <option value="">Anyone</option>
-                    @foreach ($actors as $actor)
-                        <option value="{{ $actor->id }}"
-                                @selected(($filters['actor'] ?? null) == $actor->id)>
-                            {{ $actor->name }}
-                        </option>
-                    @endforeach
-                </select>
             </div>
             <div class="col-sm-6 col-xl-2">
                 <label for="action" class="form-label">Action</label>
@@ -98,9 +86,6 @@
                         @foreach ($entries as $entry)
                             @php
                                 $actorName = $entry->actor_name ?? $entry->user?->name ?? 'System';
-                                $actorRole = $entry->actor_role
-                                    ? \App\Enums\RoleSlug::tryFrom($entry->actor_role)?->label()
-                                    : null;
                                 $target   = $entry->auditable_type ? class_basename($entry->auditable_type) : null;
                                 $diffKeys = array_keys(array_merge($entry->old_values ?? [], $entry->new_values ?? []));
                                 $diffId   = 'audit-diff-' . $entry->getKey();
@@ -121,9 +106,6 @@
                                 </td>
                                 <td>
                                     <div class="fw-medium">{{ $actorName }}</div>
-                                    @if ($actorRole)
-                                        <span class="badge bg-label-secondary">{{ $actorRole }}</span>
-                                    @endif
                                 </td>
                                 <td><code class="text-body">{{ $entry->action }}</code></td>
                                 <td>

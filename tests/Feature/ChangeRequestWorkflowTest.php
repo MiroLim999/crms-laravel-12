@@ -15,14 +15,11 @@ use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
 /**
- * The correction workflow, which is the mechanism the whole separation of duties
- * rests on:
+ * Correct record: the only way a saved record's values change.
  *
- *   - a locked record has no edit route for anyone
- *   - Staff propose, Admin decides
- *   - approving is what applies the values; Admin never edits a record
- *
- * These are the assertions that would catch someone "simplifying" the design.
+ *   - a locked record has no plain edit route
+ *   - saving a correction changes the values at once
+ *   - the old and new values stay in the Change history and the Audit Log
  */
 class ChangeRequestWorkflowTest extends TestCase
 {
@@ -30,8 +27,6 @@ class ChangeRequestWorkflowTest extends TestCase
 
     public function test_no_route_can_edit_a_record_directly(): void
     {
-        // Nothing may PUT, PATCH, or DELETE a record. Corrections go through a
-        // change request, and that is enforced by the absence of a route.
         $writeRoutes = collect(Route::getRoutes())
             ->filter(fn ($route) => preg_match('#^records(/|$)#', $route->uri()))
             ->reject(fn ($route) => $route->methods() === ['GET', 'HEAD'])
@@ -39,328 +34,209 @@ class ChangeRequestWorkflowTest extends TestCase
             ->values()
             ->all();
 
-        // The only non-GET route under records/ is opening a change request.
+        // The only non-GET route under records/ is saving a correction.
         $this->assertSame(['POST records/{record}/change-request'], $writeRoutes);
 
         $this->assertFalse(Route::has('records.update'));
         $this->assertFalse(Route::has('records.destroy'));
+        $this->assertFalse(Route::has('change-requests.approve'));
+        $this->assertFalse(Route::has('change-requests.reject'));
+        $this->assertFalse(Route::has('change-requests.withdraw'));
     }
 
-    public function test_admin_cannot_open_a_change_request(): void
+    public function test_saving_a_correction_changes_the_record_at_once(): void
     {
+        $user = User::factory()->create();
         $record = $this->lockedRecord();
+        $field = $record->fields->first();
 
-        $this->actingAs(User::factory()->admin()->create())
-            ->get(route('records.change-requests.create', $record))
-            ->assertForbidden();
-
-        $this->actingAs(User::factory()->admin()->create())
+        $this->actingAs($user)
             ->post(route('records.change-requests.store', $record), [
-                'reason' => 'Admin should not be able to do this at all.',
-                'values' => [$record->fields->first()->getKey() => 'Tampered'],
+                'reason' => 'The original register shows Maria Santos.',
+                'values' => [$field->getKey() => 'Maria Santos'],
             ])
-            ->assertForbidden();
-
-        $this->assertDatabaseCount('change_requests', 0);
-    }
-
-    public function test_staff_cannot_decide_their_own_request(): void
-    {
-        $staff = User::factory()->staff()->create();
-        $request = $this->openRequest($staff);
-
-        $this->actingAs($staff)
-            ->post(route('change-requests.approve', $request))
-            ->assertForbidden();
-
-        $this->actingAs($staff)
-            ->post(route('change-requests.reject', $request), ['decision_note' => 'Nope.'])
-            ->assertForbidden();
-
-        $this->assertSame(ChangeRequestStatus::Pending, $request->fresh()->status);
-    }
-
-    public function test_approving_applies_the_proposed_values(): void
-    {
-        $staff = User::factory()->staff()->create();
-        $request = $this->openRequest($staff);
-        $field = $request->items->first()->field;
-
-        $this->assertSame('Mana Santos', $field->verified_value);
-
-        $this->actingAs(User::factory()->admin()->create())
-            ->post(route('change-requests.approve', $request), ['decision_note' => 'Checked the register.'])
-            ->assertRedirect();
+            ->assertRedirect(route('records.show', $record))
+            ->assertSessionHas('success', 'Correction saved.');
 
         $this->assertSame('Maria Santos', $field->fresh()->verified_value);
 
-        $request->refresh();
-        $this->assertSame(ChangeRequestStatus::Approved, $request->status);
-        $this->assertNotNull($request->reviewed_at);
-        $this->assertNotNull($request->reviewed_by);
+        $correction = ChangeRequest::latest('id')->firstOrFail();
+        $this->assertSame(ChangeRequestStatus::Approved, $correction->status);
+        $this->assertSame($user->getKey(), $correction->requested_by);
+        $this->assertSame($user->getKey(), $correction->reviewed_by);
+        $this->assertNotNull($correction->reviewed_at);
+        $this->assertSame('Mana Santos', $correction->items->first()->current_value);
+        $this->assertSame('Maria Santos', $correction->items->first()->proposed_value);
     }
 
-    public function test_a_registry_number_is_no_longer_a_change_on_its_own(): void
+    public function test_the_audit_log_keeps_the_old_and_new_values_and_the_reason(): void
     {
-        $staff = User::factory()->staff()->create();
+        $user = User::factory()->create();
         $record = $this->lockedRecord();
 
-        $this->actingAs($staff)
+        $this->actingAs($user)->post(route('records.change-requests.store', $record), [
+            'reason' => 'Misread surname.',
+            'values' => [$record->fields->first()->getKey() => 'Maria Santos'],
+        ]);
+
+        $entry = AuditLog::where('action', 'record.corrected')->firstOrFail();
+        $this->assertSame(CivilRecord::class, $entry->auditable_type);
+        $this->assertSame($record->getKey(), $entry->auditable_id);
+        $this->assertSame(['Wife Full Name' => 'Mana Santos'], $entry->old_values);
+        // MySQL keeps JSON keys in its own order, so compare without order.
+        $this->assertEquals(['Wife Full Name' => 'Maria Santos', 'reason' => 'Misread surname.'], $entry->new_values);
+        $this->assertSame($user->getKey(), $entry->user_id);
+    }
+
+    public function test_the_reason_is_optional(): void
+    {
+        $record = $this->lockedRecord();
+
+        $this->actingAs(User::factory()->create())
             ->post(route('records.change-requests.store', $record), [
-                'reason' => 'The original register confirms a different registry number.',
-                'registry_number' => 'NEW-2026-001',
+                'values' => [$record->fields->first()->getKey() => 'Maria Santos'],
             ])
-            ->assertRedirect()
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('records.show', $record));
+
+        $this->assertNull(ChangeRequest::latest('id')->firstOrFail()->reason);
+        $this->assertSame(
+            ['Wife Full Name' => 'Maria Santos'],
+            AuditLog::where('action', 'record.corrected')->firstOrFail()->new_values,
+        );
+    }
+
+    public function test_a_correction_with_no_actual_changes_is_refused(): void
+    {
+        $record = $this->lockedRecord();
+
+        $this->actingAs(User::factory()->create())
+            ->from(route('records.change-requests.create', $record))
+            ->post(route('records.change-requests.store', $record), [
+                'values' => [$record->fields->first()->getKey() => 'Mana Santos'],
+            ])
+            ->assertRedirect(route('records.change-requests.create', $record))
             ->assertSessionHas('error', 'None of those values differ from what is on record.');
 
-        $this->assertSame(0, ChangeRequest::count());
-    }
-
-    public function test_a_required_field_cannot_be_cleared_in_a_change_request(): void
-    {
-        $staff = User::factory()->staff()->create();
-        $record = $this->lockedRecord();
-        $field = $record->fields->first();
-
-        $this->actingAs($staff)
-            ->post(route('records.change-requests.store', $record), [
-                'reason' => 'Attempting to remove a value that is required on this record.',
-                'values' => [$field->getKey() => '   '],
-            ])
-            ->assertSessionHas('error', 'Wife Full Name is required and cannot be blank.');
-
         $this->assertDatabaseCount('change_requests', 0);
-        $this->assertSame('Mana Santos', $field->fresh()->verified_value);
     }
 
-    public function test_requiredness_is_rechecked_when_a_request_is_approved(): void
+    public function test_a_required_field_cannot_be_cleared(): void
     {
-        $staff = User::factory()->staff()->create();
         $record = $this->lockedRecord();
-        $field = $record->fields->first();
 
-        $request = $record->changeRequests()->create([
-            'status' => ChangeRequestStatus::Pending,
-            'reason' => 'A legacy or tampered proposal should still be safe at approval.',
-            'requested_by' => $staff->getKey(),
-        ]);
-        $request->items()->create([
-            'record_field_id' => $field->getKey(),
-            'current_value' => $field->verified_value,
-            'proposed_value' => null,
-        ]);
-
-        $this->actingAs(User::factory()->admin()->create())
-            ->post(route('change-requests.approve', $request))
+        $this->actingAs(User::factory()->create())
+            ->post(route('records.change-requests.store', $record), [
+                'values' => [$record->fields->first()->getKey() => '   '],
+            ])
             ->assertSessionHas('error', 'Wife Full Name is required and cannot be blank.');
 
-        $this->assertSame(ChangeRequestStatus::Pending, $request->fresh()->status);
-        $this->assertSame('Mana Santos', $field->fresh()->verified_value);
+        $this->assertSame('Mana Santos', $record->fields->first()->fresh()->verified_value);
+        $this->assertDatabaseCount('change_requests', 0);
     }
 
-    public function test_an_optional_field_can_be_cleared_through_approval(): void
+    public function test_an_optional_field_can_be_cleared(): void
     {
-        $staff = User::factory()->staff()->create();
         $record = $this->lockedRecord();
-        $field = $record->fields->first();
-        $field->update(['is_required' => false]);
+        $optional = RecordField::factory()->for($record, 'record')->create([
+            'name' => 'Remarks',
+            'verified_value' => 'Late registration',
+            'is_required' => false,
+        ]);
 
-        $this->actingAs($staff)
+        $this->actingAs(User::factory()->create())
             ->post(route('records.change-requests.store', $record), [
-                'reason' => 'The optional value does not appear in the original register.',
-                'values' => [$field->getKey() => null],
-            ]);
-
-        $request = ChangeRequest::latest('id')->firstOrFail();
-
-        $this->actingAs(User::factory()->admin()->create())
-            ->post(route('change-requests.approve', $request))
-            ->assertRedirect();
-
-        $this->assertNull($field->fresh()->verified_value);
-        $this->assertSame(ChangeRequestStatus::Approved, $request->fresh()->status);
-    }
-
-    public function test_rejecting_leaves_the_record_untouched(): void
-    {
-        $staff = User::factory()->staff()->create();
-        $request = $this->openRequest($staff);
-        $field = $request->items->first()->field;
-
-        $this->actingAs(User::factory()->admin()->create())
-            ->post(route('change-requests.reject', $request), [
-                'decision_note' => 'The original scan supports the current spelling.',
+                'values' => [$optional->getKey() => ''],
             ])
-            ->assertRedirect();
-
-        $this->assertSame('Mana Santos', $field->fresh()->verified_value);
-        $this->assertSame(ChangeRequestStatus::Rejected, $request->fresh()->status);
-    }
-
-    public function test_rejecting_requires_a_reason(): void
-    {
-        $request = $this->openRequest(User::factory()->staff()->create());
-
-        $this->actingAs(User::factory()->admin()->create())
-            ->post(route('change-requests.reject', $request), ['decision_note' => ''])
-            ->assertSessionHasErrors('decision_note');
-
-        $this->assertSame(ChangeRequestStatus::Pending, $request->fresh()->status);
-    }
-
-    public function test_a_long_rejection_note_is_kept_in_the_audit_log(): void
-    {
-        $request = $this->openRequest(User::factory()->staff()->create());
-        $note = str_repeat('The register differs. ', 18).'Fix.'; // 400 characters
-
-        $this->actingAs(User::factory()->admin()->create())
-            ->post(route('change-requests.reject', $request), ['decision_note' => $note])
-            ->assertRedirect()
             ->assertSessionHas('success');
 
-        $this->assertSame(ChangeRequestStatus::Rejected, $request->fresh()->status);
-
-        $entries = AuditLog::where('action', 'change_request.rejected')->get();
-        $this->assertCount(1, $entries);
-        $this->assertSame("Rejected change request #{$request->getKey()}.", $entries->first()->description);
-        $this->assertSame($note, $entries->first()->new_values['decision_note']);
+        $this->assertNull($optional->fresh()->verified_value);
     }
 
-    public function test_a_decided_request_cannot_be_decided_again(): void
+    public function test_a_record_can_be_corrected_again_and_each_correction_is_kept(): void
     {
-        $request = $this->openRequest(User::factory()->staff()->create());
-        $admin = User::factory()->admin()->create();
-
-        $this->actingAs($admin)->post(route('change-requests.approve', $request));
-
-        $this->actingAs($admin)
-            ->post(route('change-requests.approve', $request))
-            ->assertSessionHas('error');
-    }
-
-    public function test_a_decision_rechecks_the_request_in_the_database(): void
-    {
-        $request = $this->openRequest(User::factory()->staff()->create());
-        $field = $request->items->first()->field;
-
-        // Another reviewer rejects the request after this copy was loaded.
-        ChangeRequest::whereKey($request->getKey())
-            ->update(['status' => ChangeRequestStatus::Rejected->value]);
-
-        try {
-            app(ChangeRequestService::class)->approve($request, User::factory()->admin()->create());
-            $this->fail('Approving a request that was already rejected should be refused.');
-        } catch (ChangeRequestException $e) {
-            $this->assertSame('This request is already rejected and cannot be changed.', $e->getMessage());
-        }
-
-        $this->assertSame(ChangeRequestStatus::Rejected, $request->fresh()->status);
-        $this->assertSame('Mana Santos', $field->fresh()->verified_value);
-    }
-
-    public function test_approval_is_audit_logged_with_before_and_after(): void
-    {
-        $request = $this->openRequest(User::factory()->staff()->create());
-
-        $this->actingAs(User::factory()->admin()->create())
-            ->post(route('change-requests.approve', $request));
-
-        $entry = AuditLog::where('action', 'change_request.approved')->latest('id')->firstOrFail();
-
-        $this->assertSame('Mana Santos', $entry->old_values['Wife Full Name']);
-        $this->assertSame('Maria Santos', $entry->new_values['Wife Full Name']);
-        $this->assertSame('admin', $entry->actor_role);
-    }
-
-    public function test_a_record_can_only_have_one_pending_request(): void
-    {
-        $staff = User::factory()->staff()->create();
-        $request = $this->openRequest($staff);
-        $record = $request->record;
-
-        $this->actingAs($staff)
-            ->post(route('records.change-requests.store', $record), [
-                'reason' => 'A second attempt while one is already pending.',
-                'values' => [$record->fields->first()->getKey() => 'Something Else'],
-            ])
-            ->assertSessionHas('error');
-
-        $this->assertDatabaseCount('change_requests', 1);
-    }
-
-    public function test_a_request_with_no_actual_changes_is_rejected(): void
-    {
-        $staff = User::factory()->staff()->create();
+        $user = User::factory()->create();
         $record = $this->lockedRecord();
         $field = $record->fields->first();
 
-        $this->actingAs($staff)
-            ->post(route('records.change-requests.store', $record), [
-                'reason' => 'Submitting the identical value changes nothing.',
-                'values' => [$field->getKey() => $field->verified_value],
-            ])
-            ->assertSessionHas('error');
+        foreach (['Maria Santos', 'Maria P. Santos'] as $value) {
+            $this->actingAs($user)->post(route('records.change-requests.store', $record), [
+                'values' => [$field->getKey() => $value],
+            ])->assertSessionHas('success');
+        }
 
-        $this->assertDatabaseCount('change_requests', 0);
+        $this->assertSame('Maria P. Santos', $field->fresh()->verified_value);
+        $this->assertSame(2, $record->changeRequests()->count());
+        $this->assertSame(
+            ['Mana Santos', 'Maria Santos'],
+            $record->changeRequests()->orderBy('id')->with('items')->get()
+                ->map(fn (ChangeRequest $correction) => $correction->items->first()->current_value)->all(),
+        );
     }
 
-    public function test_staff_only_see_their_own_requests(): void
+    public function test_a_field_of_another_record_is_ignored(): void
     {
-        $mine = User::factory()->staff()->create();
-        $theirs = User::factory()->staff()->create();
+        $record = $this->lockedRecord();
+        $other = $this->lockedRecord();
 
-        $this->openRequest($mine);
-        $other = $this->openRequest($theirs);
+        $this->expectException(ChangeRequestException::class);
 
-        $visible = $this->actingAs($mine)
+        app(ChangeRequestService::class)->correct(
+            $record,
+            [$other->fields->first()->getKey() => 'Someone Else'],
+            null,
+            User::factory()->create(),
+        );
+    }
+
+    public function test_the_record_page_offers_correct_record_and_download_csv(): void
+    {
+        $record = $this->lockedRecord();
+
+        $this->actingAs(User::factory()->create())
+            ->get(route('records.show', $record))
+            ->assertOk()
+            ->assertSee('Correct record')
+            ->assertSee(route('records.csv', $record), false)
+            ->assertDontSee('Request a change')
+            ->assertDontSee('Change request pending');
+    }
+
+    public function test_the_corrections_list_and_detail_are_read_only(): void
+    {
+        $user = User::factory()->create();
+        $record = $this->lockedRecord();
+
+        $this->actingAs($user)->post(route('records.change-requests.store', $record), [
+            'reason' => 'Misread surname.',
+            'values' => [$record->fields->first()->getKey() => 'Maria Santos'],
+        ]);
+        $correction = ChangeRequest::latest('id')->firstOrFail();
+
+        $this->actingAs($user)
             ->get(route('change-requests.index'))
             ->assertOk()
-            ->viewData('requests');
+            ->assertSee('Corrections')
+            ->assertSee('Correction #'.$correction->getKey())
+            ->assertDontSee('Waiting for review');
 
-        $this->assertSame(1, $visible->total());
-
-        // And cannot read someone else's by guessing the URL.
-        $this->actingAs($mine)
-            ->get(route('change-requests.show', $other))
-            ->assertForbidden();
-    }
-
-    public function test_admin_sees_every_request(): void
-    {
-        $this->openRequest(User::factory()->staff()->create());
-        $this->openRequest(User::factory()->staff()->create());
-
-        $visible = $this->actingAs(User::factory()->admin()->create())
-            ->get(route('change-requests.index'))
+        $this->actingAs($user)
+            ->get(route('change-requests.show', $correction))
             ->assertOk()
-            ->viewData('requests');
-
-        $this->assertSame(2, $visible->total());
+            ->assertSee('Corrected by')
+            ->assertSee('Mana Santos')
+            ->assertSee('Maria Santos')
+            ->assertSee('Misread surname.')
+            ->assertDontSee('Approve and apply')
+            ->assertDontSee('Reject request')
+            ->assertDontSee('Withdraw request');
     }
-
-    public function test_only_the_requester_can_withdraw(): void
-    {
-        $staff = User::factory()->staff()->create();
-        $request = $this->openRequest($staff);
-
-        $this->actingAs(User::factory()->staff()->create())
-            ->post(route('change-requests.withdraw', $request))
-            ->assertForbidden();
-
-        $this->actingAs($staff)
-            ->post(route('change-requests.withdraw', $request))
-            ->assertRedirect();
-
-        $this->assertSame(ChangeRequestStatus::Withdrawn, $request->fresh()->status);
-    }
-
-    // ------------------------------------------------------------------ helpers
 
     private function lockedRecord(): CivilRecord
     {
-        $staff = User::factory()->staff()->create();
+        $user = User::factory()->create();
 
-        $record = CivilRecord::factory()->submitted($staff)->create(['created_by' => $staff->getKey()]);
+        $record = CivilRecord::factory()->submitted($user)->create(['created_by' => $user->getKey()]);
 
         RecordField::factory()->for($record, 'record')->create([
             'name' => 'Wife Full Name',
@@ -370,17 +246,5 @@ class ChangeRequestWorkflowTest extends TestCase
         ]);
 
         return $record->load('fields');
-    }
-
-    private function openRequest(User $staff): ChangeRequest
-    {
-        $record = $this->lockedRecord();
-
-        $this->actingAs($staff)->post(route('records.change-requests.store', $record), [
-            'reason' => 'The surname is misread; the original register shows Maria Santos.',
-            'values' => [$record->fields->first()->getKey() => 'Maria Santos'],
-        ]);
-
-        return ChangeRequest::latest('id')->firstOrFail()->load('items.field', 'record.fields');
     }
 }

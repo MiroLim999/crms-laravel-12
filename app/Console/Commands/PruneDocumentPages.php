@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Storage;
 /**
  * Remove aligned pages that were never submitted.
  *
- * A page is uploaded when Staff finish the Align step, before they decide to
+ * A page is uploaded when the user finishes the Align step, before deciding to
  * submit. Abandoned pages are unsubmitted civil registry scans, so they are not
  * kept past `services.line_markers.keep_hours`. Scheduled hourly.
  */

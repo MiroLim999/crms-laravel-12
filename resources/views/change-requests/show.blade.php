@@ -1,81 +1,51 @@
 @extends('layouts.app')
 
-@section('title', 'Change Request #' . $changeRequest->getKey())
+@section('title', 'Correction #' . $changeRequest->getKey())
 
 @section('content')
     <main class="change-request-detail" data-record-detail>
-        <x-page-header :title="'Change Request #' . $changeRequest->getKey()" :subtitle="$recordHeading">
-            <span class="badge {{ $changeRequest->status->badgeClass() }} change-request-header-status">
-                {{ $changeRequest->status->label() }}
-            </span>
+        <x-page-header :title="'Correction #' . $changeRequest->getKey()" :subtitle="$recordHeading">
             <a href="{{ route('records.show', $changeRequest->record) }}" class="btn btn-outline-primary">
                 View record
             </a>
             <a href="{{ route('change-requests.index') }}" class="btn btn-outline-secondary">
-                Back to requests
+                Back to corrections
             </a>
         </x-page-header>
 
-        <section class="record-summary-strip change-request-review-summary" aria-label="Change request summary">
-            <div class="record-summary-item">
-                <span>Status</span>
-                <strong class="change-request-status-text change-request-status-text--{{ $changeRequest->status->value }}">
-                    {{ $changeRequest->status->label() }}
-                </strong>
-                <small>{{ $changeRequest->isOpen() ? 'Waiting for a decision' : 'Review completed' }}</small>
-            </div>
+        <section class="record-summary-strip change-request-review-summary" aria-label="Correction summary">
             <div class="record-summary-item">
                 <span>Record</span>
                 <strong>#{{ $changeRequest->record->getKey() }}</strong>
                 <small>{{ $changeRequest->record->typeShortLabel() }}</small>
             </div>
             <div class="record-summary-item">
-                <span>Proposed changes</span>
+                <span>Changed values</span>
                 <strong>{{ $changeRequest->changeCount() }}</strong>
-                <small>Value{{ $changeRequest->changeCount() === 1 ? '' : 's' }} for review</small>
+                <small>Value{{ $changeRequest->changeCount() === 1 ? '' : 's' }} changed</small>
             </div>
             <div class="record-summary-item">
-                <span>Requested by</span>
+                <span>Corrected by</span>
                 <strong>{{ $changeRequest->requester?->name ?? 'Unknown' }}</strong>
                 <small>{{ \App\Support\LocalTime::format($changeRequest->created_at, 'j M Y, H:i') }}</small>
             </div>
-            <div class="record-summary-item">
-                <span>{{ $changeRequest->reviewed_at ? 'Reviewed by' : 'Review ownership' }}</span>
-                <strong>{{ $changeRequest->reviewer?->name ?? ($canModerate ? 'Available to review' : 'Admin review') }}</strong>
-                <small>{{ \App\Support\LocalTime::format($changeRequest->reviewed_at, 'j M Y, H:i') ?: 'No decision yet' }}</small>
-            </div>
         </section>
 
-        @if ($changeRequest->isOpen())
-            <div class="alert alert-warning change-request-state-notice" role="status">
-                <i class="icon-base bx bx-time-five icon-md" aria-hidden="true"></i>
-                <div>
-                    <strong>Pending review</strong>
-                    <span>The verified record remains unchanged until this request is approved.</span>
-                </div>
-            </div>
-        @elseif ($changeRequest->status === \App\Enums\ChangeRequestStatus::Approved)
+        @if ($changeRequest->status === \App\Enums\ChangeRequestStatus::Approved)
             <div class="alert alert-success change-request-state-notice" role="status">
                 <i class="icon-base bx bx-check-circle icon-md" aria-hidden="true"></i>
                 <div>
-                    <strong>Approved and applied</strong>
-                    <span>The proposed values are now part of the verified record.</span>
-                </div>
-            </div>
-        @elseif ($changeRequest->status === \App\Enums\ChangeRequestStatus::Rejected)
-            <div class="alert alert-danger change-request-state-notice" role="status">
-                <i class="icon-base bx bx-x-circle icon-md" aria-hidden="true"></i>
-                <div>
-                    <strong>Request rejected</strong>
-                    <span>The verified record was not changed.</span>
+                    <strong>Applied</strong>
+                    <span>The new values are part of the record. The old values are kept here.</span>
                 </div>
             </div>
         @else
+            {{-- Older requests from before corrections were saved at once. --}}
             <div class="alert alert-secondary change-request-state-notice" role="status">
                 <i class="icon-base bx bx-minus-circle icon-md" aria-hidden="true"></i>
                 <div>
-                    <strong>Request withdrawn</strong>
-                    <span>The request was closed without changing the verified record.</span>
+                    <strong>Not applied ({{ $changeRequest->status->label() }})</strong>
+                    <span>This older request never changed the record.</span>
                 </div>
             </div>
         @endif
@@ -83,7 +53,7 @@
         <div class="record-split-workspace change-request-review-workspace {{ $changeRequest->record->scan_path ? 'has-scan' : 'has-no-scan' }}"
              data-record-split>
             <section class="record-split-pane record-data-pane" id="recordDataPane">
-                <x-card class="record-values-card change-request-diff-card" bodyClass="p-0" title="Proposed changes">
+                <x-card class="record-values-card change-request-diff-card" bodyClass="p-0" title="Changes">
                     @if ($changeRequest->record->scan_path)
                         <x-slot:actions>
                             <button type="button" class="btn btn-sm btn-outline-primary record-compare-toggle"
@@ -96,9 +66,9 @@
 
                     <div class="change-request-diff-legend" aria-hidden="true">
                         <span>Field</span>
-                        <span>On record when requested</span>
+                        <span>Old value</span>
                         <span></span>
-                        <span>Proposed value</span>
+                        <span>New value</span>
                     </div>
 
                     <div class="record-group-list change-request-diff-groups">
@@ -190,10 +160,10 @@
             @if ($changeRequest->record->scan_path)
                 <div class="record-splitter" data-record-splitter
                      role="separator" tabindex="0" aria-orientation="vertical"
-                     aria-label="Resize original scan and proposed changes panels"
+                     aria-label="Resize original scan and changes panels"
                      aria-controls="recordScanPane recordDataPane"
                      aria-valuemin="35" aria-valuemax="75" aria-valuenow="58"
-                     aria-valuetext="Original scan 58%, proposed changes 42%"></div>
+                     aria-valuetext="Original scan 58%, changes 42%"></div>
             @endif
 
             <section class="record-split-pane record-scan-pane" id="recordScanPane">
@@ -210,93 +180,38 @@
 
         <div class="change-request-context-grid">
             <section class="change-request-context-stack">
-                <x-card title="Reason for correction" subtitle="Submitted with the proposed values.">
-                    <p class="change-request-reason mb-0">{{ $changeRequest->reason }}</p>
-                </x-card>
-
-                <x-card title="Request details">
+                <x-card title="Correction details">
                     <dl class="change-request-detail-list mb-0">
                         <div>
-                            <dt>Requested by</dt>
+                            <dt>Corrected by</dt>
                             <dd>{{ $changeRequest->requester?->name ?? 'Unknown' }}</dd>
                         </div>
                         <div>
-                            <dt>Submitted</dt>
+                            <dt>Saved</dt>
                             <dd>{{ \App\Support\LocalTime::format($changeRequest->created_at, 'j M Y, H:i') }}</dd>
                         </div>
                         <div>
                             <dt>Record</dt>
                             <dd><a href="{{ route('records.show', $changeRequest->record) }}">{{ $recordHeading }}</a></dd>
                         </div>
-                        @if ($changeRequest->reviewed_at)
-                            <div>
-                                <dt>Reviewed by</dt>
-                                <dd>{{ $changeRequest->reviewer?->name ?? 'Unknown' }}</dd>
-                            </div>
-                            <div>
-                                <dt>Reviewed</dt>
-                                <dd>{{ \App\Support\LocalTime::format($changeRequest->reviewed_at, 'j M Y, H:i') }}</dd>
-                            </div>
-                        @endif
                     </dl>
                 </x-card>
             </section>
 
             <aside class="change-request-decision-column">
-                @if ($changeRequest->isOpen() && $canModerate)
-                    <x-card class="change-request-decision-card" title="Review decision"
-                            subtitle="Approve to apply every proposed value, or reject without changing the record.">
-                        <form method="POST" action="{{ route('change-requests.approve', $changeRequest) }}"
-                              class="change-request-decision-form is-approve" data-submit-once>
-                            @csrf
-                            <label for="approve-note" class="form-label">Approval note <span class="text-muted">(optional)</span></label>
-                            <textarea id="approve-note" name="decision_note" rows="3" maxlength="2000"
-                                      class="form-control" placeholder="Add verification details for the audit trail."></textarea>
-                            <button type="submit" class="btn btn-primary w-100 mt-3">
-                                <i class="icon-base bx bx-check icon-sm me-1"></i> Approve and apply
-                            </button>
-                        </form>
-
-                        <div class="change-request-decision-divider"><span>or</span></div>
-
-                        <form method="POST" action="{{ route('change-requests.reject', $changeRequest) }}"
-                              class="change-request-decision-form is-reject" data-submit-once>
-                            @csrf
-                            <label for="reject-note" class="form-label">Reason for rejection</label>
-                            <textarea id="reject-note" name="decision_note" rows="3" maxlength="2000"
-                                      class="form-control @error('decision_note') is-invalid @enderror"
-                                      placeholder="Explain what the requester needs to correct." required>{{ old('decision_note') }}</textarea>
-                            @error('decision_note')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                            <button type="submit" class="btn btn-outline-danger w-100 mt-3">
-                                <i class="icon-base bx bx-x icon-sm me-1"></i> Reject request
-                            </button>
-                        </form>
-                    </x-card>
-                @elseif ($changeRequest->isOpen() && $changeRequest->requested_by === auth()->id())
-                    <x-card title="Waiting for review" subtitle="An Admin must decide this request.">
-                        <p class="small text-muted">
-                            You may withdraw it while it is still pending. This closes the request without changing the record.
-                        </p>
-                        <form method="POST" action="{{ route('change-requests.withdraw', $changeRequest) }}" data-submit-once>
-                            @csrf
-                            <button type="submit" class="btn btn-outline-danger w-100">Withdraw request</button>
-                        </form>
-                    </x-card>
-                @else
-                    <x-card title="Review outcome">
-                        <span class="badge {{ $changeRequest->status->badgeClass() }} mb-3">
-                            {{ $changeRequest->status->label() }}
-                        </span>
-                        @if ($changeRequest->decision_note)
-                            <div class="change-request-decision-note">
-                                <span>Decision note</span>
-                                <p>{{ $changeRequest->decision_note }}</p>
-                            </div>
-                        @elseif ($changeRequest->status !== \App\Enums\ChangeRequestStatus::Withdrawn)
-                            <p class="text-muted mb-0">No decision note was added.</p>
-                        @endif
-                    </x-card>
-                @endif
+                <x-card title="Reason">
+                    @if (filled($changeRequest->reason))
+                        <p class="change-request-reason mb-0">{{ $changeRequest->reason }}</p>
+                    @else
+                        <p class="text-muted mb-0">No reason was given.</p>
+                    @endif
+                    @if ($changeRequest->decision_note)
+                        <div class="change-request-decision-note mt-3">
+                            <span>Decision note</span>
+                            <p>{{ $changeRequest->decision_note }}</p>
+                        </div>
+                    @endif
+                </x-card>
             </aside>
         </div>
     </main>

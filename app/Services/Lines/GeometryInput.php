@@ -51,7 +51,7 @@ final class GeometryInput
             'geometry.columns.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
             'geometry.ruled_ys' => ['present', 'array', 'max:400'],
             'geometry.ruled_ys.*' => ['required', 'numeric', 'min:0', 'max:1'],
-            // Staff set the row lines by hand in Align: Detect keeps them
+            // The row lines were set by hand in Align: Detect keeps them
             // instead of taking the page's rows.
             'geometry.keep_rows' => ['sometimes', 'boolean'],
             'geometry.fields' => ['present', 'array', 'max:'.Limits::MAX_FIELDS],

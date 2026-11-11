@@ -30,7 +30,7 @@ class DocumentPage extends Model
 
     public const STATUS_FAILED = 'failed';
 
-    /** Staff cancelled Detect or Scan: the worker discards the page at its next step. */
+    /** The user cancelled Detect or Scan: the worker discards the page at its next step. */
     public const STATUS_CANCELLED = 'cancelled';
 
     protected $fillable = [
@@ -121,7 +121,7 @@ class DocumentPage extends Model
     }
 
     /**
-     * The rows (1-based) each ledger column Staff shortened in Align reaches,
+     * The rows (1-based) each ledger column shortened in Align reaches,
      * by lower-cased name; a column reaching every row is left out. A row
      * counts when its middle lies inside the marker, give or take a quarter
      * row, as line_markers.py reads it (_rows_in_column), and the workspace

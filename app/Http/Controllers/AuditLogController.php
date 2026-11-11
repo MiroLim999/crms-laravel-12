@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
-use App\Models\User;
 use App\Support\LocalTime;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -22,7 +21,6 @@ class AuditLogController extends Controller
     public function index(Request $request): View
     {
         $filters = $request->validate([
-            'actor' => ['nullable', 'integer', 'exists:users,id'],
             'action' => ['nullable', 'string', 'max:64'],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
@@ -30,10 +28,9 @@ class AuditLogController extends Controller
         ]);
 
         $entries = AuditLog::query()
-            // Every row renders the actor's role, so load it up front rather than
-            // firing a query per row.
-            ->with(['user.role'])
-            ->when($filters['actor'] ?? null, fn (Builder $q, $id) => $q->where('user_id', $id))
+            // Every row falls back to the account's name, so load it up front
+            // rather than firing a query per row.
+            ->with(['user'])
             ->when($filters['action'] ?? null, fn (Builder $q, $action) => $q->where('action', $action))
             ->when($filters['from'] ?? null, fn (Builder $q, $from) => $q->where(
                 'created_at',
@@ -60,7 +57,6 @@ class AuditLogController extends Controller
             'entries' => $entries,
             'filters' => $filters,
             'actions' => $this->recordedActions(),
-            'actors' => $this->knownActors(),
         ]);
     }
 
@@ -77,16 +73,5 @@ class AuditLogController extends Controller
             ->distinct()
             ->orderBy('action')
             ->pluck('action');
-    }
-
-    /**
-     * @return Collection<int, User>
-     */
-    private function knownActors(): Collection
-    {
-        return User::query()
-            ->whereHas('auditLogs')
-            ->orderBy('name')
-            ->get(['id', 'name']);
     }
 }

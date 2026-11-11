@@ -74,7 +74,7 @@ function initChangeRequestForm(root) {
         if (count) count.textContent = String(changed);
         if (countLabel) countLabel.textContent = changed === 0
             ? 'No values changed'
-            : `${changed} value${changed === 1 ? '' : 's'} ready for review`;
+            : `${changed} value${changed === 1 ? '' : 's'} to save`;
         if (submit instanceof HTMLButtonElement) submit.disabled = changed === 0;
         if (readyBadge) {
             readyBadge.textContent = changed === 0

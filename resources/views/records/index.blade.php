@@ -112,9 +112,6 @@
                                 </td>
                                 <td class="text-muted">
                                     {{ \App\Support\LocalTime::format($record->submitted_at, 'j M Y') ?: '—' }}
-                                    @if ($record->submitter)
-                                        <div><small>{{ $record->submitter->name }}</small></div>
-                                    @endif
                                 </td>
                                 <td class="text-end">
                                     <a href="{{ route('records.show', $record) }}"

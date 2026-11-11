@@ -15,10 +15,10 @@ return new class extends Migration
             // register's entry number). Ledger columns keep the same settings
             // inside document_templates.columns.
             $table->string('role', 16)->nullable()->after('person_field_order');
-            // How Staff check the value: text, date, number or choice.
+            // How Verify checks the value: text, date, number or choice.
             $table->string('value_type', 16)->default('text')->after('role');
             $table->json('options')->nullable()->after('value_type');
-            // A short note shown to Staff beside the value in Verify.
+            // A short note shown beside the value in Verify.
             $table->string('hint', 200)->nullable()->after('options');
         });
 

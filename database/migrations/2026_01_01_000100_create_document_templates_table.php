@@ -23,7 +23,7 @@ return new class extends Migration
             $table->text('description')->nullable();
 
             // Only one template per doc type is active at a time; that is the one
-            // Staff get when they start a new document.
+            // used when a new document is started.
             $table->boolean('is_active')->default(false);
 
             $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();

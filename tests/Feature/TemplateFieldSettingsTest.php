@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 /**
- * What a field holds (the person's name, the entry number) and how Staff check
+ * What a field holds (the person's name, the entry number) and how Verify checks
  * its value (text, date, number, one of a list; required or not). Set in the
  * Template Builder, kept with each record, and read instead of a layout the
  * code used to know by heart.
@@ -126,7 +126,7 @@ class TemplateFieldSettingsTest extends TestCase
         ]))->assertSessionHasErrors('fields.1.role');
     }
 
-    public function test_staff_receive_the_settings_with_the_markers(): void
+    public function test_the_scan_workspace_receives_the_settings_with_the_markers(): void
     {
         Storage::fake('local');
         $this->actingAs($this->admin)->post(route('templates.store'), $this->payload([
@@ -134,7 +134,7 @@ class TemplateFieldSettingsTest extends TestCase
             'sample_document' => UploadedFile::fake()->image('register.png', 1200, 900),
         ]));
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('documents.workspace', ['type' => DocumentType::Death->value]))
             ->assertOk()
             ->assertSee('"role":"name"', escape: false)
@@ -163,20 +163,20 @@ class TemplateFieldSettingsTest extends TestCase
             'verified' => '1', 'name' => $name, 'ocr_text' => $value, 'ocr_confidence' => 90,
             'verified_value' => $value, 'x' => 0.1, 'y' => 0.1, 'width' => 0.3, 'height' => 0.05,
         ];
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 'doc_type' => DocumentType::Death->value,
                 'document_template_id' => $template->getKey(),
                 'ocr_model_key' => 'test-model',
                 'scan' => UploadedFile::fake()->image('register.png', 800, 600),
-                'fields' => [$field('Deceased', 'Juan Cruz'), $field('Remarks', 'None'), $field('Added by staff', 'x')],
+                'fields' => [$field('Deceased', 'Juan Cruz'), $field('Remarks', 'None'), $field('Added by hand', 'x')],
             ])
             ->assertCreated();
 
         $this->assertDatabaseHas('record_fields', ['name' => 'Deceased', 'role' => 'name', 'is_required' => true]);
         $this->assertDatabaseHas('record_fields', ['name' => 'Remarks', 'role' => null, 'is_required' => false]);
-        $this->assertDatabaseHas('record_fields', ['name' => 'Added by staff', 'role' => null, 'is_required' => true]);
+        $this->assertDatabaseHas('record_fields', ['name' => 'Added by hand', 'role' => null, 'is_required' => true]);
     }
 
     public function test_the_person_is_named_by_the_field_holding_the_name(): void

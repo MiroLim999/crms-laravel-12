@@ -23,15 +23,15 @@
         </nav>
 
         <div class="record-detail-topbar__actions">
+            <a href="{{ route('records.csv', $record) }}" class="btn btn-sm btn-outline-primary"
+               title="Download this document's values as a CSV file (opens in Excel)">
+                <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i> Download CSV
+            </a>
             @if ($record->isLocked() && auth()->user()->can('change-requests.create'))
-                @if ($record->hasPendingChangeRequest())
-                    <span class="badge bg-label-warning align-self-center">Change request pending</span>
-                @else
-                    <a href="{{ route('records.change-requests.create', $record) }}"
-                       class="btn btn-sm btn-outline-primary">
-                        <i class="icon-base bx bx-edit icon-sm me-1"></i> Request a change
-                    </a>
-                @endif
+                <a href="{{ route('records.change-requests.create', $record) }}"
+                   class="btn btn-sm btn-outline-primary">
+                    <i class="icon-base bx bx-edit icon-sm me-1"></i> Correct record
+                </a>
             @endif
             <a href="{{ route('records.index') }}" class="btn btn-sm btn-outline-secondary">Back to archive</a>
         </div>
@@ -45,7 +45,7 @@
                 <i class="icon-base bx bx-lock-alt icon-md" aria-hidden="true"></i>
                 <div>
                     <strong>Verified record</strong>
-                    <span>Values are locked and can change only through an approved request.</span>
+                    <span>Values change only through Correct record, which keeps the old values in the Change history.</span>
                 </div>
             </div>
         @endif
@@ -159,7 +159,7 @@
                         <summary class="card-header record-disclosure-summary">
                             <span>
                                 <strong>Change history</strong>
-                                <small>{{ $record->changeRequests->count() }} reviewed request(s)</small>
+                                <small>{{ $record->changeRequests->count() }} correction(s)</small>
                             </span>
                             <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
                         </summary>
@@ -168,13 +168,15 @@
                                 <div class="record-history-entry {{ ! $loop->last ? 'border-bottom' : '' }}">
                                     <div>
                                         <a href="{{ route('change-requests.show', $request) }}" class="fw-medium">
-                                            Request #{{ $request->getKey() }}
+                                            Correction #{{ $request->getKey() }}
                                         </a>
                                         <small>
                                             {{ $request->requester?->name }} · {{ $request->created_at->diffForHumans() }}
                                             · {{ $request->changeCount() }} change(s)
                                         </small>
-                                        <p>{{ $request->reason }}</p>
+                                        @if (filled($request->reason))
+                                            <p>{{ $request->reason }}</p>
+                                        @endif
                                     </div>
                                     <span class="badge {{ $request->status->badgeClass() }}">
                                         {{ $request->status->label() }}
