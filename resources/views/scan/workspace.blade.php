@@ -1369,6 +1369,9 @@
         });
 
         const ledgerColumns = (boxes) => boxes.filter((box) => box.kind === 'column');
+        // Told after the page's row lines are drawn (set once the spread exists): the
+        // page beside this one may be showing a copy of this grid.
+        let onGridRendered = () => {};
 
         function fieldsMatchTemplate() {
             return JSON.stringify(marker.toJSON()) === JSON.stringify(templateBoxes)
@@ -1439,6 +1442,7 @@
             const columns = ledgerColumns(boxes);
             if (!isLedger || columns.length === 0 || rows.length < 2) {
                 rowLines.render({ rows: [] });
+                onGridRendered();
                 return;
             }
             rowLines.render({
@@ -1453,6 +1457,7 @@
                 tilts: rowTilts,
                 aspect: pageAspect(),
             });
+            onGridRendered();
         }
 
         /**
@@ -3127,9 +3132,126 @@
             readOnly: true,
         });
         marker.linked = [companionMarker];
+        // Its row lines too, for looking at only: no grips.
+        const companionRows = new RowLineLayer({ overlay: el('companionOverlay') });
         let companionPage = null;
         let companionFile = null;
         let companionLoadToken = 0;
+        let companionGridKey = '';
+        let companionGridFrame = 0;
+
+        /** A layout's own markers and row lines, as a page opened on it starts. */
+        function layoutStart(page) {
+            const layout = layoutFor(page);
+            return { boxes: boxesOfLayout(layout.boxes), rows: layout.ruledYs.map(Number), tilts: null };
+        }
+
+        /**
+         * The grid to show on the page beside the one being aligned. A page
+         * already worked on shows its own. One not opened yet shows what it
+         * would start as when opened: a copy of this page's grid (the layouts
+         * match) or its layout's own, so every page shows its grid at once.
+         */
+        function companionGridFor(other, mate) {
+            if (mate) {
+                return mate.item.boxes && mate.item.rows
+                    ? { boxes: mate.item.boxes, rows: mate.item.rows, tilts: mate.item.tilts }
+                    : layoutStart(other);
+            }
+            const saved = pageLayouts.get(other)?.grid;
+            if (saved) return saved;
+            return layoutFor(other) === layoutFor(scanPageNumber)
+                ? { boxes: marker.toJSON(), rows: gridRows, tilts: rowTilts }
+                : layoutStart(other);
+        }
+
+        function renderCompanionGrid(grid) {
+            const key = JSON.stringify(grid);
+            if (key === companionGridKey && companionMarker.boxes.length === grid.boxes.length) return;
+            companionGridKey = key;
+
+            companionMarker.setBoxes(cloneBoxes(grid.boxes));
+            const columns = ledgerColumns(grid.boxes);
+            const { width, height } = companionMarker.canvas;
+            if (columns.length === 0 || grid.rows.length < 2) {
+                companionRows.render({ rows: [] });
+                return;
+            }
+            companionRows.render({
+                rows: grid.rows,
+                left: Math.min(...columns.map((column) => column.x)),
+                right: Math.max(...columns.map((column) => column.x + column.w)),
+                locked: true,
+                tilt: gridTilt(columns),
+                tilts: grid.tilts ?? grid.rows.map(() => 0),
+                aspect: width > 0 && height > 0 ? width / height : 1,
+            });
+        }
+
+        // A page not opened yet follows this one's grid as it changes, as it starts
+        // from a copy of it: redrawn once per frame at most.
+        onGridRendered = () => {
+            if (companionPage === null || companionGridFrame) return;
+            companionGridFrame = window.requestAnimationFrame(() => {
+                companionGridFrame = 0;
+                const mate = batchPartner();
+                if (companionPage === null || mate || pageLayouts.has(companionPage)) return;
+                renderCompanionGrid(companionGridFor(companionPage, null));
+            });
+        };
+
+        // The zoom a page was last focused at (null: not focused). While the view
+        // still sits at it, a change in the room it has (the side bar opening or
+        // closing, the window resized) fits the page to the new room.
+        let focusedZoom = null;
+
+        /**
+         * Zoom in on the page being aligned and centre it: as large as the room allows,
+         * whole, with one easing motion. Called when a page of the spread is clicked.
+         */
+        function focusMainPage({ animate = true } = {}) {
+            focusedZoom = marker.focusOn(el('docMainPage'), { duration: animate ? 420 : 0 });
+        }
+
+        let focusRoom = null;
+        let focusRefitTimer = 0;
+        new ResizeObserver(() => {
+            const viewport = el('docViewport');
+            const room = { width: viewport.clientWidth, height: viewport.clientHeight };
+            const before = focusRoom;
+            focusRoom = room;
+            if (!before || focusedZoom === null || !viewport.classList.contains('is-spread')) return;
+            if (Math.abs(room.width - before.width) < 4 && Math.abs(room.height - before.height) < 4) return;
+            // The side bar slides over a moment: fit once it has settled.
+            window.clearTimeout(focusRefitTimer);
+            focusRefitTimer = window.setTimeout(() => {
+                if (focusedZoom === null) return;
+                if (Math.abs(marker.zoom - focusedZoom) > 0.011) {
+                    focusedZoom = null; // zoomed by hand since: leave it
+                    return;
+                }
+                focusMainPage({ animate: false });
+            }, 150);
+        }).observe(el('docViewport'));
+
+        // Before a page of the spread is zoomed on, its first click only does that:
+        // the markers under it are for working once it is in view.
+        el('docMainPage').addEventListener('pointerdown', (event) => {
+            const viewport = el('docViewport');
+            if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
+            if (!viewport.classList.contains('is-spread') || Math.abs(marker.zoom - 1) > 0.01) return;
+            if (detection || pageTurning || scanInProgress || event.target.closest('.doc-spread__label')) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            const swallowClick = (clickEvent) => {
+                clickEvent.stopPropagation();
+                clickEvent.preventDefault();
+            };
+            el('docMainPage').addEventListener('click', swallowClick, { capture: true, once: true });
+            window.setTimeout(() => el('docMainPage').removeEventListener('click', swallowClick, true), 400);
+            focusMainPage();
+        }, true);
 
         /** The other page of this page's pair, or null: a lone last page has no partner. */
         function companionPageFor(page) {
@@ -3204,9 +3326,11 @@
                 if (token !== companionLoadToken) return;
             }
 
-            companionMarker.setBoxes((mate ? mate.item.boxes : pageLayouts.get(other)?.grid.boxes) ?? []);
-            // Same zoom as the page being aligned, so the pair stays level.
-            window.requestAnimationFrame(() => marker.resetZoom());
+            // The page's grid shows from the start, opened or not. A page just loaded
+            // is sized to the zoom the pair already has, so it stays level.
+            companionGridKey = '';
+            marker.refit();
+            renderCompanionGrid(companionGridFor(other, mate));
         }
 
         // Each page of a PDF has its own layout: markers, row lines, tilt and
@@ -3275,7 +3399,16 @@
                 clearDetection();
                 const left = scanPageNumber;
                 savePageLayout(left);
-                await marker.load(scanFile, { page });
+                // The page beside this one is already drawn: the two trade places
+                // on the spot, with nothing to load, instead of drawing it again.
+                const swap = page === companionPage && companionFile === scanFile
+                    && companionMarker.canvas.width > 0 && !batchPartner();
+                if (swap) {
+                    marker.swapPageWith(companionMarker);
+                    companionPage = left;
+                } else {
+                    await marker.load(scanFile, { page });
+                }
                 scanPageNumber = page;
                 useLayoutForPage(page);
                 showPageLayout(page, { copyFrom: left });
@@ -3283,8 +3416,11 @@
                 updateScanNotices();
                 showScanContext();
                 fetchSnapLines();
-                window.requestAnimationFrame(() => marker.resetZoom());
+                // The new page is sized to the zoom there is, then the view zooms on it
+                // and centres it.
+                if (!swap) marker.refit();
                 await updateSpread();
+                focusMainPage();
             } catch (error) {
                 showOcrError(error.message || `Page ${page} could not be opened.`);
             } finally {
@@ -3888,6 +4024,11 @@
             const item = batchState.items[index];
             if (!item) return;
 
+            // The page beside the one being aligned is already drawn: the two trade
+            // places on the spot, and the view slides to the page now being aligned.
+            const swap = batchPartner()?.index === index && companionMarker.canvas.width > 0
+                && companionFile === item.file;
+            const left = batchState.items[batchState.currentIndex];
             batchState.currentIndex = index;
             renderBatchQueueBanner();
 
@@ -3900,10 +4041,21 @@
                 savedPages = new Map();
                 clearDetection();
                 useLayoutForPage(item.pageNo ?? 1);
-                await marker.load(item.file, { page: 1 });
+                if (swap) {
+                    marker.swapPageWith(companionMarker);
+                } else {
+                    await marker.load(item.file, { page: 1 });
+                }
                 scanPageCount = 1;
                 scanPageNumber = 1;
-                resetSpread();
+                if (swap && left) {
+                    // What sits beside the page now is the one just left.
+                    companionPage = left.pageNo;
+                    companionFile = left.file;
+                    updateSpread();
+                } else {
+                    resetSpread();
+                }
                 updateScanNotices();
                 el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${index + 1}/${batchState.items.length}) · ${item.name}`;
                 el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
@@ -3919,7 +4071,10 @@
                 }
                 fetchSnapLines();
                 renderBatchQueueBanner();
-                window.requestAnimationFrame(() => marker.resetZoom());
+                // The other page of the pair is zoomed on and centred; a different
+                // document is fitted afresh.
+                if (swap) focusMainPage();
+                else window.requestAnimationFrame(() => marker.resetZoom());
             } catch (error) {
                 item.status = 'failed';
                 item.error = error.message || 'Could not open file';

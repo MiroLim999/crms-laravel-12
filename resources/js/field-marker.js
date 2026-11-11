@@ -817,6 +817,153 @@ export class FieldMarker {
         this.setZoom(1);
     }
 
+    /**
+     * Zoom in on one page of a spread and centre it, as one easing motion: the
+     * whole page (and the label above it) is made as large as the viewport
+     * allows, whatever its size now, so it suits the screen and whether the
+     * side bar is open. A wheel turn or a click on the viewport takes over at
+     * once; with reduced motion the view just jumps. Returns the zoom it ends at.
+     *
+     * @param {HTMLElement} pane  The page's wrapper (label and page) inside the viewport.
+     */
+    focusOn(pane, { duration = 420, margin = 12 } = {}) {
+        const viewport = this.viewport;
+        const stage = this.canvas.parentElement;
+        if (!viewport || !pane || !this.canvas.clientWidth || !this.canvas.clientHeight) return this.zoom;
+
+        this._stopFocus?.();
+
+        // The page at 100%, and what sits above it (the label) at any zoom.
+        const baseWidth = this.canvas.clientWidth / this.zoom;
+        const baseHeight = this.canvas.clientHeight / this.zoom;
+        const chrome = Math.max(0, pane.offsetHeight - stage.offsetHeight);
+        const fit = Math.min(
+            (viewport.clientWidth - margin * 2) / baseWidth,
+            (viewport.clientHeight - margin * 2 - chrome) / baseHeight,
+        );
+        const target = Math.round(clamp(fit, this.minZoom, this.maxZoom) * 100) / 100;
+        const start = this.zoom;
+        const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+        // What sits at the middle of the view now, as a place on the page (fractions of
+        // it, so it holds as the page grows): the motion starts from there.
+        const stageNow = stage.getBoundingClientRect();
+        const viewNow = viewport.getBoundingClientRect();
+        const anchor = {
+            x: (viewNow.left + viewNow.width / 2 - stageNow.left) / Math.max(1, stageNow.width),
+            y: (viewNow.top + viewNow.height / 2 - stageNow.top) / Math.max(1, stageNow.height),
+        };
+        const padFrom = this._pad ?? { across: 0, down: 0 };
+        // Room each side that lets the page reach the middle.
+        const padTo = {
+            across: Math.max(0, (viewport.clientWidth - baseWidth * target) / 2),
+            down: Math.max(0, (viewport.clientHeight - chrome - baseHeight * target) / 2),
+        };
+        const zooming = Math.abs(target - start) >= 0.005;
+
+        const apply = (progress) => {
+            // Slow at both ends, quick between: a slide that starts and lands softly.
+            const eased = progress < 0.5 ? 4 * progress ** 3 : 1 - (-2 * progress + 2) ** 3 / 2;
+            this._focusing = true;
+            this._setSpreadPad(
+                padFrom.across + (padTo.across - padFrom.across) * eased,
+                padFrom.down + (padTo.down - padFrom.down) * eased,
+            );
+            if (zooming) this.setZoom(start + (target - start) * eased);
+            this._focusing = false;
+
+            // Two places for the scroll, both worked out from the layout as it is
+            // now: the one that keeps the starting view's middle where it is, and the
+            // one that centres the page. Easing between them is the slide.
+            const view = viewport.getBoundingClientRect();
+            const stageRect = stage.getBoundingClientRect();
+            const box = pane.getBoundingClientRect();
+            const keep = {
+                left: viewport.scrollLeft + stageRect.left + anchor.x * stageRect.width - (view.left + view.width / 2),
+                top: viewport.scrollTop + stageRect.top + anchor.y * stageRect.height - (view.top + view.height / 2),
+            };
+            const centred = {
+                left: viewport.scrollLeft + box.left + box.width / 2 - (view.left + view.width / 2),
+                top: viewport.scrollTop + box.top + box.height / 2 - (view.top + view.height / 2),
+            };
+            viewport.scrollLeft = keep.left + (centred.left - keep.left) * eased;
+            viewport.scrollTop = keep.top + (centred.top - keep.top) * eased;
+        };
+
+        if (reduced || duration <= 0) {
+            apply(1);
+            return target;
+        }
+
+        let frame = 0;
+        const began = performance.now();
+        const stop = () => {
+            cancelAnimationFrame(frame);
+            viewport.removeEventListener('wheel', stop);
+            viewport.removeEventListener('pointerdown', stop);
+            this._stopFocus = null;
+        };
+        const step = (now) => {
+            const progress = Math.min(1, (now - began) / duration);
+            apply(progress);
+            if (progress < 1) frame = requestAnimationFrame(step);
+            else stop();
+        };
+        viewport.addEventListener('wheel', stop, { passive: true });
+        viewport.addEventListener('pointerdown', stop);
+        this._stopFocus = stop;
+        frame = requestAnimationFrame(step);
+
+        return target;
+    }
+
+    /**
+     * Size the page and the markers linked to it at the zoom they already have,
+     * without changing it: for a page that was just drawn.
+     */
+    refit() {
+        this.linked.forEach((other) => {
+            other.zoom = this.zoom;
+            other._applyZoom();
+        });
+        this._applyZoom();
+    }
+
+    /**
+     * Trade pages with another marker, as they are already drawn there: two
+     * pages of one spread change places at once, with no PDF read again and no
+     * blank page in between.
+     */
+    swapPageWith(other) {
+        const mine = document.createElement('canvas');
+        mine.width = this.canvas.width;
+        mine.height = this.canvas.height;
+        mine.getContext('2d').drawImage(this.canvas, 0, 0);
+        const mineMeasurement = this.pageMeasurement;
+
+        this._showDrawnPage(other.canvas, other.pageMeasurement);
+        other._showDrawnPage(mine, mineMeasurement);
+    }
+
+    /**
+     * Room either side of a spread, so a page at its edge can still be scrolled
+     * to the middle. Only a focused page has any; any other zoom takes it away.
+     */
+    _setSpreadPad(across, down = across) {
+        const spread = this.canvas.closest('.doc-spread');
+        spread?.style.setProperty('--spread-pad', `${Math.max(0, Math.round(across))}px`);
+        spread?.style.setProperty('--spread-pad-block', `${Math.max(0, Math.round(down))}px`);
+        this._pad = { across: Math.max(0, across), down: Math.max(0, down) };
+    }
+
+    _showDrawnPage(source, measurement) {
+        this.canvas.width = source.width;
+        this.canvas.height = source.height;
+        this.canvas.getContext('2d').drawImage(source, 0, 0);
+        this.pageMeasurement = measurement;
+        this._applyZoom();
+    }
+
     zoomBy(amount, focalEvent = null) {
         this.setZoom(this.zoom + amount, focalEvent);
     }
@@ -843,6 +990,7 @@ export class FieldMarker {
         const documentX = (this.viewport.scrollLeft + localX - before.left) / oldWidth;
         const documentY = (this.viewport.scrollTop + localY - before.top) / oldHeight;
 
+        if (!this._focusing) this._setSpreadPad(0);
         this.zoom = next;
         this.linked.forEach((other) => {
             other.zoom = next;

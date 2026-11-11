@@ -2533,6 +2533,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   // Zoomed pages grow past the box: the viewport's one scrollbar covers both.
   inline-size: max-content;
   min-inline-size: 100%;
+  // Set while a page is zoomed on: room either side, so it can be centred.
+  padding-inline: var(--spread-pad, 0px);
+  padding-block: var(--spread-pad-block, 0px);
 }
 
 .doc-spread__page {
@@ -2568,6 +2571,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .field-overlay,
   .field-box {
     pointer-events: none;
+  }
+
+  // Its row lines are only looked at: drawn in full, with no grips.
+  .row-line-layer.is-locked {
+    opacity: 1;
   }
 
   &:hover {
