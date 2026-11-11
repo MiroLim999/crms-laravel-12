@@ -450,7 +450,7 @@
                 <div class="d-grid gap-2 field-marker-actions">
                     <button class="btn btn-outline-primary" type="button" id="detectBtn"
                         title="Straighten this page, find its table, and outline every handwritten line before reading">
-                        <i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Detect fields and ink
+                        <i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Smoke test scan
                     </button>
                     <button class="btn btn-primary btn-lg d-none" type="button" id="saveQueueNextBtn">
                         <i class="icon-base bx bx-save icon-sm me-1"></i> <span id="saveQueueNextLabel">Save &amp; Queue
@@ -1947,11 +1947,13 @@
          * Show what Detect found: the page as it was straightened, the markers
          * fitted to this page's own table, and every outline it will read.
          */
-        async function applyDetection(page) {
-            // The same pixels the outlines were found on, and that go on to TrOCR.
-            await marker.loadFromUrl(page.imageUrl);
+        async function applyDetection(page, { imageShown = false, keepView = false } = {}) {
+            // The same pixels the outlines were found on, and that go on to TrOCR
+            // (already on the canvas when a page tested beside this one is opened).
+            if (!imageShown) await marker.loadFromUrl(page.imageUrl);
             updateScanNotices();
-            fetchSnapLines();
+            // A page opened with its result asks for its printed lines itself.
+            if (!imageShown) fetchSnapLines();
             // The markers and row lines Detect fitted (the page's own rows, unless
             // rows set by hand stay), as one change Ctrl+Z can take back.
             const rows = page.geometry?.ruled_ys ?? gridRows;
@@ -1962,7 +1964,7 @@
                 byHand: rowsByHand,
                 remember: true,
             });
-            window.requestAnimationFrame(() => marker.resetZoom());
+            if (!keepView) window.requestAnimationFrame(() => marker.resetZoom());
 
             setLineEditing(false);
             detection = {
@@ -3134,6 +3136,13 @@
         marker.linked = [companionMarker];
         // Its row lines too, for looking at only: no grips.
         const companionRows = new RowLineLayer({ overlay: el('companionOverlay') });
+        // And the outlines Smoke test found on it, to look at only.
+        const companionPreview = new LineOverlay({ container: el('companionOverlay'), preview: true });
+        // What Smoke test found on a page of the PDF that is not being aligned now
+        // (page number -> the detected page). A pair is tested together, so the
+        // other page comes already detected when it is opened. A queued batch page
+        // keeps its own on the queue item (item.detected).
+        const pageDetections = new Map();
         let companionPage = null;
         let companionFile = null;
         let companionLoadToken = 0;
@@ -3274,6 +3283,7 @@
 
         function resetSpread() {
             pageLayouts.clear();
+            pageDetections.clear();
             companionPage = null;
             companionFile = null;
             companionLoadToken += 1;
@@ -3301,6 +3311,7 @@
                 companionPage = null;
                 companionFile = null;
                 companionLoadToken += 1;
+                companionPreview.clear();
                 return;
             }
 
@@ -3308,16 +3319,22 @@
             const companionLeft = other < mainNumber;
             pane.style.order = companionLeft ? '-1' : '1';
             const saved = mate ? mate.item.status === 'saved' : savedPages.has(other);
-            el('docCompanionLabel').textContent = `Page ${other}${saved ? ' · saved' : ''} — click to align`;
+            const testedMark = storedDetection(other, mate) ? ' · tested' : '';
+            el('docCompanionLabel').textContent = `Page ${other}${saved ? ' · saved' : ''}${testedMark} — click to align`;
             el('docCompanionSwitch').classList.toggle('d-none', pageTurning || scanInProgress);
 
             const token = ++companionLoadToken;
-            const companionSource = mate ? mate.item.file : scanFile;
+            // A page Smoke test has been over shows as the detector left it:
+            // straightened, which is what its outlines and markers fit.
+            const tested = storedDetection(other, mate);
+            const companionSource = companionSourceFor(other, mate);
             if (companionPage !== other || companionFile !== companionSource) {
                 companionPage = other;
                 companionFile = companionSource;
+                companionPreview.clear();
                 try {
-                    await companionMarker.load(companionSource, { page: mate ? 1 : other });
+                    if (tested) await companionMarker.loadFromUrl(tested.imageUrl);
+                    else await companionMarker.load(companionSource, { page: mate ? 1 : other });
                 } catch (error) {
                     console.warn(`Page ${other} could not be shown beside the page:`, error);
                     companionPage = null;
@@ -3331,6 +3348,63 @@
             companionGridKey = '';
             marker.refit();
             renderCompanionGrid(companionGridFor(other, mate));
+            if (tested) {
+                companionPreview.setLines(tested, verificationItems(tested.lines, tested));
+                companionPreview.setGuides([]);
+                companionPreview.setVisible(true);
+            } else {
+                companionPreview.clear();
+            }
+        }
+
+        /** Smoke test's result kept for a page not being aligned now, or null. */
+        function storedDetection(page, mate = null) {
+            return mate ? (mate.item.detected ?? null) : (pageDetections.get(page) ?? null);
+        }
+
+        /** What the page beside this one is drawn from: its tested page, or the file. */
+        function companionSourceFor(page, mate = null) {
+            return storedDetection(page, mate)?.imageUrl ?? (mate ? mate.item.file : scanFile);
+        }
+
+        /**
+         * Leaving a page (a PDF page number, or a queued batch page): its Smoke
+         * test result is kept while it still fits its markers, so coming back,
+         * or going on to it after a save, needs no second run.
+         */
+        function keepDetection(target) {
+            const kept = detectionIsCurrent() ? detection.page : null;
+            if (typeof target === 'object' && target !== null) target.detected = kept;
+            else if (kept) pageDetections.set(target, kept);
+            else pageDetections.delete(target);
+        }
+
+        /**
+         * Smoke test's result for the other page of the pair: its markers and rows
+         * become that page's own (as Smoke test fitted them), and it shows beside
+         * this one with its outlines.
+         */
+        async function keepCompanionDetection(page, mate, tested) {
+            const boxes = cloneBoxes(geometryMarkers(tested.geometry, tested));
+            const rows = (tested.geometry?.ruled_ys ?? companionGridFor(page, mate).rows).map(Number);
+            const estimated = (tested.geometry?.estimated_rows ?? [])
+                .filter((index) => rows[index] !== undefined)
+                .map((index) => rowKey(rows[index]));
+            if (mate) {
+                mate.item.detected = tested;
+                mate.item.boxes = boxes;
+                mate.item.rows = rows;
+                mate.item.tilts = rows.map(() => 0);
+            } else {
+                pageDetections.set(page, tested);
+                pageLayouts.set(page, {
+                    grid: { boxes, rows, tilts: rows.map(() => 0), estimated, byHand: false },
+                    autoFields: new Map(),
+                    rowsSource: null,
+                    history: [],
+                });
+            }
+            await updateSpread();
         }
 
         // Each page of a PDF has its own layout: markers, row lines, tilt and
@@ -3396,22 +3470,30 @@
             pageTurning = true;
             updatePageBar();
             try {
-                clearDetection();
                 const left = scanPageNumber;
+                keepDetection(left);
+                clearDetection();
                 savePageLayout(left);
+                // Smoke test may have been over the page being opened already.
+                const tested = storedDetection(page);
+                pageDetections.delete(page);
                 // The page beside this one is already drawn: the two trade places
                 // on the spot, with nothing to load, instead of drawing it again.
-                const swap = page === companionPage && companionFile === scanFile
+                const swap = page === companionPage && companionFile === (tested?.imageUrl ?? scanFile)
                     && companionMarker.canvas.width > 0 && !batchPartner();
                 if (swap) {
                     marker.swapPageWith(companionMarker);
                     companionPage = left;
+                    companionFile = companionSourceFor(left);
+                } else if (tested) {
+                    await marker.loadFromUrl(tested.imageUrl);
                 } else {
                     await marker.load(scanFile, { page });
                 }
                 scanPageNumber = page;
                 useLayoutForPage(page);
                 showPageLayout(page, { copyFrom: left });
+                if (tested) await applyDetection(tested, { imageShown: true, keepView: true });
                 clearOcrError();
                 updateScanNotices();
                 showScanContext();
@@ -4026,9 +4108,13 @@
 
             // The page beside the one being aligned is already drawn: the two trade
             // places on the spot, and the view slides to the page now being aligned.
-            const swap = batchPartner()?.index === index && companionMarker.canvas.width > 0
-                && companionFile === item.file;
             const left = batchState.items[batchState.currentIndex];
+            // Smoke test's result goes with the page left, and comes with this one.
+            if (left && left !== item) keepDetection(left);
+            const tested = left !== item ? item.detected ?? null : null;
+            if (left !== item) item.detected = null;
+            const swap = batchPartner()?.index === index && companionMarker.canvas.width > 0
+                && companionFile === (tested?.imageUrl ?? item.file);
             batchState.currentIndex = index;
             renderBatchQueueBanner();
 
@@ -4043,6 +4129,8 @@
                 useLayoutForPage(item.pageNo ?? 1);
                 if (swap) {
                     marker.swapPageWith(companionMarker);
+                } else if (tested) {
+                    await marker.loadFromUrl(tested.imageUrl);
                 } else {
                     await marker.load(item.file, { page: 1 });
                 }
@@ -4051,7 +4139,7 @@
                 if (swap && left) {
                     // What sits beside the page now is the one just left.
                     companionPage = left.pageNo;
-                    companionFile = left.file;
+                    companionFile = left.detected?.imageUrl ?? left.file;
                     updateSpread();
                 } else {
                     resetSpread();
@@ -4069,6 +4157,7 @@
                 } else {
                     setGrid(templateBoxes, templateRows);
                 }
+                if (tested) await applyDetection(tested, { imageShown: true, keepView: swap });
                 fetchSnapLines();
                 renderBatchQueueBanner();
                 // The other page of the pair is zoomed on and centred; a different
@@ -5088,9 +5177,13 @@
             progress.modal.hide();
         }
 
+        // While Smoke test runs over both pages of a pair: which one is being
+        // worked on, and its share of the ring.
+        let detectPhase = null;
+
         function showPageStatus(page, waitedMs, mode = 'scan') {
             if (page.status === 'detecting' && mode === 'detect') {
-                setOcrPhase(18, 95, 20, 'Detecting fields and ink',
+                setOcrPhase(detectPhase?.from ?? 18, detectPhase?.to ?? 95, 20, detectPhase?.title ?? 'Smoke test scan',
                     'Straightening the page, fitting the columns and rows to its table, and outlining every handwritten line.');
                 return;
             }
@@ -5293,11 +5386,13 @@
          * Send the page exactly as rendered here, with the markers as they stand,
          * so every outline that comes back lines up with this canvas pixel for pixel.
          */
-        async function uploadPage({ detect }, signal) {
+        async function uploadPage({
+            detect, canvas = marker.canvas, geometry = currentGeometry(), templateId = config.templateId,
+        }, signal) {
             const form = new FormData();
-            form.set('document_template_id', String(config.templateId));
-            form.set('geometry_json', JSON.stringify(currentGeometry()));
-            form.set('page', await canvasBlob(marker.canvas), 'page.png');
+            form.set('document_template_id', String(templateId));
+            form.set('geometry_json', JSON.stringify(geometry));
+            form.set('page', await canvasBlob(canvas), 'page.png');
             if (detect) form.set('detect', '1');
 
             const response = await fetch(config.pagesUrl, {
@@ -5631,24 +5726,84 @@
             clearOcrError();
             button.disabled = true;
             el('scanNowBtn').disabled = true;
-            button.innerHTML = '<i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Detecting...';
+            button.innerHTML = '<i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Test scanning...';
+
+            // A PDF page (or queued batch page) shown with its pair: the two are one
+            // document cut in two by the scanner, so both are tested in one run.
+            // The other page goes with the markers it shows; one already tested,
+            // or with markers that would be refused, is left as it is.
+            const mate = batchPartner();
+            const otherPage = mate ? mate.item.pageNo : companionPage;
+            const mainNumber = mate ? batchState.items[batchState.currentIndex].pageNo : scanPageNumber;
+            const otherGrid = otherPage !== null && companionMarker.canvas.width > 0
+                && !storedDetection(otherPage, mate)
+                ? companionGridFor(otherPage, mate)
+                : null;
+            const pair = otherGrid !== null && otherGrid.boxes.length > 0
+                && markerSetValidationMessage(otherGrid.boxes) === null;
+            let otherProblem = null;
 
             try {
                 progress = openProgressModal();
                 beginOcrProgress(marker.toJSON().length);
                 await new Promise((resolve) => window.requestAnimationFrame(resolve));
 
-                setOcrProgress(Math.max(ocrProgress, 8), 'Sending the page', 'Uploading the page securely for detection.');
+                setOcrProgress(Math.max(ocrProgress, 8), pair ? 'Sending both pages' : 'Sending the page',
+                    'Uploading for detection.');
+                // Both go to the detector at once, so it moves straight on to the second.
+                const otherUpload = pair
+                    ? uploadPage({
+                        detect: true,
+                        canvas: companionMarker.canvas,
+                        geometry: alignedGeometry(otherGrid.boxes, otherGrid.rows, { keepRows: Boolean(otherGrid.byHand) }),
+                        templateId: layoutFor(otherPage).templateId,
+                    }, controller.signal)
+                    : null;
+                // Handled below; this only keeps a failure there from going unheard
+                // when this page's own upload fails first.
+                otherUpload?.catch(() => {});
                 const payload = await uploadPage({ detect: true }, controller.signal);
                 run.pageId = payload.id;
+                const otherPayload = otherUpload ? await otherUpload.catch((error) => {
+                    if (error.name === 'AbortError') throw error;
+                    otherProblem = error;
+                    return null;
+                }) : null;
+                if (otherPayload) run.batchPageIds = [payload.id, otherPayload.id];
+
+                detectPhase = otherPayload
+                    ? { from: 18, to: 56, title: `Smoke test scan · page ${mainNumber} of 2` }
+                    : null;
                 const page = await waitForPage(payload, controller.signal, 'detected', 'detect');
 
                 if (!Array.isArray(page.lines) || page.lines.length === 0) {
-                    throw new Error('No handwriting was found on this page. Check that the right template and file were chosen.');
+                    throw new Error(`No handwriting was found on ${pair ? `page ${mainNumber}` : 'this page'}. Check that the right template and file were chosen.`);
                 }
 
                 await applyDetection(page);
-                await completeOcrProgress('Detection complete', 'Check the outlines, then Scan with OCR.');
+
+                if (otherPayload) {
+                    detectPhase = { from: 56, to: 95, title: `Smoke test scan · page ${otherPage} of 2` };
+                    try {
+                        const otherTested = await waitForPage(otherPayload, controller.signal, 'detected', 'detect');
+                        if (!Array.isArray(otherTested.lines) || otherTested.lines.length === 0) {
+                            throw new Error('no handwriting was found on it');
+                        }
+                        await keepCompanionDetection(otherPage, mate, otherTested);
+                    } catch (error) {
+                        if (error.name === 'AbortError') throw error;
+                        otherProblem = error;
+                    }
+                }
+
+                await completeOcrProgress(
+                    otherPayload && !otherProblem ? 'Both pages tested' : 'Detection complete',
+                    'Check the outlines, then Scan with OCR.',
+                );
+                if (otherProblem) {
+                    showOcrError(`Page ${mainNumber} was tested, but page ${otherPage} could not be: ${otherProblem.message}. `
+                        + 'Open it and run Smoke test scan there.');
+                }
             } catch (error) {
                 if (!run.cancelled) {
                     const message = error.name === 'AbortError'
@@ -5659,6 +5814,7 @@
                 }
             } finally {
                 if (activeRun === run) activeRun = null;
+                detectPhase = null;
                 window.clearTimeout(timeoutId);
                 stopOcrProgress();
                 await closeProgressModal(progress);
@@ -8419,7 +8575,12 @@
 
                 const left = scanPageNumber;
                 savePageLayout(left);
-                await marker.load(scanFile, { page: pageNumber });
+                pageDetections.delete(left);
+                // Smoke test may have been over this page with the one just saved.
+                const tested = storedDetection(pageNumber);
+                pageDetections.delete(pageNumber);
+                if (tested) await marker.loadFromUrl(tested.imageUrl);
+                else await marker.load(scanFile, { page: pageNumber });
                 scanPageNumber = pageNumber;
                 useLayoutForPage(pageNumber);
                 recordSubmitting = false;
@@ -8429,6 +8590,7 @@
                 showStep('mark');
                 resetFieldHistory();
                 showPageLayout(pageNumber, { copyFrom: left });
+                if (tested) await applyDetection(tested, { imageShown: true });
                 fetchSnapLines();
                 updateSpread();
                 window.bootstrap.Modal.getInstance(el('nextPageModal'))?.hide();
