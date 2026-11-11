@@ -10,6 +10,7 @@ use App\Models\DocumentTypeDefinition;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\PageLine;
+use App\Models\RecordPage;
 use App\Services\AuditLogger;
 use App\Services\Ocr\OcrClient;
 use App\Services\Ocr\ScanModelChoice;
@@ -231,7 +232,11 @@ class DocumentScanController extends Controller
             // the page it was read from and its own verified fields.
             'extra_pages' => ['sometimes', 'array', 'max:' . self::MAX_EXTRA_PAGES],
             'extra_pages.*.document_page_id' => ['required', 'integer'],
-            'extra_pages.*.workspace_scan_path' => ['required', 'string', 'max:500'],
+            // Each page after the first keeps its scan: one the workspace queued
+            // (a batch), or the file itself, sent as extra_scans[n] beside it.
+            'extra_pages.*.workspace_scan_path' => ['nullable', 'string', 'max:500'],
+            'extra_scans' => ['sometimes', 'array', 'max:' . self::MAX_EXTRA_PAGES],
+            'extra_scans.*' => ['file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
             'extra_pages.*.source_page' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_SOURCE_PAGES],
             'extra_pages.*.fields' => ['required', 'array', 'min:1', 'max:' . Limits::MAX_FIELDS],
             'extra_pages.*.fields.*.verified' => ['required', 'accepted'],
@@ -289,19 +294,22 @@ class DocumentScanController extends Controller
             throw ValidationException::withMessages($coordinateErrors);
         }
 
-        // This page of this exact file is saved already: say so first. The user may
-        // save it again ("Save again"), which the audit log notes.
-        $savedBefore = $this->savedSourcePage($source);
+        // This page of this exact file is saved already (on its own, or as a page
+        // of a spread): say so first. The user may save it again ("Save again"),
+        // which the audit log notes. A spread asks about each of its pages.
+        $extraSourcePages = collect($validated['extra_pages'] ?? [])
+            ->pluck('source_page')->filter()->map(fn ($page) => (int) $page)->values()->all();
+        [$savedBefore, $savedPage] = $this->savedSourcePage($source, $extraSourcePages);
         if ($savedBefore !== null && !$request->boolean('allow_duplicate')) {
             $message = ($source['page_count'] ?? 1) > 1
-                ? "Page {$source['page']} of this file is already saved as record #{$savedBefore->getKey()}."
+                ? "Page {$savedPage} of this file is already saved as record #{$savedBefore->getKey()}."
                 : "This file is already saved as record #{$savedBefore->getKey()}.";
 
             if ($request->expectsJson()) {
                 return response()->json([
                     'duplicate_page' => true,
                     'message' => $message,
-                    'record' => $this->sourcePagePayload($savedBefore),
+                    'record' => [...$this->sourcePagePayload($savedBefore), 'page' => $savedPage],
                 ], 409);
             }
 
@@ -456,14 +464,19 @@ class DocumentScanController extends Controller
                 $extraSettings = $pageTwoTemplate->settingsByName();
                 foreach ($extraPages as $extra) {
                     $number = $extra['number'];
-                    $extraPath = 'scans/' . bin2hex(random_bytes(20)) . '.' . $extra['ext'];
-                    Storage::disk('local')->copy($extra['scan_path'], $extraPath);
+                    if ($extra['upload'] instanceof UploadedFile) {
+                        $extraPath = $extra['upload']->store('scans', 'local');
+                    } else {
+                        $extraPath = 'scans/' . bin2hex(random_bytes(20)) . '.' . $extra['ext'];
+                        Storage::disk('local')->copy($extra['scan_path'], $extraPath);
+                    }
                     $copiedFiles[] = $extraPath;
 
                     $record->extraPages()->create([
                         'page_no' => $number,
                         'scan_path' => $extraPath,
-                        'scan_mime' => Storage::disk('local')->mimeType($extraPath) ?: 'application/octet-stream',
+                        'scan_mime' => ($extra['upload'] instanceof UploadedFile ? $extra['upload']->getMimeType() : null)
+                            ?: Storage::disk('local')->mimeType($extraPath) ?: 'application/octet-stream',
                         'scan_rotation' => $extra['page']->deskew_degrees,
                         'page_image_path' => $this->keepPageImage($record, $extra['page'], $copiedFiles, "page-{$number}.png"),
                         'source_page' => $extra['source_page'],
@@ -576,13 +589,32 @@ class DocumentScanController extends Controller
         $records = CivilRecord::withTitleField()
             ->where('source_hash', $hash)
             ->whereNotNull('source_page')
-            ->orderBy('source_page')
             ->orderByDesc('id')
             ->get();
 
+        // A spread saved as one record holds its other pages too.
+        $spreadPages = RecordPage::query()
+            ->whereNotNull('source_page')
+            ->whereHas('record', fn ($record) => $record->where('source_hash', $hash))
+            ->with(['record' => fn ($record) => $record->withTitleField()])
+            ->get();
+
+        // The newest record per page.
+        $byPage = [];
+        foreach ($records as $record) {
+            $byPage[$record->source_page] ??= $record;
+        }
+        foreach ($spreadPages as $spreadPage) {
+            $current = $byPage[$spreadPage->source_page] ?? null;
+            if ($current === null || $spreadPage->record->getKey() > $current->getKey()) {
+                $byPage[$spreadPage->source_page] = $spreadPage->record;
+            }
+        }
+        ksort($byPage);
+
         return response()->json([
-            'pages' => $records->unique('source_page')
-                ->map(fn (CivilRecord $record) => $this->sourcePagePayload($record))
+            'pages' => collect($byPage)
+                ->map(fn (CivilRecord $record, int $page) => [...$this->sourcePagePayload($record), 'page' => $page])
                 ->values(),
         ]);
     }
@@ -619,19 +651,33 @@ class DocumentScanController extends Controller
     }
 
     /**
+     * The newest record already holding one of these pages of the file (as its
+     * own page, or as a page of a spread), and which page that is.
+     *
      * @param  array{name: ?string, page: ?int, page_count: ?int, hash: ?string}  $source
+     * @param  list<int>  $extraPages  The source pages of a spread's other pages.
+     * @return array{0: ?CivilRecord, 1: ?int}
      */
-    private function savedSourcePage(array $source): ?CivilRecord
+    private function savedSourcePage(array $source, array $extraPages = []): array
     {
         if ($source['hash'] === null || $source['page'] === null) {
-            return null;
+            return [null, null];
         }
 
-        return CivilRecord::withTitleField()
-            ->where('source_hash', $source['hash'])
-            ->where('source_page', $source['page'])
-            ->latest('id')
-            ->first();
+        foreach ([$source['page'], ...$extraPages] as $page) {
+            $record = CivilRecord::withTitleField()
+                ->where('source_hash', $source['hash'])
+                ->where(fn ($query) => $query
+                    ->where('source_page', $page)
+                    ->orWhereHas('extraPages', fn ($pages) => $pages->where('source_page', $page)))
+                ->latest('id')
+                ->first();
+            if ($record !== null) {
+                return [$record, $page];
+            }
+        }
+
+        return [null, null];
     }
 
     /** @return array{page: ?int, recordId: int, title: string, url: string, submittedAt: ?string} */
@@ -715,11 +761,17 @@ class DocumentScanController extends Controller
                 }
             }
 
-            $scanPath = (string) $extra['workspace_scan_path'];
+            // The page's own file, sent with the record (one PDF's pages, cut out
+            // in the browser), or one the workspace queued for it (a batch).
+            $upload = $request->file("extra_scans.{$position}");
+            $upload = $upload instanceof UploadedFile ? $upload : null;
+            $scanPath = $upload === null ? (string) ($extra['workspace_scan_path'] ?? '') : null;
             if (
-                !str_starts_with($scanPath, 'documents/workspace/')
-                || str_contains($scanPath, '..')
-                || !$disk->exists($scanPath)
+                $upload === null && (
+                    !str_starts_with($scanPath, 'documents/workspace/')
+                    || str_contains($scanPath, '..')
+                    || !$disk->exists($scanPath)
+                )
             ) {
                 throw ValidationException::withMessages([
                     "extra_pages.{$position}.workspace_scan_path" => 'Choose a valid scanned document to submit.',
@@ -742,8 +794,10 @@ class DocumentScanController extends Controller
                 'page' => $page,
                 'lines' => $lines,
                 'fields' => array_values($extra['fields']),
+                // Null for a file sent with the record: nothing queued to clean up.
                 'scan_path' => $scanPath,
-                'ext' => strtolower(pathinfo($scanPath, PATHINFO_EXTENSION)) ?: 'bin',
+                'upload' => $upload,
+                'ext' => $scanPath !== null ? (strtolower(pathinfo($scanPath, PATHINFO_EXTENSION)) ?: 'bin') : 'bin',
                 'source_page' => isset($extra['source_page']) ? (int) $extra['source_page'] : null,
             ];
         }

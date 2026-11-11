@@ -1170,6 +1170,13 @@
         let cropped = [];
         let readings = [];
         let processedPage = null;
+        // A two-page register read as one document: its left and right page,
+        // each read with its own layout, verified side by side and saved as one
+        // record. Row 5 of the left page and row 5 of the right are one person.
+        // { pages: [{ number, page, layout }], offsets } or null. While it is
+        // set, `cropped` holds both pages' fields (each with its pageIndex) and
+        // processedPage is the page of the field being worked on.
+        let verifyDoc = null;
         let editingLineIndex = null;
         // Verify's Add missed field: a box is being drawn, or is being read.
         let addingMissedField = false;
@@ -1231,30 +1238,196 @@
             preview: true,
         });
 
-        const lineOverlay = new LineOverlay({
-            container: el('validationFieldOverlay'),
-        onSelect: (index, event) => {
+        /** A click on a field's outline, on either page (`index` is its place in `cropped`). */
+        function selectVerifyLine(index, event) {
             // Picking fields for a new person: a click adds or takes one away.
             if (groupingFields || (event && (event.ctrlKey || event.metaKey || event.shiftKey))) {
                 togglePickedField(index);
                 return;
             }
             activateValidationField(index, 'marker');
-        },
+        }
+
+        // The outlines of the page being verified, and (a two-page register read
+        // as one document) of its second page beside it: each page has its own
+        // layer, which only knows its own lines.
+        const verifyLayer = (side) => new LineOverlay({
+            container: el(side === 0 ? 'validationFieldOverlay' : 'validationCompanionOverlay'),
+            onSelect: (index, event) => selectVerifyLine(verifyIndexOf(side, index), event),
             onModeChange: (mode) => showVerifyLineMode(mode),
-        // Verify has no Stretch tool: a closed drawing waits as a box to save.
-        drawnMode: 'rectangle',
-        onDraftChange: (points) => (addingMissedField
-            ? showAddFieldDraft(points)
-            : redrawingLineId !== null ? showRedrawDraft(points) : showVerifyDraft(points)),
+            // Verify has no Stretch tool: a closed drawing waits as a box to save.
+            drawnMode: 'rectangle',
+            onDraftChange: (points) => (addingMissedField
+                ? showAddFieldDraft(points)
+                : redrawingLineId !== null ? showRedrawDraft(points) : showVerifyDraft(points)),
             // Only a new box (Add missed field) arrives here finished and with no
             // line being edited; a redrawn outline is saved by Save and re-read.
             onEdit: (polygon, final) => {
-            if (!final || lineOverlay.editing) return;
-            if (addingMissedField) addPendingBox(polygon);
-            else if (redrawingLineId !== null) holdRedrawBox(polygon);
+                if (!final || verifyOverlays[side].editing) return;
+                if (addingMissedField) addPendingBox(polygon, side);
+                else if (redrawingLineId !== null) holdRedrawBox(polygon);
             },
         });
+        const verifyOverlays = [verifyLayer(0), verifyLayer(1)];
+
+        /** The page (0: the first, 1: the second) a field of `cropped` is on, and its place on that page. */
+        function verifySideOf(index) {
+            if (!verifyDoc) return { side: 0, local: index };
+            const side = cropped[index]?.pageIndex ?? 0;
+            return { side, local: index - (verifyDoc.offsets[side] ?? 0) };
+        }
+
+        /** A field's place in `cropped` from its page and its place there. */
+        function verifyIndexOf(side, local) {
+            return verifyDoc ? (verifyDoc.offsets[side] ?? 0) + local : local;
+        }
+
+        /** Fields of `cropped`, as each page's own places: [first page's, second page's]. */
+        function splitBySide(indexes) {
+            const parts = [[], []];
+            indexes.forEach((index) => {
+                const { side, local } = verifySideOf(index);
+                parts[side]?.push(local);
+            });
+            return parts;
+        }
+
+        // What Verify asks of the outlines, said once for all the fields: each
+        // call goes to the layer of the page the fields are on.
+        const lineOverlay = {
+            get editing() {
+                return verifyOverlays[0].editing ?? verifyOverlays[1].editing;
+            },
+            setLines(page, items) {
+                if (!verifyDoc) {
+                    verifyOverlays[0].setLines(page, items);
+                    verifyOverlays[1].clear();
+                    return;
+                }
+                verifyDoc.pages.forEach((entry, side) => {
+                    verifyOverlays[side].setLines(entry.page, items.filter((item) => (item.pageIndex ?? 0) === side));
+                });
+            },
+            setSelection(indexes, current = null) {
+                const parts = splitBySide(indexes);
+                const at = current === null ? null : verifySideOf(current);
+                verifyOverlays.forEach((overlay, side) => overlay.setSelection(parts[side], at?.side === side ? at.local : null));
+            },
+            setVerified(index, verified) {
+                const { side, local } = verifySideOf(index);
+                verifyOverlays[side].setVerified(local, verified);
+            },
+            setPicked(indexes) {
+                const parts = splitBySide(indexes);
+                verifyOverlays.forEach((overlay, side) => overlay.setPicked(parts[side]));
+            },
+            beginEdit(index, mode) {
+                const { side, local } = verifySideOf(index);
+                verifyOverlays.forEach((overlay, other) => other !== side && overlay.cancelEdit());
+                verifyOverlays[side].beginEdit(local, mode);
+            },
+            // A new outline, on one page, or (null) on whichever page it is drawn.
+            beginDraw(mode, side = null) {
+                verifyOverlays.forEach((overlay, other) => {
+                    const armed = side === null ? (other === 0 || verifyDoc !== null) : other === side;
+                    if (armed) overlay.beginDraw(mode);
+                    else overlay.cancelEdit();
+                });
+            },
+            isDrawing() {
+                return verifyOverlays.some((overlay) => overlay.isDrawing());
+            },
+            finishDrawing() {
+                const drawing = verifyOverlays.find((overlay) => overlay.isDrawing())
+                    ?? verifyOverlays.find((overlay) => overlay.editing?.mode === 'draw')
+                    ?? verifyOverlays[0];
+                return drawing.finishDrawing();
+            },
+            undoDrawStep() {
+                return verifyOverlays.find((overlay) => overlay.isDrawing())?.undoDrawStep() ?? false;
+            },
+            cancelEdit() {
+                verifyOverlays.forEach((overlay) => overlay.cancelEdit());
+            },
+            isAddingNew() {
+                return verifyOverlays.some((overlay) => overlay.isAddingNew());
+            },
+            setEditMode(mode) {
+                verifyOverlays.forEach((overlay) => overlay.editing && overlay.setEditMode(mode));
+            },
+            editedPolygon() {
+                return (verifyOverlays.find((overlay) => overlay.editing && overlay.editing.index !== null)
+                    ?? verifyOverlays[0]).editedPolygon();
+            },
+            // Boxes drawn and waiting, each on its page: [{ polygon, side }].
+            setPending(boxes, options) {
+                verifyOverlays.forEach((overlay, side) => overlay.setPending(
+                    boxes.filter((box) => (box.side ?? 0) === side).map((box) => box.polygon),
+                    options,
+                ));
+            },
+            // After a zoom: handles keep their size on screen, on both pages.
+            refresh() {
+                verifyOverlays.forEach((overlay) => overlay.refresh());
+            },
+        };
+
+        // On the second page each person's fields come after the first page's.
+        const SECOND_PAGE_ORDER = 1000;
+
+        /**
+         * The fields Verify lists, from the page's lines (or both pages' lines,
+         * the first page's first). A ledger line's person is its row, so row 5
+         * of both pages falls into one person.
+         */
+        function verifyItems() {
+            if (!verifyDoc) return verificationItems(processedPage.lines, processedPage);
+            const items = verifyDoc.pages.flatMap((entry, side) => verificationItems(entry.page.lines, entry.page)
+                .map((item) => ({
+                    ...item,
+                    pageIndex: side,
+                    pageNumber: entry.number,
+                    ...(side > 0 && Number.isInteger(item.personFieldOrder)
+                        ? { personFieldOrder: item.personFieldOrder + SECOND_PAGE_ORDER }
+                        : {}),
+                })));
+            verifyDoc.offsets = [0, items.filter((item) => item.pageIndex === 0).length];
+            return items;
+        }
+
+        /** The pages being verified, as { number, page, layout }: one, or both of a register's. */
+        function docEntries() {
+            return verifyDoc?.pages ?? [{
+                number: scanPageNumber,
+                page: processedPage,
+                layout: { templateId: config.templateId, boxes: config.boxes },
+            }];
+        }
+
+        /** The page a field of `cropped` was read from. */
+        function pageOfItem(index) {
+            return verifyDoc ? verifyDoc.pages[cropped[index]?.pageIndex ?? 0]?.page ?? processedPage : processedPage;
+        }
+
+        /** The layout a field of `cropped` was read with. */
+        function layoutOfItem(index) {
+            return docEntries()[verifyDoc ? cropped[index]?.pageIndex ?? 0 : 0].layout;
+        }
+
+        /** Work on the page a field is on: its line requests go to that page. */
+        function usePageOf(index) {
+            if (verifyDoc) processedPage = pageOfItem(index);
+            return processedPage;
+        }
+
+        function usePageOfLine(lineId) {
+            const index = cropped.findIndex((item) => item.lineId === lineId);
+            if (index >= 0) usePageOf(index);
+            return processedPage;
+        }
+
+        /** How many table rows a page's grid has. */
+        const tableRowsOf = (page) => Math.max(0, (page?.geometry?.ruled_ys?.length ?? 0) - 1);
 
         // Detect's preview in the Align step: outlines and fitted row lines over
         // the page, read-only so the markers underneath stay draggable.
@@ -1304,7 +1477,18 @@
         // field's or column's name.
         const nameKey = (name) => String(name ?? '').trim().toLowerCase();
         let templateSettings = new Map(config.boxes.map((box) => [nameKey(box.name), box]));
-        const settingsFor = (index) => templateSettings.get(nameKey(cropped[index]?.label)) ?? null;
+        // A layout's field and column settings by name, kept per layout.
+        const layoutSettingsCache = new WeakMap();
+        function layoutSettings(layout) {
+            if (!layoutSettingsCache.has(layout)) {
+                layoutSettingsCache.set(layout, new Map(layout.boxes.map((box) => [nameKey(box.name), box])));
+            }
+            return layoutSettingsCache.get(layout);
+        }
+        // A field's settings come from the layout its page was read with.
+        const settingsFor = (index) => (verifyDoc
+            ? layoutSettings(verifyDoc.pages[cropped[index]?.pageIndex ?? 0]?.layout ?? mainLayout)
+            : templateSettings).get(nameKey(cropped[index]?.label)) ?? null;
         // The template's own rectangle fields: never turned into columns.
         let templateFieldNames = new Set(config.boxes.filter((box) => box.kind !== 'column').map((box) => nameKey(box.name)));
 
@@ -2162,7 +2346,10 @@
 
         /** In Verify: the same notes, above the people, so they are read before anything is verified. */
         function showGridNotes(page) {
-            const notes = gridNotes(page?.notes);
+            // Of a two-page document, both pages' notes, each saying its page.
+            const notes = verifyDoc
+                ? verifyDoc.pages.flatMap((entry) => gridNotes(entry.page?.notes).map((note) => `Page ${entry.number}: ${note}`))
+                : gridNotes(page?.notes);
             fillGridNotes(el('verifyNotesList'), notes);
             el('verifyNotes').classList.toggle('d-none', notes.length === 0);
         }
@@ -3086,6 +3273,7 @@
                 savedPages = new Map();
                 pageLayouts.clear();
                 clearDetection();
+                verifyDoc = null;
                 // It opens at its first page not saved yet.
                 const [pageCount] = await Promise.all([pdf ? marker.pdfPageCount(file) : 1, lookUpSavedPages(file)]);
                 if (pageCount <= 1 && file.size > MAX_SCAN_BYTES) {
@@ -3312,6 +3500,7 @@
                 companionFile = null;
                 companionLoadToken += 1;
                 companionPreview.clear();
+                updateScanButtonLabel();
                 return;
             }
 
@@ -3355,6 +3544,30 @@
             } else {
                 companionPreview.clear();
             }
+            updateScanButtonLabel();
+        }
+
+        /**
+         * The page Scan with OCR reads together with this one, as one document:
+         * the other page of a two-page register (its layout has a page 2) shown
+         * beside it, outside a batch. Null when this page is read alone. It goes
+         * with the markers it shows, or what Smoke test made of it.
+         *
+         * @returns {{number: number, grid: object, tested: object|null}|null}
+         */
+        function spreadPartnerForScan() {
+            if (batchState.active || !config.pageTwo || companionPage === null || !(companionMarker.canvas.width > 0)) return null;
+            const grid = companionGridFor(companionPage, null);
+            if (grid.boxes.length === 0 || markerSetValidationMessage(grid.boxes) !== null) return null;
+            return { number: companionPage, grid, tested: storedDetection(companionPage) };
+        }
+
+        /** "Scan both pages" while the page beside this one is read with it. */
+        function updateScanButtonLabel() {
+            // Not while a scan has the button showing its progress.
+            const label = document.getElementById('scanNowBtnLabel');
+            if (batchState.active || !label) return;
+            label.textContent = spreadPartnerForScan() ? 'Scan both pages' : 'Scan with OCR';
         }
 
         /** Smoke test's result kept for a page not being aligned now, or null. */
@@ -4448,6 +4661,7 @@
         async function openBatchVerifyItem(index) {
             const item = batchState.items[index];
             if (!item || !item.page) return;
+            verifyDoc = null;
 
             // Leaving a page keeps what was typed and ticked on it, and a page only
             // looked at goes back to "Scanned" instead of staying "Validating".
@@ -4555,8 +4769,9 @@
             if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
             document.getElementById('validationExistingBanner')?.classList.add('d-none');
 
-            if (processedPage?.id) {
-                fetch(config.pageCancelUrl.replace('__PAGE__', String(processedPage.id)), {
+            // Every page that was read for it (both pages of a two-page document).
+            docEntries().map((entry) => entry.page?.id).filter(Boolean).forEach((pageId) => {
+                fetch(config.pageCancelUrl.replace('__PAGE__', String(pageId)), {
                     method: 'POST',
                     headers: {
                         'X-CSRF-TOKEN': config.csrf,
@@ -4565,7 +4780,8 @@
                     },
                     credentials: 'same-origin',
                 }).catch(() => {});
-            }
+            });
+            verifyDoc = null;
 
             if (batchState.active) {
                 const currentItem = batchState.items[batchState.currentIndex];
@@ -5180,6 +5396,19 @@
         // While Smoke test runs over both pages of a pair: which one is being
         // worked on, and its share of the ring.
         let detectPhase = null;
+        // While Scan with OCR reads both pages of a register: the share of the
+        // ring this page fills ({ from, to } out of 100) and its name.
+        let readSpan = null;
+
+        /** setOcrPhase within the share of the page being read, when two are. */
+        function readPhase(start, ceiling, seconds, title, note) {
+            if (!readSpan) {
+                setOcrPhase(start, ceiling, seconds, title, note);
+                return;
+            }
+            const scale = (value) => readSpan.from + (readSpan.to - readSpan.from) * value / 100;
+            setOcrPhase(scale(start), scale(ceiling), seconds, `${title} · ${readSpan.label}`, note);
+        }
 
         function showPageStatus(page, waitedMs, mode = 'scan') {
             if (page.status === 'detecting' && mode === 'detect') {
@@ -5188,7 +5417,7 @@
                 return;
             }
             if (page.status === 'queued') {
-                setOcrPhase(
+                readPhase(
                     15, 18, 3,
                     'Waiting for the line detector',
                     waitedMs > 20000
@@ -5197,10 +5426,10 @@
                 );
             } else if (page.status === 'detecting') {
                 // Most of a scan's time (20-50 s), so most of the ring.
-                setOcrPhase(18, 72, 20, 'Finding handwritten lines',
+                readPhase(18, 72, 20, 'Finding handwritten lines',
                     'Outlining every handwritten line, including capitals and tails that cross the ruled lines.');
             } else if (page.status === 'reading') {
-                setOcrPhase(72, 95, 6, 'Reading handwriting',
+                readPhase(72, 95, 6, 'Reading handwriting',
                     'The selected TrOCR model is reading each outlined line.');
             }
         }
@@ -5455,9 +5684,12 @@
             return detection !== null && !detection.stale && !detectionIsCurrent();
         }
 
-        /** Scan with OCR after Detect: read the crops Detect already made. */
-        async function readDetectedPage(signal) {
-            const response = await fetch(detection.page.readUrl, {
+        /**
+         * Scan with OCR after Detect: read the crops Detect already made, of
+         * this page, or of the page beside it that Smoke test went over with it.
+         */
+        async function readDetectedPage(signal, tested = detection.page) {
+            const response = await fetch(tested.readUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -5592,11 +5824,14 @@
             const run = startRun(controller, 'scan');
             let progress = null;
             let timeoutId = null;
+            // A two-page register: the page beside this one is read in the same run,
+            // and both are verified and saved together as one document.
+            const partner = spreadPartnerForScan();
 
             scanInProgress = true;
             clearOcrError();
             button.disabled = true;
-            button.innerHTML = '<i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i> OCR in progress...';
+            button.innerHTML = `<i class="icon-base bx bx-scan icon-sm me-1" aria-hidden="true"></i> ${partner ? 'Reading both pages...' : 'OCR in progress...'}`;
             el('detectBtn').disabled = true;
 
             try {
@@ -5613,6 +5848,8 @@
                 }
 
                 timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
+                // Of two pages, each fills its half of the ring, and says which it is.
+                readSpan = partner ? { from: 0, to: 50, label: `page ${scanPageNumber}` } : null;
                 let payload;
                 const readingDetectedPage = detectionIsCurrent();
                 if (readingDetectedPage) {
@@ -5622,7 +5859,7 @@
                     await lineSaveQueue;
                     setLineEditing(false);
                     // The outlines just checked are the ones read.
-                    setOcrPhase(72, 95, 6, 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
+                    readPhase(72, 95, 6, 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
                     payload = await readDetectedPage(controller.signal);
                 } else if (canReoutline()) {
                     // The markers moved after Detect. That page is already here and
@@ -5630,18 +5867,43 @@
                     // lines are reused rather than found again.
                     run.pageId = detection.page.id;
                     setLineEditing(false);
-                    setOcrPhase(30, 72, 4, 'Outlining from your markers',
+                    readPhase(30, 72, 4, 'Outlining from your markers',
                         'Reusing the lines Detect found on this page.');
                     payload = await reoutlineDetectedPage(controller.signal);
                 } else {
                     // Finishing Align hands the page to the background line detector.
-                    setOcrProgress(Math.max(ocrProgress, 8), 'Sending the aligned page', 'Uploading the page securely for line detection.');
+                    setOcrProgress(Math.max(ocrProgress, 4), partner ? 'Sending both pages' : 'Sending the aligned page',
+                        'Uploading for line detection.');
                     payload = await uploadPage({ detect: false }, controller.signal);
                     run.pageId = payload.id;
                 }
 
+                // The other page goes straight after, so the detector moves on to it:
+                // read as Smoke test outlined it, or sent with the markers it shows.
+                let partnerPayload = null;
+                if (partner) {
+                    partnerPayload = partner.tested
+                        ? await readDetectedPage(controller.signal, partner.tested)
+                        : await uploadPage({
+                            detect: false,
+                            canvas: companionMarker.canvas,
+                            geometry: alignedGeometry(partner.grid.boxes, partner.grid.rows, { keepRows: Boolean(partner.grid.byHand) }),
+                            templateId: layoutFor(partner.number).templateId,
+                        }, controller.signal);
+                    // The progress window's × stops both.
+                    run.batchPageIds = [run.pageId, partnerPayload.id].filter((id) => id !== null && id !== undefined);
+                }
+
                 const page = await waitForPage(payload, controller.signal);
+                let partnerPage = null;
+                if (partner) {
+                    readSpan = { from: 50, to: 98, label: `page ${partner.number}` };
+                    partnerPage = await waitForPage(partnerPayload, controller.signal);
+                }
+                readSpan = null;
                 clearDetection();
+                // Read now: what Smoke test made of the other page is used up.
+                if (partner) pageDetections.delete(partner.number);
 
                 // A tilted ledger grid makes the server straighten the page before
                 // outlining it; show that page so the outlines sit on their writing.
@@ -5650,34 +5912,61 @@
                     setGrid(geometryMarkers(page.geometry, page), page.geometry?.ruled_ys ?? gridRows, { byHand: rowsByHand });
                 }
 
-                if (!Array.isArray(page.lines) || page.lines.length === 0) {
-                    throw new Error('No handwriting was found inside the markers. Check the alignment and scan again.');
-                }
+                [[page, scanPageNumber], [partnerPage, partner?.number]].forEach(([read, number]) => {
+                    if (!read) return;
+                    if (!Array.isArray(read.lines) || read.lines.length === 0) {
+                        throw new Error(partner
+                            ? `No handwriting was found inside the markers of page ${number}. Check its alignment and scan again.`
+                            : 'No handwriting was found inside the markers. Check the alignment and scan again.');
+                    }
+                    if (typeof read.modelKey !== 'string' || read.modelKey.trim() === '') {
+                        throw new Error('The OCR service did not identify the model used. No data was saved; please scan again.');
+                    }
+                });
 
-                if (typeof page.modelKey !== 'string' || page.modelKey.trim() === '') {
-                    throw new Error('The OCR service did not identify the model used. No data was saved; please scan again.');
+                if (partner) {
+                    // The lower page first: it is the record's page, the other its page 2.
+                    const entries = [
+                        { number: scanPageNumber, page, layout: layoutFor(scanPageNumber) },
+                        { number: partner.number, page: partnerPage, layout: layoutFor(partner.number) },
+                    ].sort((a, b) => a.number - b.number);
+                    verifyDoc = { pages: entries, offsets: [0, 0] };
+                    processedPage = entries[0].page;
+                } else {
+                    verifyDoc = null;
+                    processedPage = page;
                 }
-
-                processedPage = page;
-                cropped = verificationItems(page.lines, page);
+                cropped = verifyItems();
                 readings = cropped.map((item) => item.reading);
-                requiredInput(document, '#ocrModelKey').value = page.modelKey.trim();
-                requiredInput(document, '#documentPageId').value = String(page.id);
-                el('summaryModel').textContent = page.model || '—';
+                requiredInput(document, '#ocrModelKey').value = processedPage.modelKey.trim();
+                requiredInput(document, '#documentPageId').value = String(processedPage.id);
+                el('summaryModel').textContent = processedPage.model || '—';
 
-                setOcrProgress(96, 'Preparing validation', 'The handwriting results are ready for your review.');
+                setOcrProgress(96, 'Preparing validation', partner
+                    ? 'Putting both pages side by side, one person to a row.'
+                    : 'The handwriting results are ready for your review.');
                 renderVerifyRows();
-                showGridNotes(page);
-                await completeOcrProgress();
+                showGridNotes(processedPage);
+                if (verifyDoc) await loadVerifySpread();
+                await completeOcrProgress(partner ? 'Both pages read' : 'Scan complete');
                 showStep('verify');
                 try {
-                    prepareValidationComparison();
-                    checkAndShowExistingRecord(page.existingRecord || null);
+                    if (verifyDoc) prepareSpreadComparison();
+                    else prepareValidationComparison();
+                    checkAndShowExistingRecord(page.existingRecord || partnerPage?.existingRecord || null);
                 } catch (error) {
                     showStep('mark');
                     throw error;
                 }
             } catch (error) {
+                readSpan = null;
+                verifyDoc = null;
+                // What Smoke test made of the other page is kept only when the read
+                // was cancelled (the server keeps it then); otherwise it is sent afresh.
+                if (partner && !(run.cancelled && run.kind === 'read')) {
+                    pageDetections.delete(partner.number);
+                    updateSpread();
+                }
                 if (run.cancelled) {
                     // Cancelled from the progress window: back to Align. A Detect
                     // result that was being read is kept, ready to scan again.
@@ -6106,7 +6395,10 @@
     // Names given to people in Verify, by page and person ("12:person-21").
     // Shown in Verify only: the record keeps each field's value as before.
     const personNameOverrides = new Map();
-    const personNameKey = (group) => `${processedPage?.id ?? ''}:${group.id}`;
+    // A two-page document's people are named once, for both pages.
+    const personNameKey = (group) => `${verifyDoc
+        ? verifyDoc.pages.map((entry) => entry.page.id).join('+')
+        : processedPage?.id ?? ''}:${group.id}`;
 
         function groupIdentity(group) {
             if (group.kind !== 'person') return `${group.indexes.length} document field${group.indexes.length === 1 ? '' : 's'}`;
@@ -6142,32 +6434,42 @@
         }
 
         /**
-         * The template's ledger columns on this page's grid. A column removed
-         * in Align is not expected in any row (the removal goes to the audit log).
+         * A layout's ledger columns on its page's grid ({ page, layout }). A column
+         * removed in Align is not expected in any row (the removal goes to the audit log).
          */
-        function columnsOnThisPage() {
-            const pageColumns = new Set((processedPage?.geometry?.columns ?? []).map((column) => nameKey(column.name)));
-            return config.boxes.filter((box) => box.kind === 'column'
+        function columnsOnPage(entry) {
+            const pageColumns = new Set((entry.page?.geometry?.columns ?? []).map((column) => nameKey(column.name)));
+            return entry.layout.boxes.filter((box) => box.kind === 'column'
                 && (pageColumns.size === 0 || pageColumns.has(nameKey(box.name))));
         }
 
+        /** A field's name, and which page it is on when two pages are verified together. */
+        const pageNamed = (entry, name) => (verifyDoc ? `${name} (page ${entry.number})` : name);
+
         /**
          * Required fields of this person that nothing was read for: the ledger
-         * columns missing from a row, or a person's template fields.
+         * columns missing from a row (on each page that has that row), or a
+         * person's template fields.
          */
         function missingRequired(group) {
             if (group.kind !== 'person' || group.indexes.length === 0) return [];
 
-            const present = new Set(group.indexes.map((index) => nameKey(cropped[index]?.label)));
+            const present = new Set(group.indexes.map((index) => `${cropped[index]?.pageIndex ?? 0}|${nameKey(cropped[index]?.label)}`));
             const ledgerRow = group.indexes.some((index) => settingsFor(index)?.kind === 'column');
             const personGroup = Number(cropped[group.indexes[0]]?.personGroup);
-            const expected = ledgerRow
-                ? columnsOnThisPage()
-                : config.boxes.filter((box) => box.kind !== 'column' && Number(box.personGroup) === personGroup);
 
-            return expected
-                .filter((box) => box.required !== false && !present.has(nameKey(box.name)))
-                .map((box) => box.name);
+            return docEntries().flatMap((entry, side) => {
+                let expected;
+                if (ledgerRow) {
+                    // A two-page document: only a page whose table has this row.
+                    expected = !verifyDoc || personGroup <= tableRowsOf(entry.page) ? columnsOnPage(entry) : [];
+                } else {
+                    expected = entry.layout.boxes.filter((box) => box.kind !== 'column' && Number(box.personGroup) === personGroup);
+                }
+                return expected
+                    .filter((box) => box.required !== false && !present.has(`${side}|${nameKey(box.name)}`))
+                    .map((box) => pageNamed(entry, box.name));
+            });
         }
 
         // ------------------------------------------- a document of several pages
@@ -6252,6 +6554,8 @@
             // One page fills the width; two share it.
             validationMarker.fitShare = mate ? 0.5 : 1;
             el('validationCompanionPage').classList.toggle('d-none', !mate);
+            el('validationCompanionPage').classList.remove('is-live');
+            el('validationSpread').classList.remove('is-joined');
             if (mate) {
                 // Pages stay where they are in the book: the lower page on the left.
                 el('validationCompanionPage').style.order = mate.pageNo < item.pageNo ? '-1' : '1';
@@ -6326,6 +6630,8 @@
 
         let switchingVerifyPage = false;
         el('validationCompanionPage').addEventListener('click', async () => {
+            // A two-page document: both pages are verified where they are.
+            if (verifyDoc) return;
             const item = currentVerifyItem();
             const mate = verifyPartnerOf(item);
             if (!mate || switchingVerifyPage || recordSubmitting || undoingVerifyChange) return;
@@ -6373,6 +6679,65 @@
             loadVerifyCompanion(spreadItem);
         }
 
+        /**
+         * Both pages of a two-page document, drawn from the pages the server read
+         * (straightened ones included), before Verify is shown.
+         */
+        async function loadVerifySpread() {
+            const [first, second] = verifyDoc.pages;
+            await Promise.all([
+                validationMarker.loadFromUrl(first.page.imageUrl),
+                validationCompanionMarker.loadFromUrl(second.page.imageUrl),
+            ]);
+        }
+
+        /**
+         * Verify a two-page document: its pages side by side, the first on the
+         * left, each with live outlines. A person is a row across both pages, so
+         * picking any of their fields lights up the whole row on both.
+         */
+        function prepareSpreadComparison() {
+            const [first, second] = verifyDoc.pages;
+            activeValidationIndex = null;
+            stopAddingMissedField();
+            stopGroupingFields();
+            cancelOutlineEdit();
+
+            const pill = el('validationPagePill');
+            pill.textContent = `Pages ${first.number}–${second.number} of ${scanPageCount} · one record`;
+            pill.classList.remove('d-none');
+            el('validationMainLabel').textContent = `Page ${first.number}`;
+            el('validationMainLabel').classList.remove('d-none');
+            const companion = el('validationCompanionPage');
+            companion.classList.remove('d-none');
+            companion.classList.add('is-live');
+            companion.style.order = '1';
+            el('validationCompanionLabel').textContent = `Page ${second.number}`;
+            el('validationSpread').classList.add('is-joined');
+
+            el('submitLabelHead').textContent = 'Save record ·';
+            el('validationPagesNote').classList.remove('d-none');
+            el('validationPagesNoteText').textContent = `Pages ${first.number} and ${second.number} are saved as one record. `
+                + 'Each row of the two pages is one person.';
+
+            validationMarker.fitShare = 0.5;
+            companionLines.clear();
+            validationMarker.setBoxes([]);
+            validationCompanionMarker.setBoxes([]);
+            lineOverlay.setLines(processedPage, cropped);
+            validationMarker.resetZoom();
+            el('validationDocViewport').scrollTo({ top: 0, left: 0 });
+
+            window.requestAnimationFrame(() => {
+                validationMarker.layout();
+                validationCompanionMarker.layout();
+                updateValidationMarkerStates();
+                const initialGroup = validationGroups.find((group) => group.kind === 'person')
+                    ?? validationGroups[0];
+                if (initialGroup) activateValidationGroup(initialGroup.id, 'initial');
+            });
+        }
+
         function handleValidationMarkerSelection(indexes, context = {}) {
             if (syncingValidationSelection) return;
             if (indexes.length === 0) {
@@ -6413,20 +6778,39 @@
         }
 
         function revealValidationLines(indexes) {
-            const bounds = lineOverlay.displayBounds(indexes);
-            if (!bounds) return;
-
             const viewport = el('validationDocViewport');
-            // The page may not start at the viewport's corner: the other page of a
-            // spread can sit to its left, and a label above it.
-            const stage = el('validationDocStage').getBoundingClientRect();
             const view = viewport.getBoundingClientRect();
-            const offsetLeft = stage.left - view.left - viewport.clientLeft + viewport.scrollLeft;
-            const offsetTop = stage.top - view.top - viewport.clientTop + viewport.scrollTop;
+            // The lines on each page, in the viewport's scrolled space. A page may
+            // not start at the viewport's corner: the other page of a spread can
+            // sit to its left, and a label above it.
+            const placed = splitBySide(indexes).flatMap((locals, side) => {
+                const bounds = locals.length > 0 ? verifyOverlays[side].displayBounds(locals) : null;
+                if (!bounds) return [];
+                const stage = el(side === 0 ? 'validationDocStage' : 'validationCompanionStage').getBoundingClientRect();
+                const left = stage.left - view.left - viewport.clientLeft + viewport.scrollLeft;
+                const top = stage.top - view.top - viewport.clientTop + viewport.scrollTop;
+                return [{
+                    left: left + bounds.left,
+                    right: left + bounds.right,
+                    top: top + bounds.top,
+                    bottom: top + bounds.bottom,
+                }];
+            });
+            if (placed.length === 0) return;
+
+            // A person across both pages: the middle of their whole row, or, zoomed
+            // in too far to see it all, of its first page's part.
+            const across = Math.max(...placed.map((box) => box.right)) - Math.min(...placed.map((box) => box.left));
+            const shown = across <= viewport.clientWidth ? placed : [placed[0]];
+            const left = Math.min(...shown.map((box) => box.left));
+            const right = Math.max(...shown.map((box) => box.right));
+            const top = Math.min(...placed.map((box) => box.top));
+            const bottom = Math.max(...placed.map((box) => box.bottom));
+            const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             viewport.scrollTo({
-                left: Math.max(0, offsetLeft + (bounds.left + bounds.right) / 2 - viewport.clientWidth / 2),
-                top: Math.max(0, offsetTop + (bounds.top + bounds.bottom) / 2 - viewport.clientHeight / 2),
-                behavior: 'smooth',
+                left: Math.max(0, (left + right) / 2 - viewport.clientWidth / 2),
+                top: Math.max(0, (top + bottom) / 2 - viewport.clientHeight / 2),
+                behavior: smooth ? 'smooth' : 'auto',
             });
         }
 
@@ -6910,6 +7294,13 @@
                 : 'i';
             requiredPart(section, '.validation-record-group__copy strong').textContent = group.label;
             requiredPart(section, '.validation-record-group__copy small').textContent = groupIdentity(group);
+            // A person across both pages of a register says so.
+            if (verifyDoc && new Set(group.indexes.map((index) => cropped[index]?.pageIndex ?? 0)).size > 1) {
+                const both = document.createElement('span');
+                both.className = 'validation-record-group__pages';
+                both.textContent = `Pages ${verifyDoc.pages[0].number}–${verifyDoc.pages[1].number}`;
+                requiredPart(section, '.validation-record-group__copy strong').append(' ', both);
+            }
 
         // A deleted crop is not something to review but something to do.
         const redrawCount = group.indexes.filter((index) => cropped[index]?.cropDeleted).length;
@@ -6964,7 +7355,19 @@
                 body.appendChild(bulk);
             }
 
+            // A two-page document: each page's fields under that page's name.
+            const pagesInGroup = new Set(group.indexes.map((index) => cropped[index]?.pageIndex ?? 0));
+            let shownPage = null;
             group.indexes.forEach((index, columnIndex) => {
+                const pageIndex = cropped[index]?.pageIndex ?? 0;
+                if (verifyDoc && pagesInGroup.size > 1 && pageIndex !== shownPage) {
+                    shownPage = pageIndex;
+                    const divider = document.createElement('div');
+                    divider.className = 'validation-page-divider';
+                    divider.innerHTML = '<i class="icon-base bx bx-file" aria-hidden="true"></i><span></span>';
+                    divider.querySelector('span').textContent = `Page ${verifyDoc.pages[pageIndex].number}`;
+                    body.appendChild(divider);
+                }
                 body.appendChild(createValidationFieldRow(readings[index], index, group, columnIndex));
             });
 
@@ -7077,6 +7480,7 @@
 
         function startOutlineEdit(index) {
             if (!processedPage || !cropped[index]) return;
+            usePageOf(index);
             stopAddingMissedField();
         stopRedrawField();
         stopGroupingFields();
@@ -7150,6 +7554,7 @@
             if (!polygon) return;
 
             const item = cropped[index];
+            usePageOf(index);
             setLineEditSaving(true);
             showLineEditStatus('Cropping along the new outline and reading it again…');
 
@@ -7181,6 +7586,8 @@
          * Verify list, keeping every other field's typed value and check.
          */
         function applyLineUpdate(line, flagsById) {
+            // The page that line is on, whatever was clicked meanwhile.
+            usePageOfLine(line.id);
             rebuildVerifyLines(
                 processedPage.lines.map((candidate) => (candidate.id === line.id ? line : candidate)),
                 flagsById,
@@ -7204,11 +7611,13 @@
                 });
             });
 
+            // `lines` are the page being worked on's (processedPage); of a
+            // two-page document the other page's stay as they are.
             processedPage.lines = lines.map((candidate) => {
                 const flags = flagsById[candidate.id];
                 return Array.isArray(flags) ? { ...candidate, flags } : candidate;
             });
-            cropped = verificationItems(processedPage.lines, processedPage);
+            cropped = verifyItems();
             readings = cropped.map((item) => item.reading);
 
             renderVerifyRows();
@@ -7293,7 +7702,7 @@
         read.querySelector('.bx-scan')?.classList.toggle('d-none', readingPendingBoxes);
         read.querySelector('.spinner-border')?.classList.toggle('d-none', !readingPendingBoxes);
             showAddFieldStatus(message ?? (count === 0
-                ? `${ADD_MODE_HINTS[addFieldMode()]} Nothing is read until you press Read.`
+                ? `${ADD_MODE_HINTS[addFieldMode()]}${verifyDoc ? ' Either page.' : ''} Nothing is read until you press Read.`
                 : `${count} box${count === 1 ? '' : 'es'} ready. Mark another, or press Read (Enter). Ctrl+Z takes back the last one.`));
         }
 
@@ -7328,9 +7737,9 @@
             slideToolbar(el('addFieldToolbar'), false);
         }
 
-        /** A box was closed on the page: it waits for Read, and the next can be drawn. */
-        function addPendingBox(polygon) {
-            pendingBoxes.push(polygon);
+        /** A box was closed on a page: it waits for Read, and the next can be drawn (on either page). */
+        function addPendingBox(polygon, side = 0) {
+            pendingBoxes.push({ polygon, side });
             showPendingBoxes();
             armAddFieldDrawing();
         }
@@ -7357,23 +7766,25 @@
             el('addFieldToolbar').querySelectorAll('input[name="addFieldMode"]').forEach((input) => { input.disabled = true; });
             showPendingBoxes(`Reading ${pendingBoxes.length} box${pendingBoxes.length === 1 ? '' : 'es'}…`);
 
-            const added = [];
-            let flags = {};
+            // Each box is read on the page it was drawn on.
+            const pageOfSide = (side) => docEntries()[side]?.page ?? processedPage;
+            const added = [[], []];
+            const flags = [{}, {}];
             const failed = [];
             const warnings = [];
-            for (const [index, polygon] of pendingBoxes.entries()) {
+            for (const [index, box] of pendingBoxes.entries()) {
                 showAddFieldStatus(`Reading box ${index + 1} of ${pendingBoxes.length}…`);
                 try {
                     const { response, payload } = await sendLineRequest(
-                        config.lineStoreUrl.replace('__PAGE__', String(processedPage.id)), 'POST', { polygon },
+                        config.lineStoreUrl.replace('__PAGE__', String(pageOfSide(box.side).id)), 'POST', { polygon: box.polygon },
                     );
                     if (!payload?.line) throw new Error(responseErrorMessage(response, payload));
-                    added.push(payload.line);
+                    added[box.side].push(payload.line);
                     if (payload.suggestion) placementSuggestions.set(payload.line.id, payload.suggestion);
-                    flags = payload.flags ?? flags;
+                    flags[box.side] = payload.flags ?? flags[box.side];
                     if (!response.ok) warnings.push(payload.line.id);
                 } catch (error) {
-                    failed.push({ polygon, message: error.message || 'The box could not be read.' });
+                    failed.push({ box, message: error.message || 'The box could not be read.' });
                 }
             }
 
@@ -7382,19 +7793,21 @@
             el('addFieldCancel').disabled = false;
             el('addFieldToolbar').querySelectorAll('input[name="addFieldMode"]').forEach((input) => { input.disabled = false; });
 
-            if (added.length > 0) {
-                rebuildVerifyLines([...processedPage.lines, ...added], flags,
-                    { focusLineId: added[0].id, freshLineId: null });
-                pushVerifyUndo({ kind: 'added', ids: added.map((line) => line.id) });
-                warnings.forEach((id) => showOcrLineWarning(id, 'The box was added, but TrOCR could not read it. Type the value.'));
-            }
+            added.forEach((lines, side) => {
+                if (lines.length === 0) return;
+                processedPage = pageOfSide(side);
+                rebuildVerifyLines([...processedPage.lines, ...lines], flags[side],
+                    { focusLineId: lines[0].id, freshLineId: null });
+                pushVerifyUndo({ kind: 'added', ids: lines.map((line) => line.id) });
+            });
+            warnings.forEach((id) => showOcrLineWarning(id, 'The box was added, but TrOCR could not read it. Type the value.'));
 
             if (failed.length === 0) {
                 stopAddingMissedField();
                 return;
             }
             // Keep the ones that failed on the page, to read again or take back.
-            pendingBoxes = failed.map((failure) => failure.polygon);
+            pendingBoxes = failed.map((failure) => failure.box);
             showPendingBoxes(`${failed.length} box${failed.length === 1 ? '' : 'es'} could not be read: ${failed[0].message}`);
             el('addFieldStatus').classList.add('is-error');
             armAddFieldDrawing();
@@ -7420,6 +7833,7 @@
         async function placeVerifyLine(index, row, column = {}) {
             const item = cropped[index];
             if (!item) return;
+            const page = usePageOf(index);
             // Where it was, for Ctrl+Z: its person, and its column if it had one.
             const before = item.gridRow === null ? null : {
                 id: item.lineId,
@@ -7434,6 +7848,7 @@
                     row === NEW_PERSON ? { new_person: true, ...column } : { row, ...column },
                 );
                 if (!response.ok || !payload?.line) throw new Error(responseErrorMessage(response, payload));
+                processedPage = page;
                 rebuildVerifyLines(
                     processedPage.lines.map((candidate) => (candidate.id === payload.line.id ? payload.line : candidate)),
                     payload.flags ?? {},
@@ -7449,9 +7864,11 @@
         async function removeVerifyLine(index) {
             const item = cropped[index];
             if (!item) return;
+            const page = usePageOf(index);
             try {
                 const { response, payload } = await sendLineRequest(verifyLineUrl(config.lineDeleteUrl, item.lineId), 'DELETE');
                 if (!response.ok) throw new Error(responseErrorMessage(response, payload));
+                processedPage = page;
                 rebuildVerifyLines(processedPage.lines.filter((line) => line.id !== item.lineId), payload?.flags ?? {});
                 pushVerifyUndo({ kind: 'removed', id: item.lineId });
             } catch (error) {
@@ -7466,6 +7883,8 @@
     // column. Submit waits until every deleted crop is drawn again.
 
     let redrawingLineId = null;
+    // The page (0 or 1) the field being drawn again is on: the box is drawn there.
+    let redrawSide = 0;
     let savingRedraw = false;
 
     const REDRAW_MODE_HINTS = {
@@ -7499,7 +7918,7 @@
 
     function armRedrawDrawing() {
         if (redrawingLineId === null || savingRedraw) return;
-        lineOverlay.beginDraw(redrawFieldMode());
+        lineOverlay.beginDraw(redrawFieldMode(), redrawSide);
         showRedrawStatus(redrawBox ? REDRAW_READY_HINT : REDRAW_MODE_HINTS[redrawFieldMode()]);
     }
 
@@ -7507,7 +7926,7 @@
     function setRedrawBox(polygon) {
         redrawBox = polygon;
         // One box for one field: no number on it.
-        lineOverlay.setPending(polygon ? [polygon] : [], { numbered: false });
+        lineOverlay.setPending(polygon ? [{ polygon, side: redrawSide }] : [], { numbered: false });
         el('redrawFieldSave').disabled = !polygon || savingRedraw;
         showRedrawState();
     }
@@ -7527,6 +7946,7 @@
     async function deleteFieldCrop(index) {
         const item = cropped[index];
         if (!item || !processedPage) return;
+        usePageOf(index);
         try {
             const { response, payload } = await sendLineRequest(
                 verifyLineUrl(config.lineRedrawUrl, item.lineId), 'POST', { needed: true },
@@ -7589,7 +8009,9 @@
         stopAddingMissedField();
         stopGroupingFields();
         cancelOutlineEdit();
+        usePageOf(index);
         redrawingLineId = item.lineId;
+        redrawSide = verifySideOf(index).side;
         setRedrawBox(null);
         activateValidationField(index, 'marker');
         const group = validationGroupForField(index);
@@ -7636,6 +8058,7 @@
             return;
         }
         if (lineOverlay.isAddingNew()) lineOverlay.cancelEdit();
+        usePageOfLine(lineId);
         setRedrawSaving(true);
         showRedrawStatus('Cropping the new box and reading it…');
         try {
@@ -7754,9 +8177,14 @@
      * layout box's field (Province, Year…). Without a table there are no people.
      */
     function canJoinPerson(item) {
-        const columns = processedPage?.geometry?.columns ?? [];
-        const rows = Math.max(0, (processedPage?.geometry?.ruled_ys?.length ?? 0) - 1);
-        return Boolean(item) && columns.length > 0 && rows > 0;
+        const page = entryOfItem(item).page;
+        const columns = page?.geometry?.columns ?? [];
+        return Boolean(item) && columns.length > 0 && tableRowsOf(page) > 0;
+    }
+
+    /** The page (and its layout) a field is on, as docEntries() has it. */
+    function entryOfItem(item) {
+        return docEntries()[verifyDoc ? item?.pageIndex ?? 0 : 0];
     }
 
     /** A layout box's field: it joins a person by its person alone, never as a cell of the table. */
@@ -7765,8 +8193,9 @@
     /** The column a field keeps when it moves: one on the page, one removed in Align, or none. */
     function columnPlacementOf(item) {
         if (item.gridColumn !== null) return { column_index: item.gridColumn };
-        const onPage = new Set((processedPage?.geometry?.columns ?? []).map((column) => nameKey(column.name)));
-        const removedInAlign = config.boxes.some((box) => (
+        const { page, layout } = entryOfItem(item);
+        const onPage = new Set((page?.geometry?.columns ?? []).map((column) => nameKey(column.name)));
+        const removedInAlign = layout.boxes.some((box) => (
             box.kind === 'column' && !onPage.has(nameKey(box.name)) && nameKey(box.name) === nameKey(item.label)
         ));
         return removedInAlign ? { column_name: item.label } : {};
@@ -7817,6 +8246,14 @@
             return;
         }
         if (!groupingFields) startGroupingFields();
+        // A new person is a row on one page: pick one page's fields at a time.
+        // Row numbers join the pages, so the other page's fields can follow.
+        const otherPage = verifyDoc && !pickedLineIds.has(item.lineId)
+            && cropped.some((other) => pickedLineIds.has(other.lineId) && other.pageIndex !== item.pageIndex);
+        if (otherPage) {
+            showGroupFieldsStatus('Pick one page’s fields at a time: group these, then the other page’s.', true);
+            return;
+        }
         if (pickedLineIds.has(item.lineId)) pickedLineIds.delete(item.lineId);
         else pickedLineIds.add(item.lineId);
         showPickedFields();
@@ -7833,6 +8270,7 @@
         el('groupFieldsName').value = '';
         slideToolbar(el('groupFieldsToolbar'), true);
         el('validationFieldOverlay').classList.add('is-picking');
+        el('validationCompanionOverlay').classList.toggle('is-picking', verifyDoc !== null);
         showPickedFields();
     }
 
@@ -7845,6 +8283,7 @@
         el('groupFieldsBtn').setAttribute('aria-pressed', 'false');
         slideToolbar(el('groupFieldsToolbar'), false);
         el('validationFieldOverlay').classList.remove('is-picking');
+        el('validationCompanionOverlay').classList.remove('is-picking');
         showPickedFields();
     }
 
@@ -7870,6 +8309,8 @@
             .filter((item) => pickedLineIds.has(item.lineId) && canJoinPerson(item))
             .sort((a, b) => Number(isLayoutBoxField(a)) - Number(isLayoutBoxField(b)) || a.x - b.x || a.y - b.y);
         if (items.length === 0) return;
+        // The picks are all on one page (see togglePickedField): its row is the new person.
+        const page = usePageOfLine(items[0].lineId);
 
         setGroupingBusy(true);
         showGroupFieldsStatus(`Grouping ${items.length} field${items.length === 1 ? '' : 's'}…`);
@@ -7908,9 +8349,10 @@
         }
 
         setGroupingBusy(false);
+        processedPage = page;
         if (moved.length > 0) {
             const byId = new Map(moved.map((line) => [line.id, line]));
-            if (name && newRow !== null) personNameOverrides.set(`${processedPage.id}:person-${newRow}`, name);
+            if (name && newRow !== null) personNameOverrides.set(personNameKey({ id: `person-${newRow}` }), name);
             groupingFields = true; // still open while the list is rebuilt
             pickedLineIds.clear();
             rebuildVerifyLines(processedPage.lines.map((line) => byId.get(line.id) ?? line), flags,
@@ -8013,9 +8455,13 @@
 
         async function undoVerifyChange() {
             if (undoingVerifyChange || !processedPage) return;
-            while (verifyUndo.length > 0 && verifyUndo[verifyUndo.length - 1].pageId !== processedPage.id) verifyUndo.pop();
+            // Only changes to the page(s) being verified can be taken back.
+            const pageIds = new Set(docEntries().map((entry) => entry.page?.id));
+            while (verifyUndo.length > 0 && !pageIds.has(verifyUndo[verifyUndo.length - 1].pageId)) verifyUndo.pop();
             const entry = verifyUndo.pop();
             if (!entry) return;
+            // Taken back on the page it was made on.
+            processedPage = docEntries().find((candidate) => candidate.page?.id === entry.pageId)?.page ?? processedPage;
 
             undoingVerifyChange = true;
             try {
@@ -8109,8 +8555,11 @@
         if (!item) return null;
         const removable = isRemovableField(item);
 
-            const columns = processedPage?.geometry?.columns ?? [];
-            const rows = Math.max(0, (processedPage?.geometry?.ruled_ys?.length ?? 0) - 1);
+            // The field's own page: its table, and its layout's columns.
+            const itemPage = pageOfItem(index);
+            const itemLayout = layoutOfItem(index);
+            const columns = itemPage?.geometry?.columns ?? [];
+            const rows = tableRowsOf(itemPage);
             const ledger = columns.length > 0 && rows > 0 && !['template', 'field'].includes(item.source);
         if (!ledger && !removable) return null;
 
@@ -8142,7 +8591,9 @@
                 const suggestion = placementSuggestions.get(item.lineId) ?? {};
                 const suggested = (text, isSuggested) => (isSuggested ? `${text} (suggested)` : text);
                 // People started by hand sit past the table's last row; they stay in the list.
-                const lastRow = Math.max(rows, ...cropped.map((other) => other.gridRow ?? 0));
+                const lastRow = Math.max(rows, ...cropped
+                    .filter((other) => (other.pageIndex ?? 0) === (item.pageIndex ?? 0))
+                    .map((other) => other.gridRow ?? 0));
                 const person = pick('Person', [
                     new Option('+ New person', NEW_PERSON),
                     ...Array.from({ length: lastRow }, (_, offset) => {
@@ -8159,7 +8610,7 @@
                 // The page's columns, then the template's columns removed in Align:
                 // a field can still be filed under one of those.
                 const onPage = new Set(columns.map((candidate) => nameKey(candidate.name)));
-                const removed = config.boxes
+                const removed = itemLayout.boxes
                     .filter((box) => box.kind === 'column' && !onPage.has(nameKey(box.name)))
                     .map((box) => String(box.name));
                 const columnOptions = columns.map((candidate, columnIndex) => new Option(
@@ -8344,34 +8795,50 @@
 
         function requiredNotSubmitted(verifiedIndexes) {
             const checkedIndexes = new Set(verifiedIndexes);
-            const checkedNames = new Set(verifiedIndexes.map((index) => nameKey(cropped[index]?.label)));
-            const missing = config.boxes
-                .filter((box) => box.kind !== 'column' && box.required !== false && !checkedNames.has(nameKey(box.name)))
-                .map((box) => box.name);
+            const sideOf = (index) => cropped[index]?.pageIndex ?? 0;
+            // Each page's layout, table and columns (one page, or a register's two).
+            const pages = docEntries().map((entry, side) => ({
+                entry,
+                side,
+                requiredColumns: columnsOnPage(entry).filter((box) => box.required !== false),
+                tableRows: tableRowsOf(entry.page),
+                shortened: shortenedColumnRows(entry.page?.geometry),
+            }));
 
-            const requiredColumns = columnsOnThisPage().filter((box) => box.required !== false);
+            const missing = pages.flatMap(({ entry, side }) => {
+                const checkedNames = new Set(verifiedIndexes
+                    .filter((index) => sideOf(index) === side)
+                    .map((index) => nameKey(cropped[index]?.label)));
+                return entry.layout.boxes
+                    .filter((box) => box.kind !== 'column' && box.required !== false && !checkedNames.has(nameKey(box.name)))
+                    .map((box) => pageNamed(entry, box.name));
+            });
+
             const untouchedRows = [];
-            const tableRows = Math.max(0, (processedPage?.geometry?.ruled_ys?.length ?? 0) - 1);
-            const shortened = shortenedColumnRows(processedPage?.geometry);
             validationGroups.forEach((group) => {
+                const row = Number(cropped[group.indexes[0]]?.personGroup);
                 // A person started by hand (past the last row) has no register row to complete.
                 const ledgerRow = group.kind === 'person'
-                    && Number(cropped[group.indexes[0]]?.personGroup) <= tableRows
+                    && pages.some((page) => row <= page.tableRows)
                     && group.indexes.some((index) => settingsFor(index)?.kind === 'column');
                 if (!ledgerRow) return;
 
                 const checkedHere = group.indexes.filter((index) => checkedIndexes.has(index));
                 if (checkedHere.length === 0) {
-                    untouchedRows.push(Number(cropped[group.indexes[0]]?.personGroup));
+                    untouchedRows.push(row);
                     return;
                 }
 
-                const columnsHere = new Set(checkedHere.map((index) => nameKey(cropped[index]?.label)));
-                const row = Number(cropped[group.indexes[0]]?.personGroup);
-                // A column shortened in Align is not asked for in the rows it leaves out.
-                const left = requiredColumns
-                    .filter((box) => !columnsHere.has(nameKey(box.name)) && (shortened.get(nameKey(box.name))?.has(row) ?? true))
-                    .map((box) => box.name);
+                const left = pages.flatMap((page) => {
+                    if (row > page.tableRows) return [];
+                    const columnsHere = new Set(checkedHere
+                        .filter((index) => sideOf(index) === page.side)
+                        .map((index) => nameKey(cropped[index]?.label)));
+                    // A column shortened in Align is not asked for in the rows it leaves out.
+                    return page.requiredColumns
+                        .filter((box) => !columnsHere.has(nameKey(box.name)) && (page.shortened.get(nameKey(box.name))?.has(row) ?? true))
+                        .map((box) => pageNamed(page.entry, box.name));
+                });
                 if (left.length > 0) missing.push(`${group.label}: ${left.join(', ')}`);
             });
 
@@ -8525,7 +8992,8 @@
             link.href = payload?.record?.url || '#';
             link.classList.toggle('d-none', !payload?.record?.url);
             if (payload?.record) {
-                savedPages.set(scanPageNumber, payload.record);
+                // The page the server found saved: of two pages, either one.
+                savedPages.set(payload.record.page ?? scanPageNumber, payload.record);
                 updateScanNotices();
             }
             window.bootstrap.Modal.getOrCreateInstance(el('duplicatePageModal')).show();
@@ -8542,9 +9010,11 @@
         // ------------------------------------------------ the next page of a PDF
         const SUBMIT_IDLE_HTML = el('submitBtn').innerHTML;
 
-        function askForNextPage(next, recordUrl) {
+        function askForNextPage(next, recordUrl, savedNow = [scanPageNumber]) {
             const saved = [...savedPages.keys()].filter((page) => page <= scanPageCount);
-            el('nextPageModalTitle').textContent = `Page ${scanPageNumber} saved`;
+            el('nextPageModalTitle').textContent = savedNow.length > 1
+                ? `Pages ${pageRanges(savedNow)} saved as one record`
+                : `Page ${savedNow[0]} saved`;
             el('nextPageModalDescription').textContent = `Continue with page ${next} of ${scanPageCount}?`;
             el('nextPageModalProgress').textContent = `Saved so far: page${saved.length === 1 ? '' : 's'} ${pageRanges(saved)} of ${scanPageCount}.`;
             el('nextPageOpenRecordBtn').href = recordUrl;
@@ -8568,6 +9038,7 @@
                 clearValidationSubmitError();
                 clearDetection();
                 processedPage = null;
+                verifyDoc = null;
                 cropped = [];
                 readings = [];
                 requiredInput(document, '#documentPageId').value = '';
@@ -8612,14 +9083,14 @@
          * it is. A PDF that cannot be cut (one locked with a password) goes whole
          * when it is small enough, and the record still knows its page.
          */
-        async function scanForRecord() {
+        async function scanForRecord(pageNumber = scanPageNumber) {
             if (!multiPage() || !isPdfFile(scanFile)) return scanFile;
             try {
-                return await pdfPageFile(scanFile, scanPageNumber);
+                return await pdfPageFile(scanFile, pageNumber);
             } catch (error) {
                 console.warn('The page could not be cut out of the PDF:', error);
                 if (scanFile.size <= MAX_SCAN_BYTES) return scanFile;
-                throw new Error(`Page ${scanPageNumber} could not be taken out of this PDF. Save that page as its own file and upload it.`);
+                throw new Error(`Page ${pageNumber} could not be taken out of this PDF. Save that page as its own file and upload it.`);
             }
         }
 
@@ -8742,10 +9213,41 @@
             });
             data.set('fields_json', JSON.stringify(submittedFields));
 
-            // A document of several pages is one record: each page is checked in
-            // turn, and the record is sent once the last page is checked.
+            // A two-page register read as one document: one record, its first
+            // page's fields as the record's own and the second page's as its
+            // page 2. A person keeps one number on both pages.
             let combined = false;
-            const documentPages = currentBatchItem?.group && currentBatchItem.pageTotal > 1
+            let spreadPages = null;
+            if (verifyDoc) {
+                const [first, second] = verifyDoc.pages;
+                const pageFields = [[], []];
+                verifiedIndexes.forEach((sourceIndex, position) => {
+                    pageFields[cropped[sourceIndex]?.pageIndex ?? 0].push(submittedFields[position]);
+                });
+                const unchecked = verifyDoc.pages.find((_, side) => pageFields[side].length === 0);
+                if (unchecked) {
+                    showValidationSubmitError(`Check Verified on at least one field of page ${unchecked.number}.`);
+                    return;
+                }
+                // Field names stay unique in the record: a name both pages have gets its page.
+                const firstNames = new Set(pageFields[0].map((field) => String(field.name).toLocaleLowerCase()));
+                const secondFields = pageFields[1].map((field) => (firstNames.has(String(field.name).toLocaleLowerCase())
+                    ? { ...field, name: `${field.name} · page ${second.number}` }
+                    : field));
+                data.set('fields_json', JSON.stringify(pageFields[0]));
+                data.set('document_template_id', String(first.layout.templateId));
+                data.set('document_page_id', String(first.page.id));
+                data.set('ocr_model_key', (first.page.modelKey || '').trim());
+                data.set('source_page', String(first.number));
+                data.set('extra_pages_json', JSON.stringify([{
+                    document_page_id: second.page.id,
+                    source_page: second.number,
+                    fields: secondFields,
+                }]));
+                spreadPages = verifyDoc.pages.map((entry) => entry.number);
+                combined = true;
+            }
+            const documentPages = !spreadPages && currentBatchItem?.group && currentBatchItem.pageTotal > 1
                 ? batchState.items.filter((it) => it.group === currentBatchItem.group).sort((a, b) => a.pageNo - b.pageNo)
                 : [];
             if (documentPages.length > 1) {
@@ -8819,7 +9321,12 @@
             button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Submitting verified fields...';
 
             try {
-                if (!currentBatchItem?.workspaceScanPath) {
+                if (spreadPages) {
+                    // Each page as its own file, cut out of the PDF.
+                    const [firstScan, secondScan] = await Promise.all(spreadPages.map((page) => scanForRecord(page)));
+                    data.set('scan', firstScan, firstScan.name);
+                    data.set('extra_scans[0]', secondScan, secondScan.name);
+                } else if (!currentBatchItem?.workspaceScanPath) {
                     const scanUpload = await scanForRecord();
                     data.set('scan', scanUpload, scanUpload.name);
                 }
@@ -8888,15 +9395,18 @@
                     }
                 }
 
-                if (payload.record) savedPages.set(scanPageNumber, payload.record);
+                const savedNow = spreadPages ?? [scanPageNumber];
+                if (payload.record) savedNow.forEach((page) => savedPages.set(page, { ...payload.record, page }));
                 submissionSucceeded = true;
 
                 // A PDF with pages still to save: offer the next one. The page just
                 // saved stays locked meanwhile (recordSubmitting), so it is not sent twice.
-                const next = !batchState.active && multiPage() ? nextUnsavedPage(scanPageNumber, scanPageCount, savedPages) : null;
+                const next = !batchState.active && multiPage()
+                    ? nextUnsavedPage(Math.max(...savedNow), scanPageCount, savedPages)
+                    : null;
                 if (next !== null) {
                     button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved';
-                    askForNextPage(next, payload.redirect);
+                    askForNextPage(next, payload.redirect, savedNow);
                     return;
                 }
 

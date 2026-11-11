@@ -3466,14 +3466,73 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 // Verify's page beside the one being verified: the outlines stay light, so it
 // reads as the other half of the same document, and a click verifies it.
-.validation-companion .line-overlay .line-marker__shape {
+.validation-companion:not(.is-live) .line-overlay .line-marker__shape {
   fill: rgba(var(--bs-secondary-rgb), .05);
   stroke: rgba(var(--bs-secondary-rgb), .45);
 }
 
-.validation-companion .line-overlay .line-marker.is-verified .line-marker__shape {
+.validation-companion:not(.is-live) .line-overlay .line-marker.is-verified .line-marker__shape {
   fill: rgba(40, 199, 111, .1);
   stroke: rgba(40, 199, 111, .72);
+}
+
+// A two-page register verified as one document: the second page is verified
+// where it is, like the first, so it takes the pointer and looks the same.
+.doc-spread__page--companion.is-live {
+  cursor: default;
+  opacity: 1;
+
+  .doc-stage,
+  .field-overlay {
+    pointer-events: auto;
+  }
+
+  .doc-spread__switch {
+    display: none;
+  }
+}
+
+.doc-spread.is-joined .doc-spread__label {
+  color: var(--bs-primary);
+}
+
+// Inside a person of a two-page document: where each page's fields begin.
+.validation-page-divider {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin-block: .65rem .3rem;
+  padding-inline: .15rem;
+  color: var(--bs-secondary-color);
+  font-size: .6875rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+
+  i {
+    color: var(--bs-primary);
+    font-size: .9rem;
+  }
+
+  &::after {
+    content: '';
+    flex: 1 1 auto;
+    border-block-start: 1px dashed var(--bs-border-color);
+  }
+}
+
+// "Pages 1–2" beside a person whose row runs across both pages.
+.validation-record-group__pages {
+  display: inline-block;
+  margin-inline-start: .2rem;
+  padding: .05rem .45rem;
+  color: var(--bs-primary);
+  font-size: .625rem;
+  font-weight: 600;
+  line-height: 1.5;
+  vertical-align: middle;
+  background: rgba(var(--bs-primary-rgb), .1);
+  border-radius: 999px;
 }
 
 .validation-field-overlay {
@@ -3988,7 +4047,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     stroke-width: 1.1px;
     stroke-linejoin: round;
     vector-effect: non-scaling-stroke;
-    transition: fill .12s ease, stroke .12s ease;
+    // A person's row lights up, and fades, across both pages together.
+    transition: fill .2s ease, stroke .2s ease, stroke-width .2s ease;
   }
 
   &:hover .line-marker__shape,
