@@ -132,7 +132,7 @@ class DocumentTemplateController extends Controller
             $this->savePageTwo($request, $template, $pageTwo, $documentType, $validated['page_two_template_id'], fresh: true);
 
             if ($validated['publish'] ?? false) {
-                $problems = $this->publishIfReady($template);
+                $problems = $this->publishIfReady($template, (bool) ($validated['publish_anyway'] ?? false));
             }
 
             return $template;
@@ -519,7 +519,7 @@ class DocumentTemplateController extends Controller
 
             // Already published: nothing to publish again.
             if (($validated['publish'] ?? false) && ! $template->is_active) {
-                $problems = $this->publishIfReady($template);
+                $problems = $this->publishIfReady($template, (bool) ($validated['publish_anyway'] ?? false));
             }
         });
 
@@ -538,9 +538,8 @@ class DocumentTemplateController extends Controller
     }
 
     /**
-     * The Publish button in the template library. A certificate type may have
-     * several published layouts (Staff choose one); a new version replaces
-     * the older version it was made from.
+     * The Publish button in the template library. Only one template per
+     * certificate type is published for Staff: it replaces the one before.
      */
     public function activate(DocumentTemplate $template): RedirectResponse
     {
@@ -558,34 +557,6 @@ class DocumentTemplateController extends Controller
         }
 
         return back()->with('success', "'{$template->name}' is now published for {$template->typeLabel()}.");
-    }
-
-    /** Take a layout away from Staff. Its records keep it. */
-    public function deactivate(DocumentTemplate $template): RedirectResponse
-    {
-        if ($redirect = $this->toMainLayout($template)) {
-            return $redirect;
-        }
-
-        if (! $template->is_active) {
-            return back()->with('error', "'{$template->name}' is not published.");
-        }
-
-        DB::transaction(function () use ($template) {
-            $template->forceFill(['is_active' => false])->save();
-            $this->audit->log(
-                'template.deactivated',
-                $template,
-                old: ['active' => $template->name],
-                description: "Unpublished template '{$template->name}' for {$template->typeLabel()}.",
-            );
-        });
-
-        $left = DocumentTemplate::listed()->where('is_active', true)
-            ->where('document_type_id', $template->document_type_id)->count();
-
-        return back()->with('success', "'{$template->name}' is no longer published for Staff."
-            .($left === 0 ? " Staff can't scan {$template->typeLabel()} until another layout is published." : ''));
     }
 
     public function sample(DocumentTemplate $template): JsonResponse
@@ -705,11 +676,11 @@ class DocumentTemplateController extends Controller
             return $redirect;
         }
 
-        // Staff may be scanning with it right now: it is unpublished first.
+        // Staff may be scanning with it right now: another layout is published first.
         if ($template->is_active) {
             return back()->with(
                 'error',
-                "'{$template->name}' is published for Staff. Unpublish it first, then delete it.",
+                "'{$template->name}' is the layout Staff use. Publish another layout first, then delete this one.",
             );
         }
 
@@ -823,6 +794,8 @@ class DocumentTemplateController extends Controller
                         ->when($template?->page_two_template_id, fn ($query, $own) => $query->orWhere('id', $own))),
             ],
             'publish' => ['sometimes', 'boolean'],
+            // "Save and publish" chosen in the builder although something is missing.
+            'publish_anyway' => ['sometimes', 'boolean'],
             // A ruled register may be described entirely by its ledger grid.
             'fields' => ['nullable', 'array', 'max:'.Limits::MAX_FIELDS],
             'columns' => ['nullable', 'array', 'max:60'],
@@ -1164,18 +1137,22 @@ class DocumentTemplateController extends Controller
 
     /**
      * Publish the layout when nothing stops it (see publishProblems), and say
-     * what does otherwise: then nothing is published.
+     * what does otherwise: then nothing is published. `$anyway`: the admin saw
+     * what is missing in the builder and chose "Save and publish", so it is
+     * published all the same (the audit log keeps what was missing).
      *
-     * @return list<string>
+     * @return list<string> what stopped it; empty when it was published
      */
-    private function publishIfReady(DocumentTemplate $template): array
+    private function publishIfReady(DocumentTemplate $template, bool $anyway = false): array
     {
         $problems = $this->publishProblems($template->fresh() ?? $template);
-        if ($problems === []) {
-            $this->publishTemplate($template);
+        if ($problems !== [] && ! $anyway) {
+            return $problems;
         }
 
-        return $problems;
+        $this->publishTemplate($template, $problems);
+
+        return [];
     }
 
     /**
@@ -1230,36 +1207,27 @@ class DocumentTemplateController extends Controller
     }
 
     /**
-     * Publish the layout for Staff. Other published layouts of the type stay
-     * published (Staff choose between them), except the older versions this
-     * one was saved from: a new version replaces them. The row lock keeps two
-     * publishes at the same moment from both reading the old state.
+     * Publish the layout Staff receive, retiring the previous one atomically.
+     * The row lock prevents two simultaneous publishes from leaving two active
+     * layouts for the same certificate type.
+     *
+     * @param  list<string>  $missing  what the publish checks found, when published anyway
      */
-    private function publishTemplate(DocumentTemplate $template): void
+    private function publishTemplate(DocumentTemplate $template, array $missing = []): void
     {
-        DocumentTemplate::query()
+        $sameType = DocumentTemplate::query()
             ->where('document_type_id', $template->document_type_id)
             ->lockForUpdate()
-            ->get(['id']);
+            ->get();
 
-        // The versions this one replaces: up its parents while each is a version.
-        $replaced = [];
-        $current = $template;
-        $seen = [$template->getKey() => true];
-        while ($current->is_version && $current->parent_id !== null && ! isset($seen[$current->parent_id])) {
-            $current = DocumentTemplate::find($current->parent_id);
-            if ($current === null) {
-                break;
-            }
-            $seen[$current->getKey()] = true;
-            if ($current->is_active) {
-                $replaced[] = $current;
-            }
-        }
+        $previous = $sameType
+            ->where('is_active', true)
+            ->where('id', '!=', $template->getKey());
 
-        foreach ($replaced as $older) {
-            $older->forceFill(['is_active' => false])->save();
-        }
+        DocumentTemplate::query()
+            ->whereIn('id', $sameType->modelKeys())
+            ->whereKeyNot($template->getKey())
+            ->update(['is_active' => false]);
 
         // Always write the target row. Its in-memory state may be stale if
         // another publish was waiting on the same lock.
@@ -1268,9 +1236,10 @@ class DocumentTemplateController extends Controller
         $this->audit->log(
             'template.activated',
             $template,
-            old: ['previous_active' => array_map(fn (DocumentTemplate $t) => $t->name, $replaced)],
-            new: ['active' => $template->name],
-            description: "Published template '{$template->name}' for {$template->typeLabel()}.",
+            old: ['previous_active' => $previous->pluck('name')->values()->all()],
+            new: ['active' => $template->name, ...($missing !== [] ? ['published_with_missing' => $missing] : [])],
+            description: "Published template '{$template->name}' for {$template->typeLabel()}."
+                .($missing !== [] ? ' Published with checks not done: '.implode(' ', $missing) : ''),
         );
     }
 
@@ -1385,7 +1354,7 @@ class DocumentTemplateController extends Controller
             $this->savePageTwo($request, $version, $pageTwo, $documentType, $validated['page_two_template_id'], fresh: true);
 
             if ($publish) {
-                $problems = $this->publishIfReady($version);
+                $problems = $this->publishIfReady($version, (bool) ($validated['publish_anyway'] ?? false));
             }
 
             return $version;

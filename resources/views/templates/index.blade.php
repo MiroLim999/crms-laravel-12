@@ -32,8 +32,7 @@
         @foreach ($documentTypes as $type)
             @php
                 $group = $templates[$type->getKey()] ?? collect();
-                $publishedLayouts = $group->where('is_active', true)->values();
-                $published = $publishedLayouts->first();
+                $published = $group->firstWhere('is_active', true);
                 $draftCount = $group->where('is_active', false)->count();
                 $expanded = request('open') === $type->key || (! request()->filled('open') && $loop->first);
                 $collapseId = 'template-layouts-' . $type->getKey();
@@ -55,13 +54,6 @@
                                 </h2>
                                 @if ($type->isArchived())
                                     <p class="mb-0 text-muted small">Hidden from Staff. Records and layouts are kept.</p>
-                                @elseif ($publishedLayouts->count() > 1)
-                                    <p class="mb-0 text-muted small">
-                                        Staff choose between {{ $publishedLayouts->count() }} published layouts:
-                                        @foreach ($publishedLayouts as $layout)
-                                            <strong class="text-body">{{ $layout->name }}</strong>{{ $loop->last ? '.' : ($loop->remaining === 1 ? ' and ' : ', ') }}
-                                        @endforeach
-                                    </p>
                                 @elseif ($published)
                                     <p class="mb-0 text-muted small">
                                         Staff currently use <strong class="text-body">{{ $published->name }}</strong>.
@@ -231,15 +223,6 @@
                                                         <i class="icon-base bx bx-dots-vertical-rounded" aria-hidden="true"></i>
                                                     </button>
                                                     <div class="dropdown-menu dropdown-menu-end">
-                                                        @if ($layout->is_active)
-                                                            <form method="POST" action="{{ route('templates.deactivate', $layout) }}">
-                                                                @csrf
-                                                                <button class="dropdown-item" type="submit">
-                                                                    <i class="icon-base bx bx-hide icon-sm me-2" aria-hidden="true"></i>
-                                                                    Unpublish (hide from Staff)
-                                                                </button>
-                                                            </form>
-                                                        @endif
                                                         <form method="POST" action="{{ route('templates.duplicate', $layout) }}">
                                                             @csrf
                                                             <button class="dropdown-item" type="submit">
@@ -268,10 +251,7 @@
                 </section>
 
                 @foreach ($group->where('is_active', false) as $layout)
-                    @php
-                        $problems = $layout->publish_problems ?? [];
-                        $replaces = $layout->is_version && $layout->parent?->is_active ? $layout->parent : null;
-                    @endphp
+                    @php $problems = $layout->publish_problems ?? []; @endphp
                     <div class="modal fade" id="publishLayout{{ $layout->getKey() }}" tabindex="-1"
                          aria-labelledby="publishLayoutLabel{{ $layout->getKey() }}" aria-hidden="true">
                         <div class="modal-dialog modal-dialog-centered">
@@ -294,16 +274,13 @@
                                         <p class="mb-2">
                                             Staff will be able to scan {{ $type->label() }} with this layout from now on.
                                         </p>
-                                        @if ($replaces)
-                                            <p class="mb-2">It replaces <strong>{{ $replaces->name }}</strong>, the older version it was saved from.</p>
-                                        @elseif ($publishedLayouts->isNotEmpty())
+                                        @if ($published)
                                             <p class="mb-2">
-                                                {{ $publishedLayouts->count() === 1 ? 'The layout' : 'The layouts' }} already published
-                                                ({{ $publishedLayouts->pluck('name')->join(', ', ' and ') }})
-                                                {{ $publishedLayouts->count() === 1 ? 'stays' : 'stay' }} published too: Staff pick the one printed like their book.
+                                                It replaces <strong>{{ $published->name }}</strong>, the layout Staff use now.
+                                                Records already read with it keep it.
                                             </p>
                                         @endif
-                                        <p class="mb-0 text-muted small">You can unpublish it later from the ⋮ menu.</p>
+                                        <p class="mb-0 text-muted small">Only one layout per document type is published for Staff.</p>
                                     @else
                                         <p class="mb-2">Fix these in the builder first:</p>
                                         <ul class="mb-0 ps-3">
@@ -354,7 +331,7 @@
                                             This layout was used by {{ $layout->records_count }} saved {{ Str::plural('record', $layout->records_count) }}, so it can't be deleted.
                                         </p>
                                         <p class="mb-0 text-muted small">
-                                            Records keep the layout they were read with. To stop Staff using it, unpublish it (⋮ menu).
+                                            Records keep the layout they were read with. To stop Staff using it, publish another layout.
                                         </p>
                                     </div>
                                     <div class="modal-footer">
@@ -363,9 +340,9 @@
                                 @elseif ($layout->is_active)
                                     {{-- Staff may be scanning with it right now. --}}
                                     <div class="modal-body">
-                                        <p class="mb-2">This layout is published, so Staff may be scanning with it right now.</p>
+                                        <p class="mb-2">This is the layout Staff use, so they may be scanning with it right now.</p>
                                         <p class="mb-0 text-muted small">
-                                            Unpublish it first (⋮ menu → Unpublish), then delete it.
+                                            Publish another layout first, then delete this one.
                                         </p>
                                     </div>
                                     <div class="modal-footer">

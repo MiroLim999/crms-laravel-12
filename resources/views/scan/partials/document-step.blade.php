@@ -29,11 +29,8 @@
         }
 
         $parts = [];
-        $count = (int) ($template->published_count ?? 1);
-        if ($count > 1) {
-            $parts[] = $count.' layouts';
-        } elseif (strcasecmp(trim($template->name), trim($type->label())) !== 0) {
-            // The layout's own name only when it says something the type does not.
+        // The layout's own name only when it says something the type does not.
+        if (strcasecmp(trim($template->name), trim($type->label())) !== 0) {
             $parts[] = $template->name;
         }
         if ($type->records_count > 0) {
@@ -178,35 +175,6 @@
                     </div>
                 </div>
             </div>
-
-            {{-- Several published layouts for this type (books printed in different
-                 years): Staff pick the one printed like their book. Each is a link,
-                 as the type list is: before a file is chosen there is nothing to lose. --}}
-            @php $layoutChoices ??= collect(); @endphp
-            @if ($currentType && $layoutChoices->count() > 1)
-                <div class="document-upload-mode-bar document-layout-bar">
-                    <div class="document-upload-mode-header">
-                        <span class="document-upload-mode-label" id="layoutChoiceLabel">Layout</span>
-                        <span class="document-upload-mode-hint">Pick the layout printed like your book</span>
-                    </div>
-                    <nav class="document-upload-mode-grid" aria-labelledby="layoutChoiceLabel">
-                        @foreach ($layoutChoices as $choice)
-                            @php $chosen = $choice->is($template); @endphp
-                            <a href="{{ route('documents.workspace', ['type' => $currentType->value, 'template' => $choice->getKey()]) }}"
-                               class="document-upload-mode-option document-layout-option {{ $chosen ? 'is-active' : '' }}"
-                               data-layout-choice="{{ $choice->getKey() }}"
-                               @if ($chosen) aria-current="true" @endif
-                               @if ($choice->description) title="{{ $choice->description }}" @endif>
-                                <span class="document-type-option__icon" aria-hidden="true">
-                                    <i class="icon-base bx bx-layout"></i>
-                                </span>
-                                <span class="document-layout-option__name">{{ $choice->name }}</span>
-                                <i class="icon-base bx bx-check document-type-option__check document-upload-mode-option__check" aria-hidden="true"></i>
-                            </a>
-                        @endforeach
-                    </nav>
-                </div>
-            @endif
 
             @if ($currentType)
                 <div class="document-upload-mode-bar" role="radiogroup" aria-label="Choose upload mode">

@@ -560,10 +560,12 @@ class DocumentTemplateBuilderTest extends TestCase
 
         $current = DocumentTemplate::where('name', 'Current layout')->firstOrFail();
 
-        // A type may have several published layouts: Staff choose.
         $this->assertTrue($current->is_active);
-        $this->assertTrue($previous->refresh()->is_active);
-        $this->assertTrue($current->is(DocumentTemplate::activeFor(DocumentType::Birth)), 'the newest published comes first');
+        $this->assertFalse($previous->refresh()->is_active);
+        $this->assertSame(
+            1,
+            DocumentTemplate::where('doc_type', DocumentType::Birth->value)->where('is_active', true)->count(),
+        );
     }
 
     public function test_edit_can_publish_a_draft_for_staff(): void
@@ -585,7 +587,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertTrue($draft->refresh()->is_active);
         $this->assertSame('Published death layout', $draft->name);
         $this->assertEqualsWithDelta(297 / 210, $draft->page_ratio, 0.00001);
-        $this->assertTrue($previous->refresh()->is_active);
+        $this->assertFalse($previous->refresh()->is_active);
     }
 
     public function test_existing_layout_can_update_many_fields_from_one_json_input(): void
@@ -607,7 +609,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertSame(199, $template->fields()->count());
     }
 
-    public function test_the_library_publish_action_adds_a_layout_beside_the_published_one(): void
+    public function test_legacy_publish_action_keeps_one_staff_layout_per_type(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
         $previous = $this->template($superAdmin, DocumentType::Marriage, 'Previous', active: true);
@@ -618,9 +620,8 @@ class DocumentTemplateBuilderTest extends TestCase
             ->assertRedirect()
             ->assertSessionHas('success');
 
-        $this->assertTrue($previous->refresh()->is_active);
+        $this->assertFalse($previous->refresh()->is_active);
         $this->assertTrue($next->refresh()->is_active);
-        $this->assertNotNull($next->published_at);
     }
 
     public function test_field_names_must_be_unique_ignoring_case(): void
@@ -686,7 +687,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertSame('Birth layout', $template->name);
     }
 
-    public function test_a_published_template_is_unpublished_before_it_is_deleted(): void
+    public function test_the_published_template_is_deleted_only_after_another_is_published(): void
     {
         Storage::fake('local');
         $superAdmin = User::factory()->superAdmin()->create();
@@ -705,17 +706,16 @@ class DocumentTemplateBuilderTest extends TestCase
             ->from(route('templates.index'))
             ->delete(route('templates.destroy', $template))
             ->assertRedirect(route('templates.index'))
-            ->assertSessionHas('error', "'Published layout' is published for Staff. Unpublish it first, then delete it.");
+            ->assertSessionHas('error', "'Published layout' is the layout Staff use. Publish another layout first, then delete this one.");
         $this->assertDatabaseHas('document_templates', ['id' => $template->getKey()]);
         $this->get(route('templates.index'))
             ->assertOk()
-            ->assertSee('Unpublish it first')
+            ->assertSee('Publish another layout first, then delete this one.')
             ->assertDontSee('action="'.route('templates.destroy', $template).'"', escape: false);
 
-        $this->post(route('templates.deactivate', $template))
-            ->assertSessionHas('success', fn (string $message) => str_contains($message, "Staff can't scan"));
+        $next = $this->template($superAdmin, DocumentType::Birth, 'Next layout', withSample: true);
+        $this->post(route('templates.activate', $next))->assertSessionHas('success');
         $this->assertFalse($template->refresh()->is_active);
-        $this->assertDatabaseHas('audit_logs', ['action' => 'template.deactivated']);
 
         $this->actingAs($superAdmin)
             ->delete(route('templates.destroy', $template))

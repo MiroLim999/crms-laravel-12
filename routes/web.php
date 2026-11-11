@@ -257,8 +257,6 @@ Route::middleware('auth')->group(function () {
             ->name('templates.update');
         Route::post('templates/{template}/activate', [DocumentTemplateController::class, 'activate'])
             ->name('templates.activate');
-        Route::post('templates/{template}/deactivate', [DocumentTemplateController::class, 'deactivate'])
-            ->name('templates.deactivate');
         Route::post('templates/{template}/duplicate', [DocumentTemplateController::class, 'duplicate'])
             ->name('templates.duplicate');
         Route::delete('templates/{template}', [DocumentTemplateController::class, 'destroy'])

@@ -89,6 +89,7 @@
             <input type="hidden" name="doc_type" value="{{ $docType->value }}">
             <input type="hidden" name="document_type_id" value="{{ $docType->getKey() }}">
             <input type="hidden" name="publish" value="0" id="publishIntent">
+            <input type="hidden" name="publish_anyway" value="0" id="publishAnyway">
             @if ($template)
                 {{-- The revision this editor opened: an older copy cannot overwrite a newer save. --}}
                 <input type="hidden" name="revision" value="{{ old('revision', $template->revision) }}">

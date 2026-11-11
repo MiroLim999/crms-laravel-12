@@ -67,6 +67,8 @@ const fileLabel = element('sampleScanLabel');
 const selectAllInput = element('selectAllFields', HTMLInputElement);
 const newFieldInput = element('newFieldName', HTMLInputElement);
 const publishIntent = element('publishIntent', HTMLInputElement);
+// Set when the admin chose "Save and publish" although the publish checks found something missing.
+const publishAnyway = element('publishAnyway', HTMLInputElement);
 const groupingModeInput = element('groupingMode', HTMLInputElement);
 // The blank page's shape (width : height) until a sample is opened; a sample
 // brings its own.
@@ -1512,15 +1514,15 @@ function openSaveCheck({ publishing, problems, guessed }) {
 
     if (publishing && problems.length > 0) {
         kicker = 'Publish for Staff';
-        title = 'Not ready to publish yet';
-        lead = 'Fix these first, or save it as a draft for now:';
+        title = 'Publish with these still missing?';
+        lead = 'Staff can scan with this layout, but these are not done yet. Go back to fix them, or publish it as it is:';
         items = [...problems, ...items];
     } else if (publishing) {
         kicker = 'Publish for Staff';
         title = 'Publish this layout for Staff?';
         lead = config.published
             ? 'Staff get the new version as soon as it is saved. Records already read keep the old one.'
-            : 'Staff can scan with this layout as soon as it is saved. Other published layouts of this type stay published.';
+            : 'Staff can scan with this layout as soon as it is saved. It replaces the layout they use now for this type.';
     } else {
         // Only the guessed rows to tell: said in the lead, no list.
         lead = guessNote ?? '';
@@ -1539,23 +1541,28 @@ function openSaveCheck({ publishing, problems, guessed }) {
     }));
     list.classList.toggle('d-none', items.length === 0);
 
-    const blocked = publishing && problems.length > 0;
-    confirm.classList.toggle('d-none', blocked);
-    confirm.textContent = publishing ? 'Publish for Staff' : 'Save anyway';
-    confirm.className = `btn ${publishing ? 'btn-success' : 'btn-primary'}${blocked ? ' d-none' : ''}`;
-    draft.classList.toggle('d-none', !blocked);
+    // Something missing: the admin may still publish it, and the server is told so.
+    const anyway = publishing && problems.length > 0;
+    confirm.textContent = anyway ? 'Save and publish' : (publishing ? 'Publish for Staff' : 'Save anyway');
+    confirm.className = `btn ${publishing ? 'btn-success' : 'btn-primary'}`;
+    confirm.dataset.anyway = anyway ? '1' : '0';
+    draft.classList.add('d-none');
 
     window.bootstrap.Modal.getOrCreateInstance(modal).show();
 }
 
-function submitAfterCheck(publish) {
+function submitAfterCheck(publish, anyway = false) {
     window.bootstrap.Modal.getInstance(element('saveCheckModal'))?.hide();
     publishIntent.value = publish ? '1' : '0';
+    publishAnyway.value = publish && anyway ? '1' : '0';
     saveChecked = true;
     form.requestSubmit();
 }
 
-element('saveCheckConfirmBtn', HTMLButtonElement).addEventListener('click', () => submitAfterCheck(publishIntent.value === '1'));
+element('saveCheckConfirmBtn', HTMLButtonElement).addEventListener('click', (event) => submitAfterCheck(
+    publishIntent.value === '1',
+    event.currentTarget instanceof HTMLElement && event.currentTarget.dataset.anyway === '1',
+));
 element('saveCheckDraftBtn', HTMLButtonElement).addEventListener('click', () => submitAfterCheck(false));
 
 // Explicitly attach the file that produced the current preview. Native file

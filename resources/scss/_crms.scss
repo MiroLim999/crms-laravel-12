@@ -1744,28 +1744,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// The layout picker's options are links: no underline, a visible keyboard focus.
-.document-layout-option {
-  text-decoration: none;
-
-  &:hover,
-  &:focus {
-    color: var(--bs-heading-color);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--bs-primary);
-    outline-offset: 2px;
-  }
-}
-
-.document-layout-option__name {
-  min-inline-size: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .document-upload-mode-option__check {
   flex: 0 0 auto;
   margin-inline-start: auto;

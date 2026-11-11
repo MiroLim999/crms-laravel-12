@@ -251,25 +251,9 @@ class DocumentTemplate extends Model
     }
 
     /**
-     * The template Staff get when starting a new document of this type: the
-     * one asked for (`$preferredId`) when it is published for the type, or
-     * else the most recently published one. A type may have several
-     * published layouts (books printed in different years); Staff choose.
+     * The template Staff get when starting a new document of this type.
      */
-    public static function activeFor(DocumentType|DocumentTypeDefinition|string $type, ?int $preferredId = null): ?self
-    {
-        $published = static::publishedFor($type);
-
-        return ($preferredId !== null ? $published->firstWhere('id', $preferredId) : null)
-            ?? $published->first();
-    }
-
-    /**
-     * Every layout published for this type, the most recently published first.
-     *
-     * @return \Illuminate\Database\Eloquent\Collection<int, self>
-     */
-    public static function publishedFor(DocumentType|DocumentTypeDefinition|string $type): \Illuminate\Database\Eloquent\Collection
+    public static function activeFor(DocumentType|DocumentTypeDefinition|string $type): ?self
     {
         $definition = $type instanceof DocumentTypeDefinition
             ? $type
@@ -277,17 +261,16 @@ class DocumentTemplate extends Model
                 ->where('key', $type instanceof DocumentType ? $type->value : $type)
                 ->first();
 
-        return static::with(['fields', 'documentTypeDefinition'])
+        $query = static::with(['fields', 'documentTypeDefinition'])
             ->where('is_active', true)
             ->listed()
             ->when(
                 $definition,
                 fn ($builder) => $builder->where('document_type_id', $definition->getKey()),
                 fn ($builder) => $builder->where('doc_type', $type instanceof DocumentType ? $type->value : $type),
-            )
-            ->orderByDesc('published_at')
-            ->orderByDesc('id')
-            ->get();
+            );
+
+        return $query->first();
     }
 
     protected static function booted(): void

@@ -53,9 +53,6 @@ class DocumentScanController extends Controller
     /** Session key: the type last opened in the workspace. */
     private const LAST_TYPE = 'scan.last_type';
 
-    /** Session key prefix: the layout last chosen for each type ("scan.last_layout.birth"). */
-    private const LAST_LAYOUT = 'scan.last_layout';
-
     /** More pages than any register book has: a typed page number past it is refused. */
     private const MAX_SOURCE_PAGES = 10000;
 
@@ -100,23 +97,17 @@ class DocumentScanController extends Controller
      */
     private function activeTemplates(Collection $types): Collection
     {
-        // Newest published first, as DocumentTemplate::publishedFor() orders them.
         $active = DocumentTemplate::listed()
             ->where('is_active', true)
             ->whereIn('document_type_id', $types->modelKeys())
-            ->orderByDesc('published_at')
-            ->orderByDesc('id')
+            ->orderBy('id')
             ->get(['id', 'name', 'document_type_id'])
-            ->groupBy('document_type_id');
+            ->unique('document_type_id')
+            ->keyBy('document_type_id');
 
-        return $types->mapWithKeys(function (DocumentTypeDefinition $type) use ($active) {
-            $layouts = $active->get($type->getKey());
-            $first = $layouts?->first();
-            // How many layouts Staff can choose from, for the type list.
-            $first?->setAttribute('published_count', $layouts->count());
-
-            return [$type->key => $first];
-        });
+        return $types->mapWithKeys(fn(DocumentTypeDefinition $type) => [
+            $type->key => $active->get($type->getKey()),
+        ]);
     }
 
     /**
@@ -138,16 +129,7 @@ class DocumentScanController extends Controller
             return redirect()->route('documents.create');
         }
 
-        // A type may have several published layouts (books printed in
-        // different years): the one Staff picked (?template=, then the last one
-        // they used for this type), else the newest published.
-        $published = DocumentTemplate::publishedFor($type);
-        $layoutKey = self::LAST_LAYOUT.'.'.$type->key;
-        $asked = $request->query('template');
-        $preferred = is_string($asked) && ctype_digit($asked)
-            ? (int) $asked
-            : $request->session()->get($layoutKey);
-        $template = $published->firstWhere('id', is_int($preferred) ? $preferred : null) ?? $published->first();
+        $template = DocumentTemplate::activeFor($type);
 
         if ($template === null) {
             return redirect()->route('documents.create')->with(
@@ -157,7 +139,6 @@ class DocumentScanController extends Controller
         }
 
         $request->session()->put(self::LAST_TYPE, $type->key);
-        $request->session()->put($layoutKey, $template->getKey());
         $documentTypes = DocumentTypeDefinition::ordered(activeOnly: true);
 
         return view('scan.workspace', [
@@ -167,8 +148,6 @@ class DocumentScanController extends Controller
             'health' => $this->ocr->recentHealth(),
             'docType' => $type,
             'template' => $template,
-            // Every published layout of the type, for Staff to choose from when there are several.
-            'layoutChoices' => $published,
             // Rectangle fields, then ledger columns. Staff align both the same way.
             'boxes' => $template->markerBoxes(),
             'ruledYs' => $template->isLedger() ? array_values($template->ruled_ys) : [],

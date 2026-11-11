@@ -15,9 +15,9 @@ use Tests\TestCase;
  *
  * - each layout has its own page 2: a copy or a new version never shares it;
  * - page 2 layouts are not listed, published, edited or deleted by themselves;
- * - a published layout is unpublished before it is deleted;
+ * - the published layout is not deleted until another is published;
  * - publishing needs a sample, real column names and a Name column;
- * - a type may have several published layouts, and Staff choose one.
+ * - one layout per type is published: publishing one replaces the other.
  */
 class TemplatePublishFlowTest extends TestCase
 {
@@ -236,6 +236,25 @@ class TemplatePublishFlowTest extends TestCase
         $this->assertFalse($draft->refresh()->is_active);
     }
 
+    public function test_save_and_publish_anyway_publishes_with_checks_not_done(): void
+    {
+        // The builder's window listed what is missing; the admin chose "Save and publish".
+        $this->actingAs($this->admin)->post(route('templates.store'), $this->payload([
+            'columns_json' => json_encode([['name' => 'Column 1', 'box' => [0.05, 0.2, 0.1, 0.6]]], JSON_THROW_ON_ERROR),
+            'sample_document' => null,
+            'publish' => 1,
+            'publish_anyway' => 1,
+        ]))->assertSessionHasNoErrors()->assertSessionHas('success', 'Template created and published for Staff.');
+
+        $this->assertTrue(DocumentTemplate::firstOrFail()->is_active);
+        // The audit log keeps what was not done.
+        $this->assertDatabaseHas('audit_logs', ['action' => 'template.activated']);
+        $this->assertStringContainsString(
+            'Published with checks not done: Add a sample page',
+            (string) \App\Models\AuditLog::where('action', 'template.activated')->value('description'),
+        );
+    }
+
     public function test_the_name_column_may_be_on_page_two(): void
     {
         $layout = $this->layout([
@@ -268,89 +287,28 @@ class TemplatePublishFlowTest extends TestCase
         $this->assertTrue($published->refresh()->is_active);
     }
 
-    // ------------------------------------------- 11. several published layouts
+    // ------------------------------------------------ one published layout per type
 
-    public function test_publishing_a_new_version_replaces_the_version_it_came_from_only(): void
+    public function test_publishing_a_layout_replaces_the_one_staff_use(): void
     {
-        $older = $this->layout(['name' => '1970s books', 'publish' => 1]);
-        $other = $this->layout(['name' => '1990s books', 'publish' => 1]);
+        $first = $this->layout(['name' => '1970s books', 'publish' => 1]);
+        $second = $this->layout(['name' => '1990s books', 'publish' => 1]);
 
-        $this->actingAs($this->admin)->put(route('templates.update', $older), $this->payload([
-            'name' => '1970s books',
-            'columns_json' => json_encode([
-                ['name' => 'Entry No.', 'box' => [0.06, 0.2, 0.1, 0.6]],
-                ['name' => "Child's Name", 'box' => [0.16, 0.2, 0.3, 0.6], 'role' => 'name'],
-            ], JSON_THROW_ON_ERROR),
-            'publish' => 1,
-        ]))->assertSessionHas('success');
-
-        $version = DocumentTemplate::listed()->latest('id')->firstOrFail();
-        $this->assertTrue($version->is_active);
-        $this->assertFalse($older->refresh()->is_active, 'its older version is replaced');
-        $this->assertTrue($other->refresh()->is_active, 'another book layout stays');
-        $this->assertSame(
-            [$version->getKey(), $other->getKey()],
-            DocumentTemplate::publishedFor(DocumentType::Birth)->modelKeys(),
-        );
-    }
-
-    public function test_publishing_a_duplicate_keeps_the_original_published(): void
-    {
-        $original = $this->layout(['publish' => 1]);
-        $this->actingAs($this->admin)->post(route('templates.duplicate', $original));
-        $copy = DocumentTemplate::listed()->latest('id')->firstOrFail();
-
-        $this->post(route('templates.activate', $copy))->assertSessionHas('success');
-
-        $this->assertTrue($copy->refresh()->is_active);
-        $this->assertTrue($original->refresh()->is_active);
-    }
-
-    public function test_staff_choose_between_published_layouts_and_the_choice_is_remembered(): void
-    {
-        $seventies = $this->layout(['name' => '1970s books', 'publish' => 1]);
-        $nineties = $this->layout(['name' => '1990s books', 'publish' => 1]);
-        $staff = User::factory()->staff()->create();
-        $workspace = fn (array $query = []) => $this->actingAs($staff)
-            ->get(route('documents.workspace', ['type' => 'birth', ...$query]));
-
-        // The newest published first, both offered.
-        $workspace()->assertOk()
-            ->assertSee('Pick the layout printed like your book')
-            ->assertSee('data-layout-choice="'.$seventies->getKey().'"', escape: false)
-            ->assertSee('templateId: '.$nineties->getKey().',', escape: false);
-
-        $workspace(['template' => $seventies->getKey()])->assertOk()
-            ->assertSee('templateId: '.$seventies->getKey().',', escape: false);
-
-        // Remembered the next time this type is opened.
-        $workspace()->assertOk()
-            ->assertSee('templateId: '.$seventies->getKey().',', escape: false);
-
-        // A layout that is not published for the type is not offered.
-        $this->actingAs($this->admin)->post(route('templates.deactivate', $seventies))->assertSessionHas('success');
-        $workspace(['template' => $seventies->getKey()])->assertOk()
-            ->assertSee('templateId: '.$nineties->getKey().',', escape: false)
-            ->assertDontSee('Pick the layout printed like your book');
-
-        // The New Document type list says how many layouts there are.
-        $this->actingAs($this->admin)->post(route('templates.activate', $seventies));
-        // Someone who has not scanned yet (no last type in the session) sees the list.
-        $this->flushSession();
-        $this->actingAs(User::factory()->staff()->create())->get(route('documents.create'))
-            ->assertOk()
-            ->assertSee('2 layouts');
-    }
-
-    public function test_unpublishing_the_last_layout_says_staff_cannot_scan_the_type(): void
-    {
-        $only = $this->layout(['publish' => 1]);
-
-        $this->actingAs($this->admin)->post(route('templates.deactivate', $only))
-            ->assertSessionHas('success', fn (string $message) => str_contains($message, "Staff can't scan"));
+        $this->assertFalse($first->refresh()->is_active);
+        $this->assertTrue($second->refresh()->is_active);
+        $this->assertSame(1, DocumentTemplate::where('document_type_id', $second->document_type_id)->where('is_active', true)->count());
 
         $this->actingAs(User::factory()->staff()->create())
             ->get(route('documents.workspace', ['type' => 'birth']))
-            ->assertRedirect(route('documents.create'));
+            ->assertOk()
+            ->assertSee('templateId: '.$second->getKey().',', escape: false)
+            ->assertDontSee('Pick the layout printed like your book');
+
+        // The published one is not deleted until another layout is published.
+        $this->actingAs($this->admin)->delete(route('templates.destroy', $second))
+            ->assertSessionHas('error', fn (string $message) => str_contains($message, 'Publish another layout first'));
+        $this->post(route('templates.activate', $first))->assertSessionHas('success');
+        $this->delete(route('templates.destroy', $second))->assertSessionHas('success');
+        $this->assertTrue($first->refresh()->is_active);
     }
 }

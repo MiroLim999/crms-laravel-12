@@ -633,11 +633,11 @@ A **template** (also called a layout) tells CRMS where each value sits on a docu
 - **Person grouping**: which fields belong to which person.
 - **Grid checks**: row lines outside the columns or on top of each other stop the save; a field covering ledger cells is reported.
 - **Versions**: a layout that is published, or that any record or page was read with, is never changed in place. Saving new markers or settings makes a **new version**, so every record keeps pointing at the exact layout it was read with. A save made from an outdated copy of the editor is refused.
-- **Several published layouts per type** (books printed in different years): Staff pick one on the Document step, and their choice is remembered. Publishing a new version replaces the version it was saved from; other layouts stay published. **Unpublish** (⋮ menu) takes a layout away from Staff.
+- **One published layout per type.** Publishing a layout replaces the one Staff used before.
 - **Publish checks**: a layout is published only with a sample page, real column names (no "Column 3") and a column or field that holds the person's name. The Publish window lists what is missing; the server checks the same.
 - **Two pages**: page 2 of a spread is its own hidden layout that belongs to its main layout alone. Duplicates and new versions get their own copy, so changing one never changes another. It is not listed, published or deleted by itself.
 - **Detect from sample** follows the page's tilt, leaves out lines below the table's frame, and shows guessed rows (faint or missing printed lines) in amber; saving with amber rows asks first.
-- Duplicate makes a draft copy. A layout used by records cannot be deleted, and a published one is unpublished first.
+- Duplicate makes a draft copy. A layout used by records cannot be deleted, and the published one cannot be deleted until another layout is published.
 - No paper size to set: layouts store the page's shape (width ÷ height), and the Align step warns when a scan looks sideways.
 - Leaving with unsaved changes asks first.
 

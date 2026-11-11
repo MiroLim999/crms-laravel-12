@@ -39,7 +39,8 @@ Seen in the real database: layouts 24 and 26 both use page 2 layout 25.
 ## 4. "Publish for Staff" asks first
 
 - [x] Library Publish button opens a confirm window that lists the publish checks (5–7) before publishing.
-- [x] Builder "Save & publish" shows the same checks (and "Save as draft" when something is missing).
+- [x] Builder "Save & publish" shows the same checks. When something is missing, the admin can still choose
+      **Save and publish** (publishes anyway; the audit log notes what was not done).
 - [x] Server runs the same checks, so nothing can skip them. The layout is still saved, as a draft.
 
 ## 5. No publishing with default column names
@@ -80,13 +81,16 @@ Seen in the real database: layouts 24 and 26 both use page 2 layout 25.
 - [x] Its tests are replaced by one that checks the routes are gone and the old folder is cleaned up.
 - [x] Docs (`SYSTEM-OVERVIEW.md`, `DEVELOPER-GUIDE.md`) no longer mention it.
 
-## 11. More than one published layout per document type; Staff choose
+## 11. More than one published layout per document type; Staff choose — REVERTED
 
-- [x] Publishing a layout no longer unpublishes the others, except its own older version (a new version replaces the one it came from; a duplicate does not).
-- [x] Library gets an "Unpublish (hide from Staff)" item in the ⋮ menu.
-- [x] Workspace: when a type has 2+ published layouts, Staff pick one under "Layout" (remembered for next time).
-- [x] Every place that asked for "the" published layout handles several (New Document says "2 layouts", workspace, library header).
-- [x] Tests.
+Built, then reverted at the user's request (2026-11-11). Back to one published layout per type:
+publishing a layout replaces the one Staff use.
+
+- [x] Publishing unpublishes the other layout of the type again.
+- [x] "Unpublish" menu item and its route removed. A published layout is deleted only after another is published.
+- [x] Staff's "Layout" picker, `?template=` and the remembered choice removed.
+- [x] Library header, Publish window and New Document type list say one layout again.
+- [x] Tests changed back. Kept from it: the `published_at` and `is_version` columns (harmless; "New version of" label).
 
 ## Final checks
 
