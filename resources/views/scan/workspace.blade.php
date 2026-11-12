@@ -1126,6 +1126,12 @@
             pageRanges,
             pdfPageFile,
         } from '{{ Vite::asset('resources/js/scan-source.js') }}';
+        import {
+            pageSeconds,
+            phaseProgress,
+            scanTimings,
+            timeLeftText,
+        } from '{{ Vite::asset('resources/js/scan-progress.js') }}';
 
         const config = {
             typeLabel: @json($docType->label()),
@@ -1140,6 +1146,8 @@
                 : ($template->grouping_mode ?? 'auto')
             ),
             threshold: @json($threshold),
+            // How long a scan's steps usually take on this machine (seconds).
+            scanSeconds: @json($scanSeconds ?? null),
             maxFields: @json(App\Support\Limits::MAX_FIELDS),
             maxFieldNameLength: 500,
             pagesUrl: @json(route('documents.pages.store')),
@@ -5367,34 +5375,70 @@
         }
 
         // Each phase of a run has a share of the ring: from where it starts to its
-        // ceiling, which the ring nears but never reaches. Each tick it closes part
-        // of the gap left, so it moves quickly as a phase opens and slows towards
-        // the ceiling, but never stands still: a ring stopped at a ceiling while
-        // Kraken still works (20-50 s) looked stuck. The page's real status opens
-        // the next phase, and the ring jumps ahead to its start.
+        // ceiling. The ring crosses most of that share at a steady pace over the
+        // time the phase usually takes on this machine (scanSeconds, from the
+        // last scans), so it arrives as the phase ends; past that time it still
+        // creeps on, never standing still. It used to rush ahead as a phase
+        // opened and then crawl, which looked stuck while Kraken worked. The
+        // page's real status opens the next phase, and the ring jumps ahead to
+        // its start. See scan-progress.js.
         const OCR_PROGRESS_TICK = 200;
-        let ocrProgressCeiling = 15;
-        // Seconds in which the ring covers about two thirds of the phase's gap:
-        // roughly how long the phase takes.
-        let ocrProgressPace = 2;
+        const scanSeconds = scanTimings(config.scanSeconds);
+        // The phase the ring is in: where it started, its ceiling, how long it
+        // usually takes, and the seconds of the phases after it (null: not
+        // known, so no time left is shown).
+        let ocrPhase = null;
+        // Whether this run shows its time left in the pill (a batch scan counts
+        // its documents there instead).
+        let ocrTimed = false;
 
-        function setOcrPhase(start, ceiling, seconds, title = null, note = null) {
-            ocrProgressCeiling = ceiling;
-            ocrProgressPace = seconds;
-            setOcrProgress(Math.max(ocrProgress, start), title, note);
+        function phaseElapsed() {
+            return ocrPhase ? (performance.now() - ocrPhase.startedAt) / 1000 : 0;
         }
 
-        function beginOcrProgress(markerCount) {
+        /** The time left, in the pill under the status. */
+        function showTimeLeft() {
+            if (!ocrPhase || ocrPhase.later === null) return;
+            el('ocrProgressFields').textContent = timeLeftText(phaseElapsed(), ocrPhase.expected, ocrPhase.later);
+        }
+
+        function setOcrPhase(start, ceiling, seconds, title = null, note = null, later = null) {
+            // Asked for again with every status check; its clock starts once.
+            const key = `${start}:${ceiling}`;
+            if (ocrPhase?.key !== key) {
+                // A phase the ring is already past (a page read without being
+                // outlined again still waits its turn first) holds the ring.
+                const from = Math.max(ocrProgress, start);
+                ocrPhase = { key, from, ceiling: Math.max(ceiling, from), startedAt: performance.now() };
+            }
+            ocrPhase.expected = seconds;
+            ocrPhase.later = later;
+            setOcrProgress(Math.max(ocrProgress, start), title, note);
+            showTimeLeft();
+        }
+
+        /** The run's phases are over (or stopped): the ring is set by hand from here. */
+        function endOcrPhases(pill = null) {
+            ocrPhase = null;
+            // Only a run that showed its time left has that pill to update.
+            if (ocrTimed && pill !== null) el('ocrProgressFields').textContent = pill;
+        }
+
+        /** `later`: the seconds the run usually takes after the page is sent. */
+        function beginOcrProgress(markerCount, later = null) {
             if (ocrProgressTimer !== null) window.clearInterval(ocrProgressTimer);
 
             el('ocrProgressFields').textContent = `${markerCount} marker${markerCount === 1 ? '' : 's'} aligned`;
             ocrProgress = 0;
-            setOcrPhase(4, 15, 2, 'Preparing document', 'Saving the aligned page for line detection.');
+            ocrPhase = null;
+            ocrTimed = later !== null;
+            setOcrPhase(4, 15, 2, 'Preparing document', 'Saving the aligned page for line detection.', later);
 
             ocrProgressTimer = window.setInterval(() => {
-                const gap = ocrProgressCeiling - ocrProgress;
-                if (gap <= 0) return;
-                setOcrProgress(ocrProgress + gap * (1 - Math.exp(-OCR_PROGRESS_TICK / 1000 / ocrProgressPace)));
+                if (!ocrPhase) return;
+                const next = phaseProgress(ocrPhase.from, ocrPhase.ceiling, phaseElapsed(), ocrPhase.expected);
+                if (next > ocrProgress) setOcrProgress(next);
+                showTimeLeft();
             }, OCR_PROGRESS_TICK);
         }
 
@@ -5429,39 +5473,52 @@
         // worked on, and its share of the ring.
         let detectPhase = null;
         // While Scan with OCR reads both pages of a register: the share of the
-        // ring this page fills ({ from, to } out of 100) and its name.
+        // ring this page fills ({ from, to } out of 100), its name, and the
+        // seconds the page after it usually takes (`after`).
         let readSpan = null;
+        // What the page being waited on still needs: 'full' (find its lines,
+        // then read), 'reoutline' (outline again from lines already found, then
+        // read) or 'read' (only read). Sets the pace and the time left.
+        let scanKind = 'full';
 
         /** setOcrPhase within the share of the page being read, when two are. */
-        function readPhase(start, ceiling, seconds, title, note) {
+        function readPhase(start, ceiling, seconds, title, note, later = 0) {
+            const rest = later + (readSpan?.after ?? 0);
             if (!readSpan) {
-                setOcrPhase(start, ceiling, seconds, title, note);
+                setOcrPhase(start, ceiling, seconds, title, note, rest);
                 return;
             }
             const scale = (value) => readSpan.from + (readSpan.to - readSpan.from) * value / 100;
-            setOcrPhase(scale(start), scale(ceiling), seconds, `${title} · ${readSpan.label}`, note);
+            setOcrPhase(scale(start), scale(ceiling), seconds, `${title} · ${readSpan.label}`, note, rest);
         }
 
         function showPageStatus(page, waitedMs, mode = 'scan') {
             if (page.status === 'detecting' && mode === 'detect') {
-                setOcrPhase(detectPhase?.from ?? 18, detectPhase?.to ?? 95, 20, detectPhase?.title ?? 'Smoke test scan',
-                    'Straightening the page, fitting the columns and rows to its table, and outlining every handwritten line.');
+                setOcrPhase(detectPhase?.from ?? 18, detectPhase?.to ?? 95, scanSeconds.detect,
+                    detectPhase?.title ?? 'Smoke test scan',
+                    'Straightening the page, fitting the columns and rows to its table, and outlining every handwritten line.',
+                    detectPhase?.after ?? 0);
                 return;
             }
             if (page.status === 'queued') {
                 readPhase(
-                    15, 18, 3,
+                    15, 18, scanSeconds.wait,
                     'Waiting for the line detector',
                     waitedMs > 20000
                         ? 'No background worker has picked this page up. Run php artisan queue:work (serve.ps1 does it for you).'
                         : 'The page is queued for line detection.',
+                    mode === 'detect'
+                        ? pageSeconds('detect', scanSeconds) + (detectPhase?.after ?? 0)
+                        : pageSeconds(scanKind, scanSeconds),
                 );
             } else if (page.status === 'detecting') {
-                // Most of a scan's time (20-50 s), so most of the ring.
-                readPhase(18, 72, 20, 'Finding handwritten lines',
-                    'Outlining every handwritten line, including capitals and tails that cross the ruled lines.');
+                // Most of a scan's time, so most of the ring.
+                readPhase(18, 72, scanKind === 'reoutline' ? scanSeconds.reoutline : scanSeconds.find,
+                    'Finding handwritten lines',
+                    'Outlining every handwritten line, including capitals and tails that cross the ruled lines.',
+                    scanSeconds.read);
             } else if (page.status === 'reading') {
-                readPhase(72, 95, 6, 'Reading handwriting',
+                readPhase(72, 95, scanSeconds.read, 'Reading handwriting',
                     'The selected TrOCR model is reading each outlined line.');
             }
         }
@@ -5519,12 +5576,15 @@
         }
 
         function stopOcrProgress() {
+            ocrPhase = null;
+            ocrTimed = false;
             if (ocrProgressTimer === null) return;
             window.clearInterval(ocrProgressTimer);
             ocrProgressTimer = null;
         }
 
         async function completeOcrProgress(title = 'Scan complete', note = 'Opening the validation results.') {
+            endOcrPhases('Done');
             stopOcrProgress();
             setOcrProgress(100, title, note);
             // Long enough to see the ring fill, no longer.
@@ -5784,6 +5844,8 @@
             run.cancelled = true;
             el('ocrProgressCancel').disabled = true;
             el('ocrProgressCancel').textContent = 'Cancelling…';
+            // The ring stops where it is.
+            endOcrPhases('Stopping');
             setOcrProgress(ocrProgress, 'Cancelling', 'Stopping this run.');
             run.controller.abort();
             const idsToCancel = Array.isArray(run.batchPageIds) && run.batchPageIds.length > 0
@@ -5871,7 +5933,12 @@
                 // browser-side failure there made the button appear to do nothing.
                 const aligned = marker.toJSON();
                 progress = openProgressModal();
-                beginOcrProgress(aligned.length);
+                // What this page needs (see scanKind), and so how long the run
+                // usually takes: this page, then the page beside it.
+                scanKind = detectionIsCurrent() ? 'read' : canReoutline() ? 'reoutline' : 'full';
+                const partnerKind = partner?.tested ? 'read' : 'full';
+                const partnerSeconds = partner ? scanSeconds.wait + pageSeconds(partnerKind, scanSeconds) : 0;
+                beginOcrProgress(aligned.length, scanSeconds.wait + pageSeconds(scanKind, scanSeconds) + partnerSeconds);
 
                 await new Promise((resolve) => window.requestAnimationFrame(resolve));
 
@@ -5881,7 +5948,7 @@
 
                 timeoutId = window.setTimeout(() => controller.abort(), 15 * 60 * 1000);
                 // Of two pages, each fills its half of the ring, and says which it is.
-                readSpan = partner ? { from: 0, to: 50, label: `page ${scanPageNumber}` } : null;
+                readSpan = partner ? { from: 0, to: 50, label: `page ${scanPageNumber}`, after: partnerSeconds } : null;
                 let payload;
                 const readingDetectedPage = detectionIsCurrent();
                 if (readingDetectedPage) {
@@ -5891,7 +5958,7 @@
                     await lineSaveQueue;
                     setLineEditing(false);
                     // The outlines just checked are the ones read.
-                    readPhase(72, 95, 6, 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
+                    readPhase(72, 95, scanSeconds.read, 'Reading handwriting', 'The selected TrOCR model is reading each detected line.');
                     payload = await readDetectedPage(controller.signal);
                 } else if (canReoutline()) {
                     // The markers moved after Detect. That page is already here and
@@ -5899,8 +5966,8 @@
                     // lines are reused rather than found again.
                     run.pageId = detection.page.id;
                     setLineEditing(false);
-                    readPhase(30, 72, 4, 'Outlining from your markers',
-                        'Reusing the lines Detect found on this page.');
+                    readPhase(30, 72, scanSeconds.reoutline, 'Outlining from your markers',
+                        'Reusing the lines Detect found on this page.', scanSeconds.read);
                     payload = await reoutlineDetectedPage(controller.signal);
                 } else {
                     // Finishing Align hands the page to the background line detector.
@@ -5930,9 +5997,11 @@
                 let partnerPage = null;
                 if (partner) {
                     readSpan = { from: 50, to: 98, label: `page ${partner.number}` };
+                    scanKind = partnerKind;
                     partnerPage = await waitForPage(partnerPayload, controller.signal);
                 }
                 readSpan = null;
+                scanKind = 'full';
                 clearDetection();
                 // Read now: what Smoke test made of the other page is used up.
                 if (partner) pageDetections.delete(partner.number);
@@ -5974,6 +6043,7 @@
                 requiredInput(document, '#documentPageId').value = String(processedPage.id);
                 el('summaryModel').textContent = processedPage.model || '—';
 
+                endOcrPhases('Almost done');
                 setOcrProgress(96, 'Preparing validation', partner
                     ? 'Putting both pages side by side, one person to a row.'
                     : 'The handwriting results are ready for your review.');
@@ -5992,6 +6062,7 @@
                 }
             } catch (error) {
                 readSpan = null;
+                scanKind = 'full';
                 verifyDoc = null;
                 // What Smoke test made of the other page is kept only when the read
                 // was cancelled (the server keeps it then); otherwise it is sent afresh.
@@ -6066,7 +6137,9 @@
 
             try {
                 progress = openProgressModal();
-                beginOcrProgress(marker.toJSON().length);
+                // One page's Smoke test, and the same again for the page beside it.
+                const testSeconds = scanSeconds.wait + pageSeconds('detect', scanSeconds);
+                beginOcrProgress(marker.toJSON().length, testSeconds * (pair ? 2 : 1));
                 await new Promise((resolve) => window.requestAnimationFrame(resolve));
 
                 setOcrProgress(Math.max(ocrProgress, 8), pair ? 'Sending both pages' : 'Sending the page',
@@ -6093,7 +6166,7 @@
                 if (otherPayload) run.batchPageIds = [payload.id, otherPayload.id];
 
                 detectPhase = otherPayload
-                    ? { from: 18, to: 56, title: `Smoke test scan · page ${mainNumber} of 2` }
+                    ? { from: 18, to: 56, title: `Smoke test scan · page ${mainNumber} of 2`, after: testSeconds }
                     : null;
                 const page = await waitForPage(payload, controller.signal, 'detected', 'detect');
 

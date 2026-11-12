@@ -207,6 +207,45 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertNotNull($runs[1]->read_ms, 'A Scan says how long the reading took.');
     }
 
+    /**
+     * The progress window paces its ring by how long this machine's last scans
+     * took, so a faster or slower computer needs no setting.
+     */
+    public function test_the_progress_window_is_paced_by_this_machines_last_scans(): void
+    {
+        // No scan yet: the defaults.
+        $this->assertSame(['find' => 20.0, 'read' => 5.0, 'detect' => 20.0], PageRun::typicalSeconds());
+
+        $user = User::factory()->superAdmin()->create();
+        $run = fn (string $mode, string $outcome, ?int $ms, ?int $readMs = null) => PageRun::create([
+            'user_id' => $user->getKey(), 'mode' => $mode, 'outcome' => $outcome,
+            'duration_ms' => $ms, 'read_ms' => $readMs,
+        ]);
+        // Ten full scans: lines found in 11-20 s, read in 2-11 s.
+        foreach (range(1, 10) as $k) {
+            $run('full', PageRun::COMPLETED, (10 + $k) * 1000 + (1 + $k) * 1000, (1 + $k) * 1000);
+        }
+        $run('detect', PageRun::COMPLETED, 18_400);
+        // Not counted: a failed scan, and one cancelled before it began.
+        $run('full', PageRun::FAILED, 500_000, 400_000);
+        $run('detect', PageRun::CANCELLED, null);
+
+        // Of the last five (16-20 s and 7-11 s), the time four stayed within:
+        // a step is more often early than late.
+        $this->assertSame(['find' => 19.0, 'read' => 10.0, 'detect' => 18.4], PageRun::typicalSeconds());
+
+        // One slow scan (30 s) does not set the pace, but it pushes the oldest out.
+        $run('full', PageRun::COMPLETED, 31_000, 1_000);
+        $this->assertSame(20.0, PageRun::typicalSeconds()['find']);
+
+        // The Align page is given these numbers.
+        $this->actingAs($user)
+            ->get(route('documents.workspace', ['type' => $this->ledgerTemplate()->documentTypeDefinition->key]))
+            ->assertOk()
+            ->assertViewHas('scanSeconds', PageRun::typicalSeconds())
+            ->assertSee('scanSeconds: {"find":20', escape: false);
+    }
+
     public function test_cancelling_while_the_lines_are_found_stops_the_detector_and_drops_the_page(): void
     {
         $markers = new class extends LineMarkers

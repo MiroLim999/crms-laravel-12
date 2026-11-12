@@ -10,6 +10,7 @@ use App\Models\DocumentTypeDefinition;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\PageLine;
+use App\Models\PageRun;
 use App\Models\RecordPage;
 use App\Services\AuditLogger;
 use App\Services\Ocr\OcrClient;
@@ -153,6 +154,8 @@ class DocumentScanController extends Controller
             'pageTwo' => $this->pageTwoLayout($template),
             'activeModel' => OcrModel::active(),
             'threshold' => OcrSetting::threshold(),
+            // How long a scan's steps usually take here: the progress ring's pace.
+            'scanSeconds' => PageRun::typicalSeconds(),
         ]);
     }
 
