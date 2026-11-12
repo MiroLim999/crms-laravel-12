@@ -152,6 +152,13 @@ PARALLEL_MIN_PIXELS = 500_000
 # (see _vec_lines_in_parallel); any other release keeps Kraken's own.
 PARALLEL_KRAKEN = "7.1."
 
+# Kraken finds baselines with scikit-image's sato filter, run at five blur
+# sizes one after another on one core: 5.8 s of a register page. The sizes do
+# not depend on one another, so they run side by side (see _parallel_sato):
+# 3.0 s, bit-identical. It copies this scikit-image release's sato; any other
+# release keeps its own.
+PARALLEL_SKIMAGE = "0.25."
+
 
 # ============================================================ line detector
 
@@ -209,11 +216,18 @@ def kraken_lines(image, device=None):
                 "Run ml\\setup_kraken.ps1, or point LINE_MARKERS_PYTHON at ml\\.venv-kraken."
             ) from error
 
+        from kraken.lib import segmentation as kraken_segmentation
+
         # segment() offers no way to pass its outline step, so its module
-        # global is swapped for the call and always put back.
+        # global is swapped for the call and always put back. The same for the
+        # sato filter its baseline step uses (see _parallel_sato).
         kraken_vec_lines = blla.vec_lines
+        kraken_filters = kraken_segmentation.filters
         if pool is not None:
             blla.vec_lines = _vec_lines_in_parallel(pool, workers)
+        sato = _parallel_sato()
+        if sato is not None:
+            kraken_segmentation.filters = _FiltersWithSato(kraken_filters, sato)
         try:
             device = detector_device(device)
             try:
@@ -226,6 +240,7 @@ def kraken_lines(image, device=None):
                 segmentation = blla.segment(image.convert("RGB"), device="cpu")
         finally:
             blla.vec_lines = kraken_vec_lines
+            kraken_segmentation.filters = kraken_filters
     finally:
         if pool is not None:
             pool.shutdown(wait=False, cancel_futures=True)
@@ -277,13 +292,48 @@ def _start_outline_pool(workers):
     return pool
 
 
+def _run_at_full_speed():
+    """Ask Windows never to run this process in efficiency mode.
+
+    A laptop with performance and efficiency cores (the i5-14500HX this was
+    measured on) lets Windows treat the line detector - started by the queue
+    worker in a background terminal - as background work, and run it in
+    efficiency mode (EcoQoS) on the slower cores. A register page then took
+    42-49 s instead of 19-20 s, with the very same lines; 56 of 84 real scans
+    had been slow. This opts the process out (Windows' HighQoS). Called by the
+    script and by each outline helper, as Windows sets it per process.
+
+    Windows only; anywhere else, or if Windows refuses, nothing changes."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        class _Throttling(ctypes.Structure):  # PROCESS_POWER_THROTTLING_STATE
+            _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong), ("StateMask", ctypes.c_ulong)]
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.SetProcessInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+        # Version 1; EXECUTION_SPEED under our control (0x1) and switched off (0x0).
+        state = _Throttling(1, 0x1, 0x0)
+        kernel32.SetProcessInformation(kernel32.GetCurrentProcess(), 4,  # 4 = ProcessPowerThrottling
+                                       ctypes.byref(state), ctypes.sizeof(state))
+    except Exception:  # an older Windows, or no ctypes: the page still scans
+        pass
+
+
 def _end_with_parent():
-    """Make this helper end when the process that started it ends, however it ends.
+    """Set up an outline helper: full speed, and end with the process that started it.
+
+    Each helper asks for full speed itself (see _run_at_full_speed): Windows
+    keeps that per process, and the helpers trace the outlines.
 
     A cancelled or timed-out page stops this script with SIGTERM. On Windows
     that ends the whole process tree (taskkill /T); on Linux, as in Docker, only
     the main process ends, and the idle helpers would wait for work forever,
     holding about 1.2 GB between them. Linux's parent-death signal ends them."""
+    _run_at_full_speed()
     if not sys.platform.startswith("linux"):
         return
     import ctypes
@@ -367,6 +417,64 @@ def _vec_lines_in_parallel(pool, workers):
                 for (bl_type, _, _), (bl, pl) in zip(lines, sc)]
 
     return vec_lines
+
+
+def _parallel_sato():
+    """scikit-image 0.25's filters.sato with its blur sizes computed side by side.
+
+    sato filters the image at each blur size (sigma) on its own and keeps the
+    largest value per pixel. Here each size runs in its own thread - numpy and
+    scipy let go of Python's interpreter lock while they compute, so threads
+    really run at once - and the results are combined in sato's own order, so
+    the output is the same to the last bit (checked on two register pages).
+    None when this scikit-image is not the release it copies."""
+    try:
+        from importlib.metadata import version
+
+        if not version("scikit-image").startswith(PARALLEL_SKIMAGE):
+            return None
+        from skimage._shared.utils import _supported_float_type
+        from skimage.feature import hessian_matrix, hessian_matrix_eigvals
+        from skimage.filters import sato as skimage_sato
+    except Exception:  # another release, or not installed: Kraken uses its own
+        return None
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one_size(image, sigma, mode, cval):
+        eigvals = hessian_matrix_eigvals(
+            hessian_matrix(image, sigma, mode=mode, cval=cval, use_gaussian_derivatives=True)
+        )
+        eigvals = eigvals[:-1]
+        return sigma**2 * np.prod(np.maximum(eigvals, 0), 0) ** (1 / len(eigvals))
+
+    def sato(image, sigmas=range(1, 10, 2), black_ridges=True, mode="reflect", cval=0):
+        if np.ndim(image) != 2:  # Kraken passes a 2-D heat map; anything else as before
+            return skimage_sato(image, sigmas=sigmas, black_ridges=black_ridges, mode=mode, cval=cval)
+        image = image.astype(_supported_float_type(image.dtype), copy=False)
+        if not black_ridges:
+            image = -image
+        sigmas = list(sigmas)
+        filtered_max = np.zeros_like(image)
+        if not sigmas:
+            return filtered_max
+        with ThreadPoolExecutor(max_workers=len(sigmas)) as threads:
+            per_size = list(threads.map(lambda sigma: one_size(image, sigma, mode, cval), sigmas))
+        for vals in per_size:  # sato's order: the result is the same to the last bit
+            filtered_max = np.maximum(filtered_max, vals)
+        return filtered_max
+
+    return sato
+
+
+class _FiltersWithSato:
+    """skimage.filters as Kraken's segmentation module sees it, with sato swapped."""
+
+    def __init__(self, filters, sato):
+        self._filters = filters
+        self.sato = sato
+
+    def __getattr__(self, name):
+        return getattr(self._filters, name)
 
 
 def _image_key(page_path):
@@ -3330,6 +3438,7 @@ def _read_json_arg(value):
 
 
 def main(argv=None):
+    _run_at_full_speed()  # before any work, and before the helpers start
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
 

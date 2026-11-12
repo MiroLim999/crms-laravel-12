@@ -716,10 +716,39 @@ async def lifespan(app: FastAPI):
     # Nothing heavy here on purpose: models stay lazy so the service answers
     # /health immediately after start, and the device is only probed on the
     # first real inference.
+    _run_at_full_speed()
     logger.info(f"Models directory:   {MODELS_DIR}")
     logger.info(f"Discovered models: {sorted(_discover_models()) or '(none)'}")
     yield
     _models.clear()
+
+
+def _run_at_full_speed():
+    """Ask Windows never to run this service in efficiency mode.
+
+    Started from a background terminal, it can be treated as background work
+    and run in efficiency mode (EcoQoS) on a laptop's slower cores; reading is
+    largely the CPU feeding the GPU, so it slows down too (225 lines took 11-12 s
+    instead of 8.8 s on such days). This opts the process out (Windows' HighQoS),
+    as ml/line_markers.py does for the line detector. Windows only; anywhere
+    else, or if Windows refuses, nothing changes."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        class _Throttling(ctypes.Structure):  # PROCESS_POWER_THROTTLING_STATE
+            _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong), ("StateMask", ctypes.c_ulong)]
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.SetProcessInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+        # Version 1; EXECUTION_SPEED under our control (0x1) and switched off (0x0).
+        state = _Throttling(1, 0x1, 0x0)
+        kernel32.SetProcessInformation(kernel32.GetCurrentProcess(), 4,  # 4 = ProcessPowerThrottling
+                                       ctypes.byref(state), ctypes.sizeof(state))
+    except Exception:  # an older Windows, or no ctypes: the service still reads
+        pass
 
 
 app = FastAPI(title="CRMS TrOCR service", lifespan=lifespan)

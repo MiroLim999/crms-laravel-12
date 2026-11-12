@@ -842,6 +842,82 @@ class DetectorDeviceTest(unittest.TestCase):
             self.assertEqual([], lm.kraken_lines(Image.new("RGB", (40, 30), (PAPER,) * 3)))
         self.assertEqual(["cuda", "cpu"], calls)
 
+    def test_kraken_gets_its_own_sato_back(self):
+        """The parallel sato is swapped in for the call only, even when it fails."""
+        from kraken import blla
+        from kraken.lib import segmentation
+        from skimage import filters
+
+        seen = []
+
+        def segment(_image, device):
+            seen.append(segmentation.filters.sato)
+            raise ValueError("a page Kraken cannot read")
+
+        with unittest.mock.patch.object(lm, "detector_device", return_value="cpu"), \
+                unittest.mock.patch.object(blla, "segment", side_effect=segment), \
+                self.assertRaises(ValueError):
+            lm.kraken_lines(Image.new("RGB", (40, 30), (PAPER,) * 3))
+        self.assertIs(filters, segmentation.filters)
+        if lm._parallel_sato() is not None:
+            self.assertIsNot(filters.sato, seen[0])  # the parallel one was in place
+
+
+@unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
+class ParallelSatoTest(unittest.TestCase):
+    """The side-by-side sato gives scikit-image's result to the last bit."""
+
+    def setUp(self):
+        self.sato = lm._parallel_sato()
+        if self.sato is None:
+            self.skipTest("another scikit-image release: Kraken keeps its own sato")
+
+    def test_same_bits_as_scikit_image(self):
+        from skimage import filters
+
+        rng = np.random.default_rng(7)
+        heat = rng.random((180, 254), dtype=np.float32)
+        heat[40:44, 20:200] = 0.95  # a ridge, like a baseline in Kraken's heat map
+        # As Kraken calls it, then with sato's own defaults, then on whole numbers.
+        self.assertTrue(np.array_equal(filters.sato(heat, black_ridges=False, mode="constant"),
+                                       self.sato(heat, black_ridges=False, mode="constant")))
+        self.assertTrue(np.array_equal(filters.sato(heat), self.sato(heat)))
+        whole = (heat * 255).astype(np.uint8)
+        self.assertTrue(np.array_equal(filters.sato(whole, sigmas=[2, 4]), self.sato(whole, sigmas=[2, 4])))
+
+    def test_anything_but_a_flat_image_goes_to_scikit_image(self):
+        from skimage import filters
+
+        cube = np.random.default_rng(1).random((12, 14, 10), dtype=np.float32)
+        self.assertTrue(np.array_equal(filters.sato(cube, sigmas=[1]), self.sato(cube, sigmas=[1])))
+
+
+@unittest.skipUnless(sys.platform == "win32", "Windows only: efficiency mode is a Windows feature")
+class FullSpeedTest(unittest.TestCase):
+    """The detector asks Windows never to run it in efficiency mode."""
+
+    def test_windows_keeps_the_request(self):
+        import ctypes
+
+        class Throttling(ctypes.Structure):
+            _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong), ("StateMask", ctypes.c_ulong)]
+
+        lm._run_at_full_speed()
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.GetProcessInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+        state = Throttling(1, 0, 0)
+        ok = kernel32.GetProcessInformation(kernel32.GetCurrentProcess(), 4, ctypes.byref(state), ctypes.sizeof(state))
+        if not ok:
+            self.skipTest("this Windows cannot report the setting")
+        self.assertTrue(state.ControlMask & 0x1)   # speed is under the process's control...
+        self.assertEqual(0, state.StateMask & 0x1)  # ...and never throttled
+
+    def test_helpers_ask_too(self):
+        with unittest.mock.patch.object(lm, "_run_at_full_speed") as full_speed:
+            lm._end_with_parent()
+        full_speed.assert_called_once()
+
 
 class OutlineWorkersTest(unittest.TestCase):
     """Kraken's outlines traced on several cores, in order, and on one core if that fails."""
