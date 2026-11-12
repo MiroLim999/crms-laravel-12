@@ -17,7 +17,7 @@ class EngineStatus
     public function __construct(private readonly OcrClient $client) {}
 
     /**
-     * @return array{reachable: bool, device: string|null, error: string|null, url: string, command: string}
+     * @return array{reachable: bool, device: string|null, precision: string|null, mode: string|null, error: string|null, url: string, command: string}
      */
     public function status(): array
     {
@@ -28,10 +28,29 @@ class EngineStatus
         return [
             'reachable' => $health['reachable'],
             'device' => $health['device'],
+            'precision' => $health['precision'] ?? null,
+            'mode' => self::modeLabel($health['device'], $health['precision'] ?? null),
             'error' => $health['error'],
             'url' => $this->baseUrl(),
             'command' => $this->displayCommand(),
         ];
+    }
+
+    /**
+     * Where and how the service reads, for the status pill: "GPU, fp16",
+     * "GPU, fp32" or "CPU". Null when it is not known (offline, or a driver
+     * problem the service reports as "unavailable (...)").
+     */
+    public static function modeLabel(?string $device, ?string $precision): ?string
+    {
+        if ($device === null) {
+            return null;
+        }
+        if (str_starts_with($device, 'cuda')) {
+            return 'GPU, '.($precision === 'fp16' ? 'fp16' : 'fp32');
+        }
+
+        return $device === 'cpu' ? 'CPU' : null;
     }
 
     /**

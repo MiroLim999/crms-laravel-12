@@ -147,7 +147,7 @@ class OcrBatchTest(unittest.TestCase):
             "cpu": {"model": on_cpu, "processor": FakeProcessor(), "eos_id": EOS, "label": "Fake"},
         }
 
-        def stop_using_gpu(reason):
+        def stop_using_gpu(reason, retry_after=None):
             device[0] = "cpu"
 
         with mock.patch.object(main, "_get_device", lambda: device[0]), \
@@ -164,9 +164,218 @@ class OcrBatchTest(unittest.TestCase):
         self.assertEqual(["t2", "t3", "t4"], [row["text"] for row in results])
         self.assertTrue(all("error" not in row for row in results))
         stop.assert_called_once()
+        # A broken card (not a full one) is given up for good.
+        self.assertIsNone(stop.call_args.kwargs.get("retry_after"))
         # The card got the first batch and one crop of it; the CPU read the rest.
         self.assertEqual([2, 1], on_card.batch_sizes)
         self.assertEqual([1, 1, 1], on_cpu.batch_sizes)
+
+    def test_a_crop_the_full_card_could_not_read_is_retried_there_once(self):
+        """Out of memory is usually another program holding memory: the cache is
+        freed and the crop read again on the card; the service stays on it."""
+        class FullOnce(FakeModel):
+            def __init__(self):
+                super().__init__()
+                self.singles = 0
+
+            def generate(self, pixel_values, **kwargs):
+                if len(pixel_values) == 1:
+                    self.singles += 1
+                    if self.singles == 1:
+                        self.batch_sizes.append(1)
+                        raise torch.cuda.OutOfMemoryError("CUDA out of memory")
+                    return super().generate(pixel_values, **kwargs)
+                self.batch_sizes.append(len(pixel_values))
+                raise torch.cuda.OutOfMemoryError("CUDA out of memory")
+
+        model = FullOnce()
+        entry = {"model": model, "processor": FakeProcessor(on_card=True), "eos_id": EOS, "label": "Fake"}
+        with mock.patch.object(main, "_get_device", lambda: "cuda"), \
+                mock.patch.object(main, "_load_model", lambda key: entry), \
+                mock.patch.object(main, "_free_gpu_cache") as freed, \
+                mock.patch.object(main, "_stop_using_gpu") as stop, \
+                self.assertLogs("ocr-api", level="WARNING"):
+            response = self.client.post(
+                "/ocr",
+                json={"fields": [{"name": n, "image": crop(s)} for n, s in [("a", 2), ("b", 3)]]},
+                headers={KEY_HEADER: main._upload_secret().decode("utf-8")},
+            )
+
+        results = response.json()["results"]
+        self.assertEqual(["t2", "t3"], [row["text"] for row in results])
+        self.assertTrue(all("error" not in row for row in results))
+        stop.assert_not_called()
+        # Once for the batch, once for the crop that failed alone.
+        self.assertEqual(2, freed.call_count)
+        # Batch of 2, crop a (full), crop a again, crop b.
+        self.assertEqual([2, 1, 1, 1], model.batch_sizes)
+
+    def test_crops_are_read_grouped_by_shape_and_answered_in_order(self):
+        def wide(shade, width):
+            buffer = io.BytesIO()
+            Image.new("RGB", (width, 4), (shade, shade, shade)).save(buffer, format="PNG")
+            return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+        class Recording(FakeModel):
+            def __init__(self):
+                super().__init__()
+                self.batches = []
+
+            def generate(self, pixel_values, **kwargs):
+                self.batches.append(pixel_values.tolist())
+                return super().generate(pixel_values, **kwargs)
+
+        model = Recording()
+        results = self.read(model, [
+            {"name": "long", "image": wide(2, 40)},
+            {"name": "short", "image": wide(3, 4)},
+            {"name": "long2", "image": wide(4, 40)},
+            {"name": "short2", "image": wide(5, 4)},
+        ])
+
+        self.assertEqual(["long", "short", "long2", "short2"], [row["name"] for row in results])
+        self.assertEqual(["t2", "t3", "t4", "t5"], [row["text"] for row in results])
+        # The two short crops shared a batch, then the two long ones.
+        self.assertEqual([[3, 5], [2, 4]], model.batches)
+
+
+class BatchConfidenceTest(unittest.TestCase):
+    """batch_confidences must give sequence_confidence's numbers, row by row."""
+
+    def test_every_row_scores_as_it_does_alone(self):
+        from trocr_common import batch_confidences, sequence_confidence
+
+        torch.manual_seed(7)
+        rows, steps = 6, 5
+        scores = [torch.randn(rows, VOCAB) * 3 for _ in range(steps)]
+        scores[1][2, :] = float("-inf")  # a row with a non-finite step
+        scores[2][4, 3] = float("nan")
+        sequences = torch.randint(2, VOCAB, (rows, steps + 1))
+        sequences[:, 0] = START
+        sequences[0, 2] = EOS            # EOS early
+        sequences[1, steps] = EOS        # EOS on the last step
+        sequences[3, 1] = EOS            # EOS first
+        sequences[3, 3] = EOS            # ... and again after it
+        # rows 2, 4 and 5 never write EOS
+        output = SimpleNamespace(sequences=sequences, scores=tuple(scores))
+        net = FakeModel()
+
+        expected = [sequence_confidence(net, output, EOS, row) for row in range(rows)]
+        self.assertEqual(expected, batch_confidences(net, output, EOS))
+
+    def test_fp16_scores_are_scored_in_fp32(self):
+        from trocr_common import batch_confidences
+
+        sequences = torch.tensor([[START, 4, EOS]])
+        first, second = torch.zeros(1, VOCAB), torch.zeros(1, VOCAB)
+        first[0, 4], second[0, EOS] = 6.0, 6.0
+        full = batch_confidences(FakeModel(), SimpleNamespace(sequences=sequences, scores=(first, second)), EOS)
+        half = batch_confidences(FakeModel(), SimpleNamespace(sequences=sequences, scores=(first.half(), second.half())), EOS)
+        self.assertEqual(full, half)
+
+
+class PrecisionTest(unittest.TestCase):
+    """OCR_PRECISION, the one-model rule, and the temporary CPU fallback."""
+
+    def setUp(self):
+        saved = (main._device, main._precision, main._gpu_back_at, dict(main._models))
+
+        def restore():
+            main._device, main._precision, main._gpu_back_at = saved[0], saved[1], saved[2]
+            main._models.clear()
+            main._models.update(saved[3])
+
+        self.addCleanup(restore)
+        main._models.clear()
+
+    def dtype_with(self, setting, device):
+        main._precision = None
+        with mock.patch.dict(os.environ, {"OCR_PRECISION": setting}):
+            return main._dtype_for(main.torch.device(device))
+
+    def test_fp16_only_on_the_card_and_fp32_on_request(self):
+        self.assertEqual(torch.float16, self.dtype_with("fp16", "cuda"))
+        self.assertEqual(torch.float32, self.dtype_with("fp16", "cpu"))
+        self.assertEqual(torch.float32, self.dtype_with("fp32", "cuda"))
+        with self.assertLogs("ocr-api", level="WARNING"):
+            self.assertEqual(torch.float16, self.dtype_with("half-ish", "cuda"))
+
+    def test_health_says_which_precision(self):
+        main._device, main._precision = main.torch.device("cuda"), "fp16"
+        self.assertEqual("fp16", main._precision_name())
+        main._device = main.torch.device("cpu")
+        self.assertEqual("fp32", main._precision_name())
+
+    def test_loading_a_model_unloads_the_others_from_the_card(self):
+        main._models.update({"old": {"model": object()}, "new": {"model": object()}})
+        with mock.patch.object(main, "_free_gpu_cache") as freed:
+            main._drop_other_models("new")
+        self.assertEqual(["new"], list(main._models))
+        freed.assert_called_once()
+
+    def test_a_full_card_is_left_for_a_while_a_broken_one_for_good(self):
+        now = [1000.0]
+        with mock.patch.object(main.time, "monotonic", lambda: now[0]), \
+                mock.patch.object(main, "_free_gpu_cache"), \
+                self.assertLogs("ocr-api", level="INFO"):
+            main._device = main.torch.device("cuda")
+            main._models["fake"] = {"model": object()}
+            main._stop_using_gpu(RuntimeError("CUDA out of memory"), retry_after=120)
+            self.assertEqual("cpu", str(main._device))
+
+            now[0] += 60
+            main._maybe_return_to_gpu()
+            self.assertEqual("cpu", str(main._device))  # not yet
+
+            main._models["fake"] = {"model": object()}  # the CPU copy
+            now[0] += 61
+            main._maybe_return_to_gpu()
+            self.assertIsNone(main._device)  # resolved again: the card, if there is one
+            self.assertEqual({}, main._models)
+
+            main._device = main.torch.device("cuda")
+            main._stop_using_gpu(RuntimeError("CUDA error: no kernel image"))
+            now[0] += 10_000
+            main._maybe_return_to_gpu()
+            self.assertEqual("cpu", str(main._device))
+
+
+class CardPreparationTest(unittest.TestCase):
+    """The arithmetic done on the card gives the processor's input."""
+
+    MODEL = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                         "ml", "models", "100k-finetuned-dataset-model")
+
+    @unittest.skipUnless(os.path.isdir(MODEL), "needs an installed model's processor")
+    def test_used_only_when_it_gives_the_processors_pixels(self):
+        """Whichever transformers is installed: if the check allows the
+        shortcut, other pictures come out identical too."""
+        from transformers import TrOCRProcessor
+
+        ip = TrOCRProcessor.from_pretrained(self.MODEL).image_processor
+        if not main._card_prep_allowed(ip, "cpu"):
+            self.skipTest("this transformers resizes differently; the processor is used (as it should be)")
+        torch.manual_seed(3)
+        images = [Image.fromarray(torch.randint(0, 256, (h, w, 3), dtype=torch.uint8).numpy())
+                  for h, w in [(57, 283), (45, 31), (65, 489), (440, 60), (61, 357)]]
+        expected = ip(images=images, return_tensors="pt").pixel_values
+        mine = main._card_pixel_values(ip, images, "cpu")
+        self.assertTrue(torch.equal(mine.half(), expected.half()))
+
+    @unittest.skipUnless(os.path.isdir(MODEL), "needs an installed model's processor")
+    def test_a_processor_that_differs_keeps_the_job(self):
+        from transformers import TrOCRProcessor
+
+        ip = TrOCRProcessor.from_pretrained(self.MODEL).image_processor
+        real = main._card_pixel_values
+        with mock.patch.object(main, "_card_pixel_values", lambda p, imgs, d: real(p, imgs, d) + 0.01), \
+                self.assertLogs("ocr-api", level="INFO"):
+            self.assertFalse(main._card_prep_allowed(ip, "cpu"))
+        self.assertFalse(main._card_prep_allowed(ip, "cpu"))  # remembered
+
+    def test_an_unknown_processor_is_left_to_itself(self):
+        unknown = SimpleNamespace(do_resize=True, do_rescale=True, do_normalize=True)
+        self.assertIsNone(main._card_pixel_values(unknown, [Image.new("RGB", (4, 4))], "cpu"))
 
 
 class DeviceChoiceTest(unittest.TestCase):

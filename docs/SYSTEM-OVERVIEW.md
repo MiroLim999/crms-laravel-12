@@ -1346,6 +1346,7 @@ Set in the `.env` file. Defaults from `.env.example`.
 | `OCR_BROWSER_API_URL` | `http://127.0.0.1:8001` | Where the browser uploads models |
 | `OCR_API_TIMEOUT` | `120` | Seconds to wait for a reading |
 | `OCR_DEVICE` | `auto` | `auto` (GPU if present), `cuda` or `cpu` |
+| `OCR_PRECISION` | `fp16` | `fp16` (faster, half the GPU memory) or `fp32`; GPU only |
 | `OCR_UPLOAD_SECRET` | empty (uses `APP_KEY`) | The shared secret: signs upload tickets and is the service key |
 | `OCR_UPLOAD_TICKET_TTL` | `900` | Seconds an upload ticket is valid (at most 3,600) |
 | `LINE_MARKERS_PYTHON` | empty (uses `ml/.venv-kraken`) | Python that runs the line detector |

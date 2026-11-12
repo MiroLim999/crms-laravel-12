@@ -10,6 +10,7 @@ use App\Models\DocumentTemplate;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\User;
+use App\Services\Ocr\EngineStatus;
 use App\Services\Ocr\OcrModelPerformance;
 use Database\Seeders\DocumentTemplateSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -57,6 +58,7 @@ class OcrWorkspaceTest extends TestCase
                 'status' => 'ok',
                 'model_loaded' => false,
                 'device' => 'cuda',
+                'precision' => 'fp16',
                 'default' => 'trocr-v1',
                 'models' => $models,
             ]),
@@ -544,7 +546,23 @@ class OcrWorkspaceTest extends TestCase
         $this->actingAs($this->superAdmin())
             ->get(route('ocr.engine.status'))
             ->assertOk()
-            ->assertJson(['reachable' => true, 'device' => 'cuda']);
+            ->assertJson(['reachable' => true, 'device' => 'cuda', 'precision' => 'fp16', 'mode' => 'GPU, fp16']);
+    }
+
+    public function test_the_status_pill_says_where_the_service_reads(): void
+    {
+        $this->fakeHealthyService();
+
+        $this->actingAs($this->superAdmin())
+            ->get(route('ocr.index'))
+            ->assertOk()
+            ->assertSee('OCR service online (GPU, fp16)');
+
+        $this->assertSame('GPU, fp32', EngineStatus::modeLabel('cuda', 'fp32'));
+        $this->assertSame('GPU, fp32', EngineStatus::modeLabel('cuda', null)); // an older service
+        $this->assertSame('CPU', EngineStatus::modeLabel('cpu', 'fp32'));
+        $this->assertNull(EngineStatus::modeLabel('unavailable (RuntimeError)', null));
+        $this->assertNull(EngineStatus::modeLabel(null, null));
     }
 
     // ----------------------------------------------------------------- scan model
