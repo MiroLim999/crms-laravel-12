@@ -3623,9 +3623,30 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   &::after {
+    order: 2;
     content: '';
     flex: 1 1 auto;
     border-block-start: 1px dashed var(--bs-border-color);
+  }
+}
+
+// "Belongs to [Person 05]": at the divider's end, after the dashed line.
+.validation-page-divider__move {
+  display: inline-flex;
+  order: 3;
+  align-items: center;
+  gap: .35rem;
+  margin: 0;
+  color: var(--bs-secondary-color);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+
+  .form-select {
+    inline-size: auto;
+    max-inline-size: 15rem;
+    padding-block: .15rem;
+    font-size: .75rem;
   }
 }
 

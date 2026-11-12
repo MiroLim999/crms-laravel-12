@@ -1150,6 +1150,7 @@
             lineRestoreUrl: @json(route('documents.pages.lines.restore', ['page' => '__PAGE__', 'line' => '__LINE__'])),
             lineStoreUrl: @json(route('documents.pages.lines.store', ['page' => '__PAGE__'])),
             linePlaceUrl: @json(route('documents.pages.lines.place', ['page' => '__PAGE__', 'line' => '__LINE__'])),
+            pageRowsUrl: @json(route('documents.pages.rows', ['page' => '__PAGE__'])),
         lineRedrawUrl: @json(route('documents.pages.lines.redraw', ['page' => '__PAGE__', 'line' => '__LINE__'])),
             pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
             // The pages of one file already saved; 64 zeros stand in for its fingerprint.
@@ -7601,16 +7602,19 @@
             }
 
             // A two-page document: each page's fields under that page's name.
+            // A person's part of each page can be moved to another person there.
             const pagesInGroup = new Set(group.indexes.map((index) => cropped[index]?.pageIndex ?? 0));
             let shownPage = null;
             group.indexes.forEach((index, columnIndex) => {
                 const pageIndex = cropped[index]?.pageIndex ?? 0;
-                if (verifyDoc && pagesInGroup.size > 1 && pageIndex !== shownPage) {
+                if (verifyDoc && (pagesInGroup.size > 1 || group.kind === 'person') && pageIndex !== shownPage) {
                     shownPage = pageIndex;
                     const divider = document.createElement('div');
                     divider.className = 'validation-page-divider';
                     divider.innerHTML = '<i class="icon-base bx bx-file" aria-hidden="true"></i><span></span>';
                     divider.querySelector('span').textContent = `Page ${verifyDoc.pages[pageIndex].number}`;
+                    const move = group.kind === 'person' ? pagePartControl(group, pageIndex) : null;
+                    if (move) divider.appendChild(move);
                     body.appendChild(divider);
                 }
                 body.appendChild(createValidationFieldRow(readings[index], index, group, columnIndex));
@@ -7639,6 +7643,83 @@
             });
 
             return section;
+        }
+
+        /**
+         * "Belongs to": on a two-page document, which person this page's part of
+         * a row is. A row of page 2 that landed on the wrong person is moved, all
+         * its columns together, to the right one; if that person already has a
+         * part on this page, the two swap. Ctrl+Z takes it back.
+         */
+        function pagePartControl(group, side) {
+            const row = group.indexes
+                .filter((index) => (cropped[index]?.pageIndex ?? 0) === side)
+                .map((index) => cropped[index]?.gridRow)
+                .find((value) => Number.isInteger(value));
+            if (!Number.isInteger(row)) return null;
+
+            const entry = verifyDoc.pages[side];
+            const onPage = cropped.filter((item) => (item.pageIndex ?? 0) === side);
+            const rows = Math.max(tableRowsOf(entry.page), ...onPage.map((item) => item.gridRow ?? 0));
+            const names = new Map(validationGroups
+                .filter((candidate) => candidate.kind === 'person')
+                .map((candidate) => [Number(cropped[candidate.indexes[0]]?.personGroup), groupIdentity(candidate)]));
+
+            const wrap = document.createElement('label');
+            wrap.className = 'validation-page-divider__move';
+            wrap.innerHTML = '<span>Belongs to</span>';
+            const select = document.createElement('select');
+            select.className = 'form-select form-select-sm';
+            select.setAttribute('aria-label', `Page ${entry.number} part of ${group.label} belongs to`);
+            select.title = `Move page ${entry.number}'s part of this row to another person`;
+            for (let candidate = 1; candidate <= rows; candidate += 1) {
+                const number = String(candidate).padStart(2, '0');
+                const name = names.get(candidate);
+                select.append(new Option(name && !/^\d+ fields?$/.test(name) ? `Person ${number} · ${name}` : `Person ${number}`, String(candidate)));
+            }
+            select.value = String(row);
+            select.addEventListener('click', (event) => event.stopPropagation());
+            select.addEventListener('change', async () => {
+                const moved = await movePagePart(side, row, Number(select.value));
+                if (!moved) select.value = String(row);
+            });
+            wrap.append(select);
+            return wrap;
+        }
+
+        /** Move page `side`'s row `from` to person `to` (swapping, if `to` has a part there). */
+        async function movePagePart(side, from, to) {
+            if (!verifyDoc || from === to || recordSubmitting) return false;
+            const page = verifyDoc.pages[side].page;
+            const onPage = cropped.filter((item) => (item.pageIndex ?? 0) === side);
+            const movingIds = onPage.filter((item) => item.gridRow === from).map((item) => item.lineId);
+            const swapped = onPage.some((item) => item.gridRow === to);
+            const moves = swapped ? [{ from, to }, { from: to, to: from }] : [{ from, to }];
+            try {
+                const { response, payload } = await sendLineRequest(
+                    config.pageRowsUrl.replace('__PAGE__', String(page.id)), 'PATCH', { moves },
+                );
+                if (!response.ok || !Array.isArray(payload?.lines)) throw new Error(responseErrorMessage(response, payload));
+                processedPage = page;
+                rebuildVerifyLines(payload.lines, payload.flags ?? {}, { focusLineId: movingIds[0] ?? null, focusFrom: 'marker' });
+                pushVerifyUndo({ kind: 'rowsMoved', moves });
+                flashVerifyFields(movingIds);
+                return true;
+            } catch (error) {
+                showValidationSubmitError(error.message || 'That part of the row could not be moved.');
+                return false;
+            }
+        }
+
+        /** A short flash on fields that just moved, so the eye finds them. */
+        function flashVerifyFields(lineIds) {
+            if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+            lineIds.forEach((lineId) => {
+                const row = validationRow(cropped.findIndex((item) => item.lineId === lineId));
+                if (!row) return;
+                row.classList.add('is-changing');
+                window.setTimeout(() => row.classList.remove('is-changing'), 700);
+            });
         }
 
         function renderVerifyRows() {
@@ -8752,6 +8833,14 @@
                 const fromHeight = validationRow(cropped.findIndex((candidate) => candidate.lineId === entry.id))?.offsetHeight ?? 0;
                 applyLineUpdate(payload.line, payload.flags ?? {});
                 animateFieldChange(entry.id, fromHeight);
+                } else if (entry.kind === 'rowsMoved') {
+                    // A page's part of a row back to the person it was on (a swap swaps back).
+                    const back = entry.moves.map(({ from, to }) => ({ from: to, to: from }));
+                    const { response, payload } = await sendLineRequest(
+                        config.pageRowsUrl.replace('__PAGE__', String(processedPage.id)), 'PATCH', { moves: back },
+                    );
+                    if (!response.ok || !Array.isArray(payload?.lines)) throw new Error(responseErrorMessage(response, payload));
+                    rebuildVerifyLines(payload.lines, payload.flags ?? {});
                 } else if (entry.kind === 'moved') {
                     const { response, payload } = await sendLineRequest(
                         verifyLineUrl(config.linePlaceUrl, entry.id), 'PATCH', { row: entry.row, ...entry.column },

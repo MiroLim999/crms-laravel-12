@@ -1363,6 +1363,51 @@ class LineOutlinePipelineTest extends TestCase
             ->assertNotFound();
     }
 
+    /**
+     * A row of a register's second page that landed on the wrong person is put
+     * right in Verify by moving the whole row, or swapping two rows at once.
+     */
+    public function test_whole_rows_move_or_swap_together(): void
+    {
+        $page = $this->storedPage();
+        $page->forceFill(['status' => DocumentPage::STATUS_READY])->save();
+        $oneName = $this->makeLine($page, ['row' => 1, 'column_index' => 0]);
+        $oneDate = $this->makeLine($page, ['row' => 1, 'column_index' => 1, 'column_name' => 'Date']);
+        $two = $this->makeLine($page, ['row' => 2, 'column_index' => 0]);
+        $three = $this->makeLine($page, ['row' => 3, 'column_index' => 0]);
+        // Neither a layout box's field nor a line between two rows moves with a row.
+        $field = $this->makeLine($page, ['source' => PageLine::SOURCE_FIELD, 'row' => 1, 'column_index' => null, 'column_name' => 'Remarks']);
+        $between = $this->makeLine($page, ['row' => 2, 'flags' => ['no_row']]);
+        $rowOf = fn (PageLine $line) => $line->fresh()->row;
+
+        // Rows 1 and 2 swap in one request, every column of each going together.
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.rows', $page), ['moves' => [['from' => 1, 'to' => 2], ['from' => 2, 'to' => 1]]])
+            ->assertOk()
+            ->assertJsonPath('moved', 3)
+            ->assertJsonCount(6, 'lines');
+        $this->assertSame([2, 2, 1, 3, 1, 2], array_map($rowOf, [$oneName, $oneDate, $two, $three, $field, $between]));
+
+        // Into a row that has a line in that column already: both are flagged to check.
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.rows', $page), ['moves' => [['from' => 3, 'to' => 1]]])
+            ->assertOk();
+        $this->assertSame(1, $rowOf($three));
+        $this->assertContains('shared_cell', $two->fresh()->flags);
+        $this->assertContains('shared_cell', $three->fresh()->flags);
+
+        // Rows the page has, each moved once; and not another user's page.
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.rows', $page), ['moves' => [['from' => 9, 'to' => 1]]])
+            ->assertUnprocessable()->assertJsonValidationErrors('moves.0.from');
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.rows', $page), ['moves' => [['from' => 1, 'to' => 2], ['from' => 1, 'to' => 3]]])
+            ->assertUnprocessable();
+        $this->actingAs(User::factory()->superAdmin()->create())
+            ->patchJson(route('documents.pages.rows', $page), ['moves' => [['from' => 1, 'to' => 2]]])
+            ->assertNotFound();
+    }
+
     public function test_a_missed_field_under_a_column_removed_in_align_can_join_a_person(): void
     {
         $page = $this->processedPage();

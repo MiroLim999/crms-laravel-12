@@ -19,6 +19,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -571,6 +572,53 @@ class DocumentPageController extends Controller
 
         return response()->json([
             'line' => $line->fresh()->toClient(),
+            'flags' => $this->lineFlags($page),
+        ]);
+    }
+
+    /**
+     * Move whole rows of the table to other people, all at once: every line of
+     * row `from` goes to row `to`, keeping its column. A two-page register
+     * joins its pages by row, so a row of page 2 that landed on the wrong
+     * person is put right by moving it, or by swapping two rows (5 -> 6 and
+     * 6 -> 5 in one request). The moves happen together, so a swap never
+     * mixes the two rows. A field of a layout box, and a line between two
+     * rows, stay where they are.
+     */
+    public function moveRows(Request $request, DocumentPage $page): JsonResponse
+    {
+        $this->authorizePage($request, $page);
+
+        if (! $page->hasLines()) {
+            return response()->json(['message' => 'This page is still being processed.'], 409);
+        }
+        $rows = max(0, count($page->geometry['ruled_ys'] ?? []) - 1);
+        if ($rows === 0) {
+            return response()->json(['message' => 'This page has no table to move rows in.'], 422);
+        }
+        $lastRow = $this->lastPerson($page, $rows);
+        $validated = $request->validate([
+            'moves' => ['required', 'array', 'min:1', 'max:'.Limits::MAX_FIELDS],
+            'moves.*.from' => ['required', 'integer', 'min:1', 'max:'.$lastRow, 'distinct'],
+            'moves.*.to' => ['required', 'integer', 'min:1', 'max:'.min(Limits::MAX_FIELDS, $lastRow + 1), 'distinct'],
+        ]);
+        $to = collect($validated['moves'])->mapWithKeys(fn (array $move) => [(int) $move['from'] => (int) $move['to']]);
+
+        // Read first, then write: each line goes by the row it had before any move.
+        $moving = $page->lines()->get()
+            ->reject(fn (PageLine $line) => $line->belongsToField()
+                || in_array(PageLine::FLAG_NO_ROW, $line->flags ?? [], true)
+                || ! $to->has((int) $line->row));
+        DB::transaction(function () use ($moving, $to, $page): void {
+            foreach ($moving as $line) {
+                $line->forceFill(['row' => $to[(int) $line->row]])->save();
+            }
+            $this->refreshSharedCells($page);
+        });
+
+        return response()->json([
+            'moved' => $moving->count(),
+            'lines' => $page->lines()->get()->map->toClient()->values(),
             'flags' => $this->lineFlags($page),
         ]);
     }

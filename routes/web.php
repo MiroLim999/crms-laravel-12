@@ -115,6 +115,10 @@ Route::middleware('auth')->group(function () {
         Route::patch('documents/pages/{page}/lines/{line}/place', [DocumentPageController::class, 'placeLine'])
             ->scopeBindings()
             ->name('documents.pages.lines.place');
+        // Move whole rows of the page to other people at once (Verify: a row of
+        // a register's second page that landed on the wrong person).
+        Route::patch('documents/pages/{page}/rows', [DocumentPageController::class, 'moveRows'])
+            ->name('documents.pages.rows');
         // Remove one line before it is read: a stray mark, a wrongly split
         // word, or one that does not belong. Only while Detect's result stands.
         // It is kept, with its crop, until the page is outlined again, so
