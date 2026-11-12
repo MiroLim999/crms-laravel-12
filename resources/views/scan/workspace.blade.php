@@ -2043,7 +2043,7 @@
             el('gridTiltGroup').setAttribute('aria-label', `Tilt of ${subject}`);
             el('gridTiltLabel').textContent = line === null ? 'Tilt' : `Line ${line + 1}`;
 
-            const message = !rowsByHand && rowsSource && !rowsSource.from_page
+            const message = !rowsByHand && rowsSource
                 // Compared with the template itself, not the grid Snap was sent.
                 ? snapRowsMessage({ ...rowsSource, template: templateRows.length - 1 }, estimatedRows.size)
                 : snapRowsMessage(null, estimatedRows.size);

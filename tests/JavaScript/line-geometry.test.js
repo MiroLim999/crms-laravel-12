@@ -243,13 +243,25 @@ test('a column that runs past the page is cut at its edge before it is sent back
 
 test('Snap to table says where the rows came from, in plain words', () => {
     assert.equal(snapRowsMessage(null), '');
+    // Rows found on the page: a word only when there is something to check.
     assert.equal(
         snapRowsMessage({ from_page: true, count: 25, template: 20, estimated: [] }),
-        'Rows found on the page (template: 20).',
+        'Check the rows: 25 found on the page, the template has 20.',
     );
     assert.equal(
-        snapRowsMessage({ from_page: true, count: 20, template: 20, estimated: [20] }),
-        'Rows found on the page.',
+        snapRowsMessage({ from_page: true, count: 15, template: 20, estimated: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] }),
+        'Check the rows: 15 found on the page, the template has 20.',
+    );
+    assert.equal(snapRowsMessage({ from_page: true, count: 20, template: 20, estimated: [20] }), '');
+    assert.equal(
+        snapRowsMessage({ from_page: true, count: 20, template: 20, estimated: [] }, 14),
+        'Check the rows: most of this page’s row lines are too faint to see, so they were spaced evenly.',
+    );
+    // An aged page whose row lines were too faint to follow.
+    assert.equal(
+        snapRowsMessage({ from_page: false, count: 20, template: 20, estimated: [], reason: 'faint_rows' }),
+        'Rows kept from the template: this page’s row lines are too faint to follow, so the template’s rows were '
+        + 'fitted to the table’s bottom border. Check them.',
     );
     assert.equal(
         snapRowsMessage({ from_page: false, count: 20, template: 20, estimated: [], reason: 'no_rows' }),

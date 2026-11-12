@@ -2597,6 +2597,24 @@ def _drop_stray_rules(rules, ys):
     return rules, ys
 
 
+def _table_extent(v_rules, h_rules, width, height):
+    """(top, bottom, reach) of the table: where most long column rules start
+    and end, in pixels; None without at least three of them.
+
+    A quarter of the column rules may start lower or end higher (a faded top,
+    the book's fold, the paper's own edge); the 25th and 75th percentiles leave
+    those out. `reach` allows for a turned page, whose border meets each
+    column rule a little higher or lower than it crosses the page's middle.
+    """
+    long_rules = [r for r in v_rules if r["hi"] - r["lo"] >= 0.4 * height]
+    if len(long_rules) < 3:
+        return None
+    reach = 4.0 + abs(math.tan(math.radians(_rules_tilt(h_rules)))) * width / 2
+    return (float(np.percentile([r["lo"] for r in long_rules], 25)),
+            float(np.percentile([r["hi"] for r in long_rules], 75)),
+            reach)
+
+
 def detect_grid(page):
     """Printed rules on a page: a template sample, or a document being scanned.
 
@@ -2622,8 +2640,19 @@ def detect_grid(page):
 
     suggestion = {"ruled_ys": [], "columns": [], "estimated_ys": 0}
     centre = width / 2
+    table = _table_extent(v_rules, h_rules, width, height)
+    if table is not None:
+        # Where most column rules end: the table's bottom border, which shows
+        # even on a page whose row rules are too faint to find (see fit_geometry).
+        suggestion["frame_bottom"] = round(table[1] / height, 5)
     # The paper's own top and bottom edge can show as a rule; it is no row's.
-    rows = sorted((r for r in h_rules if 0.004 * height < r["a"] + r["b"] * centre < 0.996 * height),
+    # Nor is a rule above or below the table's column lines: a title box or a
+    # form's header strip. On an aged page whose row rules were too faint to
+    # find, the two lines of its "City/Municipality" box and the header's rule
+    # passed for three evenly spaced rows 62 px apart (the rows are 39 px), and
+    # Snap to table stretched the grid to them.
+    rows = sorted((r for r in h_rules if 0.004 * height < r["a"] + r["b"] * centre < 0.996 * height
+                   and (table is None or table[0] - table[2] <= r["a"] + r["b"] * centre <= table[1] + table[2])),
                   key=lambda r: r["a"] + r["b"] * centre)
     ys = [r["a"] + r["b"] * centre for r in rows]
     if len(ys) >= 3:
@@ -2961,18 +2990,52 @@ def fit_geometry(image, geometry, found=None):
 
     # Any two edges can always be matched to two rules; at least three, and
     # half of a wide table's edges, must agree before the fit is trusted.
-    if x_fit is None or x_fit[2] < max(3, math.ceil(0.5 * len(edges))) or len(printed) < 3:
-        return geometry, {"fitted": False, "reason": "No ruled table matching this template was found on this page."}
+    unfitted = {"fitted": False, "reason": "No ruled table matching this template was found on this page."}
+    if x_fit is None or x_fit[2] < max(3, math.ceil(0.5 * len(edges))):
+        return geometry, unfitted
 
     sx, tx, x_hits = x_fit
-    sy = float(np.median(np.diff(printed))) / max(1e-6, float(np.median(np.diff(ruled))))
-    ty = printed[0] - sy * ruled[0]
-
+    layout_pitch = max(1e-6, float(np.median(np.diff(ruled))))
+    # The rows stretch with the columns: the page is the same table, scanned
+    # or photographed whole, and the markers already sit on this page, so the
+    # stretch the columns fit at is the one the rows should have too. A ruled
+    # run that disagrees by more than ROW_STRETCH_LIMIT, found from fewer than
+    # half the template's row lines, is not this table's rows: on an aged page
+    # whose row rules were too faint to find, lines of the form above the
+    # table passed for rows and stretched the grid 1.59 times (15 rows of the
+    # template's 20). Then the template's rows are kept at the columns'
+    # stretch, their last line on the table's bottom border (fit["faint_rows"]).
+    faint = len(printed) < 3
+    if not faint:
+        sy = float(np.median(np.diff(printed))) / layout_pitch
+        faint = len(printed) < 0.5 * len(ruled) and abs(sy / sx - 1.0) > ROW_STRETCH_LIMIT
+    horizontal = np.asarray(found["horizontal"] or printed or [0.0], dtype=float)
+    if faint:
+        # Rows that come from the columns' stretch are only as good as the
+        # column fit: it must be close to whole. A page shrunk 0.9 with half
+        # its column edges matched at the wrong scale would otherwise move a
+        # grid it used to leave alone.
+        frame = suggestion.get("frame_bottom")
+        if frame is None or not found["horizontal"] or x_hits < max(4, math.ceil(0.75 * len(edges))):
+            return geometry, unfitted
+        sy = sx
+        pitch = sy * layout_pitch
+        # The border is a printed rule; the column rules' ends only say where it is.
+        nearest = float(horizontal[np.abs(horizontal - frame).argmin()])
+        bottom = nearest if abs(nearest - frame) <= 0.5 * pitch else float(frame)
+        ty = bottom - sy * ruled[-1]
+        # Both ends on printed rules: the bottom border, and the header's rule
+        # the first row line hangs from. Anything less is a guess.
+        top = ty + sy * ruled[0]
+        if top < 0 or abs(nearest - (ty + sy * ruled[-1])) > 0.3 * pitch \
+                or float(np.abs(horizontal - top).min()) > 0.3 * pitch:
+            return geometry, unfitted
+    else:
+        ty = printed[0] - sy * ruled[0]
+        pitch = float(np.median(np.diff(printed)))
     # A faded or damaged rule can cut the ruled run short, and its top then
     # lies rows below the table's. A first row line the user already placed on
     # the printed rules is never traded for one that puts fewer rows there.
-    pitch = float(np.median(np.diff(printed)))
-    horizontal = np.asarray(found["horizontal"] or printed, dtype=float)
 
     def rows_on_rules(scale, shift):
         """The printed rules the grid's row lines meet, placed by (scale, shift).
@@ -3032,6 +3095,8 @@ def fit_geometry(image, geometry, found=None):
         "fitted": True,
         "column_edges_matched": f"{x_hits}/{len(edges)}",
         "printed_row_lines": y_hits,
+        # The page's row rules were too faint to follow: the template's rows were used.
+        **({"faint_rows": True} if faint else {}),
     }
 
 
@@ -3124,6 +3189,10 @@ UNEVEN_TEMPLATE_ROWS = 1.35
 # The page's run stands in for the template's rows only when its row height
 # is within this share of the grid's.
 PAGE_ROW_HEIGHT = 0.15
+
+# The fit's rows may stretch this much more or less than its columns before a
+# run found from few row rules is taken for something else (see fit_geometry).
+ROW_STRETCH_LIMIT = 0.15
 
 
 def _row_pitch(ys):
@@ -3259,6 +3328,14 @@ def _rows_from_page(fitted, found, writing=None, template_rows=None):
     return geometry, _rows_summary(rows, horizontal, template_rows)
 
 
+def _say_rows_were_faint(fit):
+    """Name the reason the Align step shows when fit_geometry kept the
+    template's rows because the page's row rules were too faint to follow."""
+    rows = fit.get("rows")
+    if fit.get("faint_rows") and isinstance(rows, dict) and not rows.get("from_page"):
+        rows["reason"] = "faint_rows"
+
+
 def _writing_at(image, page_path, detector, cache_path):
     """Where each written line sits (its baseline's middle), as page fractions."""
     raw, _ = detected_lines(image, page_path, detector, cache_path)
@@ -3298,6 +3375,7 @@ def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None,
         fitted, fit["rows"] = _rows_from_page(
             fitted, found, writing=lambda: _writing_at(image, page_path, detector, cache_path),
             template_rows=max(0, len(geometry.get("ruled_ys") or []) - 1))
+        _say_rows_were_faint(fit)
     if fit["fitted"]:
         fitted = _keep_shortened_columns(geometry, fitted)
     result = process_page(page_path, fitted, out_dir, detector=detector, debug=debug,
@@ -3410,6 +3488,7 @@ def snap_page(page_path, geometry):
         # them, where it lost one), so only the columns are snapped then.
         fitted, fit["rows"] = _rows_from_page(fitted, found,
                                               template_rows=max(0, len(geometry.get("ruled_ys") or []) - 1))
+        _say_rows_were_faint(fit)
         fitted = _snap_to_lines(fitted, found["vertical"],
                                 [] if fit["rows"]["from_page"] else found["horizontal"])
         fitted = _keep_shortened_columns(geometry, fitted)

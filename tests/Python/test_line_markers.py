@@ -528,6 +528,57 @@ class DetectTest(unittest.TestCase):
             self.assertAlmostEqual(cx, (x + w / 2) * WIDTH, delta=2)
             self.assertAlmostEqual(cy, (y + h / 2) * HEIGHT, delta=2)
 
+    def test_snap_to_table_keeps_the_rows_of_a_page_whose_row_lines_are_too_faint(self):
+        """An aged register: row rules too faint to find, a form box on top of the table.
+
+        Its box's two lines and the header's rule are evenly spaced, but 60 px
+        apart where the rows are 30: Snap used to take them for the rows and
+        stretch the grid twice as tall. The rows now stay the template's, at the
+        columns' stretch, from the header's rule to the table's bottom border."""
+        header, bottom, pitch = 150, 360, 30
+        rows = list(range(header, bottom + 1, pitch))  # 7 rows
+        image = Image.new("RGB", (WIDTH, HEIGHT), (PAPER,) * 3)
+        draw = ImageDraw.Draw(image)
+        strong = (RULE,) * 3
+        for y in (30, 90):  # the form box above the table; its bottom is the table's top border
+            draw.line([(COLUMN_EDGES[0], y), (COLUMN_EDGES[-1], y)], fill=strong, width=1)
+        for y in (header, bottom):
+            draw.line([(COLUMN_EDGES[0], y), (COLUMN_EDGES[-1], y)], fill=strong, width=1)
+        for y in rows[1:-1]:  # five shades from the paper: there, but not found
+            draw.line([(COLUMN_EDGES[0], y), (COLUMN_EDGES[-1], y)], fill=(PAPER - 5,) * 3, width=1)
+        for x in COLUMN_EDGES:
+            draw.line([(x, 90), (x, bottom)], fill=strong, width=1)
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "page.png")
+        image.save(path)
+        # The markers as the template put them: 12 px low, on no printed line.
+        layout = {
+            "columns": [{"name": name, "box": [COLUMN_EDGES[k] / WIDTH, (header + 12) / HEIGHT,
+                                               (COLUMN_EDGES[k + 1] - COLUMN_EDGES[k]) / WIDTH,
+                                               (bottom - header) / HEIGHT]}
+                        for k, name in enumerate(["Name", "Date", "Place"])],
+            "ruled_ys": [(y + 12) / HEIGHT for y in rows],
+            "fields": [],
+        }
+
+        # Nothing above or below the column rules is taken for a row.
+        suggestion = lm.detect_grid(image)["suggestion"]
+        self.assertTrue(all(y * HEIGHT > 80 for y in suggestion["ruled_ys"]))
+        self.assertAlmostEqual(bottom, suggestion["frame_bottom"] * HEIGHT, delta=2)
+
+        result = lm.snap_page(path, layout)
+        snapped = result["geometry"]
+
+        self.assertTrue(result["fit"]["fitted"])
+        self.assertTrue(result["fit"]["faint_rows"])
+        self.assertEqual("faint_rows", result["fit"]["rows"]["reason"])
+        self.assertEqual(len(rows), len(snapped["ruled_ys"]))
+        for y, expected in zip(snapped["ruled_ys"], rows):
+            self.assertAlmostEqual(expected, y * HEIGHT, delta=1.5)
+        for column, (left, right) in zip(snapped["columns"], zip(COLUMN_EDGES[:-1], COLUMN_EDGES[1:])):
+            self.assertAlmostEqual(left, column["box"][0] * WIDTH, delta=1.5)
+            self.assertAlmostEqual(right, (column["box"][0] + column["box"][2]) * WIDTH, delta=1.5)
+
     def test_a_rule_found_twice_does_not_cut_the_table_short(self):
         # Warped paper: part of the third rule comes back as a second rule 5 px
         # below it, which used to split the rows into two runs and anchor the

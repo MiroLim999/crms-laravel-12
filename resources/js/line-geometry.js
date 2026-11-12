@@ -87,9 +87,17 @@ export function snapRowsMessage(rows, estimated = Array.isArray(rows?.estimated)
     if (!rows || typeof rows !== 'object') return '';
 
     if (rows.from_page) {
+        // Said only when there is something to check: rows the page printed
+        // clearly and the template agrees with need no words.
         const count = Number(rows.count) || 0;
         const template = Number(rows.template) || 0;
-        return `Rows found on the page${count === template ? '' : ` (template: ${template})`}.`;
+        if (template > 0 && count !== template) {
+            return `Check the rows: ${count} found on the page, the template has ${template}.`;
+        }
+        if (count > 0 && estimated > count / 2) {
+            return 'Check the rows: most of this page’s row lines are too faint to see, so they were spaced evenly.';
+        }
+        return '';
     }
 
     const reasons = {
@@ -97,6 +105,7 @@ export function snapRowsMessage(rows, estimated = Array.isArray(rows?.estimated)
         uneven_rows: 'its rows differ in height',
         row_height: 'this page’s rows are a different height',
         no_match: 'the page’s rows do not line up with the grid',
+        faint_rows: 'this page’s row lines are too faint to follow, so the template’s rows were fitted to the table’s bottom border. Check them',
     };
     const reason = reasons[rows.reason];
     return reason ? `Rows kept from the template: ${reason}.` : '';
