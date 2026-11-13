@@ -6,11 +6,14 @@ use App\Enums\ChangeRequestStatus;
 use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
+use App\Services\ArchiveExport;
 use App\Services\AuditLogger;
 use App\Services\RecordCsv;
 use App\Services\RecordFieldGrouper;
 use App\Support\LocalTime;
 use App\Support\SearchWords;
+use App\Support\TableDownload;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
@@ -38,7 +41,8 @@ class RecordController extends Controller
             'status' => ['nullable', 'string', 'in:'.implode(',', array_column(RecordStatus::cases(), 'value'))],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
-        ], [], ['q' => 'search', 'from' => 'from date', 'to' => 'to date']);
+            'download' => ['nullable', 'string', 'in:pending,done'],
+        ], [], ['q' => 'search', 'from' => 'from date', 'to' => 'to date', 'download' => 'download status']);
 
         // The filters come from the query string, so an edited URL can carry a
         // bad one. Its message is shown on this page and the filter left out,
@@ -51,18 +55,14 @@ class RecordController extends Controller
         $filters = $validator->valid();
         $words = SearchWords::from($filters['q'] ?? null);
 
-        $records = CivilRecord::query()
+        // Records not yet downloaded come first: they are the ones still to be
+        // taken out of the archive. Within each group, newest first.
+        $records = $this->archiveQuery($filters, $words)
             ->withTitleField()
             ->with(['submitter', 'documentTypeDefinition'])
-            ->search($words)
             ->withSearchMatches($words)
-            ->when($filters['type'] ?? null, fn ($q, $type) => $q->whereHas(
-                'documentTypeDefinition',
-                fn ($typeQuery) => $typeQuery->where('key', $type),
-            ))
-            ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
-            ->when($filters['from'] ?? null, fn ($q, $from) => $q->where('submitted_at', '>=', LocalTime::dayStart($from)))
-            ->when($filters['to'] ?? null, fn ($q, $to) => $q->where('submitted_at', '<=', LocalTime::dayEnd($to)))
+            ->withDownloadState()
+            ->orderBy('is_downloaded')
             ->orderByDesc('submitted_at')
             ->orderByDesc('id')
             ->paginate(15)
@@ -70,10 +70,99 @@ class RecordController extends Controller
 
         return view('records.index', [
             'records' => $records,
+            'pendingCount' => $this->archiveQuery($filters, $words)->doesntHave('downloads')->count(),
             'filters' => $filters,
             'documentTypes' => DocumentTypeDefinition::ordered(),
             'statuses' => RecordStatus::cases(),
         ]);
+    }
+
+    /**
+     * Download the records the archive is showing (same search and filters) as
+     * one CSV or Excel file holding their checked values, one row per person.
+     *
+     * ?format=csv|xlsx (default csv). ?scope=new takes only the records never
+     * downloaded before, ?scope=done only those already downloaded, ?scope=all
+     * (default) every matching one. Each record in the file is marked as
+     * downloaded once the file is written.
+     */
+    public function export(Request $request, ArchiveExport $export, AuditLogger $audit)
+    {
+        $filters = $request->validate([
+            'q' => ['nullable', 'string', 'max:255'],
+            'type' => ['nullable', 'string', 'exists:document_types,key'],
+            'status' => ['nullable', 'string', 'in:'.implode(',', array_column(RecordStatus::cases(), 'value'))],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date', 'after_or_equal:from'],
+            'download' => ['nullable', 'string', 'in:pending,done'],
+            'format' => ['nullable', 'string', 'in:'.implode(',', TableDownload::FORMATS)],
+            'scope' => ['nullable', 'string', 'in:new,done,all'],
+        ]);
+        $format = $filters['format'] ?? 'csv';
+        $scope = $filters['scope'] ?? 'all';
+        unset($filters['format'], $filters['scope']);
+
+        $query = $this->archiveQuery($filters, SearchWords::from($filters['q'] ?? null));
+        if ($scope === 'new') {
+            $query->doesntHave('downloads');
+        } elseif ($scope === 'done') {
+            $query->has('downloads');
+        }
+        $count = (clone $query)->count();
+
+        if ($count === 0) {
+            return back()->with('error', match ($scope) {
+                'new' => 'Every matching record has already been downloaded.',
+                'done' => 'None of the matching records have been downloaded yet.',
+                default => 'No records match, so there is nothing to download.',
+            });
+        }
+
+        // Logged before the stream opens, as with the Reports export: a download
+        // that fails halfway still happened as far as the trail is concerned.
+        $audit->log(
+            'records.exported',
+            new: array_filter([...$filters, 'scope' => $scope, 'format' => $format, 'records' => $count], fn ($value) => $value !== null),
+            description: "Downloaded {$count} archive record(s) as ".TableDownload::label($format).match ($scope) {
+                'new' => ' (not yet downloaded only).',
+                'done' => ' (already downloaded only).',
+                default => '.',
+            },
+            actor: $request->user(),
+        );
+
+        $header = $export->header($query);
+
+        return TableDownload::respond(
+            $format,
+            'crms-archive-'.LocalTime::format(now(), 'Ymd-His'),
+            'Records archive',
+            $header,
+            $export->rows($query, $header, $format, $request->user()->getKey()),
+        );
+    }
+
+    /**
+     * The archive's search and filters, shared by the list and the download so
+     * the file always holds what the page showed.
+     *
+     * @param  array<string, mixed>  $filters
+     * @param  list<string>  $words
+     * @return Builder<CivilRecord>
+     */
+    private function archiveQuery(array $filters, array $words): Builder
+    {
+        return CivilRecord::query()
+            ->search($words)
+            ->when($filters['type'] ?? null, fn ($q, $type) => $q->whereHas(
+                'documentTypeDefinition',
+                fn ($typeQuery) => $typeQuery->where('key', $type),
+            ))
+            ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+            ->when($filters['from'] ?? null, fn ($q, $from) => $q->where('submitted_at', '>=', LocalTime::dayStart($from)))
+            ->when($filters['to'] ?? null, fn ($q, $to) => $q->where('submitted_at', '<=', LocalTime::dayEnd($to)))
+            ->when(($filters['download'] ?? null) === 'pending', fn ($q) => $q->doesntHave('downloads'))
+            ->when(($filters['download'] ?? null) === 'done', fn ($q) => $q->has('downloads'));
     }
 
     public function show(CivilRecord $record): View
@@ -125,6 +214,8 @@ class RecordController extends Controller
             description: "Downloaded record #{$record->getKey()} as CSV.",
             actor: $request->user(),
         );
+        // A record taken out on its own counts as downloaded in the archive list too.
+        ArchiveExport::markDownloaded([$record->getKey()], 'csv', $request->user()->getKey());
 
         return response()->streamDownload(function () use ($table) {
             $handle = fopen('php://output', 'w');

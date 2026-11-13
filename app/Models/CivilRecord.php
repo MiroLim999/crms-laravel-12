@@ -72,6 +72,25 @@ class CivilRecord extends Model
 
     // ---------------------------------------------------------------- relations
 
+    /**
+     * Each time this record was downloaded from the archive. None means it has
+     * never been downloaded.
+     */
+    public function downloads(): HasMany
+    {
+        return $this->hasMany(RecordDownload::class, 'record_id');
+    }
+
+    /**
+     * For the archive list: whether the record was ever downloaded
+     * (is_downloaded) and when last (last_downloaded_at).
+     */
+    public function scopeWithDownloadState(Builder $query): void
+    {
+        $query->withExists('downloads as is_downloaded')
+            ->withMax('downloads as last_downloaded_at', 'downloaded_at');
+    }
+
     public function fields(): HasMany
     {
         return $this->hasMany(RecordField::class, 'record_id')->orderBy('sort_order');

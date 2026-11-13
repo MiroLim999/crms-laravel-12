@@ -24,7 +24,7 @@ class RecordCsv
     /**
      * @return array{header: list<string>, rows: list<list<string|int|null>>}
      */
-    public function table(CivilRecord $record): array
+    public function table(CivilRecord $record, bool $csvSafe = true): array
     {
         $fields = $record->fields
             ->sortBy([['page_no', 'asc'], ['sort_order', 'asc'], ['id', 'asc']])
@@ -72,10 +72,10 @@ class RecordCsv
             foreach (array_keys($columns) as $key) {
                 $cells[] = $values[$key] ?? $details[$key] ?? null;
             }
-            $rows[] = array_map(CsvCell::safe(...), $cells);
+            $rows[] = $csvSafe ? array_map(CsvCell::safe(...), $cells) : $cells;
         }
 
-        return ['header' => array_map(CsvCell::safe(...), $header), 'rows' => $rows];
+        return ['header' => $csvSafe ? array_map(CsvCell::safe(...), $header) : $header, 'rows' => $rows];
     }
 
     public function filename(CivilRecord $record): string
