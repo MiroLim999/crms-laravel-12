@@ -704,7 +704,6 @@
                             <i class="icon-base bx bx-scan" aria-hidden="true"></i>
                             Orange shows the complete person row; green identifies the exact field;
                             red outlines need review.
-                            <span class="d-none" id="verifyZoomTip">Click a page to zoom in on it.</span>
                             Hold <kbd>Ctrl</kbd> (<kbd>⌘</kbd> on a Mac) and scroll to zoom or drag to move.
                         </footer>
                     </section>
@@ -737,15 +736,6 @@
                             </div>
                         </header>
 
-                        {{-- Filled in when the page job has something to say about the grid as a whole. --}}
-                        <div class="grid-notes d-none" id="verifyNotes" role="status" aria-live="polite">
-                            <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
-                            <div>
-                                <strong>Check the grid before you verify</strong>
-                                <ul class="grid-notes__list" id="verifyNotesList"></ul>
-                            </div>
-                        </div>
-
                         <div class="validation-record-list-heading">
                             <div>
                                 <i class="icon-base bx bx-list-check" aria-hidden="true"></i>
@@ -762,11 +752,6 @@
                         </div>
 
                         <footer class="validation-submit-bar">
-                            <div class="validation-lock-copy">
-                                <i class="icon-base bx bx-lock-alt" aria-hidden="true"></i>
-                                <span>Submitted fields are locked. Change them later with Correct record on the record page.</span>
-                            </div>
-
                             <div class="validation-submit-actions">
                                 <button class="btn btn-outline-secondary" type="button" id="backToMark">
                                     <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Back to marking
@@ -2375,16 +2360,6 @@
                 return item;
             }));
             list.classList.toggle('d-none', notes.length === 0);
-        }
-
-        /** In Verify: the same notes, above the people, so they are read before anything is verified. */
-        function showGridNotes(page) {
-            // Of a two-page document, both pages' notes, each saying its page.
-            const notes = verifyDoc
-                ? verifyDoc.pages.flatMap((entry) => gridNotes(entry.page?.notes).map((note) => `Page ${entry.number}: ${note}`))
-                : gridNotes(page?.notes);
-            fillGridNotes(el('verifyNotesList'), notes);
-            el('verifyNotes').classList.toggle('d-none', notes.length === 0);
         }
 
         function setLineEditing(on) {
@@ -4733,7 +4708,6 @@
             clearValidationSubmitError();
             renderVerifyRows();
             restoreVerifyDraft(item);
-            showGridNotes(page);
             showStep('verify');
             prepareValidationComparison();
             checkAndShowExistingRecord(page.existingRecord || null);
@@ -5148,9 +5122,9 @@
         el('zoomOutBtn').addEventListener('click', () => marker.zoomBy(-0.1));
         el('zoomInBtn').addEventListener('click', () => marker.zoomBy(0.1));
         el('zoomResetBtn').addEventListener('click', () => marker.resetZoom());
+        // 100%: both pages of a two-page document, easing back; one page, at once.
         el('validationZoomOutBtn').addEventListener('click', () => validationMarker.zoomBy(-0.1));
         el('validationZoomInBtn').addEventListener('click', () => validationMarker.zoomBy(0.1));
-        // 100%: both pages of a two-page document, easing back; one page, at once.
         el('validationZoomResetBtn').addEventListener('click', () => (verifyDoc ? showVerifyBoth() : validationMarker.resetZoom()));
 
         function restoreTemplateFields() {
@@ -6048,7 +6022,6 @@
                     ? 'Putting both pages side by side, one person to a row.'
                     : 'The handwriting results are ready for your review.');
                 renderVerifyRows();
-                showGridNotes(processedPage);
                 if (verifyDoc) await loadVerifySpread();
                 await completeOcrProgress(partner ? 'Both pages read' : 'Scan complete');
                 showStep('verify');
@@ -6665,7 +6638,6 @@
             // One page (or a batch's pages, verified one at a time): the usual layout.
             document.querySelector('#step-verify .validation-comparison-grid')?.classList.remove('is-two-page');
             el('verifyPageView').classList.add('d-none');
-            el('verifyZoomTip').classList.add('d-none');
             verifyFocus = null;
             verifyFocusZoom = null;
             updateRowHint();
@@ -6788,8 +6760,34 @@
                 const initialGroup = validationGroups.find((group) => group.kind === 'person')
                     ?? validationGroups[0];
                 if (initialGroup) activateValidationGroup(initialGroup.id, 'initial');
+                if (initialGroup) focusFirstVerifyField(initialGroup);
             });
             loadVerifyCompanion(spreadItem);
+        }
+
+        // On while the first field gets the cursor after a scan, so the view stays whole.
+        let quietVerifyReveal = false;
+
+        /**
+         * Straight after a scan: the first field of the first person is selected
+         * on the right, with the cursor in it, so the reviewer can start checking
+         * without a click. The pages stay at 100%.
+         */
+        function focusFirstVerifyField(group) {
+            const index = group.indexes.find((candidate) => !cropped[candidate]?.cropDeleted) ?? group.indexes[0];
+            if (!Number.isInteger(index)) return;
+            activateValidationField(index, 'marker');
+
+            // The pages stay whole (100%, both side by side): the cursor goes in
+            // the box without the view zooming to it.
+            const input = validationRow(index)?.querySelector('.verified');
+            if (!(input instanceof HTMLInputElement)) return;
+            quietVerifyReveal = true;
+            try {
+                input.focus({ preventScroll: true });
+            } finally {
+                quietVerifyReveal = false;
+            }
         }
 
         /**
@@ -6859,6 +6857,7 @@
                 const initialGroup = validationGroups.find((group) => group.kind === 'person')
                     ?? validationGroups[0];
                 if (initialGroup) activateValidationGroup(initialGroup.id, 'initial');
+                if (initialGroup) focusFirstVerifyField(initialGroup);
             });
         }
 
@@ -6902,7 +6901,6 @@
         function updateVerifyPageView() {
             const control = el('verifyPageView');
             control.classList.toggle('d-none', !verifyDoc);
-            el('verifyZoomTip').classList.toggle('d-none', !verifyDoc);
             const focused = verifyFocusIsCurrent();
             const current = focused ? String(verifyFocus) : (Math.abs(validationMarker.zoom - 1) <= 0.011 ? 'both' : null);
             control.querySelectorAll('[data-verify-view]').forEach((button) => {
@@ -6911,6 +6909,8 @@
                 button.setAttribute('aria-pressed', String(on));
             });
             el('validationSpread').classList.toggle('is-page-focused', focused);
+            // Zoomed in on a field (or by hand), no page in focus: a click must not undo it.
+            el('validationSpread').classList.toggle('is-zoomed-in', !focused && validationMarker.zoom > 1.011);
             el('validationSpread').dataset.focus = focused ? String(verifyFocus) : '';
             scheduleRowHint();
         }
@@ -6922,16 +6922,16 @@
             else focusVerifyPage(Number(button.dataset.verifyView));
         });
 
-        // A click on a page, beside every outline: zoom in on it, or back out.
+        // A click on a page, beside every outline: that page is focused on (Both goes back).
         el('validationSpread').addEventListener('click', (event) => {
             if (!verifyDoc || !(event.target instanceof Element)) return;
             if (addingMissedField || groupingFields || redrawingLineId !== null || editingLineIndex !== null || recordSubmitting) return;
             if (event.target.closest('.line-marker, .line-overlay.is-editing, button, a, input, select')) return;
             const pane = event.target.closest('#validationMainPage, #validationCompanionPage');
             if (!pane) return;
+            if (el('validationSpread').classList.contains('is-zoomed-in')) return;
             const side = pane.id === 'validationMainPage' ? 0 : 1;
-            if (verifyFocusIsCurrent() && verifyFocus === side) showVerifyBoth();
-            else focusVerifyPage(side);
+            if (!(verifyFocusIsCurrent() && verifyFocus === side)) focusVerifyPage(side);
         });
 
         /**
@@ -7122,17 +7122,28 @@
                 bottom: Math.max(...shown.map((box) => box.bottom)),
             };
 
-            // Already in view: the view stays still, so nothing jumps.
-            const margin = 8;
-            const inView = target.left >= viewport.scrollLeft + margin
-                && target.right <= viewport.scrollLeft + viewport.clientWidth - margin
-                && target.top >= viewport.scrollTop + margin
-                && target.bottom <= viewport.scrollTop + viewport.clientHeight - margin;
-            if (!inView) slideVerifyViewTo(target);
+            slideVerifyViewTo(target);
         }
 
+        /**
+         * A field picked on the right: the document glides to centre on it, every
+         * time, even when it is already in view. A field of the other page, while
+         * one page is zoomed in on, brings that page in first.
+         */
         function revealValidationMarker(index) {
-            revealValidationLines([index]);
+            if (quietVerifyReveal) return;
+            if (placedVerifyBoxes([index]).length === 0) return;
+            // Close enough to read the writing: about twice the whole-page size
+            // (a two-page document's 100% is half as wide, so it goes further).
+            // Already zoomed in further by hand: that zoom is kept.
+            const zoom = Math.max(validationMarker.zoom, verifyDoc ? 2.2 : 1.6);
+            verifyFocus = null;
+            verifyFocusZoom = null;
+            validationMarker.glideTo(zoom, () => {
+                const box = placedVerifyBoxes([index])[0];
+                return box ? { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 } : null;
+            });
+            if (verifyDoc) updateVerifyPageView();
         }
 
         function revealValidationGroup(group) {

@@ -3537,14 +3537,15 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// A click on a page zooms in on it; on the page zoomed in on, back out.
-.doc-spread.is-joined .doc-stage {
-  cursor: zoom-in;
+// A hand over a page a click would bring into focus; the page in focus keeps
+// the normal cursor.
+.doc-spread.is-joined:not(.is-zoomed-in) .doc-stage {
+  cursor: pointer;
 }
 
 .doc-spread.is-joined.is-page-focused[data-focus="0"] #validationMainPage .doc-stage,
 .doc-spread.is-joined.is-page-focused[data-focus="1"] #validationCompanionPage .doc-stage {
-  cursor: zoom-out;
+  cursor: default;
 }
 
 // Page 1 / Both / Page 2 above the pages.
@@ -4825,15 +4826,13 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 // Same two columns as the entry above: "TrOCR read" starts under the picture
 // and "Adjust outline" under the left edge of the value box.
+// The reading takes what is left; Adjust outline and Delete crop sit beside it
+// on one line instead of one above the other.
 .validation-field__reading {
   display: grid;
-  grid-template-columns: minmax(0, 9fr) minmax(0, 11fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: .6rem;
-}
-
-.validation-field__value:not(:has(.validation-field__crop)) .validation-field__reading {
-  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .validation-field__reading .validation-field__reading-text {
@@ -4947,9 +4946,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 // Adjust outline and Delete crop, side by side under the value box.
 .validation-field__tools {
   display: inline-flex;
-  flex-wrap: wrap;
-  justify-self: start;
-  gap: .25rem .5rem;
+  flex-wrap: nowrap;
+  justify-self: end;
+  gap: .5rem;
+  white-space: nowrap;
 
   .validation-field__adjust {
     gap: .1rem;

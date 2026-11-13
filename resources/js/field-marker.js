@@ -892,9 +892,72 @@ export class FieldMarker {
             viewport.scrollTop = keep.top + (centred.top - keep.top) * eased;
         };
 
-        if (reduced || duration <= 0) {
+        this._animate(reduced ? 0 : duration, apply);
+        return target;
+    }
+
+    /**
+     * Zoom to `zoom` while one place on the page glides to the middle of the
+     * view, as one easing motion: a field picked in a list, brought close and
+     * centred. The room either side of the pages is left as it is. A wheel turn
+     * or a click on the viewport takes over at once. Returns the zoom it ends at.
+     *
+     * @param {number} zoom
+     * @param {() => ({ x: number, y: number } | null)} locate  The place, in the
+     *        viewport's scrolled space, at whatever zoom the page has right now.
+     */
+    glideTo(zoom, locate, { duration = 420 } = {}) {
+        const viewport = this.viewport;
+        const stage = this.canvas.parentElement;
+        if (!viewport || !stage || !this.canvas.clientWidth) return this.zoom;
+
+        this._stopFocus?.();
+
+        const target = Math.round(clamp(zoom, this.minZoom, this.maxZoom) * 100) / 100;
+        const start = this.zoom;
+        const zooming = Math.abs(target - start) >= 0.005;
+        const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+        const stageNow = stage.getBoundingClientRect();
+        const viewNow = viewport.getBoundingClientRect();
+        const anchor = {
+            x: (viewNow.left + viewNow.width / 2 - stageNow.left) / Math.max(1, stageNow.width),
+            y: (viewNow.top + viewNow.height / 2 - stageNow.top) / Math.max(1, stageNow.height),
+        };
+
+        const apply = (progress) => {
+            const eased = progress < 0.5 ? 4 * progress ** 3 : 1 - (-2 * progress + 2) ** 3 / 2;
+            // Its own zoom: the room round a focused page stays while it moves.
+            this._focusing = true;
+            if (zooming) this.setZoom(start + (target - start) * eased);
+            this._focusing = false;
+
+            const view = viewport.getBoundingClientRect();
+            const stageRect = stage.getBoundingClientRect();
+            const keep = {
+                left: viewport.scrollLeft + stageRect.left + anchor.x * stageRect.width - (view.left + view.width / 2),
+                top: viewport.scrollTop + stageRect.top + anchor.y * stageRect.height - (view.top + view.height / 2),
+            };
+            const spot = locate();
+            if (!spot) return;
+            const centred = {
+                left: spot.x - viewport.clientWidth / 2,
+                top: spot.y - viewport.clientHeight / 2,
+            };
+            viewport.scrollLeft = keep.left + (centred.left - keep.left) * eased;
+            viewport.scrollTop = keep.top + (centred.top - keep.top) * eased;
+        };
+
+        this._animate(reduced ? 0 : duration, apply);
+        return target;
+    }
+
+    /** Run `apply(progress)` from 0 to 1 over `duration` ms; a wheel turn or click stops it. */
+    _animate(duration, apply) {
+        const viewport = this.viewport;
+        if (duration <= 0) {
             apply(1);
-            return target;
+            return;
         }
 
         let frame = 0;
@@ -915,8 +978,6 @@ export class FieldMarker {
         viewport.addEventListener('pointerdown', stop);
         this._stopFocus = stop;
         frame = requestAnimationFrame(step);
-
-        return target;
     }
 
     /** True while focusOn() is moving the view: its zoom changes are its own, not the user's. */
