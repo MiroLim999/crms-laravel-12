@@ -1,5 +1,5 @@
 {{--
-    OCR Workspace: model performance, and the models Staff scan with. One card
+    OCR Workspace: model performance, and the model scans use. One card
     holds the service status, the benchmark chart, and the Models panel. Training,
     evaluation, and process control remain command-line work.
 --}}

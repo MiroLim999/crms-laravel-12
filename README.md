@@ -6,7 +6,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Windows%20%C2%B7%20Linux%20%C2%B7%20Mac-2496ED?style=flat&logo=docker&logoColor=white)](#installation-docker)
 [![Tests](https://img.shields.io/badge/Tests-477%20passed-success)](#tests)
 
-CRMS turns handwritten civil registry pages (birth, death and marriage certificates, and register ledgers) into searchable digital records. Staff scan a page, CRMS finds every handwritten line and reads it with a fine-tuned **TrOCR** model, a person checks every value, and the record is archived with a full audit trail.
+CRMS turns handwritten civil registry pages (birth, death and marriage certificates, and register ledgers) into searchable digital records. You scan a page, CRMS finds every handwritten line and reads it with a fine-tuned **TrOCR** model, a person checks every value, and the record is archived with a full audit trail.
 
 **Everything runs on the computer itself.** Scans and their text are never sent to the internet or a cloud service, because the records are covered by the Data Privacy Act.
 
@@ -98,13 +98,26 @@ Updates, backups, the NVIDIA GPU and troubleshooting: **[docs/DOCKER-SETUP.md](d
 
 ## First Login
 
-| Account | Email | Password |
+CRMS has **one account**, the Super Admin. It runs on one offline PC, so there are no other users to add.
+
+| Account | Email | First password |
 | :--- | :--- | :--- |
 | Super Admin | `superadmin@admin.com` | `superadmin@admin.com` |
 
-> **Change this password right after the first login** (it is public): initials badge at the top right → **Account Settings**. Create other accounts under **User Accounts**.
+At the first sign-in CRMS asks you to **choose your own password**. Change your name and email in
+**Account Settings** (initials badge at the top right → **Account Settings** → **Your details**).
+Running `php artisan db:seed` again never resets an existing account.
 
-For testing only: `php artisan db:seed --class=DemoUsersSeeder` adds `staff@crms.test` and `admin@crms.test` (password `password123`).
+### Forgot the password?
+
+Nobody else can reset it, and there is no email when offline. On the CRMS computer, in the project folder, run:
+
+```powershell
+php artisan crms:reset-password
+```
+
+It prints a new temporary password once. Sign in with it, and CRMS asks you to choose a new one.
+(With Docker: `docker compose exec web php artisan crms:reset-password`.)
 
 ---
 
@@ -115,9 +128,9 @@ For testing only: `php artisan db:seed --class=DemoUsersSeeder` adds `staff@crms
 | **Scan and align** | Upload a PDF or image and place the template's markers on it. |
 | **Find the handwriting** | Kraken outlines every handwritten line and straightens a tilted page. |
 | **Read it** | A fine-tuned TrOCR model reads each line and gives a confidence score. Low scores are flagged. |
-| **Verify** | Staff check every value beside the page. Only checked values are saved. |
-| **Archive** | Submitted records are locked. Corrections go through a change request that an Admin approves. |
-| **Template Builder** | Super Admins design the layout of each document type. |
+| **Verify** | Check every value beside the page. Only checked values are saved. |
+| **Archive** | Submitted records are locked. **Correct record** changes a value at once and keeps the old one in the record's history and the Audit Log. **Download CSV** gives one document's values, one row per person, for import into another system. |
+| **Template Builder** | Design the layout of each document type. |
 | **OCR Workspace** | Install models, choose the active one, and compare benchmarks (CER, WER, exact match). |
 | **Audit log** | Every action is recorded: who, when, and what changed. |
 | **Dashboard and reports** | Volume, document types, OCR quality and throughput, plus CSV export. |
@@ -134,21 +147,6 @@ Browser ──> Laravel website ──> queue worker ──> Kraken: finds and o
 ```
 
 Slow work (15–60 s a page) runs on the queue worker, so the website stays responsive.
-
-## Who Can Do What
-
-| | Staff | Admin | Super Admin |
-| :--- | :---: | :---: | :---: |
-| Scan, verify and submit records | ✔ | | ✔ |
-| Search and view records | ✔ | ✔ | ✔ |
-| Request a correction | ✔ | | ✔ |
-| Approve or reject corrections | | ✔ | ✔ |
-| Dashboard analytics and CSV reports | | ✔ | ✔ |
-| Manage user accounts | | Staff only | ✔ |
-| View the audit log | | ✔ | ✔ |
-| Template Builder and OCR Workspace | | | ✔ |
-
-Admins supervise but never enter or edit record values.
 
 ---
 

@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 
 /**
- * A document category available to Template Builder and Staff scanning.
+ * A document category available to Template Builder and scanning.
  *
  * The key is permanent so renaming a category never disconnects its templates
  * or historical records.
@@ -29,7 +29,7 @@ class DocumentTypeDefinition extends Model
         return $this->archived_at !== null;
     }
 
-    /** Types Staff can scan and Super Admins can add layouts to. */
+    /** Types that can be scanned and given layouts. */
     public function scopeActive($query)
     {
         return $query->whereNull('archived_at');

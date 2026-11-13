@@ -3,12 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Enums\DocumentType;
-use App\Jobs\TestTemplateLayout;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTemplateField;
 use App\Models\DocumentTypeDefinition;
 use App\Services\AuditLogger;
-use App\Services\Lines\GeometryInput;
 use App\Services\Lines\LineMarkers;
 use App\Services\Lines\LineMarkersException;
 use App\Services\TemplateSampleStorage;
@@ -27,9 +25,9 @@ use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 /**
- * Document template builder - Super Admin only.
+ * Document template builder.
  *
- * Templates decide which fields Staff capture per certificate type and where the
+ * Templates decide which fields a scan captures per certificate type and where the
  * boxes start. Coordinates are fractions of the page so a layout works at any
  * scan resolution.
  *
@@ -48,11 +46,17 @@ class DocumentTemplateController extends Controller
     public function index(): View
     {
         return view('templates.index', [
-            'templates' => DocumentTemplate::withCount(['fields', 'records', 'pages'])
-                ->with(['creator', 'documentTypeDefinition', 'parent:id,name'])
+            // Page 2 layouts are not listed: they belong to their main layout.
+            'templates' => DocumentTemplate::listed()
+                ->withCount(['fields', 'records', 'pages'])
+                ->with(['creator', 'documentTypeDefinition', 'parent:id,name,is_active', 'pageTwoTemplate'])
                 ->orderBy('document_type_id')
                 ->orderByDesc('is_active')
                 ->get()
+                ->each(fn (DocumentTemplate $layout) => $layout->setAttribute(
+                    'publish_problems',
+                    $layout->is_active ? [] : $this->publishProblems($layout),
+                ))
                 ->groupBy('document_type_id'),
             'documentTypes' => DocumentTypeDefinition::ordered(),
         ]);
@@ -68,8 +72,8 @@ class DocumentTemplateController extends Controller
         return view('templates.edit', [
             'template' => null,
             'docType' => $type,
-            // Start from the prototype's field boxes rather than a blank page.
-            'fields' => $type->defaultFields(),
+            // A new layout starts empty: the admin adds the fields this document has.
+            'fields' => [],
             'columns' => [],
             'ruledYs' => [],
             'pageTwoChoices' => $this->pageTwoChoices($type->getKey(), null),
@@ -103,65 +107,16 @@ class DocumentTemplateController extends Controller
             'ruled_ys' => $grid['suggestion']['ruled_ys'] ?? [],
             'columns' => $grid['suggestion']['columns'] ?? [],
             'estimated_ys' => $grid['suggestion']['estimated_ys'] ?? 0,
+            // Row lines put back where a printed rule was too faint (shown amber).
+            'bridged_ys' => $grid['suggestion']['bridged_ys'] ?? [],
+            // Where the table's column rules end: rows below it are not the table's.
+            'frame_bottom' => $grid['suggestion']['frame_bottom'] ?? null,
+            // How far the page is turned, degrees clockwise: the columns turn with it.
+            'tilt' => (float) ($grid['tilt'] ?? 0),
             'lines' => [
                 'horizontal' => $grid['horizontal'] ?? [],
                 'vertical' => $grid['vertical'] ?? [],
             ],
-        ]);
-    }
-
-    /**
-     * Test the layout being built on its sample, saved or not: the page is
-     * straightened, the markers fitted to its table and every line outlined,
-     * exactly as Detect does it for Staff. Nothing is read or kept; the
-     * builder shows where each line would be cut and which row it lands in.
-     *
-     * That takes about half a minute, so it runs in the queue (see
-     * TestTemplateLayout) and the builder polls testLayoutStatus() for it.
-     */
-    public function testLayout(Request $request): JsonResponse
-    {
-        GeometryInput::hydrate($request);
-        $validated = $request->validate([
-            'page' => ['required', 'file', 'mimes:png', 'max:40960'],
-            ...GeometryInput::rules(),
-        ]);
-        $geometry = GeometryInput::checked($validated['geometry']);
-
-        $id = (string) Str::uuid();
-        $request->file('page')->storeAs(TestTemplateLayout::directory($id), 'page.png', 'local');
-        TestTemplateLayout::dispatch($id, $geometry);
-
-        return response()->json([
-            'id' => $id,
-            'status' => 'queued',
-            'statusUrl' => route('templates.test-layout.status', $id),
-        ], 202);
-    }
-
-    /**
-     * Where a layout test is: queued, running, or finished with the outlines
-     * (or a 422 with the reason it failed). A finished test is deleted once
-     * its result is returned, as the sample is a real register page.
-     */
-    public function testLayoutStatus(string $test): JsonResponse
-    {
-        $disk = Storage::disk('local');
-        $directory = TestTemplateLayout::directory($test);
-
-        foreach (['result.json' => 200, 'error.json' => 422] as $file => $status) {
-            if ($disk->exists($directory.'/'.$file)) {
-                $payload = json_decode((string) $disk->get($directory.'/'.$file), true);
-                $disk->deleteDirectory($directory);
-
-                return response()->json($payload, $status);
-            }
-        }
-
-        abort_unless($disk->exists($directory), 404, 'This test is no longer available. Run it again.');
-
-        return response()->json([
-            'status' => $disk->exists($directory.'/started') ? 'running' : 'queued',
         ]);
     }
 
@@ -171,29 +126,33 @@ class DocumentTemplateController extends Controller
         $documentType = DocumentTypeDefinition::findOrFail($validated['document_type_id']);
         $pageTwo = $this->validatedPageTwo($request, $validated, null);
 
-        $template = DB::transaction(function () use ($validated, $request, $documentType, $pageTwo) {
+        $problems = [];
+        $template = DB::transaction(function () use ($validated, $request, $documentType, $pageTwo, &$problems) {
             $template = $this->createLayout($request, $validated, $documentType);
-            $this->savePageTwo($request, $template, $pageTwo, $documentType);
+            $this->savePageTwo($request, $template, $pageTwo, $documentType, $validated['page_two_template_id'], fresh: true);
 
             if ($validated['publish'] ?? false) {
-                $this->publishTemplate($template);
+                $problems = $this->publishIfReady($template, (bool) ($validated['publish_anyway'] ?? false));
             }
 
             return $template;
         });
 
-        return redirect()
-            ->route('templates.edit', $template)
-            ->with(
-                'success',
-                ($validated['publish'] ?? false)
-                    ? 'Template created and published for Staff.'
-                    : 'Template saved as a draft.',
-            );
+        $redirect = redirect()->route('templates.edit', $template);
+
+        return match (true) {
+            $problems !== [] => $redirect->with('error', $this->notPublishedMessage('Template saved as a draft', $problems)),
+            (bool) ($validated['publish'] ?? false) => $redirect->with('success', 'Template created and published.'),
+            default => $redirect->with('success', 'Template saved as a draft.'),
+        };
     }
 
-    public function edit(DocumentTemplate $template): View
+    public function edit(DocumentTemplate $template): View|RedirectResponse
     {
+        if ($redirect = $this->toMainLayout($template)) {
+            return $redirect;
+        }
+
         $template->load(['fields', 'documentTypeDefinition']);
 
         return view('templates.edit', [
@@ -222,7 +181,27 @@ class DocumentTemplateController extends Controller
             'ruledYs' => array_values($template->ruled_ys ?? []),
             'pageTwoChoices' => $this->pageTwoChoices($template->document_type_id, $template),
             'pageTwo' => $this->pageTwoForBuilder($template),
+            // What still stops this layout from being published (none: it can be).
+            'publishProblems' => $this->publishProblems($template),
         ]);
+    }
+
+    /**
+     * A page 2 layout is opened, changed, published and deleted only through its
+     * main layout: back to the main layout's builder (or the library).
+     */
+    private function toMainLayout(DocumentTemplate $template): ?RedirectResponse
+    {
+        if (! $template->is_page_two) {
+            return null;
+        }
+
+        $main = $template->mainLayout()->first();
+        $message = 'That is page 2 of a two-page layout. Open its main layout and change page 2 there.';
+
+        return $main
+            ? redirect()->route('templates.edit', $main)->with('error', $message)
+            : redirect()->route('templates.index')->with('error', $message);
     }
 
     /**
@@ -329,9 +308,16 @@ class DocumentTemplateController extends Controller
     }
 
     /**
-     * Save page 2's layout beside `$main` and link it: the linked layout is
-     * changed in place, or saved as a new version when records or pages in
-     * progress were read with it, or created when there is none.
+     * Give `$main` its page 2. Page 2 is a hidden layout that belongs to `$main`
+     * alone, so changing it never changes another layout:
+     *
+     * - drawn in the builder (`$pageTwo`): `$main`'s own page 2 is changed in
+     *   place, or a new one is made from the drawing;
+     * - chosen from the "Page 2 format" list (`$chosenId`): a private copy of
+     *   the chosen layout, which itself stays as it was.
+     *
+     * `$fresh` is a layout just made (new, a new version): it owns no page 2
+     * yet, so whatever page 2 it points at is copied, never shared.
      *
      * @param  array<string, mixed>|null  $pageTwo
      */
@@ -340,59 +326,108 @@ class DocumentTemplateController extends Controller
         DocumentTemplate $main,
         ?array $pageTwo,
         DocumentTypeDefinition $documentType,
-        ?DocumentTemplate $linkedBefore = null,
+        ?int $chosenId,
+        bool $fresh,
     ): void {
-        if ($pageTwo === null) {
+        $own = ! $fresh && $main->page_two_template_id !== null
+            ? DocumentTemplate::with('fields')->find($main->page_two_template_id)
+            : null;
+        // An older link to a layout of its own is never edited through this one.
+        if ($own !== null && ! $own->is_page_two) {
+            $own = null;
+        }
+        $previous = $own;
+
+        if ($pageTwo !== null) {
+            if ($pageTwo['empty'] ?? false) {
+                $this->linkPageTwo($main, null, $previous);
+            } elseif ($own !== null) {
+                if ($this->layoutChanged($own, $pageTwo)) {
+                    $own->fill([
+                        'name' => $this->pageTwoName($main),
+                        'columns' => $pageTwo['columns'],
+                        'ruled_ys' => $pageTwo['ruled_ys'],
+                        'grouping_mode' => $pageTwo['grouping_mode'],
+                    ]);
+                    $own->forceFill(['revision' => $own->revision + 1])->save();
+                    $this->syncFields($own, $pageTwo['fields']);
+                }
+            } else {
+                $created = $this->createLayout($request, [
+                    ...$pageTwo,
+                    'name' => $this->pageTwoName($main),
+                    'page_two_template_id' => null,
+                ], $documentType, pageTwo: true);
+                $this->linkPageTwo($main, $created, $previous);
+            }
+
             return;
         }
 
-        if ($pageTwo['empty'] ?? false) {
-            $main->forceFill(['page_two_template_id' => null])->save();
+        if ($chosenId === null) {
+            $this->linkPageTwo($main, null, $previous);
 
             return;
         }
-
-        $linked = $linkedBefore ?? $main->pageTwoTemplate()->first();
-        if ($linked === null) {
-            $created = $this->createLayout($request, $pageTwo, $documentType);
-            $main->forceFill(['page_two_template_id' => $created->getKey()])->save();
-
+        if ($own !== null && $own->getKey() === $chosenId) {
             return;
         }
 
-        $linked->loadMissing('fields');
-        if (! $this->layoutChanged($linked, $pageTwo)) {
-            $main->forceFill(['page_two_template_id' => $linked->getKey()])->save();
+        $source = DocumentTemplate::with('fields')->find($chosenId);
+        $this->linkPageTwo($main, $source ? $this->copyAsPageTwo($request, $source, $main) : null, $previous);
+    }
 
-            return;
+    /** Point `$main` at `$pageTwo` (or none), and delete the page 2 it owned before. */
+    private function linkPageTwo(DocumentTemplate $main, ?DocumentTemplate $pageTwo, ?DocumentTemplate $previous): void
+    {
+        $main->forceFill(['page_two_template_id' => $pageTwo?->getKey()])->save();
+
+        if ($previous !== null && $previous->is_page_two && ! $previous->is($pageTwo)) {
+            $previous->delete();
         }
+    }
 
-        if ($linked->isInUse()) {
-            $version = $this->createLayout($request, $pageTwo, $documentType, $linked);
-            $main->forceFill(['page_two_template_id' => $version->getKey()])->save();
+    /** A private page 2 for `$main`: a copy of `$source` with its fields. */
+    private function copyAsPageTwo(Request $request, DocumentTemplate $source, DocumentTemplate $main): DocumentTemplate
+    {
+        $source->loadMissing('fields');
 
-            return;
-        }
-
-        $linked->fill([
-            'columns' => $pageTwo['columns'],
-            'ruled_ys' => $pageTwo['ruled_ys'],
-            'grouping_mode' => $pageTwo['grouping_mode'],
+        $copy = $source->replicate([
+            'is_active', 'published_at', 'revision', 'parent_id', 'is_version', 'created_by',
+            'page_two_template_id', 'is_page_two',
+            'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
         ]);
-        $linked->forceFill(['revision' => $linked->revision + 1])->save();
-        $this->syncFields($linked, $pageTwo['fields']);
-        $main->forceFill(['page_two_template_id' => $linked->getKey()])->save();
+        $copy->forceFill([
+            'name' => $this->pageTwoName($main),
+            'is_active' => false,
+            'is_page_two' => true,
+            'created_by' => $request->user()?->getKey() ?? $source->created_by,
+        ])->save();
+
+        foreach ($source->fields as $field) {
+            $copy->fields()->create($field->only([
+                'name', 'x', 'y', 'width', 'height', 'angle', 'sort_order', 'is_required',
+                'person_group', 'person_field_order', 'role', 'value_type', 'options', 'hint',
+            ]));
+        }
+
+        return $copy;
+    }
+
+    private function pageTwoName(DocumentTemplate $main): string
+    {
+        return Str::limit($main->name, 110, '').' - page 2';
     }
 
     /**
-     * The layouts that can be page 2 of a spread: others of the same certificate
-     * type that do not have a page 2 of their own.
+     * The layouts whose markers can be copied as page 2 of a spread: others of
+     * the same certificate type that do not have a page 2 of their own.
      *
      * @return \Illuminate\Support\Collection<int, DocumentTemplate>
      */
     private function pageTwoChoices(int $documentTypeId, ?DocumentTemplate $template)
     {
-        return DocumentTemplate::query()
+        return DocumentTemplate::listed()
             ->where('document_type_id', $documentTypeId)
             ->whereNull('page_two_template_id')
             ->when($template, fn ($query) => $query->whereKeyNot($template->getKey()))
@@ -403,6 +438,10 @@ class DocumentTemplateController extends Controller
 
     public function update(Request $request, DocumentTemplate $template): RedirectResponse
     {
+        if ($redirect = $this->toMainLayout($template)) {
+            return $redirect;
+        }
+
         $validated = $this->validatePayload($request, $template);
         $documentType = DocumentTypeDefinition::findOrFail($validated['document_type_id']);
         $opened = $request->filled('revision') ? $request->integer('revision') : null;
@@ -415,7 +454,8 @@ class DocumentTemplateController extends Controller
             return $this->saveAsNewVersion($request, $template, $validated, $documentType, $pageTwo);
         }
 
-        DB::transaction(function () use ($request, $template, $validated, $documentType, $opened, $pageTwo) {
+        $problems = [];
+        DB::transaction(function () use ($request, $template, $validated, $documentType, $opened, $pageTwo, &$problems) {
             // Checked again under a lock: two saves at the same moment cannot
             // both pass the check above.
             $this->guardRevision(
@@ -435,14 +475,11 @@ class DocumentTemplateController extends Controller
                 'grouping_mode' => $validated['grouping_mode'],
                 'columns' => $validated['columns'],
                 'ruled_ys' => $validated['ruled_ys'],
-                'page_two_template_id' => $validated['page_two_template_id'],
             ]);
             $template->forceFill(['revision' => $template->revision + 1]);
 
             $before = $template->fields()->count();
             $this->syncFields($template, $validated['fields']);
-            $this->savePageTwo($request, $template, $pageTwo, $documentType);
-
             $ledger = $validated['columns']
                 ? ', '.count($validated['columns']).' ledger columns, '.count($validated['ruled_ys']).' ruled lines'
                 : '';
@@ -452,6 +489,12 @@ class DocumentTemplateController extends Controller
                 "Updated template '{$template->name}' ({$before} -> ".count($validated['fields'])
                     .' fields, '.$this->personGroupCount($validated['fields']).' person groups'.$ledger.').',
             );
+
+            $this->savePageTwo($request, $template, $pageTwo, $documentType, $validated['page_two_template_id'], fresh: false);
+            // A renamed layout renames its page 2 with it.
+            DocumentTemplate::whereKey($template->page_two_template_id)
+                ->where('is_page_two', true)
+                ->update(['name' => $this->pageTwoName($template)]);
 
             if (($validated['sample_document'] ?? null) instanceof UploadedFile) {
                 $template->forceFill(
@@ -474,16 +517,21 @@ class DocumentTemplateController extends Controller
                 }
             }
 
-            if ($validated['publish'] ?? false) {
-                $this->publishTemplate($template);
+            // Already published: nothing to publish again.
+            if (($validated['publish'] ?? false) && ! $template->is_active) {
+                $problems = $this->publishIfReady($template, (bool) ($validated['publish_anyway'] ?? false));
             }
         });
+
+        if ($problems !== []) {
+            return back()->with('error', $this->notPublishedMessage('Template draft saved', $problems));
+        }
 
         return back()->with(
             'success',
             match (true) {
-                (bool) ($validated['publish'] ?? false) => 'Template saved and published for Staff.',
-                $template->is_active => 'Layout details saved. It stays published for Staff.',
+                (bool) ($validated['publish'] ?? false) => 'Template saved and published.',
+                $template->is_active => 'Layout details saved. It stays published.',
                 default => 'Template draft saved.',
             },
         );
@@ -491,15 +539,22 @@ class DocumentTemplateController extends Controller
 
     /**
      * The Publish button in the template library. Only one template per
-     * certificate type is published for Staff.
+     * certificate type is published: it replaces the one before.
      */
     public function activate(DocumentTemplate $template): RedirectResponse
     {
+        if ($redirect = $this->toMainLayout($template)) {
+            return $redirect;
+        }
+
         if ($template->fields()->doesntExist() && ! $template->isLedger()) {
             return back()->with('error', 'Add at least one field or ledger column before publishing.');
         }
 
-        DB::transaction(fn () => $this->publishTemplate($template));
+        $problems = DB::transaction(fn () => $this->publishIfReady($template));
+        if ($problems !== []) {
+            return back()->with('error', $this->notPublishedMessage("'{$template->name}' was not published", $problems));
+        }
 
         return back()->with('success', "'{$template->name}' is now published for {$template->typeLabel()}.");
     }
@@ -563,11 +618,16 @@ class DocumentTemplateController extends Controller
      */
     public function duplicate(Request $request, DocumentTemplate $template): RedirectResponse
     {
-        $template->load(['fields', 'documentTypeDefinition']);
+        if ($redirect = $this->toMainLayout($template)) {
+            return $redirect;
+        }
+
+        $template->load(['fields', 'documentTypeDefinition', 'pageTwoTemplate.fields']);
 
         $copy = DB::transaction(function () use ($request, $template) {
             $copy = $template->replicate([
-                'is_active', 'revision', 'parent_id', 'created_by',
+                'is_active', 'published_at', 'revision', 'parent_id', 'is_version', 'created_by',
+                'page_two_template_id', 'is_page_two',
                 'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
             ]);
             $copy->forceFill([
@@ -576,6 +636,13 @@ class DocumentTemplateController extends Controller
                 'parent_id' => $template->getKey(),
                 'created_by' => $request->user()->getKey(),
             ])->save();
+
+            // Its own page 2: changing the copy's page 2 leaves the original's alone.
+            if ($template->pageTwoTemplate !== null) {
+                $copy->forceFill([
+                    'page_two_template_id' => $this->copyAsPageTwo($request, $template->pageTwoTemplate, $copy)->getKey(),
+                ])->save();
+            }
 
             foreach ($template->fields as $field) {
                 $copy->fields()->create($field->only([
@@ -605,10 +672,23 @@ class DocumentTemplateController extends Controller
 
     public function destroy(DocumentTemplate $template): RedirectResponse
     {
+        if ($redirect = $this->toMainLayout($template)) {
+            return $redirect;
+        }
+
+        // A scan may be using it right now: another layout is published first.
+        if ($template->is_active) {
+            return back()->with(
+                'error',
+                "'{$template->name}' is the published layout. Publish another layout first, then delete this one.",
+            );
+        }
+
         // A record keeps the layout it was read with, so a layout that has
         // records is never deleted: they would be left pointing at nothing.
-        // Pages still in progress do not count. Deleting the layout only clears
-        // their link to it (nullOnDelete), and the hourly prune removes them.
+        // Pages still in progress do not count (the delete window warns about
+        // them). Deleting the layout only clears their link to it
+        // (nullOnDelete), and the hourly prune removes them.
         $recordCount = $template->records()->count();
         if ($recordCount > 0) {
             return back()->with(
@@ -622,6 +702,13 @@ class DocumentTemplateController extends Controller
         $wasPublished = $template->is_active;
 
         DB::transaction(function () use ($template, $wasPublished) {
+            // Its own page 2 goes with it.
+            $pageTwo = $template->pageTwoTemplate()->where('is_page_two', true)->first();
+            if ($pageTwo !== null) {
+                $template->forceFill(['page_two_template_id' => null])->save();
+                $pageTwo->delete();
+            }
+
             $this->audit->log(
                 'template.deleted',
                 $template,
@@ -641,7 +728,7 @@ class DocumentTemplateController extends Controller
 
         $message = "Layout '{$template->name}' was deleted.";
         if ($wasPublished) {
-            $message .= ' Publish another layout before Staff scan this document type again.';
+            $message .= ' Publish another layout before scanning this document type again.';
         }
 
         return redirect()->route('templates.index')->with('success', $message);
@@ -701,9 +788,14 @@ class DocumentTemplateController extends Controller
                 Rule::exists('document_templates', 'id')
                     ->where('document_type_id', $request->integer('document_type_id'))
                     ->whereNull('page_two_template_id')
-                    ->when($template, fn ($rule) => $rule->whereNot('id', $template->getKey())),
+                    ->when($template, fn ($rule) => $rule->whereNot('id', $template->getKey()))
+                    // Another layout's page 2 is not offered; this layout's own may stay.
+                    ->where(fn ($query) => $query->where('is_page_two', false)
+                        ->when($template?->page_two_template_id, fn ($query, $own) => $query->orWhere('id', $own))),
             ],
             'publish' => ['sometimes', 'boolean'],
+            // "Save and publish" chosen in the builder although something is missing.
+            'publish_anyway' => ['sometimes', 'boolean'],
             // A ruled register may be described entirely by its ledger grid.
             'fields' => ['nullable', 'array', 'max:'.Limits::MAX_FIELDS],
             'columns' => ['nullable', 'array', 'max:60'],
@@ -744,7 +836,9 @@ class DocumentTemplateController extends Controller
             'sample_document.mimes' => 'The sample must be a PDF, PNG, JPG, WEBP or BMP file.',
             'page_two_template_id.exists' => 'Choose another layout of this certificate type for page 2. A layout that has a page 2 of its own cannot be one.',
         ]);
-        $validated['page_two_template_id'] = $validated['page_two_template_id'] ?? null;
+        $validated['page_two_template_id'] = isset($validated['page_two_template_id'])
+            ? (int) $validated['page_two_template_id']
+            : null;
         // Page 2 drawn in the builder (page_two_json) replaces any layout chosen from the list.
         if ($request->filled('page_two_json')) {
             $validated['page_two_template_id'] = $template?->page_two_template_id;
@@ -854,7 +948,7 @@ class DocumentTemplateController extends Controller
     /**
      * The ledger grid, checked and normalised: null when a layout has none.
      *
-     * Staff alignment places the row lines relative to the columns' band (the
+     * The Align step places the row lines relative to the columns' band (the
      * median top and bottom of the columns), so row lines far outside that
      * band mean the two were moved apart and would land on the wrong rows.
      *
@@ -939,7 +1033,7 @@ class DocumentTemplateController extends Controller
     }
 
     /**
-     * Rules for what a field or column holds, and how Staff check its value.
+     * Rules for what a field or column holds, and how Verify checks its value.
      *
      * @return array<string, list<mixed>>
      */
@@ -1042,11 +1136,84 @@ class DocumentTemplateController extends Controller
     }
 
     /**
-     * Publish the layout Staff receive, retiring the previous one atomically.
+     * Publish the layout when nothing stops it (see publishProblems), and say
+     * what does otherwise: then nothing is published. `$anyway`: the admin saw
+     * what is missing in the builder and chose "Save and publish", so it is
+     * published all the same (the audit log keeps what was missing).
+     *
+     * @return list<string> what stopped it; empty when it was published
+     */
+    private function publishIfReady(DocumentTemplate $template, bool $anyway = false): array
+    {
+        $problems = $this->publishProblems($template->fresh() ?? $template);
+        if ($problems !== [] && ! $anyway) {
+            return $problems;
+        }
+
+        $this->publishTemplate($template, $problems);
+
+        return [];
+    }
+
+    /**
+     * What stops a layout from being published, in words for the admin:
+     * a sample page to check it against, real names instead of "Column 3",
+     * and a column or field that holds the person's name (on page 1 or 2).
+     *
+     * @return list<string>
+     */
+    private function publishProblems(DocumentTemplate $template): array
+    {
+        $template->loadMissing(['fields', 'pageTwoTemplate.fields']);
+        $layouts = array_filter([$template, $template->pageTwoTemplate]);
+        $problems = [];
+
+        if (! $template->sample_path) {
+            $problems[] = 'Add a sample page: open a scan of this book in the builder and save.';
+        }
+
+        $unnamed = [];
+        $hasName = false;
+        foreach ($layouts as $layout) {
+            $items = [
+                ...$layout->fields->map(fn (DocumentTemplateField $f) => ['name' => $f->name, 'role' => $f->role])->all(),
+                ...array_map(fn (array $c) => ['name' => (string) $c['name'], 'role' => $c['role'] ?? null], $layout->columns ?? []),
+            ];
+            foreach ($items as $item) {
+                if (preg_match('/^(column|field)\s*\d+$/i', trim($item['name']))) {
+                    $unnamed[] = trim($item['name']);
+                }
+                $hasName = $hasName || $item['role'] === 'name';
+            }
+        }
+
+        if ($unnamed !== []) {
+            $shown = array_slice(array_values(array_unique($unnamed)), 0, 4);
+            $more = count(array_unique($unnamed)) - count($shown);
+            $problems[] = 'Give every column a real name (still named: '.implode(', ', $shown)
+                .($more > 0 ? " and {$more} more" : '').').';
+        }
+        if (! $hasName) {
+            $problems[] = "Mark the column or field that holds the person's name (Field settings → Holds → Name).";
+        }
+
+        return $problems;
+    }
+
+    /** @param  list<string>  $problems */
+    private function notPublishedMessage(string $lead, array $problems): string
+    {
+        return $lead.'. It was not published yet: '.implode(' ', $problems);
+    }
+
+    /**
+     * Publish the layout scans use, retiring the previous one atomically.
      * The row lock prevents two simultaneous publishes from leaving two active
      * layouts for the same certificate type.
+     *
+     * @param  list<string>  $missing  what the publish checks found, when published anyway
      */
-    private function publishTemplate(DocumentTemplate $template): void
+    private function publishTemplate(DocumentTemplate $template, array $missing = []): void
     {
         $sameType = DocumentTemplate::query()
             ->where('document_type_id', $template->document_type_id)
@@ -1064,14 +1231,15 @@ class DocumentTemplateController extends Controller
 
         // Always write the target row. Its in-memory state may be stale if
         // another publish was waiting on the same lock.
-        $template->forceFill(['is_active' => true])->save();
+        $template->forceFill(['is_active' => true, 'published_at' => now()])->save();
 
         $this->audit->log(
             'template.activated',
             $template,
             old: ['previous_active' => $previous->pluck('name')->values()->all()],
-            new: ['active' => $template->name],
-            description: "Published template '{$template->name}' for {$template->typeLabel()}.",
+            new: ['active' => $template->name, ...($missing !== [] ? ['published_with_missing' => $missing] : [])],
+            description: "Published template '{$template->name}' for {$template->typeLabel()}."
+                .($missing !== [] ? ' Published with checks not done: '.implode(' ', $missing) : ''),
         );
     }
 
@@ -1117,7 +1285,9 @@ class DocumentTemplateController extends Controller
         array $validated,
         DocumentTypeDefinition $documentType,
         ?DocumentTemplate $parent = null,
+        bool $pageTwo = false,
     ): DocumentTemplate {
+        // Page 2 is linked by savePageTwo(), never shared from the payload.
         $template = DocumentTemplate::create([
             'name' => $validated['name'],
             'doc_type' => $documentType->legacyType()->value,
@@ -1127,11 +1297,11 @@ class DocumentTemplateController extends Controller
             'grouping_mode' => $validated['grouping_mode'],
             'columns' => $validated['columns'],
             'ruled_ys' => $validated['ruled_ys'],
-            'page_two_template_id' => $validated['page_two_template_id'] ?? null,
             'is_active' => false,
             'created_by' => $request->user()->getKey(),
             'parent_id' => $parent?->getKey(),
         ]);
+        $template->forceFill(['is_page_two' => $pageTwo, 'is_version' => $parent !== null])->save();
 
         $this->syncFields($template, $validated['fields']);
 
@@ -1177,12 +1347,14 @@ class DocumentTemplateController extends Controller
     ): RedirectResponse {
         $publish = (bool) ($validated['publish'] ?? false);
 
-        $version = DB::transaction(function () use ($request, $template, $validated, $documentType, $publish, $pageTwo) {
+        $problems = [];
+        $version = DB::transaction(function () use ($request, $template, $validated, $documentType, $publish, $pageTwo, &$problems) {
             $version = $this->createLayout($request, $validated, $documentType, $template);
-            $this->savePageTwo($request, $version, $pageTwo, $documentType, $template->pageTwoTemplate);
+            // The new version gets its own page 2 (a copy): the old version keeps its own.
+            $this->savePageTwo($request, $version, $pageTwo, $documentType, $validated['page_two_template_id'], fresh: true);
 
             if ($publish) {
-                $this->publishTemplate($version);
+                $problems = $this->publishIfReady($version, (bool) ($validated['publish_anyway'] ?? false));
             }
 
             return $version;
@@ -1192,11 +1364,14 @@ class DocumentTemplateController extends Controller
         $kept = $records > 0
             ? " '{$template->name}' is kept unchanged for the {$records} ".Str::plural('record', $records).' read with it.'
             : " '{$template->name}' is kept unchanged.";
+        $redirect = redirect()->route('templates.edit', $version);
 
-        return redirect()
-            ->route('templates.edit', $version)
-            ->with('success', $publish
-                ? 'Saved as a new version and published for Staff.'.$kept
+        if ($problems !== []) {
+            return $redirect->with('error', $this->notPublishedMessage('Saved as a new draft version', $problems).$kept);
+        }
+
+        return $redirect->with('success', $publish
+                ? 'Saved as a new version and published.'.$kept
                 : 'Saved as a new draft version.'.$kept.($template->is_active ? ' It stays published until you publish this draft.' : ''));
     }
 
@@ -1215,7 +1390,7 @@ class DocumentTemplateController extends Controller
     }
 
     /**
-     * Whether a save changes what Staff read with the layout: its markers,
+     * Whether a save changes what scans read with the layout: its markers,
      * field settings, row lines or person rows. Name, notes and sample (with
      * its page shape) only describe it.
      *

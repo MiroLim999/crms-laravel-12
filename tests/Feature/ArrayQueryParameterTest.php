@@ -27,14 +27,10 @@ class ArrayQueryParameterTest extends TestCase
         return [
             'navbar search on the dashboard' => ['dashboard', 'q', 200],
             'dashboard trend period' => ['dashboard', 'trend_period', 200],
-            'dashboard staff start date' => ['dashboard', 'staff_from', 200],
+            'dashboard processing start date' => ['dashboard', 'processing_from', 200],
             'navbar search on reports' => ['reports.index', 'q', 200],
             'records search' => ['records.index', 'q', 200],
             'change request search' => ['change-requests.index', 'q', 302],
-            'change request status' => ['change-requests.index', 'status', 302],
-            'user search' => ['users.index', 'q', 302],
-            'user role' => ['users.index', 'role', 302],
-            'user status' => ['users.index', 'status', 302],
             'template builder type' => ['templates.create', 'type', 404],
             'scan workspace type' => ['documents.workspace', 'type', 302],
         ];

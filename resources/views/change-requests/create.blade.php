@@ -1,10 +1,10 @@
 @extends('layouts.app')
 
-@section('title', 'Request a Change')
+@section('title', 'Correct Record')
 
 @section('content')
     <main class="change-request-create" data-change-request-form>
-        <x-page-header title="Request a Change" :subtitle="$recordHeading">
+        <x-page-header title="Correct Record" :subtitle="$recordHeading">
             <a href="{{ route('records.show', $record) }}" class="btn btn-outline-secondary">
                 Back to record
             </a>
@@ -13,8 +13,8 @@
         <div class="alert alert-info change-request-guidance" role="alert">
             <i class="icon-base bx bx-info-circle icon-md" aria-hidden="true"></i>
             <div>
-                <strong>The verified record remains locked.</strong>
-                Change only incorrect values and explain the evidence. Nothing is updated until an Admin approves the request.
+                <strong>Saving updates the record right away.</strong>
+                Change only the wrong values. The old values stay in the record's Change history and the Audit Log.
             </div>
         </div>
 
@@ -29,10 +29,10 @@
             <div class="record-summary-item">
                 <span>Verified fields</span>
                 <strong>{{ $record->fields->count() }}</strong>
-                <small>Current locked values</small>
+                <small>Current saved values</small>
             </div>
             <div class="record-summary-item change-request-live-summary">
-                <span>Proposed changes</span>
+                <span>Changes</span>
                 <strong data-change-count>0</strong>
                 <small data-change-count-label>No values changed</small>
             </div>
@@ -45,8 +45,8 @@
                 <section class="change-request-editor" aria-labelledby="proposed-values-heading">
                     <div class="change-request-editor__header">
                         <div>
-                            <h5 id="proposed-values-heading">Proposed values</h5>
-                            <p>Current values appear beside editable proposals for a direct comparison.</p>
+                            <h5 id="proposed-values-heading">Values</h5>
+                            <p>Each current value is shown beside a box for the right value.</p>
                         </div>
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-change-reset>
                             Reset values
@@ -84,7 +84,7 @@
                                                 <strong>{{ filled($field->verified_value) ? $field->verified_value : 'Not recorded' }}</strong>
                                             </div>
                                             <div>
-                                                <label for="field-{{ $field->getKey() }}" class="form-label">Proposed value</label>
+                                                <label for="field-{{ $field->getKey() }}" class="form-label">Correct value</label>
                                                 <input type="text"
                                                        id="field-{{ $field->getKey() }}"
                                                        name="values[{{ $field->getKey() }}]"
@@ -106,24 +106,22 @@
                 </section>
 
                 <aside class="change-request-submit-panel">
-                    <x-card title="Reason for correction"
-                            subtitle="Give the reviewer enough context to verify your proposal.">
-                        <label for="change-request-reason" class="form-label">Explanation</label>
-                        <textarea id="change-request-reason" name="reason" rows="7"
+                    <x-card title="Save correction"
+                            subtitle="A reason is optional, but helps later readers of the history.">
+                        <label for="change-request-reason" class="form-label">Reason <span class="text-muted">(optional)</span></label>
+                        <textarea id="change-request-reason" name="reason" rows="5"
                                   maxlength="2000"
                                   class="form-control @error('reason') is-invalid @enderror"
-                                  placeholder="What is incorrect, and what in the original document confirms the proposed value?"
-                                  required>{{ old('reason') }}</textarea>
+                                  placeholder="For example: the name was misread; the original page says Reyes.">{{ old('reason') }}</textarea>
                         @error('reason')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                        <div class="form-text">Minimum 10 characters.</div>
 
                         <div class="change-request-submit-panel__status" aria-live="polite">
                             <span class="badge bg-label-secondary" data-change-ready-badge>No changes selected</span>
                         </div>
 
                         <button type="submit" class="btn btn-primary w-100" data-change-submit>
-                            <i class="icon-base bx bx-git-pull-request icon-sm me-1" aria-hidden="true"></i>
-                            Submit for review
+                            <i class="icon-base bx bx-save icon-sm me-1" aria-hidden="true"></i>
+                            Save correction
                         </button>
                         <a href="{{ route('records.show', $record) }}" class="btn btn-outline-secondary w-100 mt-2">
                             Cancel

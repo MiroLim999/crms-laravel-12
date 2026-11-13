@@ -15,7 +15,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class OcrSetting extends Model
 {
     protected $fillable = [
-        'allow_staff_model_choice',
         'confidence_review_threshold',
         'updated_by',
     ];
@@ -23,7 +22,6 @@ class OcrSetting extends Model
     protected function casts(): array
     {
         return [
-            'allow_staff_model_choice' => 'boolean',
             'confidence_review_threshold' => 'float',
         ];
     }
@@ -69,18 +67,6 @@ class OcrSetting extends Model
             return (float) (static::current()->confidence_review_threshold ?? $fallback);
         } catch (\Throwable) {
             return $fallback;
-        }
-    }
-
-    /**
-     * May Staff choose a model other than the promoted one?
-     */
-    public static function staffMayChooseModel(): bool
-    {
-        try {
-            return static::current()->allow_staff_model_choice;
-        } catch (\Throwable) {
-            return false;
         }
     }
 }

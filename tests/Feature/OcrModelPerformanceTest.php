@@ -94,10 +94,10 @@ class OcrModelPerformanceTest extends TestCase
     public function test_submitted_scan_results_are_never_used_as_benchmark_data(): void
     {
         OcrModel::create(['key' => 'scanned-model', 'label' => 'Scanned model']);
-        $staff = User::factory()->staff()->create();
-        $record = CivilRecord::factory()->submitted($staff)->create([
+        $account = User::factory()->superAdmin()->create();
+        $record = CivilRecord::factory()->submitted($account)->create([
             'ocr_model_key' => 'scanned-model',
-            'created_by' => $staff,
+            'created_by' => $account,
         ]);
         RecordField::factory()->create([
             'record_id' => $record,

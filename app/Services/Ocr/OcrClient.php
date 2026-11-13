@@ -50,7 +50,7 @@ class OcrClient
     /**
      * Is the service up, and what is it running on?
      *
-     * @return array{reachable: bool, status: string|null, device: string|null, default: string|null, models: list<array<string, mixed>>, error: string|null}
+     * @return array{reachable: bool, status: string|null, device: string|null, precision: string|null, default: string|null, models: list<array<string, mixed>>, error: string|null}
      */
     public function health(bool $fresh = false): array
     {
@@ -66,10 +66,10 @@ class OcrClient
      *
      * The New Document step shows whether the service is online on every load.
      * With the service down each probe waits for the refused connection (about
-     * two seconds on Windows), so probing every time made Staff wait that long
+     * two seconds on Windows), so probing every time made the user wait that long
      * whenever they chose a type or cancelled a scan.
      *
-     * @return array{reachable: bool, status: string|null, device: string|null, default: string|null, models: list<array<string, mixed>>, error: string|null}
+     * @return array{reachable: bool, status: string|null, device: string|null, precision: string|null, default: string|null, models: list<array<string, mixed>>, error: string|null}
      */
     public function recentHealth(int $seconds = 30): array
     {
@@ -88,6 +88,8 @@ class OcrClient
                 'reachable' => true,
                 'status' => $data['status'] ?? null,
                 'device' => $data['device'] ?? null,
+                // "fp16" or "fp32"; null from a service older than the field.
+                'precision' => $data['precision'] ?? null,
                 'default' => $data['default'] ?? null,
                 'models' => $data['models'] ?? [],
                 'error' => null,
@@ -97,6 +99,7 @@ class OcrClient
                 'reachable' => false,
                 'status' => null,
                 'device' => null,
+                'precision' => null,
                 'default' => null,
                 'models' => [],
                 'error' => $this->reason($e),

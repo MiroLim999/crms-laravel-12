@@ -11,35 +11,32 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 /**
- * The correction workflow for locked records.
+ * Corrections to saved records.
  *
- * This service is the only path by which a submitted record's values change. It
- * exists so that no controller is ever tempted to write to a locked record
- * directly, and so the proposal and the decision are both on record.
- *
- * Note the split: Staff propose, Admin decides, and the values are applied by the
- * approval - not by the Admin editing anything.
+ * This service is the only path by which a saved record's values change. A
+ * correction is stored as a change request that is approved the moment it is
+ * saved, so the record's Change history and the dashboard keep working, and the
+ * old and new values stay on record.
  */
 class ChangeRequestService
 {
     public function __construct(private readonly AuditLogger $audit) {}
 
     /**
-     * Raise a request against a locked record.
+     * Save a correction: change the values at once and keep the old ones.
      *
      * @param  array<int, string|null>  $proposals  Keyed by record_field id.
      */
-    public function open(
+    public function correct(
         CivilRecord $record,
         array $proposals,
-        string $reason,
-        User $requester,
+        ?string $reason,
+        User $editor,
     ): ChangeRequest {
         $fields = $record->fields->keyBy('id');
 
-        // Only keep fields whose value actually differs, so a reviewer is not
-        // asked to approve no-ops. Requiredness is a capture-time invariant and
-        // cannot be bypassed by manually posting an empty proposal.
+        // Only keep fields whose value actually differs. Requiredness is a
+        // capture-time rule and cannot be bypassed by posting an empty value.
         $changes = [];
         foreach ($proposals as $fieldId => $value) {
             $field = $fields->get((int) $fieldId);
@@ -58,65 +55,31 @@ class ChangeRequestService
             throw new ChangeRequestException('None of those values differ from what is on record.');
         }
 
-        return DB::transaction(function () use ($record, $changes, $fields, $reason, $requester) {
-            // Lock the record row first, so two submissions for one record take
-            // turns here and the second one finds the request the first created.
+        $reason = $this->normaliseValue($reason);
+
+        return DB::transaction(function () use ($record, $changes, $fields, $reason, $editor) {
+            // Lock the record row, so two saves of one record take turns.
             CivilRecord::whereKey($record->getKey())->lockForUpdate()->first();
 
-            if ($record->hasPendingChangeRequest()) {
-                throw new ChangeRequestException('This record already has a pending change request.');
-            }
-
-            $request = $record->changeRequests()->create([
-                'status' => ChangeRequestStatus::Pending,
+            $correction = $record->changeRequests()->create([
+                'status' => ChangeRequestStatus::Approved,
                 'reason' => $reason,
-                'requested_by' => $requester->getKey(),
+                'requested_by' => $editor->getKey(),
+                'reviewed_by' => $editor->getKey(),
+                'reviewed_at' => now(),
             ]);
 
+            $previous = [];
+            $applied = [];
+
             foreach ($changes as $fieldId => $proposed) {
-                $request->items()->create([
+                $field = $fields[$fieldId];
+
+                $correction->items()->create([
                     'record_field_id' => $fieldId,
-                    'current_value' => $fields[$fieldId]->verified_value,
+                    'current_value' => $field->verified_value,
                     'proposed_value' => $proposed,
                 ]);
-            }
-
-            $changeCount = count($changes);
-
-            $this->audit->log(
-                'change_request.opened',
-                $request,
-                new: [
-                    'record_id' => $record->getKey(),
-                    'field_count' => count($changes),
-                ],
-                description: "Requested {$changeCount} change(s) on record #{$record->getKey()}.",
-                actor: $requester,
-            );
-
-            return $request->load('items.field');
-        });
-    }
-
-    /**
-     * Approve and apply. This is the only place a locked record's values move.
-     */
-    public function approve(ChangeRequest $request, User $reviewer, ?string $note = null): ChangeRequest
-    {
-        return DB::transaction(function () use ($request, $reviewer, $note) {
-            $request = $this->lockOpen($request);
-
-            $applied = [];
-            $previous = [];
-
-            foreach ($request->items as $item) {
-                $field = $item->field;
-
-                if ($field === null) {
-                    continue;
-                }
-
-                $proposed = $this->normaliseFieldValue($field, $item->proposed_value);
 
                 $previous[$field->name] = $field->verified_value;
                 $applied[$field->name] = $proposed;
@@ -124,98 +87,19 @@ class ChangeRequestService
                 $field->forceFill(['verified_value' => $proposed])->save();
             }
 
-            $request->forceFill([
-                'status' => ChangeRequestStatus::Approved,
-                'reviewed_by' => $reviewer->getKey(),
-                'reviewed_at' => now(),
-                'decision_note' => $note,
-            ])->save();
+            $count = count($changes);
 
             $this->audit->log(
-                'change_request.approved',
-                $request->record,
+                'record.corrected',
+                $record,
                 old: $previous,
-                new: $applied,
-                description: "Approved change request #{$request->getKey()} and applied "
-                    .count($applied).' value(s).',
-                actor: $reviewer,
+                new: $reason === null ? $applied : [...$applied, 'reason' => $reason],
+                description: "Corrected {$count} value(s) on record #{$record->getKey()}.",
+                actor: $editor,
             );
 
-            return $request;
+            return $correction->load('items.field');
         });
-    }
-
-    public function reject(ChangeRequest $request, User $reviewer, ?string $note = null): ChangeRequest
-    {
-        return DB::transaction(function () use ($request, $reviewer, $note) {
-            $request = $this->lockOpen($request);
-
-            $request->forceFill([
-                'status' => ChangeRequestStatus::Rejected,
-                'reviewed_by' => $reviewer->getKey(),
-                'reviewed_at' => now(),
-                'decision_note' => $note,
-            ])->save();
-
-            // The note can run to 2,000 characters, so it goes in new_values,
-            // which the Audit Log shows in full, and the description stays short.
-            $this->audit->log(
-                'change_request.rejected',
-                $request,
-                new: ['decision_note' => $note],
-                description: "Rejected change request #{$request->getKey()}.",
-                actor: $reviewer,
-            );
-
-            return $request;
-        });
-    }
-
-    /**
-     * The requester changing their mind. Not a decision, so it needs no reviewer.
-     */
-    public function withdraw(ChangeRequest $request, User $actor): ChangeRequest
-    {
-        return DB::transaction(function () use ($request, $actor) {
-            $request = $this->lockOpen($request);
-
-            $request->forceFill(['status' => ChangeRequestStatus::Withdrawn])->save();
-
-            $this->audit->log(
-                'change_request.withdrawn',
-                $request,
-                description: "Withdrew change request #{$request->getKey()}.",
-                actor: $actor,
-            );
-
-            return $request;
-        });
-    }
-
-    /**
-     * Reload the request with its row locked, and check it is still pending.
-     * Call this inside a transaction.
-     *
-     * A double-click, or two reviewers deciding at once, would otherwise both
-     * pass the check on their own stale copy. With the lock, the second one
-     * waits for the first to commit, then sees the decision and is refused.
-     */
-    private function lockOpen(ChangeRequest $request): ChangeRequest
-    {
-        $locked = ChangeRequest::whereKey($request->getKey())->lockForUpdate()->firstOrFail();
-
-        $this->guardOpen($locked);
-
-        return $locked;
-    }
-
-    private function guardOpen(ChangeRequest $request): void
-    {
-        if (! $request->isOpen()) {
-            throw new ChangeRequestException(
-                "This request is already {$request->status->value} and cannot be changed.",
-            );
-        }
     }
 
     private function normaliseFieldValue(RecordField $field, mixed $value): ?string

@@ -19,6 +19,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -32,8 +33,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * Verify step polls for the stored result, shows each crop TrOCR read, and lets
  * a reviewer redraw an outline, which re-crops and re-reads that line alone.
  *
- * Staff and Super Admin only, and every page is visible to its uploader alone:
- * these are unsubmitted civil registry scans.
+ * Every page is visible to its uploader alone: these are unsubmitted civil
+ * registry scans.
  */
 class DocumentPageController extends Controller
 {
@@ -60,9 +61,8 @@ class DocumentPageController extends Controller
             'page' => ['required', 'file', 'mimes:png', 'max:40960'],
             'scan' => ['sometimes', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
             'batch_key' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
-            'model' => ['nullable', 'string', 'max:255'],
             // Detect: straighten the page and fit the template to it, outline
-            // every line, and stop before reading so Staff can check first.
+            // every line, and stop before reading so the user can check first.
             'detect' => ['sometimes', 'boolean'],
             'defer_scan' => ['sometimes', 'boolean'],
             ...GeometryInput::rules(),
@@ -87,7 +87,7 @@ class DocumentPageController extends Controller
             'width' => $size[0],
             'height' => $size[1],
             'geometry' => $geometry,
-            'ocr_model_key' => $this->modelChoice->resolve($validated['model'] ?? null),
+            'ocr_model_key' => $this->modelChoice->resolve(),
         ]);
 
         $disk = Storage::disk('local');
@@ -125,7 +125,7 @@ class DocumentPageController extends Controller
     }
 
     /**
-     * Snap to table: fit the markers Staff are aligning onto this page's
+     * Snap to table: fit the markers being aligned onto this page's
      * printed table, and return the printed rules for magnetic edges.
      *
      * Nothing is stored: the page image is read from the upload itself and
@@ -165,8 +165,8 @@ class DocumentPageController extends Controller
     }
 
     /**
-     * Markers moved after Detect: outline this page again from where Staff
-     * have them now, then read it.
+     * Markers moved after Detect: outline this page again from where the
+     * markers are now, then read it.
      *
      * The page itself is unchanged - already uploaded, and already
      * straightened by Detect - so nothing is sent but the markers, and the
@@ -194,7 +194,6 @@ class DocumentPageController extends Controller
         }
 
         $validated = $request->validate([
-            'model' => ['nullable', 'string', 'max:255'],
             ...GeometryInput::rules(),
         ]);
         $geometry = GeometryInput::checked($validated['geometry']);
@@ -209,7 +208,7 @@ class DocumentPageController extends Controller
             'geometry' => $geometry,
             // Detect's notes describe the grid it fitted, which is gone now.
             'notes' => [],
-            'ocr_model_key' => $this->modelChoice->resolve($validated['model'] ?? null),
+            'ocr_model_key' => $this->modelChoice->resolve(),
         ])->save();
 
         ProcessDocumentPage::dispatch($page->getKey(), ProcessDocumentPage::MODE_FULL);
@@ -228,11 +227,9 @@ class DocumentPageController extends Controller
             return response()->json(['message' => 'Detect this page again before reading it.'], 409);
         }
 
-        $validated = $request->validate(['model' => ['nullable', 'string', 'max:255']]);
-
         $page->forceFill([
             'status' => DocumentPage::STATUS_READING,
-            'ocr_model_key' => $this->modelChoice->resolve($validated['model'] ?? null),
+            'ocr_model_key' => $this->modelChoice->resolve(),
         ])->save();
 
         ProcessDocumentPage::dispatch($page->getKey(), ProcessDocumentPage::MODE_READ);
@@ -580,6 +577,53 @@ class DocumentPageController extends Controller
     }
 
     /**
+     * Move whole rows of the table to other people, all at once: every line of
+     * row `from` goes to row `to`, keeping its column. A two-page register
+     * joins its pages by row, so a row of page 2 that landed on the wrong
+     * person is put right by moving it, or by swapping two rows (5 -> 6 and
+     * 6 -> 5 in one request). The moves happen together, so a swap never
+     * mixes the two rows. A field of a layout box, and a line between two
+     * rows, stay where they are.
+     */
+    public function moveRows(Request $request, DocumentPage $page): JsonResponse
+    {
+        $this->authorizePage($request, $page);
+
+        if (! $page->hasLines()) {
+            return response()->json(['message' => 'This page is still being processed.'], 409);
+        }
+        $rows = max(0, count($page->geometry['ruled_ys'] ?? []) - 1);
+        if ($rows === 0) {
+            return response()->json(['message' => 'This page has no table to move rows in.'], 422);
+        }
+        $lastRow = $this->lastPerson($page, $rows);
+        $validated = $request->validate([
+            'moves' => ['required', 'array', 'min:1', 'max:'.Limits::MAX_FIELDS],
+            'moves.*.from' => ['required', 'integer', 'min:1', 'max:'.$lastRow, 'distinct'],
+            'moves.*.to' => ['required', 'integer', 'min:1', 'max:'.min(Limits::MAX_FIELDS, $lastRow + 1), 'distinct'],
+        ]);
+        $to = collect($validated['moves'])->mapWithKeys(fn (array $move) => [(int) $move['from'] => (int) $move['to']]);
+
+        // Read first, then write: each line goes by the row it had before any move.
+        $moving = $page->lines()->get()
+            ->reject(fn (PageLine $line) => $line->belongsToField()
+                || in_array(PageLine::FLAG_NO_ROW, $line->flags ?? [], true)
+                || ! $to->has((int) $line->row));
+        DB::transaction(function () use ($moving, $to, $page): void {
+            foreach ($moving as $line) {
+                $line->forceFill(['row' => $to[(int) $line->row]])->save();
+            }
+            $this->refreshSharedCells($page);
+        });
+
+        return response()->json([
+            'moved' => $moving->count(),
+            'lines' => $page->lines()->get()->map->toClient()->values(),
+            'flags' => $this->lineFlags($page),
+        ]);
+    }
+
+    /**
      * Remove one outlined line before it is read: a stray mark the detector
      * took for writing, a word wrongly split in two, or a line that simply
      * does not belong. The line and its crop are kept until the page is
@@ -821,7 +865,7 @@ class DocumentPageController extends Controller
 
     /**
      * The template's ledger columns that are not on this page's grid: the ones
-     * Staff removed in Align.
+     * removed in Align.
      *
      * @return list<string>
      */
@@ -885,7 +929,7 @@ class DocumentPageController extends Controller
             'deskew' => $page->deskew_degrees ?? 0.0,
             // The markers as the page was outlined with them (fitted by Detect).
             'geometry' => $page->geometry,
-            // What Staff should check about the grid as a whole.
+            // What to check about the grid as a whole.
             'notes' => $page->notes ?? [],
             'statusUrl' => route('documents.pages.show', $page),
             'readUrl' => route('documents.pages.read', $page),

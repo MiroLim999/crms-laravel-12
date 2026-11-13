@@ -8,31 +8,34 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 
 /**
- * Seeds the one account that cannot be created through the UI.
+ * Makes the one CRMS account, the Super Admin.
  *
- * Every other account is provisioned by a Super Admin, so this is the bootstrap
- * entry point into the system.
+ * Only when it is missing: running `php artisan db:seed` again never resets an
+ * existing account's name or password. The first password comes from
+ * config/crms.php and must be replaced at the first sign-in. A forgotten
+ * password is reset with `php artisan crms:reset-password`.
  */
 class SuperAdminSeeder extends Seeder
 {
     public function run(): void
     {
         $email = config('crms.super_admin.email');
+        $role = Role::of(RoleSlug::SuperAdmin);
 
-        User::updateOrCreate(
-            ['email' => $email],
-            [
-                'name' => config('crms.super_admin.name'),
-                'password' => config('crms.super_admin.password'),
-                'role_id' => Role::of(RoleSlug::SuperAdmin)->getKey(),
-                // Not a temporary password - this is the documented bootstrap
-                // credential, so it does not force a change on first login.
-                'must_change_password' => false,
-                'is_active' => true,
-                'password_changed_at' => now(),
-            ],
-        );
+        if (User::where('role_id', $role->getKey())->exists()) {
+            $this->command?->info('Super Admin already exists: left as it is.');
 
-        $this->command?->info("Super Admin ready: {$email}");
+            return;
+        }
+
+        User::create([
+            'name' => config('crms.super_admin.name'),
+            'email' => $email,
+            'password' => config('crms.super_admin.password'),
+            'role_id' => $role->getKey(),
+            'must_change_password' => true,
+        ]);
+
+        $this->command?->info("Super Admin ready: {$email} (choose your own password at the first sign-in)");
     }
 }

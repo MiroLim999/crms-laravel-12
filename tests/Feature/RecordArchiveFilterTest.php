@@ -17,10 +17,10 @@ class RecordArchiveFilterTest extends TestCase
 
     public function test_an_invalid_date_gives_a_message_instead_of_an_error_page(): void
     {
-        $staff = User::factory()->staff()->create();
-        $this->submittedAt('2026-09-15 12:00:00', $staff);
+        $account = User::factory()->superAdmin()->create();
+        $this->submittedAt('2026-09-15 12:00:00', $account);
 
-        $response = $this->actingAs($staff)
+        $response = $this->actingAs($account)
             ->get(route('records.index', ['from' => 'abc']))
             ->assertOk()
             ->assertSee('The from date field must be a valid date.')
@@ -32,13 +32,13 @@ class RecordArchiveFilterTest extends TestCase
 
     public function test_a_valid_date_range_still_filters_the_records(): void
     {
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
         // Midday UTC, so each day is the same in UTC and in Philippine time.
-        $inside = $this->submittedAt('2026-09-15 12:00:00', $staff);
-        $this->submittedAt('2026-08-31 12:00:00', $staff);
-        $this->submittedAt('2026-10-01 12:00:00', $staff);
+        $inside = $this->submittedAt('2026-09-15 12:00:00', $account);
+        $this->submittedAt('2026-08-31 12:00:00', $account);
+        $this->submittedAt('2026-10-01 12:00:00', $account);
 
-        $records = $this->actingAs($staff)
+        $records = $this->actingAs($account)
             ->get(route('records.index', ['from' => '2026-09-01', 'to' => '2026-09-30']))
             ->assertOk()
             ->assertViewHas('errors', fn ($errors) => ! $errors->any())
@@ -49,26 +49,26 @@ class RecordArchiveFilterTest extends TestCase
 
     public function test_dates_are_philippine_days(): void
     {
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
         // 07:30 on 2 October in the Philippines, but still 1 October in UTC.
-        $record = $this->submittedAt('2026-10-01 23:30:00', $staff);
+        $record = $this->submittedAt('2026-10-01 23:30:00', $account);
 
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->get(route('records.index', ['from' => '2026-10-02']))
             ->assertOk()
             ->assertSee('2 Oct 2026')
             ->assertViewHas('records', fn ($records) => $records->pluck('id')->all() === [$record->getKey()]);
 
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->get(route('records.index', ['to' => '2026-10-01']))
             ->assertOk()
             ->assertViewHas('records', fn ($records) => $records->isEmpty());
     }
 
-    private function submittedAt(string $utc, User $staff): CivilRecord
+    private function submittedAt(string $utc, User $account): CivilRecord
     {
-        return CivilRecord::factory()->submitted($staff)->create([
-            'created_by' => $staff->getKey(),
+        return CivilRecord::factory()->submitted($account)->create([
+            'created_by' => $account->getKey(),
             'submitted_at' => $utc,
         ]);
     }

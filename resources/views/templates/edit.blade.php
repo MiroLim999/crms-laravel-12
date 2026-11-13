@@ -29,8 +29,9 @@
             'baselineRuledYs' => $ruledYs,
             // The layout of page 2 of a two-page spread, drawn beside page 1 (null: one page).
             'pageTwo' => $pageTwo ?? null,
+            // Already published: a save that changes nothing is not a new publish.
+            'published' => $published,
             'detectGridUrl' => route('templates.detect-grid'),
-            'testLayoutUrl' => route('templates.test-layout'),
             'csrf' => csrf_token(),
             'initialGroupingMode' => $currentGroupingMode,
             'baselineGroupingMode' => $template?->grouping_mode ?? 'auto',
@@ -59,13 +60,13 @@
                         {{ $template ? $template->name : 'New template layout' }}
                     </h1>
                     @if ($published)
-                        <span class="badge bg-label-success">Published for Staff</span>
+                        <span class="badge bg-label-success">Published</span>
                     @else
                         <span class="badge bg-label-secondary">Draft</span>
                     @endif
                     @if ($parent)
                         <a href="{{ route('templates.edit', $parent) }}" class="template-builder-page__parent">
-                            Based on “{{ $parent->name }}”
+                            {{ $template?->is_version ? 'New version of' : 'Based on' }} “{{ $parent->name }}”
                         </a>
                     @endif
                 </div>
@@ -88,6 +89,7 @@
             <input type="hidden" name="doc_type" value="{{ $docType->value }}">
             <input type="hidden" name="document_type_id" value="{{ $docType->getKey() }}">
             <input type="hidden" name="publish" value="0" id="publishIntent">
+            <input type="hidden" name="publish_anyway" value="0" id="publishAnyway">
             @if ($template)
                 {{-- The revision this editor opened: an older copy cannot overwrite a newer save. --}}
                 <input type="hidden" name="revision" value="{{ old('revision', $template->revision) }}">
@@ -129,12 +131,6 @@
                                         <span>Delete sample</span>
                                     </button>
                                 @endif
-
-                                <button type="button" class="btn btn-sm btn-outline-primary template-test-button" id="testLayoutBtn"
-                                        title="Outline the sample with this layout, as Detect does for Staff (nothing is saved)">
-                                    <i class="icon-base bx bx-radar icon-sm" aria-hidden="true"></i>
-                                    <span>Test on sample</span>
-                                </button>
 
                                 <span class="marker-toolbar__divider" aria-hidden="true"></span>
                                 <div class="btn-group marker-zoom-controls" role="group" aria-label="Document zoom controls">
@@ -219,9 +215,42 @@
                         @enderror
 
                         <div class="doc-viewport" id="docViewport">
-                            <div class="template-builder-canvas-note" id="sampleHint" role="status">
+                            {{-- Fields placed with no sample open: the small reminder. --}}
+                            <div class="template-builder-canvas-note d-none" id="sampleHint" role="status">
                                 <i class="icon-base bx bx-cloud-upload" aria-hidden="true"></i>
                                 <span><strong>Blank preview</strong> &mdash; choose a sample PDF or image to align markers precisely.</span>
+                            </div>
+                            {{-- Nothing on the page yet: a sample can be dropped anywhere in this area, or chosen
+                                 here. The picture shows what happens: a page lands, then its fields are marked. --}}
+                            <div class="template-dropzone {{ $template?->sample_path ? 'd-none' : '' }}" id="sampleDropzone">
+                                <div class="template-dropzone__panel">
+                                    <div class="template-dropzone__art" aria-hidden="true">
+                                        <span class="template-dropzone__tray"></span>
+                                        <span class="template-dropzone__sheet">
+                                            <span class="template-dropzone__line"></span>
+                                            <span class="template-dropzone__line"></span>
+                                            <span class="template-dropzone__line"></span>
+                                            <span class="template-dropzone__line"></span>
+                                            <span class="template-dropzone__marker template-dropzone__marker--1"></span>
+                                            <span class="template-dropzone__marker template-dropzone__marker--2"></span>
+                                            <span class="template-dropzone__marker template-dropzone__marker--3"></span>
+                                        </span>
+                                    </div>
+                                    <p class="template-dropzone__title">
+                                        <span class="template-dropzone__when-idle">Drop a sample document here</span>
+                                        <span class="template-dropzone__when-dragging">Release to open it</span>
+                                    </p>
+                                    <p class="template-dropzone__text">
+                                        A scan or PDF of the form. You mark where each field is on top of it.
+                                    </p>
+                                    <label for="sampleScan" class="btn btn-primary template-dropzone__button">
+                                        <i class="icon-base bx bx-cloud-upload icon-sm me-1" aria-hidden="true"></i>Choose sample
+                                    </label>
+                                    <span class="document-dropzone__formats" aria-label="Accepted formats">
+                                        <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>BMP</span>
+                                    </span>
+                                    <p class="template-dropzone__note">Up to 20 MB. No sample? Add a field on the right to start on a blank page.</p>
+                                </div>
                             </div>
                             {{-- Two pages side by side when the layout has a page 2: the page being edited is
                                  live, the other shows its own layout, and a click on it edits that page. --}}
@@ -257,7 +286,7 @@
                 <div class="col-xl-3 col-lg-4">
                     <aside class="template-builder-side-panel">
                         {{--
-                            Cards as on the Staff Align panel: the ones used now and then
+                            Cards as on the Align panel: the ones used now and then
                             (details, rows and columns, person rows) start closed and open
                             from their header; tips sit behind a ?. Details open for a new
                             layout, or when the name or notes came back with an error.
@@ -290,27 +319,38 @@
                                     </div>
 
                                     {{-- A register's left and right pages are often laid out differently: this
-                                         layout is page 1, and another layout of the type is page 2. --}}
-                                    <div class="mb-3">
-                                        <label for="page_two_template_id" class="form-label">Page 2 format</label>
-                                        <select id="page_two_template_id" name="page_two_template_id"
-                                                class="form-select form-select-sm @error('page_two_template_id') is-invalid @enderror">
-                                            <option value="">Same as this layout</option>
-                                            @foreach ($pageTwoChoices as $choice)
-                                                <option value="{{ $choice->getKey() }}"
-                                                        @selected((string) old('page_two_template_id', $template?->page_two_template_id) === (string) $choice->getKey())>
-                                                    {{ $choice->name }}{{ $choice->is_active ? ' (published)' : '' }}
-                                                </option>
-                                            @endforeach
-                                        </select>
-                                        <div class="form-text">
-                                            For a two-page spread whose pages are laid out differently: this layout is
-                                            page 1, the one chosen here is page 2. Build page 2 as its own layout first.
+                                         layout is page 1, and page 2 is its own (hidden) layout. It can start as a
+                                         copy of another layout; changing it later never changes that layout. --}}
+                                    @if ($pageTwo ?? null)
+                                        <div class="mb-3">
+                                            <span class="form-label d-block">Page 2</span>
+                                            <div class="form-text mt-0">
+                                                This layout has its own page 2. Turn on <strong>Two pages</strong> above to change it,
+                                                or turn it off and save to remove it.
+                                            </div>
                                         </div>
-                                        @error('page_two_template_id')
-                                            <div class="invalid-feedback">{{ $message }}</div>
-                                        @enderror
-                                    </div>
+                                    @else
+                                        <div class="mb-3">
+                                            <label for="page_two_template_id" class="form-label">Copy page 2 from</label>
+                                            <select id="page_two_template_id" name="page_two_template_id"
+                                                    class="form-select form-select-sm @error('page_two_template_id') is-invalid @enderror">
+                                                <option value="">None: page 2 is laid out like page 1</option>
+                                                @foreach ($pageTwoChoices as $choice)
+                                                    <option value="{{ $choice->getKey() }}"
+                                                            @selected((string) old('page_two_template_id') === (string) $choice->getKey())>
+                                                        {{ $choice->name }}{{ $choice->is_active ? ' (published)' : '' }}
+                                                    </option>
+                                                @endforeach
+                                            </select>
+                                            <div class="form-text">
+                                                For a two-page spread whose pages are laid out differently. Saving copies the
+                                                chosen layout as this layout's page 2; the chosen layout itself stays as it is.
+                                            </div>
+                                            @error('page_two_template_id')
+                                                <div class="invalid-feedback">{{ $message }}</div>
+                                            @enderror
+                                        </div>
+                                    @endif
 
                                     <div>
                                         <label for="description" class="form-label">Notes</label>
@@ -347,7 +387,7 @@
                                             <li>Lines snap to the printed rules. Hold <kbd>Alt</kbd> to place one freely.</li>
                                             <li>The − and + buttons remove or add a row line. Type a number and press <kbd>Enter</kbd> to space that many rows evenly.</li>
                                             <li>Page scanned a little turned? Tilt turns the columns and row lines together.</li>
-                                            <li>Staff scans read each row on its own, so writing that crosses a rule is still read whole.</li>
+                                            <li>Scans read each row on its own, so writing that crosses a rule is still read whole.</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -435,7 +475,7 @@
                                         <strong>Tips</strong>
                                         <ul>
                                             <li>Keep each marker tight around one handwritten value.</li>
-                                            <li>Staff check the fields in this order.</li>
+                                            <li>Verify shows the fields in this order.</li>
                                             <li>Click a name to select its marker. Its settings show below the list.</li>
                                             <li>A field is read once. For something on every row of a table, select it and set Read as to Column.</li>
                                             <li><kbd>Ctrl</kbd> + <kbd>A</kbd> then <kbd>Delete</kbd> clears the page: every marker and the row lines. <kbd>Ctrl</kbd> + <kbd>Z</kbd> brings them back.</li>
@@ -517,7 +557,7 @@
                                     <div class="form-text">Separate them with commas. Verify points out any other value.</div>
                                 </div>
                                 <div class="mb-2">
-                                    <label class="form-label" for="fieldHint">Hint for Staff</label>
+                                    <label class="form-label" for="fieldHint">Hint</label>
                                     <input type="text" class="form-control form-control-sm" id="fieldHint"
                                            maxlength="200" placeholder="e.g. Month day, year">
                                 </div>
@@ -608,7 +648,7 @@
                                 </button>
                                 <button type="submit" class="btn btn-primary" data-publish="1">
                                     <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
-                                    Save &amp; publish for Staff
+                                    Save &amp; publish
                                 </button>
                             @endif
                         </div>
@@ -675,35 +715,26 @@
         </div>
     @endif
 
-    <div class="modal fade" id="layoutTestModal" tabindex="-1" aria-labelledby="layoutTestTitle" aria-hidden="true">
-        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    {{-- Asked before a save that publishes, or that keeps guessed (amber) row lines.
+         template-builder.js fills it in. --}}
+    <div class="modal fade" id="saveCheckModal" tabindex="-1" aria-labelledby="saveCheckTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <div>
-                        <h2 class="modal-title h5" id="layoutTestTitle">Test on the sample</h2>
-                        <small class="text-muted">What Detect makes of the sample with this layout, saved or not. Nothing is read or stored.</small>
+                        <div class="text-uppercase small fw-semibold mb-1" id="saveCheckKicker">Before saving</div>
+                        <h2 class="modal-title h5" id="saveCheckTitle">Save this layout?</h2>
                     </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="layout-test__status" id="layoutTestStatus" role="status" aria-live="polite">
-                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-                        <span id="layoutTestStatusText">Outlining every line on the sample. This takes about half a minute.</span>
-                    </div>
-                    <div class="layout-test d-none" id="layoutTestResult">
-                        <p class="layout-test__summary" id="layoutTestSummary"></p>
-                        <ul class="layout-test__findings" id="layoutTestFindings"></ul>
-                        <div class="layout-test__legend" aria-hidden="true">
-                            <span class="is-placed">In a row</span>
-                            <span class="is-field">Field</span>
-                            <span class="is-shared">Shares a cell</span>
-                            <span class="is-no-row">Between rows</span>
-                            <span class="is-rule">Row line, fitted</span>
-                        </div>
-                        <div class="layout-test__page">
-                            <canvas id="layoutTestCanvas" role="img" aria-label="The sample with every outlined line"></canvas>
-                        </div>
-                    </div>
+                    <p class="mb-2" id="saveCheckLead"></p>
+                    <ul class="mb-0 ps-3" id="saveCheckList"></ul>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Go back</button>
+                    <button type="button" class="btn btn-outline-secondary d-none" id="saveCheckDraftBtn">Save as draft</button>
+                    <button type="button" class="btn btn-primary" id="saveCheckConfirmBtn">Save</button>
                 </div>
             </div>
         </div>

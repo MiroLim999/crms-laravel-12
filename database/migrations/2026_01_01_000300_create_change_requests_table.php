@@ -7,10 +7,9 @@ use Illuminate\Support\Facades\Schema;
 /**
  * The correction path for locked records.
  *
- * This table is the mechanism that keeps the audit trail meaningful: Staff cannot
- * edit a submitted record, and Admin cannot edit record values at all. A change
- * only lands when Staff propose it and Admin (or Super Admin) approve it, and the
- * proposal, the decision, and the applied values are all recorded.
+ * This table keeps the audit trail meaningful: a submitted record is never edited
+ * in place. A correction is stored here with the old and new values, and since
+ * 2026-11-11 it is saved already approved (Correct record).
  */
 return new class extends Migration
 {

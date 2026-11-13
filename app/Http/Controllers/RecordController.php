@@ -6,6 +6,8 @@ use App\Enums\ChangeRequestStatus;
 use App\Enums\RecordStatus;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
+use App\Services\AuditLogger;
+use App\Services\RecordCsv;
 use App\Services\RecordFieldGrouper;
 use App\Support\LocalTime;
 use App\Support\SearchWords;
@@ -15,6 +17,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\ViewErrorBag;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * The searchable archive. Every signed-in role may read it.
@@ -102,6 +105,38 @@ class RecordController extends Controller
             'firstPersonGroupId' => collect($fieldGroups)->firstWhere('kind', 'person')['id'] ?? null,
             'ocrAdjustedCount' => $record->fields->filter->wasCorrected()->count(),
             'postSubmissionChangeCount' => $fieldChanges->count(),
+        ]);
+    }
+
+    /**
+     * Download one document's checked values as CSV, one row per person, for the
+     * client's old system. UTF-8 with a byte-order mark, so Excel shows ñ and
+     * accents correctly.
+     */
+    public function csv(CivilRecord $record, Request $request, RecordCsv $csv, AuditLogger $audit): StreamedResponse
+    {
+        $record->load(['fields', 'documentTypeDefinition']);
+        $table = $csv->table($record);
+
+        $audit->log(
+            'record.exported',
+            $record,
+            new: ['rows' => count($table['rows'])],
+            description: "Downloaded record #{$record->getKey()} as CSV.",
+            actor: $request->user(),
+        );
+
+        return response()->streamDownload(function () use ($table) {
+            $handle = fopen('php://output', 'w');
+            fwrite($handle, "\u{FEFF}");
+            fputcsv($handle, $table['header']);
+            foreach ($table['rows'] as $row) {
+                fputcsv($handle, $row);
+            }
+            fclose($handle);
+        }, $csv->filename($record), [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'no-store, no-cache',
         ]);
     }
 

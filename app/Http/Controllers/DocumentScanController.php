@@ -10,6 +10,8 @@ use App\Models\DocumentTypeDefinition;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\PageLine;
+use App\Models\PageRun;
+use App\Models\RecordPage;
 use App\Services\AuditLogger;
 use App\Services\Ocr\OcrClient;
 use App\Services\Ocr\ScanModelChoice;
@@ -30,13 +32,10 @@ use Throwable;
  * The digitisation flow: pick a certificate type, then upload, align, verify
  * and submit in the workspace.
  *
- * Staff and Super Admin only. Admin has no route into this controller at all -
- * data entry is not an oversight function.
- *
  * The page itself is handled by DocumentPageController: finishing Align uploads
  * the aligned page, and a queue job (ProcessDocumentPage) outlines every
  * handwritten line, crops along the outlines and reads each crop with TrOCR
- * (Detect stops before the reading, so Staff can check the outlines first).
+ * (Detect stops before the reading, so the user can check the outlines first).
  * Verify reviews those readings. Submitting (store) saves the checked values and
  * copies the page image and the crops into the record, so the archive keeps the
  * very images the model read.
@@ -97,7 +96,7 @@ class DocumentScanController extends Controller
      */
     private function activeTemplates(Collection $types): Collection
     {
-        $active = DocumentTemplate::query()
+        $active = DocumentTemplate::listed()
             ->where('is_active', true)
             ->whereIn('document_type_id', $types->modelKeys())
             ->orderBy('id')
@@ -111,11 +110,11 @@ class DocumentScanController extends Controller
     }
 
     /**
-     * Step 2: the workspace, where Staff upload the scan, align the markers and
+     * Step 2: the workspace, where the user uploads the scan, align the markers and
      * verify what was read.
      *
-     * The aligned page is uploaded as soon as Staff finish Align, before they
-     * decide to submit; the original file follows only with the submission. A
+     * The aligned page is uploaded as soon as Align is finished, before the
+     * user decides to submit; the original file follows only with the submission. A
      * page nobody submits is deleted by documents:prune-pages (hourly) once it
      * has gone untouched for LINE_MARKERS_KEEP_HOURS, 24 by default.
      */
@@ -134,7 +133,7 @@ class DocumentScanController extends Controller
         if ($template === null) {
             return redirect()->route('documents.create')->with(
                 'error',
-                "No active template for {$type->label()}. A Super Admin must publish one first.",
+                "No active template for {$type->label()}. Publish one in Template Builder first.",
             );
         }
 
@@ -148,16 +147,15 @@ class DocumentScanController extends Controller
             'health' => $this->ocr->recentHealth(),
             'docType' => $type,
             'template' => $template,
-            // Rectangle fields, then ledger columns. Staff align both the same way.
+            // Rectangle fields, then ledger columns. Both are aligned the same way.
             'boxes' => $template->markerBoxes(),
             'ruledYs' => $template->isLedger() ? array_values($template->ruled_ys) : [],
             // A spread's page 2 laid out differently: its own layout, or null.
             'pageTwo' => $this->pageTwoLayout($template),
             'activeModel' => OcrModel::active(),
-            // Empty unless a Super Admin has allowed it, in which case the reading
-            // step offers a picker instead of silently using the promoted model.
-            'selectableModels' => $this->selectableModels(),
             'threshold' => OcrSetting::threshold(),
+            // How long a scan's steps usually take here: the progress ring's pace.
+            'scanSeconds' => PageRun::typicalSeconds(),
         ]);
     }
 
@@ -223,7 +221,7 @@ class DocumentScanController extends Controller
             // The processed page whose outlined lines these fields were read from.
             'document_page_id' => ['nullable', 'integer'],
             'fields.*.line_id' => ['nullable', 'integer', 'distinct'],
-            // Staff chose "Submit anyway" when asked about missing required fields.
+            // The user chose "Submit anyway" when asked about missing required fields.
             'allow_missing' => ['sometimes', 'boolean'],
             // The file this scan is a page of (the workspace sends the page alone,
             // cut out of the file): its name, the page, and the file's SHA-256.
@@ -231,13 +229,17 @@ class DocumentScanController extends Controller
             'source_page' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_SOURCE_PAGES, 'required_with:source_page_count,source_hash'],
             'source_page_count' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_SOURCE_PAGES],
             'source_hash' => ['nullable', 'string', 'regex:/^[0-9a-f]{64}$/'],
-            // Staff chose "Save again" when told this page is already saved.
+            // The user chose "Save again" when told this page is already saved.
             'allow_duplicate' => ['sometimes', 'boolean'],
             // A spread saved as one record: its pages after the first, each with
             // the page it was read from and its own verified fields.
             'extra_pages' => ['sometimes', 'array', 'max:' . self::MAX_EXTRA_PAGES],
             'extra_pages.*.document_page_id' => ['required', 'integer'],
-            'extra_pages.*.workspace_scan_path' => ['required', 'string', 'max:500'],
+            // Each page after the first keeps its scan: one the workspace queued
+            // (a batch), or the file itself, sent as extra_scans[n] beside it.
+            'extra_pages.*.workspace_scan_path' => ['nullable', 'string', 'max:500'],
+            'extra_scans' => ['sometimes', 'array', 'max:' . self::MAX_EXTRA_PAGES],
+            'extra_scans.*' => ['file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
             'extra_pages.*.source_page' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_SOURCE_PAGES],
             'extra_pages.*.fields' => ['required', 'array', 'min:1', 'max:' . Limits::MAX_FIELDS],
             'extra_pages.*.fields.*.verified' => ['required', 'accepted'],
@@ -264,7 +266,7 @@ class DocumentScanController extends Controller
         $template = DocumentTemplate::with(['documentTypeDefinition', 'fields'])->find($templateId);
 
         // Archiving only stops new scans from starting (create/workspace). A scan
-        // already verified by Staff can still be submitted, so no work is lost.
+        // already verified can still be submitted, so no work is lost.
         if ($template?->document_type_id !== $documentType->getKey()) {
             throw ValidationException::withMessages([
                 'document_template_id' => 'The selected template does not belong to this document type.',
@@ -272,8 +274,8 @@ class DocumentScanController extends Controller
         }
 
         // What each field holds and whether it is required, by its template
-        // field's name (a ledger line: its column's). A field Staff added
-        // themselves has no template settings.
+        // field's name (a ledger line: its column's). A field the user added
+        // by hand has no template settings.
         $settingsByName = $template->settingsByName();
 
         $coordinateErrors = [];
@@ -295,19 +297,22 @@ class DocumentScanController extends Controller
             throw ValidationException::withMessages($coordinateErrors);
         }
 
-        // This page of this exact file is saved already: say so first. Staff may
-        // save it again ("Save again"), which the audit log notes.
-        $savedBefore = $this->savedSourcePage($source);
+        // This page of this exact file is saved already (on its own, or as a page
+        // of a spread): say so first. The user may save it again ("Save again"),
+        // which the audit log notes. A spread asks about each of its pages.
+        $extraSourcePages = collect($validated['extra_pages'] ?? [])
+            ->pluck('source_page')->filter()->map(fn ($page) => (int) $page)->values()->all();
+        [$savedBefore, $savedPage] = $this->savedSourcePage($source, $extraSourcePages);
         if ($savedBefore !== null && !$request->boolean('allow_duplicate')) {
             $message = ($source['page_count'] ?? 1) > 1
-                ? "Page {$source['page']} of this file is already saved as record #{$savedBefore->getKey()}."
+                ? "Page {$savedPage} of this file is already saved as record #{$savedBefore->getKey()}."
                 : "This file is already saved as record #{$savedBefore->getKey()}.";
 
             if ($request->expectsJson()) {
                 return response()->json([
                     'duplicate_page' => true,
                     'message' => $message,
-                    'record' => $this->sourcePagePayload($savedBefore),
+                    'record' => [...$this->sourcePagePayload($savedBefore), 'page' => $savedPage],
                 ], 409);
             }
 
@@ -338,7 +343,7 @@ class DocumentScanController extends Controller
         }
 
         // Some certificates do leave a required field blank, so a missing one
-        // is not refused outright: Staff must confirm it first.
+        // is not refused outright: the user must confirm it first.
         $missingRequired = [
             ...$this->missingRequiredFields($template, $validated['fields'], $linesById),
             ...$this->missingRegisterRows($template, $page, $validated['fields'], $linesById),
@@ -462,14 +467,19 @@ class DocumentScanController extends Controller
                 $extraSettings = $pageTwoTemplate->settingsByName();
                 foreach ($extraPages as $extra) {
                     $number = $extra['number'];
-                    $extraPath = 'scans/' . bin2hex(random_bytes(20)) . '.' . $extra['ext'];
-                    Storage::disk('local')->copy($extra['scan_path'], $extraPath);
+                    if ($extra['upload'] instanceof UploadedFile) {
+                        $extraPath = $extra['upload']->store('scans', 'local');
+                    } else {
+                        $extraPath = 'scans/' . bin2hex(random_bytes(20)) . '.' . $extra['ext'];
+                        Storage::disk('local')->copy($extra['scan_path'], $extraPath);
+                    }
                     $copiedFiles[] = $extraPath;
 
                     $record->extraPages()->create([
                         'page_no' => $number,
                         'scan_path' => $extraPath,
-                        'scan_mime' => Storage::disk('local')->mimeType($extraPath) ?: 'application/octet-stream',
+                        'scan_mime' => ($extra['upload'] instanceof UploadedFile ? $extra['upload']->getMimeType() : null)
+                            ?: Storage::disk('local')->mimeType($extraPath) ?: 'application/octet-stream',
                         'scan_rotation' => $extra['page']->deskew_degrees,
                         'page_image_path' => $this->keepPageImage($record, $extra['page'], $copiedFiles, "page-{$number}.png"),
                         'source_page' => $extra['source_page'],
@@ -513,10 +523,10 @@ class DocumentScanController extends Controller
                         'corrected_fields' => $corrected,
                         'outlined_fields' => $record->fields->whereNotNull('polygon')->count(),
                         'ocr_model' => $validated['ocr_model_key'],
-                        // Left out on purpose: Staff confirmed with "Submit anyway".
+                        // Left out on purpose: the user confirmed with "Submit anyway".
                         ...($missingRequired !== [] ? ['missing_required_fields' => $missingRequired] : []),
                         // This page's grid against the template's: rows, and
-                        // columns Staff added or removed in Align.
+                        // columns added or removed in Align.
                         ...($gridChanges !== [] ? ['grid_changes' => $gridChanges] : []),
                         ...($extraPages !== [] ? ['pages' => count($extraPages) + 1] : []),
                         ...($source['page'] !== null ? [
@@ -556,7 +566,7 @@ class DocumentScanController extends Controller
         }
 
         $redirect = route('records.show', $record);
-        $message = 'Record submitted and locked. Further changes need a change request.';
+        $message = 'Record submitted and locked. Change it later with Correct record.';
 
         if ($request->expectsJson()) {
             return response()->json([
@@ -582,13 +592,32 @@ class DocumentScanController extends Controller
         $records = CivilRecord::withTitleField()
             ->where('source_hash', $hash)
             ->whereNotNull('source_page')
-            ->orderBy('source_page')
             ->orderByDesc('id')
             ->get();
 
+        // A spread saved as one record holds its other pages too.
+        $spreadPages = RecordPage::query()
+            ->whereNotNull('source_page')
+            ->whereHas('record', fn ($record) => $record->where('source_hash', $hash))
+            ->with(['record' => fn ($record) => $record->withTitleField()])
+            ->get();
+
+        // The newest record per page.
+        $byPage = [];
+        foreach ($records as $record) {
+            $byPage[$record->source_page] ??= $record;
+        }
+        foreach ($spreadPages as $spreadPage) {
+            $current = $byPage[$spreadPage->source_page] ?? null;
+            if ($current === null || $spreadPage->record->getKey() > $current->getKey()) {
+                $byPage[$spreadPage->source_page] = $spreadPage->record;
+            }
+        }
+        ksort($byPage);
+
         return response()->json([
-            'pages' => $records->unique('source_page')
-                ->map(fn (CivilRecord $record) => $this->sourcePagePayload($record))
+            'pages' => collect($byPage)
+                ->map(fn (CivilRecord $record, int $page) => [...$this->sourcePagePayload($record), 'page' => $page])
                 ->values(),
         ]);
     }
@@ -625,19 +654,33 @@ class DocumentScanController extends Controller
     }
 
     /**
+     * The newest record already holding one of these pages of the file (as its
+     * own page, or as a page of a spread), and which page that is.
+     *
      * @param  array{name: ?string, page: ?int, page_count: ?int, hash: ?string}  $source
+     * @param  list<int>  $extraPages  The source pages of a spread's other pages.
+     * @return array{0: ?CivilRecord, 1: ?int}
      */
-    private function savedSourcePage(array $source): ?CivilRecord
+    private function savedSourcePage(array $source, array $extraPages = []): array
     {
         if ($source['hash'] === null || $source['page'] === null) {
-            return null;
+            return [null, null];
         }
 
-        return CivilRecord::withTitleField()
-            ->where('source_hash', $source['hash'])
-            ->where('source_page', $source['page'])
-            ->latest('id')
-            ->first();
+        foreach ([$source['page'], ...$extraPages] as $page) {
+            $record = CivilRecord::withTitleField()
+                ->where('source_hash', $source['hash'])
+                ->where(fn ($query) => $query
+                    ->where('source_page', $page)
+                    ->orWhereHas('extraPages', fn ($pages) => $pages->where('source_page', $page)))
+                ->latest('id')
+                ->first();
+            if ($record !== null) {
+                return [$record, $page];
+            }
+        }
+
+        return [null, null];
     }
 
     /** @return array{page: ?int, recordId: int, title: string, url: string, submittedAt: ?string} */
@@ -721,11 +764,17 @@ class DocumentScanController extends Controller
                 }
             }
 
-            $scanPath = (string) $extra['workspace_scan_path'];
+            // The page's own file, sent with the record (one PDF's pages, cut out
+            // in the browser), or one the workspace queued for it (a batch).
+            $upload = $request->file("extra_scans.{$position}");
+            $upload = $upload instanceof UploadedFile ? $upload : null;
+            $scanPath = $upload === null ? (string) ($extra['workspace_scan_path'] ?? '') : null;
             if (
-                !str_starts_with($scanPath, 'documents/workspace/')
-                || str_contains($scanPath, '..')
-                || !$disk->exists($scanPath)
+                $upload === null && (
+                    !str_starts_with($scanPath, 'documents/workspace/')
+                    || str_contains($scanPath, '..')
+                    || !$disk->exists($scanPath)
+                )
             ) {
                 throw ValidationException::withMessages([
                     "extra_pages.{$position}.workspace_scan_path" => 'Choose a valid scanned document to submit.',
@@ -748,8 +797,10 @@ class DocumentScanController extends Controller
                 'page' => $page,
                 'lines' => $lines,
                 'fields' => array_values($extra['fields']),
+                // Null for a file sent with the record: nothing queued to clean up.
                 'scan_path' => $scanPath,
-                'ext' => strtolower(pathinfo($scanPath, PATHINFO_EXTENSION)) ?: 'bin',
+                'upload' => $upload,
+                'ext' => $scanPath !== null ? (strtolower(pathinfo($scanPath, PATHINFO_EXTENSION)) ?: 'bin') : 'bin',
                 'source_page' => isset($extra['source_page']) ? (int) $extra['source_page'] : null,
             ];
         }
@@ -865,7 +916,7 @@ class DocumentScanController extends Controller
      * nothing submitted at all. The page is removed once the record is saved,
      * so those rows would have to be scanned again.
      *
-     * Only the columns on this page's grid count. A column Staff removed in
+     * Only the columns on this page's grid count. A column removed in
      * Align is not on the page, so it is not asked for in every row (the
      * removal is in the audit log instead), and a column they added has
      * cells like any other.
@@ -930,7 +981,7 @@ class DocumentScanController extends Controller
                 continue;
             }
 
-            // A column Staff shortened in Align is not asked for in the rows it leaves out.
+            // A column shortened in Align is not asked for in the rows it leaves out.
             $askedHere = array_filter($required, fn(string $key) => !isset($shortened[$key])
                 || in_array($row, $shortened[$key], true), ARRAY_FILTER_USE_KEY);
             $left = array_values(array_diff_key($askedHere, $submitted[$row]));
@@ -951,7 +1002,7 @@ class DocumentScanController extends Controller
     }
 
     /**
-     * The ledger columns on this page's grid, as Staff left them in Align (and
+     * The ledger columns on this page's grid, as they were left in Align (and
      * Detect fitted them). A page without a grid of its own has the template's.
      *
      * @return list<string>
@@ -972,7 +1023,7 @@ class DocumentScanController extends Controller
 
     /**
      * How this page's ledger grid differs from its template's, for the audit
-     * log: its rows, and the columns Staff added or removed in Align. Empty
+     * log: its rows, and the columns added or removed in Align. Empty
      * when they match. The template itself is never changed.
      *
      * @return array{rows?: int, template_rows?: int, columns_added?: list<string>, columns_removed?: list<string>}
@@ -1087,14 +1138,6 @@ class DocumentScanController extends Controller
             'line_row' => $line->row,
             'line_flags' => $line->flags ?: [],
         ];
-    }
-
-    /**
-     * @return list<array{key: string, label: string, is_active: bool}>
-     */
-    private function selectableModels(): array
-    {
-        return $this->modelChoice->selectable();
     }
 
     /**

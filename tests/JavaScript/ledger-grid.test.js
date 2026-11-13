@@ -8,6 +8,7 @@ import {
     distributeRuledYs,
     fieldsOverLedger,
     fieldsToColumns,
+    fitColumnsToPrinted,
     clampRowAngle,
     fitTilts,
     followFirstAndLastLine,
@@ -103,7 +104,7 @@ test('columns sitting on the first and last line follow those lines', () => {
 });
 
 test('in the Align step a column within half a row of the first or last line follows it', () => {
-    // Staff align columns by hand, so their edges sit near the lines, not exactly on them.
+    // The user aligns columns by hand, so their edges sit near the lines, not exactly on them.
     const boxes = [column('A', 0.1, 0.203, 0.594), column('B', 0.2, 0.2, 0.6)];
     const next = followFirstAndLastLine(boxes, [0.2, 0.5, 0.8], [0.2, 0.5, 0.8, 0.95], 0.15 / 2);
 
@@ -319,4 +320,44 @@ test('a tilt list is made the length of the lines: cut short, or padded with the
     assert.deepEqual(fitTilts([0.1, 0.2, 0.3], 2), [0.1, 0.2]);
     assert.deepEqual(fitTilts([0.1, 0.2], 4), [0.1, 0.2, 0.2, 0.2]);
     assert.deepEqual(fitTilts(null, 3), [0, 0, 0]);
+});
+
+test('detecting a page moves a copied page 1 layout onto the columns that page printed', () => {
+    // Page 2 started as a copy of page 1's six columns; it prints five, elsewhere.
+    const copied = [0.02, 0.10, 0.24, 0.53, 0.61, 0.79].map((x, i) => column(`Column ${i + 1}`, x, 0.1, 0.5, 0.1));
+    const printed = [0.02, 0.27, 0.51, 0.66, 0.86].map((x) => ({ x, w: 0.2 }));
+
+    const { columns, created } = fitColumnsToPrinted(copied, printed, 0.24, 0.96);
+
+    assert.equal(columns.length, 5);
+    assert.deepEqual(columns.map((c) => c.x), [0.02, 0.27, 0.51, 0.66, 0.86]);
+    assert.ok(columns.every((c) => c.y === 0.24 && Math.abs(c.h - 0.72) < 1e-9 && c.w === 0.2));
+    assert.ok(created.length <= 5);
+});
+
+test('the same number of columns pair by order and keep their names and settings', () => {
+    const existing = [
+        { ...column('Name', 0.4), personGroup: 1 },
+        { ...column('Entry', 0.05), personFieldOrder: 0 },
+    ];
+
+    const { columns, created } = fitColumnsToPrinted(existing, [{ x: 0.06, w: 0.1 }, { x: 0.3, w: 0.3 }], 0.2, 0.8);
+
+    assert.deepEqual(columns.map((c) => [c.name, c.x, c.w]), [['Entry', 0.06, 0.1], ['Name', 0.3, 0.3]]);
+    assert.equal(columns[1].personGroup, 1);
+    assert.equal(columns[0].personFieldOrder, 0);
+    assert.equal(created.length, 0);
+});
+
+test('a printed column nobody covers is new, and an unmatched existing column is dropped', () => {
+    const existing = [column('A', 0.1), column('B', 0.4), column('C', 0.7)];
+
+    const { columns, created } = fitColumnsToPrinted(existing, [{ x: 0.1, w: 0.1 }, { x: 0.4, w: 0.1 }, { x: 0.55, w: 0.05 }, { x: 0.72, w: 0.1 }].slice(0, 2), 0.2, 0.8);
+    assert.deepEqual(columns.map((c) => c.name), ['A', 'B']);
+    assert.equal(created.length, 0);
+
+    const grown = fitColumnsToPrinted([column('A', 0.1)], [{ x: 0.1, w: 0.1 }, { x: 0.5, w: 0.1 }], 0.2, 0.8);
+    assert.deepEqual(grown.created, [1]);
+    assert.equal(grown.columns[0].name, 'A');
+    assert.equal(grown.columns[1].kind, 'column');
 });

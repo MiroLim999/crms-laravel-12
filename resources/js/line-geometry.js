@@ -3,7 +3,7 @@
  *
  * Pure functions, so they are unit-tested without a browser:
  *
- * - alignedGeometry(): turns the markers and row lines Staff aligned on the
+ * - alignedGeometry(): turns the markers and row lines aligned on the
  *   page into the geometry line detection runs on. Rectangle fields pass
  *   straight through; ledger columns keep their aligned boxes, and the row
  *   lines go as the Align step holds them (they follow the columns when the
@@ -34,9 +34,9 @@ function angleOf(marker) {
 
 /**
  * @param {Array<{name: string, x: number, y: number, w: number, h: number, kind?: string, columnIndex?: number, personGroup?: number, personFieldOrder?: number}>} aligned
- *        Markers as Staff left them (FieldMarker#toJSON()).
+ *        Markers as left in Align (FieldMarker#toJSON()).
  * @param {number[]} ruledYs The row lines as the Align step holds them, page fractions.
- * @param {{keepRows?: boolean}} [options] keepRows: Staff set the row lines by
+ * @param {{keepRows?: boolean}} [options] keepRows: the row lines were set by
  *        hand, so Detect keeps them instead of taking the page's rows.
  */
 export function alignedGeometry(aligned, ruledYs, { keepRows = false } = {}) {
@@ -87,9 +87,17 @@ export function snapRowsMessage(rows, estimated = Array.isArray(rows?.estimated)
     if (!rows || typeof rows !== 'object') return '';
 
     if (rows.from_page) {
+        // Said only when there is something to check: rows the page printed
+        // clearly and the template agrees with need no words.
         const count = Number(rows.count) || 0;
         const template = Number(rows.template) || 0;
-        return `Rows found on the page${count === template ? '' : ` (template: ${template})`}.`;
+        if (template > 0 && count !== template) {
+            return `Check the rows: ${count} found on the page, the template has ${template}.`;
+        }
+        if (count > 0 && estimated > count / 2) {
+            return 'Check the rows: most of this page’s row lines are too faint to see, so they were spaced evenly.';
+        }
+        return '';
     }
 
     const reasons = {
@@ -97,6 +105,7 @@ export function snapRowsMessage(rows, estimated = Array.isArray(rows?.estimated)
         uneven_rows: 'its rows differ in height',
         row_height: 'this page’s rows are a different height',
         no_match: 'the page’s rows do not line up with the grid',
+        faint_rows: 'this page’s row lines are too faint to follow, so the template’s rows were fitted to the table’s bottom border. Check them',
     };
     const reason = reasons[rows.reason];
     return reason ? `Rows kept from the template: ${reason}.` : '';
@@ -266,11 +275,11 @@ function fieldBox(field, page) {
 }
 
 /**
- * What Staff should check about the grid as a whole, as sentences.
+ * What to check about the grid as a whole, as sentences.
  *
  * The page job reports these as codes with numbers (ml/line_markers.py,
  * _grid_notes); they are worded here so the wording can be tested. A note is a
- * question to Staff, never a verdict: the grid may be right.
+ * question for the user, never a verdict: the grid may be right.
  *
  * @param {Array<{code: string, count?: number, rows?: number|number[]}>|null|undefined} notes
  * @returns {string[]}

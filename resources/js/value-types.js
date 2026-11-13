@@ -3,7 +3,7 @@
  * in the Template Builder): a date, a number, or one of a list of choices.
  *
  * A check never blocks: registers hold odd values ("unknown", a date written
- * in words), so a value that does not fit is only pointed out to Staff.
+ * in words), so a value that does not fit is only pointed out, never refused.
  *
  * Pure functions, so they are unit-tested without a browser.
  */
@@ -68,7 +68,7 @@ export function matchingChoice(value, options) {
 }
 
 /**
- * Why a value does not fit its field, for Staff, or null when it fits (or the
+ * Why a value does not fit its field, for Verify, or null when it fits (or the
  * field is plain text, or the value is empty).
  *
  * @param {string} value

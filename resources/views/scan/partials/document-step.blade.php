@@ -74,7 +74,7 @@
         @if (! $activeModel)
             <div class="alert alert-warning document-upload-alert" role="alert">
                 <i class="icon-base bx bx-error" aria-hidden="true"></i>
-                <div>No OCR model is active. A Super Admin needs to activate one before scans are read.</div>
+                <div>No OCR model is active. Activate one in OCR Workspace before scanning.</div>
             </div>
         @endif
 
@@ -222,12 +222,34 @@
                        accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp">
                 <input type="file" id="scanFolder" class="visually-hidden" webkitdirectory directory multiple>
             @else
+                {{-- Same layout as after a type is chosen, but grayed out and without inputs. --}}
+                <div class="document-upload-mode-bar is-disabled" aria-hidden="true">
+                    <div class="document-upload-mode-header">
+                        <span class="document-upload-mode-label">Upload mode</span>
+                        <span class="document-upload-mode-hint">Upload and process one document at a time</span>
+                    </div>
+                    <div class="document-upload-mode-grid">
+                        <span class="document-upload-mode-option">
+                            <span class="document-type-option__icon"><i class="icon-base bx bx-file"></i></span>
+                            <span class="document-type-select__value">Single Upload</span>
+                        </span>
+                        <span class="document-upload-mode-option">
+                            <span class="document-type-option__icon"><i class="icon-base bx bx-copy"></i></span>
+                            <span class="document-type-select__value">Batch File Upload</span>
+                        </span>
+                    </div>
+                </div>
+
                 {{-- Not a file input yet: clicking or dropping here opens the type list. --}}
-                <div class="document-dropzone is-disabled" id="documentDropzone" aria-disabled="true" data-requires-type>
+                <div class="document-dropzone is-disabled" id="documentDropzone" aria-disabled="true" data-requires-type
+                     title="Choose a document type first">
                     <span class="document-dropzone__icon" aria-hidden="true">
                         <i class="icon-base bx bx-cloud-upload"></i>
                     </span>
-                    <span class="document-dropzone__title">Choose a document type first</span>
+                    <span class="document-dropzone__title">Drop the scan here</span>
+                    <span class="document-dropzone__actions" aria-hidden="true">
+                        <span class="btn btn-primary document-dropzone__button">Choose file</span>
+                    </span>
                     <span class="document-dropzone__formats" aria-label="Accepted formats">
                         <span>PDF</span><span>PNG</span><span>JPG</span><span>WEBP</span><span>BMP</span>
                     </span>

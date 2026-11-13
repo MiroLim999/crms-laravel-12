@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Enums\ChangeRequestStatus;
 use App\Enums\RecordStatus;
-use App\Enums\RoleSlug;
 use App\Jobs\ProcessDocumentPage;
 use App\Models\AuditLog;
 use App\Models\ChangeRequest;
@@ -13,7 +12,6 @@ use App\Models\DocumentTypeDefinition;
 use App\Models\OcrSetting;
 use App\Models\PageRun;
 use App\Models\RecordField;
-use App\Models\User;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -73,7 +71,7 @@ class DashboardAnalytics
      *
      * @var list<string>
      */
-    private const ROUTINE_AUDIT_ACTIONS = ['auth.login', 'auth.logout', 'record.submitted'];
+    private const ROUTINE_AUDIT_ACTIONS = ['auth.login', 'auth.logout', 'record.submitted', 'record.exported'];
 
     /** How many entries the Recent changes card lists. */
     private const RECENT_CHANGES = 5;
@@ -167,38 +165,9 @@ class DashboardAnalytics
             'archive_types' => $this->archiveByType($entries),
             'trend' => $this->recordTrend($scopes['trend'], $entries, $first),
             'ocr_quality' => $this->ocrQuality($scopes['ocr']),
-            'change_requests' => $this->changeRequestSummary($scopes['requests']),
+            'corrections' => $this->correctionSummary($scopes['requests']),
             'processing' => $this->processing($scopes['processing']),
             'recent_changes' => $this->recentChanges(),
-            'accounts' => $this->accountHealth(),
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function staff(User $user): array
-    {
-        $timezone = (string) config('crms.reporting_timezone', 'Asia/Manila');
-        $monthStart = CarbonImmutable::now($timezone)->startOfMonth()->utc();
-
-        return [
-            'submitted_this_month' => CivilRecord::query()
-                ->where('submitted_by', $user->getKey())
-                ->where('status', RecordStatus::Submitted->value)
-                ->where('submitted_at', '>=', $monthStart)
-                ->count(),
-            'pending_change_requests' => ChangeRequest::query()
-                ->where('requested_by', $user->getKey())
-                ->where('status', ChangeRequestStatus::Pending->value)
-                ->count(),
-            'recent_records' => CivilRecord::query()
-                ->where('submitted_by', $user->getKey())
-                ->where('status', RecordStatus::Submitted->value)
-                ->with('documentTypeDefinition')
-                ->latest('submitted_at')
-                ->limit(5)
-                ->get(),
         ];
     }
 
@@ -425,8 +394,8 @@ class DashboardAnalytics
         $threshold = OcrSetting::threshold();
         $recordIds = $this->records($scope)->select('records.id');
 
-        // A correction is staff changing the OCR reading while verifying. An
-        // approved change request rewrites verified_value afterwards, so the
+        // A correction is the user changing the OCR reading while verifying. A
+        // later correction (Correct record) rewrites verified_value afterwards, so the
         // value as submitted is the first approved request's "before" value,
         // and only failing that the current one.
         $submittedValue = 'COALESCE((SELECT cri.current_value FROM change_request_items AS cri'
@@ -483,39 +452,30 @@ class DashboardAnalytics
     }
 
     /**
-     * The change-request queue now, and the decisions made in the period.
-     *
-     * The queue ignores the period: a request that is still waiting is
-     * waiting, however long ago it came in. The rest is counted on the day it
-     * was decided. A withdrawal has no reviewed_at, so its last update (the
-     * withdrawal itself, since nothing can change a withdrawn request) is its day.
+     * Corrections saved in the period: how many, on how many records, and how
+     * many fields they changed. A correction is saved approved, so its
+     * reviewed_at is the day it was made (older approved requests count too).
      *
      * @param  array<string, mixed>  $scope  the requests panel's
-     * @return array{waiting: int, oldest_waiting_at: CarbonInterface|null, approved: int, rejected: int, withdrawn: int}
+     * @return array{corrections: int, records: int, fields: int}
      */
-    private function changeRequestSummary(array $scope): array
+    private function correctionSummary(array $scope): array
     {
-        $pending = ChangeRequest::query()->where('status', ChangeRequestStatus::Pending->value);
-
-        $decided = ChangeRequest::query()
-            ->whereIn('status', [ChangeRequestStatus::Approved->value, ChangeRequestStatus::Rejected->value])
+        $corrections = ChangeRequest::query()
+            ->where('status', ChangeRequestStatus::Approved->value)
             ->whereBetween('reviewed_at', [$scope['db_start'], $scope['db_end']])
-            ->get(['status']);
+            ->withCount('items')
+            ->get(['id', 'record_id']);
 
         return [
-            'waiting' => (clone $pending)->count(),
-            'oldest_waiting_at' => (clone $pending)->oldest('created_at')->value('created_at'),
-            'approved' => $decided->where('status', ChangeRequestStatus::Approved)->count(),
-            'rejected' => $decided->where('status', ChangeRequestStatus::Rejected)->count(),
-            'withdrawn' => ChangeRequest::query()
-                ->where('status', ChangeRequestStatus::Withdrawn->value)
-                ->whereBetween('updated_at', [$scope['db_start'], $scope['db_end']])
-                ->count(),
+            'corrections' => $corrections->count(),
+            'records' => $corrections->pluck('record_id')->unique()->count(),
+            'fields' => (int) $corrections->sum('items_count'),
         ];
     }
 
     /**
-     * How the page job did in the period, and what each person who can scan did.
+     * How the page job did in the period.
      *
      * Runs come from page_runs, which outlives the pages themselves (a cancelled
      * page is deleted at once, the rest a day later). A "scan" is a Scan with OCR,
@@ -554,50 +514,6 @@ class DashboardAnalytics
         $readLines = (int) $read()->sum('lines');
         $readMs = (int) $read()->sum('read_ms');
 
-        // Who can scan: Staff and Super Admin. Admin never does, so would only be an empty row.
-        $people = User::query()
-            ->whereHas('role', fn ($q) => $q->whereIn('slug', [RoleSlug::Staff->value, RoleSlug::SuperAdmin->value]))
-            ->get(['id', 'name', 'is_active']);
-
-        $submitted = $this->records($scope)
-            ->whereIn('submitted_by', $people->modelKeys())
-            ->selectRaw('submitted_by, COUNT(*) as n')
-            ->groupBy('submitted_by')
-            ->pluck('n', 'submitted_by');
-
-        $scanned = $runs()
-            ->where('outcome', PageRun::COMPLETED)
-            ->whereIn('mode', [ProcessDocumentPage::MODE_FULL, ProcessDocumentPage::MODE_READ])
-            ->whereIn('user_id', $people->modelKeys())
-            ->selectRaw('user_id, COUNT(*) as n')
-            ->groupBy('user_id')
-            ->pluck('n', 'user_id');
-
-        // Not a period figure: when someone last signed in, whenever that was.
-        $lastSignIn = AuditLog::query()
-            ->where('action', 'auth.login')
-            ->whereIn('user_id', $people->modelKeys())
-            ->selectRaw('user_id, MAX(created_at) as last_at')
-            ->groupBy('user_id')
-            ->pluck('last_at', 'user_id');
-
-        $staff = $people
-            ->map(fn (User $person) => [
-                'name' => $person->name,
-                'active' => (bool) $person->is_active,
-                'submitted' => (int) ($submitted[$person->getKey()] ?? 0),
-                'scanned' => (int) ($scanned[$person->getKey()] ?? 0),
-                'last_sign_in' => isset($lastSignIn[$person->getKey()])
-                    ? CarbonImmutable::parse($lastSignIn[$person->getKey()], 'UTC')
-                        ->setTimezone((string) config('crms.reporting_timezone', 'Asia/Manila'))
-                    : null,
-            ])
-            // Anyone with work in the period, and active accounts even with none.
-            ->filter(fn (array $row) => $row['active'] || $row['submitted'] > 0 || $row['scanned'] > 0)
-            ->sortBy([['submitted', 'desc'], ['scanned', 'desc'], ['name', 'asc']])
-            ->values()
-            ->all();
-
         return [
             'completed' => (int) ($outcomes[PageRun::COMPLETED] ?? 0),
             'failed' => (int) ($outcomes[PageRun::FAILED] ?? 0),
@@ -608,13 +524,12 @@ class DashboardAnalytics
                 'lines' => $readLines,
                 'ms_per_line' => $readLines > 0 ? (int) round($readMs / $readLines) : null,
             ],
-            'staff' => $staff,
         ];
     }
 
     /**
-     * The newest changes to how CRMS is set up and who can use it, from the
-     * audit log: templates, OCR models, accounts, reports, corrections.
+     * The newest changes to how CRMS is set up, from the audit log: templates,
+     * OCR models, reports, corrections.
      * Sign-ins and archived records are left out.
      *
      * @return Collection<int, AuditLog>
@@ -627,17 +542,6 @@ class DashboardAnalytics
             ->orderByDesc('id')
             ->limit(self::RECENT_CHANGES)
             ->get(['id', 'actor_name', 'action', 'description', 'created_at']);
-    }
-
-    /**
-     * @return array<string, int>
-     */
-    private function accountHealth(): array
-    {
-        return [
-            'active' => User::where('is_active', true)->count(),
-            'inactive' => User::where('is_active', false)->count(),
-        ];
     }
 
     private function rangeLabel(CarbonInterface $start, CarbonInterface $end): string

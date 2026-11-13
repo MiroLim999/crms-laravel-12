@@ -96,7 +96,7 @@
     </div>
 </div>
 
-{{-- Make the selected model the one Staff scan with. --}}
+{{-- Make the selected model the one scans use. --}}
 @php
     $currentModel = $overview['models']->firstWhere('is_active', true);
 @endphp
@@ -112,7 +112,7 @@
                     </span>
                     <div>
                         <h2 class="modal-title h5 mb-0" id="activateModelTitle">Activate this model?</h2>
-                        <p class="text-muted small mb-0 mt-1">Staff will scan with it from now on.</p>
+                        <p class="text-muted small mb-0 mt-1">Scans will use it from now on.</p>
                     </div>
                 </div>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>

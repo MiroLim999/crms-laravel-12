@@ -59,7 +59,7 @@ from PIL import Image, ImageDraw
 FLAG_NO_ROW = "no_row"
 FLAG_SHARED_CELL = "shared_cell"
 
-# Things about the grid as a whole that Staff should look at (result["notes"]).
+# Things about the grid as a whole that the user should look at (result["notes"]).
 NOTE_ROWS_UNEVEN = "rows_uneven"
 NOTE_LINES_BELOW = "lines_below_grid"
 NOTE_LINES_ABOVE = "lines_above_grid"
@@ -83,10 +83,10 @@ SHARE_PENALTY = 0.35
 # room for real drift while still catching lines that straddle two rows.
 NO_ROW_DISTANCE = 0.35
 
-# How far the row fit may move the table's first row line from where Staff put
+# How far the row fit may move the table's first row line from where the user put
 # it, in row heights. Evenly ruled rows repeat, so a grid slid one row up or
 # down matches the printed rules exactly as well as the right one; rule
-# matching cannot tell them apart. Staff's placement is the only evidence, so
+# matching cannot tell them apart. The user's placement is the only evidence, so
 # it is trusted to within half a row. (Detect, which fits the template to the
 # page itself, uses the smaller FITTED_ROW_REACH on top of that fit.)
 ROW_REACH = 0.5
@@ -113,13 +113,13 @@ ROW_SIZED_BAND = 1.12
 
 # A row band whose height, against the template's, differs from the typical
 # band by more than this share was distorted by the fit (a header taken for a
-# row, a rule missing from the page). Reported to Staff, not corrected.
+# row, a rule missing from the page). Reported to the user, not corrected.
 UNEVEN_BAND = 0.20
 
 # A printed column is at least this many rows wide (the narrowest on the real
 # ledgers, Entry No. and Sex, are 1.5 rows). A printed rule closer than that
 # past a kept column's outer edge is a frame line or the page's border, not a
-# column Staff removed (see _removed_columns).
+# column the user removed (see _removed_columns).
 MIN_COLUMN_WIDTH = 0.75
 
 # A vertical rule this close to the image's left or right edge is the border
@@ -151,6 +151,13 @@ PARALLEL_MIN_PIXELS = 500_000
 # The traced-outline step is a copy of this Kraken release's blla.vec_lines
 # (see _vec_lines_in_parallel); any other release keeps Kraken's own.
 PARALLEL_KRAKEN = "7.1."
+
+# Kraken finds baselines with scikit-image's sato filter, run at five blur
+# sizes one after another on one core: 5.8 s of a register page. The sizes do
+# not depend on one another, so they run side by side (see _parallel_sato):
+# 3.0 s, bit-identical. It copies this scikit-image release's sato; any other
+# release keeps its own.
+PARALLEL_SKIMAGE = "0.25."
 
 
 # ============================================================ line detector
@@ -209,11 +216,18 @@ def kraken_lines(image, device=None):
                 "Run ml\\setup_kraken.ps1, or point LINE_MARKERS_PYTHON at ml\\.venv-kraken."
             ) from error
 
+        from kraken.lib import segmentation as kraken_segmentation
+
         # segment() offers no way to pass its outline step, so its module
-        # global is swapped for the call and always put back.
+        # global is swapped for the call and always put back. The same for the
+        # sato filter its baseline step uses (see _parallel_sato).
         kraken_vec_lines = blla.vec_lines
+        kraken_filters = kraken_segmentation.filters
         if pool is not None:
             blla.vec_lines = _vec_lines_in_parallel(pool, workers)
+        sato = _parallel_sato()
+        if sato is not None:
+            kraken_segmentation.filters = _FiltersWithSato(kraken_filters, sato)
         try:
             device = detector_device(device)
             try:
@@ -226,6 +240,7 @@ def kraken_lines(image, device=None):
                 segmentation = blla.segment(image.convert("RGB"), device="cpu")
         finally:
             blla.vec_lines = kraken_vec_lines
+            kraken_segmentation.filters = kraken_filters
     finally:
         if pool is not None:
             pool.shutdown(wait=False, cancel_futures=True)
@@ -277,13 +292,48 @@ def _start_outline_pool(workers):
     return pool
 
 
+def _run_at_full_speed():
+    """Ask Windows never to run this process in efficiency mode.
+
+    A laptop with performance and efficiency cores (the i5-14500HX this was
+    measured on) lets Windows treat the line detector - started by the queue
+    worker in a background terminal - as background work, and run it in
+    efficiency mode (EcoQoS) on the slower cores. A register page then took
+    42-49 s instead of 19-20 s, with the very same lines; 56 of 84 real scans
+    had been slow. This opts the process out (Windows' HighQoS). Called by the
+    script and by each outline helper, as Windows sets it per process.
+
+    Windows only; anywhere else, or if Windows refuses, nothing changes."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        class _Throttling(ctypes.Structure):  # PROCESS_POWER_THROTTLING_STATE
+            _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong), ("StateMask", ctypes.c_ulong)]
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.SetProcessInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+        # Version 1; EXECUTION_SPEED under our control (0x1) and switched off (0x0).
+        state = _Throttling(1, 0x1, 0x0)
+        kernel32.SetProcessInformation(kernel32.GetCurrentProcess(), 4,  # 4 = ProcessPowerThrottling
+                                       ctypes.byref(state), ctypes.sizeof(state))
+    except Exception:  # an older Windows, or no ctypes: the page still scans
+        pass
+
+
 def _end_with_parent():
-    """Make this helper end when the process that started it ends, however it ends.
+    """Set up an outline helper: full speed, and end with the process that started it.
+
+    Each helper asks for full speed itself (see _run_at_full_speed): Windows
+    keeps that per process, and the helpers trace the outlines.
 
     A cancelled or timed-out page stops this script with SIGTERM. On Windows
     that ends the whole process tree (taskkill /T); on Linux, as in Docker, only
     the main process ends, and the idle helpers would wait for work forever,
     holding about 1.2 GB between them. Linux's parent-death signal ends them."""
+    _run_at_full_speed()
     if not sys.platform.startswith("linux"):
         return
     import ctypes
@@ -367,6 +417,64 @@ def _vec_lines_in_parallel(pool, workers):
                 for (bl_type, _, _), (bl, pl) in zip(lines, sc)]
 
     return vec_lines
+
+
+def _parallel_sato():
+    """scikit-image 0.25's filters.sato with its blur sizes computed side by side.
+
+    sato filters the image at each blur size (sigma) on its own and keeps the
+    largest value per pixel. Here each size runs in its own thread - numpy and
+    scipy let go of Python's interpreter lock while they compute, so threads
+    really run at once - and the results are combined in sato's own order, so
+    the output is the same to the last bit (checked on two register pages).
+    None when this scikit-image is not the release it copies."""
+    try:
+        from importlib.metadata import version
+
+        if not version("scikit-image").startswith(PARALLEL_SKIMAGE):
+            return None
+        from skimage._shared.utils import _supported_float_type
+        from skimage.feature import hessian_matrix, hessian_matrix_eigvals
+        from skimage.filters import sato as skimage_sato
+    except Exception:  # another release, or not installed: Kraken uses its own
+        return None
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one_size(image, sigma, mode, cval):
+        eigvals = hessian_matrix_eigvals(
+            hessian_matrix(image, sigma, mode=mode, cval=cval, use_gaussian_derivatives=True)
+        )
+        eigvals = eigvals[:-1]
+        return sigma**2 * np.prod(np.maximum(eigvals, 0), 0) ** (1 / len(eigvals))
+
+    def sato(image, sigmas=range(1, 10, 2), black_ridges=True, mode="reflect", cval=0):
+        if np.ndim(image) != 2:  # Kraken passes a 2-D heat map; anything else as before
+            return skimage_sato(image, sigmas=sigmas, black_ridges=black_ridges, mode=mode, cval=cval)
+        image = image.astype(_supported_float_type(image.dtype), copy=False)
+        if not black_ridges:
+            image = -image
+        sigmas = list(sigmas)
+        filtered_max = np.zeros_like(image)
+        if not sigmas:
+            return filtered_max
+        with ThreadPoolExecutor(max_workers=len(sigmas)) as threads:
+            per_size = list(threads.map(lambda sigma: one_size(image, sigma, mode, cval), sigmas))
+        for vals in per_size:  # sato's order: the result is the same to the last bit
+            filtered_max = np.maximum(filtered_max, vals)
+        return filtered_max
+
+    return sato
+
+
+class _FiltersWithSato:
+    """skimage.filters as Kraken's segmentation module sees it, with sato swapped."""
+
+    def __init__(self, filters, sato):
+        self._filters = filters
+        self.sato = sato
+
+    def __getattr__(self, name):
+        return getattr(self._filters, name)
 
 
 def _image_key(page_path):
@@ -570,7 +678,7 @@ def _page_geometry(geometry, width, height):
 def _rows_in_column(column, ruled):
     """The rows (0-based) a ledger column marker reaches, or None for all of them.
 
-    Staff can shorten a column in Align to read only some of its rows: a
+    The user can shorten a column in Align to read only some of its rows: a
     stretch too faded or torn to read, or rows another hand filled in later.
     A row counts when its middle lies inside the marker, give or take a
     quarter row, so a marker stopping a little short of a row line still
@@ -586,10 +694,10 @@ def _rows_in_column(column, ruled):
 
 
 def _keep_shortened_columns(before, after):
-    """`after` (a fitted grid) with the columns Staff shortened in Align still shortened.
+    """`after` (a fitted grid) with the columns the user shortened in Align still shortened.
 
     The fit and the rows taken from the page give every column the table's full
-    height. A column Staff cut to some rows keeps those same rows, at wherever
+    height. A column the user cut to some rows keeps those same rows, at wherever
     the fitted row lines now put them.
     """
     old, new = before.get("columns") or [], after.get("columns") or []
@@ -682,9 +790,11 @@ def _rule_pixels(gray, length=60):
 def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near=0.0):
     """Straight printed rules along one axis.
 
-    Returns (rules, pixels). Rules are {"a", "b", "lo", "hi"} where the rule
-    is v = a + b*u, u being x for horizontal rules and y for vertical ones,
-    and [lo, hi] the extent along u. `pixels` marks every rule fragment long
+    Returns (rules, pixels). Rules are {"a", "b", "lo", "hi", "covered",
+    "thickness"} where the rule is v = a + b*u, u being x for horizontal rules
+    and y for vertical ones, [lo, hi] the extent along u, "covered" how many
+    pixels of that extent the rule was actually found on and "thickness" its
+    mean thickness there. `pixels` marks every rule fragment long
     enough to be print rather than handwriting, including fragments too short
     or too bent to join a fitted rule; those still have to be erased.
 
@@ -763,7 +873,8 @@ def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near
     for rule in merged:
         covered = len(np.unique(rule["u"]))
         if covered >= min_span:
-            rules.append({"a": rule["a"], "b": rule["b"], "lo": rule["lo"], "hi": rule["hi"]})
+            rules.append({"a": rule["a"], "b": rule["b"], "lo": rule["lo"], "hi": rule["hi"],
+                          "covered": int(covered), "thickness": len(rule["u"]) / covered})
             thicknesses.append(float(np.median([member["thickness"] for member in rule["members"]])))
             for member in rule["members"]:
                 pixels[member["window"]] |= member["mask"]
@@ -852,7 +963,7 @@ def _global_fit(expected, detected, probe, reach, tolerance, stretch=0.04, pivot
 
     `stretch` is how far the spacing may change either way. `pivot` is the
     line the stretch is about: "mean" (the middle), or "first" for rows. Rows
-    pivot on the first line because that is where Staff put the table's top:
+    pivot on the first line because that is where the user put the table's top:
     stretching about the middle couples the scale to a shift, so a template
     5% off in row height can only be matched by sliding a whole row, and a
     limit on how far the top may move (`reach`) would then rule out the right
@@ -1035,7 +1146,7 @@ def _split_at_columns(line, columns, ink, row_height, removed=()):
     The cut goes through the emptiest ink column near the rule, so text that
     overflows its column by a letter or two is not sliced through.
 
-    `removed` are the printed columns Staff removed (_removed_columns). Their
+    `removed` are the printed columns the user removed (_removed_columns). Their
     rules are cut as well: the detector often runs one line from an Informant
     straight on into the Remarks beside it, and with Informant removed that
     line was either read whole as the Remarks or, mostly Informant, dropped
@@ -1104,7 +1215,7 @@ def _printed_dividers(v_rules, top, bottom, width):
 
 
 def _removed_columns(columns, dividers, y, row_height):
-    """The printed columns beside or between the kept ones: those Staff removed.
+    """The printed columns beside or between the kept ones: those the user removed.
 
     Returns (left, right) Rule pairs. Past a kept column's outer edge the
     printed table goes on when another printed rule stands at least
@@ -1317,7 +1428,7 @@ def _rows_do_not_fit(written, rules, row_height):
 
 def _grid_notes(rules, expected, h_rules, above, below, columns, row_height, centre_x, table_left, table_right, height,
                 written=()):
-    """What Staff should check about the grid as a whole: [{"code": ..., ...}].
+    """What the user should check about the grid as a whole: [{"code": ..., ...}].
 
     A wrong grid cannot be told from a right one by looking at any single
     line: every line still lands in some row. These are the tell-tale signs,
@@ -1337,13 +1448,13 @@ def _grid_notes(rules, expected, h_rules, above, below, columns, row_height, cen
                         (see _rows_do_not_fit), so `count` column(s) were read as
                         free text. Reported by process_page itself.
       grid_moved        (Detect only) the fit moved the first row line whole rows
-                        from where Staff put it; `rows` is how many, positive
+                        from where the user put it; `rows` is how many, positive
                         for down. A header as tall as a row is part of the
                         page's evenly ruled run, so this can be the header.
       lines_above_grid  written lines in several columns in a row-sized band
                         directly above the first row. A taller band is a
                         header (more than ROW_SIZED_BAND rows) stays quiet; a
-                        band as tall as a row could be either, so Staff are asked.
+                        band as tall as a row could be either, so the user is asked.
       rows_empty        rows above the last row read that nothing was read
                         in at all; `rows` are the 1-based row numbers. A row
                         left out this way has no reading to flag, so it would
@@ -1693,7 +1804,7 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
     grid = None
     detector_used = None
     has_table = bool(columns) and len(ruled) >= 2
-    # Printed columns Staff removed in Align (see _removed_columns), and the
+    # Printed columns the user removed in Align (see _removed_columns), and the
     # writing the detector found in them.
     removed, in_removed = [], []
     # Every rectangle field is split into the written lines inside it, the same
@@ -1739,7 +1850,7 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
 
             v_rules, v_pixels = _find_rules(v_evidence, "v", 0.2 * (table_bottom - table_top), max_thickness, writing, near)
             # A printed row line runs across the whole printed table, not only
-            # the columns Staff kept. Measured against one kept 108-px Remarks
+            # the columns the user kept. Measured against one kept 108-px Remarks
             # column, "long enough to be print" fell to 22 px, and the joins of
             # every cursive "Legitimate" were erased as print.
             dividers = _printed_dividers(v_rules, table_top, table_bottom, width)
@@ -1761,7 +1872,7 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
 
             # A ledger column over writing that does not sit in its rows: read the
             # columns as free text instead - the written lines inside each, top to
-            # bottom, exactly as a rectangle field is - and tell Staff. Forcing every
+            # bottom, exactly as a rectangle field is - and tell the user. Forcing every
             # line into one of the template's rows splits words apart and flags most
             # of the page.
             written = [(float(np.mean([p[0] for p in entry["baseline"]])),
@@ -1848,7 +1959,7 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
         for column_index, members in by_column.items():
             members = _merge_rows(members, row_height)
             _assign_rows(members, rules, offset)
-            # A column Staff shortened in Align is read only in the rows it reaches.
+            # A column the user shortened in Align is read only in the rows it reaches.
             reached = columns[column_index]["rows"]
             if reached is not None:
                 ignored.extend(line for line in members if line.row not in reached)
@@ -1882,7 +1993,7 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
         # A row where the detector found no writing at all is an empty row; a
         # lone mark there is a stain or a stray stroke, not an entry.
         written_rows = {line.row for line in lines[:table_count] if line.source == SOURCE_DETECTED}
-        # Writing in a column Staff removed still shows the row holds an entry:
+        # Writing in a column the user removed still shows the row holds an entry:
         # with only a narrow Age column kept, a "36" the detector missed would
         # otherwise be taken for a stain.
         for piece in in_removed:
@@ -2020,7 +2131,7 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
                     "name": c["name"],
                     "left": c["left_rule"].to_json(),
                     "right": c["right_rule"].to_json(),
-                    # Only a column Staff shortened: the rows (0-based) it reaches.
+                    # Only a column the user shortened: the rows (0-based) it reaches.
                     **({"rows": sorted(c["rows"])} if c.get("rows") is not None else {}),
                 }
                 for c in columns
@@ -2101,7 +2212,7 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
         "lines": records,
         "grid": grid,
         "ignored": len(ignored),
-        # What Staff should check about the grid: see _grid_notes.
+        # What the user should check about the grid: see _grid_notes.
         "notes": notes,
         "timings": {k: round(v, 2) for k, v in timings.items()},
         # "cuda", "cpu", or "cpu (GPU failed)"; None when no detector ran.
@@ -2411,11 +2522,107 @@ def _bridge_missing_rules(rules, ys):
     return out_rules, out_ys
 
 
+# A line of writing taken for a rule is at least this many times as thick as
+# the page's hairline rules, and this many pixels thick.
+WRITING_THICKNESS = 2.0
+WRITING_MIN_THICKNESS = 3.5
+
+# Print is found along nearly all of a rule's length; a line of writing has
+# the gaps between its words.
+PRINT_COVERAGE = 0.9
+
+
+def _without_writing(rules):
+    """Row rules without the lines of writing a small page passes off as rules.
+
+    On a page drawn small (a whole register page some 1,200 px tall) a line
+    of joined-up handwriting is only a few pixels tall, thin enough for the
+    thin-line test, and its words string together into a "rule" running a
+    third of a row above the real one. Those cut the evenly ruled run the
+    table is found by into pieces: on one such sample only the last 8 of 20
+    rows were found, and on its facing page none at all.
+
+    Such a line is told from print by two things together: it is at least
+    twice as thick as the page's hairline rules (on that sample 4 to 5 px
+    against 2), and it is broken between the words, where print - a thick
+    frame or header rule included - runs unbroken.
+    """
+    if len(rules) < 4:
+        return rules
+    hairline = float(np.percentile([rule["thickness"] for rule in rules], 25))
+    limit = max(WRITING_MIN_THICKNESS, WRITING_THICKNESS * hairline)
+    return [rule for rule in rules
+            if rule["thickness"] < limit or rule["covered"] >= PRINT_COVERAGE * (rule["hi"] - rule["lo"] + 1)]
+
+
+def _drop_stray_rules(rules, ys):
+    """Row rules without the lines that lie off the table's rhythm.
+
+    A fold, a tear or a rule seen only at one end of the page (and so
+    measured askew) comes back as a line somewhere inside a row. Left in, it
+    ends the evenly ruled run there. A line is dropped when the two lines
+    around it are a whole number of rows apart, each of them begins or ends
+    an ordinary row on its other side, and the line itself fits neither side:
+    it is no whole number of rows from the line above it, nor from the one
+    below. (A printed rule with one tall row beside it stays.)
+
+    `rules` and `ys` go together (sorted by y, in pixels). Returns both.
+    """
+    rules, ys = list(rules), list(ys)
+
+    def whole_rows(gap, row, tolerance):
+        k = int(round(gap / row))
+        return 1 <= k <= MAX_BRIDGED_ROWS and abs(gap / k - row) <= tolerance * row
+
+    while len(ys) >= 5:
+        gaps = np.diff(ys)
+        typical = float(np.median(gaps))
+        if typical <= 0:
+            break
+        normal = [0.75 * typical <= gap <= 1.25 * typical for gap in gaps]
+        stray = None
+        for i in range(2, len(ys) - 2):
+            if not (normal[i - 2] and normal[i + 1]):
+                continue
+            # The rows around the line, without the two gaps it makes itself.
+            near = [gaps[j] for j in range(max(0, i - 5), min(len(gaps), i + 5)) if normal[j] and j not in (i - 1, i)]
+            row = float(np.median(near))
+            if whole_rows(ys[i + 1] - ys[i - 1], row, 0.12) \
+                    and not whole_rows(gaps[i - 1], row, 0.15) and not whole_rows(gaps[i], row, 0.15):
+                stray = i
+                break
+        if stray is None:
+            break
+        del rules[stray], ys[stray]
+    return rules, ys
+
+
+def _table_extent(v_rules, h_rules, width, height):
+    """(top, bottom, reach) of the table: where most long column rules start
+    and end, in pixels; None without at least three of them.
+
+    A quarter of the column rules may start lower or end higher (a faded top,
+    the book's fold, the paper's own edge); the 25th and 75th percentiles leave
+    those out. `reach` allows for a turned page, whose border meets each
+    column rule a little higher or lower than it crosses the page's middle.
+    """
+    long_rules = [r for r in v_rules if r["hi"] - r["lo"] >= 0.4 * height]
+    if len(long_rules) < 3:
+        return None
+    reach = 4.0 + abs(math.tan(math.radians(_rules_tilt(h_rules)))) * width / 2
+    return (float(np.percentile([r["lo"] for r in long_rules], 25)),
+            float(np.percentile([r["hi"] for r in long_rules], 75)),
+            reach)
+
+
 def detect_grid(page):
     """Printed rules on a page: a template sample, or a document being scanned.
 
     Suggests ruled_ys (the longest run of evenly spaced row rules, with rules
-    a worn page lost inside it put back: see _bridge_missing_rules), columns
+    a worn page lost inside it put back - listed again in bridged_ys - see
+    _bridge_missing_rules; lines of
+    writing and stray lines are left out first: see _without_writing and
+    _drop_stray_rules), columns
     (the spans between vertical rules inside that run) and frame_bottom
     (where those column rules end: the bottom of the table), all as page
     fractions. `page` is a path or a PIL image. Also says how far the page's
@@ -2428,12 +2635,24 @@ def detect_grid(page):
     gray = np.asarray(image, dtype=np.uint8)
     h_evidence, v_evidence = _rule_pixels(gray)
     h_rules, _ = _find_rules(h_evidence, "h", 0.2 * width)
+    h_rules = _without_writing(h_rules)
     v_rules, _ = _find_rules(v_evidence, "v", 0.15 * height)
 
     suggestion = {"ruled_ys": [], "columns": [], "estimated_ys": 0}
     centre = width / 2
+    table = _table_extent(v_rules, h_rules, width, height)
+    if table is not None:
+        # Where most column rules end: the table's bottom border, which shows
+        # even on a page whose row rules are too faint to find (see fit_geometry).
+        suggestion["frame_bottom"] = round(table[1] / height, 5)
     # The paper's own top and bottom edge can show as a rule; it is no row's.
-    rows = sorted((r for r in h_rules if 0.004 * height < r["a"] + r["b"] * centre < 0.996 * height),
+    # Nor is a rule above or below the table's column lines: a title box or a
+    # form's header strip. On an aged page whose row rules were too faint to
+    # find, the two lines of its "City/Municipality" box and the header's rule
+    # passed for three evenly spaced rows 62 px apart (the rows are 39 px), and
+    # Snap to table stretched the grid to them.
+    rows = sorted((r for r in h_rules if 0.004 * height < r["a"] + r["b"] * centre < 0.996 * height
+                   and (table is None or table[0] - table[2] <= r["a"] + r["b"] * centre <= table[1] + table[2])),
                   key=lambda r: r["a"] + r["b"] * centre)
     ys = [r["a"] + r["b"] * centre for r in rows]
     if len(ys) >= 3:
@@ -2450,7 +2669,11 @@ def detect_grid(page):
             kept.append((rule, y))
         rows = [rule for rule, _ in kept]
         ys = [y for _, y in kept]
+        rows, ys = _drop_stray_rules(rows, ys)
         rows, ys = _bridge_missing_rules(rows, ys)
+    # A line put back by _bridge_missing_rules borrows the rule above it: the
+    # same rule twice in a row marks it. The builder shows those lines amber.
+    bridged = {i for i in range(1, len(rows)) if rows[i] is rows[i - 1]}
     if len(ys) >= 3:
         gaps = np.diff(ys)
         typical = float(np.median(gaps))
@@ -2489,6 +2712,8 @@ def detect_grid(page):
             run = run + estimated
             suggestion["estimated_ys"] = len(estimated)
             suggestion["ruled_ys"] = [round(y / height, 5) for y in run]
+            # Lines inside the run put back where the printed rule was too faint.
+            suggestion["bridged_ys"] = [round(ys[i] / height, 5) for i in range(first, last + 1) if i in bridged]
 
             top, bottom = run[0], run[-1]
             span = bottom - top
@@ -2500,12 +2725,29 @@ def detect_grid(page):
                 if r["lo"] <= top + 0.5 * span and r["hi"] >= top + 0.5 * span
                 and r["hi"] - r["lo"] >= 0.5 * span
             ]
-            crossing = [(x, r) for x, r in crossing if lo_x - 6 <= x <= hi_x + 6]
-            xs = sorted(x for x, _ in crossing)
+            if first > 0:
+                # Faint row rules can all stop short of the table's frame; the
+                # rule above the first row (the header's) still reaches it.
+                lo_x = min(lo_x, rows[first - 1]["lo"])
+                hi_x = max(hi_x, rows[first - 1]["hi"])
+            crossing = sorted(((x, r) for x, r in crossing if lo_x - 6 <= x <= hi_x + 6),
+                              key=lambda found: found[0])
             if crossing:
                 suggestion["frame_bottom"] = round(float(np.median([r["hi"] for _, r in crossing])) / height, 5)
+            # Two lines closer than half a row are no column: the much shorter
+            # one is a fold or the shadow of the book's spine beside the frame.
+            lines = []
+            for x, r in crossing:
+                length = r["hi"] - r["lo"]
+                if lines and x - lines[-1][0] <= max(8.0, 0.5 * typical):
+                    if length < 0.8 * lines[-1][1]:
+                        continue
+                    if lines[-1][1] < 0.8 * length:
+                        lines[-1] = (x, length)
+                        continue
+                lines.append((x, length))
             deduped = []
-            for x in xs:
+            for x, _ in lines:
                 if not deduped or x - deduped[-1] > 8:
                     deduped.append(x)
             for left, right in zip(deduped[:-1], deduped[1:]):
@@ -2530,7 +2772,7 @@ def detect_grid(page):
 # Every scanned page sits differently: shifted, scaled by the scanner, and
 # tilted. The Detect step straightens the page, finds this page's own table,
 # fits the template's columns and rows onto it, and outlines every line - so
-# Staff see what will be read before anything goes to TrOCR.
+# The user sees what will be read before anything goes to TrOCR.
 
 MAX_SKEW_DEGREES = 10.0
 
@@ -2583,9 +2825,9 @@ def _straightened_point(x, y, degrees, old_size, new_size):
 
 
 def grid_tilt(geometry):
-    """The ledger's tilt as Staff marked it, in degrees clockwise (0 if none).
+    """The ledger's tilt as the user marked it, in degrees clockwise (0 if none).
 
-    Staff tilt each column marker on its own; the columns' typical (median)
+    The user tilts each column marker on its own; the columns' typical (median)
     tilt is taken as the page's.
     """
     angles = [float(column.get("angle") or 0.0) for column in geometry.get("columns") or []]
@@ -2598,7 +2840,7 @@ def _straighten_geometry(geometry, degrees, old_size, new_size, grid_frame):
     Every field corner goes where the page takes it, so a field keeps its
     place and loses the page's tilt from its own.
 
-    Columns and row lines are moved only when `grid_frame` (Staff tilted the
+    Columns and row lines are moved only when `grid_frame` (the user tilted the
     columns to match the page); otherwise they stay for Detect to refit. A
     column turned about its own centre lands with that centre where the page
     takes it, standing upright: what remains of its own tilt after the page's
@@ -2649,9 +2891,9 @@ def _straighten_geometry(geometry, degrees, old_size, new_size, grid_frame):
 
 
 def outline_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None, cache_path=None):
-    """Scan with OCR from Staff's markers, straightening a tilted page first.
+    """Scan with OCR from the user's markers, straightening a tilted page first.
 
-    When Staff tilted the ledger columns to match the page, the page is
+    When the user tilted the ledger columns to match the page, the page is
     straightened by their typical tilt and saved in place (as Detect does), so the
     outlines, the crops and the page shown in Verify share one pixel grid.
     The result then also carries "deskew" and the "geometry" used.
@@ -2724,7 +2966,7 @@ def fit_geometry(image, geometry, found=None):
     the scale. Counting matches would be fooled here - the header's own rules
     and the lines estimated below the last printed rule line up with each
     other one row off. Markers that already sit on the printed rules as well
-    as the fit would put them are kept where Staff put them.
+    as the fit would put them are kept where the user put them.
 
     Rectangle fields follow the same mapping. process_page then snaps every
     edge and row line to the printed rule it belongs to.
@@ -2748,18 +2990,52 @@ def fit_geometry(image, geometry, found=None):
 
     # Any two edges can always be matched to two rules; at least three, and
     # half of a wide table's edges, must agree before the fit is trusted.
-    if x_fit is None or x_fit[2] < max(3, math.ceil(0.5 * len(edges))) or len(printed) < 3:
-        return geometry, {"fitted": False, "reason": "No ruled table matching this template was found on this page."}
+    unfitted = {"fitted": False, "reason": "No ruled table matching this template was found on this page."}
+    if x_fit is None or x_fit[2] < max(3, math.ceil(0.5 * len(edges))):
+        return geometry, unfitted
 
     sx, tx, x_hits = x_fit
-    sy = float(np.median(np.diff(printed))) / max(1e-6, float(np.median(np.diff(ruled))))
-    ty = printed[0] - sy * ruled[0]
-
+    layout_pitch = max(1e-6, float(np.median(np.diff(ruled))))
+    # The rows stretch with the columns: the page is the same table, scanned
+    # or photographed whole, and the markers already sit on this page, so the
+    # stretch the columns fit at is the one the rows should have too. A ruled
+    # run that disagrees by more than ROW_STRETCH_LIMIT, found from fewer than
+    # half the template's row lines, is not this table's rows: on an aged page
+    # whose row rules were too faint to find, lines of the form above the
+    # table passed for rows and stretched the grid 1.59 times (15 rows of the
+    # template's 20). Then the template's rows are kept at the columns'
+    # stretch, their last line on the table's bottom border (fit["faint_rows"]).
+    faint = len(printed) < 3
+    if not faint:
+        sy = float(np.median(np.diff(printed))) / layout_pitch
+        faint = len(printed) < 0.5 * len(ruled) and abs(sy / sx - 1.0) > ROW_STRETCH_LIMIT
+    horizontal = np.asarray(found["horizontal"] or printed or [0.0], dtype=float)
+    if faint:
+        # Rows that come from the columns' stretch are only as good as the
+        # column fit: it must be close to whole. A page shrunk 0.9 with half
+        # its column edges matched at the wrong scale would otherwise move a
+        # grid it used to leave alone.
+        frame = suggestion.get("frame_bottom")
+        if frame is None or not found["horizontal"] or x_hits < max(4, math.ceil(0.75 * len(edges))):
+            return geometry, unfitted
+        sy = sx
+        pitch = sy * layout_pitch
+        # The border is a printed rule; the column rules' ends only say where it is.
+        nearest = float(horizontal[np.abs(horizontal - frame).argmin()])
+        bottom = nearest if abs(nearest - frame) <= 0.5 * pitch else float(frame)
+        ty = bottom - sy * ruled[-1]
+        # Both ends on printed rules: the bottom border, and the header's rule
+        # the first row line hangs from. Anything less is a guess.
+        top = ty + sy * ruled[0]
+        if top < 0 or abs(nearest - (ty + sy * ruled[-1])) > 0.3 * pitch \
+                or float(np.abs(horizontal - top).min()) > 0.3 * pitch:
+            return geometry, unfitted
+    else:
+        ty = printed[0] - sy * ruled[0]
+        pitch = float(np.median(np.diff(printed)))
     # A faded or damaged rule can cut the ruled run short, and its top then
-    # lies rows below the table's. A first row line Staff already placed on
+    # lies rows below the table's. A first row line the user already placed on
     # the printed rules is never traded for one that puts fewer rows there.
-    pitch = float(np.median(np.diff(printed)))
-    horizontal = np.asarray(found["horizontal"] or printed, dtype=float)
 
     def rows_on_rules(scale, shift):
         """The printed rules the grid's row lines meet, placed by (scale, shift).
@@ -2779,15 +3055,15 @@ def fit_geometry(image, geometry, found=None):
                 y += scale * (ruled[k + 1] - ruled[k])
         return hits
 
-    # A tie goes to Staff: when the markers lead onto as many printed rules
-    # as the fit would put them on, they stay where Staff put them. A header
+    # A tie goes to the user: when the markers lead onto as many printed rules
+    # as the fit would put them on, they stay where the user put them. A header
     # band as tall as a row lies in the ruled run, and matching rules alone
-    # cannot tell it from the first row; Staff's placement can - when its
+    # cannot tell it from the first row; the user's placement can - when its
     # first row line is on a printed rule. One that is not (the template's,
     # drawn on another page) has no placement to trust.
-    staff, page = rows_on_rules(1.0, 0.0), rows_on_rules(sy, ty)
+    placed, page = rows_on_rules(1.0, 0.0), rows_on_rules(sy, ty)
     on_rule = float(np.abs(horizontal - ruled[0]).min()) <= 0.3 * pitch
-    if staff > page or (staff == page and on_rule):
+    if placed > page or (placed == page and on_rule):
         sy, ty = 1.0, 0.0
     y_hits = len(printed)
 
@@ -2819,6 +3095,8 @@ def fit_geometry(image, geometry, found=None):
         "fitted": True,
         "column_edges_matched": f"{x_hits}/{len(edges)}",
         "printed_row_lines": y_hits,
+        # The page's row rules were too faint to follow: the template's rows were used.
+        **({"faint_rows": True} if faint else {}),
     }
 
 
@@ -2869,7 +3147,7 @@ def _snapped_geometry(result, fitted):
     centre_y = (top + bottom) / 2
     ruled = [(r["a"] + r["b"] * centre_x) / height for r in grid["rules"]]
     # Row lines no printed rule was found for: the Align step draws them
-    # amber, for Staff to check against the page.
+    # amber, for the user to check against the page.
     unprinted = {round(y, 5) for y, rule in zip(ruled, grid["rules"]) if not rule.get("matched")}
     # A page can have fewer rows than the template: the rules estimated below
     # its last printed one then fall past the page's edge. Rows off the page
@@ -2881,7 +3159,7 @@ def _snapped_geometry(result, fitted):
     for column in grid["columns"]:
         x0 = column["left"]["a"] + column["left"]["b"] * centre_y
         x1 = column["right"]["a"] + column["right"]["b"] * centre_y
-        # A column Staff shortened keeps to the rows it reaches.
+        # A column the user shortened keeps to the rows it reaches.
         reached = [r for r in column.get("rows") or [] if r < len(ruled) - 1]
         y0, y1 = (ruled[reached[0]], ruled[reached[-1] + 1]) if reached else (ruled[0], ruled[-1])
         columns.append({
@@ -2912,6 +3190,10 @@ UNEVEN_TEMPLATE_ROWS = 1.35
 # is within this share of the grid's.
 PAGE_ROW_HEIGHT = 0.15
 
+# The fit's rows may stretch this much more or less than its columns before a
+# run found from few row rules is taken for something else (see fit_geometry).
+ROW_STRETCH_LIMIT = 0.15
+
 
 def _row_pitch(ys):
     return float(np.median(np.diff(ys))) if len(ys) >= 2 else 0.0
@@ -2938,7 +3220,7 @@ def _rows_from_page(fitted, found, writing=None, template_rows=None):
     """The fitted grid with its row lines taken from the page's printed rows.
 
     The fit has already put the grid's first row line on the page (the top of
-    the table, or where Staff put it when that is as good). From there the
+    the table, or where the user put it when that is as good). From there the
     rows follow the page's evenly ruled run (detect_grid) to its end, rows
     estimated below the last printed rule included as long as they lie
     within the table's column lines.
@@ -3046,6 +3328,14 @@ def _rows_from_page(fitted, found, writing=None, template_rows=None):
     return geometry, _rows_summary(rows, horizontal, template_rows)
 
 
+def _say_rows_were_faint(fit):
+    """Name the reason the Align step shows when fit_geometry kept the
+    template's rows because the page's row rules were too faint to follow."""
+    rows = fit.get("rows")
+    if fit.get("faint_rows") and isinstance(rows, dict) and not rows.get("from_page"):
+        rows["reason"] = "faint_rows"
+
+
 def _writing_at(image, page_path, detector, cache_path):
     """Where each written line sits (its baseline's middle), as page fractions."""
     raw, _ = detected_lines(image, page_path, detector, cache_path)
@@ -3061,7 +3351,7 @@ def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None,
     """Straighten a scanned page, fit the template to it, and outline every line.
 
     The straightened page replaces `page_path`, so everything downstream - the
-    outlines, the crops, the page Staff see - shares one pixel grid. Returns
+    outlines, the crops, the page the user sees - shares one pixel grid. Returns
     process_page's result with the rotation applied, the fit, and the
     geometry that was used.
     """
@@ -3071,7 +3361,7 @@ def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None,
         original_size = image.size
         image = straighten_page(image, degrees)
         image.save(page_path, "PNG")
-        # Fields follow the page. Columns do too if Staff had already tilted
+        # Fields follow the page. Columns do too if the user had already tilted
         # them with the page; upright columns are refitted below.
         geometry = _straighten_geometry(geometry, degrees, original_size, image.size,
                                         grid_frame=abs(grid_tilt(geometry)) >= 0.05)
@@ -3080,11 +3370,12 @@ def detect_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None,
 
     found = detect_grid(image)
     fitted, fit = fit_geometry(image, geometry, found=found)
-    # The rows come from the page, unless Staff set them by hand in Align.
+    # The rows come from the page, unless the user set them by hand in Align.
     if fit["fitted"] and not geometry.get("keep_rows"):
         fitted, fit["rows"] = _rows_from_page(
             fitted, found, writing=lambda: _writing_at(image, page_path, detector, cache_path),
             template_rows=max(0, len(geometry.get("ruled_ys") or []) - 1))
+        _say_rows_were_faint(fit)
     if fit["fitted"]:
         fitted = _keep_shortened_columns(geometry, fitted)
     result = process_page(page_path, fitted, out_dir, detector=detector, debug=debug,
@@ -3184,8 +3475,8 @@ def snap_page(page_path, geometry):
     says where they came from. A page scanned a little turned gets its grid
     turned with it (see _tilted_grid; fit["tilt"] says how far), so the row
     lines follow its printed rules from end to end. Also returns every printed
-    rule found (page fractions), for the markers' magnetic edges while Staff
-    drag them.
+    rule found (page fractions), for the markers' magnetic edges while the user
+    drags them.
     """
     image = Image.open(page_path).convert("RGB")
     found = detect_grid(image)
@@ -3197,6 +3488,7 @@ def snap_page(page_path, geometry):
         # them, where it lost one), so only the columns are snapped then.
         fitted, fit["rows"] = _rows_from_page(fitted, found,
                                               template_rows=max(0, len(geometry.get("ruled_ys") or []) - 1))
+        _say_rows_were_faint(fit)
         fitted = _snap_to_lines(fitted, found["vertical"],
                                 [] if fit["rows"]["from_page"] else found["horizontal"])
         fitted = _keep_shortened_columns(geometry, fitted)
@@ -3225,6 +3517,7 @@ def _read_json_arg(value):
 
 
 def main(argv=None):
+    _run_at_full_speed()  # before any work, and before the helpers start
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
 

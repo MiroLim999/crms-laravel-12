@@ -11,7 +11,8 @@ use Illuminate\Validation\Rules\Password;
 use Illuminate\View\View;
 
 /**
- * Forced password change for accounts holding a temporary password.
+ * Forced password change: at the first sign-in, and after
+ * `php artisan crms:reset-password`.
  *
  * Reachable while EnsurePasswordIsChanged is blocking everything else, which is
  * why it is a separate flow from the voluntary change in account settings.
@@ -41,10 +42,10 @@ class PasswordChangeController extends Controller
 
         $user = $request->user();
 
-        // Reusing the temporary password would defeat the point of forcing a change.
+        // Reusing the current password would defeat the point of forcing a change.
         if (Hash::check($validated['password'], $user->password)) {
             return back()->withErrors([
-                'password' => 'Choose a password different from your temporary one.',
+                'password' => 'Choose a password different from your current one.',
             ]);
         }
 
@@ -57,7 +58,7 @@ class PasswordChangeController extends Controller
         $this->audit->log(
             'user.password_changed',
             $user,
-            description: 'Temporary password replaced by the account holder.',
+            description: 'Password chosen at sign-in.',
         );
 
         return redirect()

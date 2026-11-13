@@ -13,8 +13,8 @@ use Illuminate\View\View;
 /**
  * Sign-in and sign-out.
  *
- * There is no registration counterpart by design: all accounts are provisioned by
- * a Super Admin (Staff and Admin) or seeded (the bootstrap Super Admin).
+ * There is no registration counterpart by design: the one account is made by
+ * the seeder (SuperAdminSeeder).
  */
 class LoginController extends Controller
 {
@@ -32,15 +32,6 @@ class LoginController extends Controller
 
         $user = $request->user();
 
-        // Deactivated accounts must not gain a session, even with valid credentials.
-        if (! $user->is_active) {
-            Auth::logout();
-            $request->session()->invalidate();
-            $request->session()->regenerateToken();
-
-            return back()->withErrors(['email' => 'This account has been deactivated.']);
-        }
-
         $user->forceFill(['last_login_at' => now()])->save();
 
         $this->audit->log('auth.login', $user, description: 'Signed in.');
@@ -48,7 +39,7 @@ class LoginController extends Controller
         if ($user->must_change_password) {
             return redirect()
                 ->route('password.change')
-                ->with('warning', 'Your password is temporary. Please choose a new one.');
+                ->with('warning', 'Choose your own password before you start.');
         }
 
         return redirect()->intended(route('dashboard'));

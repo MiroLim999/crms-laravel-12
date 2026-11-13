@@ -2,14 +2,14 @@
 
 @section('title', 'Change Password')
 @section('heading', 'Choose a new password')
-@section('subheading', 'Your account was issued a temporary password. Replace it to continue.')
+@section('subheading', 'Choose your own password before you start.')
 
 @section('content')
     <form method="POST" action="{{ route('password.change.store') }}" class="mb-6">
         @csrf
 
         <div class="mb-6 form-password-toggle">
-            <label for="current_password" class="form-label">Temporary password</label>
+            <label for="current_password" class="form-label">Current password</label>
             <div class="input-group input-group-merge">
                 <input type="password"
                        id="current_password"

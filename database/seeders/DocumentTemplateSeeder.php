@@ -12,8 +12,8 @@ use Illuminate\Database\Seeder;
  * Starter templates, one active per certificate type.
  *
  * The field boxes come from DocumentType::defaultFields(), ported from the
- * prototype's web/js/config.js. Without these, Staff cannot scan anything until a
- * Super Admin builds a template by hand - so seeding them makes a fresh install
+ * prototype's web/js/config.js. Without these, nothing can be scanned until a
+ * template is built by hand - so seeding them makes a fresh install
  * immediately usable, and they remain fully editable in the builder.
  */
 class DocumentTemplateSeeder extends Seeder

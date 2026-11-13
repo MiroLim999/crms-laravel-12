@@ -120,8 +120,8 @@ class CivilRecord extends Model
     // ------------------------------------------------------------------- state
 
     /**
-     * Submitted records are locked. Nothing edits their values in place - not
-     * Staff, and certainly not Admin. Corrections go through a change request.
+     * Submitted records are locked. Nothing edits their values in place:
+     * Correct record saves a correction, which keeps the old values.
      */
     public function isLocked(): bool
     {

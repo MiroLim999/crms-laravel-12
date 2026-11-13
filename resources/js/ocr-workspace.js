@@ -576,7 +576,10 @@ function initEngineStatus() {
             status.classList.toggle('is-online', reachable);
             status.classList.toggle('is-offline', !reachable);
             if (state) {
-                state.textContent = reachable ? 'OCR service online' : 'OCR service offline';
+                // "(GPU, fp16)" etc.: the mode can change without a reload, for
+                // example after the service fell back to the CPU.
+                const mode = reachable && engine?.mode ? ` (${engine.mode})` : '';
+                state.textContent = (reachable ? 'OCR service online' : 'OCR service offline') + mode;
             }
 
             // A transition changes controls and model discovery; reload once

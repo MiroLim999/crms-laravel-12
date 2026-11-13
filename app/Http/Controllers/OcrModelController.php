@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\OcrModel;
-use App\Models\OcrSetting;
 use App\Services\AuditLogger;
 use App\Services\Ocr\EngineStatus;
 use App\Services\Ocr\OcrModelManager;
@@ -21,7 +20,7 @@ use Illuminate\View\View;
  * Two management responsibilities:
  *
  *   1. Manage the model folders the service can serve - install, rename, delete.
- *   2. Activate one of them, which is the model Staff scan with.
+ *   2. Activate one of them, which is the model scans use.
  *
  * The index also presents read-only performance evidence. Evaluation itself
  * remains command-line work; this controller never starts a model evaluation.
@@ -60,12 +59,7 @@ class OcrModelController extends Controller
     }
 
     /**
-     * Make one installed model the one Staff scan with.
-     *
-     * Deliberately not routed through saveSettings(): that action rewrites the
-     * Staff-choice flag and the review threshold from whatever the request
-     * carries, so a request with only a model would switch the flag off and clear
-     * the threshold. Activating a model must leave both alone.
+     * Make one installed model the one scans use.
      */
     public function activate(Request $request, string $key): RedirectResponse
     {
@@ -77,76 +71,7 @@ class OcrModelController extends Controller
             return $this->back()->with('error', $e->getMessage());
         }
 
-        return $this->back()->with('success', "Staff now scan with '{$key}'.");
-    }
-
-    /**
-     * Save the scanning settings, and the model if one is submitted.
-     *
-     * No screen posts here since the Scanning policy dialog was removed, so the
-     * Staff-choice flag and the review threshold keep their stored values. One
-     * submit still covers all three, because they were one decision: this model,
-     * and whether Staff may deviate from it.
-     */
-    public function saveSettings(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            // Nullable, not required: with no models installed - or the service down -
-            // the picker has nothing to offer, and the other settings must still save.
-            'model' => ['nullable', 'string', 'max:255'],
-            'allow_staff_model_choice' => ['nullable', 'boolean'],
-            // Null clears the override and falls back to CRMS_CONFIDENCE_THRESHOLD.
-            'confidence_review_threshold' => ['nullable', 'numeric', 'min:1', 'max:100'],
-        ]);
-
-        $actor = $request->user();
-        $changes = [];
-        $model = $validated['model'] ?? '';
-
-        try {
-            $previous = OcrModel::active();
-
-            if ($model !== '' && $previous?->key !== $model) {
-                $this->manager->activate($model, $actor);
-                $changes[] = "Staff now scan with '{$model}'";
-            }
-        } catch (OcrServiceException $e) {
-            return $this->back()->with('error', $e->getMessage());
-        }
-
-        $settings = OcrSetting::current();
-        $settings->fill([
-            'allow_staff_model_choice' => $request->boolean('allow_staff_model_choice'),
-            'confidence_review_threshold' => $validated['confidence_review_threshold'] ?? null,
-            'updated_by' => $actor->getKey(),
-        ]);
-
-        // `updated_by` alone is not a change worth reporting, so it is excluded
-        // when deciding whether anything actually moved.
-        $touched = array_diff_key($settings->getDirty(), ['updated_by' => null]);
-
-        if ($touched !== []) {
-            $this->audit->saveAndLog(
-                'ocr_settings.updated',
-                $settings,
-                'Updated OCR scanning settings.',
-                $actor,
-            );
-            $changes[] = 'scanning settings saved';
-        } elseif ($settings->isDirty()) {
-            // Only `updated_by` moved. Worth recording who last confirmed the
-            // settings, but not worth an audit entry describing no change.
-            $settings->save();
-        }
-
-        OcrSetting::forgetCached();
-
-        return $this->back()->with(
-            'success',
-            $changes === []
-                ? 'Nothing to save - those settings were already in force.'
-                : ucfirst(implode(', ', $changes)).'.',
-        );
+        return $this->back()->with('success', "Now scanning with '{$key}'.");
     }
 
     /**

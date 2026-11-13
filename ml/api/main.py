@@ -62,6 +62,7 @@ for _path in (_API_ROOT, _ML_ROOT):
 # terminal with nothing to explain a failed start.
 import hf_quiet  # noqa: E402,F401
 
+import numpy as np
 import torch
 from PIL import Image
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
@@ -76,7 +77,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import dataset_registry as ds
 # Shared with predict.py and test_finetuned.py, so a reading is loaded and
 # scored the same way everywhere.
-from trocr_common import eos_token_id, load_model, sequence_confidence
+from trocr_common import batch_confidences, eos_token_id, load_model
 
 # The service's own messages (models loading, added, deleted, renamed). Uvicorn
 # configures only its own loggers, so without a handler of its own INFO would
@@ -113,8 +114,22 @@ MAX_NEW_TOKENS = 32
 
 # /ocr reads this many crops in one generate() call. A GPU reads a batch in
 # about the time it takes to read one crop; a smaller number uses less GPU
-# memory.
-OCR_BATCH_SIZE = 16
+# memory. Laravel sends 40 crops per request (PageLineReader::BATCH), so 20
+# makes two full batches instead of 16 + 16 + a leftover 8.
+OCR_BATCH_SIZE = 20
+
+# How the model's numbers are kept on the GPU: OCR_PRECISION in .env, "fp16"
+# (default) or "fp32". fp16 lets the card use its Tensor Cores: measured on an
+# RTX 4050, 225 lines 8.1 s -> 4.0 s and about half the GPU memory, with the
+# same accuracy on 517 human-corrected lines. fp32 is the way back without a
+# code change. The CPU always reads in fp32. Read once, like the device, so a
+# change needs a restart of the service.
+DEFAULT_PRECISION = "fp16"
+
+# After the card ran out of memory even for one crop, the service reads on the
+# CPU for this long, then tries the card again. A full card is usually another
+# program holding memory for a while, not a broken card.
+GPU_RETRY_SECONDS = 120
 
 # Uploaded weights are ~1.3 GB, so they are copied to disk in chunks rather
 # than read into memory.
@@ -130,7 +145,7 @@ MODEL_LABELS = {
 
 # Fallback default when the caller names no model. In CRMS this rarely applies:
 # Laravel sends the model marked active in the ocr_models table, which is the
-# real source of truth for what Staff scan against.
+# real source of truth for what scans run against.
 PREFERRED_DEFAULT = "TrOCR-fine-tune-10k-samples"
 
 # The upload is the only browser-to-service request. Restrict response access to
@@ -141,7 +156,9 @@ DEFAULT_BROWSER_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$"
 # Models are loaded lazily and cached by key so the server starts instantly
 # and each model is only loaded once.
 _device = None
-_models = {}  # cache_key -> {"model", "processor", "eos_id", "label"}
+_precision = None  # "fp16" / "fp32" from OCR_PRECISION, read once
+_gpu_back_at = None  # time.monotonic() after which a CPU fallback tries the card again
+_models = {}  # cache_key -> {"model", "processor", "eos_id", "label", "dtype"}
 _evaluation_cache = {}  # model_dir -> {signature, report}; avoids re-hashing 1.3 GB on every poll
 
 # Inference endpoints are plain `def`, so FastAPI runs them on a threadpool, and
@@ -173,6 +190,62 @@ def _on_gpu(device):
     return str(device).startswith("cuda")
 
 
+def _precision_setting():
+    """"fp16" or "fp32", from OCR_PRECISION; anything unknown means the default."""
+    global _precision
+    if _precision is None:
+        wanted = (_env_value("OCR_PRECISION") or DEFAULT_PRECISION).strip().lower()
+        if wanted not in ("fp16", "fp32"):
+            logger.warning("OCR_PRECISION=%s is not fp16 or fp32; using %s.", wanted, DEFAULT_PRECISION)
+            wanted = DEFAULT_PRECISION
+        _precision = wanted
+    return _precision
+
+
+def _dtype_for(device):
+    """The number type models are kept in on `device`: fp16 only on the card."""
+    if _on_gpu(device) and _precision_setting() == "fp16":
+        return torch.float16
+    return torch.float32
+
+
+def _precision_name():
+    """"fp16" or "fp32" as /health reports it, without touching the card."""
+    try:
+        return "fp16" if _dtype_for(_get_device()) == torch.float16 else "fp32"
+    except Exception:
+        return "fp32"
+
+
+def _is_out_of_memory(error):
+    return isinstance(error, torch.cuda.OutOfMemoryError) or "out of memory" in str(error).lower()
+
+
+def _free_gpu_cache():
+    """Hand memory torch keeps cached but unused back to the card."""
+    try:
+        torch.cuda.empty_cache()
+    except Exception:  # a card in a bad state may refuse even this
+        pass
+
+
+def _maybe_return_to_gpu():
+    """End a CPU fallback that a full card caused, once GPU_RETRY_SECONDS passed.
+
+    Only a fallback for lack of memory is temporary; a card or driver that
+    failed keeps the service on the CPU until it is restarted."""
+    global _device, _gpu_back_at
+    if _gpu_back_at is None or time.monotonic() < _gpu_back_at:
+        return
+    with _model_lock:
+        if _gpu_back_at is None or time.monotonic() < _gpu_back_at:
+            return
+        logger.info("Trying the GPU again after reading on the CPU for lack of GPU memory.")
+        _gpu_back_at = None
+        _device = None  # resolved again on the next _get_device()
+        _models.clear()  # the CPU copies; the next _load_model puts one on the card
+
+
 def _check_gpu(device):
     """One small calculation on the card.
 
@@ -183,22 +256,26 @@ def _check_gpu(device):
     (x @ x).sum().item()
 
 
-def _stop_using_gpu(reason):
-    """Read on the CPU from now on, after the card failed.
+def _stop_using_gpu(reason, retry_after=None):
+    """Read on the CPU, after the card failed.
 
     Every cached model is dropped, since its weights are on the card; the next
-    _load_model() loads it again on the CPU. Scans keep working, only slower."""
-    global _device
+    _load_model() loads it again on the CPU. Scans keep working, only slower.
+    With `retry_after` (seconds) the card is tried again after that long - for a
+    card that was only full; without it the CPU is used until a restart."""
+    global _device, _gpu_back_at
     with _model_lock:
         if _device is not None and not _on_gpu(_device):
             return
-        logger.warning("The GPU failed (%s); reading on the CPU from now on.", reason)
+        if retry_after is None:
+            logger.warning("The GPU failed (%s); reading on the CPU from now on.", reason)
+            _gpu_back_at = None
+        else:
+            logger.warning("The GPU has no free memory (%s); reading on the CPU for %d s.", reason, retry_after)
+            _gpu_back_at = time.monotonic() + retry_after
         _device = torch.device("cpu")
         _models.clear()
-        try:
-            torch.cuda.empty_cache()
-        except Exception:  # a card in a bad state may refuse even this
-            pass
+        _free_gpu_cache()
 
 
 def _looks_like_model(path):
@@ -356,28 +433,71 @@ def _load_model(key):
 
         # Read inside the lock: another thread may have just given up on the card.
         device = _get_device()
-        logger.info(f"Loading model: {label}  ({model_src})  on  {device}")
+        if _on_gpu(device):
+            _drop_other_models(cache_key)
+        dtype = _dtype_for(device)
+        logger.info(f"Loading model: {label}  ({model_src})  on  {device} ({_precision_name()})")
         processor, model = load_model(model_src)
         try:
-            model.to(device)
-            if _on_gpu(device):
-                _check_gpu(device)
+            model = _onto(model, device, dtype)
         except Exception as e:  # out of memory, a card or driver torch cannot use
             if not _on_gpu(device):
                 raise
-            _stop_using_gpu(e)
-            device = _get_device()
-            # A fresh copy: some of the weights may already be on the card.
-            processor, model = load_model(model_src)
-            model.to(device)
+            model = None
+            # Its frames hold the half-moved model; drop them so its memory can go.
+            e.__traceback__ = None
+            if _is_out_of_memory(e):
+                # Free what torch keeps cached and try once more before the CPU.
+                _free_gpu_cache()
+                try:
+                    processor, model = load_model(model_src)
+                    model = _onto(model, device, dtype)
+                except Exception as again:
+                    model = None
+                    again.__traceback__ = None
+                    e = again
+            if model is None:
+                _stop_using_gpu(e, retry_after=GPU_RETRY_SECONDS if _is_out_of_memory(e) else None)
+                device = _get_device()
+                dtype = _dtype_for(device)
+                # A fresh copy: some of the weights may already be on the card.
+                processor, model = load_model(model_src)
+                model.to(device)
         model.eval()
 
         eos_id = eos_token_id(model, processor)
 
-        entry ={"model": model, "processor": processor, "eos_id": eos_id, "label": label}
+        entry = {"model": model, "processor": processor, "eos_id": eos_id, "label": label, "dtype": dtype}
         _models[cache_key] = entry
         logger.info(f"Model ready: {label}")
         return entry
+
+
+def _onto(model, device, dtype):
+    """Put a freshly loaded model on `device` in `dtype`, checked on the card.
+
+    Halved before it moves, so the card never holds an fp32 copy as well."""
+    if dtype != torch.float32:
+        model.to(dtype)
+    model.to(device)
+    if _on_gpu(device):
+        _check_gpu(device)
+    return model
+
+
+def _drop_other_models(keep_key):
+    """Keep one model on the card: the one about to be loaded.
+
+    Choosing another active model would otherwise leave the old one in GPU
+    memory (about 1.3 GB in fp32) until the service restarts. A request still
+    reading with a dropped model finishes normally; its memory is freed after."""
+    with _model_lock:
+        others = [key for key in _models if key != keep_key]
+        for key in others:
+            _models.pop(key, None)
+    if others:
+        logger.info("Unloaded %s to keep one model on the GPU.", ", ".join(others))
+        _free_gpu_cache()
 
 
 def _unload_model(key):
@@ -525,6 +645,7 @@ class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
     device: str
+    precision: str  # "fp16" or "fp32": how models are kept on that device
     default: Optional[str] = None  # None: no model is installed
     models: list[ModelInfo]
 
@@ -595,10 +716,39 @@ async def lifespan(app: FastAPI):
     # Nothing heavy here on purpose: models stay lazy so the service answers
     # /health immediately after start, and the device is only probed on the
     # first real inference.
+    _run_at_full_speed()
     logger.info(f"Models directory:   {MODELS_DIR}")
     logger.info(f"Discovered models: {sorted(_discover_models()) or '(none)'}")
     yield
     _models.clear()
+
+
+def _run_at_full_speed():
+    """Ask Windows never to run this service in efficiency mode.
+
+    Started from a background terminal, it can be treated as background work
+    and run in efficiency mode (EcoQoS) on a laptop's slower cores; reading is
+    largely the CPU feeding the GPU, so it slows down too (225 lines took 11-12 s
+    instead of 8.8 s on such days). This opts the process out (Windows' HighQoS),
+    as ml/line_markers.py does for the line detector. Windows only; anywhere
+    else, or if Windows refuses, nothing changes."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        class _Throttling(ctypes.Structure):  # PROCESS_POWER_THROTTLING_STATE
+            _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong), ("StateMask", ctypes.c_ulong)]
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.SetProcessInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+        # Version 1; EXECUTION_SPEED under our control (0x1) and switched off (0x0).
+        state = _Throttling(1, 0x1, 0x0)
+        kernel32.SetProcessInformation(kernel32.GetCurrentProcess(), 4,  # 4 = ProcessPowerThrottling
+                                       ctypes.byref(state), ctypes.sizeof(state))
+    except Exception:  # an older Windows, or no ctypes: the service still reads
+        pass
 
 
 app = FastAPI(title="CRMS TrOCR service", lifespan=lifespan)
@@ -661,6 +811,7 @@ def health() -> dict:
         "status": "ok",
         "model_loaded": bool(_models),
         "device": _device_name(),
+        "precision": _precision_name(),
         "default": _default_key(),
         "models": _model_info(),
     }
@@ -675,10 +826,96 @@ def models() -> dict:
     }
 
 
-def _read_crops(model, processor, device, eos_id, images):
+# Image processors whose steps _card_pixel_values repeats: resize with Pillow,
+# rescale, normalise. Even for these, _card_prep_allowed() first checks the
+# result against the processor itself, because another transformers version
+# may resize differently (5.14 differs by one grey level from 5.12).
+_CARD_PREP_PROCESSORS = {"ViTImageProcessor", "ViTImageProcessorPil"}
+
+
+def _card_prep_allowed(image_processor, device):
+    """Whether _card_pixel_values gives this processor's very input in fp16.
+
+    Checked once per processor on noise pictures in the shapes crops come in,
+    scaled up and down, every pixel compared. Any difference, and the processor
+    keeps preparing the crops."""
+    allowed = getattr(image_processor, "_crms_card_prep_ok", None)
+    if allowed is None:
+        allowed = False
+        try:
+            seed = torch.Generator().manual_seed(0)
+            probes = [
+                Image.fromarray(torch.randint(0, 256, (h, w, 3), dtype=torch.uint8, generator=seed).numpy())
+                for h, w in ((57, 283), (45, 31), (65, 489), (440, 60), (700, 900))
+            ]
+            mine = _card_pixel_values(image_processor, probes, device)
+            if mine is not None:
+                expected = image_processor(images=probes, return_tensors="pt").pixel_values
+                allowed = torch.equal(mine.cpu().half(), expected.half())
+        except Exception as e:
+            logger.warning("Checking GPU crop preparation failed (%s).", e)
+        if not allowed:
+            logger.info("Crops are prepared by the processor (the GPU shortcut does not match it exactly).")
+        try:
+            image_processor._crms_card_prep_ok = allowed
+        except Exception:
+            pass
+    return allowed
+
+
+def _card_pixel_values(image_processor, images, device):
+    """Pixel values with the arithmetic done on the card, or None if this
+    processor is not one whose steps are repeated here exactly.
+
+    The processor does the resize and then the rescale/normalise arithmetic in
+    numpy on the CPU, about 3 ms per crop while the card waits. The resize stays
+    with Pillow (the very same call); only the arithmetic moves to the card, in
+    float64 like the processor, then to float32."""
+    ip = image_processor
+    size = getattr(ip, "size", None)
+    height = getattr(size, "height", None) if size is not None else None
+    width = getattr(size, "width", None) if size is not None else None
+    if isinstance(size, dict):
+        height, width = size.get("height"), size.get("width")
+    if (
+        type(ip).__name__ not in _CARD_PREP_PROCESSORS
+        or not (getattr(ip, "do_resize", False) and getattr(ip, "do_rescale", False)
+                and getattr(ip, "do_normalize", False))
+        or getattr(ip, "do_center_crop", False) or getattr(ip, "do_pad", False)
+        or not height or not width
+        or len(ip.image_mean) != 3 or len(ip.image_std) != 3
+        or any(image.mode != "RGB" for image in images)
+    ):
+        return None
+    size = (int(width), int(height))
+    resized = np.stack([np.asarray(image.resize(size, resample=ip.resample)) for image in images])
+    x = torch.from_numpy(resized).to(device).permute(0, 3, 1, 2).double() * ip.rescale_factor
+    mean = torch.tensor(ip.image_mean, device=device, dtype=torch.float64).view(1, 3, 1, 1)
+    std = torch.tensor(ip.image_std, device=device, dtype=torch.float64).view(1, 3, 1, 1)
+    return ((x - mean) / std).float()
+
+
+def _pixel_values(processor, images, device, dtype):
+    """The model's input for `images`, on `device`, in `dtype`.
+
+    Reading in fp16 on the card, the arithmetic is done there (identical input,
+    about 0.5 s less per 225-line page). Otherwise, if the check finds any
+    difference, or if it fails for any reason, the processor does it as before."""
+    if dtype == torch.float16 and _on_gpu(device) and _card_prep_allowed(processor.image_processor, device):
+        try:
+            values = _card_pixel_values(processor.image_processor, images, device)
+            if values is not None:
+                return values.to(dtype)
+        except Exception as e:
+            logger.warning("Preparing crops on the GPU failed (%s); using the processor.", e)
+    values = processor(images=images, return_tensors="pt").pixel_values.to(device)
+    return values if dtype == torch.float32 else values.to(dtype)
+
+
+def _read_crops(model, processor, device, eos_id, images, dtype=torch.float32):
     """(text, confidence) for each image, in order, from one generate() call."""
-    pixel_values = processor(images=images, return_tensors="pt").pixel_values.to(device)
-    with torch.no_grad():
+    pixel_values = _pixel_values(processor, images, device, dtype)
+    with torch.inference_mode():
         # use_cache: fine-tuned models save use_cache=false from training, so
         # each new token recomputed every earlier one. Same readings and
         # confidences, measured on 597 real crops; 215 crops 17 s -> 8 s.
@@ -689,11 +926,9 @@ def _read_crops(model, processor, device, eos_id, images):
             return_dict_in_generate=True,
             use_cache=True,
         )
+        confidences = batch_confidences(model, gen_output, eos_id)
     texts = processor.batch_decode(gen_output.sequences, skip_special_tokens=True)
-    return [
-        (text.strip(), sequence_confidence(model, gen_output, eos_id, row))
-        for row, text in enumerate(texts)
-    ]
+    return [(text.strip(), confidence) for text, confidence in zip(texts, confidences)]
 
 
 def _ocr_error(name, error):
@@ -711,11 +946,13 @@ def ocr(payload: OcrRequest) -> dict:
         raise HTTPException(status_code=400, detail="Send a non-empty 'fields' list.")
 
     key = _resolve_key(payload.model)
+    _maybe_return_to_gpu()
     entry = _load_model(key)
     model = entry["model"]
     processor = entry["processor"]
     device = _get_device()
     eos_id = entry["eos_id"]
+    dtype = entry.get("dtype", torch.float32)
 
     # Decode every crop first. A broken one becomes an error row, so it can't
     # fail the batch it would have been read in.
@@ -727,32 +964,57 @@ def ocr(payload: OcrRequest) -> dict:
         except Exception as e:
             results[index] = _ocr_error(field.name, e)
 
+    # Lines of a similar shape read together. A batch writes until its longest
+    # line is done, so short lines grouped with short ones finish early instead
+    # of waiting on a long one. Results go back by position, so order is kept.
+    images.sort(key=lambda item: item[1].width / max(item[1].height, 1))
+
     for start in range(0, len(images), OCR_BATCH_SIZE):
         chunk = images[start:start + OCR_BATCH_SIZE]
         try:
-            readings = _read_crops(model, processor, device, eos_id, [image for _, image in chunk])
+            readings = _read_crops(model, processor, device, eos_id, [image for _, image in chunk], dtype)
         except Exception as e:
             # For example out of GPU memory. Read this chunk one crop at a time,
             # so only a crop that also fails on its own gets an error row.
             logger.warning("Reading %d crops together failed (%s); reading them one at a time.", len(chunk), e)
+            # The traceback's frames still hold the failed batch's GPU tensors;
+            # drop them, or freeing the cache cannot give that memory back.
+            e.__traceback__ = None
+            if _on_gpu(device) and _is_out_of_memory(e):
+                _free_gpu_cache()
             readings = []
             for _, image in chunk:
                 try:
-                    readings.append(_read_crops(model, processor, device, eos_id, [image])[0])
+                    readings.append(_read_crops(model, processor, device, eos_id, [image], dtype)[0])
+                    continue
                 except Exception as single:
-                    if not _on_gpu(device):
-                        readings.append(single)
-                        continue
-                    # Fails on the card even on its own: a broken card or driver,
-                    # or too little memory. This crop and the rest go to the CPU.
-                    _stop_using_gpu(single)
-                    entry = _load_model(key)
-                    model, processor, eos_id = entry["model"], entry["processor"], entry["eos_id"]
-                    device = _get_device()
+                    failure = single
+                failure.__traceback__ = None  # as above
+                if not _on_gpu(device):
+                    readings.append(failure)
+                    continue
+                if _is_out_of_memory(failure):
+                    # A full card is usually another program holding memory,
+                    # not a broken card: free torch's cache and try once more.
+                    _free_gpu_cache()
                     try:
-                        readings.append(_read_crops(model, processor, device, eos_id, [image])[0])
-                    except Exception as on_cpu:
-                        readings.append(on_cpu)
+                        readings.append(_read_crops(model, processor, device, eos_id, [image], dtype)[0])
+                        continue
+                    except Exception as again:
+                        failure = again
+                    failure.__traceback__ = None
+                # Fails on the card even on its own: a broken card or driver, or
+                # still no memory. This crop and the rest go to the CPU - for
+                # GPU_RETRY_SECONDS when the card was only full, else for good.
+                _stop_using_gpu(failure, retry_after=GPU_RETRY_SECONDS if _is_out_of_memory(failure) else None)
+                entry = _load_model(key)
+                model, processor, eos_id = entry["model"], entry["processor"], entry["eos_id"]
+                device = _get_device()
+                dtype = entry.get("dtype", torch.float32)
+                try:
+                    readings.append(_read_crops(model, processor, device, eos_id, [image], dtype)[0])
+                except Exception as on_cpu:
+                    readings.append(on_cpu)
 
         for (index, _), reading in zip(chunk, readings):
             name = payload.fields[index].name

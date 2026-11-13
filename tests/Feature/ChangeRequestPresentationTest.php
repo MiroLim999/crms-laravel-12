@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Enums\ChangeRequestStatus;
 use App\Enums\DocumentType;
 use App\Models\CivilRecord;
 use App\Models\RecordField;
@@ -17,110 +16,89 @@ class ChangeRequestPresentationTest extends TestCase
 
     public function test_create_page_groups_editable_values_by_person_and_tracks_changed_values(): void
     {
-        $staff = User::factory()->staff()->create();
-        $record = $this->groupedRecord($staff);
+        $user = User::factory()->create();
+        $record = $this->groupedRecord($user);
 
-        $this->actingAs($staff)
+        $this->actingAs($user)
             ->get(route('records.change-requests.create', $record))
             ->assertOk()
-            ->assertSee('Request a Change')
+            ->assertSee('Correct Record')
+            ->assertSee('Saving updates the record right away.')
+            ->assertSee('Save correction')
+            ->assertSee('Reason <span class="text-muted">(optional)</span>', escape: false)
             ->assertSee('Birth · Entries 1–2')
             ->assertSee('Person 01')
             ->assertSee('Person 02')
             ->assertSee('data-change-request-form', escape: false)
             ->assertSee('data-change-count', escape: false)
             ->assertSee('data-change-input', escape: false)
-            ->assertSee('No changes selected');
+            ->assertSee('No changes selected')
+            ->assertDontSee('until an Admin approves');
     }
 
-    public function test_review_page_reuses_grouped_archive_and_original_scan_comparison(): void
+    public function test_correction_page_reuses_grouped_archive_and_original_scan_comparison(): void
     {
-        $staff = User::factory()->staff()->create();
-        $admin = User::factory()->admin()->create();
-        $record = $this->groupedRecord($staff);
+        $user = User::factory()->create();
+        $record = $this->groupedRecord($user);
         $field = $record->fields->firstWhere('name', 'Name');
-        $changeRequest = app(ChangeRequestService::class)->open(
+        $correction = app(ChangeRequestService::class)->correct(
             $record,
             [$field->getKey() => 'Corrected Person One'],
             'The original register clearly shows the corrected full name.',
-            $staff,
+            $user,
         );
 
-        $this->actingAs($admin)
-            ->get(route('change-requests.show', $changeRequest))
+        $this->actingAs($user)
+            ->get(route('change-requests.show', $correction))
             ->assertOk()
-            ->assertSee('Proposed changes')
+            ->assertSee('Correction #'.$correction->getKey())
             ->assertSee('Person 01')
             ->assertSee('Corrected Person One')
-            ->assertSee('On record when requested')
+            ->assertSee('Old value')
+            ->assertSee('New value')
             ->assertSee('Compare original')
             ->assertSee('change-request-review-workspace has-scan', escape: false)
             ->assertSee('data-record-splitter', escape: false)
             ->assertSee('data-record-field="'.$field->getKey().'"', escape: false)
             ->assertSee('data-scan-marker="'.$field->getKey().'"', escape: false)
-            ->assertSee('Approve and apply');
+            ->assertDontSee('Approve and apply');
     }
 
-    public function test_request_queue_search_and_status_totals_respect_the_visible_scope(): void
+    public function test_corrections_search_finds_by_reason(): void
     {
-        $staff = User::factory()->staff()->create();
-        $admin = User::factory()->admin()->create();
-        $firstRecord = $this->groupedRecord($staff);
-        $secondRecord = $this->groupedRecord($staff);
-        $firstField = $firstRecord->fields->firstWhere('name', 'Name');
-        $secondField = $secondRecord->fields->firstWhere('name', 'Name');
-        $approved = app(ChangeRequestService::class)->open(
+        $user = User::factory()->create();
+        $firstRecord = $this->groupedRecord($user);
+        $secondRecord = $this->groupedRecord($user);
+        app(ChangeRequestService::class)->correct(
             $firstRecord,
-            [$firstField->getKey() => 'Approved correction'],
-            'Unique approved correction for the first register entry.',
-            $staff,
+            [$firstRecord->fields->firstWhere('name', 'Name')->getKey() => 'First correction'],
+            'Unique first correction for the first register entry.',
+            $user,
         );
-        app(ChangeRequestService::class)->approve($approved, $admin, 'Verified.');
-        app(ChangeRequestService::class)->open(
+        app(ChangeRequestService::class)->correct(
             $secondRecord,
-            [$secondField->getKey() => 'Pending correction'],
-            'Unique pending correction for the second register entry.',
-            $staff,
+            [$secondRecord->fields->firstWhere('name', 'Name')->getKey() => 'Second correction'],
+            'Unique second correction for the second register entry.',
+            $user,
         );
 
-        $response = $this->actingAs($admin)
-            ->get(route('change-requests.index', ['q' => 'Unique pending correction']))
+        $response = $this->actingAs($user)
+            ->get(route('change-requests.index', ['q' => 'Unique second correction']))
             ->assertOk()
-            ->assertSee('Request queue')
+            ->assertSee('All corrections')
             ->assertSee('<small>Record #'.$secondRecord->getKey().'</small>', escape: false)
             ->assertDontSee('<small>Record #'.$firstRecord->getKey().'</small>', escape: false);
 
         $this->assertSame(1, $response->viewData('requests')->total());
-        $this->assertSame(1, $response->viewData('statusCounts')->get(ChangeRequestStatus::Pending->value));
-        $this->assertSame(1, $response->viewData('statusCounts')->get(ChangeRequestStatus::Approved->value));
     }
 
-    public function test_staff_is_not_redirected_to_another_requesters_pending_request(): void
-    {
-        $requester = User::factory()->staff()->create();
-        $otherStaff = User::factory()->staff()->create();
-        $record = $this->groupedRecord($requester);
-        $field = $record->fields->firstWhere('name', 'Name');
-        app(ChangeRequestService::class)->open(
-            $record,
-            [$field->getKey() => 'Pending correction'],
-            'This correction is already waiting for an administrator review.',
-            $requester,
-        );
-
-        $this->actingAs($otherStaff)
-            ->get(route('records.change-requests.create', $record))
-            ->assertRedirect(route('records.show', $record))
-            ->assertSessionHas('error');
-    }
-
-    private function groupedRecord(User $staff): CivilRecord
+    private function groupedRecord(User $account): CivilRecord
     {
         $record = CivilRecord::factory()
             ->ofType(DocumentType::Birth)
-            ->submitted($staff)
+            ->submitted($account)
             ->create([
-                'created_by' => $staff->getKey(),
+                'created_by' => $account->getKey(),
                 'scan_path' => 'scans/change-request-source.png',
                 'scan_mime' => 'image/png',
             ]);

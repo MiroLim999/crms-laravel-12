@@ -1,5 +1,5 @@
 /**
- * The scanned file a record comes from, in the Staff workspace.
+ * The scanned file a record comes from, in the scan workspace.
  *
  * A register book usually arrives as one PDF with a page per register page.
  * Each page is read and saved as its own record. The record keeps that page

@@ -63,7 +63,7 @@ class LineMarkers
      * rotation ("deskew"), how the template was fitted ("fit"), and the
      * geometry that was used ("geometry", page fractions).
      *
-     * @param  array<string, mixed>  $geometry  Template markers as Staff left them, page fractions.
+     * @param  array<string, mixed>  $geometry  Template markers as left in Align, page fractions.
      * @return array<string, mixed> The decoded lines.json.
      */
     public function detect(string $pagePath, array $geometry, string $outDirectory): array

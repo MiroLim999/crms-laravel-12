@@ -17,8 +17,7 @@ class UserFactory extends Factory
     protected static ?string $password;
 
     /**
-     * Defaults to Staff: the role that actually does the work, and the one most
-     * tests care about.
+     * The one CRMS account is the Super Admin, so every made-up user is one too.
      *
      * @return array<string, mixed>
      */
@@ -28,9 +27,8 @@ class UserFactory extends Factory
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
             'password' => static::$password ??= Hash::make('password'),
-            'role_id' => fn () => Role::of(RoleSlug::Staff)->getKey(),
+            'role_id' => fn () => Role::of(RoleSlug::SuperAdmin)->getKey(),
             'must_change_password' => false,
-            'is_active' => true,
             'password_changed_at' => now(),
             'remember_token' => Str::random(10),
         ];
@@ -39,16 +37,6 @@ class UserFactory extends Factory
     public function role(RoleSlug $slug): static
     {
         return $this->state(fn () => ['role_id' => Role::of($slug)->getKey()]);
-    }
-
-    public function staff(): static
-    {
-        return $this->role(RoleSlug::Staff);
-    }
-
-    public function admin(): static
-    {
-        return $this->role(RoleSlug::Admin);
     }
 
     public function superAdmin(): static
@@ -65,10 +53,5 @@ class UserFactory extends Factory
             'must_change_password' => true,
             'password_changed_at' => null,
         ]);
-    }
-
-    public function inactive(): static
-    {
-        return $this->state(fn () => ['is_active' => false]);
     }
 }

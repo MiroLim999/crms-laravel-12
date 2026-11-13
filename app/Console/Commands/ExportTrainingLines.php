@@ -28,7 +28,7 @@ use Illuminate\Support\Facades\Storage;
  * in the layout ml/test_finetuned.py reads, so a model can be scored on real
  * ledger lines on this computer:
  *
- *     ml/datasets/<name>/manifest.csv   filename,label,split,source,record_id,staff_corrected
+ *     ml/datasets/<name>/manifest.csv   filename,label,split,source,record_id,hand_corrected
  *     ml/datasets/<name>/test/*.png
  *
  * The folder holds civil registry data. It is written to local storage only and
@@ -150,7 +150,7 @@ class ExportTrainingLines extends Command
 
         File::ensureDirectoryExists($root.DIRECTORY_SEPARATOR.'test');
         $csv = fopen($root.DIRECTORY_SEPARATOR.'manifest.csv', 'w');
-        fputcsv($csv, ['filename', 'label', 'split', 'source', 'record_id', 'staff_corrected']);
+        fputcsv($csv, ['filename', 'label', 'split', 'source', 'record_id', 'hand_corrected']);
 
         $disk = Storage::disk('local');
         $exported = 0;
@@ -169,7 +169,7 @@ class ExportTrainingLines extends Command
                 $fileName = sprintf('%d-%d.png', $field->record_id, $field->getKey());
                 File::copy($disk->path($field->crop_path), $root.DIRECTORY_SEPARATOR.'test'.DIRECTORY_SEPARATOR.$fileName);
 
-                // Staff changed the reading. The other lines keep the app's own
+                // The reading was changed by hand. The other lines keep the app's own
                 // reading as their answer, which flatters the model that made it.
                 $changed = trim((string) $field->ocr_text) !== trim((string) $field->verified_value);
                 fputcsv($csv, [$fileName, $field->verified_value, 'test', 'crms', $field->record_id, $changed ? 1 : 0]);
@@ -192,7 +192,7 @@ class ExportTrainingLines extends Command
         if ($missing > 0) {
             $this->warn("{$missing} crop file(s) were missing on disk and were skipped.");
         }
-        $this->line("Staff changed the reading of {$corrected} of them. The other ".($exported - $corrected)
+        $this->line("The reading was changed for {$corrected} of them. The other ".($exported - $corrected)
             .' keep the app\'s own reading as the answer, so check them before trusting a score on this set.');
         $this->line("Score a model on it:  python ml/test_finetuned.py --model <model key or base> --dataset {$name}");
         $this->warn('This folder holds civil registry data. Keep it on this computer; do not upload it to Kaggle.');

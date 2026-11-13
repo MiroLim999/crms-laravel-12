@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Schema;
  *
  * Every state change on a record, change request, account, or OCR model writes a
  * row here with actor, action, target, and before/after values. This is what makes
- * the separation of duties between Staff and Admin legally meaningful, so entries
+ * the trail legally meaningful, so entries
  * are never updated or deleted.
  */
 return new class extends Migration

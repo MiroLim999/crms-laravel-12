@@ -1547,9 +1547,27 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
     .document-dropzone__title {
       color: var(--bs-secondary-color);
-      font-size: 1rem;
-      font-weight: 500;
     }
+
+    .document-dropzone__button {
+      color: var(--bs-secondary-color);
+      background: var(--bs-gray-200, #e9ecef);
+      border-color: transparent;
+      box-shadow: none;
+    }
+  }
+}
+
+// Upload mode shown before a type is chosen: same look, grayed, not usable.
+.document-upload-mode-bar.is-disabled {
+  opacity: .55;
+  filter: grayscale(1);
+  pointer-events: none;
+  user-select: none;
+
+  .document-upload-mode-option {
+    background: rgba(var(--crms-ink-rgb), .02);
+    cursor: default;
   }
 }
 
@@ -2515,6 +2533,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   // Zoomed pages grow past the box: the viewport's one scrollbar covers both.
   inline-size: max-content;
   min-inline-size: 100%;
+  // Set while a page is zoomed on: room either side, so it can be centred.
+  padding-inline: var(--spread-pad, 0px);
+  padding-block: var(--spread-pad-block, 0px);
 }
 
 .doc-spread__page {
@@ -2550,6 +2571,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .field-overlay,
   .field-box {
     pointer-events: none;
+  }
+
+  // Its row lines are only looked at: drawn in full, with no grips.
+  .row-line-layer.is-locked {
+    opacity: 1;
   }
 
   &:hover {
@@ -3440,14 +3466,202 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 // Verify's page beside the one being verified: the outlines stay light, so it
 // reads as the other half of the same document, and a click verifies it.
-.validation-companion .line-overlay .line-marker__shape {
+.validation-companion:not(.is-live) .line-overlay .line-marker__shape {
   fill: rgba(var(--bs-secondary-rgb), .05);
   stroke: rgba(var(--bs-secondary-rgb), .45);
 }
 
-.validation-companion .line-overlay .line-marker.is-verified .line-marker__shape {
+.validation-companion:not(.is-live) .line-overlay .line-marker.is-verified .line-marker__shape {
   fill: rgba(40, 199, 111, .1);
   stroke: rgba(40, 199, 111, .72);
+}
+
+// A two-page register verified as one document: the second page is verified
+// where it is, like the first, so it takes the pointer and looks the same.
+.doc-spread__page--companion.is-live {
+  cursor: default;
+  opacity: 1;
+
+  .doc-stage,
+  .field-overlay {
+    pointer-events: auto;
+  }
+
+  .doc-spread__switch {
+    display: none;
+  }
+}
+
+.doc-spread.is-joined .doc-spread__label {
+  color: var(--bs-primary);
+}
+
+// Two pages side by side need the room: the pages take the larger share of
+// the width, and the field list keeps its own least width (31rem), where its
+// rows still fit: the "Verify all" row loses its long hint, and the note under
+// the list goes above the buttons, so Save record is never cut off.
+@media (min-width: 992px) {
+  .validation-comparison-grid.is-two-page {
+    grid-template-columns: minmax(0, 1.4fr) minmax(31rem, .9fr);
+
+    .validation-record-group__bulk {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .validation-record-group__bulk-copy {
+      grid-column: 1;
+
+      small {
+        display: none;
+      }
+    }
+
+    .validation-record-group__bulk-action {
+      grid-column: 2;
+    }
+
+    .validation-submit-bar {
+      flex-wrap: wrap;
+      row-gap: .4rem;
+    }
+
+    .validation-lock-copy {
+      flex: 1 1 100%;
+      max-inline-size: none;
+    }
+
+    .validation-submit-actions {
+      flex: 1 1 auto;
+      justify-content: flex-end;
+    }
+  }
+}
+
+// A click on a page zooms in on it; on the page zoomed in on, back out.
+.doc-spread.is-joined .doc-stage {
+  cursor: zoom-in;
+}
+
+.doc-spread.is-joined.is-page-focused[data-focus="0"] #validationMainPage .doc-stage,
+.doc-spread.is-joined.is-page-focused[data-focus="1"] #validationCompanionPage .doc-stage {
+  cursor: zoom-out;
+}
+
+// Page 1 / Both / Page 2 above the pages.
+.verify-page-view .btn {
+  padding-inline: .6rem;
+  white-space: nowrap;
+}
+
+// The person's row goes on, out of view, on the other page: a button at that
+// edge, level with the row, slides there. It fades and slides in and out.
+.verify-row-hint {
+  position: absolute;
+  // Above the pages' outlines and edit handles.
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: .15rem;
+  padding: .3rem .6rem;
+  font-size: .75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border-radius: 999px;
+  box-shadow: 0 .25rem .75rem rgba(var(--crms-shadow-rgb), .3);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(0, -50%) scale(.92);
+  transition: opacity .2s ease, transform .2s ease, top .25s ease;
+
+  i {
+    font-size: 1rem;
+  }
+
+  &.is-right {
+    transform: translate(-100%, -50%) scale(.92);
+
+    .verify-row-hint__before {
+      display: none;
+    }
+  }
+
+  &.is-left .verify-row-hint__after {
+    display: none;
+  }
+
+  &.is-shown {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(0, -50%) scale(1);
+
+    &.is-right {
+      transform: translate(-100%, -50%) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
+// Inside a person of a two-page document: where each page's fields begin.
+.validation-page-divider {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin-block: .65rem .3rem;
+  padding-inline: .15rem;
+  color: var(--bs-secondary-color);
+  font-size: .6875rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+
+  i {
+    color: var(--bs-primary);
+    font-size: .9rem;
+  }
+
+  &::after {
+    order: 2;
+    content: '';
+    flex: 1 1 auto;
+    border-block-start: 1px dashed var(--bs-border-color);
+  }
+}
+
+// "Belongs to [Person 05]": at the divider's end, after the dashed line.
+.validation-page-divider__move {
+  display: inline-flex;
+  order: 3;
+  align-items: center;
+  gap: .35rem;
+  margin: 0;
+  color: var(--bs-secondary-color);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+
+  .form-select {
+    inline-size: auto;
+    max-inline-size: 15rem;
+    padding-block: .15rem;
+    font-size: .75rem;
+  }
+}
+
+// "Pages 1–2" beside a person whose row runs across both pages.
+.validation-record-group__pages {
+  display: inline-block;
+  margin-inline-start: .2rem;
+  padding: .05rem .45rem;
+  color: var(--bs-primary);
+  font-size: .625rem;
+  font-weight: 600;
+  line-height: 1.5;
+  vertical-align: middle;
+  background: rgba(var(--bs-primary-rgb), .1);
+  border-radius: 999px;
 }
 
 .validation-field-overlay {
@@ -3541,7 +3755,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 // The Align step's Detect preview: outlines only, never in the way of the
-// markers Staff drag underneath.
+// markers dragged underneath.
 .line-overlay.is-preview {
   z-index: 1;
 
@@ -3910,7 +4124,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// What Staff should check about the grid as a whole (Detect summary and Verify).
+// What to check about the grid as a whole (Detect summary and Verify).
 .grid-notes {
   display: flex;
   align-items: flex-start;
@@ -3962,7 +4176,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     stroke-width: 1.1px;
     stroke-linejoin: round;
     vector-effect: non-scaling-stroke;
-    transition: fill .12s ease, stroke .12s ease;
+    // A person's row lights up, and fades, across both pages together.
+    transition: fill .2s ease, stroke .2s ease, stroke-width .2s ease;
   }
 
   &:hover .line-marker__shape,
@@ -4953,7 +5168,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   min-inline-size: 8rem;
 }
 
-// A person's name, above their fields: typed by Staff or read from the page.
+// A person's name, above their fields: typed in Verify or read from the page.
 .validation-record-group__name {
   display: flex;
   align-items: center;
@@ -8223,34 +8438,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.dashboard-processing__foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: .5rem;
-  margin-block-start: .75rem;
-  color: var(--bs-secondary-color);
-  font-size: .75rem;
-}
-
 // Says what the OCR Performance scores were measured on.
 .dashboard-perf__note {
   margin: .5rem 0 0;
   color: var(--bs-secondary-color);
   font-size: .6875rem;
   line-height: 1.35;
-}
-
-.dashboard-processing__table {
-  font-variant-numeric: tabular-nums;
-
-  th {
-    color: var(--bs-secondary-color);
-    font-size: .75rem;
-    font-weight: 500;
-    white-space: nowrap;
-  }
 }
 
 .dashboard-changes {
@@ -9626,6 +9819,228 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
+// Nothing on the page and no sample yet: the drop area stands in for the blank
+// page. The page keeps its place underneath (only hidden), so the markers'
+// fit-to-width sums do not change when it comes back.
+.template-builder-canvas-card .doc-viewport.is-empty {
+  overflow: hidden;
+  // The scrollbar's strip beside the drop area, in the drop area's colour.
+  background: var(--bs-paper-bg);
+
+  .doc-spread {
+    visibility: hidden;
+  }
+}
+
+// A drop anywhere in the page area opens the file, so the dashed frame fills
+// it. Clicks pass through to nothing; only the button takes them.
+.template-dropzone {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  display: flex;
+  padding: 1rem;
+  background: var(--bs-paper-bg);
+  pointer-events: none;
+}
+
+.template-dropzone__panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  text-align: center;
+  background: radial-gradient(circle at 50% 0%, rgba(105, 108, 255, .1), transparent 50%);
+  border: 2px dashed rgba(105, 108, 255, .28);
+  border-radius: .75rem;
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+
+// The picture: a page drops into its place, then three fields are marked on it.
+.template-dropzone__art {
+  position: relative;
+  inline-size: 7rem;
+  block-size: 7.75rem;
+  margin-block-end: 1.1rem;
+}
+
+.template-dropzone__tray {
+  position: absolute;
+  inset: 1rem .55rem 0;
+  background: rgba(105, 108, 255, .07);
+  border: 2px dashed rgba(105, 108, 255, .38);
+  border-radius: .55rem;
+  animation: template-dropzone-tray 4.2s ease-in-out infinite;
+}
+
+.template-dropzone__sheet {
+  position: absolute;
+  inset-block-start: 1.55rem;
+  inset-inline-start: 50%;
+  inline-size: 4.5rem;
+  block-size: 5.65rem;
+  margin-inline-start: -2.25rem;
+  padding: .75rem .55rem 0;
+  // A sheet of paper is white in the dark theme too.
+  background: #fdfdfe;
+  border: 1px solid rgba(67, 89, 113, .22);
+  border-radius: .3rem;
+  box-shadow: 0 .35rem .9rem rgba(67, 89, 113, .2);
+  animation: template-dropzone-sheet 4.2s cubic-bezier(.3, .7, .3, 1) infinite;
+}
+
+.template-dropzone__line {
+  display: block;
+  block-size: .3rem;
+  margin-block-end: .62rem;
+  background: rgba(67, 89, 113, .24);
+  border-radius: 1rem;
+
+  &:nth-child(1) { inline-size: 62%; }
+  &:nth-child(2) { inline-size: 88%; }
+  &:nth-child(3) { inline-size: 46%; }
+  &:nth-child(4) { inline-size: 74%; }
+}
+
+.template-dropzone__marker {
+  position: absolute;
+  inset-inline-start: .3rem;
+  block-size: .74rem;
+  background: rgba(105, 108, 255, .16);
+  border: 1.5px solid var(--bs-primary);
+  border-radius: 2px;
+  opacity: 0;
+
+  &--1 { inset-block-start: .52rem; inline-size: 2.75rem; animation: template-dropzone-marker-1 4.2s ease-out infinite; }
+  &--2 { inset-block-start: 1.44rem; inline-size: 3.75rem; animation: template-dropzone-marker-2 4.2s ease-out infinite; }
+  &--3 { inset-block-start: 3.28rem; inline-size: 3.2rem; animation: template-dropzone-marker-3 4.2s ease-out infinite; }
+}
+
+@keyframes template-dropzone-sheet {
+  0% { opacity: 0; transform: translateY(-2.75rem) rotate(-8deg); }
+  14% { opacity: 1; }
+  30% { transform: translateY(.18rem) rotate(.5deg); }
+  37%, 88% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: scale(.96); }
+}
+
+@keyframes template-dropzone-tray {
+  0%, 27%, 46%, 100% { border-color: rgba(105, 108, 255, .38); transform: none; }
+  34% { border-color: var(--bs-primary); transform: scale(1.05); }
+}
+
+// One after another, once the page has landed.
+@each $marker, $start in (1: 44%, 2: 54%, 3: 64%) {
+  @keyframes template-dropzone-marker-#{$marker} {
+    0%, #{$start} { opacity: 0; transform: scale(.7); }
+    #{$start + 6%}, 88% { opacity: 1; transform: none; }
+    100% { opacity: 0; }
+  }
+}
+
+@keyframes template-dropzone-hover {
+  from { transform: translateY(-1.5rem) rotate(-5deg); }
+  to { transform: translateY(-1rem) rotate(-3deg); }
+}
+
+.template-dropzone__title {
+  margin: 0;
+  color: var(--bs-heading-color);
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.template-dropzone__when-dragging {
+  display: none;
+}
+
+.template-dropzone__text {
+  max-inline-size: 26rem;
+  margin: .35rem 0 0;
+  color: var(--bs-secondary-color);
+  font-size: .875rem;
+}
+
+.template-dropzone__button {
+  margin-block-start: 1.1rem;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.template-dropzone__note {
+  margin: .85rem 0 0;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+}
+
+// A file is held over the page area: the page waits above its place.
+.doc-viewport.is-dragging {
+  .template-dropzone__panel {
+    background-color: rgba(105, 108, 255, .05);
+    border-color: var(--bs-primary);
+    box-shadow: inset 0 0 0 3px rgba(105, 108, 255, .08);
+  }
+
+  .template-dropzone__sheet {
+    opacity: 1;
+    animation: template-dropzone-hover .7s ease-in-out infinite alternate;
+  }
+
+  .template-dropzone__tray {
+    border-color: var(--bs-primary);
+    animation: none;
+  }
+
+  .template-dropzone__marker {
+    animation: none;
+  }
+
+  .template-dropzone__when-idle {
+    display: none;
+  }
+
+  .template-dropzone__when-dragging {
+    display: inline;
+    color: var(--bs-primary);
+  }
+}
+
+// No movement wanted: the finished picture, a page with its fields marked.
+@media (prefers-reduced-motion: reduce) {
+  .template-dropzone__sheet,
+  .template-dropzone__tray,
+  .template-dropzone__marker,
+  .doc-viewport.is-dragging .template-dropzone__sheet {
+    animation: none;
+  }
+
+  .template-dropzone__marker {
+    opacity: 1;
+  }
+}
+
+// Short or narrow page areas: a smaller picture and no last line.
+@media (max-height: 640px), (max-width: 575.98px) {
+  .template-dropzone__panel {
+    padding: 1rem;
+  }
+
+  .template-dropzone__art {
+    margin-block: -.75rem -.1rem;
+    transform: scale(.72);
+  }
+
+  .template-dropzone__title {
+    font-size: 1.15rem;
+  }
+
+  .template-dropzone__note {
+    display: none;
+  }
+}
+
 .template-builder-side-panel {
   position: sticky;
   top: .75rem;
@@ -9876,103 +10291,6 @@ $dashboard-reveal-step: 40ms;
   border: 1px solid var(--bs-border-color);
   border-radius: var(--bs-border-radius);
   box-shadow: 0 .15rem .65rem rgba(var(--crms-shadow-rgb), .07);
-}
-
-// Test on sample: what Detect makes of the sample with the layout.
-.layout-test__status {
-  display: flex;
-  align-items: center;
-  gap: .6rem;
-  padding: 1.25rem .5rem;
-  color: var(--bs-secondary-color);
-
-  &.is-error {
-    color: var(--bs-danger);
-  }
-}
-
-.layout-test__summary {
-  margin-block-end: .5rem;
-  font-weight: 600;
-}
-
-.layout-test__findings {
-  margin-block-end: .75rem;
-  padding-inline-start: 1.1rem;
-  font-size: .8125rem;
-  line-height: 1.45;
-
-  li+li {
-    margin-block-start: .2rem;
-  }
-
-  .is-warning {
-    color: var(--crms-warning-text-c);
-  }
-
-  .is-ok {
-    color: var(--crms-info-text);
-  }
-}
-
-.layout-test__legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .35rem 1rem;
-  margin-block-end: .6rem;
-  color: var(--bs-secondary-color);
-  font-size: .75rem;
-
-  span::before {
-    display: inline-block;
-    inline-size: .75rem;
-    block-size: .75rem;
-    margin-inline-end: .35rem;
-    vertical-align: -.1rem;
-    content: "";
-    border: 2px solid currentColor;
-    border-radius: .15rem;
-  }
-
-  .is-placed::before {
-    color: #0e9aa7;
-    background: rgba(14, 154, 167, .16);
-  }
-
-  .is-field::before {
-    color: #696cff;
-    background: rgba(105, 108, 255, .16);
-  }
-
-  .is-shared::before {
-    color: #e59500;
-    background: rgba(255, 171, 0, .22);
-  }
-
-  .is-no-row::before {
-    color: #ff3e1d;
-    background: rgba(255, 62, 29, .2);
-  }
-
-  .is-rule::before {
-    block-size: 0;
-    color: #0e9aa7;
-    border-width: 2px 0 0;
-    border-style: dashed;
-  }
-}
-
-.layout-test__page {
-  overflow: auto;
-  background: var(--bs-gray-100);
-  border: 1px solid var(--bs-border-color);
-  border-radius: .4rem;
-
-  canvas {
-    display: block;
-    inline-size: 100%;
-    block-size: auto;
-  }
 }
 
 // A layout in use: saving new markers makes a new version instead.

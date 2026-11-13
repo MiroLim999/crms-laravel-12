@@ -3,38 +3,61 @@
 @section('title', 'Account Settings')
 
 @section('content')
-    <x-page-header title="Account Settings" subtitle="Manage your own credentials." />
+    <x-page-header title="Account Settings" subtitle="Your name, email and password." />
 
     <div class="row g-4">
         <div class="col-lg-5">
-            <x-card title="Your account">
-                <dl class="row mb-0">
-                    <dt class="col-5 text-muted fw-normal">Name</dt>
-                    <dd class="col-7">{{ $user->name }}</dd>
+            <x-card title="Your details">
+                <form method="POST" action="{{ route('settings.profile.update') }}">
+                    @csrf
+                    @method('PUT')
 
-                    <dt class="col-5 text-muted fw-normal">Email</dt>
-                    <dd class="col-7">{{ $user->email }}</dd>
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Name</label>
+                        <input type="text"
+                               id="name"
+                               name="name"
+                               value="{{ old('name', $user->name) }}"
+                               maxlength="255"
+                               class="form-control @error('name') is-invalid @enderror"
+                               required
+                               autocomplete="name">
+                        @error('name')
+                            <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                    </div>
 
-                    <dt class="col-5 text-muted fw-normal">Role</dt>
-                    <dd class="col-7">
-                        <span class="badge bg-label-primary">{{ $user->role->name }}</span>
-                    </dd>
+                    <div class="mb-4">
+                        <label for="email" class="form-label">Email</label>
+                        <input type="email"
+                               id="email"
+                               name="email"
+                               value="{{ old('email', $user->email) }}"
+                               maxlength="255"
+                               class="form-control @error('email') is-invalid @enderror"
+                               required
+                               autocomplete="email">
+                        @error('email')
+                            <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                        <div class="form-text">You sign in with this email.</div>
+                    </div>
 
-                    <dt class="col-5 text-muted fw-normal">Password changed</dt>
-                    <dd class="col-7">
+                    <button type="submit" class="btn btn-primary">Save details</button>
+                </form>
+
+                <hr>
+                <dl class="row mb-0 small">
+                    <dt class="col-6 text-muted fw-normal">Password changed</dt>
+                    <dd class="col-6">
                         {{ $user->password_changed_at?->diffForHumans() ?? 'Never' }}
                     </dd>
 
-                    <dt class="col-5 text-muted fw-normal">Last sign-in</dt>
-                    <dd class="col-7 mb-0">
+                    <dt class="col-6 text-muted fw-normal">Last sign-in</dt>
+                    <dd class="col-6 mb-0">
                         {{ $user->last_login_at?->diffForHumans() ?? '—' }}
                     </dd>
                 </dl>
-
-                <hr>
-                <p class="small text-muted mb-0">
-                    Your name, email, and role are managed by an administrator.
-                </p>
             </x-card>
         </div>
 

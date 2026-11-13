@@ -82,7 +82,7 @@
                                     </a>
                                     @if ($record->isLocked())
                                         <i class="icon-base bx bx-lock-alt icon-sm text-muted ms-1"
-                                           title="Locked — changes need a change request"></i>
+                                           title="Locked — change values with Correct record"></i>
                                     @endif
                                     <div>
                                         <small class="text-muted">
@@ -112,9 +112,6 @@
                                 </td>
                                 <td class="text-muted">
                                     {{ \App\Support\LocalTime::format($record->submitted_at, 'j M Y') ?: '—' }}
-                                    @if ($record->submitter)
-                                        <div><small>{{ $record->submitter->name }}</small></div>
-                                    @endif
                                 </td>
                                 <td class="text-end">
                                     <a href="{{ route('records.show', $record) }}"

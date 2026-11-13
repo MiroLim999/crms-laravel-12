@@ -16,7 +16,7 @@ class DocumentTemplateField extends Model
     /** What a field can hold for its person: their name, or the entry number. */
     public const ROLES = ['name', 'entry'];
 
-    /** How Staff check a value in Verify. */
+    /** How Verify checks a value. */
     public const VALUE_TYPES = ['text', 'date', 'number', 'choice'];
 
     protected $fillable = [
@@ -41,7 +41,7 @@ class DocumentTemplateField extends Model
     }
 
     /**
-     * What the field holds and how Staff check it, in the shape the builder
+     * What the field holds and how Verify checks it, in the shape the builder
      * and the workspace use (ledger columns carry the same keys).
      *
      * @return array{role: string|null, required: bool, type: string, options: list<string>|null, hint: string|null}

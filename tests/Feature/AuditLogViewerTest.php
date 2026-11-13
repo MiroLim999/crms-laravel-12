@@ -17,26 +17,19 @@ class AuditLogViewerTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_staff_are_denied(): void
-    {
-        $this->actingAs(User::factory()->staff()->create())
-            ->get(route('audit.index'))
-            ->assertForbidden();
-    }
-
     public function test_admin_and_super_admin_may_view_it(): void
     {
-        foreach ([User::factory()->admin()->create(), User::factory()->superAdmin()->create()] as $user) {
+        foreach ([User::factory()->superAdmin()->create(), User::factory()->superAdmin()->create()] as $user) {
             $this->actingAs($user)->get(route('audit.index'))->assertOk();
         }
     }
 
     public function test_it_paginates(): void
     {
-        $actor = User::factory()->staff()->create();
+        $actor = User::factory()->superAdmin()->create();
         $this->entries($actor, 30);
 
-        $first = $this->actingAs(User::factory()->admin()->create())
+        $first = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('audit.index'))
             ->assertOk()
             ->viewData('entries');
@@ -45,7 +38,7 @@ class AuditLogViewerTest extends TestCase
         $this->assertCount(25, $first->items());
         $this->assertTrue($first->hasMorePages());
 
-        $second = $this->actingAs(User::factory()->admin()->create())
+        $second = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('audit.index', ['page' => 2]))
             ->assertOk()
             ->viewData('entries');
@@ -53,24 +46,24 @@ class AuditLogViewerTest extends TestCase
         $this->assertCount(5, $second->items());
     }
 
-    public function test_it_filters_by_actor_action_and_free_text(): void
+    public function test_it_filters_by_action_and_free_text(): void
     {
-        $staff = User::factory()->staff()->create(['name' => 'Nina Staffer']);
-        $other = User::factory()->staff()->create(['name' => 'Otto Staffer']);
-        $admin = User::factory()->admin()->create();
+        $account = User::factory()->superAdmin()->create(['name' => 'Nina Encoder']);
+        $other = User::factory()->superAdmin()->create(['name' => 'Otto Encoder']);
+        $admin = User::factory()->superAdmin()->create();
 
-        $this->actingAs($staff);
+        $this->actingAs($account);
         app(AuditLogger::class)->log('record.submitted', description: 'Submitted a birth certificate.');
 
         $this->actingAs($other);
         app(AuditLogger::class)->log('change_request.created', description: 'Requested a surname fix.');
 
-        $byActor = $this->actingAs($admin)
-            ->get(route('audit.index', ['actor' => $staff->getKey()]))
+        // There is one account, so there is no Actor filter; the names stay on each entry.
+        $this->actingAs($admin)
+            ->get(route('audit.index'))
             ->assertOk()
-            ->viewData('entries');
-        $this->assertSame(1, $byActor->total());
-        $this->assertSame('record.submitted', $byActor->first()->action);
+            ->assertDontSee('<label for="actor"', false)
+            ->assertSee('Nina Encoder');
 
         $byAction = $this->actingAs($admin)
             ->get(route('audit.index', ['action' => 'change_request.created']))
@@ -88,17 +81,17 @@ class AuditLogViewerTest extends TestCase
 
     public function test_before_and_after_values_are_shown(): void
     {
-        $staff = User::factory()->staff()->create();
-        $this->actingAs($staff);
+        $account = User::factory()->superAdmin()->create();
+        $this->actingAs($account);
 
         app(AuditLogger::class)->log(
             'user.updated',
-            $staff,
+            $account,
             old: ['name' => 'Before Name'],
             new: ['name' => 'After Name'],
         );
 
-        $this->actingAs(User::factory()->admin()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('audit.index'))
             ->assertOk()
             ->assertSee('Before Name')
@@ -112,7 +105,7 @@ class AuditLogViewerTest extends TestCase
         app(AuditLogger::class)->log('record.submitted', description: 'Submitted overnight.');
         $this->travelBack();
 
-        $admin = User::factory()->admin()->create();
+        $admin = User::factory()->superAdmin()->create();
         $listed = fn ($entries) => $entries->pluck('description')->contains('Submitted overnight.');
 
         $this->actingAs($admin)

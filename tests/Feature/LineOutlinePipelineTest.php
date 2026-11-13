@@ -69,7 +69,7 @@ class LineOutlinePipelineTest extends TestCase
     public function test_finishing_align_stores_the_page_and_queues_line_detection(): void
     {
         Queue::fake();
-        $user = User::factory()->staff()->create();
+        $user = User::factory()->superAdmin()->create();
         $template = $this->ledgerTemplate();
 
         $response = $this->actingAs($user)
@@ -92,7 +92,7 @@ class LineOutlinePipelineTest extends TestCase
     {
         Queue::fake();
         $geometry = $this->geometry();
-        // Staff tilted each column and one field, each on its own.
+        // The user tilted each column and one field, each on its own.
         $geometry['columns'][0]['angle'] = 2.04;
         $geometry['columns'][1]['angle'] = -1.26;
         $geometry['fields'] = [
@@ -100,7 +100,7 @@ class LineOutlinePipelineTest extends TestCase
             ['name' => 'Page', 'box' => [0.6, 0.8, 0.1, 0.05], 'angle' => 0],
         ];
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.pages.store'), [
                 'document_template_id' => $this->ledgerTemplate()->getKey(),
@@ -123,7 +123,7 @@ class LineOutlinePipelineTest extends TestCase
             ['name' => 'Remarks', 'box' => [0.1, 0.8, 0.3, 0.05], 'person_group' => 451, 'person_field_order' => 0],
         ];
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.pages.store'), [
                 'document_template_id' => $this->ledgerTemplate()->getKey(),
@@ -207,6 +207,45 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertNotNull($runs[1]->read_ms, 'A Scan says how long the reading took.');
     }
 
+    /**
+     * The progress window paces its ring by how long this machine's last scans
+     * took, so a faster or slower computer needs no setting.
+     */
+    public function test_the_progress_window_is_paced_by_this_machines_last_scans(): void
+    {
+        // No scan yet: the defaults.
+        $this->assertSame(['find' => 20.0, 'read' => 5.0, 'detect' => 20.0], PageRun::typicalSeconds());
+
+        $user = User::factory()->superAdmin()->create();
+        $run = fn (string $mode, string $outcome, ?int $ms, ?int $readMs = null) => PageRun::create([
+            'user_id' => $user->getKey(), 'mode' => $mode, 'outcome' => $outcome,
+            'duration_ms' => $ms, 'read_ms' => $readMs,
+        ]);
+        // Ten full scans: lines found in 11-20 s, read in 2-11 s.
+        foreach (range(1, 10) as $k) {
+            $run('full', PageRun::COMPLETED, (10 + $k) * 1000 + (1 + $k) * 1000, (1 + $k) * 1000);
+        }
+        $run('detect', PageRun::COMPLETED, 18_400);
+        // Not counted: a failed scan, and one cancelled before it began.
+        $run('full', PageRun::FAILED, 500_000, 400_000);
+        $run('detect', PageRun::CANCELLED, null);
+
+        // Of the last five (16-20 s and 7-11 s), the time four stayed within:
+        // a step is more often early than late.
+        $this->assertSame(['find' => 19.0, 'read' => 10.0, 'detect' => 18.4], PageRun::typicalSeconds());
+
+        // One slow scan (30 s) does not set the pace, but it pushes the oldest out.
+        $run('full', PageRun::COMPLETED, 31_000, 1_000);
+        $this->assertSame(20.0, PageRun::typicalSeconds()['find']);
+
+        // The Align page is given these numbers.
+        $this->actingAs($user)
+            ->get(route('documents.workspace', ['type' => $this->ledgerTemplate()->documentTypeDefinition->key]))
+            ->assertOk()
+            ->assertViewHas('scanSeconds', PageRun::typicalSeconds())
+            ->assertSee('scanSeconds: {"find":20', escape: false);
+    }
+
     public function test_cancelling_while_the_lines_are_found_stops_the_detector_and_drops_the_page(): void
     {
         $markers = new class extends LineMarkers
@@ -222,7 +261,7 @@ class LineOutlinePipelineTest extends TestCase
 
             public function detect(string $pagePath, array $geometry, string $outDirectory): array
             {
-                // Staff press Cancel while the detector is running.
+                // The user presses Cancel while the detector is running.
                 DocumentPage::query()->update(['status' => DocumentPage::STATUS_CANCELLED]);
                 if ($this->cancelled !== null && ($this->cancelled)()) {
                     throw new LineMarkersCancelled('Line detection was stopped: the page was cancelled.');
@@ -296,7 +335,7 @@ class LineOutlinePipelineTest extends TestCase
             ->postJson(route('documents.pages.cancel', $page))
             ->assertOk()
             ->assertJsonPath('status', DocumentPage::STATUS_READY);
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->postJson(route('documents.pages.cancel', $page))
             ->assertNotFound();
     }
@@ -306,7 +345,7 @@ class LineOutlinePipelineTest extends TestCase
         Queue::fake();
         $this->app->instance(LineMarkers::class, $this->stubMarkers());
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.pages.snap'), [
                 'page' => UploadedFile::fake()->image('page.png', 800, 600),
@@ -323,7 +362,7 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertSame(0, DocumentPage::count());
         Queue::assertNothingPushed();
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->postJson(route('documents.pages.snap'), ['geometry_json' => json_encode($this->geometry())])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('page');
@@ -333,7 +372,7 @@ class LineOutlinePipelineTest extends TestCase
     {
         Queue::fake();
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.pages.store'), [
                 'document_template_id' => $this->ledgerTemplate()->getKey(),
@@ -349,8 +388,8 @@ class LineOutlinePipelineTest extends TestCase
     public function test_row_lines_set_by_hand_are_marked_so_detect_keeps_them(): void
     {
         Queue::fake();
-        $staff = User::factory()->staff()->create();
-        $send = fn (array $geometry) => $this->actingAs($staff)
+        $account = User::factory()->superAdmin()->create();
+        $send = fn (array $geometry) => $this->actingAs($account)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.pages.store'), [
                 'document_template_id' => $this->ledgerTemplate()->getKey(),
@@ -433,7 +472,7 @@ class LineOutlinePipelineTest extends TestCase
             ->get(route('documents.pages.image', $page))
             ->assertOk()
             ->assertHeader('Content-Type', 'image/png');
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('documents.pages.image', $page))
             ->assertNotFound();
     }
@@ -457,7 +496,7 @@ class LineOutlinePipelineTest extends TestCase
                     'x' => 0.05, 'y' => 0.1, 'width' => 0.2, 'height' => 0.05,
                     'line_id' => $line->getKey(),
                 ]],
-                // One cell of the register: Staff confirmed leaving out the rest.
+                // One cell of the register: the user confirmed leaving out the rest.
                 'allow_missing' => '1',
             ])
             ->assertCreated();
@@ -471,7 +510,7 @@ class LineOutlinePipelineTest extends TestCase
         $geometry = $this->geometry();
         $geometry['ruled_ys'] = [];
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.pages.store'), [
                 'document_template_id' => $this->ledgerTemplate()->getKey(),
@@ -595,7 +634,7 @@ class LineOutlinePipelineTest extends TestCase
     {
         $page = $this->processedPage();
         $line = $page->lines->first();
-        $stranger = User::factory()->staff()->create();
+        $stranger = User::factory()->superAdmin()->create();
 
         $this->actingAs($stranger)->getJson(route('documents.pages.show', $page))->assertNotFound();
         $this->actingAs($stranger)
@@ -728,7 +767,7 @@ class LineOutlinePipelineTest extends TestCase
 
     public function test_a_deleted_crop_is_drawn_again_in_its_own_cell_and_read(): void
     {
-        // The Name of row 1 took in the wrong writing: Staff delete its crop.
+        // The Name of row 1 took in the wrong writing: the user deletes its crop.
         $page = $this->processedPage();
         $name = $page->lines->firstWhere('column_name', 'Name');
         $this->ocrCalls = [];
@@ -772,7 +811,7 @@ class LineOutlinePipelineTest extends TestCase
             ->assertJsonPath('line.text', $name->ocr_text);
 
         // Someone else's page, or a page still being outlined, is refused.
-        $this->actingAs(User::factory()->staff()->create())->postJson($route, ['needed' => true])->assertNotFound();
+        $this->actingAs(User::factory()->superAdmin()->create())->postJson($route, ['needed' => true])->assertNotFound();
         $page->forceFill(['status' => DocumentPage::STATUS_DETECTED])->save();
         $this->actingAs($page->creator)->postJson($route, ['needed' => true])->assertStatus(409);
         $this->assertSame([], $name->fresh()->flags);
@@ -879,7 +918,7 @@ class LineOutlinePipelineTest extends TestCase
                     'x' => 0.05, 'y' => 0.1, 'width' => 0.2, 'height' => 0.05,
                     'line_id' => $line->getKey(),
                 ]],
-                // One cell of the register: Staff confirmed leaving out the rest.
+                // One cell of the register: the user confirmed leaving out the rest.
                 'allow_missing' => '1',
             ])
             ->assertCreated();
@@ -934,7 +973,7 @@ class LineOutlinePipelineTest extends TestCase
         $page = $this->processedPage();
         $line = $page->lines->first();
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 'doc_type' => DocumentType::Birth->value,
@@ -986,12 +1025,12 @@ class LineOutlinePipelineTest extends TestCase
 
     public function test_workspace_offers_ledger_columns_as_markers_and_legacy_rectangles_unchanged(): void
     {
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
         $legacy = DocumentTemplate::activeFor(DocumentType::Birth);
         $legacyBoxes = $legacy->fields->map->toBox()->values()->all();
 
         $this->assertSame($legacyBoxes, $legacy->markerBoxes());
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
             ->assertOk()
             ->assertSee('ruledYs: []', escape: false)
@@ -999,7 +1038,7 @@ class LineOutlinePipelineTest extends TestCase
             ->assertSee('id="lineEditToolbar"', escape: false);
 
         $this->ledgerTemplate();
-        $this->actingAs($staff)
+        $this->actingAs($account)
             ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
             ->assertOk()
             ->assertSee('"kind":"column"', escape: false)
@@ -1085,7 +1124,7 @@ class LineOutlinePipelineTest extends TestCase
             ->assertJsonPath('id', $page->getKey())
             ->assertJsonPath('status', DocumentPage::STATUS_READY);
 
-        // The same page, read with the markers as Staff left them.
+        // The same page, read with the markers as the user left them.
         $this->assertSame(1, DocumentPage::count());
         $page->refresh();
         $this->assertSame(0.07, $page->geometry['columns'][0]['box'][0]);
@@ -1143,8 +1182,8 @@ class LineOutlinePipelineTest extends TestCase
             ])
             ->assertJsonValidationErrors('geometry.ruled_ys');
 
-        // Another Staff member's unsubmitted page does not exist for them.
-        $this->actingAs(User::factory()->staff()->create())
+        // Another user's unsubmitted page does not exist for them.
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->withHeader('Accept', 'application/json')
             ->putJson(route('documents.pages.reoutline', $page), [
                 'geometry_json' => json_encode($this->geometry(), JSON_THROW_ON_ERROR),
@@ -1354,8 +1393,8 @@ class LineOutlinePipelineTest extends TestCase
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['column_index', 'row']);
 
-        // Not another Staff member's page.
-        $this->actingAs(User::factory()->staff()->create())
+        // Not another user's page.
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->patchJson(route('documents.pages.lines.place', ['page' => $page, 'line' => $between]), [
                 'column_index' => 0,
                 'row' => 2,
@@ -1363,10 +1402,55 @@ class LineOutlinePipelineTest extends TestCase
             ->assertNotFound();
     }
 
+    /**
+     * A row of a register's second page that landed on the wrong person is put
+     * right in Verify by moving the whole row, or swapping two rows at once.
+     */
+    public function test_whole_rows_move_or_swap_together(): void
+    {
+        $page = $this->storedPage();
+        $page->forceFill(['status' => DocumentPage::STATUS_READY])->save();
+        $oneName = $this->makeLine($page, ['row' => 1, 'column_index' => 0]);
+        $oneDate = $this->makeLine($page, ['row' => 1, 'column_index' => 1, 'column_name' => 'Date']);
+        $two = $this->makeLine($page, ['row' => 2, 'column_index' => 0]);
+        $three = $this->makeLine($page, ['row' => 3, 'column_index' => 0]);
+        // Neither a layout box's field nor a line between two rows moves with a row.
+        $field = $this->makeLine($page, ['source' => PageLine::SOURCE_FIELD, 'row' => 1, 'column_index' => null, 'column_name' => 'Remarks']);
+        $between = $this->makeLine($page, ['row' => 2, 'flags' => ['no_row']]);
+        $rowOf = fn (PageLine $line) => $line->fresh()->row;
+
+        // Rows 1 and 2 swap in one request, every column of each going together.
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.rows', $page), ['moves' => [['from' => 1, 'to' => 2], ['from' => 2, 'to' => 1]]])
+            ->assertOk()
+            ->assertJsonPath('moved', 3)
+            ->assertJsonCount(6, 'lines');
+        $this->assertSame([2, 2, 1, 3, 1, 2], array_map($rowOf, [$oneName, $oneDate, $two, $three, $field, $between]));
+
+        // Into a row that has a line in that column already: both are flagged to check.
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.rows', $page), ['moves' => [['from' => 3, 'to' => 1]]])
+            ->assertOk();
+        $this->assertSame(1, $rowOf($three));
+        $this->assertContains('shared_cell', $two->fresh()->flags);
+        $this->assertContains('shared_cell', $three->fresh()->flags);
+
+        // Rows the page has, each moved once; and not another user's page.
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.rows', $page), ['moves' => [['from' => 9, 'to' => 1]]])
+            ->assertUnprocessable()->assertJsonValidationErrors('moves.0.from');
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.rows', $page), ['moves' => [['from' => 1, 'to' => 2], ['from' => 1, 'to' => 3]]])
+            ->assertUnprocessable();
+        $this->actingAs(User::factory()->superAdmin()->create())
+            ->patchJson(route('documents.pages.rows', $page), ['moves' => [['from' => 1, 'to' => 2]]])
+            ->assertNotFound();
+    }
+
     public function test_a_missed_field_under_a_column_removed_in_align_can_join_a_person(): void
     {
         $page = $this->processedPage();
-        // The template has a third column; Staff removed it in Align, so the
+        // The template has a third column; the user removed it in Align, so the
         // page's grid has only Name and Date.
         $page->template->update(['columns' => [
             ...$page->template->columns,
@@ -1544,7 +1628,7 @@ class LineOutlinePipelineTest extends TestCase
             ->assertStatus(409);
         $page->forceFill(['status' => DocumentPage::STATUS_READY])->save();
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->postJson(route('documents.pages.lines.store', $page), [
                 'polygon' => [[10, 10], [50, 10], [50, 30]],
             ])
@@ -1562,8 +1646,8 @@ class LineOutlinePipelineTest extends TestCase
             ->deleteJson(route('documents.pages.lines.destroy', ['page' => $otherPage, 'line' => $line]))
             ->assertNotFound();
 
-        // Another Staff member's unsubmitted page does not exist for them.
-        $this->actingAs(User::factory()->staff()->create())
+        // Another user's unsubmitted page does not exist for them.
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->deleteJson(route('documents.pages.lines.destroy', ['page' => $page, 'line' => $line]))
             ->assertNotFound();
 
@@ -1638,7 +1722,7 @@ class LineOutlinePipelineTest extends TestCase
         $template = $this->ledgerTemplate();
         $page = DocumentPage::create([
             'document_template_id' => $template->getKey(),
-            'created_by' => User::factory()->staff()->create()->getKey(),
+            'created_by' => User::factory()->superAdmin()->create()->getKey(),
             'status' => DocumentPage::STATUS_QUEUED,
             'image_path' => '',
             'width' => 800,

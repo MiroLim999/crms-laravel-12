@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Civil registry records digitised from scanned certificates.
  *
- * A record starts as a draft while Staff verify the OCR output, then becomes
+ * A record starts as a draft while the OCR output is verified, then becomes
  * locked on submission. Locked values are only changed through an approved change
  * request - never edited in place, and never by an Admin.
  */

@@ -1,8 +1,8 @@
 {{--
     Model inventory: fleet management panel.
 
-    Everything a Super Admin does with models lives here: activate one (the model
-    Staff scan with, always through the confirmation dialog in ocr.partials.modals),
+    Everything done with models lives here: activate one (the model scans
+    use, always through the confirmation dialog in ocr.partials.modals),
     add one, rescan ml/models/, and click any model row to inspect its benchmark.
 --}}
 @php
@@ -10,7 +10,7 @@
     $selectable = $models->filter(
         fn (array $model) => $model['on_disk'] && $model['disk_deleted_at'] === null
     );
-    // A fresh install has models on disk but none activated, so Staff cannot scan.
+    // A fresh install has models on disk but none activated, so nothing can be scanned.
     $needsActivation = $activeModel === null && $selectable->isNotEmpty();
     $selectedKey = $modelPerformance['selected'] ?? ($activeModel?->key ?? null);
     // Each model's colour slot, the same one the charts use (OcrModelPerformance).
@@ -66,7 +66,7 @@
         @if ($needsActivation)
             <div class="alert alert-warning d-flex align-items-start gap-2 py-2 px-3 small mb-0 mt-3" role="status">
                 <i class="icon-base bx bx-error icon-sm flex-shrink-0 mt-1" aria-hidden="true"></i>
-                <span>No model is active yet. Activate one so Staff can scan handwriting.</span>
+                <span>No model is active yet. Activate one to scan handwriting.</span>
             </div>
         @endif
     </div>
@@ -201,7 +201,7 @@
                                         data-label="{{ $model['label'] }}"
                                         aria-label="Activate {{ $model['label'] }}"
                                         {{ ! $engine['reachable'] ? 'disabled' : '' }}
-                                        title="{{ $engine['reachable'] ? 'Make this the model Staff scan with' : 'The OCR service must be online.' }}">
+                                        title="{{ $engine['reachable'] ? 'Use this model for scanning' : 'The OCR service must be online.' }}">
                                     Activate
                                 </button>
                             @endif

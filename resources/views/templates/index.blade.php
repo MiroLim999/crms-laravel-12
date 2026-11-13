@@ -4,7 +4,7 @@
 
 @section('content')
     <x-page-header title="Template Builder"
-                   subtitle="Design and publish the field layouts Staff receive when they scan a document.">
+                   subtitle="Design and publish the field layouts used when you scan a document.">
         <div class="dropdown">
             <button class="btn btn-primary dropdown-toggle" type="button"
                     data-bs-toggle="dropdown" aria-expanded="false">
@@ -53,13 +53,13 @@
                                     @endif
                                 </h2>
                                 @if ($type->isArchived())
-                                    <p class="mb-0 text-muted small">Hidden from Staff. Records and layouts are kept.</p>
+                                    <p class="mb-0 text-muted small">Hidden. Records and layouts are kept.</p>
                                 @elseif ($published)
                                     <p class="mb-0 text-muted small">
-                                        Staff currently use <strong class="text-body">{{ $published->name }}</strong>.
+                                        Used for scanning: <strong class="text-body">{{ $published->name }}</strong>.
                                     </p>
                                 @else
-                                    <p class="mb-0 text-danger small">No layout is published. Staff cannot scan this type yet.</p>
+                                    <p class="mb-0 text-danger small">No layout is published. This type cannot be scanned yet.</p>
                                 @endif
                             </div>
                         </div>
@@ -93,7 +93,7 @@
                                         @csrf
                                         <button type="submit" class="dropdown-item">
                                             <i class="icon-base bx {{ $type->isArchived() ? 'bx-undo' : 'bx-archive' }} icon-sm me-2" aria-hidden="true"></i>
-                                            {{ $type->isArchived() ? 'Restore for Staff' : 'Archive (hide from Staff)' }}
+                                            {{ $type->isArchived() ? 'Restore' : 'Archive (hide it)' }}
                                         </button>
                                     </form>
                                     @unless ($type->is_system)
@@ -154,7 +154,15 @@
                                                     Updated {{ $layout->updated_at->diffForHumans() }}
                                                 </small>
                                                 @if ($layout->parent)
-                                                    <small class="d-block text-muted mt-1">Based on “{{ $layout->parent->name }}”</small>
+                                                    <small class="d-block text-muted mt-1">
+                                                        {{ $layout->is_version ? 'New version of' : 'Based on' }} “{{ $layout->parent->name }}”
+                                                    </small>
+                                                @endif
+                                                @if ($layout->pageTwoTemplate)
+                                                    <small class="d-block text-muted mt-1">
+                                                        <i class="icon-base bx bx-book-open icon-xs" aria-hidden="true"></i>
+                                                        Two pages: page 2 is changed inside this layout
+                                                    </small>
                                                 @endif
                                                 @if ($layout->sample_path)
                                                     <a class="d-inline-flex align-items-center gap-1 small mt-1"
@@ -193,13 +201,12 @@
                                             </td>
                                             <td class="pe-3 py-2 text-end text-nowrap">
                                                 @unless ($layout->is_active)
-                                                    <form method="POST" action="{{ route('templates.activate', $layout) }}"
-                                                          class="d-inline">
-                                                        @csrf
-                                                        <button class="btn btn-sm btn-success" type="submit">
-                                                            Publish for Staff
-                                                        </button>
-                                                    </form>
+                                                    {{-- Asks first, and lists what still stops it (see the modal below). --}}
+                                                    <button class="btn btn-sm btn-success" type="button"
+                                                            data-bs-toggle="modal"
+                                                            data-bs-target="#publishLayout{{ $layout->getKey() }}">
+                                                        Publish
+                                                    </button>
                                                 @endunless
 
                                                 <a href="{{ route('templates.edit', $layout) }}"
@@ -243,6 +250,62 @@
                     </div>
                 </section>
 
+                @foreach ($group->where('is_active', false) as $layout)
+                    @php $problems = $layout->publish_problems ?? []; @endphp
+                    <div class="modal fade" id="publishLayout{{ $layout->getKey() }}" tabindex="-1"
+                         aria-labelledby="publishLayoutLabel{{ $layout->getKey() }}" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <div>
+                                        <div class="text-uppercase text-success small fw-semibold mb-1">Publish</div>
+                                        <h2 class="modal-title h5" id="publishLayoutLabel{{ $layout->getKey() }}">
+                                            @if ($problems === [])
+                                                Publish {{ $layout->name }}?
+                                            @else
+                                                {{ $layout->name }} is not ready yet
+                                            @endif
+                                        </h2>
+                                    </div>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body">
+                                    @if ($problems === [])
+                                        <p class="mb-2">
+                                            {{ $type->label() }} will be scanned with this layout from now on.
+                                        </p>
+                                        @if ($published)
+                                            <p class="mb-2">
+                                                It replaces <strong>{{ $published->name }}</strong>, the layout used now.
+                                                Records already read with it keep it.
+                                            </p>
+                                        @endif
+                                        <p class="mb-0 text-muted small">Only one layout per document type is published.</p>
+                                    @else
+                                        <p class="mb-2">Fix these in the builder first:</p>
+                                        <ul class="mb-0 ps-3">
+                                            @foreach ($problems as $problem)
+                                                <li class="mb-1">{{ $problem }}</li>
+                                            @endforeach
+                                        </ul>
+                                    @endif
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
+                                    @if ($problems === [])
+                                        <form method="POST" action="{{ route('templates.activate', $layout) }}">
+                                            @csrf
+                                            <button type="submit" class="btn btn-success">Publish</button>
+                                        </form>
+                                    @else
+                                        <a href="{{ route('templates.edit', $layout) }}" class="btn btn-primary">Open in builder</a>
+                                    @endif
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                @endforeach
+
                 @foreach ($group as $layout)
                     <div class="modal fade" id="deleteLayout{{ $layout->getKey() }}" tabindex="-1"
                          aria-labelledby="deleteLayoutLabel{{ $layout->getKey() }}" aria-hidden="true">
@@ -252,7 +315,7 @@
                                     <div>
                                         <div class="text-uppercase text-danger small fw-semibold mb-1">Template Builder</div>
                                         <h2 class="modal-title h5" id="deleteLayoutLabel{{ $layout->getKey() }}">
-                                            @if ($layout->records_count > 0)
+                                            @if ($layout->records_count > 0 || $layout->is_active)
                                                 {{ $layout->name }} can't be deleted
                                             @else
                                                 Delete {{ $layout->name }}?
@@ -268,7 +331,18 @@
                                             This layout was used by {{ $layout->records_count }} saved {{ Str::plural('record', $layout->records_count) }}, so it can't be deleted.
                                         </p>
                                         <p class="mb-0 text-muted small">
-                                            Records keep the layout they were read with. To stop Staff using it, publish another layout.
+                                            Records keep the layout they were read with. To stop using it, publish another layout.
+                                        </p>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Close</button>
+                                    </div>
+                                @elseif ($layout->is_active)
+                                    {{-- A scan may be using it right now. --}}
+                                    <div class="modal-body">
+                                        <p class="mb-2">This is the published layout, so a scan may be using it right now.</p>
+                                        <p class="mb-0 text-muted small">
+                                            Publish another layout first, then delete this one.
                                         </p>
                                     </div>
                                     <div class="modal-footer">
@@ -276,13 +350,17 @@
                                     </div>
                                 @else
                                     <div class="modal-body">
-                                        @if ($layout->is_active)
+                                        @if ($layout->pages_count > 0)
                                             <div class="alert alert-warning py-2 px-3 small mb-3">
-                                                This is the published Staff layout. Staff cannot start new scans for this document type until another layout is published.
+                                                {{ $layout->pages_count }} unsaved {{ Str::plural('page', $layout->pages_count) }} {{ $layout->pages_count === 1 ? 'is' : 'are' }}
+                                                in progress with this layout. If you delete it, those pages can't be saved.
                                             </div>
                                         @endif
 
                                         <p class="mb-2">This layout has not been used by any saved records.</p>
+                                        @if ($layout->pageTwoTemplate)
+                                            <p class="mb-2">Its page 2 layout is deleted with it.</p>
+                                        @endif
 
                                         @if ($layout->sample_path)
                                             <p class="mb-2">Its stored sample document will also be deleted.</p>

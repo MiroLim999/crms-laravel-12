@@ -5,8 +5,7 @@ test_finetuned.py share: finding a model, loading it, and scoring a reading.
 
 Each of them used to carry its own copy, so a fix to one copy left the others
 as they were. The confidence score most of all must be one calculation: the
-number a Super Admin sees while spot-checking must be the number Staff see while
-scanning.
+number shown while spot-checking must be the number shown while scanning.
 """
 
 import math
@@ -101,3 +100,38 @@ def sequence_confidence(net, gen_output, eos_id, row=0):
         return round(math.exp(sum(log_probs) / len(log_probs)) * 100.0, 1)
     except Exception:
         return 0.0
+
+
+def batch_confidences(net, gen_output, eos_id):
+    """sequence_confidence for every row of a batch, in row order.
+
+    The same formula and, for a model in fp32, the same numbers: geometric mean
+    of the token probabilities up to and including the first EOS, skipping a
+    non-finite one. What differs is the cost. sequence_confidence asks the card
+    for each token on its own (several waits per token, every line); this
+    computes every row on the card at once and copies the result back once.
+    The log-probabilities are always taken in fp32, so a model read in fp16
+    is scored at full precision too."""
+    try:
+        logits = torch.stack(gen_output.scores, dim=1).float()       # [rows, steps, vocab]
+        tokens = gen_output.sequences[:, 1:1 + logits.shape[1]]        # [rows, steps]
+        chosen = logits.log_softmax(dim=-1).gather(-1, tokens.unsqueeze(-1)).squeeze(-1)
+        all_log_probs, all_tokens = chosen.cpu().tolist(), tokens.cpu().tolist()
+    except Exception:
+        return [sequence_confidence(net, gen_output, eos_id, row)
+                for row in range(len(gen_output.sequences))]
+
+    confidences = []
+    for row_tokens, row_log_probs in zip(all_tokens, all_log_probs):
+        # Summed in Python, in token order, exactly as sequence_confidence does.
+        log_probs = []
+        for tok, lp in zip(row_tokens, row_log_probs):
+            if not math.isfinite(lp):
+                continue
+            log_probs.append(lp)
+            if tok == eos_id:
+                break
+        confidences.append(
+            round(math.exp(sum(log_probs) / len(log_probs)) * 100.0, 1) if log_probs else 0.0
+        )
+    return confidences

@@ -55,7 +55,8 @@ class DocumentTemplateBuilderTest extends TestCase
             ->assertSee('id="groupingModeBadge"', escape: false)
             ->assertSee('"initialGroupingMode":"auto"', escape: false)
             ->assertSee('"baselineGroupingMode":"auto"', escape: false)
-            ->assertSeeText('Save & publish for Staff');
+            ->assertSeeText('Save & publish')
+            ->assertDontSeeText('for Staff');
     }
 
     public function test_super_admin_can_create_a_template_with_its_fields(): void
@@ -373,10 +374,6 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertSame('image/jpeg', $template->sample_mime);
         Storage::disk('local')->assertExists($samplePath);
 
-        $this->actingAs(User::factory()->staff()->create())
-            ->get(route('templates.sample', $template))
-            ->assertForbidden();
-
         $this->actingAs($superAdmin)->get(route('templates.edit', $template))
             ->assertOk()
             ->assertSee('enctype="multipart/form-data"', escape: false)
@@ -413,7 +410,7 @@ class DocumentTemplateBuilderTest extends TestCase
                 'archival-birth-scan.pdf',
                 '%PDF-1.4 sample document',
             ),
-            'fields' => [$this->field('Child Full Name')],
+            'fields' => [$this->nameField('Child Full Name')],
         ])->assertRedirect();
 
         $template = DocumentTemplate::where('name', 'Published Sample Layout')->firstOrFail();
@@ -545,6 +542,7 @@ class DocumentTemplateBuilderTest extends TestCase
 
     public function test_create_can_save_and_publish_in_one_request(): void
     {
+        Storage::fake('local');
         $superAdmin = User::factory()->superAdmin()->create();
         $previous = $this->template($superAdmin, DocumentType::Birth, 'Previous layout', active: true);
 
@@ -553,8 +551,9 @@ class DocumentTemplateBuilderTest extends TestCase
             'doc_type' => DocumentType::Birth->value,
             ...$this->pageShape(),
             'publish' => '1',
-            'fields' => [$this->field('Registry Name')],
-        ])->assertRedirect();
+            'sample_document' => UploadedFile::fake()->image('register.png', 1200, 900),
+            'fields' => [$this->nameField('Registry Name')],
+        ])->assertRedirect()->assertSessionHas('success', 'Template created and published.');
 
         $current = DocumentTemplate::where('name', 'Current layout')->firstOrFail();
 
@@ -566,8 +565,9 @@ class DocumentTemplateBuilderTest extends TestCase
         );
     }
 
-    public function test_edit_can_publish_a_draft_for_staff(): void
+    public function test_edit_can_publish_a_draft(): void
     {
+        Storage::fake('local');
         $superAdmin = User::factory()->superAdmin()->create();
         $previous = $this->template($superAdmin, DocumentType::Death, 'Old death layout', active: true);
         $draft = $this->template($superAdmin, DocumentType::Death, 'Draft death layout');
@@ -577,7 +577,8 @@ class DocumentTemplateBuilderTest extends TestCase
             'doc_type' => DocumentType::Death->value,
             ...$this->pageShape(297 / 210),
             'publish' => '1',
-            'fields' => [$this->field('Deceased Full Name')],
+            'sample_document' => UploadedFile::fake()->image('register.png', 1200, 900),
+            'fields' => [$this->nameField('Deceased Full Name')],
         ])->assertRedirect();
 
         $this->assertTrue($draft->refresh()->is_active);
@@ -605,11 +606,11 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertSame(199, $template->fields()->count());
     }
 
-    public function test_legacy_publish_action_keeps_one_staff_layout_per_type(): void
+    public function test_legacy_publish_action_keeps_one_published_layout_per_type(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
         $previous = $this->template($superAdmin, DocumentType::Marriage, 'Previous', active: true);
-        $next = $this->template($superAdmin, DocumentType::Marriage, 'Next');
+        $next = $this->template($superAdmin, DocumentType::Marriage, 'Next', withSample: true);
 
         $this->actingAs($superAdmin)
             ->post(route('templates.activate', $next))
@@ -683,7 +684,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertSame('Birth layout', $template->name);
     }
 
-    public function test_super_admin_can_delete_a_published_template(): void
+    public function test_the_published_template_is_deleted_only_after_another_is_published(): void
     {
         Storage::fake('local');
         $superAdmin = User::factory()->superAdmin()->create();
@@ -696,6 +697,22 @@ class DocumentTemplateBuilderTest extends TestCase
             'sample_mime' => 'image/jpeg',
             'sample_size' => 6,
         ])->save();
+
+        // The user may be scanning with it: refused while it is published.
+        $this->actingAs($superAdmin)
+            ->from(route('templates.index'))
+            ->delete(route('templates.destroy', $template))
+            ->assertRedirect(route('templates.index'))
+            ->assertSessionHas('error', "'Published layout' is the published layout. Publish another layout first, then delete this one.");
+        $this->assertDatabaseHas('document_templates', ['id' => $template->getKey()]);
+        $this->get(route('templates.index'))
+            ->assertOk()
+            ->assertSee('Publish another layout first, then delete this one.')
+            ->assertDontSee('action="'.route('templates.destroy', $template).'"', escape: false);
+
+        $next = $this->template($superAdmin, DocumentType::Birth, 'Next layout', withSample: true);
+        $this->post(route('templates.activate', $next))->assertSessionHas('success');
+        $this->assertFalse($template->refresh()->is_active);
 
         $this->actingAs($superAdmin)
             ->delete(route('templates.destroy', $template))
@@ -710,13 +727,13 @@ class DocumentTemplateBuilderTest extends TestCase
     public function test_a_template_that_records_use_cannot_be_deleted(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
         $template = $this->template($superAdmin, DocumentType::Birth, 'Used layout');
         $record = CivilRecord::factory()->create([
             'doc_type' => DocumentType::Birth->value,
             'document_type_id' => $template->document_type_id,
             'document_template_id' => $template->getKey(),
-            'created_by' => $staff->getKey(),
+            'created_by' => $account->getKey(),
         ]);
 
         $this->actingAs($superAdmin)
@@ -861,10 +878,10 @@ class DocumentTemplateBuilderTest extends TestCase
         });
     }
 
-    public function test_renamed_builtin_type_is_shown_on_its_layout_and_staff_scan_picker(): void
+    public function test_renamed_builtin_type_is_shown_on_its_layout_and_scan_picker(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
         $birth = DocumentTypeDefinition::where('key', DocumentType::Birth->value)->firstOrFail();
         $template = $this->template($superAdmin, DocumentType::Birth, 'Registry Book 2026', active: true);
 
@@ -882,7 +899,7 @@ class DocumentTemplateBuilderTest extends TestCase
             ->assertSeeText('Book of Birth Records')
             ->assertSee('value="Registry Book 2026"', escape: false);
 
-        $this->actingAs($staff)->get(route('documents.create'))
+        $this->actingAs($account)->get(route('documents.create'))
             ->assertOk()
             ->assertSeeText('Book of Birth Records')
             ->assertSeeText('Registry Book 2026');
@@ -891,7 +908,7 @@ class DocumentTemplateBuilderTest extends TestCase
     public function test_builtin_document_types_can_be_renamed_without_changing_keys_or_associations(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
 
         foreach ([
             [DocumentType::Birth, 'Certificate of Live Birth'],
@@ -911,7 +928,7 @@ class DocumentTemplateBuilderTest extends TestCase
                 'doc_type' => $legacyType->value,
                 'document_type_id' => $definitionId,
                 'document_template_id' => $template->getKey(),
-                'created_by' => $staff->getKey(),
+                'created_by' => $account->getKey(),
             ]);
 
             $this->actingAs($superAdmin)
@@ -989,7 +1006,7 @@ class DocumentTemplateBuilderTest extends TestCase
     public function test_custom_document_type_with_records_cannot_be_deleted(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
-        $staff = User::factory()->staff()->create();
+        $account = User::factory()->superAdmin()->create();
         $type = DocumentTypeDefinition::create([
             'key' => 'custom-residency-record-test',
             'name' => 'Residency Record With History',
@@ -1000,7 +1017,7 @@ class DocumentTemplateBuilderTest extends TestCase
         CivilRecord::factory()->create([
             'doc_type' => DocumentType::Custom->value,
             'document_type_id' => $type->getKey(),
-            'created_by' => $staff->getKey(),
+            'created_by' => $account->getKey(),
         ]);
 
         $this->actingAs($superAdmin)
@@ -1024,18 +1041,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertDatabaseHas('document_types', ['id' => $birth->getKey()]);
     }
 
-    public function test_only_super_admin_can_manage_custom_document_types(): void
-    {
-        foreach ([User::factory()->staff()->create(), User::factory()->admin()->create()] as $user) {
-            $this->actingAs($user)->post(route('templates.document-types.store'), [
-                'document_type_name' => 'Unauthorized custom type',
-            ])->assertForbidden();
-        }
-
-        $this->assertDatabaseMissing('document_types', ['name' => 'Unauthorized custom type']);
-    }
-
-    public function test_custom_document_type_layout_can_be_published_for_staff(): void
+    public function test_custom_document_type_layout_can_be_published(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
         $type = DocumentTypeDefinition::create([
@@ -1052,7 +1058,8 @@ class DocumentTemplateBuilderTest extends TestCase
             'doc_type' => $type->key,
             ...$this->pageShape(),
             'publish' => '1',
-            'fields' => [$this->field('Resident Full Name')],
+            'sample_document' => UploadedFile::fake()->image('residency.png', 1200, 900),
+            'fields' => [$this->nameField('Resident Full Name')],
         ])->assertRedirect();
 
         $template = DocumentTemplate::where('name', 'Residency layout')->firstOrFail();
@@ -1060,7 +1067,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertSame($type->getKey(), $template->document_type_id);
         $this->assertTrue($template->is_active);
 
-        $this->actingAs(User::factory()->staff()->create())
+        $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('documents.create'))
             ->assertOk()
             ->assertSeeText('Residency Certificate')
@@ -1078,6 +1085,7 @@ class DocumentTemplateBuilderTest extends TestCase
         DocumentType $type,
         string $name,
         bool $active = false,
+        bool $withSample = false,
     ): DocumentTemplate {
         $template = DocumentTemplate::create([
             'name' => $name,
@@ -1085,15 +1093,29 @@ class DocumentTemplateBuilderTest extends TestCase
             ...$this->pageShape(),
             'is_active' => $active,
             'created_by' => $creator->getKey(),
+            // A sample is needed to publish; the file itself is not read here.
+            ...($withSample ? [
+                'sample_path' => 'template-samples/test/'.Str::slug($name).'.png',
+                'sample_original_name' => 'sample.png',
+                'sample_mime' => 'image/png',
+                'sample_size' => 10,
+            ] : []),
         ]);
 
         $template->fields()->create([
             ...$this->field('Full Name'),
             'sort_order' => 0,
             'is_required' => true,
+            'role' => 'name',
         ]);
 
         return $template;
+    }
+
+    /** A field that holds the person's name: a layout needs one to be published. */
+    private function nameField(string $name): array
+    {
+        return [...$this->field($name), 'role' => 'name'];
     }
 
     /**

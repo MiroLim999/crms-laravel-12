@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
  * A TrOCR model known to CRMS.
  *
  * The weights live on disk and are owned by the FastAPI service; this row carries
- * what Laravel needs, chiefly which model Staff scanning should use.
+ * what Laravel needs, chiefly which model scanning should use.
  */
 class OcrModel extends Model
 {
@@ -49,7 +49,7 @@ class OcrModel extends Model
     }
 
     /**
-     * The model Staff scanning uses. Null means no model has been promoted yet,
+     * The model scanning uses. Null means no model has been promoted yet,
      * which the scanning flow treats as "not ready".
      */
     public static function active(): ?self

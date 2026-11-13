@@ -240,7 +240,7 @@ class DetectorCacheTest(unittest.TestCase):
         self.assertEqual(1, self.runs)
         self.assertFalse(first["timings"]["detector_reused"])
 
-        # Staff moved the marker and scanned again: the page is unchanged.
+        # The user moved the marker and scanned again: the page is unchanged.
         again = self.scan(box=(0.2, 0.30, 0.3, 0.05))
         self.assertEqual(1, self.runs, "the detector ran a second time")
         self.assertTrue(again["timings"]["detector_reused"])
@@ -528,6 +528,57 @@ class DetectTest(unittest.TestCase):
             self.assertAlmostEqual(cx, (x + w / 2) * WIDTH, delta=2)
             self.assertAlmostEqual(cy, (y + h / 2) * HEIGHT, delta=2)
 
+    def test_snap_to_table_keeps_the_rows_of_a_page_whose_row_lines_are_too_faint(self):
+        """An aged register: row rules too faint to find, a form box on top of the table.
+
+        Its box's two lines and the header's rule are evenly spaced, but 60 px
+        apart where the rows are 30: Snap used to take them for the rows and
+        stretch the grid twice as tall. The rows now stay the template's, at the
+        columns' stretch, from the header's rule to the table's bottom border."""
+        header, bottom, pitch = 150, 360, 30
+        rows = list(range(header, bottom + 1, pitch))  # 7 rows
+        image = Image.new("RGB", (WIDTH, HEIGHT), (PAPER,) * 3)
+        draw = ImageDraw.Draw(image)
+        strong = (RULE,) * 3
+        for y in (30, 90):  # the form box above the table; its bottom is the table's top border
+            draw.line([(COLUMN_EDGES[0], y), (COLUMN_EDGES[-1], y)], fill=strong, width=1)
+        for y in (header, bottom):
+            draw.line([(COLUMN_EDGES[0], y), (COLUMN_EDGES[-1], y)], fill=strong, width=1)
+        for y in rows[1:-1]:  # five shades from the paper: there, but not found
+            draw.line([(COLUMN_EDGES[0], y), (COLUMN_EDGES[-1], y)], fill=(PAPER - 5,) * 3, width=1)
+        for x in COLUMN_EDGES:
+            draw.line([(x, 90), (x, bottom)], fill=strong, width=1)
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "page.png")
+        image.save(path)
+        # The markers as the template put them: 12 px low, on no printed line.
+        layout = {
+            "columns": [{"name": name, "box": [COLUMN_EDGES[k] / WIDTH, (header + 12) / HEIGHT,
+                                               (COLUMN_EDGES[k + 1] - COLUMN_EDGES[k]) / WIDTH,
+                                               (bottom - header) / HEIGHT]}
+                        for k, name in enumerate(["Name", "Date", "Place"])],
+            "ruled_ys": [(y + 12) / HEIGHT for y in rows],
+            "fields": [],
+        }
+
+        # Nothing above or below the column rules is taken for a row.
+        suggestion = lm.detect_grid(image)["suggestion"]
+        self.assertTrue(all(y * HEIGHT > 80 for y in suggestion["ruled_ys"]))
+        self.assertAlmostEqual(bottom, suggestion["frame_bottom"] * HEIGHT, delta=2)
+
+        result = lm.snap_page(path, layout)
+        snapped = result["geometry"]
+
+        self.assertTrue(result["fit"]["fitted"])
+        self.assertTrue(result["fit"]["faint_rows"])
+        self.assertEqual("faint_rows", result["fit"]["rows"]["reason"])
+        self.assertEqual(len(rows), len(snapped["ruled_ys"]))
+        for y, expected in zip(snapped["ruled_ys"], rows):
+            self.assertAlmostEqual(expected, y * HEIGHT, delta=1.5)
+        for column, (left, right) in zip(snapped["columns"], zip(COLUMN_EDGES[:-1], COLUMN_EDGES[1:])):
+            self.assertAlmostEqual(left, column["box"][0] * WIDTH, delta=1.5)
+            self.assertAlmostEqual(right, (column["box"][0] + column["box"][2]) * WIDTH, delta=1.5)
+
     def test_a_rule_found_twice_does_not_cut_the_table_short(self):
         # Warped paper: part of the third rule comes back as a second rule 5 px
         # below it, which used to split the rows into two runs and anchor the
@@ -552,9 +603,9 @@ class DetectTest(unittest.TestCase):
         self.assertAlmostEqual(RULED[0], suggested[0] * HEIGHT, delta=2)
         self.assertAlmostEqual(RULED[0], fitted["ruled_ys"][0] * HEIGHT, delta=2)
 
-    def test_rows_staff_already_placed_on_the_rules_survive_a_faded_rule(self):
+    def test_rows_already_placed_on_the_rules_survive_a_faded_rule(self):
         # The third rule faded away: the evenly ruled run now starts two rows
-        # down, but Staff's rows already sit on every rule that is printed.
+        # down, but the user's rows already sit on every rule that is printed.
         image = Image.new("RGB", (WIDTH, HEIGHT), (PAPER,) * 3)
         draw = ImageDraw.Draw(image)
         for y in RULED:
@@ -706,7 +757,7 @@ class FieldLinesTest(unittest.TestCase):
 
 
 class TurnedMarkersTest(unittest.TestCase):
-    """Markers Staff tilted by hand: fields turn alone, the ledger grid turns with the page."""
+    """Markers the user tilted by hand: fields turn alone, the ledger grid turns with the page."""
 
     def test_a_turned_field_is_cropped_level(self):
         # A dark 200 x 12 px stroke of "writing", turned 12 degrees clockwise.
@@ -777,7 +828,7 @@ class TurnedMarkersTest(unittest.TestCase):
         for row in (1, 2, 3):
             page.word(f"name{row}", 70, 250, base_of(row))
             page.word(f"date{row}", 320, 480, base_of(row))
-        # The scan came out turned 3 degrees clockwise. Staff tilted each column
+        # The scan came out turned 3 degrees clockwise. The user tilted each column
         # marker 3 degrees and dragged it onto its column: its centre goes
         # where the turn of the page took it.
         page.image = page.image.rotate(-3, resample=Image.BICUBIC, fillcolor=(PAPER,) * 3)
@@ -841,6 +892,82 @@ class DetectorDeviceTest(unittest.TestCase):
                 unittest.mock.patch.object(blla, "segment", side_effect=segment):
             self.assertEqual([], lm.kraken_lines(Image.new("RGB", (40, 30), (PAPER,) * 3)))
         self.assertEqual(["cuda", "cpu"], calls)
+
+    def test_kraken_gets_its_own_sato_back(self):
+        """The parallel sato is swapped in for the call only, even when it fails."""
+        from kraken import blla
+        from kraken.lib import segmentation
+        from skimage import filters
+
+        seen = []
+
+        def segment(_image, device):
+            seen.append(segmentation.filters.sato)
+            raise ValueError("a page Kraken cannot read")
+
+        with unittest.mock.patch.object(lm, "detector_device", return_value="cpu"), \
+                unittest.mock.patch.object(blla, "segment", side_effect=segment), \
+                self.assertRaises(ValueError):
+            lm.kraken_lines(Image.new("RGB", (40, 30), (PAPER,) * 3))
+        self.assertIs(filters, segmentation.filters)
+        if lm._parallel_sato() is not None:
+            self.assertIsNot(filters.sato, seen[0])  # the parallel one was in place
+
+
+@unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
+class ParallelSatoTest(unittest.TestCase):
+    """The side-by-side sato gives scikit-image's result to the last bit."""
+
+    def setUp(self):
+        self.sato = lm._parallel_sato()
+        if self.sato is None:
+            self.skipTest("another scikit-image release: Kraken keeps its own sato")
+
+    def test_same_bits_as_scikit_image(self):
+        from skimage import filters
+
+        rng = np.random.default_rng(7)
+        heat = rng.random((180, 254), dtype=np.float32)
+        heat[40:44, 20:200] = 0.95  # a ridge, like a baseline in Kraken's heat map
+        # As Kraken calls it, then with sato's own defaults, then on whole numbers.
+        self.assertTrue(np.array_equal(filters.sato(heat, black_ridges=False, mode="constant"),
+                                       self.sato(heat, black_ridges=False, mode="constant")))
+        self.assertTrue(np.array_equal(filters.sato(heat), self.sato(heat)))
+        whole = (heat * 255).astype(np.uint8)
+        self.assertTrue(np.array_equal(filters.sato(whole, sigmas=[2, 4]), self.sato(whole, sigmas=[2, 4])))
+
+    def test_anything_but_a_flat_image_goes_to_scikit_image(self):
+        from skimage import filters
+
+        cube = np.random.default_rng(1).random((12, 14, 10), dtype=np.float32)
+        self.assertTrue(np.array_equal(filters.sato(cube, sigmas=[1]), self.sato(cube, sigmas=[1])))
+
+
+@unittest.skipUnless(sys.platform == "win32", "Windows only: efficiency mode is a Windows feature")
+class FullSpeedTest(unittest.TestCase):
+    """The detector asks Windows never to run it in efficiency mode."""
+
+    def test_windows_keeps_the_request(self):
+        import ctypes
+
+        class Throttling(ctypes.Structure):
+            _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong), ("StateMask", ctypes.c_ulong)]
+
+        lm._run_at_full_speed()
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.GetProcessInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+        state = Throttling(1, 0, 0)
+        ok = kernel32.GetProcessInformation(kernel32.GetCurrentProcess(), 4, ctypes.byref(state), ctypes.sizeof(state))
+        if not ok:
+            self.skipTest("this Windows cannot report the setting")
+        self.assertTrue(state.ControlMask & 0x1)   # speed is under the process's control...
+        self.assertEqual(0, state.StateMask & 0x1)  # ...and never throttled
+
+    def test_helpers_ask_too(self):
+        with unittest.mock.patch.object(lm, "_run_at_full_speed") as full_speed:
+            lm._end_with_parent()
+        full_speed.assert_called_once()
 
 
 class OutlineWorkersTest(unittest.TestCase):

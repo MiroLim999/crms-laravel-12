@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Middleware\EnsureAccountIsActive;
 use App\Http\Middleware\EnsurePasswordIsChanged;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -14,12 +13,10 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         /*
-         * Both run app-wide on every web request rather than per route group, so
-         * a newly added feature cannot forget to apply them. Each is a no-op for
-         * guests.
+         * Runs app-wide on every web request rather than per route group, so a
+         * newly added feature cannot forget to apply it. A no-op for guests.
          */
         $middleware->web(append: [
-            EnsureAccountIsActive::class,
             EnsurePasswordIsChanged::class,
         ]);
 

@@ -17,7 +17,7 @@
     the only XAMPP module that has to be running is MySQL. Sitting in htdocs is
     incidental - nothing here is served by Apache.
 
-    The OCR service is meant to stay up for the whole working session: Staff
+    The OCR service is meant to stay up for the whole working session:
     scanning depends on it and it costs almost nothing while idle. CRMS never starts
     or stops it - the OCR workspace only reports whether it answers - so this script
     (or a supervisor in a deployment) is how it gets running.

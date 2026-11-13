@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Storage;
  * A layout's paper size and orientation were only labels: markers are page
  * fractions and land on every scan's own shape. What is still needed is the
  * page's width : height, to check that tilted markers stay on the page and to
- * tell Staff when a scan looks sideways. It is taken from each layout's
+ * say when a scan looks sideways. It is taken from each layout's
  * sample, or, without an image sample, from the paper it said it was on.
  */
 return new class extends Migration

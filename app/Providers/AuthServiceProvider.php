@@ -2,85 +2,30 @@
 
 namespace App\Providers;
 
-use App\Enums\RoleSlug;
 use App\Models\User;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 /**
- * The capability matrix, in code.
+ * The abilities every route and view checks.
  *
- * This is the single authoritative translation of the table in docs/roles.md;
- * change the two together (CapabilityMatrixTest checks this side). Every route
- * and view guard must reference one of these abilities rather than testing
- * roles inline.
- *
- * Note what is deliberately absent: there is no ability that lets Admin write
- * record values. Data entry belongs to Staff, and corrections go through the
- * change-request flow. Do not add one.
+ * CRMS has one account, the Super Admin, so each ability simply asks "is this the
+ * Super Admin?". They stay named so routes and views read the same as before.
  */
 class AuthServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        // A deactivated account can do nothing, whatever its role.
-        Gate::before(fn (User $user) => $user->is_active ? null : false);
-
-        // -------------------------------------------------- data entry (Staff, Super Admin)
-        Gate::define('documents.process', fn (User $u) => $u->canEnterData());
-        Gate::define('change-requests.create', fn (User $u) => $u->canEnterData());
-
-        // -------------------------------------------------- archive (everyone signed in)
-        Gate::define('records.view', fn (User $u) => $u->roleSlug() !== null);
-
-        // -------------------------------------------------- oversight (Admin, Super Admin)
-        Gate::define('change-requests.moderate', fn (User $u) => $u->hasOversight());
-        Gate::define('analytics.view', fn (User $u) => $u->hasOversight());
-        Gate::define('users.manage', fn (User $u) => $u->hasOversight());
-        Gate::define('audit.view', fn (User $u) => $u->hasOversight());
-        Gate::define('reports.generate', fn (User $u) => $u->hasOversight());
-
-        // -------------------------------------------------- Super Admin only
-        Gate::define('templates.manage', fn (User $u) => $u->isSuperAdmin());
-        Gate::define('ocr.manage', fn (User $u) => $u->isSuperAdmin());
-
-        /*
-         * Provisioning a specific role.
-         *
-         * Admin user management covers Staff accounts only. Creating another Admin,
-         * or touching a Super Admin, requires a Super Admin.
-         */
-        Gate::define('users.manage-role', function (User $actor, RoleSlug $target) {
-            if ($actor->isSuperAdmin()) {
-                return true;
-            }
-
-            return $actor->isAdmin() && $target === RoleSlug::Staff;
-        });
-
-        /*
-         * Editing an existing account.
-         *
-         * Admin user management covers Staff accounts only - modifying another
-         * Admin, or any Super Admin, requires a Super Admin.
-         */
-        Gate::define('users.update', function (User $actor, User $target) {
-            if ($actor->isSuperAdmin()) {
-                return true;
-            }
-
-            return $actor->isAdmin() && $target->isStaff();
-        });
-
-        /*
-         * Deactivation. Same rules as editing, but nobody may lock themselves out.
-         */
-        Gate::define('users.deactivate', function (User $actor, User $target) {
-            if ($actor->is($target)) {
-                return false;
-            }
-
-            return Gate::forUser($actor)->allows('users.update', $target);
-        });
+        foreach ([
+            'documents.process',
+            'change-requests.create',
+            'records.view',
+            'audit.view',
+            'reports.generate',
+            'templates.manage',
+            'ocr.manage',
+        ] as $ability) {
+            Gate::define($ability, fn (User $u) => $u->isSuperAdmin());
+        }
     }
 }

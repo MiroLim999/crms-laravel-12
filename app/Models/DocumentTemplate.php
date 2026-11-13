@@ -3,10 +3,12 @@
 namespace App\Models;
 
 use App\Enums\DocumentType;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * @property DocumentType $doc_type
@@ -22,6 +24,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property list<float>|null $ruled_ys
  * @property int|null $parent_id
  * @property int|null $page_two_template_id
+ * @property \Illuminate\Support\Carbon|null $published_at
+ * @property bool $is_page_two
+ * @property bool $is_version
  * @property int $revision
  */
 class DocumentTemplate extends Model
@@ -54,19 +59,28 @@ class DocumentTemplate extends Model
             'columns' => 'array',
             'ruled_ys' => 'array',
             'is_active' => 'boolean',
+            'is_page_two' => 'boolean',
+            'is_version' => 'boolean',
+            'published_at' => 'datetime',
             'sample_size' => 'integer',
             'revision' => 'integer',
         ];
     }
 
     /**
-     * Whether Staff use this layout: it is published, or records or pages in
+     * Whether this layout is in use: it is published, or records or pages in
      * progress were read with it. A layout in use is never changed in place:
      * saving new markers makes a new version, so records keep theirs.
      */
     public function isInUse(): bool
     {
-        return $this->is_active || $this->records()->exists() || $this->pages()->exists();
+        if ($this->is_active || $this->records()->exists() || $this->pages()->exists()) {
+            return true;
+        }
+
+        // Page 2 of a spread is used whenever its main layout is: its records
+        // are saved under the main layout.
+        return $this->is_page_two && (bool) $this->mainLayout()->first()?->isInUse();
     }
 
     /**
@@ -81,7 +95,7 @@ class DocumentTemplate extends Model
     /**
      * Column markers in the shape the field-marking UI consumes.
      *
-     * Staff align these like any other marker; the row lines are then placed
+     * These are aligned like any other marker; the row lines are then placed
      * inside them and snapped to each page's own printed rules.
      *
      * @return list<array<string, mixed>>
@@ -146,7 +160,7 @@ class DocumentTemplate extends Model
     }
 
     /**
-     * Every marker Staff align: rectangle fields, then ledger columns.
+     * Every marker the Align step shows: rectangle fields, then ledger columns.
      *
      * @return list<array<string, mixed>>
      */
@@ -179,18 +193,30 @@ class DocumentTemplate extends Model
         return $this->hasMany(DocumentPage::class);
     }
 
-    /** The layout this one was copied from, as a new version or a duplicate. */
     /**
      * The layout of page 2 when a document is a two-page spread whose pages are
      * laid out differently (a register's left and right pages). This layout
-     * describes page 1; null means page 2 uses this layout too.
+     * describes page 1; null means page 2 uses this layout too. Page 2 is a
+     * hidden layout (is_page_two) that belongs to this layout alone.
      */
     public function pageTwoTemplate(): BelongsTo
     {
         return $this->belongsTo(self::class, 'page_two_template_id');
     }
 
-    /** The layout Staff align and read page `$pageNumber` of a spread with: even pages use page 2's, when set. */
+    /** For a page 2 layout: the main layout it is page 2 of. */
+    public function mainLayout(): HasOne
+    {
+        return $this->hasOne(self::class, 'page_two_template_id');
+    }
+
+    /** Layouts listed in the template library: page 2 layouts are shown with their main layout. */
+    public function scopeListed(Builder $query): Builder
+    {
+        return $query->where('is_page_two', false);
+    }
+
+    /** The layout page `$pageNumber` of a spread is aligned and read with: even pages use page 2's, when set. */
     public function layoutForPage(int $pageNumber): self
     {
         return $pageNumber % 2 === 0 && $this->page_two_template_id !== null
@@ -198,6 +224,7 @@ class DocumentTemplate extends Model
             : $this;
     }
 
+    /** The layout this one was copied from, as a new version (is_version) or a duplicate. */
     public function parent(): BelongsTo
     {
         return $this->belongsTo(self::class, 'parent_id');
@@ -224,7 +251,7 @@ class DocumentTemplate extends Model
     }
 
     /**
-     * The template Staff get when starting a new document of this type.
+     * The template a new document of this type starts with.
      */
     public static function activeFor(DocumentType|DocumentTypeDefinition|string $type): ?self
     {
@@ -236,6 +263,7 @@ class DocumentTemplate extends Model
 
         $query = static::with(['fields', 'documentTypeDefinition'])
             ->where('is_active', true)
+            ->listed()
             ->when(
                 $definition,
                 fn ($builder) => $builder->where('document_type_id', $definition->getKey()),

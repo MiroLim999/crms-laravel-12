@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\AuditLog;
 use App\Models\DocumentTypeDefinition;
 use App\Services\DashboardAnalytics;
 use Carbon\CarbonImmutable;
@@ -14,10 +13,8 @@ use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 /**
- * Role-aware landing page.
- *
- * Staff see their own work summary. Admin and Super Admin see the consolidated
- * oversight dashboard, where each panel has its own reporting period.
+ * The landing page: the whole system at a glance, where each panel has its own
+ * reporting period.
  */
 class DashboardController extends Controller
 {
@@ -28,54 +25,39 @@ class DashboardController extends Controller
 
     public function __invoke(Request $request): View
     {
-        $user = $request->user();
-        $scopes = null;
-        $overview = null;
-        $periodForms = null;
-        $modelPerformance = null;
+        $problems = new MessageBag;
+        $filters = [];
+        $typed = [];
 
-        if ($user->hasOversight()) {
-            $problems = new MessageBag;
-            $filters = [];
-            $typed = [];
+        foreach (DashboardAnalytics::PANELS as $panel) {
+            [$filters[$panel], $typed[$panel]] = $this->periodFilters($request, $panel, $problems);
+        }
 
-            foreach (DashboardAnalytics::PANELS as $panel) {
-                [$filters[$panel], $typed[$panel]] = $this->periodFilters($request, $panel, $problems);
-            }
+        if ($problems->isNotEmpty()) {
+            view()->share('errors', (new ViewErrorBag)->put('default', $problems));
+        }
 
-            if ($problems->isNotEmpty()) {
-                view()->share('errors', (new ViewErrorBag)->put('default', $problems));
-            }
+        $scopes = array_map(fn (array $panelFilters) => $this->analytics->scope($panelFilters), $filters);
 
-            $scopes = array_map(fn (array $panelFilters) => $this->analytics->scope($panelFilters), $filters);
-            $overview = $this->analytics->oversight($scopes);
-            $modelPerformance = $this->ocrPerformance->summary();
-
-            // What each form shows: what was typed when it was rejected,
-            // otherwise the period actually in use.
-            $periodForms = [];
-            foreach ($scopes as $panel => $scope) {
-                $periodForms[$panel] = $typed[$panel] ?? [
-                    'period' => $scope['period'],
-                    'from' => $scope['period'] === 'custom' ? $scope['from'] : '',
-                    'to' => $scope['period'] === 'custom' ? $scope['to'] : '',
-                ];
-            }
+        // What each form shows: what was typed when it was rejected,
+        // otherwise the period actually in use.
+        $periodForms = [];
+        foreach ($scopes as $panel => $scope) {
+            $periodForms[$panel] = $typed[$panel] ?? [
+                'period' => $scope['period'],
+                'from' => $scope['period'] === 'custom' ? $scope['from'] : '',
+                'to' => $scope['period'] === 'custom' ? $scope['to'] : '',
+            ];
         }
 
         return view('dashboard', [
-            'user' => $user,
+            'user' => $request->user(),
             'periodOptions' => DashboardAnalytics::PERIODS,
             'periodForms' => $periodForms,
             'scopes' => $scopes,
-            'analytics' => $overview,
-            'modelPerformance' => $modelPerformance,
-            // The New document card. Admin cannot scan, so Admin gets none.
-            'scanTypes' => $user->hasOversight() && $user->can('documents.process') ? $this->scanTypes() : null,
-            'staffOverview' => $user->hasOversight() ? null : $this->analytics->staff($user),
-            'recentActivity' => $user->hasOversight()
-                ? collect()
-                : AuditLog::where('user_id', $user->getKey())->latest('created_at')->limit(6)->get(),
+            'analytics' => $this->analytics->oversight($scopes),
+            'modelPerformance' => $this->ocrPerformance->summary(),
+            'scanTypes' => $this->scanTypes(),
         ]);
     }
 

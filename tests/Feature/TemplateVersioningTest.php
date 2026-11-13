@@ -22,7 +22,7 @@ class TemplateVersioningTest extends TestCase
 
     private const COLUMNS = [
         ['name' => 'Entry No.', 'box' => [0.05, 0.2, 0.1, 0.6]],
-        ['name' => "Child's Name", 'box' => [0.15, 0.2, 0.3, 0.6]],
+        ['name' => "Child's Name", 'box' => [0.15, 0.2, 0.3, 0.6], 'role' => 'name'],
     ];
 
     private User $admin;
@@ -56,13 +56,18 @@ class TemplateVersioningTest extends TestCase
     {
         return json_encode([
             self::COLUMNS[0],
-            ['name' => "Child's Name", 'box' => [0.2, 0.2, 0.3, 0.6]],
+            ['name' => "Child's Name", 'box' => [0.2, 0.2, 0.3, 0.6], 'role' => 'name'],
         ], JSON_THROW_ON_ERROR);
     }
 
     /** @param  array<string, mixed>  $overrides */
     private function layout(array $overrides = []): DocumentTemplate
     {
+        // A layout is published only with a sample page.
+        if (($overrides['publish'] ?? false) && ! isset($overrides['sample_document'])) {
+            $overrides['sample_document'] = UploadedFile::fake()->image('register.png', 1200, 900);
+        }
+
         $this->actingAs($this->admin)->post(route('templates.store'), $this->payload($overrides))
             ->assertSessionHasNoErrors();
 
@@ -241,13 +246,4 @@ class TemplateVersioningTest extends TestCase
         Storage::disk('local')->assertExists([$published->sample_path, $version->sample_path]);
     }
 
-    public function test_only_super_admins_duplicate_layouts(): void
-    {
-        $layout = $this->layout();
-
-        $this->actingAs(User::factory()->staff()->create())
-            ->post(route('templates.duplicate', $layout))
-            ->assertForbidden();
-        $this->assertSame(1, DocumentTemplate::count());
-    }
 }
