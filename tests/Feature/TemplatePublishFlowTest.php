@@ -255,6 +255,27 @@ class TemplatePublishFlowTest extends TestCase
         );
     }
 
+    public function test_two_pages_need_their_own_names_and_the_same_rows_before_publishing(): void
+    {
+        // Page 2 repeats "Entry No." and has one row fewer than page 1.
+        $draft = $this->layout(['page_two_json' => json_encode([
+            'fields' => [],
+            'columns' => [['name' => 'Entry No.', 'box' => [0.1, 0.2, 0.5, 0.6]]],
+            'ruled_ys' => [0.2, 0.35, 0.5, 0.65],
+            'grouping_mode' => 'auto',
+        ], JSON_THROW_ON_ERROR)]);
+
+        $this->actingAs($this->admin)->post(route('templates.activate', $draft))
+            ->assertSessionHas('error', fn (string $message) => str_contains($message, 'own column names (on both pages: Entry No.)')
+                && str_contains($message, 'Page 1 has 4 rows and page 2 has 3.'));
+        $this->assertFalse($draft->refresh()->is_active);
+
+        // Its own names and the same rows: published.
+        $ready = $this->layout(['name' => 'Ready spread', 'page_two_json' => $this->pageTwo()]);
+        $this->post(route('templates.activate', $ready))->assertSessionHas('success');
+        $this->assertTrue($ready->refresh()->is_active);
+    }
+
     public function test_the_name_column_may_be_on_page_two(): void
     {
         $layout = $this->layout([

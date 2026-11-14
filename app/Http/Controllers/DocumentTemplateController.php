@@ -86,7 +86,6 @@ class DocumentTemplateController extends Controller
             'fields' => [],
             'columns' => [],
             'ruledYs' => [],
-            'pageTwoChoices' => $this->pageTwoChoices($type->getKey(), null),
         ]);
     }
 
@@ -189,7 +188,6 @@ class DocumentTemplateController extends Controller
             'parent' => $template->parent()->first(['id', 'name']),
             'columns' => array_values($template->columns ?? []),
             'ruledYs' => array_values($template->ruled_ys ?? []),
-            'pageTwoChoices' => $this->pageTwoChoices($template->document_type_id, $template),
             'pageTwo' => $this->pageTwoForBuilder($template),
             // What still stops this layout from being published (none: it can be).
             'publishProblems' => $this->publishProblems($template),
@@ -434,23 +432,6 @@ class DocumentTemplateController extends Controller
     private function pageTwoName(DocumentTemplate $main): string
     {
         return Str::limit($main->name, 110, '').' - page 2';
-    }
-
-    /**
-     * The layouts whose markers can be copied as page 2 of a spread: others of
-     * the same certificate type that do not have a page 2 of their own.
-     *
-     * @return \Illuminate\Support\Collection<int, DocumentTemplate>
-     */
-    private function pageTwoChoices(int $documentTypeId, ?DocumentTemplate $template)
-    {
-        return DocumentTemplate::listed()
-            ->where('document_type_id', $documentTypeId)
-            ->whereNull('page_two_template_id')
-            ->when($template, fn ($query) => $query->whereKeyNot($template->getKey()))
-            ->orderByDesc('is_active')
-            ->orderBy('name')
-            ->get(['id', 'name', 'revision', 'is_active']);
     }
 
     public function update(Request $request, DocumentTemplate $template): RedirectResponse
@@ -1306,6 +1287,30 @@ class DocumentTemplateController extends Controller
         }
         if (! $hasName) {
             $problems[] = "Mark the column or field that holds the person's name (Field settings → Holds → Name).";
+        }
+
+        // A two-page register: row N of page 1 and row N of page 2 are one person.
+        if (count($layouts) === 2) {
+            [$one, $two] = array_values($layouts);
+            $names = fn (DocumentTemplate $layout) => collect([
+                ...$layout->fields->pluck('name')->all(),
+                ...array_column($layout->columns ?? [], 'name'),
+            ])->map(fn ($name) => trim((string) $name))->filter()->unique(fn ($name) => mb_strtolower($name));
+            $second = $names($two)->map(fn ($name) => mb_strtolower($name))->flip();
+            $both = $names($one)->filter(fn ($name) => $second->has(mb_strtolower($name)))->values();
+            if ($both->isNotEmpty()) {
+                $problems[] = 'Give each page its own column names (on both pages: '.$both->take(3)->implode(', ')
+                    .($both->count() > 3 ? ' and '.($both->count() - 3).' more' : '').').';
+            }
+
+            $rows = fn (DocumentTemplate $layout) => count($layout->columns ?? []) > 0 && count($layout->ruled_ys ?? []) >= 2
+                ? count($layout->ruled_ys) - 1
+                : null;
+            [$rowsOne, $rowsTwo] = [$rows($one), $rows($two)];
+            if ($rowsOne !== null && $rowsTwo !== null && $rowsOne !== $rowsTwo) {
+                $problems[] = "Page 1 has {$rowsOne} ".Str::plural('row', $rowsOne)." and page 2 has {$rowsTwo}. "
+                    .'Row 1 of both pages is one person, so both pages need the same number of rows.';
+            }
         }
 
         return $problems;

@@ -35,7 +35,7 @@ import {
     layoutUndoIsBlocked,
 } from './template-builder-shortcuts';
 import { LayoutHistory } from './template-history';
-import { guessedRowCount, publishProblems } from './layout-publish-checks';
+import { guessedRowCount, namesOnBothPages, publishProblems, rowMismatch } from './layout-publish-checks';
 import { setDisclosureExpanded } from './disclosure-motion';
 
 const configNode = document.getElementById('templateBuilderConfig');
@@ -232,6 +232,9 @@ drawBlankPage();
 // or closing, the window resized) fits the page to the new room. Declared before
 // the marker, whose zoom callback reads it.
 let focusedZoom = null;
+// Two pages whose row counts differ (set by renderRowMatch): the Table grid card's
+// warning mark shows it while the card is closed.
+let rowsMismatched = false;
 
 const marker = new FieldMarker({
     canvas,
@@ -389,6 +392,11 @@ function renderPersonGroups(boxes) {
     const list = element('personGroupList');
     const modeBadge = element('groupingModeBadge');
     const automaticButton = element('useAutomaticGroupsBtn', HTMLButtonElement);
+
+    // Only loose fields (a form) are grouped into people: a register's columns are
+    // one person per row already. Kept while rows set by hand need a way back.
+    const looseFields = boxes.filter((box) => !isColumn(box)).length;
+    element('personCard').classList.toggle('d-none', !custom && looseFields < 2);
 
     modeBadge.textContent = custom ? 'Custom' : 'Automatic';
     modeBadge.classList.toggle('bg-label-primary', custom);
@@ -553,6 +561,14 @@ function renderFieldList(boxes) {
         items = [...list.querySelectorAll('.template-builder-field-item')];
     }
 
+    // Two pages: one person's record runs on from page 1 into page 2, so page 2's
+    // numbers follow page 1's. A name on both pages is pointed out on both.
+    const other = otherPageLayout();
+    const offset = other && activePage === 2 ? other.boxes.length : 0;
+    const onBoth = new Set(other
+        ? namesOnBothPages(boxes, other.boxes).map((name) => name.toLocaleLowerCase())
+        : []);
+
     items.forEach((item, index) => {
         const box = boxes[index];
         item.dataset.fieldIndex = String(index);
@@ -562,11 +578,12 @@ function renderFieldList(boxes) {
         const groupBadge = item.querySelector('.template-builder-field-group');
         const removeButton = item.querySelector('button');
 
-        if (number) number.textContent = String(index + 1);
+        if (number) number.textContent = String(offset + index + 1);
         if (input instanceof HTMLInputElement) {
             if (document.activeElement !== input) input.value = box.name;
             input.classList.toggle('is-invalid', invalidFieldIndexes.has(index));
-            input.setAttribute('aria-label', `Field ${index + 1} name`);
+            input.classList.toggle('is-duplicate', onBoth.has(box.name.trim().toLocaleLowerCase()));
+            input.setAttribute('aria-label', `Field ${offset + index + 1} name`);
         }
         if (groupBadge instanceof HTMLElement) {
             const group = displayPersonGroup(boxes, box.personGroup);
@@ -592,10 +609,121 @@ function renderFieldList(boxes) {
         removeButton?.setAttribute('aria-label', `Remove field ${index + 1}`);
     });
 
-    element('fieldCount').textContent = `${boxes.length} field${boxes.length === 1 ? '' : 's'}`;
+    const total = boxes.length + (other?.boxes.length ?? 0);
+    element('fieldCount').textContent = `${total} field${total === 1 ? '' : 's'}`;
     selectAllInput.disabled = boxes.length === 0;
+    renderPersonRecord(boxes, other, onBoth);
     renderPersonGroups(boxes);
     updateSelectionUI(marker.selectedIndexes());
+}
+
+/** The page not being edited of a two-page layout ({ boxes, ruledYs, ... }), or null. */
+function otherPageLayout() {
+    return twoPage ? pageLayouts[3 - activePage] ?? null : null;
+}
+
+/** A page's number of ruled rows, or null for a page without a table. */
+function pageRowCount(layout) {
+    if (!layout || !layout.boxes.some(isColumn) || layout.ruledYs.length < 2) return null;
+    return layout.ruledYs.length - 1;
+}
+
+/**
+ * The Fields card as one person's record. One page: the usual field list. Two
+ * pages: page 1's part, then page 2's, each under its heading; the page being
+ * edited is the live list, the other a list whose rows open that page.
+ */
+function renderPersonRecord(boxes, other, onBoth) {
+    element('fieldsCardTitle').textContent = other ? 'Person record' : 'Fields';
+    // Add field (in the panel's footer) adds to the page being edited.
+    element('newFieldName', HTMLInputElement).placeholder = other ? `Page ${activePage} field, e.g. Page No.` : 'e.g. Page No.';
+    element('activePageHeading').classList.toggle('d-none', !other);
+    element('otherPageSection').classList.toggle('d-none', !other);
+    // Page 1 always first, as in the record.
+    element('activePageSection').style.order = activePage === 1 ? '0' : '1';
+    element('otherPageSection').style.order = activePage === 1 ? '1' : '0';
+
+    if (!other) return;
+
+    const otherPage = 3 - activePage;
+    element('activePageHeading').textContent = `Page ${activePage} · editing`;
+    element('otherPageHeading').textContent = `Page ${otherPage}`;
+
+    const start = otherPage === 2 ? boxes.length : 0;
+    const list = element('otherFieldList');
+    list.replaceChildren(...(other.boxes.length === 0
+        ? [Object.assign(document.createElement('li'), {
+            className: 'marker-field-empty',
+            textContent: `No fields on page ${otherPage} yet.`,
+        })]
+        : other.boxes.map((box, index) => {
+            const item = document.createElement('li');
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'template-person-record__item';
+            button.title = `Edit page ${otherPage} and select “${box.name}”`;
+            button.addEventListener('click', () => openOtherPageField(index));
+
+            const number = document.createElement('span');
+            number.className = 'badge bg-label-secondary template-builder-field-number';
+            number.textContent = String(start + index + 1);
+
+            const name = document.createElement('span');
+            name.className = 'template-person-record__name';
+            name.classList.toggle('is-duplicate', onBoth.has(box.name.trim().toLocaleLowerCase()));
+            name.textContent = box.name;
+
+            button.append(number, name);
+            const text = settingsTags(box);
+            if (text) {
+                const tags = document.createElement('span');
+                tags.className = 'template-builder-field-tags';
+                tags.textContent = text;
+                button.appendChild(tags);
+            }
+            if (isColumn(box)) {
+                const badge = document.createElement('span');
+                badge.className = 'template-builder-field-group is-column';
+                badge.textContent = 'Col';
+                button.appendChild(badge);
+            }
+            item.appendChild(button);
+            return item;
+        })));
+}
+
+/** A field of the other page picked in the record: edit that page, with the field selected. */
+async function openOtherPageField(index) {
+    await switchPage(3 - activePage);
+    marker.selectIndexes([index]);
+    window.requestAnimationFrame(() => centerFieldListRow(index, { centerPanel: false }));
+}
+
+/**
+ * Two pages with tables: row N of each is one person, so the rows must match.
+ * Said only when they do not (the amber line and the mark on the card header);
+ * matching rows need no words.
+ */
+function renderRowMatch() {
+    const line = element('rowMatch');
+    const other = otherPageLayout();
+    const here = pageRowCount({ boxes: marker.toJSON(), ruledYs });
+    const there = pageRowCount(other);
+    const problem = other && here !== null && there !== null
+        ? rowMismatch(activePage === 1 ? [here, there] : [there, here])
+        : null;
+
+    rowsMismatched = problem !== null;
+    line.classList.toggle('d-none', problem === null);
+    line.replaceChildren();
+    if (problem === null) return;
+
+    const icon = document.createElement('i');
+    icon.className = 'icon-base bx bx-error icon-sm';
+    icon.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span');
+    text.textContent = problem;
+    line.append(icon, text);
 }
 
 const ROLE_LABELS = { name: 'Name', entry: 'Entry no.' };
@@ -1213,11 +1341,6 @@ function setCardOpen(toggle, open) {
     return setDisclosureExpanded(document.getElementById(toggle.getAttribute('aria-controls') ?? ''), open);
 }
 
-function openCard(toggleId) {
-    const toggle = element(toggleId, HTMLButtonElement);
-    if (toggle.getAttribute('aria-expanded') !== 'true') setCardOpen(toggle, true);
-}
-
 document.querySelectorAll('.template-builder-side-panel .card-disclosure__header').forEach((header) => {
     const toggle = header.querySelector('.card-disclosure__toggle');
     if (!(toggle instanceof HTMLButtonElement)) return;
@@ -1443,7 +1566,6 @@ form.addEventListener('submit', (event) => {
     const blocking = updateLedgerChecks().find((problem) => problem.blocking);
     if (blocking) {
         event.preventDefault();
-        openCard('ledgerCardToggle');
         showBuilderError(blocking.message);
         return;
     }
@@ -1500,7 +1622,11 @@ function saveCheck() {
     return {
         publishing,
         problems: publishing
-            ? publishProblems({ hasSample: sampleLoaded, pages: pages.map((page) => page.boxes) })
+            ? publishProblems({
+                hasSample: sampleLoaded,
+                pages: pages.map((page) => page.boxes),
+                rows: pages.map(pageRowCount),
+            })
             : [],
         // Only a page with columns keeps its row lines (see layoutPayload).
         guessed: guessedRowCount(
@@ -1674,6 +1800,8 @@ function renderLedgerGrid() {
     if (document.activeElement !== rowsInput) rowsInput.value = rows > 0 ? String(rows) : '';
     element('removeRuledLineBtn', HTMLButtonElement).disabled = selectedRule === null && ruledYs.length <= 2;
 
+    renderRowMatch();
+
     const tiltInput = element('gridTiltValue', HTMLInputElement);
     if (document.activeElement !== tiltInput) tiltInput.value = formatTilt(gridTilt(columns));
     tiltInput.disabled = columns.length === 0;
@@ -1730,7 +1858,10 @@ function updateLedgerChecks(boxes = marker.toJSON()) {
     }));
     element('ledgerProblems').classList.toggle('d-none', problems.length === 0);
     // The card may be closed: a mark on its header says there is something to check.
-    element('ledgerCardAlert').classList.toggle('d-none', problems.length === 0 && coveredFieldIndexes.length === 0);
+    element('ledgerCardAlert').classList.toggle(
+        'd-none',
+        problems.length === 0 && coveredFieldIndexes.length === 0 && !rowsMismatched,
+    );
 
     return problems;
 }
@@ -1847,36 +1978,38 @@ function uniqueName(base, taken) {
 function requestSampleGrid() {
     if (sampleGrid) return sampleGrid;
 
-    const request = (async () => {
-        const blob = await new Promise((resolve, reject) => {
-            canvas.toBlob((result) => (result ? resolve(result) : reject(new Error('The sample could not be prepared.'))), 'image/png');
-        });
-        const data = new FormData();
-        data.set('image', blob, 'sample.png');
-
-        const response = await window.fetch(config.detectGridUrl, {
-            method: 'POST',
-            headers: {
-                Accept: 'application/json',
-                'X-CSRF-TOKEN': config.csrf,
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-            credentials: 'same-origin',
-            body: data,
-        });
-        const payload = await response.json().catch(() => null);
-        if (!response.ok) {
-            throw new Error(payload?.message || `Grid detection failed with HTTP ${response.status}.`);
-        }
-        return payload ?? {};
-    })();
-
+    const request = detectGridOn(canvas);
     sampleGrid = request;
     // A failed request is asked again next time.
     request.catch(() => {
         if (sampleGrid === request) sampleGrid = null;
     });
     return request;
+}
+
+/** Ask the server for the printed grid of the page drawn on `source`. */
+async function detectGridOn(source) {
+    const blob = await new Promise((resolve, reject) => {
+        source.toBlob((result) => (result ? resolve(result) : reject(new Error('The sample could not be prepared.'))), 'image/png');
+    });
+    const data = new FormData();
+    data.set('image', blob, 'sample.png');
+
+    const response = await window.fetch(config.detectGridUrl, {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+            'X-CSRF-TOKEN': config.csrf,
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+        credentials: 'same-origin',
+        body: data,
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+        throw new Error(payload?.message || `Grid detection failed with HTTP ${response.status}.`);
+    }
+    return payload ?? {};
 }
 
 function forgetSampleGrid() {
@@ -1903,6 +2036,79 @@ async function loadPrintedLines() {
     }
 }
 
+/**
+ * A page's markers and row lines fitted to what Detect found on it: its own
+ * column lines (columns already there keep their names and settings), its
+ * ruled rows inside the table frame, and which lines are guesses (amber).
+ *
+ * @returns {{ boxes: object[], ruledYs: number[], estimated: Set<string> }}
+ */
+function gridFromDetection(payload, boxes, aspect) {
+    if (!Array.isArray(payload?.ruled_ys) || payload.ruled_ys.length < 2) {
+        throw new Error('No evenly ruled rows were found on this sample. Add the row lines by hand.');
+    }
+
+    const found = normaliseRuledYs(payload.ruled_ys);
+    // Lines below the table's frame (a signature line, the margin) are no rows.
+    const detected = rowsWithinFrame(found, payload.frame_bottom);
+    const top = detected[0];
+    const bottom = detected[detected.length - 1];
+    let next = boxes;
+
+    const printed = (Array.isArray(payload.columns) ? payload.columns : [])
+        .map((column) => ({ x: column.box[0], w: column.box[2] }));
+
+    if (printed.length > 0) {
+        // This page's own column lines. Columns already in the layout (page 2
+        // starts as a copy of page 1's) keep their names and settings but
+        // move onto this page's printed columns.
+        const fields = boxes.filter((box) => !isColumn(box));
+        const fitted = fitColumnsToPrinted(boxes.filter(isColumn), printed, top, bottom);
+        const taken = new Set(fields.map((box) => box.name.trim().toLocaleLowerCase()));
+        fitted.columns.forEach((column, index) => {
+            if (!fitted.created.includes(index)) taken.add(column.name.trim().toLocaleLowerCase());
+        });
+        fitted.created.forEach((index) => {
+            // Name a new column after the topmost field already sitting in it.
+            const column = fitted.columns[index];
+            const inside = fields
+                .filter((field) => field.x + field.w / 2 >= column.x && field.x + field.w / 2 <= column.x + column.w)
+                .sort((a, b) => a.y - b.y)[0];
+            const fieldName = inside?.name?.trim();
+            fitted.columns[index] = {
+                ...column,
+                name: uniqueName(fieldName ? `${fieldName} column` : `Column ${index + 1}`, taken),
+                personGroup: null,
+                personFieldOrder: null,
+            };
+        });
+        // A page scanned a little turned: the columns turn with it, as Snap does.
+        next = columnsAtPageTilt([...fields, ...fitted.columns], payload.tilt, aspect);
+    } else {
+        // No column lines found: keep the admin's columns, stretched over the detected rows.
+        next = boxes.map((box) => (isColumn(box) ? { ...box, y: top, h: bottom - top } : box));
+    }
+
+    // Lines below the last printed rule, and lines put back where a printed
+    // rule was too faint to find, are Detect's guesses: shown amber until
+    // each is checked (moved or nudged) against the page.
+    const estimated = Math.max(0, Math.min(found.length, Number(payload.estimated_ys) || 0));
+    const guessed = new Set([
+        ...found.slice(found.length - estimated),
+        ...normaliseRuledYs(Array.isArray(payload.bridged_ys) ? payload.bridged_ys : []),
+    ].map(ruleKey));
+
+    return {
+        boxes: next,
+        ruledYs: detected,
+        estimated: new Set(detected.map(ruleKey).filter((key) => guessed.has(key))),
+    };
+}
+
+/**
+ * Detect from sample, on the page being edited only (one undo step). On a
+ * two-page layout the other page is detected when it is the one being edited.
+ */
 async function detectLedgerGrid() {
     if (!sampleLoaded) {
         showBuilderError('Choose a sample page first: the grid is found from its printed rules.');
@@ -1916,65 +2122,14 @@ async function detectLedgerGrid() {
 
     try {
         const payload = await requestSampleGrid();
-        if (!Array.isArray(payload?.ruled_ys) || payload.ruled_ys.length < 2) {
-            throw new Error('No evenly ruled rows were found on this sample. Add the row lines by hand.');
-        }
-        if (!printedLines) usePrintedLines(payload.lines);
+        if (!printedLines) usePrintedLines(payload?.lines);
 
-        const boxes = marker.toJSON();
-        const found = normaliseRuledYs(payload.ruled_ys);
-        // Lines below the table's frame (a signature line, the margin) are no rows.
-        const detected = rowsWithinFrame(found, payload.frame_bottom);
-        const top = detected[0];
-        const bottom = detected[detected.length - 1];
-        let next = boxes;
-
-        const printed = (Array.isArray(payload.columns) ? payload.columns : [])
-            .map((column) => ({ x: column.box[0], w: column.box[2] }));
-
-        if (printed.length > 0) {
-            // This page's own column lines. Columns already in the layout (page 2
-            // starts as a copy of page 1's) keep their names and settings but
-            // move onto this page's printed columns.
-            const fields = boxes.filter((box) => !isColumn(box));
-            const fitted = fitColumnsToPrinted(boxes.filter(isColumn), printed, top, bottom);
-            const taken = new Set(fields.map((box) => box.name.trim().toLocaleLowerCase()));
-            fitted.columns.forEach((column, index) => {
-                if (!fitted.created.includes(index)) taken.add(column.name.trim().toLocaleLowerCase());
-            });
-            fitted.created.forEach((index) => {
-                // Name a new column after the topmost field already sitting in it.
-                const column = fitted.columns[index];
-                const inside = fields
-                    .filter((field) => field.x + field.w / 2 >= column.x && field.x + field.w / 2 <= column.x + column.w)
-                    .sort((a, b) => a.y - b.y)[0];
-                const fieldName = inside?.name?.trim();
-                fitted.columns[index] = {
-                    ...column,
-                    name: uniqueName(fieldName ? `${fieldName} column` : `Column ${index + 1}`, taken),
-                    personGroup: null,
-                    personFieldOrder: null,
-                };
-            });
-            // A page scanned a little turned: the columns turn with it, as Snap does.
-            next = columnsAtPageTilt([...fields, ...fitted.columns], payload.tilt, pageAspect());
-        } else {
-            // No column lines found: keep the admin's columns, stretched over the detected rows.
-            next = boxes.map((box) => (isColumn(box) ? { ...box, y: top, h: bottom - top } : box));
-        }
-
-        // Lines below the last printed rule, and lines put back where a printed
-        // rule was too faint to find, are Detect's guesses: shown amber until
-        // each is checked (moved or nudged) against the page.
-        const estimated = Math.max(0, Math.min(found.length, Number(payload.estimated_ys) || 0));
-        const guessed = new Set([
-            ...found.slice(found.length - estimated),
-            ...normaliseRuledYs(Array.isArray(payload.bridged_ys) ? payload.bridged_ys : []),
-        ].map(ruleKey));
-        estimatedYs = new Set(detected.map(ruleKey).filter((key) => guessed.has(key)));
+        const result = gridFromDetection(payload, marker.toJSON(), pageAspect());
+        estimatedYs = result.estimated;
         selectedRule = null;
-        ruledYs = detected;
-        replaceBoxes(next);
+        ruledYs = result.ruledYs;
+        replaceBoxes(result.boxes);
+
     } catch (error) {
         showBuilderError(error instanceof Error ? error.message : 'The grid could not be detected.');
     } finally {
@@ -2160,6 +2315,24 @@ async function drawSamplePage(target, page) {
     target.layout();
 }
 
+/**
+ * What says one page or two in the side panel: the badge, the Detect button,
+ * the record list and the row check (both pages' parts change on a switch).
+ */
+function refreshPageCount() {
+    const badge = element('pagesBadge');
+    badge.textContent = twoPage ? '2 pages' : '1 page';
+    badge.classList.toggle('template-pages-badge--two', twoPage);
+    // Two pages: only the page being edited (click the other page to detect that one).
+    element('detectGridLabel').textContent = twoPage ? `Detect page ${activePage}` : 'Detect from sample';
+    element('detectGridBtn').title = twoPage
+        ? `Find page ${activePage}'s columns and row lines from its printed rules`
+        : "Find the columns and row lines from the sample's printed rules";
+    renderFieldList(marker.toJSON());
+    renderLedgerGrid();
+    updateLedgerChecks();
+}
+
 async function updateSpread({ focus = false } = {}) {
     const pane = element('docCompanionPage');
     const spread = element('docSpread');
@@ -2167,6 +2340,7 @@ async function updateSpread({ focus = false } = {}) {
     pane.classList.toggle('d-none', !twoPage);
     element('docMainLabel').classList.toggle('d-none', !twoPage);
     marker.fitShare = twoPage ? 0.5 : 1;
+    refreshPageCount();
 
     if (!twoPage) {
         focusedZoom = null;

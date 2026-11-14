@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { guessedRowCount, isDefaultName, publishProblems } from '../../resources/js/layout-publish-checks.js';
+import { guessedRowCount, isDefaultName, namesOnBothPages, publishProblems, rowMismatch } from '../../resources/js/layout-publish-checks.js';
 import { columnsAtPageTilt, gridTilt, rowsWithinFrame } from '../../resources/js/ledger-grid.js';
 
 const ready = [
@@ -80,4 +80,23 @@ test('detected columns are set upright, then turned by the page tilt', () => {
     const upright = columnsAtPageTilt(boxes, 0.04, 1.4);
     assert.deepEqual(upright.filter((box) => box.kind === 'column').map((box) => box.angle), [0, 0]);
     assert.equal(upright[1].x, 0.1);
+});
+
+test('two pages: a name on both pages is pointed out, once, in page 1 order', () => {
+    const pageOne = [{ name: 'Entry No.', role: 'entry' }, { name: "Child's Name", role: 'name' }, { name: 'Remarks' }];
+    const pageTwo = [{ name: 'remarks ' }, { name: 'Entry no.' }, { name: "Father's Name" }];
+    assert.deepEqual(namesOnBothPages(pageOne, pageTwo), ['Entry No.', 'Remarks']);
+    const [problem] = publishProblems({ hasSample: true, pages: [pageOne, pageTwo] });
+    assert.match(problem, /own column names \(on both pages: Entry No\., Remarks\)/);
+});
+
+test('two pages: different row counts stop the publish; equal or tableless pages do not', () => {
+    const pageOne = [{ name: "Child's Name", role: 'name' }];
+    const pageTwo = [{ name: "Father's Name" }];
+    assert.deepEqual(publishProblems({ hasSample: true, pages: [pageOne, pageTwo], rows: [20, 20] }), []);
+    assert.deepEqual(publishProblems({ hasSample: true, pages: [pageOne, pageTwo], rows: [20, null] }), []);
+    const [problem] = publishProblems({ hasSample: true, pages: [pageOne, pageTwo], rows: [20, 19] });
+    assert.match(problem, /Page 1 has 20 rows and page 2 has 19/);
+    assert.equal(rowMismatch([1, 2]), 'Page 1 has 1 row and page 2 has 2. Row 1 of both pages is one person, so both pages need the same number of rows.');
+    assert.equal(rowMismatch(undefined), null);
 });

@@ -2437,9 +2437,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// The Align step's menu shows the Mac keys too: wide enough for
+// The Align step's and the Template Builder's menus show the Mac keys too: wide enough for
 // "Ctrl / ⌘ + C / V" on one line.
-#step-mark .marker-shortcuts-menu {
+#step-mark .marker-shortcuts-menu,
+.template-builder-canvas-card .marker-shortcuts-menu {
   min-inline-size: 23rem;
 
   // The keys keep their room; the description wraps first.
@@ -4697,7 +4698,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   flex: 0 0 auto;
 
   .document-grid-card__count {
-    width: 2.5rem;
+    width: 3rem;
     min-width: 0;
   }
 }
@@ -10138,9 +10139,43 @@ $dashboard-reveal-step: 40ms;
   font-size: .75rem;
 }
 
-.template-builder-field-list {
-  max-block-size: min(40vh, 22rem);
-  overscroll-behavior: contain;
+// The panel is the only thing that scrolls: the field lists grow with it. (As
+// small scroll boxes that kept the wheel to themselves, a wheel turn over a
+// list did nothing at all, even with nothing left to scroll in it.)
+.template-builder-field-list,
+.template-person-record__other {
+  max-block-size: none;
+  padding-inline-end: 0;
+  overflow: visible;
+  overscroll-behavior: auto;
+  scrollbar-gutter: auto;
+}
+
+// Add field, any error and the save buttons stay in view at the bottom of the
+// panel while the cards above scroll under them.
+.template-builder-side-panel__footer {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 4;
+  display: grid;
+  gap: .6rem;
+  margin-block-start: .25rem;
+  padding: .75rem;
+  background: var(--bs-paper-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  box-shadow: 0 -.4rem 1rem rgba(var(--crms-shadow-rgb), .1);
+
+  .template-builder-error {
+    margin: 0;
+  }
+
+  .template-builder-save-panel {
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
 }
 
 // Person rows card body: the buttons, the groups, then Back to automatic.
@@ -10230,6 +10265,141 @@ $dashboard-reveal-step: 40ms;
 .template-person-builder__automatic {
   justify-self: start;
   font-size: .6875rem;
+}
+
+// Two pages: the Fields card is one person's record, page 1's part then
+// page 2's (order is set from the script: the page being edited may be 2).
+.template-person-record {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.template-person-record__heading {
+  margin-block-end: .25rem;
+  padding-block-end: .2rem;
+  color: var(--bs-secondary-color);
+  border-block-end: 1px solid var(--bs-border-color);
+  font-size: .6875rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+#activePageSection .template-person-record__heading {
+  color: var(--bs-primary);
+}
+
+// A field of the other page: a click edits that page with it selected.
+.template-person-record__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: .45rem;
+  inline-size: 100%;
+  min-block-size: 2rem;
+  margin-block-end: .2rem;
+  padding: .15rem .3rem;
+  color: var(--bs-secondary-color);
+  text-align: start;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: .45rem;
+  font-size: .8125rem;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--bs-heading-color);
+    background: var(--bs-gray-100);
+    border-color: var(--bs-border-color);
+  }
+}
+
+.template-person-record__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// A name used on both pages: amber and wavy on both (the Publish window says why).
+.template-builder-field-name.is-duplicate:not(.is-invalid),
+.template-person-record__name.is-duplicate {
+  color: var(--crms-warning-text);
+  text-decoration: underline wavy rgba(255, 171, 0, .7);
+  text-underline-offset: 3px;
+}
+
+.template-row-match {
+  display: flex;
+  gap: .45rem;
+  margin: 0;
+  padding: .5rem .6rem;
+  border-radius: .4rem;
+  font-size: .75rem;
+  line-height: 1.4;
+
+  .icon-base {
+    flex: 0 0 auto;
+    margin-block-start: .1rem;
+  }
+}
+
+// Rows that do not match across two pages (said only when wrong).
+.template-row-match {
+  color: var(--crms-warning-text);
+  background: rgba(255, 171, 0, .12);
+}
+
+.template-row-match {
+  margin: .6rem 0 0;
+}
+
+// The Layout card: the name and the rows on one line each, Rows lined up under Name.
+.template-builder-layout-card {
+  .card-header {
+    padding-block-end: .5rem;
+  }
+
+  .card-body {
+    padding-block-start: .5rem;
+  }
+
+  .document-grid-card__line {
+    margin-block-end: .5rem;
+  }
+
+  .document-grid-card__label {
+    flex: 0 0 2.5rem;
+  }
+
+  .template-layout-name .form-control {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+  }
+}
+
+// A narrower screen: the toolbar keeps one line. Reset shows only its icon,
+// and "0 selected" shows only while something is selected.
+@media (max-width: 1399.98px) {
+  .marker-toolbar .marker-reset-button > span {
+    display: none;
+  }
+
+  .marker-toolbar .marker-reset-button > i {
+    margin-inline-end: 0 !important;
+  }
+
+  .marker-toolbar .marker-selection-summary:not(.is-active) {
+    display: none !important;
+  }
+}
+
+// Detect in the toolbar above the page: one compact button, icon and label.
+.template-detect-button {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  white-space: nowrap;
 }
 
 .template-builder-field-item {
@@ -10527,10 +10697,6 @@ $dashboard-reveal-step: 40ms;
     max-block-size: none;
     padding-inline-end: 0;
     overflow: visible;
-  }
-
-  .template-builder-field-list {
-    max-block-size: 20rem;
   }
 }
 

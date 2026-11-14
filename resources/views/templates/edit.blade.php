@@ -9,7 +9,6 @@
         $published = (bool) $template?->is_active;
         $usage ??= ['published' => false, 'records' => 0, 'pages' => 0];
         $parent ??= null;
-        $pageTwoChoices ??= collect();
         // Published, or read by records or pages in progress: saving new markers
         // makes a new version, so what was read with this one stays as it was.
         $inUse = $template !== null && ($usage['published'] || $usage['records'] > 0 || $usage['pages'] > 0);
@@ -72,7 +71,7 @@
                 </div>
             </div>
 
-            <a href="{{ route('templates.index') }}" class="btn btn-outline-secondary">
+            <a href="{{ route('templates.index') }}" class="btn btn-outline-primary">
                 <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>
                 Template library
             </a>
@@ -103,6 +102,7 @@
                              aria-label="Template document editor">
                         <div class="marker-toolbar">
                             <div class="marker-toolbar__primary">
+                                {{-- Left: the sample, then what changes the layout (Detect, Reset) and what is selected. --}}
                                 <label for="sampleScan" class="btn btn-sm btn-outline-secondary template-sample-control"
                                        id="sampleScanLabel" tabindex="0" role="button"
                                        title="{{ $template?->sample_path ? 'Replace the stored sample document' : 'Choose a sample document' }}. It is stored privately with this layout when you save.">
@@ -133,6 +133,32 @@
                                 @endif
 
                                 <span class="marker-toolbar__divider" aria-hidden="true"></span>
+                                {{-- Finds the columns and row lines from the printed rules of the page being edited. --}}
+                                <button type="button" class="btn btn-sm btn-outline-primary template-detect-button" id="detectGridBtn"
+                                        title="Find the columns and row lines from the sample's printed rules">
+                                    <i class="icon-base bx bx-grid-alt icon-sm" aria-hidden="true"></i>
+                                    <span id="detectGridLabel">Detect from sample</span>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary marker-reset-button" id="resetFieldsBtn"
+                                        title="Restore the saved layout and document view" disabled>
+                                    <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
+                                    <span>Reset</span>
+                                </button>
+                                <span class="marker-selection-summary" id="selectionSummary">
+                                    <i class="icon-base bx bx-list-check icon-sm" aria-hidden="true"></i>
+                                    <span>0 selected</span>
+                                </span>
+                            </div>
+
+                            <div class="marker-toolbar__actions">
+                                {{-- Right: how the page is looked at (grid lines, zoom), then help. --}}
+                                {{-- Hides the row lines and every field box to look at the sample itself; on at every visit. --}}
+                                <div class="form-check form-switch marker-grid-toggle"
+                                     title="Show or hide the row lines and field boxes over the page">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="showGridToggle" checked>
+                                    <label class="form-check-label" for="showGridToggle">Grid lines</label>
+                                </div>
+
                                 <div class="btn-group marker-zoom-controls" role="group" aria-label="Document zoom controls">
                                     <button type="button" class="btn btn-sm btn-icon btn-outline-secondary marker-tool-button" id="zoomOutBtn"
                                             aria-label="Zoom out">
@@ -145,16 +171,8 @@
                                         <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
                                     </button>
                                 </div>
-                            </div>
 
-                            <div class="marker-toolbar__actions">
-                                {{-- Hides the row lines and every field box to look at the sample itself; on at every visit. --}}
-                                <div class="form-check form-switch marker-grid-toggle"
-                                     title="Show or hide the row lines and field boxes over the page">
-                                    <input class="form-check-input" type="checkbox" role="switch" id="showGridToggle" checked>
-                                    <label class="form-check-label" for="showGridToggle">Grid lines</label>
-                                </div>
-
+                                <span class="marker-toolbar__divider" aria-hidden="true"></span>
                                 <div class="dropdown">
                                     <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle marker-help-button" data-bs-toggle="dropdown"
                                             aria-expanded="false" aria-label="Show editor shortcuts">
@@ -162,39 +180,39 @@
                                         <span>Shortcuts</span>
                                     </button>
                                     <div class="dropdown-menu dropdown-menu-end marker-shortcuts-menu">
-                                        <div class="marker-shortcuts-menu__title">Editor shortcuts</div>
-                                        <div><span><kbd>Ctrl</kbd> + scroll</span><small>Zoom document</small></div>
-                                        <div><span><kbd>Ctrl</kbd> + drag</span><small>Move document</small></div>
-                                        <div><span>Drag empty document area</span><small>Select fields in a rectangle</small></div>
+                                        <div class="marker-shortcuts-menu__title">Page and fields</div>
+                                        {{-- Mac keys beside the Windows ones: ⌘ Command for Ctrl, ⌥ Option for Alt, ⌫ for Delete. --}}
+                                        <p class="marker-shortcuts-menu__note">On a Mac, <kbd>⌘</kbd> is Command, <kbd>⌥</kbd> is Option and
+                                            <kbd>⌫</kbd> is the delete key. Use <kbd>⌘</kbd> (not Control) to move the page.</p>
+                                        <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + scroll</span><small>Zoom document (or pinch the trackpad)</small></div>
+                                        <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + drag</span><small>Move document</small></div>
+                                        <div><span>Click a page (two pages)</span><small>Zoom in on it. Click the other page to edit that one</small></div>
+                                        <div><span>Drag empty document area</span><small>Select fields in a rectangle (<kbd>Esc</kbd> cancels)</small></div>
                                         <div><span><kbd>Shift</kbd> + drag</span><small>Add to selection</small></div>
                                         <div><span><kbd>Shift</kbd> + click</span><small>Select multiple</small></div>
+                                        <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>A</kbd></span><small>Select all markers</small></div>
                                         <div><span>Drag selection</span><small>Move selected fields</small></div>
                                         <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
                                         <div><span>Arrow keys</span><small>Move selected 1 px (<kbd>Shift</kbd>: 10 px)</small></div>
-                                        <div><span><kbd>Alt</kbd> + drag</span><small>Place without snapping to printed lines</small></div>
+                                        <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + drag</span><small>Place without snapping to printed lines</small></div>
                                         <div><span>Drag the rotate knob below a field</span><small>Tilt that field (<kbd>Shift</kbd>: 5° steps)</small></div>
                                         <div><span><kbd>[</kbd> or <kbd>]</kbd></span><small>Tilt selected 0.5° (<kbd>Shift</kbd>: 5°)</small></div>
                                         <div><span>Double-click the knob</span><small>Straighten</small></div>
-                                        <div><span><kbd>Ctrl</kbd> + <kbd>A</kbd></span><small>Select all markers</small></div>
-                                        <div><span><kbd>Ctrl</kbd> + <kbd>C</kbd></span><small>Copy selected</small></div>
-                                        <div><span><kbd>Ctrl</kbd> + <kbd>V</kbd></span><small>Paste fields</small></div>
-                                        <div><span><kbd>Del</kbd> or <kbd>Backspace</kbd></span><small>Delete selected</small></div>
-                                        <div><span><kbd>Ctrl</kbd> + <kbd>Z</kbd></span><small>Undo last change (row lines too)</small></div>
-                                        <div><span>Click a row line's grip</span><small>Select it: <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>Del</kbd> removes</small></div>
-                                        <div><span><kbd>Shift</kbd> + drag a grip</span><small>Move every row line</small></div>
+                                        <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>C</kbd> / <kbd>V</kbd></span><small>Copy / paste selected</small></div>
+                                        <div><span><kbd>Del</kbd> / <kbd>⌫</kbd></span><small>Delete selected. After select all: clears the page</small></div>
+                                        <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>Z</kbd></span><small>Undo last change (row lines too)</small></div>
+                                        <div class="marker-shortcuts-menu__title">Row lines</div>
+                                        <div><span>Drag the dot at a line's end</span><small>Move that line (<kbd>Shift</kbd>: all lines)</small></div>
+                                        <div><span>Click a dot, then <kbd>↑</kbd> or <kbd>↓</kbd></span><small>Nudge it (<kbd>Shift</kbd>: 10 px)</small></div>
+                                        <div><span><kbd>Del</kbd> / <kbd>⌫</kbd> or double-click a dot</span><small>Remove that line</small></div>
+                                        <div><span><kbd>Esc</kbd></span><small>Let go of the line</small></div>
+                                        <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + drag a dot</span><small>Place the line freely (no snap)</small></div>
+                                        <div class="marker-shortcuts-menu__title">Table grid</div>
+                                        <div><span>Type a row count, <kbd>Enter</kbd></span><small>Space that many rows evenly</small></div>
+                                        <div><span>Tilt <kbd>↺</kbd> <kbd>↻</kbd></span><small>Turn the table 0.1° (<kbd>Shift</kbd>: 1°)</small></div>
+                                        <div><span>Name box, <kbd>Enter</kbd></span><small>Add a field</small></div>
                                     </div>
                                 </div>
-
-                                <button type="button" class="btn btn-sm btn-outline-secondary marker-reset-button" id="resetFieldsBtn"
-                                        title="Restore the saved layout and document view" disabled>
-                                    <i class="icon-base bx bx-refresh icon-sm me-1" aria-hidden="true"></i>
-                                    <span>Reset</span>
-                                </button>
-
-                                <span class="marker-selection-summary" id="selectionSummary">
-                                    <i class="icon-base bx bx-list-check icon-sm" aria-hidden="true"></i>
-                                    <span>0 selected</span>
-                                </span>
                             </div>
                         </div>
 
@@ -277,127 +295,53 @@
                 <div class="col-xl-3 col-lg-4">
                     <aside class="template-builder-side-panel">
                         {{--
-                            Cards as on the Align panel: the ones used now and then
-                            (details, rows and columns, person rows) start closed and open
-                            from their header; tips sit behind a ?. Details open for a new
-                            layout, or when the name or notes came back with an error.
+                            Cards as on the Align panel: tips sit behind a ?. Layout and table
+                            grid are one card (the name, then the rows and tilt of the table);
+                            Detect is in the toolbar above the page. Person rows starts closed.
                         --}}
                         @php
-                            $detailsOpen = ! $template || $errors->hasAny(['name', 'description', 'page_two_template_id']);
                             $personRowsOpen = $currentGroupingMode === 'custom';
                         @endphp
-                        <section class="card card-disclosure template-builder-details-card mb-3"
-                                 aria-labelledby="detailsCardToggle">
-                            <div class="card-header d-flex align-items-center gap-1 position-relative card-disclosure__header {{ $detailsOpen ? 'is-expanded' : '' }}">
-                                <h2 class="card-title h5 mb-0">
-                                    <button type="button" class="btn btn-link card-disclosure__toggle" id="detailsCardToggle"
-                                            aria-expanded="{{ $detailsOpen ? 'true' : 'false' }}" aria-controls="detailsCardBody">
-                                        Layout details
-                                    </button>
-                                </h2>
-                                <i class="icon-base bx bx-chevron-down card-disclosure__chevron" aria-hidden="true"></i>
-                            </div>
-                            <div class="card-disclosure__body" id="detailsCardBody" @if (! $detailsOpen) hidden @endif>
-                                <div class="card-body">
-                                    <div class="mb-3">
-                                        <label for="name" class="form-label">Name</label>
-                                        <input type="text" id="name" name="name" maxlength="120"
-                                               value="{{ old('name', $template?->name ?? $docType->label()) }}"
-                                               class="form-control form-control-sm @error('name') is-invalid @enderror" required>
-                                        @error('name')
-                                            <div class="invalid-feedback">{{ $message }}</div>
-                                        @enderror
-                                    </div>
-
-                                    {{-- A register's left and right pages are often laid out differently: this
-                                         layout is page 1, and page 2 is its own (hidden) layout. It can start as a
-                                         copy of another layout; changing it later never changes that layout. --}}
-                                    @if ($pageTwo ?? null)
-                                        <div class="mb-3">
-                                            <span class="form-label d-block">Page 2</span>
-                                            <div class="form-text mt-0">
-                                                This layout has its own page 2, shown beside page 1. Choosing a sample
-                                                that is not a two-page PDF removes it when you save.
-                                            </div>
-                                        </div>
-                                    @else
-                                        <div class="mb-3">
-                                            <label for="page_two_template_id" class="form-label">Copy page 2 from</label>
-                                            <select id="page_two_template_id" name="page_two_template_id"
-                                                    class="form-select form-select-sm @error('page_two_template_id') is-invalid @enderror">
-                                                <option value="">None: page 2 is laid out like page 1</option>
-                                                @foreach ($pageTwoChoices as $choice)
-                                                    <option value="{{ $choice->getKey() }}"
-                                                            @selected((string) old('page_two_template_id') === (string) $choice->getKey())>
-                                                        {{ $choice->name }}{{ $choice->is_active ? ' (published)' : '' }}
-                                                    </option>
-                                                @endforeach
-                                            </select>
-                                            <div class="form-text">
-                                                For a two-page spread whose pages are laid out differently. Saving copies the
-                                                chosen layout as this layout's page 2; the chosen layout itself stays as it is.
-                                            </div>
-                                            @error('page_two_template_id')
-                                                <div class="invalid-feedback">{{ $message }}</div>
-                                            @enderror
-                                        </div>
-                                    @endif
-
-                                    <div>
-                                        <label for="description" class="form-label">Notes</label>
-                                        <textarea id="description" name="description" rows="2" maxlength="1000"
-                                                  class="form-control form-control-sm @error('description') is-invalid @enderror"
-                                                  placeholder="Form revision or internal note">{{ old('description', $template?->description) }}</textarea>
-                                        @error('description')
-                                            <div class="invalid-feedback">{{ $message }}</div>
-                                        @enderror
-                                    </div>
-                                </div>
-                            </div>
-                        </section>
-
-                        <section class="card card-disclosure document-grid-card template-ledger-card mb-3"
-                                 aria-labelledby="ledgerCardToggle">
-                            <div class="card-header d-flex align-items-center gap-1 position-relative card-disclosure__header">
-                                <h2 class="card-title h5 mb-0">
-                                    <button type="button" class="btn btn-link card-disclosure__toggle" id="ledgerCardToggle"
-                                            aria-expanded="false" aria-controls="ledgerCardBody">
-                                        Table grid
-                                    </button>
-                                </h2>
+                        <section class="card document-grid-card template-builder-layout-card template-ledger-card mb-3" aria-labelledby="layoutCardTitle">
+                            <div class="card-header d-flex align-items-center gap-2 position-relative">
+                                <h2 class="card-title h5 mb-0" id="layoutCardTitle">Layout</h2>
                                 <div class="card-help">
                                     <button type="button" class="btn btn-link card-help__toggle"
-                                            aria-label="Table grid tips" aria-describedby="ledgerTips">
+                                            aria-label="Layout tips" aria-describedby="ledgerTips">
                                         <i class="icon-base bx bx-help-circle" aria-hidden="true"></i>
                                     </button>
                                     <div class="card-help__tips" id="ledgerTips" role="tooltip">
                                         <strong>Tips</strong>
                                         <ul>
-                                            <li>For ruled register books. Detect from sample finds the columns and row lines from the sample's printed rules.</li>
-                                            <li>Drag a row line by the grip at either end of the table, or click a grip and press <kbd>↑</kbd> <kbd>↓</kbd>. <kbd>Shift</kbd> + drag moves every line. Double-click a grip to remove its line.</li>
-                                            <li>Lines snap to the printed rules. Hold <kbd>Alt</kbd> to place one freely.</li>
-                                            <li>The − and + buttons remove or add a row line. Type a number and press <kbd>Enter</kbd> to space that many rows evenly.</li>
-                                            <li>Page scanned a little turned? Tilt turns the columns and row lines together.</li>
-                                            <li>Scans read each row on its own, so writing that crosses a rule is still read whole.</li>
+                                            <li>Detect, above the page, finds the columns and row lines of the page being edited from its printed rules.</li>
+                                            <li>Drag a row line by its grip (<kbd>Shift</kbd>: every line). Hold <kbd>Alt</kbd> to place it freely.</li>
+                                            <li>Tilt turns the table for a page scanned a little turned.</li>
                                         </ul>
                                     </div>
                                 </div>
-                                {{-- Something to check inside while the card is closed. --}}
+                                {{-- Something to check below: the row match, the problems, the covered fields. --}}
                                 <i class="icon-base bx bx-error-circle text-warning card-disclosure__alert d-none" id="ledgerCardAlert"
-                                   title="Check Table grid" aria-hidden="true"></i>
-                                <i class="icon-base bx bx-chevron-down card-disclosure__chevron" aria-hidden="true"></i>
+                                   title="Check the table grid" aria-hidden="true"></i>
+                                {{-- One page, or two (decided by the sample): as in the library. --}}
+                                <span class="badge rounded-pill template-pages-badge {{ ($pageTwo ?? null) ? 'template-pages-badge--two' : '' }} ms-auto"
+                                      id="pagesBadge">{{ ($pageTwo ?? null) ? '2 pages' : '1 page' }}</span>
                             </div>
 
-                            <div class="card-disclosure__body" id="ledgerCardBody" hidden>
-                                <div class="card-body">
-                                    <div class="document-grid-card__line">
-                                        <button type="button" class="btn btn-sm btn-outline-primary w-100" id="detectGridBtn"
-                                                title="Find the columns and row lines from the sample's printed rules">
-                                            <i class="icon-base bx bx-grid-alt icon-sm me-1" aria-hidden="true"></i>
-                                            Detect from sample
-                                        </button>
-                                    </div>
+                            <div class="card-body">
+                                <div class="document-grid-card__line template-layout-name">
+                                    <label for="name" class="document-grid-card__label">Name</label>
+                                    <input type="text" id="name" name="name" maxlength="120"
+                                           value="{{ old('name', $template?->name ?? $docType->label()) }}"
+                                           class="form-control form-control-sm @error('name') is-invalid @enderror" required>
+                                    {{-- Notes are no longer edited here; what an older layout has is kept as it is. --}}
+                                    <input type="hidden" id="description" name="description"
+                                           value="{{ old('description', $template?->description) }}">
+                                </div>
+                                @error('name')
+                                    <div class="invalid-feedback d-block mt-n1 mb-2">{{ $message }}</div>
+                                @enderror
 
+                                <div class="template-grid-controls">
                                     <div class="document-grid-card__line">
                                         <span class="document-grid-card__label" id="ledgerRowsLabel">Rows</span>
                                         <div class="input-group input-group-sm template-ledger-rows" role="group" aria-labelledby="ledgerRowsLabel">
@@ -432,6 +376,9 @@
                                         </div>
                                     </div>
 
+                                    {{-- Two pages whose rows differ: row N of both pages is one person. Only said when wrong. --}}
+                                    <p class="template-row-match is-mismatch d-none" id="rowMatch" role="status" aria-live="polite"></p>
+
                                     <p class="template-ledger-card__summary d-none" id="ledgerGridSummary" aria-live="polite"></p>
 
                                     <div class="template-ledger-card__problems d-none" id="ledgerProblems" role="status">
@@ -456,7 +403,8 @@
 
                         <section class="card document-fields-card template-builder-fields-card mb-3">
                             <div class="card-header d-flex align-items-center gap-1 position-relative">
-                                <h2 class="card-title h5 mb-0">Fields</h2>
+                                {{-- Two pages: "Person record", both pages' columns in the order one person's record has them. --}}
+                                <h2 class="card-title h5 mb-0" id="fieldsCardTitle">Fields</h2>
                                 <div class="card-help">
                                     <button type="button" class="btn btn-link card-help__toggle"
                                             aria-label="Fields tips" aria-describedby="fieldTips">
@@ -465,11 +413,9 @@
                                     <div class="card-help__tips" id="fieldTips" role="tooltip">
                                         <strong>Tips</strong>
                                         <ul>
-                                            <li>Keep each marker tight around one handwritten value.</li>
-                                            <li>Verify shows the fields in this order.</li>
+                                            <li>Verify, the records and the CSV show the fields in this order.</li>
                                             <li>Click a name to select its marker. Its settings show below the list.</li>
-                                            <li>A field is read once. For something on every row of a table, select it and set Read as to Column.</li>
-                                            <li><kbd>Ctrl</kbd> + <kbd>A</kbd> then <kbd>Delete</kbd> clears the page: every marker and the row lines. <kbd>Ctrl</kbd> + <kbd>Z</kbd> brings them back.</li>
+                                            <li>Two pages: row 1 of page 1 and row 1 of page 2 are one person. Click the other page's part to edit it.</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -487,16 +433,21 @@
                                     </button>
                                 </div>
 
-                                <ul class="list-unstyled marker-field-list template-builder-field-list mb-3"
-                                    id="fieldList"></ul>
-
-                                <label class="visually-hidden" for="newFieldName">New field name</label>
-                                <div class="input-group input-group-sm">
-                                    <input type="text" id="newFieldName" class="form-control"
-                                           maxlength="120" placeholder="e.g. Page No.">
-                                    <button class="btn btn-outline-primary" type="button" id="addFieldBtn"
-                                            title="One marker, read once. Drag it onto the value on the sample">Add field</button>
+                                <div class="template-person-record" id="personRecord">
+                                    {{-- The page being edited: its markers, renamed and removed here. --}}
+                                    <div class="template-person-record__page" id="activePageSection">
+                                        <div class="template-person-record__heading d-none" id="activePageHeading"></div>
+                                        <ul class="list-unstyled marker-field-list template-builder-field-list mb-0"
+                                            id="fieldList"></ul>
+                                    </div>
+                                    {{-- The other page of a two-page layout: a click edits that page. --}}
+                                    <div class="template-person-record__page d-none" id="otherPageSection">
+                                        <div class="template-person-record__heading" id="otherPageHeading"></div>
+                                        <ul class="list-unstyled marker-field-list template-person-record__other mb-0"
+                                            id="otherFieldList"></ul>
+                                    </div>
                                 </div>
+
                             </div>
                         </section>
 
@@ -562,7 +513,8 @@
                         </section>
 
                         {{-- Who each row of fields belongs to in Verify: found by position unless set by hand. --}}
-                        <section class="card card-disclosure template-person-card mb-3" aria-labelledby="personCardToggle">
+                        {{-- Only for loose fields (a form): a register's columns are one person per row already. --}}
+                        <section class="card card-disclosure template-person-card mb-3" id="personCard" aria-labelledby="personCardToggle">
                             <div class="card-header d-flex align-items-center gap-1 position-relative card-disclosure__header {{ $personRowsOpen ? 'is-expanded' : '' }}">
                                 <h2 class="card-title h5 mb-0">
                                     <button type="button" class="btn btn-link card-disclosure__toggle" id="personCardToggle"
@@ -614,34 +566,46 @@
                             </div>
                         </section>
 
-                        <div class="template-builder-error d-none" id="builderError" role="alert" aria-live="assertive">
-                            <i class="icon-base bx bx-error" aria-hidden="true"></i>
-                            <span id="builderErrorMessage"></span>
-                        </div>
+                        {{-- Always in view at the bottom of the panel while the cards above scroll:
+                             adding a field, what went wrong, and saving. --}}
+                        <div class="template-builder-side-panel__footer">
+                            <label class="visually-hidden" for="newFieldName">New field name</label>
+                            <div class="input-group input-group-sm template-builder-add-field">
+                                <input type="text" id="newFieldName" class="form-control"
+                                       maxlength="120" placeholder="e.g. Page No.">
+                                <button class="btn btn-outline-primary" type="button" id="addFieldBtn"
+                                        title="One marker, read once. Drag it onto the value on the sample">Add field</button>
+                            </div>
 
-                        <div class="template-builder-save-panel">
-                            {{-- A layout in use is never overwritten: its buttons say so on hover. --}}
-                            @if ($inUse)
-                                @php
-                                    $inUseNote = 'In use'.($usageParts ? ': '.implode(', ', $usageParts) : '')
-                                        .'. Saving makes a new version; records already read keep this one.';
-                                @endphp
-                                <button type="submit" class="btn btn-outline-secondary" data-publish="0" title="{{ $inUseNote }}">
-                                    Save as new draft
-                                </button>
-                                <button type="submit" class="btn btn-primary" data-publish="1" title="{{ $inUseNote }}">
-                                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
-                                    Save &amp; publish new version
-                                </button>
-                            @else
-                                <button type="submit" class="btn btn-outline-secondary" data-publish="0">
-                                    Save draft
-                                </button>
-                                <button type="submit" class="btn btn-primary" data-publish="1">
-                                    <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
-                                    Save &amp; publish
-                                </button>
-                            @endif
+                            <div class="template-builder-error d-none" id="builderError" role="alert" aria-live="assertive">
+                                <i class="icon-base bx bx-error" aria-hidden="true"></i>
+                                <span id="builderErrorMessage"></span>
+                            </div>
+
+                            <div class="template-builder-save-panel">
+                                {{-- A layout in use is never overwritten: its buttons say so on hover. --}}
+                                @if ($inUse)
+                                    @php
+                                        $inUseNote = 'In use'.($usageParts ? ': '.implode(', ', $usageParts) : '')
+                                            .'. Saving makes a new version; records already read keep this one.';
+                                    @endphp
+                                    <button type="submit" class="btn btn-outline-secondary" data-publish="0" title="{{ $inUseNote }}">
+                                        Save as new draft
+                                    </button>
+                                    <button type="submit" class="btn btn-primary" data-publish="1" title="{{ $inUseNote }}">
+                                        <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
+                                        Save &amp; publish new version
+                                    </button>
+                                @else
+                                    <button type="submit" class="btn btn-outline-secondary" data-publish="0">
+                                        Save draft
+                                    </button>
+                                    <button type="submit" class="btn btn-primary" data-publish="1">
+                                        <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
+                                        Save &amp; publish
+                                    </button>
+                                @endif
+                            </div>
                         </div>
                     </aside>
                 </div>

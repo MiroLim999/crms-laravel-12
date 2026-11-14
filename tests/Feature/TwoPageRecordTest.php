@@ -515,7 +515,7 @@ class TwoPageRecordTest extends TestCase
 
         // The builder opens with both pages.
         $this->actingAs($admin)->get(route('templates.edit', $main))
-            ->assertOk()->assertSee('Informant')->assertSee('This layout has its own page 2');
+            ->assertOk()->assertSee('Informant')->assertSee('id="pagesBadge">2 pages</span>', escape: false);
 
         // Saving again with a changed page 2 changes the same page 2 layout (nothing read with it yet).
         $pageTwo['fields'][0]['name'] = 'Informant name';
