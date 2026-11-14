@@ -528,17 +528,6 @@
                                         title="Pick fields on the page or in the list, then group them as a new person">
                                     <i class="icon-base bx bx-group icon-sm me-1" aria-hidden="true"></i><span>Group fields</span>
                                 </button>
-                                {{-- A two-page register: which page fills the view, or both side by side.
-                                     A click on a page does the same. --}}
-                                <div class="btn-group verify-page-view d-none" role="group" id="verifyPageView"
-                                    aria-label="Pages in view">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-verify-view="0"
-                                        aria-pressed="false" title="Zoom in on the left page">Page 1</button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary active" data-verify-view="both"
-                                        aria-pressed="true" title="Both pages side by side">Both</button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-verify-view="1"
-                                        aria-pressed="false" title="Zoom in on the right page">Page 2</button>
-                                </div>
                                 <div class="btn-group marker-zoom-controls" role="group"
                                     aria-label="Original document zoom controls">
                                     <button type="button"
@@ -6637,7 +6626,6 @@
             el('validationSpread').classList.remove('is-joined', 'is-page-focused');
             // One page (or a batch's pages, verified one at a time): the usual layout.
             document.querySelector('#step-verify .validation-comparison-grid')?.classList.remove('is-two-page');
-            el('verifyPageView').classList.add('d-none');
             verifyFocus = null;
             verifyFocusZoom = null;
             updateRowHint();
@@ -6829,8 +6817,6 @@
             el('validationSpread').classList.add('is-joined');
             // The pages get the larger share of the width, and start side by side.
             document.querySelector('#step-verify .validation-comparison-grid')?.classList.add('is-two-page');
-            el('verifyPageView').querySelector('[data-verify-view="0"]').textContent = `Page ${first.number}`;
-            el('verifyPageView').querySelector('[data-verify-view="1"]').textContent = `Page ${second.number}`;
             verifyFocus = null;
             verifyFocusZoom = null;
 
@@ -6863,8 +6849,8 @@
 
         // -------------------------------------------- two pages in view (Verify)
         // A two-page document starts with both pages side by side. A click on a
-        // page (or Page 1 / Page 2 above) zooms in until that page fills the view,
-        // with one easing motion; a second click, Both, or 100% goes back. A
+        // page zooms in until that page fills the view, with one easing motion;
+        // a second click, or 100%, goes back. A
         // person's row runs across both pages: when part of it is out of view, a
         // button at that edge, level with the row, slides there.
         const verifyPaneOf =(side) => el(side === 0 ? 'validationMainPage' : 'validationCompanionPage');
@@ -6897,30 +6883,15 @@
             updateVerifyPageView();
         }
 
-        /** Page 1 / Both / Page 2: which is in view, and the cursor that says what a click does. */
+        /** Which page is in view, and the cursor that says what a click does. */
         function updateVerifyPageView() {
-            const control = el('verifyPageView');
-            control.classList.toggle('d-none', !verifyDoc);
             const focused = verifyFocusIsCurrent();
-            const current = focused ? String(verifyFocus) : (Math.abs(validationMarker.zoom - 1) <= 0.011 ? 'both' : null);
-            control.querySelectorAll('[data-verify-view]').forEach((button) => {
-                const on = button.dataset.verifyView === current;
-                button.classList.toggle('active', on);
-                button.setAttribute('aria-pressed', String(on));
-            });
             el('validationSpread').classList.toggle('is-page-focused', focused);
             // Zoomed in on a field (or by hand), no page in focus: a click must not undo it.
             el('validationSpread').classList.toggle('is-zoomed-in', !focused && validationMarker.zoom > 1.011);
             el('validationSpread').dataset.focus = focused ? String(verifyFocus) : '';
             scheduleRowHint();
         }
-
-        el('verifyPageView').addEventListener('click', (event) => {
-            const button = event.target instanceof Element ? event.target.closest('[data-verify-view]') : null;
-            if (!button || !verifyDoc) return;
-            if (button.dataset.verifyView === 'both') showVerifyBoth();
-            else focusVerifyPage(Number(button.dataset.verifyView));
-        });
 
         // A click on a page, beside every outline: that page is focused on (Both goes back).
         el('validationSpread').addEventListener('click', (event) => {
@@ -7656,9 +7627,6 @@
                 body.appendChild(note);
             }
             if (group.kind === 'person') {
-            body.appendChild(personNameControl(group, section));
-        }
-        if (group.kind === 'person') {
                 const bulk = document.createElement('div');
                 const checkboxId = `verifyGroup-${group.id}`;
                 bulk.className = 'validation-record-group__bulk';
@@ -7697,8 +7665,6 @@
                     divider.className = 'validation-page-divider';
                     divider.innerHTML = '<i class="icon-base bx bx-file" aria-hidden="true"></i><span></span>';
                     divider.querySelector('span').textContent = `Page ${verifyDoc.pages[pageIndex].number}`;
-                    const move = group.kind === 'person' ? pagePartControl(group, pageIndex) : null;
-                    if (move) divider.appendChild(move);
                     body.appendChild(divider);
                 }
                 body.appendChild(createValidationFieldRow(readings[index], index, group, columnIndex));
@@ -7727,83 +7693,6 @@
             });
 
             return section;
-        }
-
-        /**
-         * "Belongs to": on a two-page document, which person this page's part of
-         * a row is. A row of page 2 that landed on the wrong person is moved, all
-         * its columns together, to the right one; if that person already has a
-         * part on this page, the two swap. Ctrl+Z takes it back.
-         */
-        function pagePartControl(group, side) {
-            const row = group.indexes
-                .filter((index) => (cropped[index]?.pageIndex ?? 0) === side)
-                .map((index) => cropped[index]?.gridRow)
-                .find((value) => Number.isInteger(value));
-            if (!Number.isInteger(row)) return null;
-
-            const entry = verifyDoc.pages[side];
-            const onPage = cropped.filter((item) => (item.pageIndex ?? 0) === side);
-            const rows = Math.max(tableRowsOf(entry.page), ...onPage.map((item) => item.gridRow ?? 0));
-            const names = new Map(validationGroups
-                .filter((candidate) => candidate.kind === 'person')
-                .map((candidate) => [Number(cropped[candidate.indexes[0]]?.personGroup), groupIdentity(candidate)]));
-
-            const wrap = document.createElement('label');
-            wrap.className = 'validation-page-divider__move';
-            wrap.innerHTML = '<span>Belongs to</span>';
-            const select = document.createElement('select');
-            select.className = 'form-select form-select-sm';
-            select.setAttribute('aria-label', `Page ${entry.number} part of ${group.label} belongs to`);
-            select.title = `Move page ${entry.number}'s part of this row to another person`;
-            for (let candidate = 1; candidate <= rows; candidate += 1) {
-                const number = String(candidate).padStart(2, '0');
-                const name = names.get(candidate);
-                select.append(new Option(name && !/^\d+ fields?$/.test(name) ? `Person ${number} · ${name}` : `Person ${number}`, String(candidate)));
-            }
-            select.value = String(row);
-            select.addEventListener('click', (event) => event.stopPropagation());
-            select.addEventListener('change', async () => {
-                const moved = await movePagePart(side, row, Number(select.value));
-                if (!moved) select.value = String(row);
-            });
-            wrap.append(select);
-            return wrap;
-        }
-
-        /** Move page `side`'s row `from` to person `to` (swapping, if `to` has a part there). */
-        async function movePagePart(side, from, to) {
-            if (!verifyDoc || from === to || recordSubmitting) return false;
-            const page = verifyDoc.pages[side].page;
-            const onPage = cropped.filter((item) => (item.pageIndex ?? 0) === side);
-            const movingIds = onPage.filter((item) => item.gridRow === from).map((item) => item.lineId);
-            const swapped = onPage.some((item) => item.gridRow === to);
-            const moves = swapped ? [{ from, to }, { from: to, to: from }] : [{ from, to }];
-            try {
-                const { response, payload } = await sendLineRequest(
-                    config.pageRowsUrl.replace('__PAGE__', String(page.id)), 'PATCH', { moves },
-                );
-                if (!response.ok || !Array.isArray(payload?.lines)) throw new Error(responseErrorMessage(response, payload));
-                processedPage = page;
-                rebuildVerifyLines(payload.lines, payload.flags ?? {}, { focusLineId: movingIds[0] ?? null, focusFrom: 'marker' });
-                pushVerifyUndo({ kind: 'rowsMoved', moves });
-                flashVerifyFields(movingIds);
-                return true;
-            } catch (error) {
-                showValidationSubmitError(error.message || 'That part of the row could not be moved.');
-                return false;
-            }
-        }
-
-        /** A short flash on fields that just moved, so the eye finds them. */
-        function flashVerifyFields(lineIds) {
-            if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-            lineIds.forEach((lineId) => {
-                const row = validationRow(cropped.findIndex((item) => item.lineId === lineId));
-                if (!row) return;
-                row.classList.add('is-changing');
-                window.setTimeout(() => row.classList.remove('is-changing'), 700);
-            });
         }
 
         function renderVerifyRows() {
@@ -8779,56 +8668,6 @@
         stopGroupingFields();
     }
 
-    /** The person's name at the top of their fields: what Verify calls them. */
-    function personNameControl(group, section) {
-        const wrap = document.createElement('div');
-        wrap.className = 'validation-record-group__name';
-        const inputId = `personName-${group.id}`;
-        wrap.innerHTML = `
-            <label for="${inputId}">Name</label>
-            <input type="text" class="form-control form-control-sm" id="${inputId}" maxlength="120" autocomplete="off">
-            <small></small>`;
-        const input = requiredInput(wrap, 'input');
-        const note = requiredPart(wrap, 'small');
-        const automatic = automaticIdentity(group);
-        const key = personNameKey(group);
-        input.value = personNameOverrides.get(key) ?? '';
-        input.placeholder = /^\d+ fields?$/.test(automatic) ? 'Type a name' : automatic;
-        const showNote = () => {
-            note.textContent = input.value.trim() ? 'Named by you' : 'From the page';
-        };
-        showNote();
-
-        const apply = () => {
-            const value = input.value.trim();
-            if (value) personNameOverrides.set(key, value);
-            else personNameOverrides.delete(key);
-            showNote();
-            // The header and every Person list show the new name at once.
-            const shown = groupIdentity(group);
-            const header = section.querySelector('.validation-record-group__copy small');
-            if (header) header.textContent = shown;
-            const row = Number(cropped[group.indexes[0]]?.personGroup);
-            const number = String(row).padStart(2, '0');
-            el('verifyRows').querySelectorAll(`select[aria-label^="Person"] option[value="${row}"]`).forEach((option) => {
-                option.textContent = /^\d+ fields?$/.test(shown) ? number : `${number} · ${shown}`;
-            });
-        };
-        input.addEventListener('click', (event) => event.stopPropagation());
-        input.addEventListener('change', apply);
-        input.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                input.blur();
-            } else if (event.key === 'Escape') {
-                event.preventDefault();
-                input.value = personNameOverrides.get(key) ?? '';
-                input.blur();
-            }
-        });
-        return wrap;
-    }
-
     el('groupFieldsBtn').addEventListener('click', () => (groupingFields ? stopGroupingFields() : startGroupingFields()));
     el('groupFieldsCancel').addEventListener('click', stopGroupingFields);
     el('groupFieldsApply').addEventListener('click', groupPickedFields);
@@ -8917,14 +8756,6 @@
                 const fromHeight = validationRow(cropped.findIndex((candidate) => candidate.lineId === entry.id))?.offsetHeight ?? 0;
                 applyLineUpdate(payload.line, payload.flags ?? {});
                 animateFieldChange(entry.id, fromHeight);
-                } else if (entry.kind === 'rowsMoved') {
-                    // A page's part of a row back to the person it was on (a swap swaps back).
-                    const back = entry.moves.map(({ from, to }) => ({ from: to, to: from }));
-                    const { response, payload } = await sendLineRequest(
-                        config.pageRowsUrl.replace('__PAGE__', String(processedPage.id)), 'PATCH', { moves: back },
-                    );
-                    if (!response.ok || !Array.isArray(payload?.lines)) throw new Error(responseErrorMessage(response, payload));
-                    rebuildVerifyLines(payload.lines, payload.flags ?? {});
                 } else if (entry.kind === 'moved') {
                     const { response, payload } = await sendLineRequest(
                         verifyLineUrl(config.linePlaceUrl, entry.id), 'PATCH', { row: entry.row, ...entry.column },

@@ -3633,12 +3633,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   cursor: default;
 }
 
-// Page 1 / Both / Page 2 above the pages.
-.verify-page-view .btn {
-  padding-inline: .6rem;
-  white-space: nowrap;
-}
-
 // The person's row goes on, out of view, on the other page: a button at that
 // edge, level with the row, slides there. It fades and slides in and out.
 .verify-row-hint {
@@ -3713,26 +3707,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     content: '';
     flex: 1 1 auto;
     border-block-start: 1px dashed var(--bs-border-color);
-  }
-}
-
-// "Belongs to [Person 05]": at the divider's end, after the dashed line.
-.validation-page-divider__move {
-  display: inline-flex;
-  order: 3;
-  align-items: center;
-  gap: .35rem;
-  margin: 0;
-  color: var(--bs-secondary-color);
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-
-  .form-select {
-    inline-size: auto;
-    max-inline-size: 15rem;
-    padding-block: .15rem;
-    font-size: .75rem;
   }
 }
 
@@ -5251,32 +5225,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .group-fields-toolbar__name {
   flex: 0 1 12rem;
   min-inline-size: 8rem;
-}
-
-// A person's name, above their fields: typed in Verify or read from the page.
-.validation-record-group__name {
-  display: flex;
-  align-items: center;
-  gap: .6rem;
-  padding: .45rem 1rem .45rem 1.35rem;
-  border-block-end: 1px solid var(--bs-border-color);
-
-  label {
-    flex: 0 0 auto;
-    color: var(--bs-heading-color);
-    font-size: .75rem;
-    font-weight: 600;
-  }
-
-  .form-control {
-    flex: 0 1 18rem;
-    min-inline-size: 0;
-  }
-
-  small {
-    color: var(--bs-secondary-color);
-    font-size: .6875rem;
-  }
 }
 
 // Draw again: red, where Add missed field is blue.
