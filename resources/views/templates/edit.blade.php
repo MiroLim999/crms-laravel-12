@@ -148,15 +148,6 @@
                             </div>
 
                             <div class="marker-toolbar__actions">
-                                {{-- A register's left and right pages are laid out differently: both pages side by side,
-                                     each with its own markers, saved as page 1 and page 2 of this layout. --}}
-                                <div class="form-check form-switch marker-grid-toggle"
-                                     title="Lay out page 2 of a two-page spread beside page 1">
-                                    <input class="form-check-input" type="checkbox" role="switch" id="twoPageToggle"
-                                           @checked(! empty($pageTwo))>
-                                    <label class="form-check-label" for="twoPageToggle">Two pages</label>
-                                </div>
-
                                 {{-- Hides the row lines and every field box to look at the sample itself; on at every visit. --}}
                                 <div class="form-check form-switch marker-grid-toggle"
                                      title="Show or hide the row lines and field boxes over the page">
@@ -325,8 +316,8 @@
                                         <div class="mb-3">
                                             <span class="form-label d-block">Page 2</span>
                                             <div class="form-text mt-0">
-                                                This layout has its own page 2. Turn on <strong>Two pages</strong> above to change it,
-                                                or turn it off and save to remove it.
+                                                This layout has its own page 2, shown beside page 1. Choosing a sample
+                                                that is not a two-page PDF removes it when you save.
                                             </div>
                                         </div>
                                     @else

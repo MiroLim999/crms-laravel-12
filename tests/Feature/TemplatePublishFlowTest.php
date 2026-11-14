@@ -182,7 +182,7 @@ class TemplatePublishFlowTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('templates.index'))
             ->assertOk()
-            ->assertSee('Two pages: page 2 is changed inside this layout')
+            ->assertSee('2 pages')
             ->assertDontSee(route('templates.edit', $pageTwo).'"', escape: false)
             ->assertDontSee(route('templates.activate', $pageTwo), escape: false);
 
@@ -288,6 +288,19 @@ class TemplatePublishFlowTest extends TestCase
     }
 
     // ------------------------------------------------ one published layout per type
+
+    public function test_publishing_another_layout_does_not_change_the_updated_time_of_the_one_it_replaces(): void
+    {
+        $first = $this->layout(['name' => '1970s books', 'publish' => 1]);
+        $before = $first->refresh()->updated_at->copy();
+
+        $this->travel(3)->hours();
+        $this->layout(['name' => '1990s books', 'publish' => 1]);
+
+        $first->refresh();
+        $this->assertFalse($first->is_active);
+        $this->assertTrue($first->updated_at->equalTo($before), 'Retiring a layout is not an edit.');
+    }
 
     public function test_publishing_a_layout_replaces_the_one_in_use(): void
     {

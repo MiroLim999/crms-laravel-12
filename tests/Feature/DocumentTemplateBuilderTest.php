@@ -724,7 +724,7 @@ class DocumentTemplateBuilderTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'template.deleted']);
     }
 
-    public function test_a_template_that_records_use_cannot_be_deleted(): void
+    public function test_deleting_a_template_that_records_use_hides_it_and_the_records_keep_it(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
         $account = User::factory()->superAdmin()->create();
@@ -736,22 +736,99 @@ class DocumentTemplateBuilderTest extends TestCase
             'created_by' => $account->getKey(),
         ]);
 
+        // The window says what will happen before anything is done.
+        $this->actingAs($superAdmin)->get(route('templates.index'))
+            ->assertOk()
+            ->assertSee('That record keeps the layout it was read with');
+
         $this->actingAs($superAdmin)
             ->from(route('templates.index'))
             ->delete(route('templates.destroy', $template))
             ->assertRedirect(route('templates.index'))
-            ->assertSessionHas('error', "'Used layout' was used by 1 record and can't be deleted.");
+            ->assertSessionHas('success', "Layout 'Used layout' was deleted. The 1 saved record read with it keeps it.");
 
-        // Nothing changed: the layout is still there, and the record still points at it.
-        $this->assertDatabaseHas('document_templates', ['id' => $template->getKey()]);
+        // Hidden, not erased: the record still points at it.
+        $this->assertNotNull($template->refresh()->archived_at);
         $this->assertSame($template->getKey(), $record->refresh()->document_template_id);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'template.archived']);
         $this->assertDatabaseMissing('audit_logs', ['action' => 'template.deleted']);
 
-        // The library says why, and offers no way to delete it.
+        // Gone from the library, and cannot be opened, published or copied any more.
+        $this->get(route('templates.index'))->assertOk()
+            ->assertDontSee(route('templates.edit', $template), escape: false);
+        $this->get(route('templates.edit', $template))
+            ->assertRedirect(route('templates.index'))
+            ->assertSessionHas('error', "'Used layout' was deleted, so it can't be opened or changed.");
+        $this->post(route('templates.activate', $template))->assertRedirect(route('templates.index'));
+        $this->assertFalse($template->refresh()->is_active);
+
+        // A second delete (a double click, an old tab) is told, not failed.
+        $this->delete(route('templates.destroy', $template))
+            ->assertRedirect(route('templates.index'))
+            ->assertSessionHas('info', "'Used layout' was already deleted.");
+    }
+
+    public function test_a_deleted_template_is_listed_for_its_type_and_can_be_restored_as_a_draft(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $account = User::factory()->superAdmin()->create();
+        $template = $this->template($superAdmin, DocumentType::Birth, 'Brought back');
+        CivilRecord::factory()->create([
+            'doc_type' => DocumentType::Birth->value,
+            'document_type_id' => $template->document_type_id,
+            'document_template_id' => $template->getKey(),
+            'created_by' => $account->getKey(),
+        ]);
+        $this->actingAs($superAdmin)->delete(route('templates.destroy', $template))->assertSessionHas('success');
+
+        // Listed under its own document type's "Deleted layouts", with a Restore button.
         $this->get(route('templates.index'))
             ->assertOk()
-            ->assertSee("so it can't be deleted.", escape: false)
-            ->assertDontSee('action="'.route('templates.destroy', $template).'"', escape: false);
+            ->assertSee('Deleted layouts')
+            ->assertSee('Brought back')
+            ->assertSee('action="'.route('templates.restore', $template).'"', escape: false);
+
+        $this->post(route('templates.restore', $template))
+            ->assertRedirect(route('templates.index', ['open' => 'birth']))
+            ->assertSessionHas('success', "Layout 'Brought back' was restored as a draft.");
+
+        $this->assertNull($template->refresh()->archived_at);
+        $this->assertFalse($template->is_active);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'template.restored']);
+        $this->get(route('templates.edit', $template))->assertOk();
+
+        // Restoring something that is not deleted is told, not failed.
+        $this->post(route('templates.restore', $template))
+            ->assertSessionHas('info', "'Brought back' is not deleted, so there is nothing to restore.");
+    }
+
+    public function test_a_failed_delete_changes_nothing_and_says_so(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $template = $this->template($superAdmin, DocumentType::Birth, 'Stubborn layout');
+
+        $this->mock(\App\Services\AuditLogger::class, function ($mock) {
+            $mock->shouldReceive('log')->andThrow(new \RuntimeException('disk full'));
+        });
+
+        $this->actingAs($superAdmin)
+            ->from(route('templates.index'))
+            ->delete(route('templates.destroy', $template))
+            ->assertRedirect(route('templates.index'))
+            ->assertSessionHas('error', fn (string $message) => str_contains($message, "'Stubborn layout' could not be deleted and nothing was changed"));
+
+        $this->assertDatabaseHas('document_templates', ['id' => $template->getKey(), 'archived_at' => null]);
+    }
+
+    public function test_deleting_an_erased_template_twice_is_told_not_a_404(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $template = $this->template($superAdmin, DocumentType::Birth, 'Once only');
+
+        $this->actingAs($superAdmin)->delete(route('templates.destroy', $template))->assertSessionHas('success');
+        $this->delete(route('templates.destroy', $template))
+            ->assertRedirect(route('templates.index'))
+            ->assertSessionHas('info', 'That layout was already deleted.');
     }
 
     public function test_a_layout_no_record_used_still_offers_delete(): void

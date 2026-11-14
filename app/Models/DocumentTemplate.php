@@ -25,6 +25,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property int|null $parent_id
  * @property int|null $page_two_template_id
  * @property \Illuminate\Support\Carbon|null $published_at
+ * @property \Illuminate\Support\Carbon|null $archived_at
  * @property bool $is_page_two
  * @property bool $is_version
  * @property int $revision
@@ -62,6 +63,7 @@ class DocumentTemplate extends Model
             'is_page_two' => 'boolean',
             'is_version' => 'boolean',
             'published_at' => 'datetime',
+            'archived_at' => 'datetime',
             'sample_size' => 'integer',
             'revision' => 'integer',
         ];
@@ -210,10 +212,19 @@ class DocumentTemplate extends Model
         return $this->hasOne(self::class, 'page_two_template_id');
     }
 
-    /** Layouts listed in the template library: page 2 layouts are shown with their main layout. */
+    /**
+     * Layouts listed in the template library: page 2 layouts are shown with their
+     * main layout, and a deleted (archived) layout is not shown at all.
+     */
     public function scopeListed(Builder $query): Builder
     {
-        return $query->where('is_page_two', false);
+        return $query->where('is_page_two', false)->whereNull('archived_at');
+    }
+
+    /** Deleted from the library but kept, because saved records were read with it. */
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
     }
 
     /** The layout page `$pageNumber` of a spread is aligned and read with: even pages use page 2's, when set. */

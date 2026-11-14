@@ -227,6 +227,12 @@ function drawBlankPage(target = canvas) {
 resizeBlankCanvas();
 drawBlankPage();
 
+// The zoom the page being edited was last focused at (null: not focused). While
+// the view still sits at it, a change in the room it has (the side bar opening
+// or closing, the window resized) fits the page to the new room. Declared before
+// the marker, whose zoom callback reads it.
+let focusedZoom = null;
+
 const marker = new FieldMarker({
     canvas,
     overlay,
@@ -245,7 +251,6 @@ attachMarqueeSelection({
 
 // A layout of two pages (a register's left and right pages): each page has its
 // own markers, row lines and person-row mode, and its own saved baseline.
-const twoPageToggle = element('twoPageToggle', HTMLInputElement);
 const savedPageTwo = config.pageTwo && typeof config.pageTwo === 'object' ? config.pageTwo : null;
 const pageTwoBaseline = {
     boxes: savedPageTwo
@@ -262,7 +267,8 @@ const pageLayouts = {
     1: null,
     2: { boxes: cloneBoxes(pageTwoBaseline.boxes), ruledYs: [...pageTwoBaseline.ruledYs], grouping: pageTwoBaseline.grouping },
 };
-let twoPage = twoPageToggle.checked;
+// A saved page 2 opens as two pages; a picked sample then decides (see setTwoPage).
+let twoPage = savedPageTwo !== null;
 let activePage = 1;
 
 function layoutMatchesBaseline() {
@@ -801,6 +807,10 @@ fieldRequired.addEventListener('change', () => applyFieldSettings({ required: fi
 
 function updateZoomUI(zoom) {
     element('zoomResetBtn', HTMLButtonElement).textContent = `${Math.round(zoom * 100)}%`;
+    // Zoomed in (a page in focus, or by hand): a click on the page just works on it.
+    // Zoomed by hand since the page was focused: the focus is let go.
+    if (focusedZoom !== null && !marker.gliding && Math.abs(zoom - focusedZoom) > 0.011) focusedZoom = null;
+    element('docSpread').classList.toggle('is-zoomed-in', zoom > 1.011 || focusedZoom !== null);
     updateResetUI();
 }
 
@@ -1087,11 +1097,11 @@ async function openSample(file, { pendingUpload = true } = {}) {
             : file.name;
         updateSampleHint();
         window.requestAnimationFrame(() => marker.resetZoom());
-        // A PDF of exactly two pages, picked or dropped on a layout of one page: both pages
-        // side by side (a register's left and right pages). The switch can be turned off.
-        if (pendingUpload && samplePageCount === 2 && !twoPage && !twoPageToggle.checked) {
-            twoPageToggle.checked = true;
-            await applyTwoPageToggle();
+        // A sample picked or dropped: exactly two pages are laid out side by side (a
+        // register's left and right pages), anything else as one page. A stored
+        // sample follows the layout as it was saved.
+        if (pendingUpload) {
+            await setTwoPage(samplePageCount === 2);
         } else {
             await updateSpread();
         }
@@ -1110,8 +1120,9 @@ async function removePickedSample() {
     fileInput.value = '';
     updatePickedSampleUI();
     clearBuilderError();
-
     if (config.sample?.url) {
+        // Back to the layout as saved, with its page 2 or without; the stored sample then draws it.
+        await setTwoPage(savedPageTwo !== null);
         await openStoredSample();
         return;
     }
@@ -1126,6 +1137,8 @@ async function removePickedSample() {
     element('sampleFileName').textContent = 'Choose sample';
     updateSampleHint();
     window.requestAnimationFrame(() => marker.resetZoom());
+    // Back to the layout as saved, with its page 2 or without (now the blank page is drawn).
+    await setTwoPage(savedPageTwo !== null);
 }
 
 // Asked first, as for a stored sample: the modal names the file.
@@ -1276,6 +1289,7 @@ function restoreBaseline() {
 // so the sample shows as scanned.
 element('showGridToggle', HTMLInputElement).addEventListener('change', (event) => {
     overlay.classList.toggle('is-grid-hidden', !event.target.checked);
+    element('companionOverlay').classList.toggle('is-grid-hidden', !event.target.checked);
 });
 
 element('resetFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
@@ -2100,6 +2114,28 @@ const companionMarker = new FieldMarker({
     fieldSettings: true,
 });
 marker.linked = [companionMarker];
+// Its row lines too, for looking at only: no grips.
+const companionRows = new RowLineLayer({ overlay: element('companionOverlay') });
+
+/** Draw the other page's own row lines across its columns. */
+function renderCompanionRows(layout) {
+    const columns = ledgerColumns(layout.boxes);
+    const ys = layout.ruledYs ?? [];
+    if (columns.length === 0 || ys.length < 2) {
+        companionRows.render({ rows: [] });
+        return;
+    }
+    const { width, height } = companionMarker.canvas;
+    companionRows.render({
+        rows: ys,
+        left: Math.min(...columns.map((c) => c.x)),
+        right: Math.max(...columns.map((c) => c.x + c.w)),
+        locked: true,
+        estimated: new Set((layout.estimated ?? []).map(ruleKey)),
+        tilt: gridTilt(columns),
+        aspect: width > 0 && height > 0 ? width / height : 1,
+    });
+}
 
 /** What page being edited has now, kept for when it is turned to again. */
 function storeActivePage() {
@@ -2124,7 +2160,7 @@ async function drawSamplePage(target, page) {
     target.layout();
 }
 
-async function updateSpread() {
+async function updateSpread({ focus = false } = {}) {
     const pane = element('docCompanionPage');
     const spread = element('docSpread');
     spread.classList.toggle('is-spread', twoPage);
@@ -2133,6 +2169,7 @@ async function updateSpread() {
     marker.fitShare = twoPage ? 0.5 : 1;
 
     if (!twoPage) {
+        focusedZoom = null;
         window.requestAnimationFrame(() => marker.resetZoom());
         return;
     }
@@ -2150,11 +2187,69 @@ async function updateSpread() {
         console.warn(`Page ${other} of the sample could not be shown beside the page:`, error);
     }
     companionMarker.setBoxes(cloneBoxes(pageLayouts[other].boxes));
-    window.requestAnimationFrame(() => marker.resetZoom());
+    renderCompanionRows(pageLayouts[other]);
+    window.requestAnimationFrame(() => {
+        if (focus) {
+            focusActivePage();
+        } else {
+            focusedZoom = null;
+            marker.resetZoom();
+        }
+    });
 }
 
+/**
+ * Zoom in on the page being edited and centre it: as large as the room allows,
+ * whole, with one easing motion. Called when a page of the spread is clicked.
+ */
+function focusActivePage({ animate = true } = {}) {
+    focusedZoom = marker.focusOn(element('docMainPage'), { duration: animate ? 420 : 0 });
+    // In focus: the normal cursors, whatever zoom the room allowed.
+    element('docSpread').classList.add('is-zoomed-in');
+}
+
+let focusRoom = null;
+let focusRefitTimer = 0;
+new ResizeObserver(() => {
+    const room = { width: viewport.clientWidth, height: viewport.clientHeight };
+    const before = focusRoom;
+    focusRoom = room;
+    if (!before || focusedZoom === null || !twoPage) return;
+    if (Math.abs(room.width - before.width) < 4 && Math.abs(room.height - before.height) < 4) return;
+    // The side bar slides over a moment: fit once it has settled.
+    window.clearTimeout(focusRefitTimer);
+    focusRefitTimer = window.setTimeout(() => {
+        if (focusedZoom === null) return;
+        if (Math.abs(marker.zoom - focusedZoom) > 0.011) {
+            focusedZoom = null; // zoomed by hand since: leave it
+            return;
+        }
+        focusActivePage({ animate: false });
+    }, 150);
+}).observe(viewport);
+
+// Before the page being edited is zoomed on, its first click only does that:
+// the markers under it are for working once it is in view.
+element('docMainPage').addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    // Already in focus (even where the fit lands near 100%): work on the page.
+    if (!twoPage || focusedZoom !== null || Math.abs(marker.zoom - 1) > 0.01) return;
+    if (event.target instanceof Element && event.target.closest('.doc-spread__label')) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const main = element('docMainPage');
+    const swallowClick = (clickEvent) => {
+        clickEvent.stopPropagation();
+        clickEvent.preventDefault();
+    };
+    main.addEventListener('click', swallowClick, { capture: true, once: true });
+    window.setTimeout(() => main.removeEventListener('click', swallowClick, true), 400);
+    focusActivePage();
+}, true);
+
 /** Edit the other page: its sample page, markers, row lines and person-row mode. */
-async function switchPage(page) {
+async function switchPage(page, { focus = false } = {}) {
     if (!twoPage || page === activePage) return;
 
     storeActivePage();
@@ -2181,13 +2276,19 @@ async function switchPage(page) {
     if (sampleLoaded) loadPrintedLines();
     clearBuilderError();
     updateResetUI();
-    await updateSpread();
+    await updateSpread({ focus });
 }
 
-twoPageToggle.addEventListener('change', applyTwoPageToggle);
-
-async function applyTwoPageToggle() {
-    if (twoPageToggle.checked) {
+/**
+ * Two pages or one, decided by the sample: a PDF of two pages is laid out as
+ * page 1 and page 2 side by side, anything else as one page. There is no switch.
+ */
+async function setTwoPage(on) {
+    if (on === twoPage) {
+        await updateSpread();
+        return;
+    }
+    if (on) {
         twoPage = true;
         // A page 2 with nothing on it starts from page 1's markers: the pages are often alike.
         if (pageLayouts[2].boxes.length === 0 && pageLayouts[1] === null) {
@@ -2203,7 +2304,8 @@ async function applyTwoPageToggle() {
     }
     updateResetUI();
 }
-element('docCompanionPage').addEventListener('click', () => switchPage(3 - activePage));
+// A click on the other page: it becomes the page edited, and is brought into focus.
+element('docCompanionPage').addEventListener('click', () => switchPage(3 - activePage, { focus: true }));
 
 marker.setBoxes(cloneBoxes(initialBoxes));
 renderLedgerGrid();

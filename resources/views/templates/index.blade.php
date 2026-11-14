@@ -34,6 +34,7 @@
                 $group = $templates[$type->getKey()] ?? collect();
                 $published = $group->firstWhere('is_active', true);
                 $draftCount = $group->where('is_active', false)->count();
+                $deleted = $archivedTemplates[$type->getKey()] ?? collect();
                 $expanded = request('open') === $type->key || (! request()->filled('open') && $loop->first);
                 $collapseId = 'template-layouts-' . $type->getKey();
             @endphp
@@ -87,6 +88,15 @@
                                             data-bs-target="#renameDocumentType{{ $type->getKey() }}">
                                         <i class="icon-base bx bx-edit-alt icon-sm me-2" aria-hidden="true"></i>
                                         Rename
+                                    </button>
+                                    {{-- Layouts deleted while records were read with them: kept, and restorable here. --}}
+                                    <button type="button" class="dropdown-item d-flex align-items-center"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#deletedLayouts{{ $type->getKey() }}"
+                                            @disabled($deleted->isEmpty())>
+                                        <i class="icon-base bx bx-history icon-sm me-2" aria-hidden="true"></i>
+                                        Deleted layouts
+                                        <span class="badge bg-label-secondary ms-4">{{ $deleted->count() }}</span>
                                     </button>
                                     <form method="POST"
                                           action="{{ route($type->isArchived() ? 'templates.document-types.restore' : 'templates.document-types.archive', $type) }}">
@@ -149,7 +159,14 @@
                                         <tr class="template-layout-row"
                                             style="{{ $loop->last ? '' : 'border-bottom:1px solid rgba(var(--crms-ink-rgb),.1)' }}">
                                             <td class="ps-3 py-2">
-                                                <div class="fw-medium text-heading">{{ $layout->name }}</div>
+                                                <div class="d-flex align-items-center flex-wrap gap-2">
+                                                    <span class="fw-medium text-heading">{{ $layout->name }}</span>
+                                                    {{-- One page, or a register's left and right pages (a page 2 of its own). --}}
+                                                    <span class="badge rounded-pill template-pages-badge {{ $layout->pageTwoTemplate ? 'template-pages-badge--two' : '' }}">
+                                                        <i class="icon-base bx {{ $layout->pageTwoTemplate ? 'bx-book-open' : 'bx-file' }} icon-xs me-1" aria-hidden="true"></i>
+                                                        {{ $layout->pageTwoTemplate ? '2 pages' : '1 page' }}
+                                                    </span>
+                                                </div>
                                                 <small class="text-muted" title="Created by {{ $layout->creator?->name ?? 'System' }}">
                                                     Updated {{ $layout->updated_at->diffForHumans() }}
                                                 </small>
@@ -157,20 +174,6 @@
                                                     <small class="d-block text-muted mt-1">
                                                         {{ $layout->is_version ? 'New version of' : 'Based on' }} “{{ $layout->parent->name }}”
                                                     </small>
-                                                @endif
-                                                @if ($layout->pageTwoTemplate)
-                                                    <small class="d-block text-muted mt-1">
-                                                        <i class="icon-base bx bx-book-open icon-xs" aria-hidden="true"></i>
-                                                        Two pages: page 2 is changed inside this layout
-                                                    </small>
-                                                @endif
-                                                @if ($layout->sample_path)
-                                                    <a class="d-inline-flex align-items-center gap-1 small mt-1"
-                                                       href="{{ route('templates.sample', $layout) }}" target="_blank"
-                                                       rel="noopener" title="Open stored sample">
-                                                        <i class="icon-base bx bx-file icon-sm" aria-hidden="true"></i>
-                                                        {{ $layout->sample_original_name }}
-                                                    </a>
                                                 @endif
                                             </td>
                                             <td class="text-nowrap py-2">
@@ -315,7 +318,7 @@
                                     <div>
                                         <div class="text-uppercase text-danger small fw-semibold mb-1">Template Builder</div>
                                         <h2 class="modal-title h5" id="deleteLayoutLabel{{ $layout->getKey() }}">
-                                            @if ($layout->records_count > 0 || $layout->is_active)
+                                            @if ($layout->is_active)
                                                 {{ $layout->name }} can't be deleted
                                             @else
                                                 Delete {{ $layout->name }}?
@@ -324,21 +327,8 @@
                                     </div>
                                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                                 </div>
-                                {{-- A record keeps the layout it was read with, so a layout that has records is never deleted. --}}
-                                @if ($layout->records_count > 0)
-                                    <div class="modal-body">
-                                        <p class="mb-2">
-                                            This layout was used by {{ $layout->records_count }} saved {{ Str::plural('record', $layout->records_count) }}, so it can't be deleted.
-                                        </p>
-                                        <p class="mb-0 text-muted small">
-                                            Records keep the layout they were read with. To stop using it, publish another layout.
-                                        </p>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Close</button>
-                                    </div>
-                                @elseif ($layout->is_active)
-                                    {{-- A scan may be using it right now. --}}
+                                {{-- The published layout is never deleted: a scan may be using it right now. --}}
+                                @if ($layout->is_active)
                                     <div class="modal-body">
                                         <p class="mb-2">This is the published layout, so a scan may be using it right now.</p>
                                         <p class="mb-0 text-muted small">
@@ -357,15 +347,26 @@
                                             </div>
                                         @endif
 
-                                        <p class="mb-2">This layout has not been used by any saved records.</p>
-                                        @if ($layout->pageTwoTemplate)
-                                            <p class="mb-2">Its page 2 layout is deleted with it.</p>
-                                        @endif
+                                        @if ($layout->records_count > 0)
+                                            {{-- A record keeps the layout it was read with: the layout is hidden, not erased. --}}
+                                            <p class="mb-2">
+                                                This layout was used by {{ $layout->records_count }} saved {{ Str::plural('record', $layout->records_count) }}.
+                                                It is removed from this list and can no longer be used for new scans.
+                                            </p>
+                                            <p class="mb-0 text-muted small">
+                                                {{ $layout->records_count === 1 ? 'That record keeps' : 'Those records keep' }} the layout it was read with, so nothing is lost.
+                                            </p>
+                                        @else
+                                            <p class="mb-2">This layout has not been used by any saved records.</p>
+                                            @if ($layout->pageTwoTemplate)
+                                                <p class="mb-2">Its page 2 layout is deleted with it.</p>
+                                            @endif
 
-                                        @if ($layout->sample_path)
-                                            <p class="mb-2">Its stored sample document will also be deleted.</p>
+                                            @if ($layout->sample_path)
+                                                <p class="mb-2">Its stored sample document will also be deleted.</p>
+                                            @endif
+                                            <p class="mb-0 text-muted small">This action cannot be undone.</p>
                                         @endif
-                                        <p class="mb-0 text-muted small">This action cannot be undone.</p>
                                     </div>
                                     <div class="modal-footer">
                                         <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -427,6 +428,55 @@
                                     <button type="submit" class="btn btn-primary" data-document-type-rename-submit>Save name</button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal fade" id="deletedLayouts{{ $type->getKey() }}" tabindex="-1"
+                     aria-labelledby="deletedLayoutsLabel{{ $type->getKey() }}" aria-hidden="true">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <div>
+                                    <div class="text-uppercase text-primary small fw-semibold mb-1">{{ $type->label() }}</div>
+                                    <h2 class="modal-title h5" id="deletedLayoutsLabel{{ $type->getKey() }}">Deleted layouts</h2>
+                                </div>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="text-muted small mb-3">
+                                    These layouts were deleted but are kept, because saved records were read with them.
+                                    Restoring one puts it back in the library as a draft.
+                                </p>
+                                <ul class="list-unstyled mb-0 template-deleted-list">
+                                    @foreach ($deleted as $layout)
+                                        <li class="d-flex align-items-center justify-content-between gap-3 py-2">
+                                            <div class="min-w-0">
+                                                <div class="fw-medium text-heading text-truncate">
+                                                    {{ $layout->name }}
+                                                    <span class="badge rounded-pill template-pages-badge {{ $layout->pageTwoTemplate ? 'template-pages-badge--two' : '' }} ms-1">
+                                                        {{ $layout->pageTwoTemplate ? '2 pages' : '1 page' }}
+                                                    </span>
+                                                </div>
+                                                <small class="text-muted">
+                                                    Deleted {{ $layout->archived_at->diffForHumans() }}
+                                                    &middot; {{ $layout->records_count }} {{ Str::plural('record', $layout->records_count) }}
+                                                </small>
+                                            </div>
+                                            <form method="POST" action="{{ route('templates.restore', $layout) }}">
+                                                @csrf
+                                                <button type="submit" class="btn btn-sm btn-label-primary text-nowrap">
+                                                    <i class="icon-base bx bx-undo icon-sm me-1" aria-hidden="true"></i>
+                                                    Restore
+                                                </button>
+                                            </form>
+                                        </li>
+                                    @endforeach
+                                </ul>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Close</button>
+                            </div>
                         </div>
                     </div>
                 </div>

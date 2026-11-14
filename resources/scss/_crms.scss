@@ -2562,6 +2562,15 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   color: var(--bs-primary);
 }
 
+// Template Builder, two pages: a hand over the page being edited while a click
+// would only bring it into focus; zoomed in, the normal cursors come back.
+.doc-spread.is-spread:not(.is-zoomed-in) .doc-spread__page--main {
+  .doc-stage,
+  .field-box {
+    cursor: pointer;
+  }
+}
+
 // The page beside the working one: read-only, and a click works on it instead.
 .doc-spread__page--companion {
   cursor: pointer;
@@ -8982,6 +8991,31 @@ $dashboard-reveal-step: 40ms;
   .icon-base {
     color: var(--crms-green-text) !important;
   }
+}
+
+// How many pages a layout has, beside its name in the library. Violet is used
+// for nothing else here (blue is for buttons, green for Published, red for
+// Delete), and the pill shape keeps it from looking like a button: an outline
+// for one page, a filled pill for a register's left and right pages.
+.template-pages-badge {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 500;
+  background-color: transparent !important;
+  border: 1px solid var(--crms-violet-border) !important;
+  color: var(--crms-violet-text) !important;
+
+  .icon-base {
+    color: inherit !important;
+  }
+
+  &.template-pages-badge--two {
+    background-color: var(--crms-violet-bg) !important;
+  }
+}
+
+.template-deleted-list > li + li {
+  border-top: 1px solid rgba(var(--crms-ink-rgb), .1);
 }
 
 .template-library-layouts {

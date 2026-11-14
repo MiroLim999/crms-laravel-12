@@ -23,6 +23,7 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\File;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use Throwable;
 
 /**
  * Document template builder.
@@ -57,6 +58,15 @@ class DocumentTemplateController extends Controller
                     'publish_problems',
                     $layout->is_active ? [] : $this->publishProblems($layout),
                 ))
+                ->groupBy('document_type_id'),
+            // Deleted layouts that records were read with: kept, and shown per type to restore.
+            'archivedTemplates' => DocumentTemplate::query()
+                ->where('is_page_two', false)
+                ->whereNotNull('archived_at')
+                ->withCount('records')
+                ->with('pageTwoTemplate')
+                ->orderByDesc('archived_at')
+                ->get()
                 ->groupBy('document_type_id'),
             'documentTypes' => DocumentTypeDefinition::ordered(),
         ]);
@@ -192,6 +202,13 @@ class DocumentTemplateController extends Controller
      */
     private function toMainLayout(DocumentTemplate $template): ?RedirectResponse
     {
+        // A deleted layout stays only for the records read with it: it cannot be opened,
+        // changed, published or copied (an old tab or a typed address still reaches it).
+        if ($template->isArchived()) {
+            return redirect()->route('templates.index')
+                ->with('error', "'{$template->name}' was deleted, so it can't be opened or changed.");
+        }
+
         if (! $template->is_page_two) {
             return null;
         }
@@ -670,68 +687,162 @@ class DocumentTemplateController extends Controller
             ->with('success', "Duplicated '{$template->name}' as a draft. Changes here do not touch the original.");
     }
 
+    /**
+     * Bring a deleted (archived) layout back into the library, as a draft: it is
+     * never published again by itself. Its own page 2 comes back with it.
+     */
+    public function restore(DocumentTemplate $template): RedirectResponse
+    {
+        if ($template->is_page_two) {
+            return redirect()->route('templates.index')
+                ->with('error', 'That is page 2 of a two-page layout. Restore its main layout instead.');
+        }
+
+        $name = $template->name;
+        $typeKey = $template->documentTypeDefinition?->key;
+
+        try {
+            $restored = DB::transaction(function () use ($template) {
+                $locked = DocumentTemplate::query()->whereKey($template->getKey())->lockForUpdate()->first();
+                if ($locked === null || ! $locked->isArchived()) {
+                    return false;
+                }
+
+                $pageTwo = $locked->pageTwoTemplate()->where('is_page_two', true)->first();
+                foreach (array_filter([$locked, $pageTwo]) as $layout) {
+                    $layout->forceFill(['archived_at' => null])->save();
+                }
+
+                $this->audit->log(
+                    'template.restored',
+                    $locked,
+                    new: ['name' => $locked->name],
+                    description: "Restored template '{$locked->name}' as a draft.",
+                );
+
+                return true;
+            });
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return back()->with('error', "'{$name}' could not be restored and nothing was changed. Try again; if it keeps happening, tell the system administrator.");
+        }
+
+        $to = redirect()->route('templates.index', $typeKey ? ['open' => $typeKey] : []);
+
+        return $restored
+            ? $to->with('success', "Layout '{$name}' was restored as a draft.")
+            : $to->with('info', "'{$name}' is not deleted, so there is nothing to restore.");
+    }
+
+    /**
+     * Delete a layout from the library.
+     *
+     * - Published: refused (a scan may be using it); publish another layout first.
+     * - Records were read with it: it is archived (hidden, kept) so every record keeps
+     *   its layout. Its own page 2 goes with it.
+     * - Nothing was read with it: it is erased, with its page 2 and stored sample.
+     *
+     * The checks are repeated under a row lock, so a record saved or a layout published
+     * at the same moment cannot slip past them. Any failure leaves everything as it was.
+     */
     public function destroy(DocumentTemplate $template): RedirectResponse
     {
+        // A second click, or an old tab: already gone from the library.
+        if ($template->isArchived()) {
+            return redirect()->route('templates.index')
+                ->with('info', "'{$template->name}' was already deleted.");
+        }
+
         if ($redirect = $this->toMainLayout($template)) {
             return $redirect;
         }
 
-        // A scan may be using it right now: another layout is published first.
-        if ($template->is_active) {
-            return back()->with(
-                'error',
-                "'{$template->name}' is the published layout. Publish another layout first, then delete this one.",
-            );
-        }
-
-        // A record keeps the layout it was read with, so a layout that has
-        // records is never deleted: they would be left pointing at nothing.
-        // Pages still in progress do not count (the delete window warns about
-        // them). Deleting the layout only clears their link to it
-        // (nullOnDelete), and the hourly prune removes them.
-        $recordCount = $template->records()->count();
-        if ($recordCount > 0) {
-            return back()->with(
-                'error',
-                "'{$template->name}' was used by {$recordCount} ".Str::plural('record', $recordCount)." and can't be deleted.",
-            );
-        }
-
         $template->loadMissing('documentTypeDefinition');
+        $name = $template->name;
         $samplePath = $template->sample_path;
-        $wasPublished = $template->is_active;
 
-        DB::transaction(function () use ($template, $wasPublished) {
-            // Its own page 2 goes with it.
-            $pageTwo = $template->pageTwoTemplate()->where('is_page_two', true)->first();
-            if ($pageTwo !== null) {
-                $template->forceFill(['page_two_template_id' => null])->save();
-                $pageTwo->delete();
-            }
+        try {
+            $outcome = DB::transaction(function () use ($template) {
+                $locked = DocumentTemplate::query()->whereKey($template->getKey())->lockForUpdate()->first();
+                if ($locked === null || $locked->isArchived()) {
+                    return ['gone', 0];
+                }
 
-            $this->audit->log(
-                'template.deleted',
-                $template,
-                old: [
-                    'name' => $template->name,
-                    'document_type' => $template->documentTypeDefinition?->key ?? $template->doc_type->value,
-                    'was_published' => $wasPublished,
-                    'sample_document' => $template->sample_original_name,
-                ],
-                description: "Deleted template '{$template->name}'.",
-            );
+                // A scan may be using it right now: another layout is published first.
+                if ($locked->is_active) {
+                    return ['published', 0];
+                }
 
-            $template->delete();
-        });
+                // Pages still in progress do not count (the delete window warns about them):
+                // deleting only clears their link (nullOnDelete) and the hourly prune removes them.
+                $records = $locked->records()->count();
+                $pageTwo = $locked->pageTwoTemplate()->where('is_page_two', true)->first();
 
-        $this->samples->deletePath($samplePath);
+                if ($records > 0) {
+                    // Records keep the layout they were read with, so it is hidden, not erased.
+                    $now = now();
+                    foreach (array_filter([$locked, $pageTwo]) as $layout) {
+                        $layout->forceFill(['archived_at' => $now])->save();
+                    }
+                    $this->audit->log(
+                        'template.archived',
+                        $locked,
+                        old: ['name' => $locked->name, 'records' => $records],
+                        description: "Deleted template '{$locked->name}'. It is kept for its {$records} saved "
+                            .Str::plural('record', $records).'.',
+                    );
 
-        $message = "Layout '{$template->name}' was deleted.";
-        if ($wasPublished) {
-            $message .= ' Publish another layout before scanning this document type again.';
+                    return ['archived', $records];
+                }
+
+                if ($pageTwo !== null) {
+                    $locked->forceFill(['page_two_template_id' => null])->save();
+                    $pageTwo->delete();
+                }
+
+                $this->audit->log(
+                    'template.deleted',
+                    $locked,
+                    old: [
+                        'name' => $locked->name,
+                        'document_type' => $template->documentTypeDefinition?->key ?? $locked->doc_type->value,
+                        'was_published' => false,
+                        'sample_document' => $locked->sample_original_name,
+                    ],
+                    description: "Deleted template '{$locked->name}'.",
+                );
+                $locked->delete();
+
+                return ['deleted', 0];
+            });
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return back()->with('error', "'{$name}' could not be deleted and nothing was changed. Try again; if it keeps happening, tell the system administrator.");
         }
 
-        return redirect()->route('templates.index')->with('success', $message);
+        [$result, $records] = $outcome;
+
+        if ($result === 'gone') {
+            return redirect()->route('templates.index')->with('info', "'{$name}' was already deleted.");
+        }
+        if ($result === 'published') {
+            return back()->with('error', "'{$name}' is the published layout. Publish another layout first, then delete this one.");
+        }
+
+        if ($result === 'deleted' && $samplePath) {
+            // The layout is gone; a sample file that cannot be removed now is only left behind.
+            try {
+                $this->samples->deletePath($samplePath);
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        return redirect()->route('templates.index')->with('success', $result === 'archived'
+            ? "Layout '{$name}' was deleted. The {$records} saved ".Str::plural('record', $records).' read with it '.($records === 1 ? 'keeps' : 'keep').' it.'
+            : "Layout '{$name}' was deleted.");
     }
 
     /**
@@ -1224,10 +1335,11 @@ class DocumentTemplateController extends Controller
             ->where('is_active', true)
             ->where('id', '!=', $template->getKey());
 
-        DocumentTemplate::query()
+        // Retiring a layout is not an edit: its "Updated" time stays what it was.
+        DocumentTemplate::withoutTimestamps(fn () => DocumentTemplate::query()
             ->whereIn('id', $sameType->modelKeys())
             ->whereKeyNot($template->getKey())
-            ->update(['is_active' => false]);
+            ->update(['is_active' => false]));
 
         // Always write the target row. Its in-memory state may be stale if
         // another publish was waiting on the same lock.

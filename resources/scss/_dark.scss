@@ -34,6 +34,10 @@
   --crms-green-bg: #f0fdf4;
   --crms-green-border: #dcfce7;
 
+  --crms-violet-text: #6d28d9;
+  --crms-violet-bg: #f5f3ff;
+  --crms-violet-border: #ddd6fe;
+
   // Backdrop behind a scanned page. The scan itself is a photo of white paper
   // and stays white in both modes.
   --crms-viewport-bg: #e9ebf0;
@@ -191,6 +195,10 @@
   --crms-green-text: #3fdc80;
   --crms-green-bg: rgba(34, 212, 106, .18);
   --crms-green-border: rgba(34, 212, 106, .45);
+
+  --crms-violet-text: #b79bff;
+  --crms-violet-bg: rgba(139, 92, 246, .2);
+  --crms-violet-border: rgba(139, 92, 246, .5);
 
   --crms-viewport-bg: #101015;
 }

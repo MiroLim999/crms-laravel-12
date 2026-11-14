@@ -78,6 +78,12 @@ class DocumentPageController extends Controller
         }
 
         $template = DocumentTemplate::findOrFail((int) $validated['document_template_id']);
+        // A deleted layout is kept only for its records: no new page is read with it.
+        if ($template->isArchived()) {
+            throw ValidationException::withMessages([
+                'document_template_id' => 'That layout was deleted. Choose a published layout and align the page again.',
+            ]);
+        }
 
         $page = DocumentPage::create([
             'document_template_id' => $template->getKey(),

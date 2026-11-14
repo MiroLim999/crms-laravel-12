@@ -217,8 +217,12 @@ Route::middleware('auth')->group(function () {
             ->name('templates.activate');
         Route::post('templates/{template}/duplicate', [DocumentTemplateController::class, 'duplicate'])
             ->name('templates.duplicate');
+        Route::post('templates/{template}/restore', [DocumentTemplateController::class, 'restore'])
+            ->name('templates.restore');
         Route::delete('templates/{template}', [DocumentTemplateController::class, 'destroy'])
-            ->name('templates.destroy');
+            ->name('templates.destroy')
+            // A second click, or an old tab, after the layout was erased.
+            ->missing(fn () => redirect()->route('templates.index')->with('info', 'That layout was already deleted.'));
     });
 
     /*
