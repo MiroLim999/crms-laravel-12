@@ -1756,14 +1756,11 @@ function renderLedgerGrid() {
     drawRules(ruledYs, columns);
 
     const rows = Math.max(0, ruledYs.length - 1);
-    const estimated = ruledYs.filter((y) => estimatedYs.has(ruleKey(y))).length;
-    // Only what the stepper and the page do not show already.
+    // Only what the stepper and the page do not show already (the amber lines say the rest).
     const summary = element('ledgerGridSummary');
     summary.textContent = columns.length === 0 && ruledYs.length === 0
         ? 'No grid yet: each field is read as one rectangle.'
-        : estimated > 0
-            ? `${estimated} line${estimated === 1 ? '' : 's'} ${estimated === 1 ? 'is' : 'are'} guessed (amber): Detect could not see ${estimated === 1 ? 'its' : 'their'} printed line. Check ${estimated === 1 ? 'it' : 'them'} against the page.`
-            : '';
+        : '';
     summary.classList.toggle('d-none', summary.textContent === '');
 
     const rowsInput = element('evenRowsInput', HTMLInputElement);

@@ -10503,13 +10503,42 @@ $dashboard-reveal-step: 40ms;
     margin-block-end: .5rem;
   }
 
-  .document-grid-card__label {
-    flex: 0 0 2.5rem;
+  // Name and Rows: the same label width, so both controls start at the same edge
+  // (outranks the ledger card's auto-sized label).
+  &.template-ledger-card .document-grid-card__line .document-grid-card__label {
+    flex: 0 0 2.75rem;
+    inline-size: 2.75rem;
   }
 
   .template-layout-name .form-control {
     flex: 1 1 auto;
     min-inline-size: 0;
+  }
+
+  // Every control in the card is the same height: the name box, the Rows
+  // stepper (box and buttons) and the Tilt group.
+  --layout-control-height: 2rem;
+
+  .document-grid-card__line {
+    align-items: center;
+  }
+
+  :is(.form-control, .btn, .document-grid-card__count) {
+    block-size: var(--layout-control-height);
+    min-block-size: var(--layout-control-height);
+    padding-block: 0;
+    line-height: 1;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  :is(.template-ledger-rows, #gridTiltGroup) {
+    align-items: stretch;
+    block-size: var(--layout-control-height);
   }
 }
 
