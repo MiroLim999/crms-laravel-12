@@ -823,8 +823,6 @@ function updateSelectionUI(indexes, context = {}) {
         selectedRule = null;
         renderLedgerGrid();
     }
-    updateLedgerButtons(indexes);
-    renderFieldSettings(indexes);
 
     document.querySelectorAll('#fieldList .template-builder-field-item').forEach((item) => {
         item.classList.toggle('is-selected', selected.has(Number(item.dataset.fieldIndex)));
@@ -904,74 +902,6 @@ function useAutomaticPersonDetection() {
     marker.setBoxes(boxes);
     clearBuilderError();
 }
-
-// ------------------------------------------------------------- field settings
-//
-// What the selected fields hold and how Verify checks their values.
-// With several selected, a change applies to all of them (the role only fits
-// one field per person, so it is set one field at a time).
-
-const fieldRole = element('fieldRole', HTMLSelectElement);
-const fieldType = element('fieldType', HTMLSelectElement);
-const fieldOptions = element('fieldOptions', HTMLInputElement);
-const fieldHint = element('fieldHint', HTMLInputElement);
-const fieldRequired = element('fieldRequired', HTMLInputElement);
-
-function renderFieldSettings(indexes = marker.selectedIndexes()) {
-    const boxes = marker.toJSON();
-    const selected = indexes.map((index) => boxes[index]).filter(Boolean);
-    element('fieldSettingsCard').classList.toggle('d-none', selected.length === 0);
-    if (selected.length === 0) return;
-
-    const [first] = selected;
-    const settings = markerFieldSettings(first);
-    element('fieldSettingsName').textContent = selected.length === 1
-        ? `${first.name}${isColumn(first) ? ' · ledger column' : ''}`
-        : `${selected.length} selected: changes apply to all of them`;
-
-    fieldRole.disabled = selected.length !== 1;
-    fieldRole.value = selected.length === 1 ? (settings.role ?? '') : '';
-    fieldType.value = settings.type ?? 'text';
-    if (document.activeElement !== fieldOptions) fieldOptions.value = (settings.options ?? []).join(', ');
-    if (document.activeElement !== fieldHint) fieldHint.value = settings.hint ?? '';
-    fieldRequired.checked = settings.required !== false;
-    element('fieldOptionsGroup').classList.toggle('d-none', fieldType.value !== 'choice');
-}
-
-/** Whether two markers are in the same person row: one name and one entry number each. */
-function sameRow(a, b) {
-    if (isColumn(a) || isColumn(b)) return isColumn(a) && isColumn(b);
-    return groupingModeInput.value === 'custom'
-        && (positiveInteger(a.personGroup) ?? null) === (positiveInteger(b.personGroup) ?? null);
-}
-
-function applyFieldSettings(patch) {
-    const indexes = marker.selectedIndexes();
-    if (indexes.length === 0) return;
-
-    const boxes = marker.toJSON();
-    const chosen = new Set(indexes);
-    // Giving a field a role takes it from the field in the same row that had it.
-    const holder = patch.role ? boxes[indexes[0]] : null;
-    const affected = boxes
-        .map((box, index) => index)
-        .filter((index) => chosen.has(index)
-            || (holder && boxes[index].role === patch.role && sameRow(boxes[index], holder)));
-
-    marker.updateBoxes(affected, (box, index) => (chosen.has(index) ? patch : { role: null }));
-    clearBuilderError();
-}
-
-const choiceList = (text) => text.split(',').map((option) => option.trim()).filter(Boolean);
-
-fieldRole.addEventListener('change', () => applyFieldSettings({ role: fieldRole.value || null }));
-fieldType.addEventListener('change', () => {
-    element('fieldOptionsGroup').classList.toggle('d-none', fieldType.value !== 'choice');
-    applyFieldSettings({ type: fieldType.value, options: choiceList(fieldOptions.value) });
-});
-fieldOptions.addEventListener('input', () => applyFieldSettings({ options: choiceList(fieldOptions.value) }));
-fieldHint.addEventListener('input', () => applyFieldSettings({ hint: fieldHint.value }));
-fieldRequired.addEventListener('change', () => applyFieldSettings({ required: fieldRequired.checked }));
 
 function updateZoomUI(zoom) {
     element('zoomResetBtn', HTMLButtonElement).textContent = `${Math.round(zoom * 100)}%`;
@@ -1642,7 +1572,7 @@ form.addEventListener('submit', (event) => {
 // ------------------------------------------------------------ save check
 //
 // Before a save that publishes: the same checks the server makes (a sample,
-// real column names, a Name column), and a last "Publish this layout?". Before
+// real column names), and a last "Publish this layout?". Before
 // any save: row lines still amber (guessed by Detect) are pointed out.
 
 /** Set once the admin answered the save check, for the submit it starts. */
@@ -2178,59 +2108,7 @@ async function detectLedgerGrid() {
     }
 }
 
-// Read as Field / Column in Field settings: the button for what the whole
-// selection already is shows pressed; a mixed selection presses neither.
-function updateLedgerButtons(indexes = marker.selectedIndexes()) {
-    const boxes = marker.toJSON();
-    const columns = indexes.filter((index) => isColumn(boxes[index])).length;
-    const pressed = {
-        makeColumnsBtn: indexes.length > 0 && columns === indexes.length,
-        makeFieldsBtn: indexes.length > 0 && columns === 0,
-    };
-    Object.entries(pressed).forEach(([id, on]) => {
-        const button = element(id, HTMLButtonElement);
-        button.classList.toggle('active', on);
-        button.setAttribute('aria-pressed', String(on));
-    });
-}
-
 element('detectGridBtn', HTMLButtonElement).addEventListener('click', detectLedgerGrid);
-
-element('makeColumnsBtn', HTMLButtonElement).addEventListener('click', () => {
-    const indexes = marker.selectedIndexes();
-    const boxes = marker.toJSON();
-    if (indexes.every((index) => isColumn(boxes[index]))) return;
-    const selected = new Set(indexes);
-    const top = ruledYs.length >= 2 ? ruledYs[0] : null;
-    const bottom = ruledYs.length >= 2 ? ruledYs[ruledYs.length - 1] : null;
-
-    marker.setBoxes(cloneBoxes(boxes.map((box, index) => {
-        if (!selected.has(index)) return box;
-        return {
-            ...box,
-            kind: 'column',
-            personGroup: null,
-            personFieldOrder: null,
-            ...(top !== null ? { y: top, h: bottom - top } : {}),
-        };
-    })));
-    // Keep them selected, so Field settings stays on them.
-    marker.selectIndexes(indexes);
-});
-
-// Back from a column to a field, read as one rectangle (Detect splits it
-// into its written lines). The row lines stay for the columns that remain.
-element('makeFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
-    const selected = marker.selectedIndexes();
-    const boxes = marker.toJSON();
-    if (!selected.some((index) => isColumn(boxes[index]))) return;
-
-    const chosen = new Set(selected);
-    marker.setBoxes(cloneBoxes(boxes.map((box, index) => (
-        chosen.has(index) && isColumn(box) ? { ...box, kind: null } : box
-    ))));
-    marker.selectIndexes(selected);
-});
 
 element('addRuledLineBtn', HTMLButtonElement).addEventListener('click', () => {
     const inserted = insertRuledY(ruledYs, selectedRule);

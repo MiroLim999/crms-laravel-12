@@ -9,7 +9,6 @@
         $published = (bool) $template?->is_active;
         $usage ??= ['published' => false, 'records' => 0, 'pages' => 0];
         $parent ??= null;
-        $version ??= null;
         // Published, or read by records or pages in progress: saving new markers
         // makes a new version, so what was read with this one stays as it was.
         $inUse = $template !== null && ($usage['published'] || $usage['records'] > 0 || $usage['pages'] > 0);
@@ -64,10 +63,7 @@
                     @else
                         <span class="badge bg-label-secondary">Draft</span>
                     @endif
-                    @if ($version && $version['size'] > 1)
-                        <span class="template-version-badge" title="Version {{ $version['number'] }} of this layout">v{{ $version['number'] }}</span>
-                    @endif
-                    @if ($parent && ! $template?->is_version)
+                    @if ($parent)
                         <a href="{{ route('templates.edit', $parent) }}" class="template-builder-page__parent">
                             Based on “{{ $parent->name }}”
                         </a>
@@ -398,8 +394,7 @@
                                                 @else
                                                     This layout is <strong>published</strong>.
                                                 @endif
-                                                Saving changes creates
-                                                <strong>version {{ ($version['number'] ?? 1) + 1 }}</strong>; this one stays as it is.
+                                                Saving changes makes a <strong>duplicate</strong>; this one stays as it is.
                                             </span>
                                         </p>
                                     @endif
@@ -437,7 +432,7 @@
                                         <strong>Tips</strong>
                                         <ul>
                                             <li>Verify, the records and the CSV show the fields in this order.</li>
-                                            <li>Click a name to select its marker. Its settings show below the list.</li>
+                                            <li>Click a name to select its marker on the page.</li>
                                             <li>Two pages: row 1 of page 1 and row 1 of page 2 are one person. Click the other page's part to edit it.</li>
                                         </ul>
                                     </div>
@@ -474,68 +469,6 @@
                             </div>
                         </section>
 
-                        <section class="card template-field-settings-card mb-3 d-none" id="fieldSettingsCard"
-                                 aria-labelledby="fieldSettingsHeading">
-                            <div class="card-header">
-                                <h2 class="card-title h5 mb-0" id="fieldSettingsHeading">Field settings</h2>
-                                <small class="text-muted d-block text-truncate" id="fieldSettingsName"></small>
-                            </div>
-                            <div class="card-body">
-                                {{-- A field is read once; a column once per row of the ledger. --}}
-                                <div class="mb-2">
-                                    <span class="form-label d-block" id="fieldKindLabel">Read as</span>
-                                    <div class="btn-group btn-group-sm w-100" role="group" aria-labelledby="fieldKindLabel">
-                                        <button type="button" class="btn btn-outline-secondary" id="makeFieldsBtn"
-                                                aria-pressed="false" title="Read once, as one rectangle">
-                                            <i class="icon-base bx bx-rectangle icon-sm me-1" aria-hidden="true"></i>
-                                            Field
-                                        </button>
-                                        <button type="button" class="btn btn-outline-secondary" id="makeColumnsBtn"
-                                                aria-pressed="false" title="Read once per row of the ledger">
-                                            <i class="icon-base bx bx-columns icon-sm me-1" aria-hidden="true"></i>
-                                            Column
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="mb-2">
-                                    <label class="form-label" for="fieldRole">Holds</label>
-                                    <select class="form-select form-select-sm" id="fieldRole">
-                                        <option value="">Any value</option>
-                                        <option value="name">The person's name</option>
-                                        <option value="entry">The entry number</option>
-                                    </select>
-                                    <div class="form-text">The name titles each person in Verify and the records archive.</div>
-                                </div>
-                                <div class="mb-2">
-                                    <label class="form-label" for="fieldType">Value</label>
-                                    <select class="form-select form-select-sm" id="fieldType">
-                                        <option value="text">Text</option>
-                                        <option value="date">A date</option>
-                                        <option value="number">A number</option>
-                                        <option value="choice">One of a list</option>
-                                    </select>
-                                </div>
-                                <div class="mb-2 d-none" id="fieldOptionsGroup">
-                                    <label class="form-label" for="fieldOptions">Choices</label>
-                                    <input type="text" class="form-control form-control-sm" id="fieldOptions"
-                                           maxlength="1900" placeholder="Male, Female">
-                                    <div class="form-text">Separate them with commas. Verify points out any other value.</div>
-                                </div>
-                                <div class="mb-2">
-                                    <label class="form-label" for="fieldHint">Hint</label>
-                                    <input type="text" class="form-control form-control-sm" id="fieldHint"
-                                           maxlength="200" placeholder="e.g. Month day, year">
-                                </div>
-                                <div class="form-check mb-0">
-                                    <input class="form-check-input" type="checkbox" id="fieldRequired">
-                                    <label class="form-check-label" for="fieldRequired">
-                                        Required: point out a person without it
-                                    </label>
-                                </div>
-                            </div>
-                        </section>
-
-                        {{-- Who each row of fields belongs to in Verify: found by position unless set by hand. --}}
                         {{-- Only for loose fields (a form): a register's columns are one person per row already. --}}
                         <section class="card card-disclosure template-person-card mb-3" id="personCard" aria-labelledby="personCardToggle">
                             <div class="card-header d-flex align-items-center gap-1 position-relative card-disclosure__header {{ $personRowsOpen ? 'is-expanded' : '' }}">
@@ -610,14 +543,14 @@
                                 @if ($inUse)
                                     @php
                                         $inUseNote = 'In use'.($usageParts ? ': '.implode(', ', $usageParts) : '')
-                                            .'. Saving makes a new version; records already read keep this one.';
+                                            .'. Saving changes makes a duplicate; records already read keep this one.';
                                     @endphp
                                     <button type="submit" class="btn btn-outline-secondary" data-publish="0" title="{{ $inUseNote }}">
-                                        Save as new draft
+                                        Save as duplicate
                                     </button>
                                     <button type="submit" class="btn btn-primary" data-publish="1" title="{{ $inUseNote }}">
                                         <i class="icon-base bx bx-check icon-sm me-1" aria-hidden="true"></i>
-                                        Save &amp; publish new version
+                                        Save duplicate &amp; publish
                                     </button>
                                 @else
                                     <button type="submit" class="btn btn-outline-secondary" data-publish="0">

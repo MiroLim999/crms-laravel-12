@@ -29,6 +29,7 @@
     </x-page-header>
 
     <div class="row g-4">
+        {{-- Archived document types stay out of sight; the toggle under the list opens them. --}}
         @foreach ($documentTypes as $type)
             @php
                 $group = $templates[$type->getKey()] ?? collect();
@@ -39,7 +40,8 @@
                 $collapseId = 'template-layouts-' . $type->getKey();
             @endphp
 
-            <div class="col-12">
+            <div class="col-12 {{ $type->isArchived() ? 'template-archived-type' : '' }}"
+                 @if ($type->isArchived()) data-archived-type hidden @endif>
                 <section class="card template-library-card" aria-labelledby="template-type-{{ $type->getKey() }}">
                     <header class="template-library-card__header">
                         <div class="template-library-card__identity">
@@ -161,9 +163,6 @@
                                             <td class="ps-3 py-2">
                                                 <div class="d-flex align-items-center flex-wrap gap-2">
                                                     <span class="fw-medium text-heading">{{ $layout->name }}</span>
-                                                    @if ($layout->version)
-                                                        <span class="template-version-badge" title="Version {{ $layout->version }} of this layout">v{{ $layout->version }}</span>
-                                                    @endif
                                                     {{-- One page, or a register's left and right pages (a page 2 of its own). --}}
                                                     <span class="badge rounded-pill template-pages-badge {{ $layout->pageTwoTemplate ? 'template-pages-badge--two' : '' }}">
                                                         <i class="icon-base bx {{ $layout->pageTwoTemplate ? 'bx-book-open' : 'bx-file' }} icon-xs me-1" aria-hidden="true"></i>
@@ -173,7 +172,7 @@
                                                 <small class="text-muted" title="Created by {{ $layout->creator?->name ?? 'System' }}">
                                                     Updated {{ $layout->updated_at->diffForHumans() }}
                                                 </small>
-                                                @if ($layout->parent && ! $layout->is_version)
+                                                @if ($layout->parent)
                                                     <small class="d-block text-muted mt-1">
                                                         Based on “{{ $layout->parent->name }}”
                                                     </small>
@@ -523,6 +522,20 @@
                 @endunless
             </div>
         @endforeach
+
+        @php
+            $archivedTypeCount = $documentTypes->filter->isArchived()->count();
+        @endphp
+        @if ($archivedTypeCount > 0)
+            <div class="col-12 template-archived-toggle-row">
+                <button type="button" class="btn btn-link template-archived-toggle" id="archivedTypesToggle"
+                        aria-expanded="false" data-label="{{ $archivedTypeCount }} archived document {{ Str::plural('type', $archivedTypeCount) }}">
+                    <i class="icon-base bx bx-archive icon-sm" aria-hidden="true"></i>
+                    <span>Show {{ $archivedTypeCount }} archived document {{ Str::plural('type', $archivedTypeCount) }}</span>
+                    <i class="icon-base bx bx-chevron-down icon-sm template-archived-toggle__chevron" aria-hidden="true"></i>
+                </button>
+            </div>
+        @endif
     </div>
 
     <div class="modal fade" id="newDocumentTypeModal" tabindex="-1"
@@ -564,6 +577,42 @@
 
 @push('scripts')
     <script>
+        // Archived document types: opened and closed with a short slide.
+        (() => {
+            const toggle = document.getElementById('archivedTypesToggle');
+            if (!toggle) return;
+            const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+            const easing = 'cubic-bezier(.2, .72, .2, 1)';
+
+            const slide = (card, open) => {
+                card.getAnimations().forEach((animation) => animation.cancel());
+                const margin = window.getComputedStyle(card).marginTop;
+                if (open) card.hidden = false;
+                if (reduced || typeof card.animate !== 'function') {
+                    card.hidden = !open;
+                    return;
+                }
+
+                const full = card.scrollHeight;
+                const from = open ? { height: '0px', marginTop: '0px', opacity: 0 } : { height: `${card.getBoundingClientRect().height}px`, marginTop: margin, opacity: 1 };
+                const to = open ? { height: `${full}px`, marginTop: margin, opacity: 1 } : { height: '0px', marginTop: '0px', opacity: 0 };
+                card.style.overflow = 'hidden';
+                const animation = card.animate([from, to], { duration: open ? 260 : 200, easing, fill: 'forwards' });
+                animation.onfinish = () => {
+                    card.style.removeProperty('overflow');
+                    animation.cancel();
+                    card.hidden = !open;
+                };
+            };
+
+            toggle.addEventListener('click', () => {
+                const open = toggle.getAttribute('aria-expanded') !== 'true';
+                toggle.setAttribute('aria-expanded', String(open));
+                toggle.querySelector('span').textContent = `${open ? 'Hide' : 'Show'} ${toggle.dataset.label}`;
+                document.querySelectorAll('[data-archived-type]').forEach((card) => slide(card, open));
+            });
+        })();
+
         document.querySelectorAll('[data-template-layout-toggle]').forEach((toggle) => {
             const label = toggle.querySelector('span');
             const target = document.getElementById(toggle.dataset.target);

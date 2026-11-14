@@ -54,16 +54,18 @@ class DocumentTypeArchiveTest extends TestCase
             ->assertOk();
     }
 
-    public function test_template_builder_lists_archived_types_with_a_restore_action(): void
+    public function test_archived_types_are_hidden_from_the_library_until_asked_for(): void
     {
         $this->seed(DocumentTemplateSeeder::class);
         $type = DocumentTypeDefinition::where('key', DocumentType::Birth->value)->firstOrFail();
         $type->forceFill(['archived_at' => now()])->save();
+        $admin = User::factory()->superAdmin()->create();
 
-        $this->actingAs(User::factory()->superAdmin()->create())
-            ->get(route('templates.index'))
+        // Folded away: one toggle says there is one, and its card starts hidden.
+        $this->actingAs($admin)->get(route('templates.index'))
             ->assertOk()
-            ->assertSee('Archived')
+            ->assertSee('Show 1 archived document type')
+            ->assertSee('data-archived-type hidden', escape: false)
             ->assertSee('Restore');
     }
 }

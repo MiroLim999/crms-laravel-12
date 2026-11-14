@@ -16,7 +16,7 @@ use Tests\TestCase;
  * - each layout has its own page 2: a copy or a new version never shares it;
  * - page 2 layouts are not listed, published, edited or deleted by themselves;
  * - the published layout is not deleted until another is published;
- * - publishing needs a sample, real column names and a Name column;
+ * - publishing needs a sample and real column names;
  * - one layout per type is published: publishing one replaces the other.
  */
 class TemplatePublishFlowTest extends TestCase
@@ -116,38 +116,46 @@ class TemplatePublishFlowTest extends TestCase
         ]))->assertSessionHasNoErrors();
 
         $version = DocumentTemplate::listed()->latest('id')->firstOrFail();
-        $this->assertTrue($version->is_version);
+        $this->assertSame($published->getKey(), $version->parent_id);
         $this->assertNotSame($oldPageTwo, $version->page_two_template_id);
         $this->assertSame(['Mother'], $this->pageTwoColumns($version));
         $this->assertSame($oldPageTwo, $published->refresh()->page_two_template_id);
         $this->assertSame(['Informant'], $this->pageTwoColumns($published));
     }
 
-    public function test_versions_are_numbered_and_a_layout_in_use_says_so_before_saving(): void
+    public function test_changes_to_a_layout_in_use_are_saved_as_a_named_duplicate(): void
     {
         $first = $this->layout(['name' => 'Register', 'publish' => 1]);
 
-        // Alone: no version number to tell apart. In use (published): said in the builder.
-        $this->assertSame(1, DocumentTemplate::versionInfo()[$first->getKey()]['number']);
+        // A layout in use says so in the builder, before saving.
         $this->get(route('templates.edit', $first))->assertOk()
-            ->assertSee('This layout is')->assertSee('version 2')->assertDontSee('>v1<', escape: false);
+            ->assertSee('This layout is')->assertSee('Saving changes makes a')->assertSee('duplicate')
+            ->assertSee('Save duplicate &amp; publish', escape: false);
 
-        // Changed markers on a layout in use: a new version.
+        // Changed markers, same name: saved as "Register (copy)", the original untouched.
         $this->put(route('templates.update', $first), $this->payload([
+            'name' => 'Register',
             'columns_json' => json_encode([['name' => "Child's Name", 'box' => [0.15, 0.2, 0.3, 0.6], 'role' => 'name']], JSON_THROW_ON_ERROR),
             'revision' => $first->revision,
+        ]))->assertSessionHasNoErrors()
+            ->assertSessionHas('success', fn (string $m) => str_contains($m, "Saved as the duplicate 'Register (copy)'"));
+        $copy = DocumentTemplate::listed()->latest('id')->firstOrFail();
+        $this->assertSame('Register (copy)', $copy->name);
+        $this->assertSame($first->getKey(), $copy->parent_id);
+        $this->assertFalse($copy->is_version);
+        $this->assertSame('Register', $first->refresh()->name);
+
+        // A name typed by the admin is kept as it is.
+        $this->put(route('templates.update', $first), $this->payload([
+            'name' => 'Register 1960s',
+            'columns_json' => json_encode([['name' => 'Entry No.', 'box' => [0.1, 0.2, 0.3, 0.6]]], JSON_THROW_ON_ERROR),
+            'revision' => $first->revision,
         ]))->assertSessionHasNoErrors();
-        $second = DocumentTemplate::listed()->latest('id')->firstOrFail();
-        $this->assertTrue($second->is_version);
+        $this->assertSame('Register 1960s', DocumentTemplate::listed()->latest('id')->value('name'));
 
-        $info = DocumentTemplate::versionInfo();
-        $this->assertSame([1, 2], [$info[$first->getKey()]['number'], $info[$second->getKey()]['number']]);
-        $this->assertSame(2, $info[$first->getKey()]['size']);
-
-        // The library shows v1 and v2 beside the name.
+        // The library has no version numbers.
         $this->get(route('templates.index'))->assertOk()
-            ->assertSee('>v1<', escape: false)->assertSee('>v2<', escape: false);
-        $this->get(route('templates.edit', $second))->assertOk()->assertSee('>v2<', escape: false);
+            ->assertSee('Based on')->assertDontSee('>v1<', escape: false)->assertDontSee('>v2<', escape: false);
     }
 
     public function test_a_version_saved_without_page_two_changes_copies_it(): void
@@ -234,7 +242,7 @@ class TemplatePublishFlowTest extends TestCase
 
     // ------------------------------------------------------- 4-7. publish checks
 
-    public function test_a_layout_is_not_published_without_a_sample_real_names_and_a_name_column(): void
+    public function test_a_layout_is_not_published_without_a_sample_and_real_names(): void
     {
         $this->actingAs($this->admin)->post(route('templates.store'), $this->payload([
             'columns_json' => json_encode([
@@ -246,8 +254,7 @@ class TemplatePublishFlowTest extends TestCase
         ]))->assertSessionHasNoErrors()->assertSessionHas('error', function (string $message) {
             return str_contains($message, 'Template saved as a draft. It was not published')
                 && str_contains($message, 'Add a sample page')
-                && str_contains($message, 'still named: Column 1, Column 2')
-                && str_contains($message, "holds the person's name");
+                && str_contains($message, 'still named: Column 1, Column 2');
         });
 
         $draft = DocumentTemplate::firstOrFail();
@@ -301,22 +308,6 @@ class TemplatePublishFlowTest extends TestCase
         $ready = $this->layout(['name' => 'Ready spread', 'page_two_json' => $this->pageTwo()]);
         $this->post(route('templates.activate', $ready))->assertSessionHas('success');
         $this->assertTrue($ready->refresh()->is_active);
-    }
-
-    public function test_the_name_column_may_be_on_page_two(): void
-    {
-        $layout = $this->layout([
-            'columns_json' => json_encode([['name' => 'Entry No.', 'box' => [0.05, 0.2, 0.1, 0.6]]], JSON_THROW_ON_ERROR),
-            'page_two_json' => json_encode([
-                'fields' => [],
-                'columns' => [['name' => 'Mother', 'box' => [0.1, 0.2, 0.5, 0.6], 'role' => 'name']],
-                'ruled_ys' => [0.2, 0.35, 0.5, 0.65, 0.8],
-                'grouping_mode' => 'auto',
-            ], JSON_THROW_ON_ERROR),
-            'publish' => 1,
-        ]);
-
-        $this->assertTrue($layout->is_active);
     }
 
     public function test_saving_a_published_layout_with_publish_asked_does_not_unpublish_it(): void

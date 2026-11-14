@@ -1189,7 +1189,7 @@ class DocumentTemplateBuilderTest extends TestCase
         return $template;
     }
 
-    /** A field that holds the person's name: a layout needs one to be published. */
+    /** A field with the person's name role (older layouts have one; the builder no longer sets it). */
     private function nameField(string $name): array
     {
         return [...$this->field($name), 'role' => 'name'];

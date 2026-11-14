@@ -192,14 +192,14 @@ class TemplateVersioningTest extends TestCase
 
         $this->actingAs($this->admin)->get(route('templates.edit', $published))
             ->assertOk()
-            ->assertSee('Saving makes a new version')
-            ->assertSee('Save &amp; publish new version', escape: false)
+            ->assertSee('Saving changes makes a duplicate')
+            ->assertSee('Save duplicate &amp; publish', escape: false)
             ->assertSee('name="revision" value="1"', escape: false);
 
         $draft = $this->layout(['name' => 'Unused draft']);
         $this->actingAs($this->admin)->get(route('templates.edit', $draft))
             ->assertOk()
-            ->assertDontSee('Saving makes a new version')
+            ->assertDontSee('Saving changes makes a duplicate')
             ->assertSee('Save draft');
     }
 

@@ -46,33 +46,21 @@ class DocumentTemplateController extends Controller
 
     public function index(): View
     {
-        $versions = DocumentTemplate::versionInfo();
-
-        $layouts = DocumentTemplate::listed()
-            ->withCount(['fields', 'records', 'pages'])
-            ->with(['creator', 'documentTypeDefinition', 'parent:id,name,is_active', 'pageTwoTemplate'])
-            ->get()
-            ->each(function (DocumentTemplate $layout) use ($versions) {
-                $layout->setAttribute('publish_problems', $layout->is_active ? [] : $this->publishProblems($layout));
-                // "v2" beside the name, only where the layout has versions to tell apart.
-                $layout->setAttribute('version', ($versions[$layout->getKey()]['size'] ?? 1) > 1 ? $versions[$layout->getKey()]['number'] : null);
-                $layout->setAttribute('family', $versions[$layout->getKey()]['root'] ?? $layout->getKey());
-            });
-
-        // The family (a layout and its versions) that holds the published layout first, each
-        // family together with its newest version on top; other families after it.
-        $publishedFamilies = $layouts->where('is_active', true)->pluck('family')->flip();
-        $layouts = $layouts->sortBy([
-            ['document_type_id', 'asc'],
-            fn (DocumentTemplate $a, DocumentTemplate $b) => (int) $publishedFamilies->has($b->family) <=> (int) $publishedFamilies->has($a->family),
-            ['family', 'asc'],
-            fn (DocumentTemplate $a, DocumentTemplate $b) => ($b->version ?? 0) <=> ($a->version ?? 0),
-            ['id', 'asc'],
-        ]);
-
         return view('templates.index', [
             // Page 2 layouts are not listed: they belong to their main layout.
-            'templates' => $layouts->groupBy('document_type_id'),
+            'templates' => DocumentTemplate::listed()
+                ->withCount(['fields', 'records', 'pages'])
+                ->with(['creator', 'documentTypeDefinition', 'parent:id,name,is_active', 'pageTwoTemplate'])
+                ->orderBy('document_type_id')
+                ->orderByDesc('is_active')
+                ->orderBy('name')
+                ->orderBy('id')
+                ->get()
+                ->each(fn (DocumentTemplate $layout) => $layout->setAttribute(
+                    'publish_problems',
+                    $layout->is_active ? [] : $this->publishProblems($layout),
+                ))
+                ->groupBy('document_type_id'),
             // Deleted layouts that records were read with: kept, and shown per type to restore.
             'archivedTemplates' => DocumentTemplate::query()
                 ->where('is_page_two', false)
@@ -200,8 +188,6 @@ class DocumentTemplateController extends Controller
                 'pages' => $template->pages()->count(),
             ],
             'parent' => $template->parent()->first(['id', 'name']),
-            // Which version this is, and how many layouts the family has.
-            'version' => DocumentTemplate::versionInfo()[$template->getKey()] ?? null,
             'columns' => array_values($template->columns ?? []),
             'ruledYs' => array_values($template->ruled_ys ?? []),
             'pageTwo' => $this->pageTwoForBuilder($template),
@@ -463,9 +449,9 @@ class DocumentTemplateController extends Controller
         $pageTwo = $this->validatedPageTwo($request, $validated, $template);
 
         // Records keep the layout they were read with: new markers or field
-        // settings on a layout in use become a new version.
+        // settings on a layout in use are saved as a duplicate.
         if ($template->isInUse() && ($this->layoutChanged($template, $validated) || $this->pageTwoChanged($template, $pageTwo))) {
-            return $this->saveAsNewVersion($request, $template, $validated, $documentType, $pageTwo);
+            return $this->saveAsDuplicate($request, $template, $validated, $documentType, $pageTwo);
         }
 
         $problems = [];
@@ -1265,8 +1251,8 @@ class DocumentTemplateController extends Controller
 
     /**
      * What stops a layout from being published, in words for the admin:
-     * a sample page to check it against, real names instead of "Column 3",
-     * and a column or field that holds the person's name (on page 1 or 2).
+     * a sample page to check it against, real names instead of "Column 3", and on
+     * a two-page layout: no name on both pages and the same number of rows.
      *
      * @return list<string>
      */
@@ -1281,7 +1267,6 @@ class DocumentTemplateController extends Controller
         }
 
         $unnamed = [];
-        $hasName = false;
         foreach ($layouts as $layout) {
             $items = [
                 ...$layout->fields->map(fn (DocumentTemplateField $f) => ['name' => $f->name, 'role' => $f->role])->all(),
@@ -1291,7 +1276,6 @@ class DocumentTemplateController extends Controller
                 if (preg_match('/^(column|field)\s*\d+$/i', trim($item['name']))) {
                     $unnamed[] = trim($item['name']);
                 }
-                $hasName = $hasName || $item['role'] === 'name';
             }
         }
 
@@ -1301,10 +1285,6 @@ class DocumentTemplateController extends Controller
             $problems[] = 'Give every column a real name (still named: '.implode(', ', $shown)
                 .($more > 0 ? " and {$more} more" : '').').';
         }
-        if (! $hasName) {
-            $problems[] = "Mark the column or field that holds the person's name (Field settings → Holds → Name).";
-        }
-
         // A two-page register: row N of page 1 and row N of page 2 are one person.
         if (count($layouts) === 2) {
             [$one, $two] = array_values($layouts);
@@ -1434,7 +1414,7 @@ class DocumentTemplateController extends Controller
             'created_by' => $request->user()->getKey(),
             'parent_id' => $parent?->getKey(),
         ]);
-        $template->forceFill(['is_page_two' => $pageTwo, 'is_version' => $parent !== null])->save();
+        $template->forceFill(['is_page_two' => $pageTwo, 'is_version' => false])->save();
 
         $this->syncFields($template, $validated['fields']);
 
@@ -1471,7 +1451,7 @@ class DocumentTemplateController extends Controller
      *
      * @param  array<string, mixed>  $validated
      */
-    private function saveAsNewVersion(
+    private function saveAsDuplicate(
         Request $request,
         DocumentTemplate $template,
         array $validated,
@@ -1480,32 +1460,37 @@ class DocumentTemplateController extends Controller
     ): RedirectResponse {
         $publish = (bool) ($validated['publish'] ?? false);
 
+        // Under the same name it would look like the layout it came from: "(copy)", as Duplicate does.
+        if (mb_strtolower(trim($validated['name'])) === mb_strtolower(trim($template->name))) {
+            $validated['name'] = $this->copyName($template);
+        }
+
         $problems = [];
-        $version = DB::transaction(function () use ($request, $template, $validated, $documentType, $publish, $pageTwo, &$problems) {
-            $version = $this->createLayout($request, $validated, $documentType, $template);
-            // The new version gets its own page 2 (a copy): the old version keeps its own.
-            $this->savePageTwo($request, $version, $pageTwo, $documentType, $validated['page_two_template_id'], fresh: true);
+        $copy = DB::transaction(function () use ($request, $template, $validated, $documentType, $publish, $pageTwo, &$problems) {
+            $copy = $this->createLayout($request, $validated, $documentType, $template);
+            // The duplicate gets its own page 2 (a copy): the original keeps its own.
+            $this->savePageTwo($request, $copy, $pageTwo, $documentType, $validated['page_two_template_id'], fresh: true);
 
             if ($publish) {
-                $problems = $this->publishIfReady($version, (bool) ($validated['publish_anyway'] ?? false));
+                $problems = $this->publishIfReady($copy, (bool) ($validated['publish_anyway'] ?? false));
             }
 
-            return $version;
+            return $copy;
         });
 
         $records = $template->records()->count();
         $kept = $records > 0
             ? " '{$template->name}' is kept unchanged for the {$records} ".Str::plural('record', $records).' read with it.'
             : " '{$template->name}' is kept unchanged.";
-        $redirect = redirect()->route('templates.edit', $version);
+        $redirect = redirect()->route('templates.edit', $copy);
 
         if ($problems !== []) {
-            return $redirect->with('error', $this->notPublishedMessage('Saved as a new draft version', $problems).$kept);
+            return $redirect->with('error', $this->notPublishedMessage("Saved as the duplicate '{$copy->name}'", $problems).$kept);
         }
 
         return $redirect->with('success', $publish
-                ? 'Saved as a new version and published.'.$kept
-                : 'Saved as a new draft version.'.$kept.($template->is_active ? ' It stays published until you publish this draft.' : ''));
+                ? "Saved as the duplicate '{$copy->name}' and published.".$kept
+                : "Saved as the duplicate '{$copy->name}'.".$kept.($template->is_active ? ' The original stays published until you publish the duplicate.' : ''));
     }
 
     /**

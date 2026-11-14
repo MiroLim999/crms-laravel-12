@@ -9,7 +9,7 @@ const ready = [
     { name: "Child's Name", role: 'name' },
 ];
 
-test('a layout with a sample, real names and a Name column can be published', () => {
+test('a layout with a sample and real names can be published', () => {
     assert.deepEqual(publishProblems({ hasSample: true, pages: [ready] }), []);
 });
 
@@ -25,17 +25,10 @@ test('default column names are listed, the first four and how many more', () => 
     assert.match(problem, /Column 3, Column 4, Column 5, Column 6 and 2 more/);
 });
 
-test('the Name column may be on page 2, and page 2 names are checked too', () => {
-    const pageOne = [{ name: 'Entry No.', role: 'entry' }];
-    assert.deepEqual(publishProblems({ hasSample: true, pages: [pageOne, [{ name: 'Mother', role: 'name' }]] }), []);
+test('page 2 names are checked too', () => {
     const problems = publishProblems({ hasSample: true, pages: [ready, [{ name: 'Field 2' }]] });
     assert.equal(problems.length, 1);
     assert.match(problems[0], /Field 2/);
-});
-
-test('without a Name column the admin is told where to set one', () => {
-    const problems = publishProblems({ hasSample: true, pages: [[{ name: 'Entry No.', role: 'entry' }]] });
-    assert.match(problems[0], /Holds → Name/);
 });
 
 test('only names the builder made up count as default', () => {

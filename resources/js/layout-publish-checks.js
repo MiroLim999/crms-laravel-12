@@ -5,7 +5,6 @@
  *
  * - a sample page to check the layout against;
  * - real names instead of "Column 3" or "Field 2";
- * - one column or field that holds the person's name (page 1 or page 2);
  * - on a two-page layout: no name on both pages, and the same number of rows
  *   on both (row N of each page is one person).
  */
@@ -34,10 +33,6 @@ export function publishProblems({ hasSample, pages, rows }) {
         const shown = unnamed.slice(0, 4);
         const more = unnamed.length - shown.length;
         problems.push(`Give every column a real name (still named: ${shown.join(', ')}${more > 0 ? ` and ${more} more` : ''}).`);
-    }
-
-    if (!boxes.some((box) => box.role === 'name')) {
-        problems.push('Mark the column or field that holds the person\'s name (Field settings → Holds → Name).');
     }
 
     // A two-page register: row N of page 1 and row N of page 2 are one person.

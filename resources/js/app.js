@@ -14,6 +14,7 @@ import './sneat/menu';
 import './sneat/main';
 import './theme';
 import './record-search';
+import './dropdown-motion';
 
 // Auto-dismiss session alerts after 4 seconds
 document.addEventListener('DOMContentLoaded', () => {
