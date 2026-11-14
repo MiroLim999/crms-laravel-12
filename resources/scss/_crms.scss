@@ -8994,6 +8994,36 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
+// "v2" beside a layout's name: which version of the layout it is.
+.template-version-badge {
+  padding: .1rem .4rem;
+  color: var(--bs-secondary-color);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 50rem;
+  font-size: .6875rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+// The builder's note on a layout in use, in the Layout card.
+.template-in-use-note {
+  display: flex;
+  gap: .45rem;
+  margin: .6rem 0 0;
+  padding: .5rem .6rem;
+  color: var(--bs-body-color);
+  background: rgba(var(--crms-ink-rgb), .05);
+  border-radius: .4rem;
+  font-size: .75rem;
+  line-height: 1.4;
+
+  .icon-base {
+    flex: 0 0 auto;
+    margin-block-start: .1rem;
+    color: var(--bs-primary);
+  }
+}
+
 // How many pages a layout has, beside its name in the library. Violet is used
 // for nothing else here (blue is for buttons, green for Published, red for
 // Delete), and the pill shape keeps it from looking like a button: an outline
@@ -10378,8 +10408,7 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
-// A narrower screen: the toolbar keeps one line. Reset shows only its icon,
-// and "0 selected" shows only while something is selected.
+// A narrower screen: the toolbar keeps one line. Reset shows only its icon.
 @media (max-width: 1399.98px) {
   .marker-toolbar .marker-reset-button > span {
     display: none;
@@ -10388,10 +10417,11 @@ $dashboard-reveal-step: 40ms;
   .marker-toolbar .marker-reset-button > i {
     margin-inline-end: 0 !important;
   }
+}
 
-  .marker-toolbar .marker-selection-summary:not(.is-active) {
-    display: none !important;
-  }
+// "0 selected" says nothing: the count shows only while something is selected.
+.marker-toolbar .marker-selection-summary:not(.is-active) {
+  display: none !important;
 }
 
 // Detect in the toolbar above the page: one compact button, icon and label.

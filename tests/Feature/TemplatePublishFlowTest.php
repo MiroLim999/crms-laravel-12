@@ -123,6 +123,33 @@ class TemplatePublishFlowTest extends TestCase
         $this->assertSame(['Informant'], $this->pageTwoColumns($published));
     }
 
+    public function test_versions_are_numbered_and_a_layout_in_use_says_so_before_saving(): void
+    {
+        $first = $this->layout(['name' => 'Register', 'publish' => 1]);
+
+        // Alone: no version number to tell apart. In use (published): said in the builder.
+        $this->assertSame(1, DocumentTemplate::versionInfo()[$first->getKey()]['number']);
+        $this->get(route('templates.edit', $first))->assertOk()
+            ->assertSee('This layout is')->assertSee('version 2')->assertDontSee('>v1<', escape: false);
+
+        // Changed markers on a layout in use: a new version.
+        $this->put(route('templates.update', $first), $this->payload([
+            'columns_json' => json_encode([['name' => "Child's Name", 'box' => [0.15, 0.2, 0.3, 0.6], 'role' => 'name']], JSON_THROW_ON_ERROR),
+            'revision' => $first->revision,
+        ]))->assertSessionHasNoErrors();
+        $second = DocumentTemplate::listed()->latest('id')->firstOrFail();
+        $this->assertTrue($second->is_version);
+
+        $info = DocumentTemplate::versionInfo();
+        $this->assertSame([1, 2], [$info[$first->getKey()]['number'], $info[$second->getKey()]['number']]);
+        $this->assertSame(2, $info[$first->getKey()]['size']);
+
+        // The library shows v1 and v2 beside the name.
+        $this->get(route('templates.index'))->assertOk()
+            ->assertSee('>v1<', escape: false)->assertSee('>v2<', escape: false);
+        $this->get(route('templates.edit', $second))->assertOk()->assertSee('>v2<', escape: false);
+    }
+
     public function test_a_version_saved_without_page_two_changes_copies_it(): void
     {
         $published = $this->layout(['page_two_json' => $this->pageTwo(), 'publish' => 1]);

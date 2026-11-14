@@ -9,6 +9,7 @@
         $published = (bool) $template?->is_active;
         $usage ??= ['published' => false, 'records' => 0, 'pages' => 0];
         $parent ??= null;
+        $version ??= null;
         // Published, or read by records or pages in progress: saving new markers
         // makes a new version, so what was read with this one stays as it was.
         $inUse = $template !== null && ($usage['published'] || $usage['records'] > 0 || $usage['pages'] > 0);
@@ -63,9 +64,12 @@
                     @else
                         <span class="badge bg-label-secondary">Draft</span>
                     @endif
-                    @if ($parent)
+                    @if ($version && $version['size'] > 1)
+                        <span class="template-version-badge" title="Version {{ $version['number'] }} of this layout">v{{ $version['number'] }}</span>
+                    @endif
+                    @if ($parent && ! $template?->is_version)
                         <a href="{{ route('templates.edit', $parent) }}" class="template-builder-page__parent">
-                            {{ $template?->is_version ? 'New version of' : 'Based on' }} “{{ $parent->name }}”
+                            Based on “{{ $parent->name }}”
                         </a>
                     @endif
                 </div>
@@ -210,7 +214,8 @@
                                         <div class="marker-shortcuts-menu__title">Table grid</div>
                                         <div><span>Type a row count, <kbd>Enter</kbd></span><small>Space that many rows evenly</small></div>
                                         <div><span>Tilt <kbd>↺</kbd> <kbd>↻</kbd></span><small>Turn the table 0.1° (<kbd>Shift</kbd>: 1°)</small></div>
-                                        <div><span>Name box, <kbd>Enter</kbd></span><small>Add a field</small></div>
+                                        <div><span>Field name, <kbd>Enter</kbd></span><small>Next name (<kbd>Shift</kbd>: previous)</small></div>
+                                        <div><span>Add field box, <kbd>Enter</kbd></span><small>Add a field</small></div>
                                     </div>
                                 </div>
                             </div>
@@ -380,6 +385,24 @@
                                     <p class="template-row-match is-mismatch d-none" id="rowMatch" role="status" aria-live="polite"></p>
 
                                     <p class="template-ledger-card__summary d-none" id="ledgerGridSummary" aria-live="polite"></p>
+
+                                    {{-- A layout in use is never changed in place: said before the save, not on hover. --}}
+                                    @if ($inUse)
+                                        <p class="template-in-use-note">
+                                            <i class="icon-base bx bx-info-circle icon-sm" aria-hidden="true"></i>
+                                            <span>
+                                                @if ($usage['records'] > 0)
+                                                    <strong>{{ $usage['records'] }} {{ Str::plural('record', $usage['records']) }}</strong> use this layout.
+                                                @elseif ($usage['pages'] > 0)
+                                                    <strong>{{ $usage['pages'] }} {{ Str::plural('page', $usage['pages']) }}</strong> in progress use this layout.
+                                                @else
+                                                    This layout is <strong>published</strong>.
+                                                @endif
+                                                Saving changes creates
+                                                <strong>version {{ ($version['number'] ?? 1) + 1 }}</strong>; this one stays as it is.
+                                            </span>
+                                        </p>
+                                    @endif
 
                                     <div class="template-ledger-card__problems d-none" id="ledgerProblems" role="status">
                                         <i class="icon-base bx bx-error icon-sm" aria-hidden="true"></i>

@@ -46,19 +46,33 @@ class DocumentTemplateController extends Controller
 
     public function index(): View
     {
+        $versions = DocumentTemplate::versionInfo();
+
+        $layouts = DocumentTemplate::listed()
+            ->withCount(['fields', 'records', 'pages'])
+            ->with(['creator', 'documentTypeDefinition', 'parent:id,name,is_active', 'pageTwoTemplate'])
+            ->get()
+            ->each(function (DocumentTemplate $layout) use ($versions) {
+                $layout->setAttribute('publish_problems', $layout->is_active ? [] : $this->publishProblems($layout));
+                // "v2" beside the name, only where the layout has versions to tell apart.
+                $layout->setAttribute('version', ($versions[$layout->getKey()]['size'] ?? 1) > 1 ? $versions[$layout->getKey()]['number'] : null);
+                $layout->setAttribute('family', $versions[$layout->getKey()]['root'] ?? $layout->getKey());
+            });
+
+        // The family (a layout and its versions) that holds the published layout first, each
+        // family together with its newest version on top; other families after it.
+        $publishedFamilies = $layouts->where('is_active', true)->pluck('family')->flip();
+        $layouts = $layouts->sortBy([
+            ['document_type_id', 'asc'],
+            fn (DocumentTemplate $a, DocumentTemplate $b) => (int) $publishedFamilies->has($b->family) <=> (int) $publishedFamilies->has($a->family),
+            ['family', 'asc'],
+            fn (DocumentTemplate $a, DocumentTemplate $b) => ($b->version ?? 0) <=> ($a->version ?? 0),
+            ['id', 'asc'],
+        ]);
+
         return view('templates.index', [
             // Page 2 layouts are not listed: they belong to their main layout.
-            'templates' => DocumentTemplate::listed()
-                ->withCount(['fields', 'records', 'pages'])
-                ->with(['creator', 'documentTypeDefinition', 'parent:id,name,is_active', 'pageTwoTemplate'])
-                ->orderBy('document_type_id')
-                ->orderByDesc('is_active')
-                ->get()
-                ->each(fn (DocumentTemplate $layout) => $layout->setAttribute(
-                    'publish_problems',
-                    $layout->is_active ? [] : $this->publishProblems($layout),
-                ))
-                ->groupBy('document_type_id'),
+            'templates' => $layouts->groupBy('document_type_id'),
             // Deleted layouts that records were read with: kept, and shown per type to restore.
             'archivedTemplates' => DocumentTemplate::query()
                 ->where('is_page_two', false)
@@ -186,6 +200,8 @@ class DocumentTemplateController extends Controller
                 'pages' => $template->pages()->count(),
             ],
             'parent' => $template->parent()->first(['id', 'name']),
+            // Which version this is, and how many layouts the family has.
+            'version' => DocumentTemplate::versionInfo()[$template->getKey()] ?? null,
             'columns' => array_values($template->columns ?? []),
             'ruledYs' => array_values($template->ruled_ys ?? []),
             'pageTwo' => $this->pageTwoForBuilder($template),

@@ -518,6 +518,14 @@ function createFieldRow(index) {
         marker.selectBox(Number(item.dataset.fieldIndex));
     });
 
+    // Naming many fields: Enter goes to the next name, Shift + Enter back to the
+    // one before (across the two pages of a spread). It never submits the form.
+    input.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || event.isComposing) return;
+        event.preventDefault();
+        stepFieldName(Number(item.dataset.fieldIndex), event.shiftKey ? -1 : 1);
+    });
+
     input.addEventListener('input', () => {
         const currentIndex = Number(item.dataset.fieldIndex);
         invalidFieldIndexes.delete(currentIndex);
@@ -690,6 +698,38 @@ function renderPersonRecord(boxes, other, onBoth) {
             item.appendChild(button);
             return item;
         })));
+}
+
+/** Put the cursor in a field's name box on the page being edited, the name selected, ready to type over. */
+function focusFieldName(index) {
+    const input = element('fieldList').querySelector(`[data-field-index="${index}"] .template-builder-field-name`);
+    if (!(input instanceof HTMLInputElement)) return false;
+    input.focus();
+    input.select();
+    centerFieldListRow(index, { centerPanel: false });
+    return true;
+}
+
+/**
+ * The name box after (or before) field `index`: the next field of the page being edited, and
+ * past its last field the first of the other page (the last of it, going back). At the very
+ * end it stays where it is.
+ */
+async function stepFieldName(index, direction) {
+    const here = marker.toJSON().length;
+    const next = index + direction;
+    if (next >= 0 && next < here) {
+        focusFieldName(next);
+        return;
+    }
+
+    const other = otherPageLayout();
+    const goesToOther = other && other.boxes.length > 0
+        && ((direction > 0 && activePage === 1) || (direction < 0 && activePage === 2));
+    if (!goesToOther) return;
+
+    await switchPage(3 - activePage);
+    focusFieldName(direction > 0 ? 0 : marker.toJSON().length - 1);
 }
 
 /** A field of the other page picked in the record: edit that page, with the field selected. */

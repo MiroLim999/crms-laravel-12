@@ -161,6 +161,9 @@
                                             <td class="ps-3 py-2">
                                                 <div class="d-flex align-items-center flex-wrap gap-2">
                                                     <span class="fw-medium text-heading">{{ $layout->name }}</span>
+                                                    @if ($layout->version)
+                                                        <span class="template-version-badge" title="Version {{ $layout->version }} of this layout">v{{ $layout->version }}</span>
+                                                    @endif
                                                     {{-- One page, or a register's left and right pages (a page 2 of its own). --}}
                                                     <span class="badge rounded-pill template-pages-badge {{ $layout->pageTwoTemplate ? 'template-pages-badge--two' : '' }}">
                                                         <i class="icon-base bx {{ $layout->pageTwoTemplate ? 'bx-book-open' : 'bx-file' }} icon-xs me-1" aria-hidden="true"></i>
@@ -170,9 +173,9 @@
                                                 <small class="text-muted" title="Created by {{ $layout->creator?->name ?? 'System' }}">
                                                     Updated {{ $layout->updated_at->diffForHumans() }}
                                                 </small>
-                                                @if ($layout->parent)
+                                                @if ($layout->parent && ! $layout->is_version)
                                                     <small class="d-block text-muted mt-1">
-                                                        {{ $layout->is_version ? 'New version of' : 'Based on' }} “{{ $layout->parent->name }}”
+                                                        Based on “{{ $layout->parent->name }}”
                                                     </small>
                                                 @endif
                                             </td>
@@ -195,11 +198,6 @@
                                                     </span>
                                                 @else
                                                     <span class="badge bg-label-secondary">Draft</span>
-                                                @endif
-                                                @if ($layout->is_active || $layout->records_count > 0 || $layout->pages_count > 0)
-                                                    <i class="icon-base bx bx-lock-alt icon-xs text-muted ms-1"
-                                                       title="Saving changed markers makes a new version, so records keep this one"
-                                                       aria-label="Edits make a new version"></i>
                                                 @endif
                                             </td>
                                             <td class="pe-3 py-2 text-end text-nowrap">

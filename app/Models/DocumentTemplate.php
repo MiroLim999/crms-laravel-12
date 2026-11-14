@@ -235,6 +235,36 @@ class DocumentTemplate extends Model
             : $this;
     }
 
+    /**
+     * Version numbers of every layout, from the chain of "new version of" links:
+     * a layout that is no version of another is v1, its new version v2, and so on.
+     * `size` is how many layouts the family has (a layout with no versions is alone).
+     *
+     * @return array<int, array{number: int, root: int, size: int}>
+     */
+    public static function versionInfo(): array
+    {
+        $rows = static::query()->where('is_page_two', false)->get(['id', 'parent_id', 'is_version'])->keyBy('id');
+        $info = [];
+
+        foreach ($rows as $row) {
+            $number = 1;
+            $current = $row;
+            while ($current->is_version && $current->parent_id !== null && $rows->has($current->parent_id) && $number < 500) {
+                $number++;
+                $current = $rows[$current->parent_id];
+            }
+            $info[$row->getKey()] = ['number' => $number, 'root' => $current->getKey(), 'size' => 0];
+        }
+
+        $sizes = array_count_values(array_column($info, 'root'));
+        foreach ($info as $id => $one) {
+            $info[$id]['size'] = $sizes[$one['root']];
+        }
+
+        return $info;
+    }
+
     /** The layout this one was copied from, as a new version (is_version) or a duplicate. */
     public function parent(): BelongsTo
     {
