@@ -9,6 +9,8 @@ import {
     csvSafe,
     exportFileName,
     nextCellPosition,
+    parseClipboard,
+    rowSpan,
     selectStart,
     toCsv,
     toSheetData,
@@ -131,3 +133,17 @@ test('the split stays between 20% and 65%, 30% by default', () => {
     assert.equal(clampSplit(90), 65);
     assert.equal(clampSplit('41.63'), 41.6);
 });
+
+test('cells dragged down or up a column cover every row between, top first', () => {
+    assert.deepEqual(rowSpan(1, 4), [1, 2, 3, 4]);
+    assert.deepEqual(rowSpan(4, 1), [1, 2, 3, 4]);
+    assert.deepEqual(rowSpan(2, 2), [2]);
+});
+
+test('clipboard text becomes rows and cells', () => {
+    assert.deepEqual(parseClipboard('Filipino'), [['Filipino']]);
+    assert.deepEqual(parseClipboard('a\nb\n'), [['a'], ['b']]);
+    assert.deepEqual(parseClipboard('a\tb\r\nc\td'), [['a', 'b'], ['c', 'd']]);
+    assert.deepEqual(parseClipboard(''), []);
+});
+

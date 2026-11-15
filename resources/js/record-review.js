@@ -79,6 +79,8 @@ if (root instanceof HTMLElement && source) {
             button.classList.toggle('btn-outline-danger', parts.length > 0);
         },
     });
+    // Ctrl+Z / Ctrl+Y after a click on the scan or elsewhere on the page.
+    table.listenForUndoKeys();
     table.render(model);
     if (model.rows.length > 0 && model.columns.length > 0) table.select(0, 0, { locate: false });
     showState();
@@ -92,7 +94,8 @@ if (root instanceof HTMLElement && source) {
     });
     element('reviewExportXlsx').addEventListener('click', async () => {
         table.commit();
-        const button = element('reviewExportXlsx');
+        // The spinner shows on the Download button (the menu closes on the click).
+        const button = element('reviewDownloadBtn');
         const spinner = button.querySelector('.spinner-border');
         button.disabled = true;
         spinner?.classList.remove('d-none');

@@ -33,7 +33,9 @@ export const COLUMN_RULES = [
 ];
 
 /**
- * A column's input and check: { input: 'text' | 'select', options?, settings? }.
+ * A column's check: { input: 'text' | 'select', options?, settings? }. Every
+ * cell is typed into; 'select' means its value must be one of `options`
+ * (typed "m" is saved as M, anything else is shown as invalid).
  * `settings` is the layout field's own (type, options, required).
  */
 export function columnType(name, settings = null, rules = COLUMN_RULES) {
@@ -332,6 +334,22 @@ export function nextCellPosition({ row, column }, key, shift, rowCount, columnCo
 }
 
 /**
+ * Clipboard text as rows of cells: lines are rows, tabs split cells (an
+ * Excel block). One closing line break is ignored; no text gives no rows.
+ */
+export function parseClipboard(text) {
+    const clean = String(text ?? '').replace(/\r\n?/g, '\n').replace(/\n$/, '');
+    if (clean === '') return [];
+    return clean.split('\n').map((line) => line.split('\t').map((cell) => cell.trim()));
+}
+
+/** The rows from `anchor` to `focus`, top first. */
+export function rowSpan(anchor, focus) {
+    const top = Math.min(anchor, focus);
+    return Array.from({ length: Math.abs(focus - anchor) + 1 }, (_, step) => top + step);
+}
+
+/**
  * The table on the page.
  *
  *   container       where the table goes (it scrolls; the header row sticks)
@@ -339,20 +357,185 @@ export function nextCellPosition({ row, column }, key, shift, rowCount, columnCo
  *   onChange(cell, value)  a cell was confirmed with a new value
  *   onLocate(cell)  a cell was picked: show it on the scan
  *   onIssues({ invalid, empty })  the issue counts changed
+ *   snapshotOf(cell)  what else a change alters, kept so Ctrl+Z can put it
+ *                   back (Verify: each field's Verified tick); optional
+ *   restore(cell, snapshot)  put that back after the value (optional)
+ *   onCleared(refs)  the fields whose cell the reviewer emptied (for the scan)
+ *   onRange(cells)  the cells picked together changed ([] when one or none);
+ *                   the page shows them on the scan (optional)
+ *
+ * The picked cell (blue) and its row (orange) are marked is-active. Several
+ * cells of one column can be picked together, by dragging down or up it, by
+ * Shift+click, or by Shift+Up/Down: typing or Enter then edits them all at
+ * once (starting from the top one's value), Delete empties them. A header
+ * or row number double-clicked can be renamed: only the downloads use the
+ * new name. Ctrl+Z (Cmd+Z) takes back the last change of any of these, and
+ * Ctrl+Y (Cmd+Shift+Z, Ctrl+Shift+Z) does it again.
  */
 export class ReviewTable {
-    constructor({ container, valueOf, onChange, onLocate = () => {}, onIssues = () => {} }) {
+    constructor({
+        container, valueOf, onChange, onLocate = () => {}, onIssues = () => {},
+        snapshotOf = () => null, restore = () => {}, onRange = () => {}, onCleared = () => {},
+    }) {
+        this.onRange = onRange;
+        this.onCleared = onCleared;
         this.container = container;
         this.valueOf = valueOf;
         this.onChange = onChange;
+        this.snapshotOf = snapshotOf;
+        this.restore = restore;
         this.onLocate = onLocate;
         this.onIssues = onIssues;
         this.model = { columns: [], rows: [] };
         this.active = null;
+        // Several cells of the active cell's column: { column, anchor, focus } rows.
+        this.range = null;
         this.editor = null;
+        this.drag = null;
+        // Changes Ctrl+Z takes back, newest last, and those Ctrl+Y does again:
+        //   { cells: [{ rowId, columnKey, before, after, snapshot }] }
+        //   { label: 'header' | 'row', key, before, after }   (names; null = the original)
+        this.history = [];
+        this.redoList = [];
+        // Cells the reviewer emptied (Delete, cut, typing nothing): shown red, not as never read.
+        this.cleared = new Set();
+        // Names typed over a header or a row number, for the downloads.
+        this.headerNames = new Map();
+        this.rowNames = new Map();
 
         container.addEventListener('pointerdown', (event) => this._pointerDown(event));
         container.addEventListener('keydown', (event) => this._keyDown(event));
+        container.addEventListener('dblclick', (event) => this._doubleClick(event));
+        container.addEventListener('copy', (event) => this._copy(event, false));
+        container.addEventListener('cut', (event) => this._copy(event, true));
+        container.addEventListener('paste', (event) => this._paste(event));
+    }
+
+    /** Ctrl+C / Ctrl+X on picked cells: their values, one per line (cut also empties them). */
+    _copy(event, cut) {
+        if (!this.active || this.editor || event.target instanceof HTMLInputElement) return;
+        const { column } = this.active;
+        const rows = this.selectedRows();
+        const text = rows
+            .map((row) => String(this.valueOf(this.cell(row, column)) ?? '').replace(/[\t\r\n]+/g, ' '))
+            .join('\n');
+        event.clipboardData?.setData('text/plain', text);
+        event.preventDefault();
+        if (cut) this._apply(rows.map((row) => ({ row, column, value: '' })));
+        // The copied cells are marked (a dashed frame) until Esc, a change or the next copy.
+        this._showCopied({ column, rows });
+    }
+
+    /** Mark the copied cells (`copied`: { column, rows }), or clear the mark (null). */
+    _showCopied(copied) {
+        this.container.querySelectorAll('.review-table__cell.is-copied').forEach((node) => node.classList.remove('is-copied', 'is-copied-top', 'is-copied-bottom'));
+        this.copied = copied;
+        if (!copied) return;
+        const top = Math.min(...copied.rows);
+        const bottom = Math.max(...copied.rows);
+        copied.rows.forEach((row) => {
+            const td = this.cellNodes[row]?.[copied.column];
+            if (!td) return;
+            td.classList.add('is-copied');
+            td.classList.toggle('is-copied-top', row === top);
+            td.classList.toggle('is-copied-bottom', row === bottom);
+        });
+    }
+
+    /**
+     * Ctrl+V: one value goes into every picked cell; several lines (or an
+     * Excel block, tab-separated) fill down and across from the top picked
+     * cell, as far as the table goes. One change for Ctrl+Z.
+     */
+    _paste(event) {
+        if (!this.active || this.editor || event.target instanceof HTMLInputElement) return;
+        const grid = parseClipboard(event.clipboardData?.getData('text/plain') ?? '');
+        event.preventDefault();
+        if (grid.length === 0) return;
+
+        const picked = this.selectedRows();
+        const startRow = picked[0];
+        const startColumn = this.active.column;
+        const changes = [];
+        if (grid.length === 1 && grid[0].length === 1) {
+            picked.forEach((row) => changes.push({ row, column: startColumn, value: this._typed(startColumn, grid[0][0]) }));
+        } else {
+            grid.forEach((cells, down) => cells.forEach((value, across) => {
+                const row = startRow + down;
+                const column = startColumn + across;
+                if (row < this.model.rows.length && column < this.model.columns.length) {
+                    changes.push({ row, column, value: this._typed(column, value) });
+                }
+            }));
+        }
+        if (this._apply(changes) === 0 || changes.length === 0) return;
+
+        // The cells it filled stay picked, to see them (down the first column).
+        const last = Math.max(...changes.filter((change) => change.column === startColumn).map((change) => change.row));
+        this.select(startRow, startColumn, { locate: false });
+        if (last > startRow) this._extendTo(last);
+    }
+
+    /** A pasted or typed value for a column: a choice column takes "f" as F, anything else as it is. */
+    _typed(columnIndex, text) {
+        const options = this.model.columns[columnIndex]?.type.options;
+        const value = String(text).slice(0, 2000);
+        return options ? (selectStart(value, options) || value) : value;
+    }
+
+    /** A new document: renamed labels and the undo list are dropped. */
+    reset() {
+        this._closeEditor(false);
+        this.headerNames.clear();
+        this.rowNames.clear();
+        this.history = [];
+        this.redoList = [];
+        this.cleared.clear();
+        this.range = null;
+        this.onCleared([]);
+    }
+
+    /**
+     * Ctrl+Z / Ctrl+Y (Cmd+Z / Cmd+Shift+Z on a Mac) pressed outside the table,
+     * e.g. after a click on the scan: the table's undo, unless a text box has
+     * the keys (it undoes its own typing). `isActive()` says when the table is
+     * shown. Returns a function that stops listening.
+     */
+    listenForUndoKeys(isActive = () => true, target = document) {
+        const listener = (event) => {
+            if (!isActive() || this.container.contains(event.target)) return;
+            const typing = event.target instanceof Element
+                && event.target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+            if (typing || document.querySelector('.modal.show')) return;
+            this._undoKey(event);
+        };
+        target.addEventListener('keydown', listener);
+        return () => target.removeEventListener('keydown', listener);
+    }
+
+    /** Ctrl+Z: undo; Ctrl+Y or Ctrl+Shift+Z: redo (Cmd on a Mac). True when the key was one of them. */
+    _undoKey(event) {
+        if (!(event.ctrlKey || event.metaKey) || event.altKey) return false;
+        const key = event.key.toLowerCase();
+        const z = key === 'z' || event.code === 'KeyZ';
+        const y = key === 'y' || event.code === 'KeyY';
+        if (!z && !y) return false;
+        event.preventDefault();
+        event.stopPropagation();
+        this._closeEditor(true);
+        if (z && !event.shiftKey) this.undo();
+        else this.redo();
+        return true;
+    }
+
+    /** A column's header as shown and downloaded (renamed or not). */
+    headerOf(column) {
+        return this.headerNames.get(column.key) ?? column.header;
+    }
+
+    /** A row's number as shown and downloaded (renamed or not). */
+    rowLabelOf(row) {
+        return this.rowNames.get(row.id) ?? row.label;
     }
 
     /** Draw the table for `model` (see buildReviewModel); keeps the picked cell where it can. */
@@ -361,6 +544,8 @@ export class ReviewTable {
         this._closeEditor(false);
         this.model = model;
         this.cellNodes = [];
+        this.range = null;
+        this.copied = null;
 
         const table = document.createElement('table');
         table.className = 'review-table';
@@ -373,23 +558,25 @@ export class ReviewTable {
         corner.className = 'review-table__row-head';
         corner.textContent = 'Row';
         head.appendChild(corner);
-        model.columns.forEach((column) => {
+        this.headerNodes = model.columns.map((column, columnIndex) => {
             const th = document.createElement('th');
             th.scope = 'col';
-            th.textContent = column.header;
-            th.title = column.header;
+            th.dataset.column = String(columnIndex);
             if (column.type.input === 'select') th.dataset.choices = column.type.options.join(' / ');
             head.appendChild(th);
+            return th;
         });
 
         const body = table.createTBody();
+        this.rowHeadNodes = [];
         model.rows.forEach((row, rowIndex) => {
             const tr = body.insertRow();
+            tr.dataset.row = String(rowIndex);
             const label = document.createElement('th');
             label.scope = 'row';
             label.className = 'review-table__row-head';
-            label.textContent = row.label;
             tr.appendChild(label);
+            this.rowHeadNodes.push(label);
             const nodes = model.columns.map((column, columnIndex) => {
                 const td = tr.insertCell();
                 td.className = 'review-table__cell';
@@ -404,6 +591,7 @@ export class ReviewTable {
         });
 
         this.container.replaceChildren(table);
+        this._paintLabels();
         this.refresh();
         if (keep && keep.row < model.rows.length && keep.column < model.columns.length) {
             this._mark(keep.row, keep.column);
@@ -431,6 +619,16 @@ export class ReviewTable {
         }));
         this.issueCounts = { invalid, empty };
         this.onIssues(this.issueCounts);
+        this._reportCleared();
+    }
+
+    /** Tell the page which fields hold an emptied cell, to mark them on the scan. */
+    _reportCleared() {
+        const refs = [];
+        this.model.rows.forEach((row) => this.model.columns.forEach((column) => {
+            if (this.cleared.has(`${row.id}|${column.key}`)) refs.push(...(row.cells[column.key]?.refs ?? []));
+        }));
+        this.onCleared(refs);
     }
 
     _paint(rowIndex, columnIndex) {
@@ -439,12 +637,40 @@ export class ReviewTable {
         if (!td || !cell) return null;
         const value = String(this.valueOf(cell) ?? '');
         const problem = cellProblem(value, cell.column.type);
+        // A cell being typed in keeps its box; it is drawn again once closed.
+        if (td.classList.contains('is-editing')) return problem;
         td.textContent = value;
         td.classList.toggle('is-empty', problem?.kind === 'empty');
+        td.classList.toggle('is-cleared', problem?.kind === 'empty' && this.cleared.has(`${cell.row.id}|${cell.column.key}`));
         td.classList.toggle('is-invalid', problem?.kind === 'invalid');
         td.title = problem?.message ?? '';
         td.setAttribute('aria-invalid', String(Boolean(problem)));
         return problem;
+    }
+
+    _paintLabels() {
+        this.model.columns.forEach((column, columnIndex) => {
+            const th = this.headerNodes[columnIndex];
+            if (!th || th.classList.contains('is-renaming')) return;
+            const shown = this.headerOf(column);
+            const renamed = shown !== column.header;
+            th.textContent = shown;
+            th.classList.toggle('is-renamed', renamed);
+            th.title = renamed
+                ? `${shown} (was ${column.header}). Double-click to rename it in the downloads.`
+                : `${shown}. Double-click to rename it in the downloads.`;
+        });
+        this.model.rows.forEach((row, rowIndex) => {
+            const th = this.rowHeadNodes[rowIndex];
+            if (!th || th.classList.contains('is-renaming')) return;
+            const shown = this.rowLabelOf(row);
+            const renamed = shown !== row.label;
+            th.textContent = shown;
+            th.classList.toggle('is-renamed', renamed);
+            th.title = renamed
+                ? `Row ${shown} (was ${row.label}). Double-click to change it in the downloads.`
+                : 'Double-click to change this row number in the downloads.';
+        });
     }
 
     /** Pick the cell holding `ref` (a field picked on the scan); no locate, no edit. */
@@ -453,6 +679,7 @@ export class ReviewTable {
             for (let column = 0; column < this.model.columns.length; column += 1) {
                 if (this.cell(row, column).refs.includes(ref)) {
                     this._closeEditor(true);
+                    this.range = null;
                     this._mark(row, column);
                     this._scrollTo(row, column);
                     return true;
@@ -483,11 +710,39 @@ export class ReviewTable {
     /** Pick a cell and show it on the scan; `edit` opens it for typing. */
     select(row, column, { edit = false, locate = true } = {}) {
         this._closeEditor(true);
+        this.range = null;
         if (!this._mark(row, column)) return;
         this._scrollTo(row, column);
         if (locate) this.onLocate(this.cell(row, column));
         if (edit) this.edit();
         else this.cellNodes[row][column].focus({ preventScroll: true });
+    }
+
+    /** The picked rows of the active cell's column, top first (just the active one when one is picked). */
+    selectedRows() {
+        if (!this.active) return [];
+        const range = this.range;
+        if (!range || range.column !== this.active.column) return [this.active.row];
+        return rowSpan(range.anchor, range.focus);
+    }
+
+    /** Pick from the active cell down or up its column to `row`. */
+    _extendTo(row) {
+        if (!this.active) return;
+        const focus = Math.min(this.model.rows.length - 1, Math.max(0, row));
+        this.range = focus === this.active.row ? null : { column: this.active.column, anchor: this.active.row, focus };
+        this._showRange();
+        this._scrollTo(focus, this.active.column);
+    }
+
+    _showRange() {
+        const rows = new Set(this.selectedRows());
+        const column = this.active?.column;
+        this.container.querySelectorAll('.review-table__cell.is-selected').forEach((node) => node.classList.remove('is-selected'));
+        if (rows.size > 1) {
+            rows.forEach((row) => this.cellNodes[row]?.[column]?.classList.add('is-selected'));
+        }
+        this.onRange(rows.size > 1 ? [...rows].map((row) => this.cell(row, column)).filter(Boolean) : []);
     }
 
     _mark(row, column) {
@@ -498,6 +753,7 @@ export class ReviewTable {
         td.classList.add('is-active');
         td.parentElement?.classList.add('is-active');
         this.active = { row, column };
+        this._showRange();
         return true;
     }
 
@@ -518,45 +774,33 @@ export class ReviewTable {
         else if (right > box.scrollLeft + box.clientWidth) box.scrollLeft = right - box.clientWidth;
     }
 
-    /** Open the picked cell for typing; `typed` starts it with that text (a key pressed on it). */
+    /**
+     * Open the picked cell for typing; `typed` starts it with that text (a key
+     * pressed on it). With several cells picked, the box opens on the top one,
+     * starting from its value, and what is confirmed goes into every one.
+     */
     edit(typed = null) {
         if (!this.active || this.editor) return;
-        const { row, column } = this.active;
+        const rows = this.selectedRows();
+        const row = rows[0];
+        const { column } = this.active;
         const td = this.cellNodes[row][column];
         const cell = this.cell(row, column);
         const original = String(this.valueOf(cell) ?? '');
         const type = cell.column.type;
-        let input;
-
-        if (type.input === 'select') {
-            input = document.createElement('select');
-            input.className = 'form-select form-select-sm review-table__editor';
-            const choices = ['', ...type.options];
-            const start = selectStart(typed ?? original, type.options);
-            // A value that is none of the choices stays on offer, so Esc or Enter keeps it.
-            if (original.trim() !== '' && !type.options.includes(original.trim())) choices.splice(1, 0, original);
-            choices.forEach((choice) => {
-                const option = document.createElement('option');
-                option.value = choice;
-                option.textContent = choice === '' ? '—' : choice === original && !type.options.includes(choice)
-                    ? `${choice} (as read)` : choice;
-                input.appendChild(option);
-            });
-            input.value = start || (original.trim() === '' ? '' : original);
-            // Picked with the mouse: confirmed at once.
-            input.addEventListener('change', () => {
-                if (this.editor?.input === input && !this.editor.keyed) this._closeEditor(true);
-            });
-        } else {
-            input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'form-control form-control-sm review-table__editor';
-            input.maxLength = 2000;
-            input.autocomplete = 'off';
-            input.spellcheck = false;
-            input.value = typed ?? original;
-        }
-        input.setAttribute('aria-label', `${cell.row.label}, ${cell.column.header}`);
+        // Every column is typed into, choices too (Sex): a typed value that
+        // stands for one of them is saved as it ("m" -> M), and any other is
+        // shown as invalid, as a value read wrong is.
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'form-control form-control-sm review-table__editor';
+        input.maxLength = 2000;
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        input.value = typed ?? original;
+        input.setAttribute('aria-label', rows.length > 1
+            ? `${rows.length} cells of ${this.headerOf(cell.column)}`
+            : `${this.rowLabelOf(cell.row)}, ${this.headerOf(cell.column)}`);
         input.addEventListener('blur', () => {
             // Clicking elsewhere confirms, as in a spreadsheet.
             window.setTimeout(() => {
@@ -564,14 +808,16 @@ export class ReviewTable {
             }, 0);
         });
 
-        this.editor = { input, row, column, original, keyed: false };
+        this.editor = { input, row, column, rows, original };
+        // The box fills the cell as it is: the column and row do not grow.
+        const size = td.getBoundingClientRect();
+        td.style.inlineSize = td.style.minInlineSize = td.style.maxInlineSize = `${size.width}px`;
+        td.style.blockSize = `${size.height}px`;
         td.classList.add('is-editing');
         td.replaceChildren(input);
         input.focus({ preventScroll: true });
-        if (input instanceof HTMLInputElement) {
-            const end = input.value.length;
-            input.setSelectionRange(end, end);
-        }
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
     }
 
     /** Keep what is being typed (before a save, an export or leaving the table). */
@@ -579,29 +825,256 @@ export class ReviewTable {
         this._closeEditor(true);
     }
 
-    /** Close the editor: `commit` keeps the typed value, otherwise it is dropped. */
+    /** Close the editor: `commit` keeps the typed value (in every picked cell), otherwise it is dropped. */
     _closeEditor(commit) {
         const editor = this.editor;
         if (!editor) return;
         this.editor = null;
         const td = this.cellNodes[editor.row]?.[editor.column];
         td?.classList.remove('is-editing');
-        const value = editor.input.value;
-        if (commit && value !== editor.original) {
-            this.onChange(this.cell(editor.row, editor.column), value);
+        ['inline-size', 'min-inline-size', 'max-inline-size', 'block-size'].forEach((name) => td?.style.removeProperty(name));
+        const options = this.model.columns[editor.column]?.type.options;
+        const typed = editor.input.value;
+        const value = options ? (selectStart(typed, options) || typed) : typed;
+        // One cell: changed only when its value was. Several: each that differs.
+        if (commit && (editor.rows.length > 1 || value !== editor.original)) {
+            this._apply(editor.rows.map((row) => ({ row, column: editor.column, value })));
         }
         this.refresh();
     }
 
+    /** Set cells ([{ row, column, value }]) as one change Ctrl+Z can take back. */
+    _apply(changes) {
+        const cells = [];
+        changes.forEach(({ row, column, value }) => {
+            const cell = this.cell(row, column);
+            if (!cell) return;
+            const before = String(this.valueOf(cell) ?? '');
+            if (before === value) return;
+            cells.push({ rowId: cell.row.id, columnKey: cell.column.key, before, after: value, snapshot: this.snapshotOf(cell) });
+            this._markCleared(cell, value, before);
+            this.onChange(cell, value);
+        });
+        if (cells.length > 0) this._remember({ cells });
+        // A change ends the "copied" mark, except the cut that makes it (set again by _copy).
+        if (cells.length > 0) this._showCopied(null);
+        this.refresh();
+        return cells.length;
+    }
+
+    /** A cell emptied by the reviewer is remembered (red); one given a value, or that was empty already, is not. */
+    _markCleared(cell, value, before) {
+        const key = `${cell.row.id}|${cell.column.key}`;
+        if (String(value).trim() === '' && String(before).trim() !== '') this.cleared.add(key);
+        else this.cleared.delete(key);
+    }
+
+    /** A new change: Ctrl+Z can take it back, and what was undone can no longer be done again. */
+    _remember(change) {
+        this.history.push(change);
+        if (this.history.length > 200) this.history.shift();
+        this.redoList = [];
+    }
+
+    /** Take back the last change: a cell, every cell of an edit of several, or a renamed label. */
+    undo() {
+        const change = this.history.pop();
+        if (!change) return false;
+        this._replay(change, false);
+        this.redoList.push(change);
+        return true;
+    }
+
+    /** Make the last undone change again. */
+    redo() {
+        const change = this.redoList.pop();
+        if (!change) return false;
+        this._replay(change, true);
+        this.history.push(change);
+        return true;
+    }
+
+    /** Put a change's cells or label back as they were (`forward` false), or as it made them. */
+    _replay(change, forward) {
+        if (change.label) {
+            const names = change.label === 'header' ? this.headerNames : this.rowNames;
+            const name = forward ? change.after : change.before;
+            if (name === null) names.delete(change.key);
+            else names.set(change.key, name);
+            this._paintLabels();
+            return;
+        }
+
+        const places = [];
+        change.cells.forEach((entry) => {
+            const row = this.model.rows.findIndex((candidate) => candidate.id === entry.rowId);
+            const column = this.model.columns.findIndex((candidate) => candidate.key === entry.columnKey);
+            if (row < 0 || column < 0) return;
+            const cell = this.cell(row, column);
+            if (forward) {
+                // What the redo alters is kept again, for the next Ctrl+Z.
+                entry.snapshot = this.snapshotOf(cell);
+                this._markCleared(cell, entry.after, entry.before);
+                this.onChange(cell, entry.after);
+            } else {
+                this.cleared.delete(`${cell.row.id}|${cell.column.key}`);
+                this.onChange(cell, entry.before);
+                this.restore(cell, entry.snapshot);
+            }
+            places.push({ row, column });
+        });
+        this.refresh();
+        if (places.length > 0) {
+            // The cells it touched are picked again, to see them.
+            const rows = places.map((place) => place.row);
+            const top = Math.min(...rows);
+            const bottom = Math.max(...rows);
+            this.select(top, places[0].column, { locate: false });
+            if (bottom > top && places.every((place) => place.column === places[0].column)) this._extendTo(bottom);
+        }
+    }
+
     _pointerDown(event) {
+        if (event.button !== 0) return;
         const td = event.target instanceof Element ? event.target.closest('.review-table__cell') : null;
-        if (!td || td.classList.contains('is-editing')) return;
+        if (!td) return;
+        const row = Number(td.dataset.row);
+        const column = Number(td.dataset.column);
+
+        // In the open typing box a press places the cursor as usual; dragged out of
+        // it down or up the column, the box is confirmed and the cells are picked.
+        if (td.classList.contains('is-editing')) {
+            this._followDrag(row, column, false);
+            return;
+        }
         event.preventDefault();
-        this.select(Number(td.dataset.row), Number(td.dataset.column), { edit: true });
+
+        // Shift+click down or up the picked cell's column: those cells too.
+        if (event.shiftKey && this.active && this.active.column === column) {
+            this._closeEditor(true);
+            this._extendTo(row);
+            this.cellNodes[this.active.row][column].focus({ preventScroll: true });
+            return;
+        }
+
+        this.select(row, column);
+        // A click opens the cell for typing; a drag down or up the column picks cells.
+        this._followDrag(row, column, true);
+    }
+
+    /** Follow the pointer until it is let go: down or up the column picks cells; `openOnClick` types on a plain click. */
+    _followDrag(row, column, openOnClick) {
+        const drag = { column, moved: false };
+        this.drag = drag;
+        const move = (moveEvent) => this._dragMove(moveEvent, drag);
+        const end = () => {
+            document.removeEventListener('pointermove', move);
+            document.removeEventListener('pointerup', end);
+            document.removeEventListener('pointercancel', end);
+            if (this.drag === drag) this.drag = null;
+            if (openOnClick && !drag.moved && this.active?.row === row && this.active?.column === column) this.edit();
+        };
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', end);
+        document.addEventListener('pointercancel', end);
+    }
+
+    _dragMove(event, drag) {
+        if (!this.active) return;
+        const box = this.container.getBoundingClientRect();
+        const headHeight = this.container.querySelector('thead')?.offsetHeight ?? 0;
+        // Near the top or bottom edge, the table scrolls on.
+        if (event.clientY > box.bottom - 24) this.container.scrollTop += 18;
+        else if (event.clientY < box.top + headHeight + 24) this.container.scrollTop -= 18;
+
+        // Only down or up the column the drag began in, wherever the pointer is sideways.
+        const anchor = this.cellNodes[this.active.row]?.[drag.column]?.getBoundingClientRect();
+        if (!anchor) return;
+        const x = Math.min(box.right - 2, Math.max(box.left + 2, anchor.left + anchor.width / 2));
+        const y = Math.min(box.bottom - 2, Math.max(box.top + headHeight + 2, event.clientY));
+        const hit = document.elementFromPoint(x, y)?.closest?.('.review-table__cell');
+        if (!hit || Number(hit.dataset.column) !== drag.column) return;
+        const row = Number(hit.dataset.row);
+        if (row === this.active.row && !drag.moved) return;
+        if (!drag.moved) {
+            drag.moved = true;
+            // Began in the open typing box: what was typed is kept, and the box closes.
+            if (this.editor) {
+                this._closeEditor(true);
+                window.getSelection()?.removeAllRanges();
+                this.cellNodes[this.active.row]?.[drag.column]?.focus({ preventScroll: true });
+            }
+        }
+        this._extendTo(row);
+    }
+
+    _doubleClick(event) {
+        const th = event.target instanceof Element ? event.target.closest('th') : null;
+        if (!th || !this.container.contains(th) || th.classList.contains('is-renaming')) return;
+        if (th.closest('thead')) {
+            if (th.dataset.column === undefined) return;
+            const column = this.model.columns[Number(th.dataset.column)];
+            if (column) this._renameLabel(th, this.headerOf(column), (name) => {
+                this._rename(this.headerNames, 'header', column.key, name === '' || name === column.header ? null : name);
+            });
+            return;
+        }
+        const tr = th.closest('tr');
+        const row = tr ? this.model.rows[Number(tr.dataset.row)] : null;
+        if (row) this._renameLabel(th, this.rowLabelOf(row), (name) => {
+            this._rename(this.rowNames, 'row', row.id, name === '' || name === row.label ? null : name);
+        });
+    }
+
+    /** A label renamed (`name` null: back to the original), as a change Ctrl+Z can take back. */
+    _rename(names, label, key, name) {
+        const before = names.get(key) ?? null;
+        if (before === name) return;
+        if (name === null) names.delete(key);
+        else names.set(key, name);
+        this._remember({ label, key, before, after: name });
+    }
+
+    /** A header or row number typed over in place: Enter keeps it, Esc drops it, empty puts the old one back. */
+    _renameLabel(th, current, keep) {
+        this._closeEditor(true);
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'form-control form-control-sm review-table__label-editor';
+        input.maxLength = 120;
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        input.value = current;
+        input.setAttribute('aria-label', 'New name for the downloads');
+        let done = false;
+        const finish = (save) => {
+            if (done) return;
+            done = true;
+            if (save) keep(input.value.trim());
+            th.classList.remove('is-renaming');
+            this._paintLabels();
+            if (this.active) this.cellNodes[this.active.row]?.[this.active.column]?.focus({ preventScroll: true });
+        };
+        input.addEventListener('keydown', (event) => {
+            event.stopPropagation();
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                finish(true);
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                finish(false);
+            }
+        });
+        input.addEventListener('blur', () => finish(true));
+        th.classList.add('is-renaming');
+        th.replaceChildren(input);
+        input.focus();
+        input.select();
     }
 
     _keyDown(event) {
         if (!this.active) return;
+        if (event.target instanceof Element && event.target.closest('.review-table__label-editor')) return;
         const { row, column } = this.active;
         const rows = this.model.rows.length;
         const columns = this.model.columns.length;
@@ -610,25 +1083,43 @@ export class ReviewTable {
             if (event.key === 'Escape') {
                 event.preventDefault();
                 event.stopPropagation();
+                const at = this.editor;
                 this._closeEditor(false);
-                this.cellNodes[row][column].focus({ preventScroll: true });
+                this.cellNodes[at.row][at.column].focus({ preventScroll: true });
                 return;
             }
             if (event.key === 'Enter' || event.key === 'Tab') {
                 event.preventDefault();
                 event.stopPropagation();
-                this.editor.keyed = true;
+                const several = this.editor.rows.length > 1;
                 this._closeEditor(true);
+                // Several cells changed with Enter stay picked, to see them.
+                if (several && event.key === 'Enter') {
+                    this.cellNodes[row][column].focus({ preventScroll: true });
+                    return;
+                }
                 const next = nextCellPosition(this.active, event.key, event.shiftKey, rows, columns);
                 this.select(next.row, next.column);
                 return;
             }
-            // A select's arrows change its choice; mark it keyed so change waits for Enter.
-            if (this.editor.input instanceof HTMLSelectElement) this.editor.keyed = true;
             return;
         }
 
+        // Here, Ctrl+Z and Ctrl+Y belong to the table (not to the page's other tools).
+        if (this._undoKey(event)) return;
         if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+            event.preventDefault();
+            event.stopPropagation();
+            this._apply(this.selectedRows().map((picked) => ({ row: picked, column, value: '' })));
+            return;
+        }
+        if (event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+            event.preventDefault();
+            const focus = this.range && this.range.column === column ? this.range.focus : row;
+            this._extendTo(focus + (event.key === 'ArrowDown' ? 1 : -1));
+            return;
+        }
         if (['Enter', 'F2'].includes(event.key) && !event.shiftKey) {
             event.preventDefault();
             this.edit();
@@ -640,7 +1131,22 @@ export class ReviewTable {
             this.select(next.row, next.column);
             return;
         }
-        if (event.key === 'Escape') return;
+        if (event.key === 'Escape') {
+            // The copied mark goes first; then several picked cells go back to the one.
+            if (this.copied) {
+                event.preventDefault();
+                event.stopPropagation();
+                this._showCopied(null);
+                return;
+            }
+            if (this.range) {
+                event.preventDefault();
+                event.stopPropagation();
+                this.range = null;
+                this._showRange();
+            }
+            return;
+        }
         // Typing on a picked cell replaces its value, as in a spreadsheet.
         if (event.key.length === 1) {
             event.preventDefault();
@@ -648,11 +1154,11 @@ export class ReviewTable {
         }
     }
 
-    /** [header, ...rows] of what the table shows now, for the files. */
+    /** [header, ...rows] of what the table shows now, for the files (with any renamed labels). */
     exportTable() {
-        const header = ['Row', ...this.model.columns.map((column) => column.header)];
+        const header = ['Row', ...this.model.columns.map((column) => this.headerOf(column))];
         const rows = this.model.rows.map((row, rowIndex) => [
-            row.label,
+            this.rowLabelOf(row),
             ...this.model.columns.map((_, columnIndex) => String(this.valueOf(this.cell(rowIndex, columnIndex)) ?? '')),
         ]);
         return [header, ...rows];

@@ -528,6 +528,13 @@
                                         title="Pick fields on the page or in the list, then group them as a new person">
                                     <i class="icon-base bx bx-group icon-sm me-1" aria-hidden="true"></i><span>Group fields</span>
                                 </button>
+                                {{-- Review & Export only: the field outlines off, to read the writing under them.
+                                     The picked field and its row stay shown. --}}
+                                <div class="form-check form-switch marker-grid-toggle review-grid-toggle"
+                                     title="Show or hide the field outlines over the page. The picked field and its row stay shown.">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="reviewGridToggle" checked>
+                                    <label class="form-check-label" for="reviewGridToggle">Grid</label>
+                                </div>
                                 <div class="btn-group marker-zoom-controls" role="group"
                                     aria-label="Original document zoom controls">
                                     <button type="button"
@@ -791,20 +798,28 @@
                                 <i class="icon-base bx bx-error icon-sm me-1" aria-hidden="true"></i>
                                 <span id="reviewIssuesLabel">No issues</span>
                             </button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" id="reviewExportCsv">
-                                <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>CSV
-                            </button>
-                            <button type="button" class="btn btn-sm btn-outline-primary" id="reviewExportXlsx">
-                                <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>
-                                <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>Excel
-                            </button>
+                            @include('records.partials.review-shortcuts')
+                            <div class="dropdown">
+                                <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="reviewDownloadBtn"
+                                        data-bs-toggle="dropdown" aria-expanded="false">
+                                    <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                                    <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>Download
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="reviewDownloadBtn">
+                                    <li>
+                                        <button type="button" class="dropdown-item" id="reviewExportCsv">
+                                            <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button type="button" class="dropdown-item" id="reviewExportXlsx">
+                                            <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)
+                                        </button>
+                                    </li>
+                                </ul>
+                            </div>
                         </div>
                     </header>
-
-                    <div class="review-pane__notes">
-                        <span><i class="icon-base bx bx-pointer" aria-hidden="true"></i>Click a cell to edit it and see it on the scan.
-                            <kbd>Enter</kbd> or <kbd>Tab</kbd> confirms and moves on, <kbd>Esc</kbd> cancels.</span>
-                    </div>
 
                     <div class="review-table-scroll" id="reviewTable"></div>
 
@@ -1413,6 +1428,16 @@
             setPicked(indexes) {
                 const parts = splitBySide(indexes);
                 verifyOverlays.forEach((overlay, side) => overlay.setPicked(parts[side]));
+            },
+            // Review & Export: fields whose cell was emptied.
+            setCleared(indexes) {
+                const parts = splitBySide(indexes);
+                verifyOverlays.forEach((overlay, side) => overlay.setCleared(parts[side]));
+            },
+            // Review & Export: fields of several cells picked together.
+            setRange(indexes) {
+                const parts = splitBySide(indexes);
+                verifyOverlays.forEach((overlay, side) => overlay.setRange(parts[side]));
             },
             beginEdit(index, mode) {
                 const { side, local } = verifySideOf(index);
@@ -6820,6 +6845,7 @@
             // A new scan: nothing typed in Review & Export yet.
             reviewExtras.clear();
             reviewModel = null;
+            reviewTable?.reset();
             stopAddingMissedField();
         stopGroupingFields();
             target.width = source.width;
@@ -6892,6 +6918,7 @@
             activeValidationIndex = null;
             reviewExtras.clear();
             reviewModel = null;
+            reviewTable?.reset();
             stopAddingMissedField();
             stopGroupingFields();
             cancelOutlineEdit();
@@ -9377,6 +9404,11 @@
                 verifyGrid.prepend(pane);
                 verifyGrid.before(...notices);
             }
+            // Here the picked field's outline turns into a box (a rectangle); in Verify it stays traced.
+            verifyOverlays.forEach((overlay) => {
+                overlay.setBoxCurrent(on);
+                if (!on) { overlay.setRange([]); overlay.setCleared([]); }
+            });
             // The pane changed width: fit the page to it.
             window.requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
         }
@@ -9444,6 +9476,19 @@
                 validationRow(index)?.classList.add('is-verified');
             }
             clearValidationFieldError(index);
+        }
+
+        /** Verify's ticks of a cell's fields as they were before a change (Ctrl+Z). */
+        function restoreReviewTicks(cell, ticks) {
+            if (!Array.isArray(ticks)) return;
+            cell.refs.forEach((index, position) => {
+                const checkbox = verifyTickOf(index);
+                if (!checkbox || ticks[position] === null || checkbox.checked === ticks[position]) return;
+                checkbox.checked = ticks[position];
+                // Verify's own reaction: the row, its outline and the count.
+                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+            updateVerificationSummary();
         }
 
         function reviewChange(cell, value) {
@@ -9574,13 +9619,24 @@
             reviewModel.rows.forEach((row) => reviewModel.columns.forEach((column) => {
                 if ((row.cells[column.key]?.refs.length ?? 0) > 0) reviewExtras.delete(`${row.id}|${column.key}`);
             }));
-            reviewTable ??= new ReviewTable({
-                container: el('reviewTable'),
-                valueOf: reviewValue,
-                onChange: reviewChange,
-                onLocate: locateReviewCell,
-                onIssues: showReviewIssues,
-            });
+            if (!reviewTable) {
+                reviewTable = new ReviewTable({
+                    container: el('reviewTable'),
+                    valueOf: reviewValue,
+                    onChange: reviewChange,
+                    onLocate: locateReviewCell,
+                    onIssues: showReviewIssues,
+                    // An edit ticks Verified; Ctrl+Z puts each tick back as it was.
+                    snapshotOf: (cell) => cell.refs.map((index) => verifyTickOf(index)?.checked ?? null),
+                    restore: restoreReviewTicks,
+                    // Cells dragged together show on the scan as well.
+                    onRange: (cells) => lineOverlay.setRange(cells.flatMap((cell) => cell.refs)),
+                    // Emptied cells show red on the scan as well.
+                    onCleared: (refs) => lineOverlay.setCleared(reviewing ? refs : []),
+                });
+                // Ctrl+Z / Ctrl+Y after a click on the scan or elsewhere on this step.
+                reviewTable.listenForUndoKeys(() => reviewing);
+            }
 
             showStep('review');
             reviewTable.render(reviewModel);
@@ -9614,6 +9670,10 @@
             if (activeValidationIndex !== null) revealValidationRow(activeValidationIndex);
         });
         el('reviewIssuesBtn').addEventListener('click', () => reviewTable?.nextIssue());
+        // Grid off: the scan without its field outlines (the picked field and its row stay).
+        el('reviewGridToggle').addEventListener('change', (event) => {
+            document.querySelector('.validation-document-pane')?.classList.toggle('is-grid-hidden', !event.target.checked);
+        });
 
         attachSplit({
             split: el('reviewGrid'),
@@ -9639,7 +9699,8 @@
         el('reviewExportXlsx').addEventListener('click', async () => {
             if (!reviewTable) return;
             reviewTable.commit();
-            const button = el('reviewExportXlsx');
+            // The spinner shows on the Download button (the menu closes on the click).
+            const button = el('reviewDownloadBtn');
             const spinner = button.querySelector('.spinner-border');
             button.disabled = true;
             spinner?.classList.remove('d-none');

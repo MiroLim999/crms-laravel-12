@@ -12,12 +12,14 @@ import {
     verificationItems,
 } from '../../resources/js/line-geometry.js';
 import {
+    boxOfPolygon,
     dragBounds,
     handlePoint,
     offsetPolygon,
     polygonBounds,
     polygonPoints,
     rectanglePolygon,
+    resamplePolygon,
     scalePolygon,
 } from '../../resources/js/line-overlay.js';
 
@@ -361,4 +363,27 @@ test('an adjusted line is marked as such for the overlay', () => {
     const [item] = verificationItems([line({ adjusted: true })], page);
     assert.equal(item.adjusted, true);
     assert.equal(verificationItems([line()], page)[0].adjusted, false);
+});
+
+test('an outline and its box are sampled alike, so one can turn smoothly into the other', () => {
+    // A slanted outline, drawn anticlockwise on screen.
+    const outline = [[10, 30], [110, 22], [112, 8], [12, 16]];
+    const samples = resamplePolygon(outline, 40);
+    assert.equal(samples.length, 40);
+    // Starts at the point nearest the top-left corner, then runs clockwise (along the top first).
+    assert.deepEqual(samples[0], [12, 16]);
+    assert.ok(samples[1][0] > samples[0][0]);
+
+    const box = boxOfPolygon(outline, 40);
+    assert.equal(box.length, 40);
+    assert.deepEqual(box[0], [10, 8]);
+    // Every point of the box lies on the rectangle round the outline.
+    box.forEach(([x, y]) => {
+        const onSide = x === 10 || x === 112 || y === 8 || y === 30;
+        assert.ok(onSide && x >= 10 && x <= 112 && y >= 8 && y <= 30, `${x},${y}`);
+    });
+    // The corners are among them.
+    [[10, 8], [112, 8], [112, 30], [10, 30]].forEach((corner) => {
+        assert.ok(box.some(([x, y]) => Math.hypot(x - corner[0], y - corner[1]) < 6), `near ${corner}`);
+    });
 });

@@ -73,21 +73,28 @@
                             <i class="icon-base bx bx-error icon-sm me-1" aria-hidden="true"></i>
                             <span id="reviewIssuesLabel">No issues</span>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-primary" id="reviewExportCsv">
-                            <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>CSV
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-primary" id="reviewExportXlsx">
-                            <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>
-                            <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>Excel
-                        </button>
+                        @include('records.partials.review-shortcuts', ['savedRecord' => true])
+                        <div class="dropdown">
+                            <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="reviewDownloadBtn"
+                                    data-bs-toggle="dropdown" aria-expanded="false">
+                                <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                                <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>Download
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="reviewDownloadBtn">
+                                <li>
+                                    <button type="button" class="dropdown-item" id="reviewExportCsv">
+                                        <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)
+                                    </button>
+                                </li>
+                                <li>
+                                    <button type="button" class="dropdown-item" id="reviewExportXlsx">
+                                        <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)
+                                    </button>
+                                </li>
+                            </ul>
+                        </div>
                     </div>
                 </header>
-
-                <div class="review-pane__notes">
-                    <span><i class="icon-base bx bx-pointer" aria-hidden="true"></i>Click a cell to edit it and see it on the scan.
-                        <kbd>Enter</kbd> or <kbd>Tab</kbd> confirms and moves on, <kbd>Esc</kbd> cancels.</span>
-                    <span>Save writes each old and new value to the audit log.</span>
-                </div>
 
                 <div class="review-table-scroll" id="reviewTable"></div>
 

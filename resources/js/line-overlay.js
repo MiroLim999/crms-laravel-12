@@ -48,6 +48,70 @@ export function rectanglePolygon(x0, y0, x1, y1) {
     return [[left, top], [right, top], [right, bottom], [left, bottom]];
 }
 
+/** Twice a closed polygon's area: positive when it runs clockwise on screen (y down). */
+function signedArea(polygon) {
+    return polygon.reduce((sum, [x, y], index) => {
+        const [nextX, nextY] = polygon[(index + 1) % polygon.length];
+        return sum + x * nextY - nextX * y;
+    }, 0);
+}
+
+/**
+ * `count` points spread evenly round a closed polygon's edge, clockwise on
+ * screen, from the point nearest its box's top-left corner. Two outlines
+ * sampled alike can be blended point by point (an outline turning into its box).
+ */
+export function resamplePolygon(polygon, count) {
+    let points = polygon.map(([x, y]) => [x, y]);
+    if (points.length < 2) return Array.from({ length: count }, () => [...(points[0] ?? [0, 0])]);
+    if (signedArea(points) < 0) points.reverse();
+    const bounds = polygonBounds(points);
+    let start = 0;
+    points.forEach(([x, y], index) => {
+        const [startX, startY] = points[start];
+        if ((x - bounds.left) ** 2 + (y - bounds.top) ** 2 < (startX - bounds.left) ** 2 + (startY - bounds.top) ** 2) start = index;
+    });
+    points = [...points.slice(start), ...points.slice(0, start)];
+
+    const lengths = points.map(([x, y], index) => {
+        const [nextX, nextY] = points[(index + 1) % points.length];
+        return Math.hypot(nextX - x, nextY - y);
+    });
+    const total = lengths.reduce((sum, length) => sum + length, 0);
+    if (total === 0) return Array.from({ length: count }, () => [...points[0]]);
+
+    const samples = [];
+    let edge = 0;
+    let walked = 0;
+    for (let step = 0; step < count; step += 1) {
+        const target = (step / count) * total;
+        while (edge < points.length - 1 && walked + lengths[edge] < target) {
+            walked += lengths[edge];
+            edge += 1;
+        }
+        const [x, y] = points[edge];
+        const [nextX, nextY] = points[(edge + 1) % points.length];
+        const t = lengths[edge] > 0 ? (target - walked) / lengths[edge] : 0;
+        samples.push([x + (nextX - x) * t, y + (nextY - y) * t]);
+    }
+    return samples;
+}
+
+/** The rectangle round an outline: its four corners. */
+export function polygonBox(polygon) {
+    const { left, top, right, bottom } = polygonBounds(polygon);
+    return rectanglePolygon(left, top, right, bottom);
+}
+
+/** The rectangle round an outline, sampled as resamplePolygon samples the outline. */
+export function boxOfPolygon(polygon, count) {
+    return resamplePolygon(polygonBox(polygon), count);
+}
+
+// An outline turning into its box (and back): how finely, and how fast.
+const MORPH_POINTS = 96;
+const MORPH_MS = 220;
+
 // A traced outline keeps a point every few screen pixels; the server takes
 // up to 2000, and this leaves room.
 const MAX_DRAWN_POINTS = 1500;
@@ -214,6 +278,9 @@ export class LineOverlay {
         this.height = Math.max(1, page.height);
         this.root.setAttribute('viewBox', `0 0 ${this.width} ${this.height}`);
         this.lines = lines;
+        this._stopMorphs();
+        this.boxed = new Set();
+        this.rangeIndexes = new Set();
         this.linesLayer.replaceChildren();
         // Rebuilt before any line is drawn, so a re-render never paints onto
         // the previous render's detached elements.
@@ -316,6 +383,35 @@ export class LineOverlay {
         if (currentIndex !== null && this.groups[currentIndex]) {
             this.linesLayer.appendChild(this.groups[currentIndex]);
         }
+        this.currentIndex = currentIndex;
+        this._syncBoxes();
+    }
+
+    /**
+     * Show the current line as its box (a rectangle) instead of its traced
+     * outline; the outline turns smoothly into the box, and back when another
+     * line is picked or this is turned off. Review & Export turns it on.
+     */
+    setBoxCurrent(on) {
+        this.boxCurrent = Boolean(on);
+        this._syncBoxes();
+    }
+
+    /** Lines whose value the reviewer emptied (Review & Export): marked is-cleared, drawn red. */
+    setCleared(indexes) {
+        const cleared = new Set(indexes);
+        this.groups?.forEach((group, index) => group.classList.toggle('is-cleared', cleared.has(index)));
+    }
+
+    /**
+     * Lines picked together (several cells of a column in Review & Export):
+     * each is marked is-ranged and, with setBoxCurrent on, shown as its box
+     * like the current line.
+     */
+    setRange(indexes) {
+        this.rangeIndexes = new Set(indexes);
+        this.groups?.forEach((group, index) => group.classList.toggle('is-ranged', this.rangeIndexes.has(index)));
+        this._syncBoxes();
     }
 
     setVerified(index, verified) {
@@ -527,7 +623,10 @@ export class LineOverlay {
         group.classList.toggle('is-unsaved', Boolean(line.unsaved));
         // A crop deleted in Verify is off the page until it is drawn again.
         group.classList.toggle('is-crop-deleted', Boolean(line.cropDeleted));
-        group.querySelector('.line-marker__shape').setAttribute('points', polygonPoints(line.polygon));
+        this._stopMorph(index);
+        group.querySelector('.line-marker__shape').setAttribute('points', polygonPoints(
+            this.boxed?.has(index) ? polygonBox(line.polygon) : line.polygon,
+        ));
         group.querySelector('.line-adjusted-mark')?.remove();
 
         if (line.adjusted) {
@@ -545,6 +644,74 @@ export class LineOverlay {
             mark.textContent = '✎';
             group.appendChild(mark);
         }
+    }
+
+    /** The lines shown as boxes are the current one and the picked range: others turn back into their outlines, new ones into boxes. */
+    _syncBoxes() {
+        const want = new Set();
+        if (this.boxCurrent) {
+            if (Number.isInteger(this.currentIndex)) want.add(this.currentIndex);
+            this.rangeIndexes?.forEach((index) => want.add(index));
+        }
+        [...(this.boxed ?? [])].filter((index) => !want.has(index)).forEach((index) => {
+            this.boxed.delete(index);
+            this._morph(index, false);
+        });
+        want.forEach((index) => {
+            if (!this.lines?.[index] || this.boxed.has(index)) return;
+            this.boxed.add(index);
+            this._morph(index, true);
+        });
+    }
+
+    /** Blend line `index` between its outline and its box; ends on the exact shape. */
+    _morph(index, toBox) {
+        const line = this.lines?.[index];
+        const shape = this.groups?.[index]?.querySelector('.line-marker__shape');
+        if (!line || !shape || !Array.isArray(line.polygon) || line.polygon.length < 3) return;
+        const outline = resamplePolygon(line.polygon, MORPH_POINTS);
+        const box = boxOfPolygon(line.polygon, MORPH_POINTS);
+        const running = this.morphs?.get(index);
+        const from = running?.points ?? (toBox ? outline : box);
+        const to = toBox ? box : outline;
+        // The blend ends on the exact shape: the box's four corners, or the outline as traced.
+        const finish = () => shape.setAttribute('points', polygonPoints(toBox ? polygonBox(line.polygon) : line.polygon));
+        this._stopMorph(index);
+
+        const still = typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (still || typeof window.requestAnimationFrame !== 'function') {
+            finish();
+            return;
+        }
+        this.morphs ??= new Map();
+        const morph = { points: from, frame: 0 };
+        const started = performance.now();
+        const step = (now) => {
+            const t = Math.min(1, (now - started) / MORPH_MS);
+            const eased = 1 - (1 - t) ** 3;
+            morph.points = from.map(([x, y], point) => [x + (to[point][0] - x) * eased, y + (to[point][1] - y) * eased]);
+            shape.setAttribute('points', polygonPoints(morph.points));
+            if (t < 1) {
+                morph.frame = window.requestAnimationFrame(step);
+            } else {
+                this.morphs.delete(index);
+                finish();
+            }
+        };
+        this.morphs.set(index, morph);
+        morph.frame = window.requestAnimationFrame(step);
+    }
+
+    _stopMorph(index) {
+        const morph = this.morphs?.get(index);
+        if (!morph) return;
+        window.cancelAnimationFrame(morph.frame);
+        this.morphs.delete(index);
+    }
+
+    _stopMorphs() {
+        [...(this.morphs?.keys() ?? [])].forEach((index) => this._stopMorph(index));
     }
 
     /** Tell the page how the drawing stands, and preview it from three points. */
