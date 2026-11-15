@@ -220,49 +220,70 @@ export const SPLIT_MIN = 20;
 export const SPLIT_MAX = 65;
 export const SPLIT_DEFAULT = 30;
 
-export function clampSplit(value, fallback = SPLIT_DEFAULT) {
+export function clampSplit(value, fallback = SPLIT_DEFAULT, min = SPLIT_MIN, max = SPLIT_MAX) {
     if (value === null || value === undefined || value === '') return fallback;
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return fallback;
     // Tenths of a percent: whole percents would make the bar jump under the pointer.
-    return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, Math.round(numeric * 10) / 10));
+    return Math.min(max, Math.max(min, Math.round(numeric * 10) / 10));
 }
 
 /**
- * Drag, arrow keys or Home/End on `splitter` set how much of `split` the scan
- * takes (CSS --review-scan-width); a double-click puts it back at 30%. The
- * width is remembered in this browser. `onResize` runs after every change.
+ * Drag, arrow keys or Home/End on `splitter` set how much of `split` the
+ * left-hand pane takes (the CSS custom property `property`); a double-click
+ * puts it back at its starting width. The width is not remembered: each
+ * visit (a refresh, or coming back from another page) starts at the starting
+ * width. `onResize` runs after every change.
+ *
+ * `initial` is the starting width in percent, or a function giving it (for a
+ * layout whose natural width depends on the screen or the page). Until the
+ * user drags, `refresh()` re-reads it, e.g. after the layout changed.
  */
-export function attachSplit({ split, splitter, storageKey = 'crms.review.scan-width', onResize = () => {} }) {
-    let percentage = SPLIT_DEFAULT;
+export function attachSplit({
+    split,
+    splitter,
+    onResize = () => {},
+    min = SPLIT_MIN,
+    max = SPLIT_MAX,
+    initial = SPLIT_DEFAULT,
+    property = '--review-scan-width',
+    describe = (left) => `Scan ${left}%, table ${100 - left}%`,
+}) {
+    const starting = () => clampSplit(typeof initial === 'function' ? initial() : initial, SPLIT_DEFAULT, min, max);
+    let percentage = starting();
+    // Set by the user on this visit (dragged, or keys): the starting width no longer applies.
+    let custom = false;
     let dragging = false;
     // Where on the bar it was grabbed, so it does not jump to the pointer.
     let grab = 0;
-    try {
-        percentage = clampSplit(window.localStorage.getItem(storageKey));
-    } catch {
-        // Storage may be blocked; the split still works for this visit.
-    }
 
-    const update = (next, persist = false) => {
-        percentage = clampSplit(next);
-        split.style.setProperty('--review-scan-width', `${percentage}%`);
+    const update = (next, byUser = false) => {
+        percentage = clampSplit(next, percentage, min, max);
+        split.style.setProperty(property, `${percentage}%`);
+        splitter.setAttribute('aria-valuemin', String(min));
+        splitter.setAttribute('aria-valuemax', String(max));
         splitter.setAttribute('aria-valuenow', String(Math.round(percentage)));
-        splitter.setAttribute('aria-valuetext', `Scan ${Math.round(percentage)}%, table ${100 - Math.round(percentage)}%`);
+        splitter.setAttribute('aria-valuetext', describe(Math.round(percentage)));
         onResize();
-        if (!persist) return;
-        try {
-            window.localStorage.setItem(storageKey, String(percentage));
-        } catch {
-            // Not remembered; nothing else depends on it.
-        }
+        if (byUser) custom = true;
+    };
+    /** Back to the starting width. */
+    const reset = () => {
+        custom = false;
+        update(starting());
     };
     const fromPointer = (event) => {
         const bounds = split.getBoundingClientRect();
-        if (bounds.width > 0) update(((event.clientX - grab - bounds.left) / bounds.width) * 100);
+        if (bounds.width <= 0) return;
+        // Dragged by the user from the first move: refresh() leaves it alone.
+        update(((event.clientX - grab - bounds.left) / bounds.width) * 100, true);
+        // The other pane may have a least width (CSS) that stops the bar short:
+        // keep the width where the bar really is, so dragging back moves it at once.
+        const shown = ((splitter.getBoundingClientRect().left - bounds.left) / bounds.width) * 100;
+        if (Number.isFinite(shown) && Math.abs(shown - percentage) > 0.5) update(shown, true);
     };
 
-    // A second press soon after the first, in the same place: back to 30%.
+    // A second press soon after the first, in the same place: back to the start.
     // (pointerdown's preventDefault keeps the browser from sending dblclick.)
     let lastPress = { time: 0, x: 0 };
     splitter.addEventListener('pointerdown', (event) => {
@@ -271,7 +292,7 @@ export function attachSplit({ split, splitter, storageKey = 'crms.review.scan-wi
         const now = event.timeStamp;
         if (now - lastPress.time < 400 && Math.abs(event.clientX - lastPress.x) < 6) {
             lastPress = { time: 0, x: 0 };
-            update(SPLIT_DEFAULT, true);
+            reset();
             return;
         }
         lastPress = { time: now, x: event.clientX };
@@ -297,8 +318,8 @@ export function attachSplit({ split, splitter, storageKey = 'crms.review.scan-wi
         const next = {
             ArrowLeft: percentage - step,
             ArrowRight: percentage + step,
-            Home: SPLIT_MIN,
-            End: SPLIT_MAX,
+            Home: min,
+            End: max,
         }[event.key];
         if (next === undefined) return;
         event.preventDefault();
@@ -306,7 +327,16 @@ export function attachSplit({ split, splitter, storageKey = 'crms.review.scan-wi
     });
 
     update(percentage);
-    return { reset: () => update(SPLIT_DEFAULT, true) };
+    return {
+        reset,
+        // The layout changed (a wider screen, a second page): a width the user
+        // did not set follows its new starting width.
+        refresh: () => {
+            if (dragging || custom) return;
+            const next = starting();
+            if (next !== percentage) update(next);
+        },
+    };
 }
 
 // ------------------------------------------------------------- the table

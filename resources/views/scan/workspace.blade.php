@@ -197,6 +197,11 @@
                 </x-card>
             </div>
 
+            {{-- Drag to resize the page and the panel, as in Review & Export; double-click for the start. --}}
+            <div class="review-splitter workspace-splitter" id="alignSplitter" role="separator" tabindex="0"
+                 aria-orientation="vertical" aria-label="Resize the page and the side panel"
+                 title="Drag to resize · double-click to reset"></div>
+
             <div class="document-side-panel field-marker-controls-pane">
                 {{--
                 What to know about the scan itself, shown only when
@@ -505,7 +510,7 @@
                     </div>
                 </div>
 
-                <div class="validation-comparison-grid">
+                <div class="validation-comparison-grid verify-grid" id="verifyGrid">
                     <section class="card validation-pane validation-document-pane" aria-labelledby="originalDocumentTitle">
                         <header class="validation-pane__header">
                             <div class="min-w-0">
@@ -706,6 +711,11 @@
                             Hold <kbd>Ctrl</kbd> (<kbd>⌘</kbd> on a Mac) and scroll to zoom or drag to move.
                         </footer>
                     </section>
+
+                    {{-- Drag to resize the page and the fields, as in Review & Export; double-click for the start. --}}
+                    <div class="review-splitter workspace-splitter" id="verifySplitter" role="separator" tabindex="0"
+                         aria-orientation="vertical" aria-label="Resize the document and the fields"
+                         title="Drag to resize · double-click to reset"></div>
 
                     <section class="card validation-pane validation-output-pane" aria-labelledby="digitalDocumentTitle">
                         <header class="validation-pane__header validation-output-header">
@@ -6763,7 +6773,7 @@
             el('validationCompanionPage').title = 'Verify this page instead';
             el('validationSpread').classList.remove('is-joined', 'is-page-focused');
             // One page (or a batch's pages, verified one at a time): the usual layout.
-            document.querySelector('#step-verify .validation-comparison-grid')?.classList.remove('is-two-page');
+            document.querySelector('#step-verify .validation-comparison-grid')?.classList.remove('is-two-page'); window.dispatchEvent(new Event('crms:verify-layout'));
             verifyFocus = null;
             verifyFocusZoom = null;
             updateRowHint();
@@ -6961,7 +6971,7 @@
             el('validationCompanionLabel').textContent = `Page ${second.number}`;
             el('validationSpread').classList.add('is-joined');
             // The pages get the larger share of the width, and start side by side.
-            document.querySelector('#step-verify .validation-comparison-grid')?.classList.add('is-two-page');
+            document.querySelector('#step-verify .validation-comparison-grid')?.classList.add('is-two-page'); window.dispatchEvent(new Event('crms:verify-layout'));
             verifyFocus = null;
             verifyFocusZoom = null;
 
@@ -9769,6 +9779,47 @@
                 if (reviewing) window.requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
             },
         });
+
+        // Align and Verify have the same bar. Each starts where its layout always
+        // put it, on every visit: a dragged width lasts until the page is left.
+        // The page refits once per frame while the bar is dragged, not once per
+        // pointer move (several can come in one frame).
+        const refitShown = (step) => {
+            let pending = false;
+            return () => {
+                if (pending || el(step).classList.contains('d-none')) return;
+                pending = true;
+                window.requestAnimationFrame(() => {
+                    pending = false;
+                    window.dispatchEvent(new Event('resize'));
+                });
+            };
+        };
+        const alignSplit = attachSplit({
+            split: document.querySelector('#step-mark .field-marker-comparison-grid'),
+            splitter: el('alignSplitter'),
+            property: '--align-page-width',
+            // The page took 3 parts of 4 on a wide screen, 2 of 3 below 1200px.
+            initial: () => (window.innerWidth >= 1200 ? 75 : 66.7),
+            min: 45,
+            max: 85,
+            describe: (left) => `Page ${left}%, panel ${100 - left}%`,
+            onResize: refitShown('step-mark'),
+        });
+        const verifySplit = attachSplit({
+            split: el('verifyGrid'),
+            splitter: el('verifySplitter'),
+            property: '--verify-page-width',
+            // One page 1.04 : 0.96 of the width; two pages side by side 1.4 : 0.9.
+            initial: () => (el('verifyGrid').classList.contains('is-two-page') ? 60.9 : 52),
+            min: 30,
+            max: 75,
+            describe: (left) => `Document ${left}%, fields ${100 - left}%`,
+            onResize: refitShown('step-verify'),
+        });
+        // A window crossing 1200px, or a second page, moves a width the user did not set.
+        window.addEventListener('resize', () => alignSplit.refresh());
+        window.addEventListener('crms:verify-layout', () => verifySplit.refresh());
 
         /** "births-2splitpages-pages-1-2-2026-11-15" */
         function reviewFileName() {

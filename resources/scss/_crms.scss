@@ -10503,6 +10503,38 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
+// Align and Verify have the same bar between their two panes, on screens wide
+// enough to show them side by side. Each starts where its layout always put it
+// (set again by attachSplit in workspace.blade.php): Align's page 3 parts of 4
+// (2 of 3 below 1200px), Verify's 1.04 : .96 (two pages 1.4 : .9). The right
+// pane keeps room for its controls however far the bar is dragged.
+@media (min-width: 992px) {
+  .field-marker-comparison-grid {
+    --align-page-width: 75%;
+
+    grid-template-columns: minmax(0, min(var(--align-page-width), 100% - 14rem - .875rem)) .875rem minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .verify-grid,
+  .verify-grid.is-two-page {
+    --verify-page-width: 52%;
+
+    grid-template-columns: minmax(0, min(var(--verify-page-width), 100% - 31rem - .875rem)) .875rem minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .workspace-splitter {
+    display: block;
+  }
+
+  .field-marker-comparison-grid.is-resizing,
+  .verify-grid.is-resizing {
+    cursor: col-resize;
+    user-select: none;
+  }
+}
+
 .review-pane__header {
   flex-wrap: wrap;
 }
