@@ -2308,6 +2308,26 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     color: var(--bs-secondary-color);
     background: rgba(var(--crms-ink-rgb), .05);
   }
+
+  // One colour per certificate, so each is told apart at a glance
+  // (DocumentTypeDefinition::toneClass). Other types keep the house blue.
+  &.is-tone-birth,
+  &.is-tone-marriage,
+  &.is-tone-death {
+    color: rgb(var(--type-tone));
+    background: rgba(var(--type-tone), .12);
+  }
+
+  &.is-tone-birth { --type-tone: 2, 132, 199; }      // sky blue
+  &.is-tone-marriage { --type-tone: 219, 39, 119; }  // rose
+  &.is-tone-death { --type-tone: 109, 40, 217; }     // violet
+}
+
+// Darker page: lighter shades of the same colours, so the icons still read.
+[data-bs-theme="dark"] .document-type-option__icon {
+  &.is-tone-birth { --type-tone: 56, 189, 248; }
+  &.is-tone-marriage { --type-tone: 244, 114, 182; }
+  &.is-tone-death { --type-tone: 167, 139, 250; }
 }
 
 .document-type-option__copy {

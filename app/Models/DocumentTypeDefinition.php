@@ -63,6 +63,20 @@ class DocumentTypeDefinition extends Model
         };
     }
 
+    /**
+     * The type's colour, as a CSS class for its icon (see .document-type-option__icon
+     * in _crms.scss): one colour per certificate, the house blue for any other type.
+     */
+    public function toneClass(): string
+    {
+        return match ($this->key) {
+            'birth' => 'is-tone-birth',
+            'marriage' => 'is-tone-marriage',
+            'death' => 'is-tone-death',
+            default => '',
+        };
+    }
+
     /** @return list<array{name: string, x: float, y: float, width: float, height: float}> */
     public function defaultFields(): array
     {

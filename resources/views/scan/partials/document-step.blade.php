@@ -99,7 +99,7 @@
                             data-bs-toggle="dropdown" data-bs-offset="0,6" aria-expanded="false"
                             aria-labelledby="documentTypeLabel documentTypeToggle">
                         @if ($currentType)
-                            <span class="document-type-option__icon" aria-hidden="true">
+                            <span class="document-type-option__icon {{ $currentType->toneClass() }}" aria-hidden="true">
                                 <i class="icon-base bx {{ $currentType->icon() }}"></i>
                             </span>
                             <span class="document-type-select__value">{{ $currentType->label() }}</span>
@@ -131,7 +131,7 @@
                                     <a href="{{ route('documents.workspace', ['type' => $type->value]) }}"
                                        class="dropdown-item document-type-option {{ $selected ? 'is-selected' : '' }}"
                                        data-document-type-option @if ($selected) aria-current="true" @endif>
-                                        <span class="document-type-option__icon" aria-hidden="true">
+                                        <span class="document-type-option__icon {{ $type->toneClass() }}" aria-hidden="true">
                                             <i class="icon-base bx {{ $type->icon() }}"></i>
                                         </span>
                                         <span class="document-type-option__copy">
@@ -147,7 +147,7 @@
                                 @else
                                     <span class="dropdown-item document-type-option disabled" aria-disabled="true"
                                           data-document-type-option>
-                                        <span class="document-type-option__icon" aria-hidden="true">
+                                        <span class="document-type-option__icon {{ $type->toneClass() }}" aria-hidden="true">
                                             <i class="icon-base bx {{ $type->icon() }}"></i>
                                         </span>
                                         <span class="document-type-option__copy">
