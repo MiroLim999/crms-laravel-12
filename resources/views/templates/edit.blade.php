@@ -404,16 +404,13 @@
                                         <ul class="mb-0" id="ledgerProblemList"></ul>
                                     </div>
 
-                                    <div class="template-ledger-card__covered d-none" id="ledgerCoveredNotice">
+                                    {{-- Fields on table cells, or selected fields on a row the grid missed:
+                                         one click hands them to their columns. --}}
+                                    <div class="template-ledger-card__covered d-none" id="ledgerCoveredNotice" role="status">
                                         <span id="ledgerCoveredMessage"></span>
-                                        <span class="template-ledger-card__covered-actions">
-                                            <button type="button" class="btn btn-sm btn-outline-secondary" id="selectCoveredFieldsBtn">
-                                                Select them
-                                            </button>
-                                            <button type="button" class="btn btn-sm btn-outline-danger" id="removeCoveredFieldsBtn">
-                                                Remove them
-                                            </button>
-                                        </span>
+                                        <button type="button" class="btn btn-sm btn-primary" id="mergeFieldsBtn">
+                                            Merge into columns
+                                        </button>
                                     </div>
                                 </div>
                             </div>

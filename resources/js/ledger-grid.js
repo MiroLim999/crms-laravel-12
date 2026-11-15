@@ -297,6 +297,75 @@ export function followFirstAndLastLine(boxes, before, after, attached = ATTACHED
     return moved ? next : boxes;
 }
 
+/**
+ * Fields drawn by hand over table rows merge into the columns. A field over
+ * a row the grid missed (above the first line, or under the last) adds that
+ * row: a row line goes on its edge and the columns on the first or last line
+ * stretch over it. A field already inside the table only goes, as its column
+ * reads that cell. Only fields over a column count; others are left alone.
+ *
+ * @param {object[]} boxes     Every marker.
+ * @param {number[]} ys        The row lines, top to bottom.
+ * @param {number[]} indexes   The fields to merge.
+ * @returns {{boxes: object[], ys: number[], merged: number, added: number}|null}
+ *          null when none can merge; `added` is how many rows were added
+ */
+export function mergeFieldsIntoTable(boxes, ys, indexes, minGap = MIN_ROW_GAP) {
+    const columns = boxes.filter(isColumn);
+    if (columns.length === 0 || ys.length < 2) return null;
+
+    const row = typicalGap(ys);
+    const first = ys[0];
+    const last = ys[ys.length - 1];
+    const wanted = new Set(indexes);
+    const above = [];
+    const below = [];
+    const inside = [];
+
+    boxes.forEach((box, index) => {
+        if (!wanted.has(index) || isColumn(box)) return;
+        const middle = box.x + box.w / 2;
+        if (!columns.some((column) => middle >= column.x && middle <= column.x + column.w)) return;
+        const centre = box.y + box.h / 2;
+        if (centre < first && centre > first - 2 * row) above.push({ index, box, centre });
+        else if (centre > last && centre < last + 2 * row) below.push({ index, box, centre });
+        else if (centre >= first && centre <= last) inside.push({ index, box, centre });
+    });
+
+    if (above.length + below.length + inside.length === 0) return null;
+
+    // One row per cluster of fields: fields whose middles are within half a row share it.
+    const rowsOf = (list) => {
+        const rows = [];
+        [...list].sort((a, b) => a.centre - b.centre).forEach((item) => {
+            const current = rows[rows.length - 1];
+            if (current && item.centre - current.centre < row / 2) {
+                current.top = Math.min(current.top, item.box.y);
+                current.bottom = Math.max(current.bottom, item.box.y + item.box.h);
+                current.centre = item.centre;
+            } else {
+                rows.push({ top: item.box.y, bottom: item.box.y + item.box.h, centre: item.centre });
+            }
+        });
+        return rows;
+    };
+
+    // Lines go on the fields' edges, in order, never closer than minGap.
+    const added = [
+        ...rowsOf(above).map((cluster) => cluster.top),
+        ...rowsOf(below).map((cluster) => cluster.bottom),
+    ];
+    const next = tidy([...ys, ...added]);
+    if (next.some((y, index) => index > 0 && y - next[index - 1] < minGap)) return null;
+
+    const merged = new Set([...above, ...below, ...inside].map((item) => item.index));
+    const rest = boxes.filter((_, index) => !merged.has(index));
+    // Columns sitting near the first or last line stretch to the new ones.
+    const stretched = followFirstAndLastLine(rest, ys, next, Math.max(ATTACHED, row / 2));
+
+    return { boxes: stretched, ys: next, merged: merged.size, added: next.length - ys.length };
+}
+
 /** A column narrower than this (fraction of the page width) holds no writing. */
 export const MIN_COLUMN_WIDTH = 0.01;
 

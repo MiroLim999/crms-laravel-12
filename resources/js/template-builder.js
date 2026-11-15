@@ -17,6 +17,7 @@ import {
     insertRuledY,
     isColumn,
     ledgerGridProblems,
+    mergeFieldsIntoTable,
     remapRuledYs,
     rowsWithinFrame,
     sameBand,
@@ -839,6 +840,7 @@ function updateSelectionUI(indexes, context = {}) {
     selectAllInput.indeterminate = count > 0 && count < total;
     element('deleteFieldsBtn', HTMLButtonElement).disabled = count === 0;
     element('groupSelectedBtn', HTMLButtonElement).disabled = count === 0;
+    renderMergeNotice();
     element('ungroupSelectedBtn', HTMLButtonElement).disabled = !indexes.some((index) => (
         positiveInteger(marker.toJSON()[index]?.personGroup) !== null
     ));
@@ -1811,10 +1813,7 @@ function setTableTilt(degrees) {
  */
 function updateLedgerChecks(boxes = marker.toJSON()) {
     coveredFieldIndexes = fieldsOverLedger(boxes, ruledYs);
-    element('ledgerCoveredNotice').classList.toggle('d-none', coveredFieldIndexes.length === 0);
-    element('ledgerCoveredMessage').textContent = coveredFieldIndexes.length === 1
-        ? '1 field covers ledger cells. The handwriting under it is read as that field, so those rows lose their cells.'
-        : `${coveredFieldIndexes.length} fields cover ledger cells. The handwriting under them is read as those fields, so those rows lose their cells.`;
+    renderMergeNotice(boxes);
 
     const problems = ledgerGridProblems(ledgerColumns(boxes), ruledYs);
     element('ledgerProblemList').replaceChildren(...problems.map((problem) => {
@@ -2161,13 +2160,51 @@ element('gridTiltValue', HTMLInputElement).addEventListener('keydown', (event) =
 });
 element('gridTiltValue', HTMLInputElement).addEventListener('blur', () => renderLedgerGrid());
 
-element('selectCoveredFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
-    if (coveredFieldIndexes.length > 0) marker.selectIndexes(coveredFieldIndexes, { source: 'group' });
-});
+/**
+ * What "Merge into columns" would take: every field sitting on table cells,
+ * and the selected fields drawn over a row the grid missed (above the first
+ * line or under the last). Null when nothing can merge.
+ */
+function pendingMerge(boxes = marker.toJSON()) {
+    const indexes = [...new Set([...coveredFieldIndexes, ...marker.selectedIndexes()])];
+    return mergeFieldsIntoTable(boxes, ruledYs, indexes);
+}
 
-element('removeCoveredFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
-    const covered = new Set(coveredFieldIndexes);
-    replaceBoxes(marker.toJSON().filter((_, index) => !covered.has(index)));
+function plural(count, one, many) {
+    return count === 1 ? one : many.replace('#', String(count));
+}
+
+/** One notice, one button: shown only while some field can merge into the columns. */
+function renderMergeNotice(boxes = marker.toJSON()) {
+    const merge = pendingMerge(boxes);
+    const covered = coveredFieldIndexes.length;
+    let message = '';
+
+    if (merge && merge.added > 0) {
+        message = `${plural(merge.merged, '1 field sits', '# fields sit')} on a row the table missed. `
+            + `Merge adds ${plural(merge.added, 'that row', 'those # rows')} to the columns.`;
+    } else if (merge) {
+        message = `${plural(merge.merged, '1 field sits', '# fields sit')} on table cells, so those rows lose their cells. `
+            + 'Merge lets the columns read them.';
+    } else if (covered > 0) {
+        // Over the table but between columns: there is no column to hand them to.
+        message = `${plural(covered, '1 field sits', '# fields sit')} on table cells, so those rows lose their cells. `
+            + 'Move or delete them.';
+    }
+
+    element('ledgerCoveredNotice').classList.toggle('d-none', message === '');
+    element('ledgerCoveredMessage').textContent = message;
+    element('mergeFieldsBtn').classList.toggle('d-none', !merge);
+}
+
+element('mergeFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
+    const merge = pendingMerge();
+    if (!merge) return;
+    clearBuilderError();
+    selectedRule = null;
+    ruledYs = merge.ys;
+    // Records one undo step and redraws the grid and this notice.
+    replaceBoxes(merge.boxes);
 });
 
 // ------------------------------------------------------------- two pages

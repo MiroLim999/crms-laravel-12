@@ -15,6 +15,7 @@ import {
     gridTilt,
     insertRuledY,
     insertTilt,
+    mergeFieldsIntoTable,
     ledgerGridProblems,
     MIN_ROW_GAP,
     nearestLine,
@@ -360,4 +361,35 @@ test('a printed column nobody covers is new, and an unmatched existing column is
     assert.deepEqual(grown.created, [1]);
     assert.equal(grown.columns[0].name, 'A');
     assert.equal(grown.columns[1].kind, 'column');
+});
+
+test('fields drawn over a missed first row become a row of the table', () => {
+    const ys = [0.3, 0.35, 0.4, 0.45];
+    const col = (x, w) => ({ kind: 'column', name: 'c', x, y: 0.3, w, h: 0.15 });
+    const field = (name, x, w, y) => ({ name, x, y, w, h: 0.05 });
+    const boxes = [col(0.1, 0.3), col(0.45, 0.3), field('a', 0.1, 0.3, 0.25), field('b', 0.45, 0.3, 0.25), field('far', 0.1, 0.3, 0.8)];
+
+    const result = mergeFieldsIntoTable(boxes, ys, [2, 3, 4]);
+    assert.equal(result.merged, 2);
+    assert.deepEqual(result.ys.map((y) => Math.round(y * 100) / 100), [0.25, 0.3, 0.35, 0.4, 0.45]);
+    // Both fields go; the far one was not next to the grid and stays.
+    assert.deepEqual(result.boxes.map((box) => box.name), ['c', 'c', 'far']);
+    assert.ok(result.boxes.filter((box) => box.kind === 'column').every((c) => Math.abs(c.y - 0.25) < 1e-9 && Math.abs(c.h - 0.2) < 1e-9));
+
+    // Under the last line works too; a field off the columns does not merge.
+    const under = mergeFieldsIntoTable([col(0.1, 0.3), field('z', 0.1, 0.3, 0.45)], ys, [1]);
+    assert.equal(under.ys.at(-1), 0.5);
+    assert.equal(mergeFieldsIntoTable([col(0.1, 0.3), field('off', 0.6, 0.2, 0.32)], ys, [1]), null);
+});
+
+test('after a missed row is added, the other fields on it merge into their columns', () => {
+    const ys = [0.25, 0.3, 0.35];
+    const col = (x) => ({ kind: 'column', name: 'c', x, y: 0.25, w: 0.2, h: 0.1 });
+    const boxes = [col(0.1), col(0.4), { name: 'b', x: 0.4, y: 0.25, w: 0.2, h: 0.05 }];
+
+    const result = mergeFieldsIntoTable(boxes, ys, [2]);
+    assert.equal(result.merged, 1);
+    assert.equal(result.added, 0);
+    assert.deepEqual(result.ys, ys);
+    assert.deepEqual(result.boxes.map((box) => box.kind), ['column', 'column']);
 });

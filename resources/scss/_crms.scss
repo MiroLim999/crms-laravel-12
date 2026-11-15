@@ -4792,15 +4792,15 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-radius: .4rem;
   font-size: .75rem;
 
+  // The message takes the room it needs; the one button sits on its right, or under it.
+  > span {
+    flex: 1 1 12rem;
+  }
+
   .btn {
     flex: 0 0 auto;
     white-space: nowrap;
   }
-}
-
-.template-ledger-card__covered-actions {
-  display: inline-flex;
-  gap: .35rem;
 }
 
 // What is wrong with the grid; a blocking problem stops the save.
