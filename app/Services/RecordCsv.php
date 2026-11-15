@@ -123,14 +123,7 @@ class RecordCsv
      */
     private function label(RecordField $field): string
     {
-        $column = trim((string) $field->line_column);
-        if ($column !== '') {
-            return $column;
-        }
-
-        $name = preg_replace('/\s*·\s*(row|page)\s+\d+(\s*\(\d+\))?\s*$/u', '', (string) $field->name);
-
-        return trim((string) $name) !== '' ? trim((string) $name) : (string) $field->name;
+        return $field->columnName();
     }
 
     /**

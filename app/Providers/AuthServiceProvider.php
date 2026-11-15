@@ -18,7 +18,8 @@ class AuthServiceProvider extends ServiceProvider
     {
         foreach ([
             'documents.process',
-            'change-requests.create',
+            // Edit a saved record's values in Review & Export.
+            'records.edit',
             'records.view',
             'audit.view',
             'reports.generate',

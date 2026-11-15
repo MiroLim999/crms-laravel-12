@@ -66,7 +66,14 @@ export function recordScanPanPosition(scrollLeft, scrollTop, movementX, movement
     };
 }
 
-function initRecordDetail(root) {
+/**
+ * The record page's scan and values: the split, the scan's zoom and pan, and
+ * a value picked showing its box on the scan. Review & Export for a saved
+ * record uses the same scan card, so it calls this too: `onActivate(fieldId)`
+ * hears a box clicked on the scan, and the returned activateField(fieldId)
+ * shows one.
+ */
+export function initRecordDetail(root, { onActivate = () => {} } = {}) {
     const split = root.querySelector('[data-record-split]');
     const splitter = root.querySelector('[data-record-splitter]');
     const storageKey = 'crms.record-detail.scan-width';
@@ -366,17 +373,18 @@ function initRecordDetail(root) {
     });
 
     const activateField = (fieldId, scrollRow = false) => {
+        // Review & Export has no value rows: the box on the scan is enough.
         const row = root.querySelector(`[data-record-field="${fieldId}"]`);
         const marker = root.querySelector(`[data-scan-marker="${fieldId}"]`);
-        if (!(row instanceof HTMLElement) || !(marker instanceof HTMLElement)) return;
+        if (!(marker instanceof HTMLElement)) return;
         if ((marker.dataset.scanPage ?? '1') !== shownPage) showScanPage(marker.dataset.scanPage ?? '1');
 
         setOriginalComparison(true);
         root.querySelectorAll('.record-field-row.is-active, .record-scan-marker.is-active')
             .forEach((element) => element.classList.remove('is-active'));
-        row.classList.add('is-active');
+        row?.classList.add('is-active');
         marker.classList.add('is-active');
-        const group = row.closest('.record-field-group');
+        const group = row?.closest('.record-field-group');
         if (group instanceof HTMLDetailsElement && !group.classList.contains('is-expanded')) {
             setGroupExpanded(group, true);
         }
@@ -390,7 +398,7 @@ function initRecordDetail(root) {
                     behavior: 'smooth',
                 });
             }
-            if (scrollRow) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            if (scrollRow) row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         });
     };
 
@@ -405,8 +413,13 @@ function initRecordDetail(root) {
     });
 
     root.querySelectorAll('[data-scan-marker]').forEach((marker) => {
-        marker.addEventListener('click', () => activateField(marker.dataset.scanMarker, true));
+        marker.addEventListener('click', () => {
+            activateField(marker.dataset.scanMarker, true);
+            onActivate(marker.dataset.scanMarker);
+        });
     });
+
+    return { activateField };
 }
 
 if (typeof document !== 'undefined') {

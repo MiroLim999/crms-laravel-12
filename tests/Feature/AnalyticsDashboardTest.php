@@ -10,7 +10,6 @@ use App\Models\DocumentTemplate;
 use App\Models\OcrModel;
 use App\Models\PageRun;
 use App\Models\User;
-use App\Services\ChangeRequestService;
 use App\Services\DashboardAnalytics;
 use Database\Seeders\DocumentTemplateSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -42,7 +41,7 @@ class AnalyticsDashboardTest extends TestCase
             ->assertSee('Total digitized records')
             ->assertSee('Digitization Volume &amp; Trend', escape: false)
             ->assertSee('OCR Quality')
-            ->assertSee('Corrections')
+            ->assertSee('Edits after saving')
             ->assertSee('Recent changes')
             ->assertSee('View report')
             ->assertDontSee('Your submissions this month')
@@ -259,7 +258,7 @@ class AnalyticsDashboardTest extends TestCase
         $response->assertDontSee('the previous 30 days');
     }
 
-    public function test_the_correction_rate_counts_only_changes_made_while_verifying(): void
+    public function test_the_correction_rate_counts_changes_made_while_verifying_and_after_saving(): void
     {
         Carbon::setTestNow('2026-08-11 04:00:00');
         $account = User::factory()->superAdmin()->create();
@@ -278,12 +277,12 @@ class AnalyticsDashboardTest extends TestCase
             'ocr_confidence' => 90.0,
         ]));
 
-        // Later, a correction rewrites two values that were
-        // accepted as read. That is an amendment, not a verification fix.
-        app(ChangeRequestService::class)->correct($record->load('fields'), [
-            $fields[0]->getKey() => 'Mariah Santos',
-            $fields[1]->getKey() => 'Anna Reyes',
-        ], 'The register spells both names differently.', $account);
+        // Later, two values accepted as read are changed in Review & Export:
+        // the reading was wrong there too, so they count.
+        $this->actingAs($account)->patchJson(route('records.review.update', $record), ['changes' => [
+            ['id' => $fields[0]->getKey(), 'value' => 'Mariah Santos'],
+            ['id' => $fields[1]->getKey(), 'value' => 'Anna Reyes'],
+        ]])->assertOk();
         $this->assertSame('Mariah Santos', $fields[0]->fresh()->verified_value);
 
         $quality = $this->actingAs(User::factory()->superAdmin()->create())
@@ -291,8 +290,8 @@ class AnalyticsDashboardTest extends TestCase
             ->viewData('analytics')['ocr_quality'];
 
         $this->assertSame(4, $quality['comparable_fields']);
-        $this->assertSame(1, $quality['corrected_fields']);
-        $this->assertSame(25.0, $quality['correction_rate']);
+        $this->assertSame(3, $quality['corrected_fields']);
+        $this->assertSame(75.0, $quality['correction_rate']);
     }
 
     public function test_each_document_type_keeps_its_own_colour(): void
@@ -383,7 +382,7 @@ class AnalyticsDashboardTest extends TestCase
         $this->record($recentAccount, DocumentType::Birth, ['submitted_at' => Carbon::parse('2026-08-05 02:00:00')]);
         $this->record($olderAccount, DocumentType::Death, ['submitted_at' => Carbon::parse('2026-06-01 02:00:00')]);
 
-        // Only the change requests panel is narrowed; the trend stays on 12 months.
+        // Only the edits panel is narrowed; the trend stays on 12 months.
         $response = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('dashboard', ['requests_period' => '30']))
             ->assertOk();
@@ -463,22 +462,21 @@ class AnalyticsDashboardTest extends TestCase
         $this->assertNull($response->viewData('analytics')['processing']['reading']['ms_per_line']);
     }
 
-    public function test_corrections_are_counted_in_their_period(): void
+    public function test_edits_after_saving_are_counted_in_their_period(): void
     {
-        $user = User::factory()->create();
-        $service = app(ChangeRequestService::class);
+        $user = User::factory()->superAdmin()->create();
 
-        $correct = function (string $at, int $fieldCount) use ($user, $service): void {
+        $correct = function (string $at, int $fieldCount) use ($user): void {
             Carbon::setTestNow($at);
             $record = $this->record($user, DocumentType::Birth);
-            $values = [];
+            $changes = [];
             for ($n = 1; $n <= $fieldCount; $n++) {
                 $field = $record->fields()->create([
                     'name' => "Field {$n}", 'ocr_text' => 'Ana Cruz', 'verified_value' => 'Ana Cruz', 'ocr_confidence' => 90.0,
                 ]);
-                $values[$field->getKey()] = 'Anna Cruz';
+                $changes[] = ['id' => $field->getKey(), 'value' => 'Anna Cruz'];
             }
-            $service->correct($record->load('fields'), $values, null, $user);
+            $this->actingAs($user)->patchJson(route('records.review.update', $record), ['changes' => $changes])->assertOk();
         };
 
         $correct('2026-08-01 02:00:00', 2);
@@ -493,9 +491,9 @@ class AnalyticsDashboardTest extends TestCase
             ['corrections' => 3, 'records' => 3, 'fields' => 6],
             $response->viewData('analytics')['corrections'],
         );
-        $response->assertSee('corrections saved')
-            ->assertSee('All corrections')
-            ->assertSee(route('change-requests.index'))
+        $response->assertSee('edits saved')
+            ->assertSee('All edits')
+            ->assertSee(route('audit.index', ['action' => 'record.edited']), escape: false)
             ->assertDontSee('waiting for a decision');
 
         // The last 30 days leave out the May one.
@@ -507,12 +505,12 @@ class AnalyticsDashboardTest extends TestCase
         );
     }
 
-    public function test_corrections_show_zero_when_there_are_none(): void
+    public function test_edits_after_saving_show_zero_when_there_are_none(): void
     {
         $response = $this->actingAs(User::factory()->create())
             ->get(route('dashboard'))
             ->assertOk()
-            ->assertSee('corrections saved')
+            ->assertSee('edits saved')
             ->assertDontSee('Nothing is waiting');
 
         $this->assertSame(

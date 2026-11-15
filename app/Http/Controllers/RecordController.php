@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\ChangeRequestStatus;
 use App\Enums\RecordStatus;
+use App\Models\AuditLog;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
 use App\Services\AuditLogger;
@@ -82,25 +82,33 @@ class RecordController extends Controller
             'fields',
             'extraPages',
             'documentTypeDefinition',
-            'changeRequests.requester',
-            'changeRequests.reviewer',
-            'changeRequests.items.field',
         ]);
 
         $fieldGroups = $this->fieldGrouper->groups($record->fields, $record->template);
-        $approvedRequests = $record->changeRequests
-            ->filter(fn ($changeRequest) => $changeRequest->status === ChangeRequestStatus::Approved);
-        $fieldChanges = $approvedRequests
-            ->flatMap(fn ($changeRequest) => $changeRequest->items->map(
-                fn ($item) => ['field_id' => $item->record_field_id, 'request' => $changeRequest],
-            ))
-            ->groupBy('field_id');
+        // Saves in Review & Export after the record was saved, newest first,
+        // and which of them last changed each field.
+        $edits = AuditLog::query()
+            ->where('action', 'record.edited')
+            ->where('auditable_type', $record::class)
+            ->where('auditable_id', $record->getKey())
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->get(['id', 'actor_name', 'user_id', 'new_values', 'created_at']);
+        $fieldChanges = collect();
+        foreach ($edits as $edit) {
+            foreach (array_keys($edit->new_values['fields'] ?? []) as $fieldId) {
+                if (! $fieldChanges->has((int) $fieldId)) {
+                    $fieldChanges->put((int) $fieldId, $edit);
+                }
+            }
+        }
 
         return view('records.show', [
             'record' => $record,
             'fieldGroups' => $fieldGroups,
             'recordHeading' => $this->fieldGrouper->heading($record, $fieldGroups),
             'fieldChanges' => $fieldChanges,
+            'edits' => $edits,
             'personCount' => collect($fieldGroups)->where('kind', 'person')->count(),
             'firstPersonGroupId' => collect($fieldGroups)->firstWhere('kind', 'person')['id'] ?? null,
             'ocrAdjustedCount' => $record->fields->filter->wasCorrected()->count(),

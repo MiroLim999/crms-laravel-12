@@ -33,7 +33,6 @@ class Navigation
                 'items' => [
                     self::item('New Document', 'documents.create', 'bx-scan', 'documents.process'),
                     self::item('Records Archive', 'records.index', 'bx-archive', 'records.view'),
-                    self::item('Corrections', 'change-requests.index', 'bx-edit', 'records.view'),
                 ],
             ],
             [

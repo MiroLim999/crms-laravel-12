@@ -7,7 +7,6 @@ use App\Models\AuditLog;
 use App\Models\CivilRecord;
 use App\Models\RecordField;
 use App\Models\User;
-use App\Services\ChangeRequestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
@@ -86,13 +85,15 @@ class RecordCsvExportTest extends TestCase
         $this->assertSame("'-5", $rows[0][4]);
     }
 
-    public function test_corrections_are_in_the_file(): void
+    public function test_edits_after_saving_are_in_the_file(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->superAdmin()->create();
         $record = $this->record($user);
         $field = $this->field($record, 1, 1, 'Name', 'Mana Santos', column: 'Name');
 
-        app(ChangeRequestService::class)->correct($record->load('fields'), [$field->getKey() => 'Maria Santos'], null, $user);
+        $this->actingAs($user)->patchJson(route('records.review.update', $record), ['changes' => [
+            ['id' => $field->getKey(), 'value' => 'Maria Santos'],
+        ]])->assertOk();
 
         [, $rows] = $this->csv($this->download($record->fresh(), $user));
 

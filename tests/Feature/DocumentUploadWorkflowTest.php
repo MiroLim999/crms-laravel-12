@@ -540,6 +540,79 @@ class DocumentUploadWorkflowTest extends TestCase
         ], $audit->new_values['missing_required_fields']);
     }
 
+    public function test_a_cell_typed_in_review_and_export_is_saved_without_an_outline(): void
+    {
+        Storage::fake('local');
+        [$template, $page, $account] = $this->registerPage();
+        // The Name column holds the person's name and is required.
+        $template->update(['columns' => array_map(
+            fn (array $column) => $column['name'] === 'Name' ? [...$column, 'role' => 'name'] : $column,
+            $template->columns,
+        )]);
+        // Row 3's Name was never read: no line for it on the page.
+        $page->lines->first(fn (PageLine $line) => $line->row === 3 && $line->column_name === 'Name')->delete();
+        $page->load('lines');
+
+        $fields = [];
+        foreach (range(1, 5) as $row) {
+            if ($row !== 3) {
+                $fields[] = ['person_group' => $row, 'person_field_order' => 0, ...$this->cellField($page, $row, 'Name')];
+            }
+            $fields[] = ['person_group' => $row, 'person_field_order' => 1, ...$this->cellField($page, $row, 'Date')];
+        }
+        // What Review & Export sends for it: no line, named by its column and row.
+        $fields[] = [
+            ...$this->verifiedField('Name · row 3', 'Juan Dela Cruz'),
+            'ocr_text' => null,
+            'ocr_confidence' => null,
+            'person_group' => 3,
+            'person_field_order' => 2,
+            'line_id' => null,
+        ];
+
+        // Typed in, the required Name of row 3 is not missing: no "Submit anyway" needed.
+        $this->actingAs($account)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, $fields),
+                'document_page_id' => $page->getKey(),
+            ])
+            ->assertCreated();
+
+        $typed = CivilRecord::sole()->fields()->where('name', 'Name · row 3')->sole();
+        $this->assertSame('Juan Dela Cruz', $typed->verified_value);
+        $this->assertSame(3, $typed->person_group);
+        // Its column's settings, as a read cell of that column gets them.
+        $this->assertSame('name', $typed->role);
+        $this->assertTrue((bool) $typed->is_required);
+        $this->assertNull($typed->line_crop_path ?? null);
+    }
+
+    public function test_a_required_cell_left_empty_in_review_and_export_is_still_missing(): void
+    {
+        Storage::fake('local');
+        [$template, $page, $account] = $this->registerPage();
+        $page->lines->first(fn (PageLine $line) => $line->row === 3 && $line->column_name === 'Name')->delete();
+        $page->load('lines');
+
+        $fields = [];
+        foreach (range(1, 5) as $row) {
+            if ($row !== 3) {
+                $fields[] = $this->cellField($page, $row, 'Name');
+            }
+            $fields[] = $this->cellField($page, $row, 'Date');
+        }
+
+        $this->actingAs($account)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.store'), [
+                ...$this->submissionPayload($template, $fields),
+                'document_page_id' => $page->getKey(),
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.missing_required', ['Person 03: Name']);
+    }
+
     public function test_a_complete_register_page_is_not_asked_to_confirm(): void
     {
         Storage::fake('local');
@@ -740,6 +813,8 @@ class DocumentUploadWorkflowTest extends TestCase
         ]);
 
         $page = $this->readPage($template, $account);
+        // Detect found the layout's five table rows on the page.
+        $page->update(['geometry' => [...$page->geometry, 'ruled_ys' => [0.1, 0.26, 0.42, 0.58, 0.74, 0.9]]]);
         foreach (range(1, 5) as $row) {
             foreach (['Name', 'Date'] as $columnIndex => $column) {
                 $this->pageLine($page, ['column_index' => $columnIndex, 'column_name' => $column, 'row' => $row]);

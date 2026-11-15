@@ -58,4 +58,22 @@ class RecordField extends Model
     {
         return trim((string) $this->ocr_text) !== trim((string) $this->verified_value);
     }
+
+    /**
+     * The template field or ledger column this value belongs to: its line's
+     * column, else its name without the row and page it was saved with
+     * ("Sex · row 5 · page 2" -> "Sex"). A record's CSV and Review & Export
+     * head their columns with it.
+     */
+    public function columnName(): string
+    {
+        $column = trim((string) $this->line_column);
+        if ($column !== '') {
+            return $column;
+        }
+
+        $name = trim((string) preg_replace('/(\s*·\s*(row|page)\s+\d+(\s*\(\d+\))?)+\s*$/u', '', (string) $this->name));
+
+        return $name !== '' ? $name : (string) $this->name;
+    }
 }

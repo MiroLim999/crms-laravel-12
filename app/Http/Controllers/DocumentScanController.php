@@ -901,13 +901,39 @@ class DocumentScanController extends Controller
 
     /**
      * The name a submitted field's template settings are found under: its
-     * line's field or column, else its own name (see settingsByName()).
+     * line's field or column, else its own name (see settingsByName()). A
+     * cell typed into in Review & Export, where nothing was read, has no line:
+     * its name is "Column · row 5", so its column is the part before the row.
      *
      * @param  array<string, mixed>  $field
      */
     private function templateNameKey(array $field, ?PageLine $line): string
     {
-        return mb_strtolower(trim($line?->column_name ?? $field['name']));
+        if ($line !== null) {
+            return mb_strtolower(trim((string) $line->column_name));
+        }
+
+        return mb_strtolower(trim($this->typedCell($field)['column'] ?? $field['name']));
+    }
+
+    /**
+     * A field with no line named "Column · row 5" (or "· row 5 · page 2"): a
+     * register cell typed into in Review & Export. Its column and table row,
+     * or null for any other field.
+     *
+     * @param  array<string, mixed>  $field
+     * @return array{column: string, row: int}|null
+     */
+    private function typedCell(array $field): ?array
+    {
+        if (isset($field['line_id'])) {
+            return null;
+        }
+        if (!preg_match('/^(.+?) · row (\d+)(?: · page \d+)?$/u', (string) ($field['name'] ?? ''), $match)) {
+            return null;
+        }
+
+        return ['column' => trim($match[1]), 'row' => (int) $match[2]];
     }
 
     /**
@@ -969,6 +995,8 @@ class DocumentScanController extends Controller
             $line = isset($field['line_id']) ? $linesById->get((int) $field['line_id']) : null;
             if ($line !== null && $isCell($line)) {
                 $submitted[$line->row][$columnOf($line)] = true;
+            } elseif ($line === null && ($typed = $this->typedCell($field)) !== null) {
+                $submitted[$typed['row']][mb_strtolower($typed['column'])] = true;
             }
         }
 

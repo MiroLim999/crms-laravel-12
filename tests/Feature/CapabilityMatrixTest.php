@@ -25,7 +25,6 @@ class CapabilityMatrixTest extends TestCase
             'dashboard' => ['dashboard'],
             'new document' => ['documents.create'],
             'records archive' => ['records.index'],
-            'corrections' => ['change-requests.index'],
             'reports' => ['reports.index'],
             'audit log' => ['audit.index'],
             'template builder' => ['templates.index'],
@@ -53,7 +52,7 @@ class CapabilityMatrixTest extends TestCase
         $user = User::factory()->create();
 
         foreach ([
-            'documents.process', 'change-requests.create', 'records.view', 'audit.view',
+            'documents.process', 'records.edit', 'records.view', 'audit.view',
             'reports.generate', 'templates.manage', 'ocr.manage',
         ] as $ability) {
             $this->assertTrue($user->can($ability), "The account should have '{$ability}'.");
@@ -69,6 +68,7 @@ class CapabilityMatrixTest extends TestCase
             'user accounts' => ['/users'],
             'new account' => ['/users/create'],
             'old analytics link' => ['/analytics'],
+            'corrections (replaced by Review & Export)' => ['/change-requests'],
         ];
     }
 
@@ -80,13 +80,13 @@ class CapabilityMatrixTest extends TestCase
             ->assertNotFound();
     }
 
-    public function test_the_sidebar_has_no_user_accounts_and_shows_corrections(): void
+    public function test_the_sidebar_has_no_user_accounts_and_no_corrections(): void
     {
         $this->actingAs(User::factory()->create())
             ->get(route('dashboard'))
             ->assertOk()
             ->assertDontSee('User Accounts')
-            ->assertSee('Corrections')
+            ->assertDontSee('href="'.url('change-requests').'"', false)
             ->assertSee('Reports &amp; history', false)
             ->assertDontSee('Signed in as');
     }

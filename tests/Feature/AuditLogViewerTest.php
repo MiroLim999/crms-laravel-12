@@ -56,7 +56,7 @@ class AuditLogViewerTest extends TestCase
         app(AuditLogger::class)->log('record.submitted', description: 'Submitted a birth certificate.');
 
         $this->actingAs($other);
-        app(AuditLogger::class)->log('change_request.created', description: 'Requested a surname fix.');
+        app(AuditLogger::class)->log('record.edited', description: 'Edited a surname in Review & Export.');
 
         // There is one account, so there is no Actor filter; the names stay on each entry.
         $this->actingAs($admin)
@@ -66,7 +66,7 @@ class AuditLogViewerTest extends TestCase
             ->assertSee('Nina Encoder');
 
         $byAction = $this->actingAs($admin)
-            ->get(route('audit.index', ['action' => 'change_request.created']))
+            ->get(route('audit.index', ['action' => 'record.edited']))
             ->assertOk()
             ->viewData('entries');
         $this->assertSame(1, $byAction->total());

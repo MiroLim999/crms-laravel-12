@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Enums\ChangeRequestStatus;
 use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
 use App\Support\SearchWords;
@@ -112,27 +111,15 @@ class CivilRecord extends Model
         return $this->belongsTo(User::class, 'submitted_by');
     }
 
-    public function changeRequests(): HasMany
-    {
-        return $this->hasMany(ChangeRequest::class, 'record_id')->latest();
-    }
-
     // ------------------------------------------------------------------- state
 
     /**
-     * Submitted records are locked. Nothing edits their values in place:
-     * Correct record saves a correction, which keeps the old values.
+     * Submitted records are locked: their values change only in Review &
+     * Export (records/{record}/review), which logs each old and new value.
      */
     public function isLocked(): bool
     {
         return $this->status->isLocked();
-    }
-
-    public function hasPendingChangeRequest(): bool
-    {
-        return $this->changeRequests()
-            ->where('status', ChangeRequestStatus::Pending->value)
-            ->exists();
     }
 
     // ----------------------------------------------------------------- display

@@ -62,7 +62,7 @@
             'ocrPerformance' => ['series' => $perfSeries->all()],
         ];
 
-        // Corrections saved in the period.
+        // Saved records edited in Review & Export in the period.
         $corrections = $analytics['corrections'];
 
         // Recent changes: an icon for the kind of thing that was changed.
@@ -71,7 +71,7 @@
             'user', 'users' => 'bx-user',
             'template', 'document-type' => 'bx-layout',
             'ocr_model', 'ocr_settings' => 'bx-chip',
-            'change_request', 'record' => 'bx-edit',
+            'record' => 'bx-edit',
             'report' => 'bx-file',
             default => 'bx-history',
         };
@@ -531,15 +531,15 @@
     </div>
 
     {{--
-        The bottom row: corrections, and what changed lately. The first
+        The bottom row: edits to saved records, and what changed lately. The first
         follows a period; the second is simply the newest entries.
     --}}
     <div class="row g-4">
         <div class="col-12 col-lg-6 dashboard-reveal" style="--dashboard-reveal: 5">
-            <x-dashboard.panel panel="requests" title="Corrections">
-                <x-slot:meta>Saved · {{ $requestsScope['short_label'] }}</x-slot:meta>
+            <x-dashboard.panel panel="requests" title="Edits after saving">
+                <x-slot:meta>Review &amp; Export · {{ $requestsScope['short_label'] }}</x-slot:meta>
                 <x-slot:tools>
-                    <x-dashboard.period-filter panel="requests" label="corrections"
+                    <x-dashboard.period-filter panel="requests" label="edits after saving"
                                                :scopes="$scopes" :forms="$periodForms" :options="$periodOptions" />
                 </x-slot:tools>
 
@@ -551,19 +551,19 @@
                         <div class="dashboard-requests__figure">
                             <span class="dashboard-requests__headline">
                                 <strong data-dashboard-count>{{ number_format($corrections['corrections']) }}</strong>
-                                {{ $corrections['corrections'] === 1 ? 'correction' : 'corrections' }} saved
+                                {{ $corrections['corrections'] === 1 ? 'edit' : 'edits' }} saved
                             </span>
-                            <small>Each keeps the old values in its record's history.</small>
+                            <small>The audit log keeps each old and new value.</small>
                         </div>
-                        <a href="{{ route('change-requests.index') }}" class="btn btn-xs btn-label-primary px-2">
-                            <span>All corrections</span>
+                        <a href="{{ route('audit.index', ['action' => 'record.edited']) }}" class="btn btn-xs btn-label-primary px-2">
+                            <span>All edits</span>
                             <i class="icon-base bx bx-right-arrow-alt ms-1" aria-hidden="true"></i>
                         </a>
                     </div>
 
-                    <dl class="dashboard-requests__stats" aria-label="Corrections in {{ $requestsScope['short_label'] }}">
+                    <dl class="dashboard-requests__stats" aria-label="Edits after saving in {{ $requestsScope['short_label'] }}">
                         <div>
-                            <dt>Records corrected</dt>
+                            <dt>Records edited</dt>
                             <dd>{{ number_format($corrections['records']) }}</dd>
                         </div>
                         <div>
@@ -577,7 +577,7 @@
 
         <div class="col-12 col-lg-6 dashboard-reveal" style="--dashboard-reveal: 6">
             <x-dashboard.panel panel="changes" title="Recent changes">
-                <x-slot:meta>Templates, OCR models and corrections</x-slot:meta>
+                <x-slot:meta>Templates, OCR models and records</x-slot:meta>
                 <x-slot:tools>
                     <a href="{{ route('audit.index') }}" class="btn btn-xs btn-label-primary px-2" title="Open the full audit log">
                         <span>Audit log</span>

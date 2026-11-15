@@ -23,7 +23,11 @@
         </div>
         <div class="document-flow-step" data-flow-step="verify">
             <span class="document-flow-step__number">3</span>
-            <span class="document-flow-step__copy"><strong>Verify</strong><small>Review and submit</small></span>
+            <span class="document-flow-step__copy"><strong>Verify</strong><small>Check each field</small></span>
+        </div>
+        <div class="document-flow-step" data-flow-step="review">
+            <span class="document-flow-step__number">4</span>
+            <span class="document-flow-step__copy"><strong>Review &amp; Export</strong><small>Table, save, download</small></span>
         </div>
     </nav>
 

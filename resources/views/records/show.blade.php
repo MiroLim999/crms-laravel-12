@@ -27,12 +27,12 @@
                title="Download this document's values as a CSV file (opens in Excel)">
                 <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i> Download CSV
             </a>
-            @if ($record->isLocked() && auth()->user()->can('change-requests.create'))
-                <a href="{{ route('records.change-requests.create', $record) }}"
-                   class="btn btn-sm btn-outline-primary">
-                    <i class="icon-base bx bx-edit icon-sm me-1"></i> Correct record
+            @can('records.edit')
+                <a href="{{ route('records.review', $record) }}" class="btn btn-sm btn-primary"
+                   title="Edit this record's values as a table, then save or download them">
+                    <i class="icon-base bx bx-edit icon-sm me-1" aria-hidden="true"></i> Edit in Review &amp; Export
                 </a>
-            @endif
+            @endcan
             <a href="{{ route('records.index') }}" class="btn btn-sm btn-outline-secondary">Back to archive</a>
         </div>
     </nav>
@@ -45,7 +45,7 @@
                 <i class="icon-base bx bx-lock-alt icon-md" aria-hidden="true"></i>
                 <div>
                     <strong>Verified record</strong>
-                    <span>Values change only through Correct record, which keeps the old values in the Change history.</span>
+                    <span>Values change only in Review &amp; Export, which keeps each old and new value in the audit log.</span>
                 </div>
             </div>
         @endif
@@ -69,9 +69,9 @@
                 <small>Changed during verification</small>
             </div>
             <div class="record-summary-item">
-                <span>Later corrections</span>
+                <span>Edited after saving</span>
                 <strong>{{ $postSubmissionChangeCount }}</strong>
-                <small>Saved after submission</small>
+                <small>Fields changed in Review &amp; Export</small>
             </div>
         </section>
 
@@ -112,7 +112,7 @@
 
                                 <div class="record-field-group__body">
                                     @foreach ($group['fields'] as $field)
-                                        @php($changes = $fieldChanges->get($field->getKey(), collect()))
+                                        @php($lastEdit = $fieldChanges->get($field->getKey()))
                                         <div class="record-field-row"
                                              data-record-field="{{ $field->getKey() }}"
                                              data-group="{{ $group['id'] }}"
@@ -129,9 +129,9 @@
 
                                             <div class="record-field-row__verified">
                                                 <strong>{{ filled($field->verified_value) ? $field->verified_value : 'Not recorded' }}</strong>
-                                                @if ($changes->isNotEmpty())
+                                                @if ($lastEdit)
                                                     <span class="record-field-row__change-note">
-                                                        Updated by correction #{{ $changes->last()['request']->getKey() }}
+                                                        Edited {{ $lastEdit->created_at->diffForHumans() }}
                                                     </span>
                                                 @endif
                                             </div>
@@ -154,33 +154,33 @@
                     </div>
                 </x-card>
 
-                @if ($record->changeRequests->isNotEmpty())
+                @if ($edits->isNotEmpty())
                     <details class="card record-history-card mt-4">
                         <summary class="card-header record-disclosure-summary">
                             <span>
-                                <strong>Change history</strong>
-                                <small>{{ $record->changeRequests->count() }} correction(s)</small>
+                                <strong>Edit history</strong>
+                                <small>{{ $edits->count() }} {{ $edits->count() === 1 ? 'save' : 'saves' }} in Review &amp; Export</small>
                             </span>
                             <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
                         </summary>
                         <div class="card-body">
-                            @foreach ($record->changeRequests as $request)
+                            @foreach ($edits as $edit)
+                                @php($changed = $edit->new_values['fields'] ?? [])
                                 <div class="record-history-entry {{ ! $loop->last ? 'border-bottom' : '' }}">
                                     <div>
-                                        <a href="{{ route('change-requests.show', $request) }}" class="fw-medium">
-                                            Correction #{{ $request->getKey() }}
-                                        </a>
-                                        <small>
-                                            {{ $request->requester?->name }} · {{ $request->created_at->diffForHumans() }}
-                                            · {{ $request->changeCount() }} change(s)
-                                        </small>
-                                        @if (filled($request->reason))
-                                            <p>{{ $request->reason }}</p>
-                                        @endif
+                                        <span class="fw-medium">{{ count($changed) }} {{ count($changed) === 1 ? 'value' : 'values' }} changed</span>
+                                        <small>{{ $edit->actor_name }} · {{ $edit->created_at->diffForHumans() }}</small>
+                                        <p>
+                                            @foreach (array_slice($changed, 0, 4, true) as $change)
+                                                {{ $change['name'] ?? 'Field' }}: <strong>{{ $change['value'] ?? '' }}</strong>@if (! $loop->last) · @endif
+                                            @endforeach
+                                            @if (count($changed) > 4) · and {{ count($changed) - 4 }} more @endif
+                                        </p>
                                     </div>
-                                    <span class="badge {{ $request->status->badgeClass() }}">
-                                        {{ $request->status->label() }}
-                                    </span>
+                                    @can('audit.view')
+                                        <a href="{{ route('audit.index', ['action' => 'record.edited', 'q' => '#'.$record->getKey()]) }}"
+                                           class="small">Audit log</a>
+                                    @endcan
                                 </div>
                             @endforeach
                         </div>

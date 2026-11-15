@@ -25,8 +25,8 @@ enum RecordStatus: string
     }
 
     /**
-     * Submitted records are locked. Values change only through an approved
-     * change request.
+     * Submitted records are locked: their values change only in Review &
+     * Export, which writes each old and new value to the audit log.
      */
     public function isLocked(): bool
     {

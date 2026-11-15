@@ -2,11 +2,9 @@
 
 namespace App\Services;
 
-use App\Enums\ChangeRequestStatus;
 use App\Enums\RecordStatus;
 use App\Jobs\ProcessDocumentPage;
 use App\Models\AuditLog;
-use App\Models\ChangeRequest;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
 use App\Models\OcrSetting;
@@ -165,7 +163,7 @@ class DashboardAnalytics
             'archive_types' => $this->archiveByType($entries),
             'trend' => $this->recordTrend($scopes['trend'], $entries, $first),
             'ocr_quality' => $this->ocrQuality($scopes['ocr']),
-            'corrections' => $this->correctionSummary($scopes['requests']),
+            'corrections' => $this->editSummary($scopes['requests']),
             'processing' => $this->processing($scopes['processing']),
             'recent_changes' => $this->recentChanges(),
         ];
@@ -394,15 +392,9 @@ class DashboardAnalytics
         $threshold = OcrSetting::threshold();
         $recordIds = $this->records($scope)->select('records.id');
 
-        // A correction is the user changing the OCR reading while verifying. A
-        // later correction (Correct record) rewrites verified_value afterwards, so the
-        // value as submitted is the first approved request's "before" value,
-        // and only failing that the current one.
-        $submittedValue = 'COALESCE((SELECT cri.current_value FROM change_request_items AS cri'
-            .' INNER JOIN change_requests AS cr ON cr.id = cri.change_request_id'
-            .' WHERE cri.record_field_id = record_fields.id AND cr.status = ?'
-            .' ORDER BY cr.reviewed_at, cr.id LIMIT 1), record_fields.verified_value)';
-        $corrected = $this->differs('TRIM(record_fields.ocr_text)', "TRIM(COALESCE({$submittedValue}, ''))");
+        // A correction is a person changing the OCR reading: while verifying,
+        // or later in Review & Export, which edits verified_value in place.
+        $corrected = $this->differs('TRIM(record_fields.ocr_text)', "TRIM(COALESCE(record_fields.verified_value, ''))");
 
         $row = RecordField::query()
             ->whereIn('record_id', $recordIds)
@@ -410,10 +402,7 @@ class DashboardAnalytics
             ->selectRaw('AVG(ocr_confidence) as average_confidence')
             ->selectRaw('COALESCE(SUM(CASE WHEN ocr_confidence < ? THEN 1 ELSE 0 END), 0) as below_threshold', [$threshold])
             ->selectRaw('COUNT(ocr_text) as comparable_fields')
-            ->selectRaw(
-                "COALESCE(SUM(CASE WHEN ocr_text IS NOT NULL AND {$corrected} THEN 1 ELSE 0 END), 0) as corrected_fields",
-                [ChangeRequestStatus::Approved->value],
-            )
+            ->selectRaw("COALESCE(SUM(CASE WHEN ocr_text IS NOT NULL AND {$corrected} THEN 1 ELSE 0 END), 0) as corrected_fields")
             ->first();
 
         $confidenceFields = (int) ($row?->confidence_fields ?? 0);
@@ -452,25 +441,24 @@ class DashboardAnalytics
     }
 
     /**
-     * Corrections saved in the period: how many, on how many records, and how
-     * many fields they changed. A correction is saved approved, so its
-     * reviewed_at is the day it was made (older approved requests count too).
+     * Saved records edited in Review & Export in the period: how many saves,
+     * on how many records, and how many fields they changed (each save is one
+     * record.edited audit entry, its new values keyed by field).
      *
      * @param  array<string, mixed>  $scope  the requests panel's
      * @return array{corrections: int, records: int, fields: int}
      */
-    private function correctionSummary(array $scope): array
+    private function editSummary(array $scope): array
     {
-        $corrections = ChangeRequest::query()
-            ->where('status', ChangeRequestStatus::Approved->value)
-            ->whereBetween('reviewed_at', [$scope['db_start'], $scope['db_end']])
-            ->withCount('items')
-            ->get(['id', 'record_id']);
+        $edits = AuditLog::query()
+            ->where('action', 'record.edited')
+            ->whereBetween('created_at', [$scope['db_start'], $scope['db_end']])
+            ->get(['id', 'auditable_id', 'new_values']);
 
         return [
-            'corrections' => $corrections->count(),
-            'records' => $corrections->pluck('record_id')->unique()->count(),
-            'fields' => (int) $corrections->sum('items_count'),
+            'corrections' => $edits->count(),
+            'records' => $edits->pluck('auditable_id')->unique()->count(),
+            'fields' => (int) $edits->sum(fn (AuditLog $edit) => count($edit->new_values['fields'] ?? [])),
         ];
     }
 

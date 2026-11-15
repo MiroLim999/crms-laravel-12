@@ -14,8 +14,6 @@ export default defineConfig({
                 // Page-scoped archive split view and shared disclosure animation.
                 'resources/js/record-detail.js',
                 'resources/js/disclosure-motion.js',
-                // Grouped correction editor with live no-op detection.
-                'resources/js/change-request.js',
                 // Auth-page decoration (centred card, corner shapes). Only the
                 // guest layout loads it, so it stays out of the main bundle.
                 'resources/scss/pages/page-auth.scss',
@@ -41,6 +39,11 @@ export default defineConfig({
                 'resources/js/row-lines.js',
                 // The value checks Verify runs from each template field's settings.
                 'resources/js/value-types.js',
+                // Review & Export: the records table, its CSV and Excel files.
+                // The Excel writer (write-excel-file) loads only when asked for.
+                'resources/js/review-table.js',
+                // A saved record's Review & Export page (records/{record}/review).
+                'resources/js/record-review.js',
                 // A scanned file of many pages: its fingerprint, and one page cut
                 // out of it per record. pdf-lib loads only when a page is cut.
                 'resources/js/scan-source.js',

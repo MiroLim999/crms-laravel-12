@@ -745,18 +745,83 @@
                                 <button class="btn btn-outline-secondary" type="button" id="backToMark">
                                     <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Back to marking
                                 </button>
-                                <button class="btn btn-primary" type="submit" id="submitBtn" disabled>
+                                {{-- Batch mode saves from here; one document goes on to Review & Export. --}}
+                                <button class="btn btn-primary d-none" type="submit" id="submitBtn" disabled>
                                     <i class="icon-base bx bx-check-shield icon-sm me-1"></i>
                                     {{-- One inline span: .btn is a flex container, which drops the
                                     spaces between separate text and element children. --}}
                                     <span><span id="submitLabelHead">Submit</span> <span id="submitVerifiedCount">0</span> verified</span>
                                 </button>
+                                <button class="btn btn-primary" type="button" id="reviewExportBtn">
+                                    <span>Review &amp; export</span>
+                                    <i class="icon-base bx bx-chevron-right icon-sm ms-1" aria-hidden="true"></i>
+                                </button>
                             </div>
                         </footer>
                     </section>
+
                 </div>
             </div>
         </form>
+    </section>
+
+    {{-- Step 4: Review & Export. Verify's own document pane (and its error notices) is
+         moved in here when the step opens and back when Verify is shown again, so
+         the scan, its outlines and its zoom are the same ones. The table is on the
+         right; drag the bar between them to resize, double-click it for 30/70. --}}
+    <section id="step-review" class="document-step-panel d-none">
+        <div class="validation-workspace">
+            <div id="reviewNotices"></div>
+            <div class="validation-comparison-grid review-grid" id="reviewGrid">
+                <div class="review-splitter" id="reviewSplitter" role="separator" tabindex="0"
+                     aria-orientation="vertical" aria-controls="reviewPane" aria-label="Resize the scan and the table"
+                     aria-valuemin="20" aria-valuemax="65" aria-valuenow="30"
+                     title="Drag to resize · double-click for 30/70"></div>
+
+                <section class="card validation-pane review-pane" id="reviewPane" aria-labelledby="reviewPaneTitle">
+                    <header class="validation-pane__header review-pane__header">
+                        <div class="min-w-0">
+                            <span class="validation-pane__eyebrow">Review &amp; Export</span>
+                            <h3 class="h5 mb-0" id="reviewPaneTitle">Records table</h3>
+                            <p class="small text-muted mb-0" id="reviewPaneSummary"></p>
+                        </div>
+                        <div class="review-pane__tools">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="reviewIssuesBtn"
+                                    title="Go to the next empty or invalid cell">
+                                <i class="icon-base bx bx-error icon-sm me-1" aria-hidden="true"></i>
+                                <span id="reviewIssuesLabel">No issues</span>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="reviewExportCsv">
+                                <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>CSV
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="reviewExportXlsx">
+                                <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>
+                                <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>Excel
+                            </button>
+                        </div>
+                    </header>
+
+                    <div class="review-pane__notes">
+                        <span><i class="icon-base bx bx-pointer" aria-hidden="true"></i>Click a cell to edit it and see it on the scan.
+                            <kbd>Enter</kbd> or <kbd>Tab</kbd> confirms and moves on, <kbd>Esc</kbd> cancels.</span>
+                    </div>
+
+                    <div class="review-table-scroll" id="reviewTable"></div>
+
+                    <footer class="validation-submit-bar">
+                        <div class="validation-submit-actions">
+                            <button class="btn btn-outline-secondary" type="button" id="backToVerify">
+                                <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i> Back to verify
+                            </button>
+                            <button class="btn btn-primary" type="button" id="reviewSaveBtn" disabled>
+                                <i class="icon-base bx bx-check-shield icon-sm me-1" aria-hidden="true"></i>
+                                <span>Save record</span>
+                            </button>
+                        </div>
+                    </footer>
+                </section>
+            </div>
+        </div>
     </section>
 
     {{-- Confirm restoring the original template layout --}}
@@ -1091,6 +1156,14 @@
         import { RowLineLayer, rowKey } from '{{ Vite::asset('resources/js/row-lines.js') }}';
         import { valueProblem } from '{{ Vite::asset('resources/js/value-types.js') }}';
         import {
+            attachSplit,
+            buildReviewModel,
+            downloadCsv,
+            downloadXlsx,
+            exportFileName,
+            ReviewTable,
+        } from '{{ Vite::asset('resources/js/review-table.js') }}';
+        import {
             fileFingerprint,
             firstUnsavedPage,
             isPdfFile,
@@ -1163,7 +1236,12 @@
             }
             return node;
         };
-        const steps = { upload: el('step-upload'), mark: el('step-mark'), verify: el('step-verify') };
+        const steps = {
+            upload: el('step-upload'),
+            mark: el('step-mark'),
+            verify: el('step-verify'),
+            review: el('step-review'),
+        };
         const scanFileInput = requiredInput(document, '#scanFile');
         const selectAllFieldsInput = requiredInput(document, '#selectAllFields');
 
@@ -1200,6 +1278,14 @@
         let syncingValidationSelection = false;
         let recordSubmitting = false;
         let markerConstraintMessage = null;
+        // Step 4, Review & Export: on while it is shown; the table (made when
+        // first shown) and what it was drawn from; values typed into cells
+        // where nothing was read ("person-5|1|sex" -> "M"), kept until the
+        // next scan and saved with the record as fields with no outline.
+        let reviewing = false;
+        let reviewTable = null;
+        let reviewModel = null;
+        const reviewExtras = new Map();
 
         const markerOverlay = el('fieldOverlay');
         const marker = new FieldMarker({
@@ -3082,6 +3168,9 @@
 
         function showStep(name) {
             Object.entries(steps).forEach(([key, node]) => node.classList.toggle('d-none', key !== name));
+            // Verify's document pane goes with Review & Export and comes back to Verify.
+            setReviewMode(name === 'review');
+            if (name === 'verify') syncVerifyButtons();
 
             const batchBanner = document.getElementById('batchQueueBanner');
             if (batchBanner) {
@@ -3095,7 +3184,7 @@
             }
 
             const marking = name === 'mark';
-            const focusedWorkspace = marking || name === 'verify';
+            const focusedWorkspace = marking || name === 'verify' || name === 'review';
             el('layout-navbar').classList.remove('d-none');
             el('documentFlowSteps').classList.remove('d-none');
             document.querySelector('.content-footer')?.classList.toggle('d-none', focusedWorkspace);
@@ -3104,7 +3193,7 @@
             el('workspaceContextDetail').classList.toggle('d-none', !focusedWorkspace);
             el('workspaceCancel').classList.toggle('d-none', !focusedWorkspace);
 
-            const order = ['upload', 'mark', 'verify'];
+            const order = ['upload', 'mark', 'verify', 'review'];
             const activeIndex = order.indexOf(name);
             document.querySelectorAll('[data-flow-step]').forEach((node) => {
                 const stepIndex = order.indexOf(node.dataset.flowStep);
@@ -6728,6 +6817,9 @@
             const spreadItem = currentVerifyItem();
             setVerifySpreadLayout(spreadItem);
             activeValidationIndex = null;
+            // A new scan: nothing typed in Review & Export yet.
+            reviewExtras.clear();
+            reviewModel = null;
             stopAddingMissedField();
         stopGroupingFields();
             target.width = source.width;
@@ -6798,6 +6890,8 @@
         function prepareSpreadComparison() {
             const [first, second] = verifyDoc.pages;
             activeValidationIndex = null;
+            reviewExtras.clear();
+            reviewModel = null;
             stopAddingMissedField();
             stopGroupingFields();
             cancelOutlineEdit();
@@ -7197,6 +7291,8 @@
                 expansion.then(() => {
                     if (activeValidationIndex === index) revealValidationRow(index);
                 });
+                // Review & Export: the field's cell in the table.
+                if (reviewing) reviewTable?.selectRef(index);
             }
             if (source === 'row') revealValidationMarker(index);
         }
@@ -7254,8 +7350,13 @@
             el('verifiedProgressBar').style.width = `${percentage}%`;
             el('submitVerifiedCount').textContent = String(verified);
             el('submitBtn').disabled = verified === 0 || recordSubmitting;
+            el('reviewSaveBtn').disabled = verified === 0 || recordSubmitting;
             updateValidationGroupSummaries();
             updateValidationMarkerStates();
+            if (reviewing) {
+                reviewTable?.refresh();
+                updateReviewSummary();
+            }
         }
 
         function updateValidationGroupSummaries() {
@@ -9063,6 +9164,8 @@
                     .map((box) => pageNamed(entry, box.name));
             });
 
+            // Cells typed in Review & Export where nothing was read count as submitted.
+            const typed = reviewTypedCells();
             const untouchedRows = [];
             validationGroups.forEach((group) => {
                 const row = Number(cropped[group.indexes[0]]?.personGroup);
@@ -9073,16 +9176,20 @@
                 if (!ledgerRow) return;
 
                 const checkedHere = group.indexes.filter((index) => checkedIndexes.has(index));
-                if (checkedHere.length === 0) {
+                const typedHere = typed.get(group.id) ?? [];
+                if (checkedHere.length === 0 && typedHere.length === 0) {
                     untouchedRows.push(row);
                     return;
                 }
 
                 const left = pages.flatMap((page) => {
                     if (row > page.tableRows) return [];
-                    const columnsHere = new Set(checkedHere
-                        .filter((index) => sideOf(index) === page.side)
-                        .map((index) => nameKey(cropped[index]?.label)));
+                    const columnsHere = new Set([
+                        ...checkedHere
+                            .filter((index) => sideOf(index) === page.side)
+                            .map((index) => nameKey(cropped[index]?.label)),
+                        ...typedHere.filter((cell) => cell.side === page.side).map((cell) => cell.name),
+                    ]);
                     // A column shortened in Align is not asked for in the rows it leaves out.
                     return page.requiredColumns
                         .filter((box) => !columnsHere.has(nameKey(box.name)) && (page.shortened.get(nameKey(box.name))?.has(row) ?? true))
@@ -9225,6 +9332,12 @@
 
         el('confirmMissingRequiredBtn').addEventListener('click', () => {
             window.bootstrap.Modal.getInstance(el('missingRequiredModal'))?.hide();
+            // Asked on the way to Review & Export: go on there.
+            if (missingThenReview) {
+                missingThenReview = false;
+                openReview({ allowMissing: true });
+                return;
+            }
             submitRecord({ ...lastSubmitChoices, allowMissing: true });
         });
 
@@ -9232,6 +9345,389 @@
             event.preventDefault();
             submitRecord();
         });
+
+        // ------------------------------------------------ step 4: Review & Export
+        // The people as one table, a row per person and a column per field. A
+        // cell is that person's Verify field(s) in that column: the table reads
+        // and writes Verify's own value boxes, so an edit shows in both and Save
+        // record sends it through submitRecord() as Verify would. A cell picked
+        // here is shown on the scan by Verify's own activateValidationField, on
+        // Verify's own document pane, which is moved into this step while it is
+        // shown (as the batch banner is moved between steps).
+
+        /** Verify (one document) goes on to Review & Export; batch mode still saves from Verify. */
+        function syncVerifyButtons() {
+            const batch = Boolean(batchState?.active);
+            el('submitBtn').classList.toggle('d-none', !batch);
+            el('reviewExportBtn').classList.toggle('d-none', batch);
+        }
+
+        /** Move Verify's document pane and its notices into step 4 (on) or back to Verify (off). */
+        function setReviewMode(on) {
+            if (reviewing === on) return;
+            reviewing = on;
+            const pane = document.querySelector('.validation-document-pane');
+            const notices = [el('validationExistingBanner'), el('validationSubmitError')];
+            if (on) {
+                el('reviewNotices').append(...notices);
+                el('reviewGrid').prepend(pane);
+            } else {
+                reviewTable?.commit();
+                const verifyGrid = el('step-verify').querySelector('.validation-comparison-grid');
+                verifyGrid.prepend(pane);
+                verifyGrid.before(...notices);
+            }
+            // The pane changed width: fit the page to it.
+            window.requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+        }
+
+        const verifyInputOf = (index) => {
+            const input = validationRow(index)?.querySelector('.verified');
+            return input instanceof HTMLInputElement ? input : null;
+        };
+        const verifyTickOf = (index) => {
+            const checkbox = validationRow(index)?.querySelector('.validation-verified');
+            return checkbox instanceof HTMLInputElement ? checkbox : null;
+        };
+        const verifyValueOf = (index) => verifyInputOf(index)?.value ?? '';
+        const extraKey = (cell) => `${cell.row.id}|${cell.column.key}`;
+
+        /** What the table is drawn from: each page's columns, the people and the document details. */
+        function reviewInput() {
+            const pages = docEntries().map((entry) => {
+                const settings = verifyDoc ? layoutSettings(entry.layout) : templateSettings;
+                const onGrid = (entry.page?.geometry?.columns ?? []).map((column) => column.name);
+                const names = onGrid.length > 0
+                    ? onGrid
+                    : entry.layout.boxes.filter((box) => box.kind === 'column').map((box) => box.name);
+                return {
+                    number: entry.number,
+                    columns: names.map((name) => ({ name, settings: settings.get(nameKey(name)) ?? null })),
+                    settings: Object.fromEntries(settings),
+                };
+            });
+            const field = (index) => ({
+                side: cropped[index]?.pageIndex ?? 0,
+                column: cropped[index]?.label || readings[index]?.name || `Field ${index + 1}`,
+                ref: index,
+            });
+            const people = validationGroups
+                .filter((group) => group.kind === 'person')
+                .map((group, position) => ({
+                    id: group.id,
+                    // The register row, as the record's CSV numbers it (else the person's place).
+                    label: String(Number(String(group.id).match(/^person-(\d+)$/)?.[1]) || position + 1).padStart(2, '0'),
+                    fields: group.indexes.map(field),
+                }));
+            const details = validationGroups
+                .filter((group) => group.kind !== 'person' && group.id !== 'needs-review')
+                .flatMap((group) => group.indexes.map(field));
+            return { pages, people, details };
+        }
+
+        /** A cell's value: its Verify fields' values (two written lines join), or what was typed in an empty cell. */
+        function reviewValue(cell) {
+            if (cell.refs.length === 0) return cell.column.detail ? '' : reviewExtras.get(extraKey(cell)) ?? '';
+            return cell.refs.map(verifyValueOf).filter((value) => value.trim() !== '').join(' ');
+        }
+
+        /** Put a value in a Verify field and tick it (an empty value is left unticked). */
+        function setVerifyValue(index, value) {
+            const input = verifyInputOf(index);
+            if (!input || input.disabled) return;
+            input.value = value;
+            // Verify's own reaction: its value check, and the tick taken off.
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            const checkbox = verifyTickOf(index);
+            if (checkbox && value.trim() !== '') {
+                checkbox.checked = true;
+                validationRow(index)?.classList.add('is-verified');
+            }
+            clearValidationFieldError(index);
+        }
+
+        function reviewChange(cell, value) {
+            const text = value.trim();
+            if (cell.refs.length === 0) {
+                if (text === '') reviewExtras.delete(extraKey(cell));
+                else reviewExtras.set(extraKey(cell), text);
+            } else {
+                // Two written lines in one cell: the whole value goes in the first.
+                cell.refs.forEach((index, position) => setVerifyValue(index, position === 0 ? text : ''));
+            }
+            clearValidationSubmitError();
+            updateVerificationSummary();
+        }
+
+        /** A cell picked: its field on the scan, as a click in Verify's list does; an empty cell shows its person. */
+        function locateReviewCell(cell) {
+            const index = cell.refs.find((ref) => placedVerifyBoxes([ref]).length > 0) ?? cell.refs[0];
+            if (Number.isInteger(index)) {
+                activateValidationField(index, 'row');
+                return;
+            }
+            if (!cell.column.detail) activateValidationGroup(cell.row.id, 'group');
+        }
+
+        function showReviewIssues({ invalid, empty }) {
+            const parts = [];
+            if (invalid > 0) parts.push(`${invalid} invalid`);
+            if (empty > 0) parts.push(`${empty} empty`);
+            el('reviewIssuesLabel').textContent = parts.length > 0 ? parts.join(' · ') : 'No issues';
+            const button = el('reviewIssuesBtn');
+            button.disabled = parts.length === 0;
+            button.classList.toggle('btn-outline-secondary', parts.length === 0);
+            button.classList.toggle('btn-outline-danger', parts.length > 0);
+        }
+
+        function updateReviewSummary() {
+            if (!reviewModel) return;
+            const people = reviewModel.rows.length;
+            const pages = docEntries().length;
+            el('reviewPaneSummary').textContent = `${people} ${people === 1 ? 'person' : 'people'} · `
+                + `${reviewModel.columns.length} column${reviewModel.columns.length === 1 ? '' : 's'}`
+                + (pages > 1 ? ` · ${pages} pages` : '');
+        }
+
+        // Required fields left out were accepted on the way in (Continue anyway):
+        // Save record does not ask again. missingThenReview: the question is for step 4.
+        let reviewAllowMissing = false;
+        let missingThenReview = false;
+
+        /**
+         * Verify's "Review & export": the checks Submit makes in Verify, in the
+         * same order as submitRecord(), then the table.
+         */
+        function openReview({ allowMissing = false } = {}) {
+            clearValidationSubmitError();
+            const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
+            rows.forEach((row) => clearValidationFieldError(Number(row.dataset.fieldIndex)));
+
+            const toRedraw = cropped.map((item, index) => (item.cropDeleted ? index : null)).filter((index) => index !== null);
+            if (toRedraw.length > 0) {
+                showValidationSubmitError(toRedraw.length === 1
+                    ? 'One field has a deleted crop. Draw it again before going on.'
+                    : `${toRedraw.length} fields have a deleted crop. Draw them again before going on.`);
+                toRedraw.forEach((index) => setValidationFieldError(index, 'Press Draw again and mark this field on the page.'));
+                activateValidationField(toRedraw[0], 'marker');
+                return;
+            }
+
+            const verifiedIndexes = rows
+                .filter((row) => requiredInput(row, '.validation-verified').checked)
+                .map((row) => Number(row.dataset.fieldIndex));
+            if (verifiedIndexes.length === 0) {
+                showValidationSubmitError('Check Verified on at least one field before going on.');
+                if (rows[0]) {
+                    activateValidationField(Number(rows[0].dataset.fieldIndex), 'marker');
+                    requiredInput(rows[0], '.validation-verified').focus();
+                }
+                return;
+            }
+
+            const invalidIndexes = verifiedIndexes.filter((index) => {
+                const row = validationRow(index);
+                if (!row) return true;
+                if (requiredInput(row, '.verified').value.trim()) return false;
+                setValidationFieldError(index, 'A verified field must contain a value.');
+                return true;
+            });
+            if (invalidIndexes.length > 0) {
+                showValidationSubmitError('Some checked fields still need a value.');
+                activateValidationField(invalidIndexes[0], 'marker');
+                const invalidRow = validationRow(invalidIndexes[0]);
+                if (invalidRow) requiredInput(invalidRow, '.verified').focus();
+                return;
+            }
+
+            if (!scanFile) {
+                showValidationSubmitError('The original scan is no longer available. Return to marking and choose the file again.');
+                return;
+            }
+
+            if (!allowMissing) {
+                const missing = requiredNotSubmitted(verifiedIndexes);
+                if (missing.length > 0) {
+                    missingThenReview = true;
+                    el('missingRequiredModalTitle').textContent = 'Continue without required fields?';
+                    el('confirmMissingRequiredBtn').textContent = 'Continue anyway';
+                    askToSubmitWithoutRequired(missing);
+                    return;
+                }
+            }
+
+            if (verifyDoc) {
+                const unchecked = verifyDoc.pages.find((_, side) => !verifiedIndexes.some((index) => (cropped[index]?.pageIndex ?? 0) === side));
+                if (unchecked) {
+                    showValidationSubmitError(`Check Verified on at least one field of page ${unchecked.number}.`);
+                    return;
+                }
+            }
+            reviewAllowMissing = allowMissing;
+
+            stopAddingMissedField();
+            stopGroupingFields();
+            cancelOutlineEdit();
+
+            reviewModel = buildReviewModel(reviewInput());
+            // A cell typed into before that has a field now (Add missed field): the field wins.
+            reviewModel.rows.forEach((row) => reviewModel.columns.forEach((column) => {
+                if ((row.cells[column.key]?.refs.length ?? 0) > 0) reviewExtras.delete(`${row.id}|${column.key}`);
+            }));
+            reviewTable ??= new ReviewTable({
+                container: el('reviewTable'),
+                valueOf: reviewValue,
+                onChange: reviewChange,
+                onLocate: locateReviewCell,
+                onIssues: showReviewIssues,
+            });
+
+            showStep('review');
+            reviewTable.render(reviewModel);
+            updateVerificationSummary();
+            // Start on the first cell, without zooming the scan.
+            if (reviewModel.rows.length > 0 && reviewModel.columns.length > 0) reviewTable.select(0, 0, { locate: false });
+        }
+
+        // The question Submit asks; asked on the way to step 4 it says Continue.
+        el('missingRequiredModal').addEventListener('hidden.bs.modal', () => {
+            missingThenReview = false;
+            el('missingRequiredModalTitle').textContent = 'Submit without required fields?';
+            el('confirmMissingRequiredBtn').textContent = 'Submit anyway';
+        });
+
+        el('reviewExportBtn').addEventListener('click', () => openReview());
+        el('reviewSaveBtn').addEventListener('click', () => {
+            // A cell still being typed counts.
+            reviewTable?.commit();
+            // "Continue anyway" is not asked again, but once the cells typed here
+            // fill every required field the server checks the record as usual.
+            const verifiedNow = [...el('verifyRows').querySelectorAll('.validation-field')]
+                .filter((row) => requiredInput(row, '.validation-verified').checked)
+                .map((row) => Number(row.dataset.fieldIndex));
+            submitRecord({ allowMissing: reviewAllowMissing && requiredNotSubmitted(verifiedNow).length > 0 });
+        });
+        el('backToVerify').addEventListener('click', () => {
+            reviewTable?.commit();
+            clearValidationSubmitError();
+            showStep('verify');
+            if (activeValidationIndex !== null) revealValidationRow(activeValidationIndex);
+        });
+        el('reviewIssuesBtn').addEventListener('click', () => reviewTable?.nextIssue());
+
+        attachSplit({
+            split: el('reviewGrid'),
+            splitter: el('reviewSplitter'),
+            onResize: () => {
+                if (reviewing) window.requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+            },
+        });
+
+        /** "births-2splitpages-pages-1-2-2026-11-15" */
+        function reviewFileName() {
+            const pages = verifyDoc
+                ? `pages ${verifyDoc.pages.map((entry) => entry.number).join(' ')}`
+                : (multiPage() ? `page ${scanPageNumber}` : '');
+            return exportFileName(config.typeLabel, scanFile?.name, pages, new Date().toISOString().slice(0, 10));
+        }
+
+        el('reviewExportCsv').addEventListener('click', () => {
+            if (!reviewTable) return;
+            reviewTable.commit();
+            downloadCsv(reviewTable.exportTable(), reviewFileName());
+        });
+        el('reviewExportXlsx').addEventListener('click', async () => {
+            if (!reviewTable) return;
+            reviewTable.commit();
+            const button = el('reviewExportXlsx');
+            const spinner = button.querySelector('.spinner-border');
+            button.disabled = true;
+            spinner?.classList.remove('d-none');
+            try {
+                await downloadXlsx(reviewTable.exportTable(), reviewFileName());
+            } catch (error) {
+                console.error('Excel export failed:', error);
+                showValidationSubmitError('The Excel file could not be made. Try CSV instead.');
+            } finally {
+                button.disabled = false;
+                spinner?.classList.add('d-none');
+            }
+        });
+
+        /**
+         * Values typed into cells where nothing was read, as fields of the
+         * record (no outline; the box is the cell on the page's grid), each
+         * with the page side it belongs to. `personGroups` numbers the people
+         * as the record does.
+         */
+        function reviewExtraFields(personGroups) {
+            if (!reviewModel) return [];
+            const fields = [];
+            reviewModel.rows.forEach((row) => {
+                const group = personGroups.find((candidate) => candidate.id === row.id);
+                if (!group) return;
+                let order = group.indexes.length;
+                const tableRow = Number(String(row.id).match(/^person-(\d+)$/)?.[1] ?? 0) || personGroups.indexOf(group) + 1;
+                reviewModel.columns.forEach((column) => {
+                    if (column.detail || (row.cells[column.key]?.refs.length ?? 0) > 0) return;
+                    const value = String(reviewExtras.get(`${row.id}|${column.key}`) ?? '').trim();
+                    if (value === '') return;
+                    const box = unreadCellBox(column, tableRow);
+                    fields.push({
+                        side: column.side,
+                        field: {
+                            verified: '1',
+                            name: `${column.name} · row ${tableRow}`,
+                            ocr_text: null,
+                            ocr_confidence: null,
+                            verified_value: value,
+                            person_group: personGroups.indexOf(group) + 1,
+                            person_field_order: order,
+                            x: box.x.toFixed(5),
+                            y: box.y.toFixed(5),
+                            width: box.w.toFixed(5),
+                            height: box.h.toFixed(5),
+                            line_id: null,
+                        },
+                    });
+                    order += 1;
+                });
+            });
+            return fields;
+        }
+
+        /** The cells typed in Review & Export where nothing was read: person id -> [{side, name}]. */
+        function reviewTypedCells() {
+            const typed = new Map();
+            if (!reviewModel || batchState.active) return typed;
+            reviewModel.rows.forEach((row) => {
+                reviewModel.columns.forEach((column) => {
+                    if (column.detail || (row.cells[column.key]?.refs.length ?? 0) > 0) return;
+                    if (String(reviewExtras.get(`${row.id}|${column.key}`) ?? '').trim() === '') return;
+                    if (!typed.has(row.id)) typed.set(row.id, []);
+                    typed.get(row.id).push({ side: column.side, name: nameKey(column.name) });
+                });
+            });
+            return typed;
+        }
+
+        /** Where an unread cell is on its page: its column across, its table row down. */
+        function unreadCellBox(column, tableRow) {
+            const page = docEntries()[column.side]?.page;
+            const columnBox = (page?.geometry?.columns ?? []).find((candidate) => nameKey(candidate.name) === nameKey(column.name))?.box;
+            const ruled = page?.geometry?.ruled_ys ?? [];
+            const top = Number(ruled[tableRow - 1]);
+            const bottom = Number(ruled[tableRow]);
+            const clamp = (value) => Math.min(1, Math.max(0, value));
+            const x = clamp(Number(columnBox?.[0] ?? 0));
+            const y = Number.isFinite(top) ? clamp(top) : 0;
+            return {
+                x,
+                y,
+                w: Math.max(0.00001, Math.min(1 - x, Number(columnBox?.[2] ?? 0.01) || 0.01)),
+                h: Math.max(0.00001, Math.min(1 - y, Number.isFinite(bottom) && bottom > top ? bottom - top : 0.01)),
+            };
+        }
 
         // ------------------------------------------------ a page saved before
         // The server says this page of this file (or this file) is saved already.
@@ -9258,6 +9754,7 @@
 
         // ------------------------------------------------ the next page of a PDF
         const SUBMIT_IDLE_HTML = el('submitBtn').innerHTML;
+        const REVIEW_SAVE_IDLE_HTML = el('reviewSaveBtn').innerHTML;
 
         function askForNextPage(next, recordUrl, savedNow = [scanPageNumber]) {
             const saved = [...savedPages.keys()].filter((page) => page <= scanPageCount);
@@ -9305,6 +9802,7 @@
                 useLayoutForPage(pageNumber);
                 recordSubmitting = false;
                 el('submitBtn').innerHTML = SUBMIT_IDLE_HTML;
+                el('reviewSaveBtn').innerHTML = REVIEW_SAVE_IDLE_HTML;
                 updateScanNotices();
                 showScanContext();
                 showStep('mark');
@@ -9403,6 +9901,10 @@
                 return;
             }
 
+            // Values typed in Review & Export where nothing was read: saved as fields with no outline.
+            const personGroupsForExtras = validationGroups.filter((candidate) => candidate.kind === 'person');
+            const extraFields = batchState.active ? [] : reviewExtraFields(personGroupsForExtras);
+
             if (!allowMissing) {
                 const missing = requiredNotSubmitted(verifiedIndexes);
                 if (missing.length > 0) {
@@ -9460,7 +9962,7 @@
                     line_id: crop.lineId ?? null,
                 };
             });
-            data.set('fields_json', JSON.stringify(submittedFields));
+            data.set('fields_json', JSON.stringify([...submittedFields, ...extraFields.map((extra) => extra.field)]));
 
             // A two-page register read as one document: one record, its first
             // page's fields as the record's own and the second page's as its
@@ -9473,6 +9975,7 @@
                 verifiedIndexes.forEach((sourceIndex, position) => {
                     pageFields[cropped[sourceIndex]?.pageIndex ?? 0].push(submittedFields[position]);
                 });
+                extraFields.forEach((extra) => pageFields[extra.side]?.push(extra.field));
                 const unchecked = verifyDoc.pages.find((_, side) => pageFields[side].length === 0);
                 if (unchecked) {
                     showValidationSubmitError(`Check Verified on at least one field of page ${unchecked.number}.`);
@@ -9560,7 +10063,7 @@
                 combined = true;
             }
 
-            const button = el('submitBtn');
+            const button = reviewing ? el('reviewSaveBtn') : el('submitBtn');
             const idleButton = button.innerHTML;
             const controller = new AbortController();
             const timeoutId = window.setTimeout(() => controller.abort(), 120000);

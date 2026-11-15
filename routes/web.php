@@ -4,7 +4,6 @@ use App\Http\Controllers\AccountSettingsController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordChangeController;
-use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentPageController;
 use App\Http\Controllers\DocumentScanController;
@@ -14,6 +13,7 @@ use App\Http\Controllers\OcrEngineController;
 use App\Http\Controllers\OcrModelController;
 use App\Http\Controllers\OcrUploadController;
 use App\Http\Controllers\RecordController;
+use App\Http\Controllers\RecordReviewController;
 use App\Http\Controllers\ReportController;
 use Illuminate\Support\Facades\Route;
 
@@ -137,8 +137,8 @@ Route::middleware('auth')->group(function () {
     });
 
     /*
-     * Archive. There is no update or destroy route: a saved record changes only
-     * through a correction, which keeps the old values in its history.
+     * Archive. There is no destroy route, and a saved record's values change
+     * only in Review & Export below, which logs each old and new value.
      */
     Route::middleware('can:records.view')->group(function () {
         Route::get('records', [RecordController::class, 'index'])->name('records.index');
@@ -154,20 +154,15 @@ Route::middleware('auth')->group(function () {
     });
 
     /*
-     * Corrections (still named change requests in the code). Saving one changes the
-     * record at once and keeps the old and new values, so there is no plain
-     * record-edit route anywhere in this file.
+     * Review & Export for a saved record: its people as a table, edited and
+     * downloaded as CSV or Excel. Saving writes every old and new value to the
+     * audit log (record.edited).
      */
-    Route::get('change-requests', [ChangeRequestController::class, 'index'])
-        ->name('change-requests.index');
-    Route::get('change-requests/{changeRequest}', [ChangeRequestController::class, 'show'])
-        ->name('change-requests.show');
-
-    Route::middleware('can:change-requests.create')->group(function () {
-        Route::get('records/{record}/change-request', [ChangeRequestController::class, 'create'])
-            ->name('records.change-requests.create');
-        Route::post('records/{record}/change-request', [ChangeRequestController::class, 'store'])
-            ->name('records.change-requests.store');
+    Route::middleware('can:records.edit')->group(function () {
+        Route::get('records/{record}/review', [RecordReviewController::class, 'edit'])
+            ->name('records.review');
+        Route::patch('records/{record}/review', [RecordReviewController::class, 'update'])
+            ->name('records.review.update');
     });
 
     // Reports list and export records. Neither is a write path to record values.

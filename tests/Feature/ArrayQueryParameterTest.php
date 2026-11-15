@@ -30,7 +30,6 @@ class ArrayQueryParameterTest extends TestCase
             'dashboard processing start date' => ['dashboard', 'processing_from', 200],
             'navbar search on reports' => ['reports.index', 'q', 200],
             'records search' => ['records.index', 'q', 200],
-            'change request search' => ['change-requests.index', 'q', 302],
             'template builder type' => ['templates.create', 'type', 404],
             'scan workspace type' => ['documents.workspace', 'type', 302],
         ];
