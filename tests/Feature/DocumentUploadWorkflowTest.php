@@ -90,7 +90,7 @@ class DocumentUploadWorkflowTest extends TestCase
                 ->assertSee('Original document')
                 ->assertSee('Digital text output')
                 ->assertSee('Registry records')
-                ->assertSee('Select a person to compare the complete row.')
+                ->assertSee('id="verifyAllFields"', false)
                 ->assertSee('Orange shows the complete person row')
                 ->assertSee('green identifies the exact field')
                 ->assertSee('id="validationPageCanvas"', escape: false)
@@ -283,6 +283,28 @@ class DocumentUploadWorkflowTest extends TestCase
             'name' => 'Child Full Name',
             'verified_value' => 'Maria Santos',
         ]);
+    }
+
+    public function test_a_document_scanned_again_can_be_saved_again(): void
+    {
+        Storage::fake('local');
+        $this->seed(DocumentTemplateSeeder::class);
+        $this->registerTestModel();
+
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+        $user = User::factory()->superAdmin()->create();
+        $payload = [
+            ...$this->submissionPayload($template, [$this->verifiedField('Child Full Name', 'Maria Santos')]),
+            'allow_missing' => '1',
+        ];
+
+        // The same values twice (a rescan, after Continue anyway in Verify): two records.
+        foreach ([1, 2] as $count) {
+            $this->actingAs($user)->withHeader('Accept', 'application/json')
+                ->post(route('documents.store'), $payload)
+                ->assertCreated();
+            $this->assertSame($count, CivilRecord::count());
+        }
     }
 
     public function test_unchecked_and_blank_verified_fields_are_rejected_without_saving(): void

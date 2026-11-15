@@ -327,13 +327,11 @@ class DocumentScanController extends Controller
             : $template;
         $extraPages = $this->prepareExtraPages($request, $validated, (int) $pageTwoTemplate->getKey());
 
-        // A crop deleted in Verify must be drawn again and read first.
-        $toRedraw = ($page?->lines
-            ->filter(fn (PageLine $line) => in_array(PageLine::FLAG_REDRAW, $line->flags ?? [], true))
-            ->count() ?? 0)
-            + collect($extraPages)->sum(fn (array $extra) => $extra['page']->lines
-                ->filter(fn (PageLine $line) => in_array(PageLine::FLAG_REDRAW, $line->flags ?? [], true))
-                ->count());
+        // A crop deleted in Verify and not drawn again is left out of the record.
+        // Only a field still sent with that deleted crop's outline is refused.
+        $isRedraw = fn (PageLine $line) => in_array(PageLine::FLAG_REDRAW, $line->flags ?? [], true);
+        $toRedraw = $linesById->filter($isRedraw)->count()
+            + collect($extraPages)->sum(fn (array $extra) => $extra['lines']->filter($isRedraw)->count());
         if ($toRedraw > 0) {
             throw ValidationException::withMessages([
                 'fields' => $toRedraw === 1
@@ -363,22 +361,10 @@ class DocumentScanController extends Controller
             throw ValidationException::withMessages(['missing_required' => $missingRequired]);
         }
 
-        // Flowchart step: "Is it existing? -> Yes -> Data Extracted Rejected"
-        $existingRecord = $this->findExistingRecord($templateId, $validated['fields']);
-        if ($existingRecord !== null) {
-            $rejectMessage = "Data Extracted Rejected: This document record ({$existingRecord->title()}) already exists in the database.";
-            if ($request->expectsJson()) {
-                return response()->json([
-                    'existing_record' => true,
-                    'message' => $rejectMessage,
-                    'record_id' => $existingRecord->getKey(),
-                    'record_title' => $existingRecord->title(),
-                    'record_url' => route('records.show', $existingRecord),
-                ], 409);
-            }
-
-            throw ValidationException::withMessages(['scan' => $rejectMessage]);
-        }
+        // Flowchart step "Is it existing?" is asked when the page is read (the
+        // page's existingRecord, with Continue anyway in Verify) and, for the same
+        // page of the same file, by savedSourcePage() above. Values alone are not
+        // refused here: two pages, or two people, may well read the same.
 
         $disk = Storage::disk('local');
         $scan = $request->file('scan');
@@ -1166,49 +1152,5 @@ class DocumentScanController extends Controller
             'line_row' => $line->row,
             'line_flags' => $line->flags ?: [],
         ];
-    }
-
-    /**
-     * Check whether a CivilRecord for the same template already has identical
-     * verified field values ("Is it existing? -> Data Extracted Rejected").
-     *
-     * @param  list<array<string, mixed>>  $fields
-     */
-    private function findExistingRecord(int $templateId, array $fields): ?CivilRecord
-    {
-        $submitted = collect($fields)
-            ->mapWithKeys(fn(array $f) => [
-                mb_strtolower(trim((string) ($f['name'] ?? ''))) . ':' . ((int) ($f['person_group'] ?? 0)) => mb_strtolower(trim((string) preg_replace('/\s+/', ' ', (string) ($f['verified_value'] ?? '')))),
-            ])
-            ->filter(fn(string $v) => $v !== '');
-
-        if ($submitted->isEmpty()) {
-            return null;
-        }
-
-        $candidates = CivilRecord::with('fields')
-            ->where('document_template_id', $templateId)
-            ->latest('id')
-            ->limit(150)
-            ->get();
-
-        foreach ($candidates as $record) {
-            $existing = $record->fields
-                ->mapWithKeys(fn($f) => [
-                    mb_strtolower(trim((string) $f->name)) . ':' . ((int) ($f->person_group ?? 0)) => mb_strtolower(trim((string) preg_replace('/\s+/', ' ', (string) $f->verified_value))),
-                ])
-                ->filter(fn(string $v) => $v !== '');
-
-            if ($existing->count() !== $submitted->count()) {
-                continue;
-            }
-
-            $allMatch = $submitted->every(fn(string $val, string $key) => ($existing->get($key) ?? null) === $val);
-            if ($allMatch) {
-                return $record;
-            }
-        }
-
-        return null;
     }
 }

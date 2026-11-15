@@ -477,19 +477,22 @@
             <div class="validation-workspace">
                 <div class="validation-submit-error d-none" id="validationExistingBanner" role="alert"
                     aria-live="assertive">
-                    <i class="icon-base bx bx-x-circle" aria-hidden="true"></i>
+                    <i class="icon-base bx bx-copy" aria-hidden="true"></i>
                     <div class="flex-grow-1">
-                        <strong>Data Extracted Rejected — Record Already Exists</strong>
-                        <div id="validationExistingMessage">This document's extracted data already exists in the database.
+                        <strong>This document may already be saved</strong>
+                        <div id="validationExistingMessage">What was read matches a saved record.
                         </div>
                     </div>
                     <div class="d-flex align-items-center gap-2 flex-wrap">
-                        <a href="#" target="_blank" class="btn btn-sm btn-outline-danger d-none"
+                        <a href="#" target="_blank" class="btn btn-sm btn-outline-secondary d-none"
                             id="validationExistingViewLink">
                             View existing
                         </a>
-                        <button type="button" class="btn btn-sm btn-danger" id="validationExistingRejectBtn">
-                            Reject extracted data
+                        <button type="button" class="btn btn-sm btn-label-danger" id="validationExistingRejectBtn">
+                            Reject
+                        </button>
+                        <button type="button" class="btn btn-sm btn-primary" id="validationExistingContinueBtn">
+                            Continue anyway
                         </button>
                     </div>
                 </div>
@@ -737,7 +740,12 @@
                                 <i class="icon-base bx bx-list-check" aria-hidden="true"></i>
                                 <span>Registry records</span>
                             </div>
-                            <small>Select a person to compare the complete row.</small>
+                            {{-- Every person's fields at once, for a quick submission. --}}
+                            <label class="validation-verified-control validation-group-verified-control" for="verifyAllFields">
+                                <input class="form-check-input" type="checkbox" id="verifyAllFields"
+                                       aria-label="Verify every field of every person">
+                                <span>Verify all</span>
+                            </label>
                         </div>
                         <div class="validation-result-list" id="verifyRows"></div>
 
@@ -1071,21 +1079,24 @@
         <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
             <div class="modal-content leave-scan-modal">
                 <div class="modal-body">
-                    <span class="leave-scan-modal__icon bg-label-danger" aria-hidden="true">
-                        <i class="icon-base bx bx-x-circle"></i>
+                    <span class="leave-scan-modal__icon bg-label-warning" aria-hidden="true">
+                        <i class="icon-base bx bx-copy"></i>
                     </span>
-                    <h5 class="modal-title" id="existingRecordModalTitle">Data Extracted Rejected</h5>
+                    <h5 class="modal-title" id="existingRecordModalTitle">Already saved?</h5>
                     <p class="leave-scan-modal__text" id="existingRecordModalDescription">
                         This document's extracted data already exists in the database.
                     </p>
 
+                    <p class="leave-scan-modal__text">
+                        <a href="#" target="_blank" rel="noopener" class="d-none" id="existingRecordViewBtn">Open the saved record</a>
+                    </p>
+
                     <div class="leave-scan-modal__actions">
-                        <a href="#" target="_blank" class="btn btn-outline-secondary d-none" id="existingRecordViewBtn">
-                            View Existing Record
-                        </a>
-                        <button type="button" class="btn btn-danger" id="confirmRejectExistingBtn">
-                            <i class="icon-base bx bx-x-circle icon-sm me-1" aria-hidden="true"></i>
+                        <button type="button" class="btn btn-label-danger" id="confirmRejectExistingBtn">
                             <span id="confirmRejectExistingLabel">Reject &amp; End</span>
+                        </button>
+                        <button type="button" class="btn btn-primary" id="continueExistingBtn">
+                            Continue anyway
                         </button>
                     </div>
                 </div>
@@ -4816,7 +4827,11 @@
             checkAndShowExistingRecord(page.existingRecord || null);
         }
 
+        // Continue anyway was chosen for this scan's match with a saved record.
+        let existingRecordAccepted = false;
+
         function checkAndShowExistingRecord(existing) {
+            existingRecordAccepted = false;
             const banner = document.getElementById('validationExistingBanner');
             const msgEl = document.getElementById('validationExistingMessage');
             const viewLink = document.getElementById('validationExistingViewLink');
@@ -4831,7 +4846,8 @@
             }
 
             const recordTitle = existing.title || 'Existing Record';
-            const description = `The extracted data matches an existing record ("${recordTitle}") in the database. Duplicate extracted data is rejected.`;
+            const description = `What was read matches a saved record ("${recordTitle}"). `
+                + 'Continue to save it again as a new record, or reject this scan.';
 
             if (msgEl) msgEl.textContent = description;
             if (viewLink) {
@@ -4844,14 +4860,7 @@
             }
             banner?.classList.remove('d-none');
 
-            if (batchState.active && batchState.items[batchState.currentIndex]) {
-                const rejected = batchState.items[batchState.currentIndex];
-                batchState.items
-                    .filter((it) => it === rejected || (rejected.group && it.group === rejected.group))
-                    .forEach((it) => { it.status = 'rejected'; it.staged = null; });
-                renderBatchQueueBanner();
-            }
-
+            // Nothing is rejected until Reject is pressed: Continue keeps the scan.
             if (modalDesc) modalDesc.textContent = description;
             if (modalViewBtn) {
                 if (existing.url) {
@@ -4894,8 +4903,13 @@
             verifyDoc = null;
 
             if (batchState.active) {
+                // The file, and the other pages of the same document with it.
                 const currentItem = batchState.items[batchState.currentIndex];
-                if (currentItem) currentItem.status = 'rejected';
+                if (currentItem) {
+                    batchState.items
+                        .filter((it) => it === currentItem || (currentItem.group && it.group === currentItem.group))
+                        .forEach((it) => { it.status = 'rejected'; it.staged = null; });
+                }
                 renderBatchQueueBanner();
 
                 const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && !['imported', 'rejected'].includes(it.status));
@@ -4928,6 +4942,16 @@
 
         document.getElementById('confirmRejectExistingBtn')?.addEventListener('click', rejectCurrentExistingDocument);
         document.getElementById('validationExistingRejectBtn')?.addEventListener('click', rejectCurrentExistingDocument);
+
+        // Continue anyway: the scan is kept and verified as usual, and saving it
+        // makes a new record without asking again.
+        function continueWithExistingRecord() {
+            existingRecordAccepted = true;
+            window.bootstrap.Modal.getInstance(el('existingRecordModal'))?.hide();
+            el('validationExistingBanner').classList.add('d-none');
+        }
+        el('continueExistingBtn').addEventListener('click', continueWithExistingRecord);
+        el('validationExistingContinueBtn').addEventListener('click', continueWithExistingRecord);
 
         scanFileInput.addEventListener('change', (event) => {
             if (!(event.currentTarget instanceof HTMLInputElement)) return;
@@ -7389,12 +7413,18 @@
         }
 
         function updateVerificationSummary() {
-            const checkboxes = [...el('verifyRows').querySelectorAll('.validation-verified')];
+            // A field whose crop was deleted is left out of the record: not counted.
+            const checkboxes = [...el('verifyRows').querySelectorAll('.validation-verified')]
+                .filter((checkbox) => !checkbox.disabled);
             const verified = checkboxes.filter((checkbox) => checkbox.checked).length;
             const total = checkboxes.length;
             const percentage = total > 0 ? Math.round((verified / total) * 100) : 0;
 
             el('verifiedCount').textContent = `${verified} of ${total}`;
+            const all = el('verifyAllFields');
+            all.checked = total > 0 && verified === total;
+            all.indeterminate = verified > 0 && verified < total;
+            all.disabled = total === 0;
             el('verifiedProgress').setAttribute('aria-valuenow', String(percentage));
             el('verifiedProgressBar').style.width = `${percentage}%`;
             el('submitVerifiedCount').textContent = String(verified);
@@ -7413,7 +7443,7 @@
                 const section = el('verifyRows').querySelector(`[data-group-id="${group.id}"]`);
                 if (!(section instanceof HTMLElement)) return;
 
-                const checkedStates = group.indexes.map((index) => {
+                const checkedStates = group.indexes.filter((index) => !cropped[index]?.cropDeleted).map((index) => {
                     const checkbox = validationRow(index)?.querySelector('.validation-verified');
                     return checkbox instanceof HTMLInputElement && checkbox.checked;
                 });
@@ -7434,26 +7464,24 @@
             });
         }
 
-        function setGroupVerified(group, checked) {
-            let firstBlankIndex = null;
-
-            group.indexes.forEach((index) => {
+        /**
+         * Tick (or untick) every field in `indexes` that has a value. A field whose
+         * crop was deleted is left out of the record, so it is skipped quietly.
+         * Returns the blank fields that could not be ticked.
+         */
+        function verifyFields(indexes, checked) {
+            const blank = [];
+            indexes.forEach((index) => {
                 const row = validationRow(index);
-                if (!(row instanceof HTMLElement)) return;
+                if (!(row instanceof HTMLElement) || cropped[index]?.cropDeleted) return;
 
                 const input = requiredInput(row, '.verified');
                 const checkbox = requiredInput(row, '.validation-verified');
-
-            if (checked && cropped[index]?.cropDeleted) {
-                setValidationFieldError(index, 'Draw this field again first; its crop was deleted.');
-                firstBlankIndex ??= index;
-                return;
-            }
                 if (checked && !canVerifyValue(input.value)) {
                     checkbox.checked = false;
                     row.classList.remove('is-verified');
                     setValidationFieldError(index, 'Enter or confirm a value before marking this field as verified.');
-                    firstBlankIndex ??= index;
+                    blank.push(index);
                     return;
                 }
 
@@ -7461,19 +7489,36 @@
                 row.classList.toggle('is-verified', checked);
                 clearValidationFieldError(index);
             });
-
             updateVerificationSummary();
+            return blank;
+        }
 
-            if (firstBlankIndex !== null) {
-                showValidationSubmitError(`${group.label} has blank fields that could not be verified.`);
-                activateValidationField(firstBlankIndex, 'marker');
-                const row = validationRow(firstBlankIndex);
-                if (row) requiredInput(row, '.verified').focus();
+        /** After Verify all: point at the first blank field left unticked, if any. */
+        function reportBlankFields(blank, owner) {
+            if (blank.length === 0) {
+                clearValidationSubmitError();
                 return;
             }
-
-            clearValidationSubmitError();
+            showValidationSubmitError(blank.length === 1
+                ? `${owner} has 1 blank field left unchecked. Type its value, or leave it out.`
+                : `${owner} has ${blank.length} blank fields left unchecked. Type their values, or leave them out.`);
+            activateValidationField(blank[0], 'marker');
         }
+
+        function setGroupVerified(group, checked) {
+            reportBlankFields(verifyFields(group.indexes, checked), group.label);
+        }
+
+        /** Verify all, above the list: every field of every person and detail at once. */
+        function setAllVerified(checked) {
+            // Fields in no person's row ("Needs review") wait for a decision first.
+            const indexes = validationGroups
+                .filter((group) => group.id !== 'needs-review')
+                .flatMap((group) => group.indexes);
+            reportBlankFields(verifyFields(indexes, checked), 'This document');
+        }
+
+        el('verifyAllFields').addEventListener('change', (event) => setAllVerified(event.currentTarget.checked));
 
         function createValidationFieldRow(reading, index, group, columnIndex) {
             const confidence = normaliseConfidence(reading);
@@ -7761,7 +7806,7 @@
             const missing = missingRequired(group);
             const review = requiredPart(section, '.validation-record-group__review');
             review.textContent = [
-            redrawCount > 0 ? `${redrawCount} to draw again` : null,
+            redrawCount > 0 ? `${redrawCount} crop deleted` : null,
                 reviewCount > 0 ? `${reviewCount} to review` : null,
                 missing.length > 0 ? `${missing.length} missing` : null,
             ].filter(Boolean).join(' · ') || 'Ready to review';
@@ -9460,6 +9505,7 @@
                     settings: Object.fromEntries(settings),
                 };
             });
+            const kept = (index) => !cropped[index]?.cropDeleted;
             const field = (index) => ({
                 side: cropped[index]?.pageIndex ?? 0,
                 column: cropped[index]?.label || readings[index]?.name || `Field ${index + 1}`,
@@ -9471,11 +9517,12 @@
                     id: group.id,
                     // The register row, as the record's CSV numbers it (else the person's place).
                     label: String(Number(String(group.id).match(/^person-(\d+)$/)?.[1]) || position + 1).padStart(2, '0'),
-                    fields: group.indexes.map(field),
+                    // A deleted crop is left out: its cell is empty, and can be typed in.
+                    fields: group.indexes.filter(kept).map(field),
                 }));
             const details = validationGroups
                 .filter((group) => group.kind !== 'person' && group.id !== 'needs-review')
-                .flatMap((group) => group.indexes.map(field));
+                .flatMap((group) => group.indexes.filter(kept).map(field));
             return { pages, people, details };
         }
 
@@ -9590,16 +9637,7 @@
             const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
             rows.forEach((row) => clearValidationFieldError(Number(row.dataset.fieldIndex)));
 
-            const toRedraw = cropped.map((item, index) => (item.cropDeleted ? index : null)).filter((index) => index !== null);
-            if (toRedraw.length > 0) {
-                showValidationSubmitError(toRedraw.length === 1
-                    ? 'One field has a deleted crop. Draw it again before going on.'
-                    : `${toRedraw.length} fields have a deleted crop. Draw them again before going on.`);
-                toRedraw.forEach((index) => setValidationFieldError(index, 'Press Draw again and mark this field on the page.'));
-                activateValidationField(toRedraw[0], 'marker');
-                return;
-            }
-
+            // A field whose crop was deleted and not drawn again is simply left out.
             const verifiedIndexes = rows
                 .filter((row) => requiredInput(row, '.validation-verified').checked)
                 .map((row) => Number(row.dataset.fieldIndex));
@@ -9655,6 +9693,8 @@
             stopAddingMissedField();
             stopGroupingFields();
             cancelOutlineEdit();
+            // Drawing a deleted field again, unsaved: left as it is (out of the record).
+            stopRedrawField();
 
             reviewModel = buildReviewModel(reviewInput());
             // A cell typed into before that has a field now (Add missed field): the field wins.
@@ -9957,23 +9997,16 @@
         // allowDuplicate, after the same checks again.
         async function submitRecord({ allowMissing = false, allowDuplicate = false } = {}) {
             if (recordSubmitting) return;
+            // Continue anyway was chosen when the scan matched a saved record.
+            allowDuplicate = allowDuplicate || existingRecordAccepted;
             lastSubmitChoices = { allowMissing, allowDuplicate };
 
             clearValidationSubmitError();
             const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
             rows.forEach((row) => clearValidationFieldError(Number(row.dataset.fieldIndex)));
 
-        // A deleted crop must be drawn again and read before anything is submitted.
-        const toRedraw = cropped.map((item, index) => (item.cropDeleted ? index : null)).filter((index) => index !== null);
-        if (toRedraw.length > 0) {
-            showValidationSubmitError(toRedraw.length === 1
-                ? 'One field has a deleted crop. Draw it again before submitting.'
-                : `${toRedraw.length} fields have a deleted crop. Draw them again before submitting.`);
-            toRedraw.forEach((index) => setValidationFieldError(index, 'Press Draw again and mark this field on the page.'));
-            activateValidationField(toRedraw[0], 'marker');
-            return;
-        }
-
+            // A field whose crop was deleted and not drawn again is simply left out
+            // (it cannot be ticked, so it is not among the verified fields).
             const verifiedIndexes = rows
                 .filter((row) => requiredInput(row, '.validation-verified').checked)
                 .map((row) => Number(row.dataset.fieldIndex));
@@ -10205,14 +10238,6 @@
                 const payload = contentType.includes('application/json') ? await response.json() : null;
 
                 if (!response.ok) {
-                    if (response.status === 409 && payload?.existing_record) {
-                        checkAndShowExistingRecord({
-                            id: payload.record_id,
-                            title: payload.record_title || 'Existing Record',
-                            url: payload.record_url || null,
-                        });
-                        return;
-                    }
                     // This page of this file is saved already: nothing was saved,
                     // so ask whether to save it again.
                     if (response.status === 409 && payload?.duplicate_page) {

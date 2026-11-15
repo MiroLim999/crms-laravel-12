@@ -817,7 +817,7 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertSame([], $name->fresh()->flags);
     }
 
-    public function test_a_record_is_not_submitted_while_a_deleted_crop_waits_to_be_drawn_again(): void
+    public function test_a_deleted_crop_not_drawn_again_is_left_out_of_the_record(): void
     {
         $page = $this->processedPage();
         $name = $page->lines->firstWhere('column_name', 'Name');
@@ -826,7 +826,7 @@ class LineOutlinePipelineTest extends TestCase
             ->postJson(route('documents.pages.lines.redraw', ['page' => $page, 'line' => $date]), ['needed' => true])
             ->assertOk();
 
-        $this->actingAs($page->creator)
+        $submit = fn (array $field) => $this->actingAs($page->creator)
             ->withHeader('Accept', 'application/json')
             ->post(route('documents.store'), [
                 'doc_type' => DocumentType::Birth->value,
@@ -837,20 +837,26 @@ class LineOutlinePipelineTest extends TestCase
                 'fields' => [[
                     'verified' => '1',
                     'name' => 'Name · row 1',
-                    'ocr_text' => $name->ocr_text,
+                    'ocr_text' => 'x',
                     'ocr_confidence' => 88.5,
                     'verified_value' => 'Juan Dela Cruz',
                     'person_group' => 1,
                     'person_field_order' => 0,
                     'x' => 0.05, 'y' => 0.1, 'width' => 0.2, 'height' => 0.05,
-                    'line_id' => $name->getKey(),
+                    ...$field,
                 ]],
                 'allow_missing' => '1',
-            ])
+            ]);
+
+        // A field still sent with the deleted crop's outline is refused.
+        $submit(['name' => 'Date · row 1', 'line_id' => $date->getKey()])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['fields' => 'One field has a deleted crop. Draw it again before submitting.']);
-
         $this->assertSame(0, CivilRecord::count());
+
+        // The other fields save; the deleted one is simply not in the record.
+        $submit(['line_id' => $name->getKey()])->assertCreated();
+        $this->assertSame(1, CivilRecord::count());
     }
 
     public function test_an_outline_adjusted_within_its_own_cell_saves_without_asking(): void

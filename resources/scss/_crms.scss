@@ -3493,6 +3493,13 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// A match with a saved record: a question, not an error.
+#validationExistingBanner {
+  color: var(--crms-warning-text);
+  background: rgba(255, 171, 0, .1);
+  border-color: rgba(255, 171, 0, .3);
+}
+
 .validation-comparison-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.04fr) minmax(31rem, .96fr);
@@ -5617,6 +5624,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   justify-content: center;
   min-inline-size: 5.25rem;
   color: var(--bs-primary);
+}
+
+// Verify all for the whole document, in the list's slim heading: no taller than it.
+.validation-record-list-heading .validation-verified-control {
+  margin-block: -.3rem;
+  padding-block: .3rem;
 }
 
 .validation-record-group.is-complete .validation-record-group__bulk {
