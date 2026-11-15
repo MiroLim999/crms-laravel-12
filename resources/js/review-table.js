@@ -349,6 +349,10 @@ export function rowSpan(anchor, focus) {
     return Array.from({ length: Math.abs(focus - anchor) + 1 }, (_, step) => top + step);
 }
 
+// Columns are never narrower than this, and size themselves to their longest value up to this.
+const MIN_COLUMN_WIDTH = 44;
+const MAX_AUTO_WIDTH = 420;
+
 /**
  * The table on the page.
  *
@@ -399,6 +403,9 @@ export class ReviewTable {
         this.redoList = [];
         // Cells the reviewer emptied (Delete, cut, typing nothing): shown red, not as never read.
         this.cleared = new Set();
+        // Column widths the reviewer set (dragged or double-clicked), in pixels ('row' is
+        // the Row column). Any other column is as wide as its longest value.
+        this.widths = new Map();
         // Names typed over a header or a row number, for the downloads.
         this.headerNames = new Map();
         this.rowNames = new Map();
@@ -491,6 +498,7 @@ export class ReviewTable {
         this.history = [];
         this.redoList = [];
         this.cleared.clear();
+        this.widths.clear();
         this.range = null;
         this.onCleared([]);
     }
@@ -556,13 +564,21 @@ export class ReviewTable {
         const corner = document.createElement('th');
         corner.scope = 'col';
         corner.className = 'review-table__row-head';
-        corner.textContent = 'Row';
+        corner.dataset.sizeKey = 'row';
+        const cornerLabel = document.createElement('span');
+        cornerLabel.className = 'review-table__label';
+        cornerLabel.textContent = 'Row';
+        corner.append(cornerLabel, this._resizer());
         head.appendChild(corner);
         this.headerNodes = model.columns.map((column, columnIndex) => {
             const th = document.createElement('th');
             th.scope = 'col';
             th.dataset.column = String(columnIndex);
+            th.dataset.sizeKey = column.key;
             if (column.type.input === 'select') th.dataset.choices = column.type.options.join(' / ');
+            const label = document.createElement('span');
+            label.className = 'review-table__label';
+            th.append(label, this._resizer());
             head.appendChild(th);
             return th;
         });
@@ -592,6 +608,7 @@ export class ReviewTable {
 
         this.container.replaceChildren(table);
         this._paintLabels();
+        this._sizeColumns(table);
         this.refresh();
         if (keep && keep.row < model.rows.length && keep.column < model.columns.length) {
             this._mark(keep.row, keep.column);
@@ -620,6 +637,7 @@ export class ReviewTable {
         this.issueCounts = { invalid, empty };
         this.onIssues(this.issueCounts);
         this._reportCleared();
+        this._autoSizeColumns();
     }
 
     /** Tell the page which fields hold an emptied cell, to mark them on the scan. */
@@ -654,7 +672,7 @@ export class ReviewTable {
             if (!th || th.classList.contains('is-renaming')) return;
             const shown = this.headerOf(column);
             const renamed = shown !== column.header;
-            th.textContent = shown;
+            this._labelOf(th).textContent = shown;
             th.classList.toggle('is-renamed', renamed);
             th.title = renamed
                 ? `${shown} (was ${column.header}). Double-click to rename it in the downloads.`
@@ -671,6 +689,136 @@ export class ReviewTable {
                 ? `Row ${shown} (was ${row.label}). Double-click to change it in the downloads.`
                 : 'Double-click to change this row number in the downloads.';
         });
+    }
+
+    /** A header's label span (made again when a rename box replaced it). */
+    _labelOf(th) {
+        let label = th.querySelector(':scope > .review-table__label');
+        if (!label) {
+            label = document.createElement('span');
+            label.className = 'review-table__label';
+            th.replaceChildren(label, this._resizer());
+        }
+        return label;
+    }
+
+    /** The grip on a header's right edge: drag to resize, double-click to fit. */
+    _resizer() {
+        const grip = document.createElement('span');
+        grip.className = 'review-table__resizer';
+        grip.setAttribute('aria-hidden', 'true');
+        grip.title = 'Drag to resize, double-click to fit';
+        return grip;
+    }
+
+    /**
+     * Fix every column's width (as it came out, or as it was dragged before),
+     * so one can be resized without the others moving.
+     */
+    _sizeColumns(table) {
+        const heads = [...table.tHead.rows[0].cells];
+        // Not on screen (nothing to measure): the browser's own layout stays.
+        if (heads.every((th) => th.getBoundingClientRect().width === 0)) return;
+        const group = document.createElement('colgroup');
+        heads.forEach((th) => {
+            const col = document.createElement('col');
+            const width = this.widths.get(th.dataset.sizeKey) ?? this._contentWidth(th);
+            col.style.width = `${width}px`;
+            col.dataset.sizeKey = th.dataset.sizeKey;
+            group.appendChild(col);
+        });
+        table.prepend(group);
+        table.classList.add('is-sized');
+        this._fitTable();
+    }
+
+    /**
+     * The width a column needs for its longest value (and its header), from the
+     * values the table holds, within a limit; the Row column's is the row numbers.
+     */
+    _contentWidth(th, unlimited = false) {
+        const key = th.dataset.sizeKey;
+        const probe = this.cellNodes?.[0]?.[0] ?? th;
+        this._measureContext ??= document.createElement('canvas').getContext('2d');
+        const context = this._measureContext;
+        const widthOf = (text, node) => {
+            context.font = getComputedStyle(node).font;
+            return context.measureText(String(text ?? '')).width;
+        };
+        let widest;
+        if (key === 'row') {
+            widest = Math.max(widthOf(th.textContent, th), ...this.model.rows.map((row) => widthOf(this.rowLabelOf(row), th)));
+        } else {
+            const columnIndex = Number(th.dataset.column);
+            const column = this.model.columns[columnIndex];
+            widest = Math.max(
+                widthOf(column ? this.headerOf(column) : th.textContent, th) + 8,
+                ...this.model.rows.map((_, rowIndex) => widthOf(this.valueOf(this.cell(rowIndex, columnIndex)), probe)),
+            );
+        }
+        // Text, the cell's padding either side, and the border.
+        return Math.round(Math.min(unlimited ? 900 : MAX_AUTO_WIDTH, Math.max(MIN_COLUMN_WIDTH, widest + 2 * 8.8 + 3)));
+    }
+
+    /** Columns the reviewer has not sized follow their longest value as it changes. */
+    _autoSizeColumns() {
+        const table = this.container.querySelector('table');
+        if (!table?.classList.contains('is-sized') || this.editor) return;
+        [...table.tHead.rows[0].cells].forEach((th) => {
+            const key = th.dataset.sizeKey;
+            if (this.widths.has(key)) return;
+            const col = table.querySelector(`col[data-size-key="${CSS.escape(key)}"]`);
+            if (col) col.style.width = `${this._contentWidth(th)}px`;
+        });
+        this._fitTable();
+    }
+
+    /** The table as wide as its columns. */
+    _fitTable() {
+        const table = this.container.querySelector('table');
+        if (!table?.classList.contains('is-sized')) return;
+        const total = [...table.querySelectorAll('col')].reduce((sum, col) => sum + parseFloat(col.style.width), 0);
+        table.style.width = `${total}px`;
+    }
+
+    /** Set a column's width (px), at least a few characters. */
+    _setWidth(key, width) {
+        const next = Math.round(Math.min(900, Math.max(MIN_COLUMN_WIDTH, width)));
+        this.widths.set(key, next);
+        const col = this.container.querySelector(`col[data-size-key="${CSS.escape(key)}"]`);
+        if (col) col.style.width = `${next}px`;
+        this._fitTable();
+    }
+
+    _resizeStart(event, grip) {
+        const th = grip.closest('th');
+        const key = th?.dataset.sizeKey;
+        if (key === undefined) return;
+        event.preventDefault();
+        event.stopPropagation();
+        this._closeEditor(true);
+        const startX = event.clientX;
+        const startWidth = th.getBoundingClientRect().width;
+        document.body.classList.add('is-resizing-column');
+        const move = (moveEvent) => this._setWidth(key, startWidth + moveEvent.clientX - startX);
+        const end = () => {
+            document.body.classList.remove('is-resizing-column');
+            document.removeEventListener('pointermove', move);
+            document.removeEventListener('pointerup', end);
+            document.removeEventListener('pointercancel', end);
+        };
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', end);
+        document.addEventListener('pointercancel', end);
+    }
+
+    /** Fit a column to its longest value (double-click on its edge). */
+    _fitColumn(grip) {
+        const th = grip.closest('th');
+        const key = th?.dataset.sizeKey;
+        if (key === undefined) return;
+        // Even a long value: a double-click shows all of it (the limit is for the automatic width).
+        this._setWidth(key, this._contentWidth(th, true));
     }
 
     /** Pick the cell holding `ref` (a field picked on the scan); no locate, no edit. */
@@ -808,6 +956,17 @@ export class ReviewTable {
             }, 0);
         });
 
+        // Several cells picked: what is typed shows in all of them as it is typed
+        // (Enter keeps it in every one, Esc puts them back).
+        if (rows.length > 1) {
+            input.addEventListener('input', () => {
+                rows.slice(1).forEach((picked) => {
+                    const other = this.cellNodes[picked]?.[column];
+                    if (other) other.textContent = input.value;
+                });
+            });
+        }
+
         this.editor = { input, row, column, rows, original };
         // The box fills the cell as it is: the column and row do not grow.
         const size = td.getBoundingClientRect();
@@ -936,6 +1095,11 @@ export class ReviewTable {
 
     _pointerDown(event) {
         if (event.button !== 0) return;
+        const grip = event.target instanceof Element ? event.target.closest('.review-table__resizer') : null;
+        if (grip) {
+            this._resizeStart(event, grip);
+            return;
+        }
         const td = event.target instanceof Element ? event.target.closest('.review-table__cell') : null;
         if (!td) return;
         const row = Number(td.dataset.row);
@@ -1009,6 +1173,11 @@ export class ReviewTable {
     }
 
     _doubleClick(event) {
+        const grip = event.target instanceof Element ? event.target.closest('.review-table__resizer') : null;
+        if (grip) {
+            this._fitColumn(grip);
+            return;
+        }
         const th = event.target instanceof Element ? event.target.closest('th') : null;
         if (!th || !this.container.contains(th) || th.classList.contains('is-renaming')) return;
         if (th.closest('thead')) {

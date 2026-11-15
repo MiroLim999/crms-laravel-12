@@ -10447,6 +10447,48 @@ $dashboard-reveal-step: 40ms;
     box-shadow: inset 0 -2px 0 var(--bs-border-color);
   }
 
+  // Columns the reviewer can resize (ReviewTable fixes each width).
+  &.is-sized {
+    min-inline-size: 0;
+    table-layout: fixed;
+
+    th,
+    td {
+      max-inline-size: none;
+    }
+  }
+
+  .review-table__label {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  // The grip on a header's right edge, as in a spreadsheet.
+  .review-table__resizer {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: -3px;
+    z-index: 4;
+    inline-size: 7px;
+    cursor: col-resize;
+    touch-action: none;
+
+    &::after {
+      position: absolute;
+      inset-block: 25%;
+      inset-inline-start: 3px;
+      inline-size: 1px;
+      content: "";
+      background: transparent;
+    }
+
+    &:hover::after {
+      inline-size: 2px;
+      background: var(--review-pick);
+    }
+  }
+
   // The Row column stays in view while the table scrolls sideways.
   .review-table__row-head {
     position: sticky;
@@ -10569,6 +10611,12 @@ $dashboard-reveal-step: 40ms;
 }
 
 // Over Sneat's .form-control.form-control-sm (and its :focus), so the text stays where the cell showed it.
+// While a column is dragged: the pointer stays a resize arrow and text is not picked.
+body.is-resizing-column {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .review-table td .review-table__editor,
 .review-table td .review-table__editor:focus {
   display: block;
