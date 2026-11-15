@@ -7222,9 +7222,14 @@
          * time, even when it is already in view. A field of the other page, while
          * one page is zoomed in on, brings that page in first.
          */
+        // The field the view is sliding to. One click on a card focuses it and then
+        // clicks it: the slide already on its way is left to finish, not restarted.
+        let glidingToField = null;
         function revealValidationMarker(index, { alignTo = null } = {}) {
             if (quietVerifyReveal) return;
             if (placedVerifyBoxes([index]).length === 0) return;
+            if (glidingToField === index && validationMarker.gliding) return;
+            glidingToField = index;
             // Close enough to read the writing: about twice the whole-page size
             // (a two-page document's 100% is half as wide, so it goes further).
             // Already zoomed in further by hand: that zoom is kept.
@@ -7259,42 +7264,6 @@
             revealValidationLines(group.indexes);
         }
 
-        /**
-         * A person picked by their header: their fields slide level with it (the
-         * header moves while the list opens and scrolls; the level follows it).
-         * Across both pages when the row fits the view, else the part most in view.
-         */
-        function levelValidationGroup(group, header) {
-            if (placedVerifyBoxes(group.indexes).length === 0) return;
-            const target = () => {
-                const placed = placedVerifyBoxes(group.indexes);
-                if (placed.length === 0) return null;
-                const viewport = el('validationDocViewport');
-                const across = Math.max(...placed.map((box) => box.right)) - Math.min(...placed.map((box) => box.left));
-                const shown = across <= viewport.clientWidth
-                    ? placed
-                    : [[...placed].sort((a, b) => visibleArea(b) - visibleArea(a))[0]];
-                return {
-                    x: (Math.min(...shown.map((box) => box.left)) + Math.max(...shown.map((box) => box.right))) / 2,
-                    y: (Math.min(...shown.map((box) => box.top)) + Math.max(...shown.map((box) => box.bottom))) / 2,
-                };
-            };
-            verifyFocus = null;
-            verifyFocusZoom = null;
-            // The list opens, closes the person before and scrolls for a moment: a
-            // longer glide keeps up with the header, and once the list has settled a
-            // short one lands it exactly (if this person is still the one picked).
-            validationMarker.glideTo(validationMarker.zoom, target, { level: () => levelWith(header), duration: 650 });
-            window.clearTimeout(levelGroupTimer);
-            levelGroupTimer = window.setTimeout(() => {
-                if (activeValidationGroupId !== group.id || activeValidationIndex !== null) return;
-                validationMarker.glideTo(validationMarker.zoom, target, { level: () => levelWith(header), duration: 260 });
-                if (verifyDoc) updateVerifyPageView();
-            }, 800);
-            if (verifyDoc) updateVerifyPageView();
-        }
-        let levelGroupTimer = 0;
-
         // Resolves when the opening and closing animations are done, so a scroll
         // can be aimed at the list's final layout rather than a half-open one.
         function setExpandedValidationGroup(groupId) {
@@ -7315,7 +7284,7 @@
             lineOverlay.setSelection(group.indexes, activeValidationIndex);
         }
 
-        function activateValidationGroup(groupId, source = 'group', { alignTo = null } = {}) {
+        function activateValidationGroup(groupId, source = 'group') {
             const group = validationGroups.find((candidate) => candidate.id === groupId);
             if (!group) return;
 
@@ -7333,17 +7302,11 @@
             });
             updateValidationMarkerStates();
 
-            if (source === 'group') {
-                if (alignTo) levelValidationGroup(group, alignTo);
-                else revealValidationGroup(group);
-            }
+            if (source === 'group') revealValidationGroup(group);
             const section = el('verifyRows').querySelector(`[data-group-id="${group.id}"]`);
             expansion.then(() => {
                 if (activeValidationGroupId === group.id) {
-                    // The person's header stays in view (their fields may run on below it):
-                    // it is what was picked, and what the page is levelled with.
-                    const head = section?.querySelector('.validation-record-group__toggle') ?? section;
-                    head?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                    section?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
                 }
             });
         }
@@ -7714,17 +7677,16 @@
             if (modifier || (groupingFields && !onControl)) {
                 event.preventDefault();
                 togglePickedField(index);
-                if (pickedLineIds.has(cropped[index]?.lineId)) revealValidationMarker(index, { alignTo: row });
                 return;
             }
-            activateValidationField(index, 'row', { alignTo: row });
+            activateValidationField(index, 'row');
         });
         row.classList.toggle('is-picked', pickedLineIds.has(item.lineId));
-            row.addEventListener('focusin', () => activateValidationField(index, 'row', { alignTo: row }));
+            row.addEventListener('focusin', () => activateValidationField(index, 'row'));
             row.addEventListener('keydown', (event) => {
                 if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
                 event.preventDefault();
-                activateValidationField(index, 'row', { alignTo: row });
+                activateValidationField(index, 'row');
                 input.focus();
             });
 
@@ -7739,7 +7701,7 @@
             });
 
             checkbox.addEventListener('change', () => {
-                activateValidationField(index, 'row', { alignTo: row });
+                activateValidationField(index, 'row');
                 clearValidationFieldError(index);
                 clearValidationSubmitError();
 
@@ -7874,10 +7836,10 @@
                         row.removeAttribute('aria-current');
                     });
                     updateValidationMarkerStates();
-                    levelValidationGroup(group, toggle);
+                    revealValidationGroup(group);
                     return;
                 }
-                activateValidationGroup(group.id, 'group', { alignTo: toggle });
+                activateValidationGroup(group.id, 'group');
             });
 
             return section;

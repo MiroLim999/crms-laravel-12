@@ -910,8 +910,11 @@ export class FieldMarker {
      * `level()` (optional): how far down the view, in px from its top, the
      * spot should end up (e.g. level with a row picked beside the page),
      * instead of the middle. The view cannot scroll past the page's edges.
+     *
+     * `duration` (optional, ms): left out, it follows the way to go: a short
+     * hop is quick, a long slide or a big zoom takes a little longer.
      */
-    glideTo(zoom, locate, { duration = 420, level = null } = {}) {
+    glideTo(zoom, locate, { duration = null, level = null } = {}) {
         const viewport = this.viewport;
         const stage = this.canvas.parentElement;
         if (!viewport || !stage || !this.canvas.clientWidth) return this.zoom;
@@ -930,6 +933,17 @@ export class FieldMarker {
             y: (viewNow.top + viewNow.height / 2 - stageNow.top) / Math.max(1, stageNow.height),
         };
 
+        let time = duration;
+        if (!Number.isFinite(time)) {
+            // How far the spot is from the middle now (at the current zoom), and how much the zoom changes.
+            const spot = locate();
+            const away = spot
+                ? Math.hypot(spot.x - viewport.scrollLeft - viewport.clientWidth / 2, spot.y - viewport.scrollTop - viewport.clientHeight / 2)
+                : 0;
+            const zoomSteps = zooming ? Math.abs(Math.log2(target / Math.max(0.01, start))) : 0;
+            time = clamp(300 + away * 0.22 + zoomSteps * 140, 300, 680);
+        }
+
         // Levelled with something beside the page: room above and below the pages
         // (a view's height), so a field near the top or the bottom of a page shorter
         // than the view can still reach any level.
@@ -937,11 +951,15 @@ export class FieldMarker {
         const padDown = typeof level === 'function' ? Math.max(padFrom.down, viewport.clientHeight) : padFrom.down;
 
         const apply = (progress) => {
-            const eased = progress < 0.5 ? 4 * progress ** 3 : 1 - (-2 * progress + 2) ** 3 / 2;
+            // Eases out: it moves the moment a field is picked and settles softly. A
+            // new pick mid-way carries on moving instead of stopping and starting again.
+            const eased = 1 - (1 - progress) ** 3;
             // Its own zoom: the room round a focused page stays while it moves.
             this._focusing = true;
             if (padDown !== padFrom.down) this._setSpreadPad(padFrom.across, padFrom.down + (padDown - padFrom.down) * eased);
-            if (zooming) this.setZoom(start + (target - start) * eased);
+            // Zoom steps evenly to the eye (100% -> 200% looks like 200% -> 400%),
+            // so it does not rush at the start and crawl at the end.
+            if (zooming) this.setZoom(start * (target / start) ** eased);
             this._focusing = false;
 
             const view = viewport.getBoundingClientRect();
@@ -964,7 +982,7 @@ export class FieldMarker {
             viewport.scrollTop = keep.top + (centred.top - keep.top) * eased;
         };
 
-        this._animate(reduced ? 0 : duration, apply);
+        this._animate(reduced ? 0 : time, apply);
         return target;
     }
 
