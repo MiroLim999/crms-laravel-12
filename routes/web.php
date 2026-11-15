@@ -255,3 +255,6 @@ Route::middleware('auth')->group(function () {
         Route::delete('models/{key}', [OcrModelController::class, 'destroy'])->name('destroy');
     });
 });
+
+// DEV ONLY: Review & Export shortcut (temporary). Delete this line to remove it; see config/dev_review_shortcut.php.
+if (config('dev_review_shortcut.enabled')) require __DIR__ . '/dev-review-shortcut.php';
