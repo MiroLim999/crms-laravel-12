@@ -1,7 +1,7 @@
 @extends('layouts.app')
 
 @section('title', 'Review & Export · ' . $recordHeading)
-@section('body-class', 'record-detail-focused')
+@section('body-class', 'record-detail-focused record-review-focused')
 
 @section('workspace-navbar')
     <nav class="layout-navbar container-xxl navbar-detached navbar document-workspace-topbar record-detail-topbar"

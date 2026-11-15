@@ -906,7 +906,12 @@ export class FieldMarker {
      * @param {() => ({ x: number, y: number } | null)} locate  The place, in the
      *        viewport's scrolled space, at whatever zoom the page has right now.
      */
-    glideTo(zoom, locate, { duration = 420 } = {}) {
+    /**
+     * `level()` (optional): how far down the view, in px from its top, the
+     * spot should end up (e.g. level with a row picked beside the page),
+     * instead of the middle. The view cannot scroll past the page's edges.
+     */
+    glideTo(zoom, locate, { duration = 420, level = null } = {}) {
         const viewport = this.viewport;
         const stage = this.canvas.parentElement;
         if (!viewport || !stage || !this.canvas.clientWidth) return this.zoom;
@@ -925,10 +930,17 @@ export class FieldMarker {
             y: (viewNow.top + viewNow.height / 2 - stageNow.top) / Math.max(1, stageNow.height),
         };
 
+        // Levelled with something beside the page: room above and below the pages
+        // (a view's height), so a field near the top or the bottom of a page shorter
+        // than the view can still reach any level.
+        const padFrom = this._pad ?? { across: 0, down: 0 };
+        const padDown = typeof level === 'function' ? Math.max(padFrom.down, viewport.clientHeight) : padFrom.down;
+
         const apply = (progress) => {
             const eased = progress < 0.5 ? 4 * progress ** 3 : 1 - (-2 * progress + 2) ** 3 / 2;
             // Its own zoom: the room round a focused page stays while it moves.
             this._focusing = true;
+            if (padDown !== padFrom.down) this._setSpreadPad(padFrom.across, padFrom.down + (padDown - padFrom.down) * eased);
             if (zooming) this.setZoom(start + (target - start) * eased);
             this._focusing = false;
 
@@ -940,9 +952,13 @@ export class FieldMarker {
             };
             const spot = locate();
             if (!spot) return;
+            const wanted = typeof level === 'function' ? level() : null;
+            const down = Number.isFinite(wanted)
+                ? clamp(wanted, 24, Math.max(24, viewport.clientHeight - 24))
+                : viewport.clientHeight / 2;
             const centred = {
                 left: spot.x - viewport.clientWidth / 2,
-                top: spot.y - viewport.clientHeight / 2,
+                top: spot.y - down,
             };
             viewport.scrollLeft = keep.left + (centred.left - keep.left) * eased;
             viewport.scrollTop = keep.top + (centred.top - keep.top) * eased;

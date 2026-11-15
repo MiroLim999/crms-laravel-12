@@ -2559,8 +2559,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   // Match the Template Builder: 8/4 at large widths, then 9/3 on desktop.
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 1rem;
-  block-size: calc(100vh - 8rem);
-  block-size: calc(100dvh - 8rem);
+  // The top bar and the page's padding above and below (5rem + 1.75rem + 1.5rem):
+  // exactly the window, with no page scrollbar.
+  block-size: calc(100vh - 8.25rem);
+  block-size: calc(100dvh - 8.25rem);
   min-block-size: 34rem;
 
   >* {
@@ -3475,8 +3477,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   display: grid;
   grid-template-columns: minmax(0, 1.04fr) minmax(31rem, .96fr);
   gap: 1rem;
-  block-size: calc(100vh - 8rem);
-  block-size: calc(100dvh - 8rem);
+  // The top bar and the page's padding above and below (5rem + 1.75rem + 1.5rem):
+  // exactly the window, with no page scrollbar.
+  block-size: calc(100vh - 8.25rem);
+  block-size: calc(100dvh - 8.25rem);
   min-block-size: 34rem;
 }
 
@@ -7367,17 +7371,30 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-.dashboard-page {
-
-  // The top bar is also a .container-xxl; it keeps its own detached width
-  // (viewport minus gutters) and only shares the wider cap with the content.
-  .content-wrapper>.container-xxl {
+// Page width on wide screens. Sneat stops every page at 1440px, which leaves
+// a 1920px monitor with empty strips either side: every page goes up to
+// 1720px (the Dashboard had this first). The top bar is also a
+// .container-xxl; it keeps its own detached width (viewport minus gutters)
+// and only shares the wider cap with the content. Below 1720px nothing changes.
+.layout-page {
+  >.content-wrapper>.container-xxl {
     max-inline-size: 1720px;
     inline-size: 100%;
   }
 
-  #layout-navbar.navbar-detached.container-xxl {
+  >#layout-navbar.navbar-detached.container-xxl {
     max-inline-size: calc(1720px - 3rem);
+  }
+}
+
+// The scanning workspace (steps 1-4) and a saved record's Review & Export
+// page have no cap: the scan and the table take all the room there is, and
+// collapsing the sidebar gives them more (as the Template Builder editor).
+.document-workspace-focused,
+.record-review-focused {
+  .layout-page>.content-wrapper>.container-xxl,
+  .layout-page>#layout-navbar.navbar-detached.container-xxl {
+    max-inline-size: none;
   }
 }
 
@@ -9936,6 +9953,63 @@ $dashboard-reveal-step: 40ms;
   }
 }
 
+// The Layout card adapts to the panel's width: Rows and Tilt always share one
+// line. On a narrow panel (a laptop, a MacBook) their buttons and boxes shrink
+// so the row count and the tilt both stay readable.
+.template-builder-layout-card {
+  container-type: inline-size;
+}
+
+@container (max-width: 23rem) {
+  .template-builder-layout-card .template-grid-controls>.document-grid-card__line:first-child {
+    gap: .35rem;
+
+    .btn {
+      padding-inline: .3rem;
+    }
+
+    // Rows: the number takes what the two buttons leave.
+    .template-ledger-rows {
+      flex: 1 1 0;
+      min-inline-size: 0;
+
+      .form-control {
+        min-inline-size: 1.75rem;
+        padding-inline: .1rem;
+      }
+    }
+
+    // Tilt: two buttons round the value, no room for a label.
+    #gridTiltGroup {
+      flex: 0 0 auto;
+
+      .document-grid-card__count {
+        inline-size: 2.9rem;
+        font-size: .75rem;
+      }
+    }
+  }
+}
+
+// The side panel never gets too narrow for its controls: at least 20rem, a
+// quarter of the page on a large monitor, at most 26rem. The page takes the rest.
+@media (min-width: 1200px) {
+  .template-builder-grid {
+    flex-wrap: nowrap;
+
+    > .col-xl-9 {
+      flex: 1 1 0;
+      inline-size: auto;
+      min-inline-size: 0;
+    }
+
+    > .col-xl-3 {
+      flex: 0 0 clamp(20rem, 25%, 26rem);
+      inline-size: auto;
+    }
+  }
+}
+
 // A narrower screen: the toolbar keeps one line. Reset shows only its icon.
 @media (max-width: 1399.98px) {
   .marker-toolbar .marker-reset-button > span {
@@ -10680,8 +10754,10 @@ body.is-resizing-column {
 // A saved record's Review & Export page: the record's scan card fills the left.
 .review-split {
   display: grid;
-  block-size: calc(100vh - 8rem);
-  block-size: calc(100dvh - 8rem);
+  // The top bar and the page's padding above and below (5rem + 1.75rem + 1.5rem):
+  // exactly the window, with no page scrollbar.
+  block-size: calc(100vh - 8.25rem);
+  block-size: calc(100dvh - 8.25rem);
   min-block-size: 34rem;
 }
 
