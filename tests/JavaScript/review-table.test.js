@@ -36,10 +36,10 @@ test('a new rule is all it takes to give a column its own input', () => {
     assert.equal(columnType('Sex', null, rules).input, 'text');
 });
 
-test('empty and invalid cells are problems, in every column', () => {
+test('only empty cells are problems, in every column', () => {
     const sex = columnType('Sex');
     assert.equal(cellProblem('', sex).kind, 'empty');
-    assert.equal(cellProblem('Male', sex).kind, 'invalid');
+    assert.equal(cellProblem('Male', sex), null);
     assert.equal(cellProblem('M', sex), null);
     assert.equal(cellProblem('  F ', sex), null);
 
@@ -48,7 +48,7 @@ test('empty and invalid cells are problems, in every column', () => {
 
     const born = columnType('Born', { type: 'date' });
     assert.equal(cellProblem('Jan. 03, 1978', born), null);
-    assert.equal(cellProblem('soon', born).kind, 'invalid');
+    assert.equal(cellProblem('soon', born), null);
 });
 
 test('a dropdown starts on the choice a read value stands for', () => {

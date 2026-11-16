@@ -9,7 +9,7 @@
  *
  * The parts above ReviewTable are pure, so they are unit-tested without a browser.
  */
-import { matchingChoice, valueProblem } from './value-types.js';
+import { matchingChoice } from './value-types.js';
 
 // ------------------------------------------------------------- column types
 
@@ -46,18 +46,10 @@ export function columnType(name, settings = null, rules = COLUMN_RULES) {
     return { input: 'text', settings: settings ?? {} };
 }
 
-/** What is wrong with a cell's value, or null: { kind: 'empty' | 'invalid', message }. */
-export function cellProblem(value, type) {
-    const text = String(value ?? '').trim();
-    if (text === '') return { kind: 'empty', message: 'Empty' };
-    if (type?.input === 'select') {
-        return type.options.includes(text) ? null : { kind: 'invalid', message: `Expected ${listed(type.options)}.` };
-    }
-    const problem = valueProblem(text, type?.settings ?? {});
-    return problem ? { kind: 'invalid', message: problem } : null;
+/** What is wrong with a cell, or null: only an empty cell is flagged. */
+export function cellProblem(value) {
+    return String(value ?? '').trim() === '' ? { kind: 'empty', message: 'Empty' } : null;
 }
-
-const listed = (options) => (options.length <= 2 ? options.join(' or ') : `one of ${options.join(', ')}`);
 
 /** The option a select starts on: the value, or the option it stands for ("male" -> M). */
 export function selectStart(value, options) {
