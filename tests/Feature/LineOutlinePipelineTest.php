@@ -1409,6 +1409,31 @@ class LineOutlinePipelineTest extends TestCase
     }
 
     /**
+     * A field added where a deleted crop was (Verify) takes that cell: the
+     * deleted crop is left out of the record, so the cell is not shared.
+     */
+    public function test_a_field_placed_over_a_deleted_crop_does_not_share_its_cell(): void
+    {
+        $page = $this->processedPage();
+        $between = $page->lines->first(fn (PageLine $line) => in_array('no_row', $line->flags, true));
+        $occupant = $page->lines->first(fn (PageLine $line) => $line->column_index === 0 && $line->row === 1);
+
+        $this->actingAs($page->creator)
+            ->postJson(route('documents.pages.lines.redraw', ['page' => $page, 'line' => $occupant]), ['needed' => true])
+            ->assertOk();
+
+        $this->actingAs($page->creator)
+            ->patchJson(route('documents.pages.lines.place', ['page' => $page, 'line' => $between]), [
+                'column_index' => 0,
+                'row' => 1,
+            ])
+            ->assertOk()
+            ->assertJsonPath('line.column', 'Name')
+            ->assertJsonPath('line.flags', []);
+        $this->assertSame(['redraw'], $occupant->fresh()->flags);
+    }
+
+    /**
      * A row of a register's second page that landed on the wrong person is put
      * right in Verify by moving the whole row, or swapping two rows at once.
      */

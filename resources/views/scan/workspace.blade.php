@@ -8180,7 +8180,8 @@
         // Boxes drawn and waiting for Read (page pixels), in the order drawn.
         let pendingBoxes = [];
         // Where each added field seems to sit, by line id: shown as "(suggested)"
-        // in its Person and Column lists, never applied by itself.
+        // in its Person and Column lists. The column starts chosen; nothing is
+        // saved until the reviewer picks the Person.
         const placementSuggestions = new Map();
         let readingPendingBoxes = false;
 
@@ -9042,7 +9043,17 @@
                 const personNames = new Map(validationGroups
                     .filter((group) => group.kind === 'person')
                     .map((group) => [Number(cropped[group.indexes[0]]?.personGroup), groupIdentity(group)]));
-                const suggestion = placementSuggestions.get(item.lineId) ?? {};
+                const suggestion = { ...(placementSuggestions.get(item.lineId) ?? {}) };
+                // After a reload the server's suggestion is gone: the column the
+                // field's middle sits in is the same guess.
+                if (!Number.isInteger(suggestion.column_index) && item.source === 'manual') {
+                    const middle = item.x + item.w / 2;
+                    const found = columns.findIndex((candidate) => {
+                        const [left, , width] = candidate.box ?? [];
+                        return Number.isFinite(left) && Number.isFinite(width) && middle >= left && middle <= left + width;
+                    });
+                    if (found >= 0) suggestion.column_index = found;
+                }
                 const suggested = (text, isSuggested) => (isSuggested ? `${text} (suggested)` : text);
                 // People started by hand sit past the table's last row; they stay in the list.
                 const lastRow = Math.max(rows, ...cropped
@@ -9076,9 +9087,15 @@
                     group.append(...removed.map((name) => new Option(name, `n:${name}`)));
                     columnOptions.push(group);
                 }
+                // A field added by hand that has no person yet starts on the column
+                // it seems to sit in: choosing its Person then saves both, so it
+                // fills that column instead of a "Drawn line" column of its own.
+                const awaitingPerson = item.gridRow === null && item.label === 'Drawn line'
+                    && Number.isInteger(suggestion.column_index) && suggestion.column_index < columns.length;
                 const selectedColumn = item.gridColumn !== null
                     ? `i:${item.gridColumn}`
-                    : (removed.some((name) => nameKey(name) === nameKey(item.label)) ? `n:${item.label}` : '');
+                    : (removed.some((name) => nameKey(name) === nameKey(item.label)) ? `n:${item.label}`
+                        : (awaitingPerson ? `i:${suggestion.column_index}` : ''));
                 const column = pick('Column', columnOptions, selectedColumn, end);
                 column.title = 'Column (optional)';
 

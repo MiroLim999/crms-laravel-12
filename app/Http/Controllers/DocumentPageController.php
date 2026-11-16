@@ -1040,13 +1040,18 @@ class DocumentPageController extends Controller
     private function refreshSharedCells(DocumentPage $page): void
     {
         $lines = $page->lines()->get()->reject->belongsToField();
+        // A deleted crop is left out of the record, so the field added in its
+        // place does not share the cell with it.
         $counts = $lines
-            ->filter(fn (PageLine $l) => $l->row !== null && $l->column_index !== null)
+            ->filter(fn (PageLine $l) => $l->row !== null && $l->column_index !== null
+                && ! in_array(PageLine::FLAG_REDRAW, $l->flags ?? [], true))
             ->countBy(fn (PageLine $l) => $l->column_index.':'.$l->row);
 
         foreach ($lines as $line) {
             $flags = array_values(array_diff($line->flags ?? [], [PageLine::FLAG_SHARED_CELL]));
-            if ($line->row !== null && $line->column_index !== null && ($counts[$line->column_index.':'.$line->row] ?? 0) > 1) {
+            if ($line->row !== null && $line->column_index !== null
+                && ! in_array(PageLine::FLAG_REDRAW, $line->flags ?? [], true)
+                && ($counts[$line->column_index.':'.$line->row] ?? 0) > 1) {
                 $flags[] = PageLine::FLAG_SHARED_CELL;
             }
             if ($flags !== ($line->flags ?? [])) {
