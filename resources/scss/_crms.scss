@@ -4915,6 +4915,156 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   border-radius: .3rem;
 }
 
+img.validation-field__crop {
+  cursor: zoom-in;
+  transition: border-color .15s ease, box-shadow .15s ease;
+
+  &:hover,
+  &:focus-visible {
+    border-color: var(--bs-primary);
+    box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), .15);
+    outline: none;
+  }
+}
+
+// The enlarged crop (click the picture beside a value in Verify).
+.crop-preview {
+  border: 1px solid var(--bs-border-color);
+  border-radius: .75rem;
+  box-shadow: 0 1.25rem 3rem rgba(var(--bs-black-rgb, 0, 0, 0), .18);
+  overflow: hidden;
+}
+
+.crop-preview__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.4rem .9rem;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+// Quick and soft: a short fade with a small rise, not Bootstrap's slow slide.
+#cropPreviewModal.fade {
+  transition: opacity .12s ease-out;
+
+  .modal-dialog {
+    transform: translateY(8px) scale(.98);
+    transition: transform .16s cubic-bezier(.2, .8, .2, 1);
+  }
+
+  &.show .modal-dialog {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #cropPreviewModal.fade,
+  #cropPreviewModal.fade .modal-dialog {
+    transition: none;
+  }
+}
+
+// The theme floats the close button over the card's corner; keep it in the header.
+// The theme's `.modal .btn-close` lifts it out by translate(23px, -25px) and
+// moves it again on hover/focus (three-part selector), so it jumped off the card
+// and was clipped at the corner. This one is stronger and holds it still.
+#cropPreviewModal .crop-preview__header .btn-close {
+  position: static;
+  flex: none;
+  margin: 0;
+  padding: .563rem;
+  transform: none;
+  transition: border-color .15s ease;
+
+  &:hover,
+  &:focus,
+  &:focus-visible,
+  &:active {
+    transform: none;
+    border-color: var(--bs-primary);
+  }
+}
+
+.crop-preview__eyebrow {
+  display: block;
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--bs-primary);
+}
+
+.crop-preview__title {
+  margin: .1rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.crop-preview__stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 12rem;
+  padding: 1.5rem;
+  background: var(--bs-gray-100, var(--bs-body-bg));
+
+  img {
+    inline-size: 100%;
+    max-block-size: 50vh;
+    object-fit: contain;
+    background: var(--bs-paper-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: .4rem;
+    box-shadow: 0 .15rem .6rem rgba(0, 0, 0, .08);
+    // Cheaper to draw while the modal is moving.
+    will-change: transform;
+  }
+}
+
+.crop-preview__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1.5rem;
+  margin: 0;
+  padding: 1.1rem 1.4rem;
+
+  dt {
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+  }
+
+  dd {
+    margin: .2rem 0 0;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+}
+
+.crop-preview__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .8rem 1.4rem;
+  border-top: 1px solid var(--bs-border-color);
+}
+
+.crop-preview__note {
+  font-size: .8rem;
+  color: var(--bs-secondary-color);
+}
+
+@media (max-width: 575.98px) {
+  .crop-preview__facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 // Same two columns as the entry above: "TrOCR read" starts under the picture
 // and "Adjust outline" under the left edge of the value box.
 // The reading takes what is left; Adjust outline and Delete crop sit beside it
@@ -10665,7 +10815,8 @@ $dashboard-reveal-step: 40ms;
 
 // Review & Export: the picked field is blue, in the table and on the scan.
 .review-grid,
-.review-split {
+.review-split,
+.verify-grid {
   --review-pick: #2563eb;
   --review-pick-rgb: 37, 99, 235;
 }
@@ -10785,17 +10936,13 @@ body.is-resizing-column {
   stroke-width: 1.5px;
 }
 
-// The Source panel's Grid switch: only in Review & Export. Off hides the
-// field outlines and row guides; the picked field and its row stay.
+// The Source panel's Grid switch, in Verify and in Review & Export. Off hides
+// the field outlines and row guides; the picked field and its row stay.
 .marker-grid-toggle.review-grid-toggle {
-  display: none;
-}
-
-.review-grid .marker-grid-toggle.review-grid-toggle {
   display: inline-flex;
 }
 
-.review-grid .validation-document-pane.is-grid-hidden {
+.validation-document-pane.is-grid-hidden {
   .line-marker:not(.is-selected):not(.is-ranged):not(.is-cleared),
   .line-overlay__guides {
     display: none;
@@ -10804,8 +10951,11 @@ body.is-resizing-column {
 
 // On the scan: the picked field blue, its person's other fields stay orange.
 // Thin, and nearly clear inside, so the handwriting under it can still be read.
+// Verify uses the same blue for the field clicked on the scan (a field picked
+// for Group fields keeps its own look).
 .review-grid .line-marker.is-ranged .line-marker__shape,
-.review-grid .line-marker.is-selected.is-current .line-marker__shape {
+.review-grid .line-marker.is-selected.is-current .line-marker__shape,
+.verify-grid .line-marker.is-selected.is-current:not(.is-picked) .line-marker__shape {
   fill: rgba(var(--review-pick-rgb), .05);
   stroke: var(--review-pick);
   stroke-width: 1.3px;

@@ -514,11 +514,8 @@
                     <section class="card validation-pane validation-document-pane" aria-labelledby="originalDocumentTitle">
                         <header class="validation-pane__header">
                             <div class="min-w-0">
-                                <div class="d-flex align-items-center flex-wrap column-gap-2">
-                                    <span class="validation-pane__eyebrow">Source</span>
-                                    {{-- A document of several pages: which page is in view and how many are checked. --}}
-                                    <span class="validation-page-pill d-none" id="validationPagePill" role="status"></span>
-                                </div>
+                                {{-- Kept for the page script, never shown: the pages are labelled on the scan itself. --}}
+                                <span class="validation-page-pill d-none" id="validationPagePill" role="status" style="display:none !important"></span>
                                 <h3 class="h5 mb-0" id="originalDocumentTitle">Original document</h3>
                             </div>
 
@@ -1020,6 +1017,25 @@
         </div>
     </div>
 
+    {{-- A field's crop, larger (Verify: click the picture beside a value) --}}
+    <div class="modal fade" id="cropPreviewModal" tabindex="-1"
+         aria-labelledby="cropPreviewTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg crop-preview-dialog">
+            <div class="modal-content crop-preview">
+                <div class="crop-preview__header">
+                    <div class="min-w-0">
+                        <span class="crop-preview__eyebrow">Field crop</span>
+                        <h5 class="crop-preview__title" id="cropPreviewTitle"></h5>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="crop-preview__stage">
+                    <img id="cropPreviewImage" alt="">
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- Confirm leaving a scan that is not submitted (Cancel, or a link out) --}}
     <div class="modal fade" id="leaveScanModal" tabindex="-1" aria-labelledby="leaveScanModalTitle"
         aria-describedby="leaveScanModalDescription" aria-hidden="true">
@@ -1398,6 +1414,8 @@
             },
         });
         const verifyOverlays = [verifyLayer(0), verifyLayer(1)];
+        // The picked field shows as a box (a rectangle), here and in Review & Export.
+        verifyOverlays.forEach((overlay) => overlay.setBoxCurrent(true));
 
         /** The page (0: the first, 1: the second) a field of `cropped` is on, and its place on that page. */
         function verifySideOf(index) {
@@ -7530,6 +7548,18 @@
 
         el('verifyAllFields').addEventListener('change', (event) => setAllVerified(event.currentTarget.checked));
 
+        /** The crop TrOCR read, larger, with what it read and what the value is now. */
+        function openCropPreview(row, name, url, thumbnail) {
+            el('cropPreviewTitle').textContent = name;
+            const picture = el('cropPreviewImage');
+            // The thumbnail is already loaded, so the same picture is on screen at
+            // once. Its shape is set first so nothing jumps while it is drawn.
+            if (thumbnail?.naturalWidth) picture.style.aspectRatio = `${thumbnail.naturalWidth} / ${thumbnail.naturalHeight}`;
+            if (picture.getAttribute('src') !== url) picture.src = url;
+            picture.alt = `Crop TrOCR read for ${name}`;
+            window.bootstrap.Modal.getOrCreateInstance(el('cropPreviewModal')).show();
+        }
+
         function createValidationFieldRow(reading, index, group, columnIndex) {
             const confidence = normaliseConfidence(reading);
             const flagged = confidence < config.threshold;
@@ -7600,7 +7630,22 @@
             if (thumbnail instanceof HTMLImageElement && item.cropUrl) {
                 thumbnail.src = item.cropUrl;
                 thumbnail.alt = `Crop TrOCR read for ${displayName}`;
-                thumbnail.title = 'The exact image TrOCR read';
+                thumbnail.title = 'Click to enlarge the exact image TrOCR read';
+                // A click (or Enter) opens it larger in a modal.
+                thumbnail.tabIndex = 0;
+                thumbnail.setAttribute('role', 'button');
+                thumbnail.setAttribute('aria-label', `Enlarge the crop of ${displayName}`);
+                const openCrop = (event) => {
+                    event.stopPropagation();
+                    openCropPreview(row, displayName, item.cropUrl, thumbnail);
+                };
+                thumbnail.addEventListener('click', openCrop);
+                thumbnail.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openCrop(event);
+                    }
+                });
             } else {
                 thumbnail?.remove();
             }
@@ -9498,9 +9543,9 @@
                 verifyGrid.prepend(pane);
                 verifyGrid.before(...notices);
             }
-            // Here the picked field's outline turns into a box (a rectangle); in Verify it stays traced.
+            // The picked field's outline is a box (a rectangle) in Verify and in Review & Export.
             verifyOverlays.forEach((overlay) => {
-                overlay.setBoxCurrent(on);
+                overlay.setBoxCurrent(true);
                 if (!on) { overlay.setRange([]); overlay.setCleared([]); }
             });
             // The pane changed width: fit the page to it.
