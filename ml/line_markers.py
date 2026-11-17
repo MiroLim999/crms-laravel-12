@@ -1575,8 +1575,18 @@ def _assign_strokes(lines, clean, x_height, row_height):
 
     owner = np.zeros(clean.shape, dtype=np.int32)
     loose = []
+    page_height, page_width = clean.shape
     for index, window in enumerate(ndimage.find_objects(labels), start=1):
         if window is None:
+            continue
+        # Not writing: the page's torn or darkened edge, a fold or a stain joined
+        # into one component that spans half the page or more and many rows. A
+        # bracket over a few rows, or a long word, is neither. Given to the one
+        # line whose band it crosses, it made that line's outline, and its crop,
+        # the whole page.
+        span_y = window[0].stop - window[0].start
+        span_x = window[1].stop - window[1].start
+        if (span_y > 0.5 * page_height or span_x > 0.5 * page_width) and span_y > 6 * row_height:
             continue
         pixels = labels[window] == index
         core_ids = cores[window][pixels]

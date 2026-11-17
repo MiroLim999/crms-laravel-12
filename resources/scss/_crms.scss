@@ -10951,14 +10951,19 @@ body.is-resizing-column {
 
 // On the scan: the picked field blue, its person's other fields stay orange.
 // Thin, and nearly clear inside, so the handwriting under it can still be read.
-// Verify uses the same blue for the field clicked on the scan (a field picked
-// for Group fields keeps its own look).
 .review-grid .line-marker.is-ranged .line-marker__shape,
-.review-grid .line-marker.is-selected.is-current .line-marker__shape,
-.verify-grid .line-marker.is-selected.is-current:not(.is-picked) .line-marker__shape {
+.review-grid .line-marker.is-selected.is-current .line-marker__shape {
   fill: rgba(var(--review-pick-rgb), .05);
   stroke: var(--review-pick);
   stroke-width: 1.3px;
+}
+
+// Verify: the field clicked on the scan is a soft scarlet, thin and nearly clear
+// (a field picked for Group fields keeps its own look).
+.verify-grid .line-marker.is-selected.is-current:not(.is-picked) .line-marker__shape {
+  fill: rgba(230, 57, 70, .05);
+  stroke: #e63946;
+  stroke-width: 1.4px;
 }
 
 .review-split .record-scan-marker.is-active {

@@ -311,6 +311,29 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual([3, 4, 5], sorted(row for column, row in cells if column == "Date"))
         self.assertEqual([1, 2, 3, 4, 5, 6], sorted(row for column, row in cells if column == "Name"))
 
+    def test_a_page_wide_mark_is_not_given_to_the_line_it_crosses(self):
+        # An aged page's darkened edge or a fold joins into one ink component
+        # that spans the page. It crossed one line's band, so that line was given
+        # all of it and its outline, and its crop, became the whole page.
+        ink = np.zeros((HEIGHT, WIDTH), bool)
+        ink[:, 2:6] = True            # the page's edge, top to bottom
+        ink[2:6, :] = True            # and along the top
+        ink[100:104, 100:300] = True  # joined to a word 4 px thick, on the line's baseline
+        ink[96:100, 120:124] = True
+        ink[:, 120:124] = True        # a fold running down through the word
+
+        line = lm.Line([[100, 102], [300, 102]], [np.array([[100, 80], [300, 80], [300, 110], [100, 110]], float)],
+                       lm.SOURCE_DETECTED)
+        owner, labels, _ = lm._assign_strokes([line], ink, 19.0, 40.0)
+
+        self.assertFalse(owner.any(), "the page-wide component belongs to no line")
+
+        # Writing of its own is still given to its line.
+        word = np.zeros((HEIGHT, WIDTH), bool)
+        word[96:104, 120:200] = True
+        owner, _, _ = lm._assign_strokes([line], word, 19.0, 40.0)
+        self.assertTrue(owner[word].all())
+
     def test_a_line_that_drifts_across_its_rule_stays_in_its_row(self):
         page = Page()
         for row in (1, 2, 3, 4):
