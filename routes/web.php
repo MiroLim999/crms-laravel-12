@@ -15,6 +15,7 @@ use App\Http\Controllers\OcrUploadController;
 use App\Http\Controllers\RecordController;
 use App\Http\Controllers\RecordReviewController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\ScanBatchController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -76,6 +77,17 @@ Route::middleware('auth')->group(function () {
         Route::get('documents/workspace', [DocumentScanController::class, 'workspace'])
             ->name('documents.workspace');
         Route::post('documents', [DocumentScanController::class, 'store'])->name('documents.store');
+        // Batch File Upload, kept on the server while it is worked on, so it can be
+        // resumed after a reload or a crash. Each change carries the batch's
+        // version: one from an older copy (another tab) is refused with 409.
+        Route::post('documents/batches', [ScanBatchController::class, 'store'])->name('documents.batches.store');
+        Route::get('documents/batches/{batch}', [ScanBatchController::class, 'show'])->name('documents.batches.show');
+        Route::post('documents/batches/{batch}/claim', [ScanBatchController::class, 'claim'])->name('documents.batches.claim');
+        Route::post('documents/batches/{batch}/ping', [ScanBatchController::class, 'ping'])->name('documents.batches.ping');
+        Route::put('documents/batches/{batch}/pages', [ScanBatchController::class, 'updatePages'])->name('documents.batches.pages');
+        Route::put('documents/batches/{batch}/draft', [ScanBatchController::class, 'saveDraft'])->name('documents.batches.draft');
+        Route::post('documents/batches/{batch}/done', [ScanBatchController::class, 'done'])->name('documents.batches.done');
+        Route::post('documents/batches/{batch}/abandon', [ScanBatchController::class, 'abandon'])->name('documents.batches.abandon');
         // Which pages of one scanned file (by its SHA-256) are already saved.
         Route::get('documents/sources/{hash}/pages', [DocumentScanController::class, 'sourcePages'])
             ->where('hash', '[0-9a-f]{64}')

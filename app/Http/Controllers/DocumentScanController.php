@@ -12,6 +12,7 @@ use App\Models\OcrSetting;
 use App\Models\PageLine;
 use App\Models\PageRun;
 use App\Models\RecordPage;
+use App\Models\ScanBatch;
 use App\Services\AuditLogger;
 use App\Services\Ocr\OcrClient;
 use App\Services\Ocr\ScanModelChoice;
@@ -156,6 +157,8 @@ class DocumentScanController extends Controller
             'threshold' => OcrSetting::threshold(),
             // How long a scan's steps usually take here: the progress ring's pace.
             'scanSeconds' => PageRun::typicalSeconds(),
+            // Batches left open, to resume (Batch File Upload).
+            'openBatches' => ScanBatchController::openBatchesFor((int) $request->user()->getKey()),
         ]);
     }
 
@@ -231,6 +234,10 @@ class DocumentScanController extends Controller
             'source_hash' => ['nullable', 'string', 'regex:/^[0-9a-f]{64}$/'],
             // The user chose "Save again" when told this page is already saved.
             'allow_duplicate' => ['sometimes', 'boolean'],
+            // A batch kept on the server: the pages of it this record is saved from.
+            'scan_batch_id' => ['nullable', 'integer'],
+            'scan_batch_pages' => ['nullable', 'array', 'max:' . (self::MAX_EXTRA_PAGES + 1)],
+            'scan_batch_pages.*' => ['string', 'max:64'],
             // A spread saved as one record: its pages after the first, each with
             // the page it was read from and its own verified fields.
             'extra_pages' => ['sometimes', 'array', 'max:' . self::MAX_EXTRA_PAGES],
@@ -551,6 +558,8 @@ class DocumentScanController extends Controller
             }
         }
 
+        $this->linkBatchPages($request, $validated, $record);
+
         $redirect = route('records.show', $record);
         $message = 'Record submitted and locked. Change it later with Correct record.';
 
@@ -566,6 +575,31 @@ class DocumentScanController extends Controller
         return redirect()
             ->to($redirect)
             ->with('success', $message);
+    }
+
+    /**
+     * A record saved from a batch kept on the server: its batch page(s) are
+     * marked saved and point at it, so a resumed batch lists it as saved.
+     * Only the user's own batch; a batch that is gone is let be.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function linkBatchPages(Request $request, array $validated, CivilRecord $record): void
+    {
+        $keys = array_values(array_filter((array) ($validated['scan_batch_pages'] ?? []), 'is_string'));
+        if (empty($validated['scan_batch_id']) || $keys === []) {
+            return;
+        }
+
+        $batch = ScanBatch::query()
+            ->whereKey((int) $validated['scan_batch_id'])
+            ->where('user_id', $request->user()->getKey())
+            ->first();
+
+        $batch?->pages()->whereIn('client_key', $keys)->update([
+            'record_id' => $record->getKey(),
+            'status' => 'imported',
+        ]);
     }
 
     /**

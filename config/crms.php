@@ -44,4 +44,20 @@ return [
 
     'reporting_timezone' => env('CRMS_REPORTING_TIMEZONE', 'Asia/Manila'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Batch File Upload: how long an unfinished batch is kept
+    |--------------------------------------------------------------------------
+    |
+    | A batch is kept on the server while it is worked on, so it can be resumed
+    | after a reload or a crash. Its queued pages are kept with it (past the
+    | usual 24 hours) until it has been left untouched this many days; then
+    | documents:prune-pages removes it, its pages and their queued files.
+    |
+    */
+
+    'scan_batches' => [
+        'keep_days' => (int) env('CRMS_SCAN_BATCH_KEEP_DAYS', 7),
+    ],
+
 ];

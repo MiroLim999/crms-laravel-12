@@ -291,29 +291,29 @@ Needs A0 (pages go back from Verify) and D1 (the page is read again).
 ### Phase F: never lose a batch (Option A) (L)
 
 **F1. Server: keep the batch**
-- [ ] Migration:
-  - [ ] `scan_batches`: id, user, document type, template (and page-two template), key, status (`open`, `done`, `abandoned`), timestamps.
-  - [ ] `scan_batch_pages`: batch id, order, source name, source hash, page no, page total, record key, status, `document_page_id`, workspace scan path, alignment JSON (boxes, rows, tilts, geometry), flags (skipped, align check, existing accepted), error, record id, timestamps.
-  - [ ] `scan_batch_drafts`: batch id, record key, draft JSON (Verify values and ticks, Review & Export cells), updated at.
-- [ ] Models and relations.
-- [ ] Endpoints under `documents.batches.*`, each limited to the user's own batches (404 for others):
-  - [ ] create;
-  - [ ] show (for resume);
-  - [ ] update pages (state, alignment, flags);
-  - [ ] save draft;
-  - [ ] mark done;
-  - [ ] abandon.
-- [ ] A version number on the batch: an update from an older copy (a second tab) is refused with 409, so two tabs cannot overwrite each other.
-- [ ] Saving a record from a batch links it to its batch page(s).
-- [ ] Pruning (`documents:prune-pages`):
-  - [ ] keep pages of an **open** batch until the batch passes its own limit (default 7 days, in config);
-  - [ ] then remove the batch, its pages and their queued originals;
-  - [ ] remove abandoned batches the same way.
-- [ ] **Tests (PHP):**
-  - [ ] create, show and update work only for the batch's owner;
-  - [ ] an update with an old version is refused;
-  - [ ] pruning keeps an open batch's pages and removes an expired one with its files;
-  - [ ] a record saved from a batch links back to it.
+- [x] Migration:
+  - [x] `scan_batches`: id, user, document type, template (and page-two template), key, status (`open`, `done`, `abandoned`), timestamps.
+  - [x] `scan_batch_pages`: batch id, order, source name, source hash, page no, page total, record key, status, `document_page_id`, workspace scan path, alignment JSON (boxes, rows, tilts, geometry), flags (skipped, align check, existing accepted), error, record id, timestamps.
+  - [x] `scan_batch_drafts`: batch id, record key, draft JSON (Verify values and ticks, Review & Export cells), updated at.
+- [x] Models and relations.
+- [x] Endpoints under `documents.batches.*`, each limited to the user's own batches (404 for others):
+  - [x] create;
+  - [x] show (for resume);
+  - [x] update pages (state, alignment, flags);
+  - [x] save draft;
+  - [x] mark done;
+  - [x] abandon.
+- [x] A version number on the batch: an update from an older copy (a second tab) is refused with 409, so two tabs cannot overwrite each other. (Also claim, for taking a batch over in another tab, and ping.)
+- [x] Saving a record from a batch links it to its batch page(s).
+- [x] Pruning (`documents:prune-pages`):
+  - [x] keep pages of an **open** batch until the batch passes its own limit (default 7 days, in config);
+  - [x] then remove the batch, its pages and their queued originals;
+  - [x] remove abandoned batches the same way.
+- [x] **Tests (PHP):**
+  - [x] create, show and update work only for the batch's owner;
+  - [x] an update with an old version is refused;
+  - [x] pruning keeps an open batch's pages and removes an expired one with its files;
+  - [x] a record saved from a batch links back to it.
 
 **F2. Browser: save as you go**
 - [ ] Create the server batch when the first files are queued.

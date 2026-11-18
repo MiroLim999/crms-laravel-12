@@ -3,6 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Models\DocumentPage;
+use App\Models\ScanBatch;
+use App\Models\ScanBatchPage;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 
@@ -12,6 +14,12 @@ use Illuminate\Support\Facades\Storage;
  * A page is uploaded when the user finishes the Align step, before deciding to
  * submit. Abandoned pages are unsubmitted civil registry scans, so they are not
  * kept past `services.line_markers.keep_hours`. Scheduled hourly.
+ *
+ * A batch kept on the server (Batch File Upload) keeps its queued pages while
+ * it is open, so it can be resumed: until it has been left untouched for
+ * `crms.scan_batches.keep_days`. Then it goes, with its pages and their queued
+ * files, as does a batch that was discarded; a finished one goes once it is
+ * that old (its pages are pruned as usual).
  */
 class PruneDocumentPages extends Command
 {
@@ -32,8 +40,17 @@ class PruneDocumentPages extends Command
         $disk = Storage::disk('local');
         $removed = 0;
 
+        $batches = $this->pruneBatches();
+        if ($batches > 0) {
+            $this->info("Removed {$batches} batch(es) discarded, finished, or left open past their limit.");
+        }
+
+        // The pages of a batch still open are kept for it.
+        $kept = $this->openBatchPageIds();
+
         DocumentPage::query()
             ->where('updated_at', '<', $cutoff)
+            ->when($kept !== [], fn ($query) => $query->whereNotIn('id', $kept))
             ->chunkById(100, function ($pages) use ($disk, &$removed) {
                 foreach ($pages as $page) {
                     // A batch keeps the page's original scan outside its folder
@@ -60,6 +77,55 @@ class PruneDocumentPages extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Batches discarded, and batches left open (or finished) past their limit:
+     * each goes with its pages and their queued files (a page saved as a
+     * record is gone already: the record took what it keeps).
+     */
+    private function pruneBatches(): int
+    {
+        $cutoff = now()->subDays(ScanBatch::keepDays());
+        $disk = Storage::disk('local');
+        $removed = 0;
+
+        ScanBatch::query()
+            ->where(fn ($query) => $query
+                ->where('status', ScanBatch::STATUS_ABANDONED)
+                ->orWhere('updated_at', '<', $cutoff))
+            ->with('pages.documentPage')
+            ->chunkById(50, function ($batches) use ($disk, &$removed) {
+                foreach ($batches as $batch) {
+                    foreach ($batch->pages as $batchPage) {
+                        $page = $batchPage->documentPage;
+                        if ($page !== null && $batch->status !== ScanBatch::STATUS_DONE) {
+                            $this->deleteWorkspaceScan($page);
+                            $disk->deleteDirectory($page->directory());
+                            $page->delete();
+                        }
+                    }
+                    // The batch's folder of queued files, with anything left in it.
+                    if ($batch->batch_key !== '' && ! str_contains($batch->batch_key, '..')) {
+                        $disk->deleteDirectory(self::WORKSPACE.'/'.$batch->batch_key);
+                    }
+                    $batch->delete();
+                    $removed++;
+                }
+            });
+
+        return $removed;
+    }
+
+    /** @return list<int> */
+    private function openBatchPageIds(): array
+    {
+        return ScanBatchPage::query()
+            ->whereNotNull('document_page_id')
+            ->whereHas('batch', fn ($batch) => $batch->where('status', ScanBatch::STATUS_OPEN))
+            ->pluck('document_page_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
     }
 
     /** A batch page's original scan, as DocumentPageController kept it (workspace_scan.json). */
