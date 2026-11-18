@@ -1,6 +1,6 @@
 # Batch File Upload: improvement plan
 
-Status: **planned, not started**. Branch: **`miro-dev4`** (at `e35c5a6`, which includes the batch work `de556d5`).
+Status: **in progress**. Branch: **`miro-dev4`** (at `e35c5a6`, which includes the batch work `de556d5`).
 Scope: the batch flow in `resources/views/scan/workspace.blade.php` and the
 endpoints behind it. **Single Upload must keep working as it does now.**
 
@@ -125,16 +125,16 @@ Effort: **S** small (hours), **M** medium (about a day), **L** large (several da
 - [x] **0.1** Work on `miro-dev4`. It is in sync with GitHub (`origin/miro-dev4`), 41 commits ahead of GitHub `main` and 0 behind, so no rebase is needed.
   - [ ] Optional: update the local `main` copy (`git fetch` then `git branch -f main origin/main`). It is 126 commits behind GitHub, which only matters for comparing against it.
 - [x] **0.2** The batch work (`de556d5`) is on `miro-dev4` and pushed (also on `review-export-page-creation`).
-- [ ] **0.3** Commit this plan on `miro-dev4` (it is not tracked yet).
+- [x] **0.3** Commit this plan on `miro-dev4` (done in `80e603f` and `60f4add`).
 - [x] **0.4** Baseline, measured on `miro-dev4` on 2026-11-18. New failures are compared with this:
   - [x] `npm run test:js`: 151 tests, 149 pass, 2 old failures (style-lint, tests 124 and 125).
   - [x] `php -d extension=gd vendor/bin/phpunit tests/Feature`: 355 tests, 2 old failures:
     - `LedgerTemplateAndExportTest` › rectangle template;
     - `MultiPageSourceTest` › saved pages.
-- [ ] **0.5** Make plain `vendor/bin/phpunit` work. It fails with "tests/Unit not found", because `phpunit.xml` lists a folder that does not exist.
-  - [ ] Add `tests/Unit/.gitkeep`, or drop the Unit suite from `phpunit.xml`.
-  - [ ] Note in `docs/DEVELOPER-GUIDE.md` that the tests need GD (`php -d extension=gd …`, or enable `extension=gd` in XAMPP's `php.ini`).
-  - [ ] **Verify:** `php -d extension=gd vendor/bin/phpunit` runs every suite with the same 2 old failures.
+- [x] **0.5** Make plain `vendor/bin/phpunit` work. It fails with "tests/Unit not found", because `phpunit.xml` lists a folder that does not exist.
+  - [x] Add `tests/Unit/.gitkeep`, or drop the Unit suite from `phpunit.xml`.
+  - [x] Note in `docs/DEVELOPER-GUIDE.md` that the tests need GD (`php -d extension=gd …`, or enable `extension=gd` in XAMPP's `php.ini`).
+  - [x] **Verify:** `php -d extension=gd vendor/bin/phpunit` runs every suite with the same 2 old failures.
 
 ### Phase A0: per-page states (M)
 

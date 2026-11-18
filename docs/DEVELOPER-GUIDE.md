@@ -555,6 +555,15 @@ vendor\bin\pint --test                                       # Check PHP code st
 vendor\bin\pint                                              # Fix PHP code style
 ```
 
+**The PHP tests need PHP's GD extension** (several tests make fake images). XAMPP ships it turned off (`;extension=gd` in `php.ini`). Either turn it on there (remove the `;`, then restart Apache), or pass it on the command line:
+
+```powershell
+php -d extension=gd vendor/bin/phpunit                       # Every suite (Unit and Feature)
+php -d extension=gd vendor/bin/phpunit tests/Feature         # Feature tests only
+```
+
+`php artisan test` starts PHP again without the `-d` flag, so it needs GD turned on in `php.ini`.
+
 ---
 
 ## The TrOCR Machine Learning Pipeline
