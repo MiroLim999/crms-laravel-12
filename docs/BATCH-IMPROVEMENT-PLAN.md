@@ -1,6 +1,6 @@
 # Batch File Upload: improvement plan
 
-Status: **in progress**. Branch: **`miro-dev4`** (at `e35c5a6`, which includes the batch work `de556d5`).
+Status: **built, waiting for the manual review (G3)**. Every automated step is done and committed phase by phase (`e2e9811` … the Phase G commit); the boxes left open are the *(manual)* browser checks. Branch: **`miro-dev4`** (at `e35c5a6`, which includes the batch work `de556d5`).
 Scope: the batch flow in `resources/views/scan/workspace.blade.php` and the
 endpoints behind it. **Single Upload must keep working as it does now.**
 
@@ -350,12 +350,12 @@ Needs A0 (pages go back from Verify) and D1 (the page is read again).
 
 ### Phase G: finish (S)
 
-- [ ] **G1.** Update `docs/MULTI-PAGE-PDF-BATCH-NOTE.md` and the batch section of `docs/DEVELOPER-GUIDE.md`.
-- [ ] **G2.** Run the full checks, with no new failures compared with the baseline (0.4):
-  - [ ] `npm run check:icons`
-  - [ ] `npm run build`
-  - [ ] `npm run test:js`
-  - [ ] `php -d extension=gd vendor/bin/phpunit` (all suites, after 0.5)
+- [x] **G1.** Update `docs/MULTI-PAGE-PDF-BATCH-NOTE.md` and the batch section of `docs/DEVELOPER-GUIDE.md`.
+- [x] **G2.** Run the full checks, with no new failures compared with the baseline (0.4):
+  - [x] `npm run check:icons`
+  - [x] `npm run build`
+  - [x] `npm run test:js` (166 tests, the same 2 old failures.)
+  - [x] `php -d extension=gd vendor/bin/phpunit` (all suites, after 0.5) (362 tests, the same 2 old failures.)
 - [ ] **G3.** *(manual)* Final review: run the whole manual checklist (section 6) in the browser, including every *(manual)* box left open above.
 - [ ] **G4.** Set this file's status to **done**.
 

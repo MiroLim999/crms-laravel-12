@@ -1,5 +1,36 @@
 # Multi-page PDFs in batch mode (note for the `gono` branch)
 
+> **Status (miro-dev4, batch improvement plan):** the batch flow was reworked
+> as `docs/BATCH-IMPROVEMENT-PLAN.md` describes. In short:
+>
+> - **Per-page states.** `batchState.phase` is gone. A page's `status`
+>   (`pending`, `saving`, `saved`, `scanning`, `ready`, `verifying`, `imported`,
+>   `rejected`, `failed`) decides what can be done with it: `pageCanAlign`,
+>   `recordState` / `recordReadiness` and `batchSummaryPhase` in
+>   `scan-source.js`. In the workspace, `batchAligning()` says whether the page
+>   open now is in Align, and `continueBatch()` picks what opens next (a record
+>   read, a record still being read, a page to align, or the summary).
+> - **Reading.** Scan while I align (default; `crms.scan.batchReading` in the
+>   browser) sends each page to the worker as it is queued; pages being read
+>   are polled in the background. Scan all at the end keeps `runBatchScanAll`.
+>   `documents.pages.queue` takes `read=1` for a Smoke-tested page.
+> - **Align.** A new page starts on the template and is snapped
+>   (`autoSnapBatchPage`); the next new page is snapped ahead off-screen.
+>   `item.alignCheck` flags a page Snap could not fit.
+> - **Queue panel and page bar.** `renderBatchQueuePanel` (files, pages,
+>   filters from `QUEUE_FILTERS`, totals from `queueCounts`) and
+>   `updateBatchPageBar`. Pages are removed one at a time or a file at once
+>   (`removeBatchPages`); Add files merges with `appendToQueue`.
+> - **Re-align** (`realignBatchPages`) sends a record's page(s) back to Align.
+> - **Kept on the server.** `ScanBatchController` (`documents.batches.*`),
+>   tables `scan_batches`, `scan_batch_pages`, `scan_batch_drafts`. The
+>   workspace sends changed pages (`syncBatchPages`) and drafts
+>   (`syncBatchDraft`) one write at a time, each with the batch's version and
+>   the tab's name; 409 means another tab took the batch over (`batchLost`).
+>   Resume uses `rebuildBatchState` and `matchFilesToBatch`. A record saved
+>   from a batch sends `scan_batch_id` and `scan_batch_pages[]`, which links
+>   the batch pages to it.
+
 > **Status (review-export-page-creation):** done in `workspace.blade.php`. Batch
 > mode now saves pages as single mode does: a page is its own record, or a pair
 > (1–2, 3–4) when the layout has a page 2 (`recordLeadPage` in `scan-source.js`).
