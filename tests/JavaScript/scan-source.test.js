@@ -15,6 +15,7 @@ import {
     pageFileName,
     pageRanges,
     pdfPageFile,
+    queueCounts,
     recordLeadPage,
     recordReadiness,
     recordState,
@@ -224,4 +225,45 @@ test('a copy asked for in the left-out window, or a file with no fingerprint, is
     ];
     assert.deepEqual(appendToQueue(queued, added).map((item) => item.name), ['a1', 'copy-a1', 'unknown', 'unknown-too']);
     assert.deepEqual(appendToQueue(null, null), []);
+});
+
+test('queue counts cover every state', () => {
+    const items = [
+        page('pending'),
+        page('pending', { alignCheck: true }),
+        page('saving'),
+        page('saved'),
+        page('scanning'),
+        page('ready'),
+        page('verifying'),
+        page('imported'),
+        page('imported', { alignCheck: true }),
+        page('rejected'),
+        page('rejected', { skipped: true }),
+        page('failed'),
+    ];
+    const counts = queueCounts(items);
+    assert.equal(counts.total, 12);
+    // Sent to the queue: queued, reading, read, verifying, saved, rejected.
+    assert.equal(counts.queued, 8);
+    // Read: scanned, verifying, saved, and a rejected match (a skipped page may not have been read).
+    assert.equal(counts.read, 5);
+    assert.equal(counts.saved, 2);
+    assert.equal(counts.failed, 1);
+    assert.deepEqual(counts.byStatus, {
+        pending: 2, saving: 1, saved: 1, scanning: 1, ready: 1, verifying: 1, imported: 2, rejected: 2, failed: 1,
+    });
+    assert.deepEqual(counts.filters, { all: 12, attention: 2, pending: 2, saved: 2 });
+});
+
+test('needs attention: failed pages, and pages Snap could not fit that are not done', () => {
+    const counts = queueCounts([
+        page('failed'),
+        page('saved', { alignCheck: true }),
+        page('imported', { alignCheck: true }),
+        page('ready'),
+    ]);
+    assert.equal(counts.filters.attention, 2);
+    assert.equal(counts.alignCheck, 1);
+    assert.deepEqual(queueCounts([]).filters, { all: 0, attention: 0, pending: 0, saved: 0 });
 });

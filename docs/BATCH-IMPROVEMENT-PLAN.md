@@ -221,27 +221,27 @@ The foundation for A3, D1 and E1. No visible change on its own.
 ### Phase C: finding your way in a big batch (M)
 
 **C1. Queue panel: files, pages, state, removal (#8, #5, #3)**
-- [ ] Replace the single row of queue labels with a collapsible panel in the queue bar.
-- [ ] **Collapsed:** one line with the current file and page, and the totals (as the bar shows today).
-- [ ] **Expanded:**
+- [x] Replace the single row of queue labels with a collapsible panel in the queue bar.
+- [x] **Collapsed:** one line with the current file and page, and the totals (as the bar shows today).
+- [x] **Expanded:**
   - one row per file, with its page count, state counts and a remove button;
   - expanding a file lists its pages, each with its label and flags from section 3, open-on-click, and the A3 remove dialog.
-- [ ] Filters: All · Needs attention (Failed, Check alignment) · Pending · Saved.
-- [ ] Totals: pages queued, read and saved.
-- [ ] Dragging whole files to change their order still works.
-- [ ] Render only the expanded file's pages, so a 300-page PDF stays quick.
-- [ ] Pure helper `queueCounts(items)` for the totals and filter counts.
+- [x] Filters: All · Needs attention (Failed, Check alignment) · Pending · Saved.
+- [x] Totals: pages queued, read and saved.
+- [x] Dragging whole files to change their order still works.
+- [x] Render only the expanded file's pages, so a 300-page PDF stays quick.
+- [x] Pure helper `queueCounts(items)` for the totals and filter counts.
 - [ ] **Tests:**
-  - [ ] JS: `queueCounts` for each state, and for "Needs attention".
+  - [x] JS: `queueCounts` for each state, and for "Needs attention".
   - [ ] *(manual)* a folder of 10 PDFs × 2 pages, and one 100-page PDF.
-- [ ] **Verify:** every page can be found, opened and removed from the panel.
+- [ ] **Verify:** every page can be found, opened and removed from the panel. (By code: every file row, and every page of the file expanded, opens and removes; to confirm in the browser in G3.)
 
 **C2. Page bar for the current file (#5)**
-- [ ] In Align, show the page bar (‹ Page 3 of 12 ›, with a dropdown) in batch too, reusing `scanPageBar`.
-- [ ] The dropdown shows each page's state icon; choosing a page opens its queue item.
-- [ ] Prev and next move within the current file.
+- [x] In Align, show the page bar (‹ Page 3 of 12 ›, with a dropdown) in batch too, reusing `scanPageBar`.
+- [x] The dropdown shows each page's state icon; choosing a page opens its queue item.
+- [x] Prev and next move within the current file.
 - [ ] *(manual)* **Test:** a 12-page PDF: jump to page 9, back to 3, then next and previous.
-- [ ] **Verify:** Single Upload's page bar behaves exactly as before.
+- [ ] **Verify:** Single Upload's page bar behaves exactly as before. (Single mode's code path is unchanged apart from a menu reset; to confirm in the browser in G3.)
 
 > **Phase C gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 5, 6 and 10.
 

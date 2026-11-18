@@ -31,9 +31,14 @@
                                         <span class="batch-queue-banner__sub" id="batchQueueCounter">0 / 0</span>
                                     </div>
                                 </div>
-                                <div class="batch-queue-chips" id="batchQueueChips" role="list"
-                                    aria-label="Queued documents"></div>
                                 <div class="batch-queue-banner__actions">
+                                    {{-- The queue, collapsed to where the user is; opens the panel below. --}}
+                                    <button type="button" class="btn btn-sm btn-label-secondary batch-queue-toggle" id="batchQueueToggle"
+                                        aria-expanded="false" aria-controls="batchQueuePanel" title="Show every file and page in this batch">
+                                        <i class="icon-base bx bx-list-check icon-sm" aria-hidden="true"></i>
+                                        <span class="batch-queue-toggle__text" id="batchQueueToggleText">Queue</span>
+                                        <i class="icon-base bx bx-chevron-down icon-sm batch-queue-toggle__chevron" aria-hidden="true"></i>
+                                    </button>
                                     {{-- More files for this batch, while pages can still be aligned. --}}
                                     <div class="btn-group btn-group-sm d-none" role="group" id="batchAddMoreGroup"
                                         aria-label="Add to this batch">
@@ -62,6 +67,24 @@
                                 <button type="button" class="btn btn-sm btn-label-danger text-nowrap" id="batchQueueNoticeBtn">
                                     Open it
                                 </button>
+                            </div>
+                            {{-- Every file of the batch; the one expanded lists its pages. --}}
+                            <div class="batch-queue-panel d-none" id="batchQueuePanel">
+                                <div class="batch-queue-panel__head">
+                                    <div class="btn-group btn-group-sm" role="group" aria-label="Show pages" id="batchQueueFilters">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary active" data-queue-filter="all"
+                                            aria-pressed="true">All<span class="batch-queue-filter__count"></span></button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" data-queue-filter="attention"
+                                            aria-pressed="false" title="Pages that failed, or that Snap could not fit">Needs attention<span
+                                                class="batch-queue-filter__count"></span></button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" data-queue-filter="pending"
+                                            aria-pressed="false">Pending<span class="batch-queue-filter__count"></span></button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" data-queue-filter="saved"
+                                            aria-pressed="false">Saved<span class="batch-queue-filter__count"></span></button>
+                                    </div>
+                                    <span class="batch-queue-panel__totals" id="batchQueueTotals"></span>
+                                </div>
+                                <ol class="batch-queue-files" id="batchQueueFiles" aria-label="Files in this batch"></ol>
                             </div>
                         </div>
                     </div>
@@ -1347,6 +1370,8 @@
             pageFileName,
             pageKey,
             pdfPageFile,
+            QUEUE_FILTERS,
+            queueCounts,
             recordLeadPage,
             recordState,
         } from '{{ Vite::asset('resources/js/scan-source.js') }}';
@@ -3472,11 +3497,18 @@
 
         /** ‹ Page 3 of 12 › in the Align toolbar, for a PDF of many pages; ✓: saved already. */
         function updatePageBar() {
+            // A batch has its own: the pages of the file open, as queued.
+            if (batchState.active) {
+                updateBatchPageBar();
+                return;
+            }
             el('scanPageBar').classList.toggle('d-none', !multiPage());
             if (!multiPage()) return;
 
             // A real dropdown, so a saved page can show a green check icon.
             const menu = el('scanPageMenu');
+            if (menu.dataset.mode === 'batch') menu.replaceChildren();
+            delete menu.dataset.mode;
             if (menu.children.length !== scanPageCount) {
                 menu.replaceChildren(...Array.from({ length: scanPageCount }, (_, index) => {
                     const item = document.createElement('button');
@@ -4010,8 +4042,73 @@
             }
         }
 
-        el('scanPagePrevBtn').addEventListener('click', () => turnToPage(scanPageNumber - 1));
-        el('scanPageNextBtn').addEventListener('click', () => turnToPage(scanPageNumber + 1));
+        el('scanPagePrevBtn').addEventListener('click', () => (batchState.active ? turnBatchPage(-1) : turnToPage(scanPageNumber - 1)));
+        el('scanPageNextBtn').addEventListener('click', () => (batchState.active ? turnBatchPage(1) : turnToPage(scanPageNumber + 1)));
+
+        /**
+         * The page bar in a batch, in Align: "Page 3 of 12" of the file open, its
+         * queued pages in the dropdown (each with its state), and ‹ › to the page
+         * before or after it in that file that can be aligned.
+         */
+        function updateBatchPageBar() {
+            const current = batchState.items[batchState.currentIndex];
+            const show = batchAligning() && current?.pageTotal > 1;
+            el('scanPageBar').classList.toggle('d-none', !show);
+            if (!show) return;
+
+            const siblings = batchState.items
+                .map((item, index) => ({ item, index }))
+                .filter(({ item }) => item.group === current.group);
+            const label = (item) => {
+                const span = document.createElement('span');
+                span.className = 'marker-page-label';
+                span.append(`Page ${item.pageNo} of ${item.pageTotal}`);
+                if (item !== current) {
+                    const state = document.createElement('span');
+                    state.className = 'marker-page-state';
+                    const badge = statusBadge(item);
+                    const icon = document.createElement('i');
+                    icon.className = `icon-base bx ${item.alignCheck && !pageDone(item) ? 'bx-error' : badge.icon} me-1`;
+                    icon.setAttribute('aria-hidden', 'true');
+                    state.append(icon, item.alignCheck && !pageDone(item) ? `${badge.text} · Check alignment` : badge.text);
+                    span.append(state);
+                }
+                return span;
+            };
+            const menu = el('scanPageMenu');
+            menu.dataset.mode = 'batch';
+            menu.replaceChildren(...siblings.map(({ item, index }) => {
+                const option = document.createElement('button');
+                option.type = 'button';
+                option.className = 'dropdown-item';
+                option.classList.toggle('active', item === current);
+                option.disabled = item !== current && !pageCanAlign(item);
+                option.append(label(item));
+                option.addEventListener('click', () => {
+                    if (item !== current) openBatchDocument(index);
+                });
+                return option;
+            }));
+            el('scanPageSelect').replaceChildren(label(current));
+            el('scanPageSelect').disabled = pageTurning || batchState.readingAll;
+            const here = siblings.findIndex(({ item }) => item === current);
+            const alignable = ({ item }) => pageCanAlign(item);
+            el('scanPagePrevBtn').disabled = pageTurning || !siblings.slice(0, here).some(alignable);
+            el('scanPageNextBtn').disabled = pageTurning || !siblings.slice(here + 1).some(alignable);
+        }
+
+        /** The page before (-1) or after (1) this one in its file that can be aligned. */
+        function turnBatchPage(step) {
+            const current = batchState.items[batchState.currentIndex];
+            if (!current || pageTurning || scanInProgress) return;
+            const siblings = batchState.items
+                .map((item, index) => ({ item, index }))
+                .filter(({ item }) => item.group === current.group);
+            const here = siblings.findIndex(({ item }) => item === current);
+            const ordered = step < 0 ? siblings.slice(0, here).reverse() : siblings.slice(here + 1);
+            const target = ordered.find(({ item }) => pageCanAlign(item));
+            if (target) openBatchDocument(target.index);
+        }
         el('docCompanionPage').addEventListener('click', () => {
             const mate = batchPartner();
             if (mate) {
@@ -4280,7 +4377,6 @@
             const counter = document.getElementById('batchQueueCounter');
             const progressTrack = document.getElementById('batchQueueProgressTrack');
             const progressBar = document.getElementById('batchQueueProgressBar');
-            const chipsContainer = document.getElementById('batchQueueChips');
             // Add files shows in Align while pages can still be aligned.
             const addMoreBtn = document.getElementById('batchAddMoreGroup');
             const saveQueueBtn = document.getElementById('saveQueueNextBtn');
@@ -4356,163 +4452,289 @@
             }
 
             renderBatchNotice();
+            if (activeStep === 'mark') updateBatchPageBar();
 
-            if (chipsContainer) {
-                chipsContainer.innerHTML = '';
-                const groups = batchGroups();
-                groups.forEach((group, index) => {
-                    const first = group.items[0];
-                    // The file's own name, and its pages beside it (never cut off with the name):
-                    // "2 pages", or "2 of 5 pages" when some were left out as saved already.
-                    const fileName = first.sourceName ?? first.name;
-                    const fileTotal = first.pageTotal ?? 1;
-                    const pagesText = fileTotal > 1
-                        ? (group.items.length < fileTotal ? `${group.items.length} of ${fileTotal} pages` : `${fileTotal} pages`)
-                        : '';
-                    const item = {
-                        ...first,
-                        status: groupStatus(group),
-                        name: pagesText ? `${fileName} (${pagesText})` : fileName,
-                    };
-                    const badgeMap = {
-                        pending: { cls: 'is-pending', icon: 'bx-time-five', text: 'Pending' },
-                        saving: { cls: 'is-working', icon: 'bx-refresh', text: 'Saving' },
-                        saved: { cls: 'is-queued', icon: 'bx-check-circle', text: 'Queued' },
-                        scanning: { cls: 'is-working', icon: 'bx-radar', text: 'Scanning' },
-                        ready: { cls: 'is-ready', icon: 'bx-scan', text: 'Scanned' },
-                        verifying: { cls: 'is-verifying', icon: 'bx-edit-alt', text: 'Verifying' },
-                        imported: { cls: 'is-imported', icon: 'bx-check-shield', text: 'Saved' },
-                        rejected: { cls: 'is-failed', icon: 'bx-x-circle', text: 'Rejected (Existing)' },
-                        failed: { cls: 'is-failed', icon: 'bx-error-circle', text: 'Failed' },
-                    };
-                    const badgeInfo = { ...(badgeMap[item.status] || badgeMap.pending) };
-                    if (item.status === 'rejected' && group.items.every((it) => it.status !== 'rejected' || it.skipped)) {
-                        badgeInfo.text = 'Skipped';
-                    }
-                    // A file of several pages (several records) says how many of its pages are saved.
-                    if (group.items.length > 1 && item.status === 'verifying') {
-                        const savedPages = group.items.filter((it) => it.status === 'imported').length;
-                        badgeInfo.text = `${savedPages}/${group.items.length} pages saved`;
-                    }
-                    const isCurrent = group.indices.includes(batchState.currentIndex);
-                    // A file is closed while Scan all reads, and once all its pages are done.
-                    const canInteract = !batchState.readingAll && !group.items.every(pageDone);
-
-                    // The chip opens its document on click; the small × beside it removes it.
-                    const chip = document.createElement('div');
-                    chip.className = `batch-queue-chip ${badgeInfo.cls}${isCurrent ? ' is-current' : ''}${canInteract ? '' : ' is-locked'}`;
-                    chip.setAttribute('role', 'listitem');
-                    chip.draggable = canInteract && groups.length > 1;
-
-                    const openBtn = document.createElement('button');
-                    openBtn.type = 'button';
-                    openBtn.className = 'batch-queue-chip__open';
-                    openBtn.disabled = !canInteract;
-                    openBtn.title = canInteract ? `${item.name} — Click to open, drag to change priority` : item.name;
-                    openBtn.innerHTML = `
-                        <span class="batch-queue-chip__index">${index + 1}</span>
-                        <span class="batch-queue-chip__name"></span>
-                        <span class="batch-queue-chip__pages d-none"></span>
-                        <span class="batch-queue-chip__status">
-                            <i class="icon-base bx ${badgeInfo.icon}" aria-hidden="true"></i>
-                            <span>${badgeInfo.text}</span>
-                        </span>
-                    `;
-                    openBtn.querySelector('.batch-queue-chip__name').textContent = fileName;
-                    if (pagesText) {
-                        const pages = openBtn.querySelector('.batch-queue-chip__pages');
-                        pages.textContent = pagesText;
-                        pages.classList.remove('d-none');
-                    }
-                    chip.appendChild(openBtn);
-
-                    if (canInteract) {
-                        const removeBtn = document.createElement('button');
-                        removeBtn.type = 'button';
-                        removeBtn.className = 'batch-queue-chip__remove';
-                        removeBtn.setAttribute('aria-label', `Remove ${item.name} from the queue`);
-                        removeBtn.title = 'Remove from queue';
-                        removeBtn.innerHTML = '<i class="icon-base bx bx-x" aria-hidden="true"></i>';
-                        removeBtn.addEventListener('click', (event) => {
-                            event.stopPropagation();
-                            const currentHere = group.indices.includes(batchState.currentIndex) ? batchState.currentIndex : null;
-                            openBatchDocumentModal(group.indices[0], { pageIndex: currentHere });
-                        });
-                        chip.appendChild(removeBtn);
-                    }
-
-                    chip.addEventListener('dragstart', (event) => {
-                        if (!chip.draggable) return;
-                        draggedBatchIndex = index;
-                        batchChipDidDrag = true;
-                        chip.classList.add('is-dragging');
-                        if (event.dataTransfer) {
-                            event.dataTransfer.effectAllowed = 'move';
-                            event.dataTransfer.setData('text/plain', String(index));
-                        }
-                    });
-
-                    chip.addEventListener('dragover', (event) => {
-                        if (draggedBatchIndex === null || draggedBatchIndex === index) return;
-                        event.preventDefault();
-                        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-                        chip.classList.add('is-drag-over');
-                    });
-
-                    chip.addEventListener('dragleave', () => {
-                        chip.classList.remove('is-drag-over');
-                    });
-
-                    chip.addEventListener('drop', (event) => {
-                        event.preventDefault();
-                        chip.classList.remove('is-drag-over');
-                        if (draggedBatchIndex === null || draggedBatchIndex === index) return;
-
-                        const activeItem = batchState.items[batchState.currentIndex];
-                        keepCurrentAlignment({ onlyIfNew: true });
-
-                        // Whole documents move: a PDF's pages stay together.
-                        const reordered = batchGroups();
-                        const [movedGroup] = reordered.splice(draggedBatchIndex, 1);
-                        reordered.splice(index, 0, movedGroup);
-                        batchState.items = reordered.flatMap((g) => g.items);
-                        batchState.currentIndex = Math.max(0, batchState.items.indexOf(activeItem));
-                        draggedBatchIndex = null;
-
-                        if (activeItem) {
-                            el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${batchState.currentIndex + 1}/${batchState.items.length}) · ${activeItem.name}`;
-                            el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
-                        }
-                        renderBatchQueueBanner();
-                    });
-
-                    chip.addEventListener('dragend', () => {
-                        chip.classList.remove('is-dragging');
-                        chipsContainer.querySelectorAll('.batch-queue-chip').forEach((c) => c.classList.remove('is-drag-over'));
-                        draggedBatchIndex = null;
-                        window.setTimeout(() => { batchChipDidDrag = false; }, 60);
-                    });
-
-                    openBtn.addEventListener('click', () => {
-                        if (batchChipDidDrag || !canInteract) return;
-                        if (isCurrent) return;
-                        // The page still to do, else the first: in Align, one not queued
-                        // yet; in Verify, one whose record is read and not saved.
-                        const target = batchAligning()
-                            ? group.items.findIndex((it) => it.status !== 'saved' && pageCanAlign(it))
-                            : group.items.findIndex((it) => recordStateOf(it) === 'ready');
-                        openBatchDocument(group.indices[target === -1 ? 0 : target]);
-                    });
-
-                    chipsContainer.appendChild(chip);
-                });
-                const activeChip = chipsContainer.querySelector('.batch-queue-chip.is-current');
-                activeChip?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-            }
+            renderBatchQueuePanel();
         }
 
+        // ------------------------------------------------ the queue panel
+        // One line in the bar says where the user is; the panel lists every file
+        // (its pages, their states and counts) and the pages of the file expanded,
+        // each to open or remove. Only that file's pages are drawn, so a PDF of
+        // hundreds of pages stays quick. Whole files are dragged to reorder.
+
+        /** What the user sees for each page status (section 3 of the batch plan). */
+        const BATCH_STATUS_BADGE = {
+            pending: { cls: 'is-pending', icon: 'bx-time-five', text: 'Pending' },
+            saving: { cls: 'is-working', icon: 'bx-refresh', text: 'Saving' },
+            saved: { cls: 'is-queued', icon: 'bx-check-circle', text: 'Queued' },
+            scanning: { cls: 'is-working', icon: 'bx-radar', text: 'Reading' },
+            ready: { cls: 'is-ready', icon: 'bx-scan', text: 'Scanned' },
+            verifying: { cls: 'is-verifying', icon: 'bx-edit-alt', text: 'Verifying' },
+            imported: { cls: 'is-imported', icon: 'bx-check-shield', text: 'Saved' },
+            rejected: { cls: 'is-failed', icon: 'bx-x-circle', text: 'Rejected' },
+            failed: { cls: 'is-failed', icon: 'bx-error-circle', text: 'Failed' },
+        };
+
+        function statusBadge(item) {
+            const badge = { ...(BATCH_STATUS_BADGE[item.status] ?? BATCH_STATUS_BADGE.pending) };
+            if (item.status === 'rejected' && item.skipped) badge.text = 'Skipped';
+            return badge;
+        }
+
+        function badgeElement({ cls, icon, text }, extraClass = '') {
+            const span = document.createElement('span');
+            span.className = `batch-queue-status ${cls}${extraClass ? ` ${extraClass}` : ''}`;
+            const i = document.createElement('i');
+            i.className = `icon-base bx ${icon}`;
+            i.setAttribute('aria-hidden', 'true');
+            span.append(i, text);
+            return span;
+        }
+
+        const queuePanel = { open: false, filter: 'all', expanded: null };
         let draggedBatchIndex = null;
         let batchChipDidDrag = false;
+
+        /** Whether a page can be opened from the queue: in Align, or (its record read) in Verify. */
+        function batchPageOpenable(item) {
+            return !batchState.readingAll && (pageCanAlign(item) || recordStateOf(item) === 'ready');
+        }
+
+        /** "BIRTHS-1995.pdf · page 3 of 12", or the record in Verify, for the collapsed line. */
+        function batchWhereText() {
+            const current = batchState.items[batchState.currentIndex];
+            if (!current) return 'Queue';
+            const name = current.sourceName ?? current.name;
+            if (!batchAligning() && !batchState.readingAll) return recordLabel(recordOf(current));
+            return current.pageTotal > 1 ? `${name} · page ${current.pageNo} of ${current.pageTotal}` : name;
+        }
+
+        function setQueuePanelOpen(open) {
+            queuePanel.open = open;
+            if (open) queuePanel.expanded = batchState.items[batchState.currentIndex]?.group ?? queuePanel.expanded;
+            el('batchQueueToggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+            renderBatchQueuePanel();
+        }
+
+        el('batchQueueToggle').addEventListener('click', () => setQueuePanelOpen(!queuePanel.open));
+        el('batchQueueFilters').addEventListener('click', (event) => {
+            const button = event.target.closest('[data-queue-filter]');
+            if (!button) return;
+            queuePanel.filter = button.dataset.queueFilter;
+            renderBatchQueuePanel();
+        });
+
+        function renderBatchQueuePanel() {
+            const groups = batchGroups();
+            const counts = queueCounts(batchState.items);
+            const files = groups.length;
+            el('batchQueueToggleText').textContent = files > 1 ? `${batchWhereText()} · ${files} files` : batchWhereText();
+
+            const panel = el('batchQueuePanel');
+            panel.classList.toggle('d-none', !queuePanel.open);
+            if (!queuePanel.open) return;
+
+            // Filters and their counts; the totals.
+            el('batchQueueFilters').querySelectorAll('[data-queue-filter]').forEach((button) => {
+                const name = button.dataset.queueFilter;
+                const active = name === queuePanel.filter;
+                button.classList.toggle('active', active);
+                button.setAttribute('aria-pressed', active ? 'true' : 'false');
+                button.querySelector('.batch-queue-filter__count').textContent = String(counts.filters[name] ?? 0);
+            });
+            const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+            el('batchQueueTotals').textContent = `${plural(counts.total, 'page')} · ${counts.queued} queued · ${counts.read} read · ${counts.saved} saved`;
+
+            const matches = QUEUE_FILTERS[queuePanel.filter] ?? QUEUE_FILTERS.all;
+            const list = el('batchQueueFiles');
+            const scrollTop = list.scrollTop;
+            const rows = [];
+            groups.forEach((group, groupIndex) => {
+                const shownPages = group.items.filter(matches);
+                if (shownPages.length === 0) return;
+                rows.push(fileRow(group, groupIndex, groups.length, shownPages));
+            });
+            if (rows.length === 0) {
+                const empty = document.createElement('li');
+                empty.className = 'batch-queue-files__empty';
+                empty.textContent = 'No page matches this filter.';
+                rows.push(empty);
+            }
+            list.replaceChildren(...rows);
+            list.scrollTop = scrollTop;
+        }
+
+        /** One file: its name and pages, how they stand, remove; expanded, its pages. */
+        function fileRow(group, groupIndex, groupCount, shownPages) {
+            const first = group.items[0];
+            const fileName = first.sourceName ?? first.name;
+            const fileTotal = first.pageTotal ?? 1;
+            const isCurrent = group.indices.includes(batchState.currentIndex);
+            const expanded = queuePanel.expanded === group.key && fileTotal > 1;
+            const canInteract = !batchState.readingAll;
+
+            const li = document.createElement('li');
+            li.className = `batch-queue-file${isCurrent ? ' is-current' : ''}`;
+            const row = document.createElement('div');
+            row.className = 'batch-queue-file__row';
+            row.draggable = canInteract && groupCount > 1;
+
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'batch-queue-file__toggle';
+            toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            const index = document.createElement('span');
+            index.className = 'batch-queue-file__index';
+            index.textContent = String(groupIndex + 1);
+            const name = document.createElement('span');
+            name.className = 'batch-queue-file__name';
+            name.textContent = fileName;
+            name.title = fileName;
+            const meta = document.createElement('span');
+            meta.className = 'batch-queue-file__meta';
+            // "12 pages · 4 queued · 1 failed", or "2 of 5 pages" when some were left out as saved.
+            const pagesText = fileTotal > 1
+                ? (group.items.length < fileTotal ? `${group.items.length} of ${fileTotal} pages` : `${fileTotal} pages`)
+                : '';
+            const stateText = Object.entries(queueCounts(group.items).byStatus)
+                .map(([status, count]) => `${count} ${(BATCH_STATUS_BADGE[status]?.text ?? status).toLowerCase()}`);
+            meta.textContent = [pagesText, ...(group.items.length > 1 ? stateText : [])].filter(Boolean).join(' · ');
+            if (fileTotal > 1) {
+                const chevron = document.createElement('i');
+                chevron.className = 'icon-base bx bx-chevron-right icon-sm';
+                chevron.setAttribute('aria-hidden', 'true');
+                toggle.append(chevron);
+            }
+            toggle.append(index, name, meta);
+            // A file of one page shows its state; one of many, its pages when expanded.
+            if (group.items.length === 1) {
+                toggle.append(badgeElement(statusBadge(first)));
+                if (first.alignCheck && !pageDone(first)) toggle.append(badgeElement({ cls: 'is-flag', icon: 'bx-error', text: 'Check alignment' }));
+            } else {
+                // What still needs attention in the file wins (see groupStatus).
+                toggle.append(badgeElement(statusBadge({ status: groupStatus(group) })));
+            }
+            toggle.title = fileTotal > 1 ? 'Show or hide its pages' : 'Open it';
+            toggle.addEventListener('click', () => {
+                if (batchChipDidDrag) return;
+                if (fileTotal > 1) {
+                    queuePanel.expanded = expanded ? null : group.key;
+                    renderBatchQueuePanel();
+                    return;
+                }
+                if (!isCurrent && batchPageOpenable(first)) openBatchDocument(group.indices[0]);
+            });
+
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'batch-queue-row__remove';
+            remove.disabled = !canInteract || group.items.every(pageDone);
+            remove.title = fileTotal > 1 ? 'Remove this file from the batch' : 'Remove from the batch';
+            remove.setAttribute('aria-label', `Remove ${fileName} from the batch`);
+            remove.innerHTML = '<i class="icon-base bx bx-x" aria-hidden="true"></i>';
+            remove.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const currentHere = isCurrent ? batchState.currentIndex : null;
+                openBatchDocumentModal(group.indices[0], { pageIndex: currentHere });
+            });
+            row.append(toggle, remove);
+            li.append(row);
+            attachFileDrag(li, row, groupIndex);
+
+            if (expanded) {
+                const pages = document.createElement('ol');
+                pages.className = 'batch-queue-pages';
+                pages.setAttribute('aria-label', `Pages of ${fileName}`);
+                shownPages.forEach((item) => pages.append(pageRow(item, group)));
+                li.append(pages);
+            }
+            return li;
+        }
+
+        /** One page of the file expanded: its state and flags, open on click, and remove. */
+        function pageRow(item, group) {
+            const index = batchState.items.indexOf(item);
+            const isCurrent = index === batchState.currentIndex;
+            const li = document.createElement('li');
+            li.className = `batch-queue-page${isCurrent ? ' is-current' : ''}`;
+
+            const open = document.createElement('button');
+            open.type = 'button';
+            open.className = 'batch-queue-page__open';
+            open.disabled = isCurrent || !batchPageOpenable(item);
+            const number = document.createElement('span');
+            number.className = 'batch-queue-page__number';
+            number.textContent = `Page ${item.pageNo}`;
+            open.append(number, badgeElement(statusBadge(item)));
+            if (item.alignCheck && !pageDone(item)) open.append(badgeElement({ cls: 'is-flag', icon: 'bx-error', text: 'Check alignment' }));
+            if (item.status === 'failed' && item.error) {
+                const error = document.createElement('span');
+                error.className = 'batch-queue-page__error';
+                error.textContent = item.error;
+                open.append(error);
+            }
+            open.title = isCurrent ? 'Open now'
+                : (recordStateOf(item) === 'ready' ? 'Open in Verify' : (pageCanAlign(item) ? 'Open in Align' : ''));
+            open.addEventListener('click', () => {
+                if (!open.disabled) openBatchDocument(index);
+            });
+
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'batch-queue-row__remove';
+            remove.disabled = batchState.readingAll || pageDone(item);
+            remove.title = 'Remove this page from the batch';
+            remove.setAttribute('aria-label', `Remove page ${item.pageNo} from the batch`);
+            remove.innerHTML = '<i class="icon-base bx bx-x" aria-hidden="true"></i>';
+            remove.addEventListener('click', () => openBatchDocumentModal(group.indices[0], { pageIndex: index }));
+            li.append(open, remove);
+            return li;
+        }
+
+        /** Whole files are dragged to change their order (a PDF's pages stay together). */
+        function attachFileDrag(li, row, groupIndex) {
+            row.addEventListener('dragstart', (event) => {
+                if (!row.draggable) return;
+                draggedBatchIndex = groupIndex;
+                batchChipDidDrag = true;
+                li.classList.add('is-dragging');
+                if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', String(groupIndex));
+                }
+            });
+            li.addEventListener('dragover', (event) => {
+                if (draggedBatchIndex === null || draggedBatchIndex === groupIndex) return;
+                event.preventDefault();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                li.classList.add('is-drag-over');
+            });
+            li.addEventListener('dragleave', () => li.classList.remove('is-drag-over'));
+            li.addEventListener('drop', (event) => {
+                event.preventDefault();
+                li.classList.remove('is-drag-over');
+                if (draggedBatchIndex === null || draggedBatchIndex === groupIndex) return;
+
+                const activeItem = batchState.items[batchState.currentIndex];
+                keepCurrentAlignment({ onlyIfNew: true });
+                const reordered = batchGroups();
+                const [movedGroup] = reordered.splice(draggedBatchIndex, 1);
+                reordered.splice(groupIndex, 0, movedGroup);
+                batchState.items = reordered.flatMap((g) => g.items);
+                batchState.currentIndex = Math.max(0, batchState.items.indexOf(activeItem));
+                draggedBatchIndex = null;
+                showBatchContext();
+                renderBatchQueueBanner();
+            });
+            row.addEventListener('dragend', () => {
+                li.classList.remove('is-dragging');
+                el('batchQueueFiles').querySelectorAll('.batch-queue-file').forEach((node) => node.classList.remove('is-drag-over'));
+                draggedBatchIndex = null;
+                window.setTimeout(() => { batchChipDidDrag = false; }, 60);
+            });
+        }
+
         // The file (index) and page (pageIndex, or null) the remove dialog is about.
         let selectedBatchModal = null;
 

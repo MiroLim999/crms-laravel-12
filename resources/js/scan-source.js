@@ -338,3 +338,41 @@ export function appendToQueue(items, added) {
     }
     return queue;
 }
+
+/** Whether a page needs the user: it failed, or Snap could not fit it ("Check alignment"). */
+export function pageNeedsAttention(item) {
+    return item?.status === 'failed' || (Boolean(item?.alignCheck) && !pageDone(item));
+}
+
+/** The queue panel's filters: which pages each one shows. */
+export const QUEUE_FILTERS = Object.freeze({
+    all: () => true,
+    attention: pageNeedsAttention,
+    pending: (item) => item?.status === 'pending',
+    saved: (item) => item?.status === 'imported',
+});
+
+/**
+ * The queue's totals and filter counts: `total` pages; `queued` (sent to the
+ * queue: queued, being read, read, or done); `read` (read, being verified,
+ * saved, or left out after reading); `saved` (saved as records); and one
+ * count per filter (see QUEUE_FILTERS), plus one per status in `byStatus`.
+ */
+export function queueCounts(items) {
+    const pages = Array.from(items ?? []);
+    const count = (test) => pages.filter(test).length;
+    const byStatus = {};
+    pages.forEach((item) => {
+        byStatus[item.status] = (byStatus[item.status] ?? 0) + 1;
+    });
+    return {
+        total: pages.length,
+        queued: count((item) => ['saved', 'scanning', 'ready', 'verifying', 'imported', 'rejected'].includes(item.status)),
+        read: count((item) => ['ready', 'verifying', 'imported'].includes(item.status) || (item.status === 'rejected' && !item.skipped)),
+        saved: count((item) => item.status === 'imported'),
+        failed: count((item) => item.status === 'failed'),
+        alignCheck: count((item) => Boolean(item.alignCheck) && !pageDone(item)),
+        filters: Object.fromEntries(Object.entries(QUEUE_FILTERS).map(([name, test]) => [name, count(test)])),
+        byStatus,
+    };
+}
