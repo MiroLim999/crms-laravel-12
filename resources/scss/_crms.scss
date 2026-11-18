@@ -11121,6 +11121,19 @@ $dashboard-reveal-step: 40ms;
     text-overflow: ellipsis;
   }
 
+  // Headers can be dragged to swap places; the bar shows where one lands.
+  thead th[draggable="true"] {
+    cursor: grab;
+
+    &.is-drop-before {
+      box-shadow: inset 3px 0 0 var(--bs-primary, #696cff);
+    }
+
+    &.is-drop-after {
+      box-shadow: inset -3px 0 0 var(--bs-primary, #696cff);
+    }
+  }
+
   // The grip on a header's right edge, as in a spreadsheet.
   .review-table__resizer {
     position: absolute;

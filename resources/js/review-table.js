@@ -463,8 +463,16 @@ export class ReviewTable {
         // Names typed over a header or a row number, for the downloads.
         this.headerNames = new Map();
         this.rowNames = new Map();
+        // Column keys in the order the reviewer dragged them to (empty: as built).
+        this.columnOrder = [];
+        this.sourceModel = null;
 
         container.addEventListener('pointerdown', (event) => this._pointerDown(event));
+        container.addEventListener('dragstart', (event) => this._dragStart(event));
+        container.addEventListener('dragover', (event) => this._dragOver(event));
+        container.addEventListener('dragleave', () => this._clearDropMark());
+        container.addEventListener('dragend', () => this._clearDropMark());
+        container.addEventListener('drop', (event) => this._drop(event));
         container.addEventListener('keydown', (event) => this._keyDown(event));
         container.addEventListener('dblclick', (event) => this._doubleClick(event));
         container.addEventListener('copy', (event) => this._copy(event, false));
@@ -553,8 +561,81 @@ export class ReviewTable {
         this.redoList = [];
         this.cleared.clear();
         this.widths.clear();
+        this.columnOrder = [];
         this.range = null;
         this.onCleared([]);
+    }
+
+    /** The model with its columns in the order the reviewer dragged them to. */
+    _ordered(model) {
+        if (this.columnOrder.length === 0) return model;
+        const rank = (column) => {
+            const at = this.columnOrder.indexOf(column.key);
+            return at === -1 ? this.columnOrder.length : at;
+        };
+        const columns = model.columns
+            .map((column, index) => ({ column, index }))
+            .sort((a, b) => rank(a.column) - rank(b.column) || a.index - b.index)
+            .map((entry) => entry.column);
+        return { ...model, columns };
+    }
+
+    _dragStart(event) {
+        const th = event.target instanceof Element ? event.target.closest('thead th[data-column]') : null;
+        if (!th || th.classList.contains('is-renaming') || th.dataset.noDrag === '1') {
+            event.preventDefault();
+            return;
+        }
+        this.dragKey = th.dataset.sizeKey;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', this.dragKey);
+    }
+
+    _dropTarget(event) {
+        if (this.dragKey == null) return null;
+        const th = event.target instanceof Element ? event.target.closest('thead th[data-column]') : null;
+        if (!th || th.dataset.sizeKey === this.dragKey) return null;
+        const box = th.getBoundingClientRect();
+        return { th, after: event.clientX > box.left + box.width / 2 };
+    }
+
+    _dragOver(event) {
+        const target = this._dropTarget(event);
+        if (!target) return;
+        event.preventDefault();
+        this._clearDropMark();
+        target.th.classList.add(target.after ? 'is-drop-after' : 'is-drop-before');
+    }
+
+    _clearDropMark() {
+        this.container.querySelectorAll('.is-drop-before, .is-drop-after')
+            .forEach((node) => node.classList.remove('is-drop-before', 'is-drop-after'));
+    }
+
+    _drop(event) {
+        const target = this._dropTarget(event);
+        const moving = this.dragKey;
+        this.dragKey = null;
+        this._clearDropMark();
+        if (!target) return;
+        event.preventDefault();
+        const keys = this.model.columns.map((column) => column.key);
+        keys.splice(keys.indexOf(moving), 1);
+        const at = keys.indexOf(target.th.dataset.sizeKey) + (target.after ? 1 : 0);
+        keys.splice(at, 0, moving);
+        this._reorder(keys);
+    }
+
+    /** Draw the columns again in `keys` order; the picked cell stays on its column. */
+    _reorder(keys) {
+        this._closeEditor(true);
+        const activeKey = this.active ? this.model.columns[this.active.column]?.key : null;
+        this.columnOrder = keys;
+        this.render(this.sourceModel);
+        if (activeKey != null) {
+            const column = this.model.columns.findIndex((candidate) => candidate.key === activeKey);
+            if (column !== -1 && this.active) this.select(this.active.row, column, { locate: false });
+        }
     }
 
     /**
@@ -604,6 +685,8 @@ export class ReviewTable {
     render(model) {
         const keep = this.active;
         this._closeEditor(false);
+        this.sourceModel = model;
+        model = this._ordered(model);
         this.model = model;
         this.cellNodes = [];
         this.range = null;
@@ -629,6 +712,7 @@ export class ReviewTable {
             th.scope = 'col';
             th.dataset.column = String(columnIndex);
             th.dataset.sizeKey = column.key;
+            th.draggable = true;
             if (column.type.input === 'select') th.dataset.choices = column.type.options.join(' / ');
             const label = document.createElement('span');
             label.className = 'review-table__label';
@@ -1150,6 +1234,9 @@ export class ReviewTable {
     _pointerDown(event) {
         if (event.button !== 0) return;
         const grip = event.target instanceof Element ? event.target.closest('.review-table__resizer') : null;
+        // Pressing a header's resize grip must not start a column drag.
+        const pressed = event.target instanceof Element ? event.target.closest('thead th[data-column]') : null;
+        if (pressed) pressed.dataset.noDrag = grip ? '1' : '0';
         if (grip) {
             this._resizeStart(event, grip);
             return;
