@@ -4,11 +4,16 @@ Status: **planned, not started**. Branch: **`miro-dev4`** (at `e35c5a6`, which i
 Scope: the batch flow in `resources/views/scan/workspace.blade.php` and the
 endpoints behind it. **Single Upload must keep working as it does now.**
 
-How to use this file:
-- Work top to bottom. Each phase builds on the one before.
-- Tick a box (`- [x]`) when the step is done **and** its check passes.
-- A task is done when all of its boxes, including **Verify**, are ticked.
-- Run the **Phase check** (section 6) before starting the next phase.
+How to use this file (**continuous run**):
+- Work top to bottom, **without pausing between phases**. Each phase builds on the one before.
+- Tick a box (`- [x]`) when the step is done **and** its automated check passes.
+- A task is done when all of its boxes, including **Verify**, are ticked. Boxes marked *(manual)* need a person in the browser: leave them unticked and carry on. They are collected in the final review (G3).
+- **Gate between phases = automated checks only:** `npm run build`, `npm run test:js`, `php -d extension=gd vendor/bin/phpunit tests/Feature`, Blade compile and the workspace script syntax check. No new failures compared with the baseline (0.4) means go on.
+- **Commit after each phase** on `miro-dev4` (message names the phase), so any phase can be reverted alone.
+- **Stop only when:**
+  - an automated check fails and cannot be fixed within the phase;
+  - a task needs a decision not already recorded in section 1;
+  - a step would delete data or change the database outside this plan.
 
 The batch flow today: add files or a folder, align each page, Save & Queue,
 **Scan all**, then Verify and Review & Export each record, then the summary
@@ -147,7 +152,7 @@ The foundation for A3, D1 and E1. No visible change on its own.
 - [ ] Keep today's flow exactly: align all → Scan all → verify. This task only changes how it is decided.
 - [ ] **Tests:**
   - [ ] JS: each helper with page mixes (all pending; some read; a pair with one failed page; everything saved).
-  - [ ] Manual: a full batch as today (section 6, items 1, 3 end mode, 8 and 10) behaves exactly as before.
+  - [ ] *(manual)* a full batch as today (section 6, items 1, 3 end mode, 8 and 10) behaves exactly as before.
 - [ ] **Verify:** `grep -c "batchState.phase ==="` is down to display-only uses, and every remaining one is commented.
 
 ### Phase A: quick fixes (S)
@@ -168,7 +173,7 @@ The foundation for A3, D1 and E1. No visible change on its own.
 - [ ] Put the merge rule in a pure helper, `appendToQueue(items, added)` in `resources/js/scan-source.js`.
 - [ ] **Tests:**
   - [ ] JS (`tests/JavaScript/scan-source.test.js`): added pages go last and keep their order; a page already queued (same hash and page) is not added twice.
-  - [ ] Manual: queue 2 files, add 1 more mid-queue. Then add a copy of a queued file: it appears in the left-out window.
+  - [ ] *(manual)* queue 2 files, add 1 more mid-queue. Then add a copy of a queued file: it appears in the left-out window.
 - [ ] **Verify:** the new JS tests pass; the manual steps behave as described.
 
 **A3. A failed page does not stop the batch, and anything can be removed (#3)**
@@ -181,11 +186,11 @@ The foundation for A3, D1 and E1. No visible change on its own.
   - [ ] Saved and rejected pages are not offered.
 - [ ] **Tests:**
   - [ ] JS: `recordReadiness` with a failed page, and after that page is removed (its partner becomes `ready`).
-  - [ ] Manual: stop the OCR service in the middle of Scan all. The other pages still finish, and the failed one can be re-aligned or removed.
-  - [ ] Manual: remove a single page, a page of a pair, and a whole file.
+  - [ ] *(manual)* stop the OCR service in the middle of Scan all. The other pages still finish, and the failed one can be re-aligned or removed.
+  - [ ] *(manual)* remove a single page, a page of a pair, and a whole file.
 - [ ] **Verify:** tests pass; the summary still lists saved records after removals.
 
-> **Phase A check:** run section 6, items 1, 4, 5, 8 and 10.
+> **Phase A gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 1, 4, 5, 8 and 10.
 
 ### Phase B: Align takes less work (S–M)
 
@@ -198,7 +203,7 @@ The foundation for A3, D1 and E1. No visible change on its own.
   - show the reason in the Align message area.
 - [ ] A page opened before, or one that was Smoke-tested (alone or as the page beside another), keeps its own markers.
 - [ ] Show the spinner on Snap to table while it runs; Save & Queue waits for it.
-- [ ] **Tests:** manual with two different PDFs.
+- [ ] *(manual)* **Test** with two different PDFs.
   - Each new page opens already snapped.
   - A page with faint lines is flagged, not moved.
   - Ctrl+Z undoes the automatic Snap.
@@ -211,7 +216,7 @@ The foundation for A3, D1 and E1. No visible change on its own.
 - [ ] Only one page ahead. Drop it if the user opens another page.
 - [ ] **Verify:** Save & Next opens an already-fitted page in under half a second on this PC.
 
-> **Phase B check:** run section 6, items 2 and 10.
+> **Phase B gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 2 and 10.
 
 ### Phase C: finding your way in a big batch (M)
 
@@ -228,17 +233,17 @@ The foundation for A3, D1 and E1. No visible change on its own.
 - [ ] Pure helper `queueCounts(items)` for the totals and filter counts.
 - [ ] **Tests:**
   - [ ] JS: `queueCounts` for each state, and for "Needs attention".
-  - [ ] Manual: a folder of 10 PDFs × 2 pages, and one 100-page PDF.
+  - [ ] *(manual)* a folder of 10 PDFs × 2 pages, and one 100-page PDF.
 - [ ] **Verify:** every page can be found, opened and removed from the panel.
 
 **C2. Page bar for the current file (#5)**
 - [ ] In Align, show the page bar (‹ Page 3 of 12 ›, with a dropdown) in batch too, reusing `scanPageBar`.
 - [ ] The dropdown shows each page's state icon; choosing a page opens its queue item.
 - [ ] Prev and next move within the current file.
-- [ ] **Tests:** manual, a 12-page PDF: jump to page 9, back to 3, then next and previous.
+- [ ] *(manual)* **Test:** a 12-page PDF: jump to page 9, back to 3, then next and previous.
 - [ ] **Verify:** Single Upload's page bar behaves exactly as before.
 
-> **Phase C check:** run section 6, items 5, 6 and 10.
+> **Phase C gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 5, 6 and 10.
 
 ### Phase D: when pages are read (M)
 
@@ -256,11 +261,11 @@ The foundation for A3, D1 and E1. No visible change on its own.
 - [ ] Server: `documents.pages.queue` accepts `read=1` to start reading a Smoke-tested page.
 - [ ] **Tests:**
   - [ ] PHP: queuing a Smoke-tested page with `read=1` starts its reading (`Queue::assertPushed`); without it, nothing starts.
-  - [ ] Manual: 6 pages in background mode. Align steadily; Verify starts with little or no wait.
-  - [ ] Manual: switch the mode mid-batch.
+  - [ ] *(manual)* 6 pages in background mode. Align steadily; Verify starts with little or no wait.
+  - [ ] *(manual)* switch the mode mid-batch.
 - [ ] **Verify:** end mode works exactly as before.
 
-> **Phase D check:** run section 6, items 3, 4 and 10.
+> **Phase D gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 3, 4 and 10.
 
 ### Phase E: fix a page without losing your place (M)
 
@@ -278,10 +283,10 @@ Needs A0 (pages go back from Verify) and D1 (the page is read again).
   - Fields on an unchanged page keep their values.
   - A re-read page starts fresh.
 - [ ] Back to marking stays hidden in batch.
-- [ ] **Tests:** manual, re-align one page of a pair, queue it, verify, Review & Export, save. The record has both pages, and the unchanged page kept its typed values.
+- [ ] *(manual)* **Test:** re-align one page of a pair, queue it, verify, Review & Export, save. The record has both pages, and the unchanged page kept its typed values.
 - [ ] **Verify:** Skip record and Reject still work after a re-align.
 
-> **Phase E check:** run section 6, items 7 and 8.
+> **Phase E gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 7 and 8.
 
 ### Phase F: never lose a batch (Option A) (L)
 
@@ -335,13 +340,13 @@ Needs A0 (pages go back from Verify) and D1 (the page is read again).
 - [ ] Pure helpers: `rebuildBatchState(serverBatch)` and `matchFilesToBatch(files, pages)`.
 - [ ] **Tests:**
   - [ ] JS: rebuild from a sample server batch; match by fingerprint with renamed files, a missing file and an extra file.
-  - [ ] Manual:
+  - [ ] *(manual)*
     - [ ] reload during Align, during Verify (with typed values) and during Review & Export, then resume each;
     - [ ] resume after the layout was changed;
     - [ ] open the batch in two tabs.
 - [ ] **Verify:** after a resume, the summary and Download all include records saved before the reload.
 
-> **Phase F check:** run section 6, items 9 and 10.
+> **Phase F gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 9 and 10.
 
 ### Phase G: finish (S)
 
@@ -351,7 +356,7 @@ Needs A0 (pages go back from Verify) and D1 (the page is read again).
   - [ ] `npm run build`
   - [ ] `npm run test:js`
   - [ ] `php -d extension=gd vendor/bin/phpunit` (all suites, after 0.5)
-- [ ] **G3.** Run the whole manual checklist (section 6).
+- [ ] **G3.** *(manual)* Final review: run the whole manual checklist (section 6) in the browser, including every *(manual)* box left open above.
 - [ ] **G4.** Set this file's status to **done**.
 
 ---
@@ -378,7 +383,7 @@ Needs A0 (pages go back from Verify) and D1 (the page is read again).
 
 ---
 
-## 6. Manual checklist
+## 6. Manual checklist (done once, in G3)
 
 Use a folder of **10 PDFs × 2 pages** and one **PDF of 12 or more pages**.
 
