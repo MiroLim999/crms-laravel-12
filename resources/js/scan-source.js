@@ -245,3 +245,73 @@ export function pageRanges(pages) {
     const parts = runs.map(([first, last]) => (first === last ? String(first) : `${first}–${last}`));
     return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] ?? '');
 }
+
+// ---------------------------------------------------------------- batch pages
+
+/*
+ * A batch is a queue of pages (one item each). What can be done with a page
+ * is decided by its own status, not by one phase for the whole batch, so a
+ * page can be aligned or read again while others are already in Verify.
+ *
+ *   pending    not aligned and queued yet (or sent back to Align)
+ *   saving     being sent to the queue
+ *   saved      queued, not read yet ("Queued")
+ *   scanning   being read ("Reading")
+ *   ready      read, waiting to be verified ("Scanned")
+ *   verifying  open in Verify or Review & Export
+ *   imported   saved as a record ("Saved")
+ *   rejected   left out of the batch ("Rejected", or "Skipped")
+ *   failed     could not be read or queued (item.error says why)
+ */
+
+/** Statuses of a page that is finished with: saved as a record, or left out. */
+export const PAGE_DONE = Object.freeze(['imported', 'rejected']);
+
+/** Statuses of a page that has been read. */
+export const PAGE_READ = Object.freeze(['ready', 'verifying']);
+
+export function pageDone(item) {
+    return PAGE_DONE.includes(item?.status);
+}
+
+/** Whether a page may be opened in Align: not queued yet, queued but not read, or failed. */
+export function pageCanAlign(item) {
+    return ['pending', 'saved', 'failed'].includes(item?.status);
+}
+
+/**
+ * One record's state, from its pages: `done` (every page saved or left out),
+ * `blocked` (a page failed), `ready` (every page read, so it can be verified)
+ * or `waiting` (a page is not read yet).
+ */
+export function recordState(members) {
+    const pages = Array.from(members ?? []);
+    if (pages.every(pageDone)) return 'done';
+    if (pages.some((item) => item.status === 'failed')) return 'blocked';
+    if (pages.every((item) => pageDone(item) || PAGE_READ.includes(item.status))) return 'ready';
+    return 'waiting';
+}
+
+/** Each record's state (see recordState), by its key: records are `{ key, members }`. */
+export function recordReadiness(records) {
+    return new Map(Array.from(records ?? [], (record) => [record.key, recordState(record.members)]));
+}
+
+/**
+ * The phase the batch bar shows, worked out from the pages: `aligning`
+ * while a page still has to be aligned or queued (or waits for Scan all),
+ * `reading` while pages are read and none waits for Align, `verifying`
+ * while read records wait, `done` once every page is saved or left out,
+ * and `idle` for an empty queue.
+ */
+export function batchSummaryPhase(items) {
+    const pages = Array.from(items ?? []);
+    if (pages.length === 0) return 'idle';
+    const any = (...statuses) => pages.some((item) => statuses.includes(item.status));
+    if (any('pending', 'saving')) return 'aligning';
+    if (any('scanning')) return 'reading';
+    if (any('saved')) return 'aligning';
+    if (any(...PAGE_READ)) return 'verifying';
+    if (any('failed')) return 'aligning';
+    return 'done';
+}

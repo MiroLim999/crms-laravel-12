@@ -1298,16 +1298,20 @@
             ReviewTable,
         } from '{{ Vite::asset('resources/js/review-table.js') }}';
         import {
+            batchSummaryPhase,
             fileFingerprint,
             firstUnsavedPage,
             isPdfFile,
             MAX_PDF_BYTES,
             MAX_SCAN_BYTES,
             nextUnsavedPage,
+            pageCanAlign,
+            pageDone,
             pageRanges,
             pageFileName,
             pdfPageFile,
             recordLeadPage,
+            recordState,
         } from '{{ Vite::asset('resources/js/scan-source.js') }}';
         import {
             pageSeconds,
@@ -1383,6 +1387,8 @@
             verify: el('step-verify'),
             review: el('step-review'),
         };
+        // The step shown now (see showStep).
+        let activeStep = 'upload';
         const scanFileInput = requiredInput(document, '#scanFile');
         const selectAllFieldsInput = requiredInput(document, '#selectAllFields');
 
@@ -3320,6 +3326,7 @@
         }
 
         function showStep(name) {
+            activeStep = name;
             Object.entries(steps).forEach(([key, node]) => node.classList.toggle('d-none', key !== name));
             // Verify's document pane goes with Review & Export and comes back to Verify.
             setReviewMode(name === 'review');
@@ -3701,7 +3708,7 @@
 
         /** The queued page paired with the one being aligned (pages 1-2, 3-4), or null. */
         function batchPartner() {
-            if (!batchState.active || batchState.phase !== 'queuing') return null;
+            if (!batchAligning()) return null;
             const current = batchState.items[batchState.currentIndex];
             if (!current?.group || !(current.pageTotal > 1)) return null;
             const first = current.pageNo % 2 === 1 ? current.pageNo : current.pageNo - 1;
@@ -3979,10 +3986,14 @@
 
         // ---------------------------------------------------------------- Upload Mode & Batch Queue System
         let uploadMode = 'single';
+        // There is no phase for the whole batch: what can be done with a page is
+        // decided by its own status (see scan-source.js), and the phase the bar
+        // shows is worked out from the pages (batchSummaryPhase).
         let batchState = {
             active: false,
             key: null,
-            phase: 'idle', // 'queuing' | 'scanning' | 'verifying' | 'done'
+            // Scan all is reading the queue (its progress window is open).
+            readingAll: false,
             // One page each: { file, name, group (its file), record (its record), pageNo, pageTotal,
             // sourceName, sourceHash, status, pageId, page, workspaceScanPath, scanKind, geometry,
             // recordUrl, recordId, error, boxes, rows, tilts, detected, verifyDraft, reviewExtras,
@@ -4109,7 +4120,31 @@
             return batchRecords().find((record) => record.members.includes(item)) ?? { key: item, members: [item] };
         }
 
-        const recordDone = (record) => record.members.every((it) => ['imported', 'rejected'].includes(it.status));
+        const recordDone = (record) => record.members.every(pageDone);
+
+        /** The state of the record a page is in: ready, waiting, blocked or done (see recordState). */
+        const recordStateOf = (item) => recordState(recordOf(item).members);
+
+        /**
+         * Whether the batch page open now is being aligned: true in Align, and
+         * for a page about to open there (pending, queued or failed). Not while
+         * Scan all reads the queue, nor for a record in Verify.
+         */
+        function batchAligning() {
+            if (!batchState.active || batchState.readingAll) return false;
+            const current = batchState.items[batchState.currentIndex];
+            if (!current) return false;
+            return activeStep === 'mark' || pageCanAlign(current);
+        }
+
+        /** Keep the markers of the page open in Align on its queue item, before another opens. */
+        function keepCurrentAlignment({ onlyIfNew = false } = {}) {
+            const current = batchState.items[batchState.currentIndex];
+            if (!current || !batchAligning() || (onlyIfNew && current.boxes)) return;
+            current.boxes = cloneBoxes(marker.toJSON());
+            current.rows = [...gridRows];
+            current.tilts = [...rowTilts];
+        }
 
         /** "BIRTHS-1995.pdf · pages 1–2", "BIRTHS-1995.pdf · page 3", or the file's name. */
         function recordLabel(record) {
@@ -4120,9 +4155,9 @@
             return `${name} · page${pages.length > 1 ? 's' : ''} ${pageRanges(pages)}`;
         }
 
-        /** The first record (from `after` on, then from the start) still to save, or null. */
+        /** The first record (from `after` on, then from the start) read and still to save, or null. */
         function nextOpenRecord(after = null) {
-            const records = batchRecords().filter((record) => !recordDone(record));
+            const records = batchRecords().filter((record) => recordState(record.members) === 'ready');
             const start = after === null ? -1 : batchState.items.indexOf(after);
             return records.find((record) => batchState.items.indexOf(record.members[0]) > start) ?? records[0] ?? null;
         }
@@ -4136,7 +4171,9 @@
                 return;
             }
             banner.classList.remove('d-none');
-            banner.dataset.phase = batchState.phase;
+            // Display only: the bar's wording, worked out from the pages.
+            const phase = batchSummaryPhase(batchState.items);
+            banner.dataset.phase = phase;
 
             const total = batchState.items.length;
             const phaseTitle = document.getElementById('batchQueuePhaseTitle');
@@ -4160,7 +4197,7 @@
                 if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(pct));
             };
 
-            if (batchState.phase === 'queuing') {
+            if (phase === 'aligning') {
                 const allSaved = savedCount === total;
                 if (phaseTitle) {
                     phaseTitle.textContent = allSaved
@@ -4184,19 +4221,19 @@
                     scanNowBtn.classList.toggle('d-none', !allSaved);
                     if (scanNowLabel) scanNowLabel.textContent = `Scan All Queued Documents (${total})`;
                 }
-            } else if (batchState.phase === 'scanning') {
+            } else if (phase === 'reading') {
                 if (phaseTitle) phaseTitle.textContent = `Scanning all queued documents with OCR (${readyCount} of ${total} ${unit}s scanned)...`;
                 if (counter) counter.textContent = `${readyCount} / ${total} ${unit}s scanned`;
                 updateProgress(Math.round((readyCount / total) * 100));
                 if (addMoreBtn) addMoreBtn.classList.add('d-none');
                 if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
                 if (scanNowBtn) scanNowBtn.classList.remove('d-none');
-            } else if (batchState.phase === 'verifying' || batchState.phase === 'done') {
+            } else if (phase === 'verifying' || phase === 'done') {
                 // Saved a record at a time, as in single mode: a page, or a pair of pages.
                 const records = batchRecords();
                 const finished = records.filter(recordDone).length;
                 if (phaseTitle) {
-                    phaseTitle.textContent = batchState.phase === 'done'
+                    phaseTitle.textContent = phase === 'done'
                         ? 'Batch complete'
                         : `Verify, review & save each record (${finished} of ${records.length} done)`;
                 }
@@ -4239,13 +4276,13 @@
                         badgeInfo.text = 'Skipped';
                     }
                     // A file of several pages (several records) says how many of its pages are saved.
-                    if (group.items.length > 1 && batchState.phase === 'verifying' && item.status === 'verifying') {
+                    if (group.items.length > 1 && item.status === 'verifying') {
                         const savedPages = group.items.filter((it) => it.status === 'imported').length;
                         badgeInfo.text = `${savedPages}/${group.items.length} pages saved`;
                     }
                     const isCurrent = group.indices.includes(batchState.currentIndex);
-                    const canInteract = !['scanning', 'done'].includes(batchState.phase)
-                        && !(batchState.phase === 'verifying' && group.items.every((it) => ['imported', 'rejected'].includes(it.status)));
+                    // A file is closed while Scan all reads, and once all its pages are done.
+                    const canInteract = !batchState.readingAll && !group.items.every(pageDone);
 
                     // The chip opens its document on click; the small × beside it removes it.
                     const chip = document.createElement('div');
@@ -4317,11 +4354,7 @@
                         if (draggedBatchIndex === null || draggedBatchIndex === index) return;
 
                         const activeItem = batchState.items[batchState.currentIndex];
-                        if (batchState.phase === 'queuing' && activeItem && !activeItem.boxes) {
-                            activeItem.boxes = cloneBoxes(marker.toJSON());
-                            activeItem.rows = [...gridRows];
-                            activeItem.tilts = [...rowTilts];
-                        }
+                        keepCurrentAlignment({ onlyIfNew: true });
 
                         // Whole documents move: a PDF's pages stay together.
                         const reordered = batchGroups();
@@ -4348,9 +4381,11 @@
                     openBtn.addEventListener('click', () => {
                         if (batchChipDidDrag || !canInteract) return;
                         if (isCurrent) return;
-                        // The page still to do, else the first.
-                        const done = batchState.phase === 'verifying' ? ['imported', 'rejected'] : ['saved'];
-                        const target = group.items.findIndex((it) => !done.includes(it.status));
+                        // The page still to do, else the first: in Align, one not queued
+                        // yet; in Verify, one whose record is read and not saved.
+                        const target = batchAligning()
+                            ? group.items.findIndex((it) => it.status !== 'saved' && pageCanAlign(it))
+                            : group.items.findIndex((it) => recordStateOf(it) === 'ready');
                         openBatchDocument(group.indices[target === -1 ? 0 : target]);
                     });
 
@@ -4418,22 +4453,37 @@
             document.getElementById('batchDocCancelBtn')?.focus();
         });
 
-        // Open a queued document straight from its chip.
+        /**
+         * Open a queued page straight from its chip, where its own state says:
+         * a page whose record is read opens in Verify; a page not read yet (or
+         * one that failed) opens in Align.
+         */
         async function openBatchDocument(idx) {
-            if (idx === batchState.currentIndex) return;
-            if (batchState.phase === 'queuing') {
-                const currentItem = batchState.items[batchState.currentIndex];
-                if (currentItem) {
-                    currentItem.boxes = cloneBoxes(marker.toJSON());
-                    currentItem.rows = [...gridRows];
-                    currentItem.tilts = [...rowTilts];
-                }
-                await openBatchQueueItem(idx);
-            } else if (batchState.phase === 'verifying') {
+            const item = batchState.items[idx];
+            if (!item || idx === batchState.currentIndex || batchState.readingAll) return;
+            if (recordStateOf(item) === 'ready') {
                 // The other page of the record open now is open already.
-                if (recordOf(batchState.items[idx]).members.includes(batchState.items[batchState.currentIndex])) return;
+                if (!batchAligning() && recordOf(item).members.includes(batchState.items[batchState.currentIndex])) return;
+                keepCurrentAlignment();
                 await openBatchVerifyItem(idx);
+            } else if (pageCanAlign(item)) {
+                keepCurrentAlignment();
+                leaveBatchVerify();
+                await openBatchQueueItem(idx);
             }
+        }
+
+        /**
+         * Leaving Verify (or Review & Export) for a page in Align: what was typed
+         * and ticked on the record is kept, and it goes back to "Scanned".
+         */
+        function leaveBatchVerify() {
+            const current = batchState.items[batchState.currentIndex];
+            if (!current || batchAligning() || current.status !== 'verifying') return;
+            keepVerifyDraft(current);
+            recordOf(current).members.forEach((it) => {
+                if (it.status === 'verifying') it.status = 'ready';
+            });
         }
 
         document.getElementById('confirmDeleteBatchDocBtn')?.addEventListener('click', async () => {
@@ -4452,11 +4502,9 @@
 
             const wasCurrent = removing.includes(batchState.items[batchState.currentIndex]);
             const currentItem = batchState.items[batchState.currentIndex];
-            if (!wasCurrent && batchState.phase === 'queuing' && currentItem) {
-                currentItem.boxes = cloneBoxes(marker.toJSON());
-                currentItem.rows = [...gridRows];
-                currentItem.tilts = [...rowTilts];
-            }
+            // Where the user is: in Align, or on a record in Verify.
+            const aligning = batchAligning();
+            if (!wasCurrent) keepCurrentAlignment();
 
             removing.forEach((gone) => {
                 if (!gone.pageId) return;
@@ -4475,7 +4523,6 @@
 
             if (batchState.items.length === 0) {
                 batchState.active = false;
-                batchState.phase = 'idle';
                 batchState.currentIndex = 0;
                 scanFile = null;
                 scanFileInput.value = '';
@@ -4485,13 +4532,19 @@
             }
 
             if (wasCurrent) {
-                const nextIndex = Math.min(deleteIdx, batchState.items.length - 1);
-                if (batchState.phase === 'verifying') {
+                // In Align, the next page that can be aligned (from where the removed
+                // one was); in Verify, the next record that is read.
+                const alignable = batchState.items
+                    .map((it, index) => (pageCanAlign(it) ? index : -1))
+                    .filter((index) => index !== -1);
+                const nextAlign = alignable.find((index) => index >= deleteIdx) ?? alignable[alignable.length - 1];
+                if (aligning && nextAlign !== undefined) {
+                    await openBatchQueueItem(nextAlign);
+                } else {
                     const next = nextOpenRecord();
                     if (next) await openBatchVerifyItem(batchState.items.indexOf(next.members[0]));
+                    else if (nextAlign !== undefined) await openBatchQueueItem(nextAlign);
                     else showBatchSummary();
-                } else {
-                    await openBatchQueueItem(nextIndex);
                 }
             } else {
                 batchState.currentIndex = Math.max(0, batchState.items.indexOf(currentItem));
@@ -4816,7 +4869,7 @@
             if (!batchState.active) {
                 batchState.active = true;
                 batchState.key = 'batch_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-                batchState.phase = 'queuing';
+                batchState.readingAll = false;
                 batchState.items = [];
                 batchState.currentIndex = 0;
             }
@@ -5059,7 +5112,7 @@
             const total = itemsToScan.length;
             if (total === 0) return;
 
-            batchState.phase = 'scanning';
+            batchState.readingAll = true;
             itemsToScan.forEach((it) => {
                 it.status = 'scanning';
             });
@@ -5232,7 +5285,7 @@
                 trackList.forEach((entry) => { entry.item.status = 'ready'; });
                 el('ocrProgressFields').textContent = `${total} of ${total} ${unitWord} scanned`;
                 await completeOcrProgress('Batch scan complete', 'Opening the first record for verification.');
-                batchState.phase = 'verifying';
+                batchState.readingAll = false;
                 const first = nextOpenRecord();
                 if (first) await openBatchVerifyItem(batchState.items.indexOf(first.members[0]));
             } catch (error) {
@@ -5242,9 +5295,10 @@
                 batchState.items.forEach((it) => {
                     if (it.status === 'scanning') it.status = 'saved';
                 });
-                batchState.phase = 'queuing';
+                batchState.readingAll = false;
                 renderBatchQueueBanner();
             } finally {
+                batchState.readingAll = false;
                 if (activeRun === run) activeRun = null;
                 if (timeoutId !== null) window.clearTimeout(timeoutId);
                 stopOcrProgress();
@@ -5265,7 +5319,8 @@
          */
         async function openBatchVerifyItem(index) {
             const picked = batchState.items[index];
-            if (!picked) return;
+            // Only a record whose pages are all read opens in Verify.
+            if (!picked || recordStateOf(picked) !== 'ready') return;
             const record = recordOf(picked);
             const members = record.members.filter((it) => it.page?.imageUrl && !['rejected', 'failed'].includes(it.status));
             const lead = members[0];
@@ -5487,7 +5542,6 @@ Nothing is saved for it, and the next record opens. `
         }
 
         function showBatchSummary() {
-            batchState.phase = 'done';
             // Nothing is left to lose: leaving the page no longer asks.
             scanFile = null;
             renderBatchQueueBanner();
@@ -6612,7 +6666,8 @@ Cancel opens only the first file.`)) {
 
         el('scanNowBtn').addEventListener('click', async () => {
             if (scanInProgress) return;
-            if (batchState.active && batchState.phase === 'queuing') {
+            // In a batch, this button is Scan all (Align is the only step that shows it).
+            if (batchState.active) {
                 await runBatchScanAll();
                 return;
             }
@@ -7325,9 +7380,8 @@ Cancel opens only the first file.`)) {
 
         /** The queued record being verified (its first page), while a batch is in Verify. */
         function currentVerifyItem() {
-            return batchState.active && batchState.phase === 'verifying'
-                ? batchState.items[batchState.currentIndex] ?? null
-                : null;
+            const item = batchState.active ? batchState.items[batchState.currentIndex] ?? null : null;
+            return item?.status === 'verifying' ? item : null;
         }
 
         /** One page in Verify: its labels, its width and the Submit wording. */

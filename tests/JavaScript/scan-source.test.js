@@ -5,14 +5,18 @@ import test from 'node:test';
 import { PDFDocument } from 'pdf-lib';
 
 import {
+    batchSummaryPhase,
     fileFingerprint,
     firstUnsavedPage,
     isPdfFile,
     nextUnsavedPage,
+    pageCanAlign,
     pageFileName,
     pageRanges,
     pdfPageFile,
     recordLeadPage,
+    recordReadiness,
+    recordState,
     sha256Hex,
 } from '../../resources/js/scan-source.js';
 
@@ -114,4 +118,59 @@ test('a page is its own record, or goes with its pair when the layout has a page
     assert.deepEqual([1, 2, 3, 4, 5].map((page) => recordLeadPage(page, 5, true)), [1, 1, 3, 3, 5]);
     // A file of one page has no pair.
     assert.equal(recordLeadPage(1, 1, true), 1);
+});
+
+// ---------------------------------------------------------------- batch pages
+
+const page = (status, extra = {}) => ({ status, ...extra });
+const records = (...groups) => groups.map((members, index) => ({ key: `r${index + 1}`, members }));
+
+test('a page can be aligned while it is pending, queued or failed', () => {
+    for (const status of ['pending', 'saved', 'failed']) assert.equal(pageCanAlign(page(status)), true, status);
+    for (const status of ['saving', 'scanning', 'ready', 'verifying', 'imported', 'rejected']) {
+        assert.equal(pageCanAlign(page(status)), false, status);
+    }
+    assert.equal(pageCanAlign(null), false);
+});
+
+test('a record is ready once all its pages are read, blocked by a failed page', () => {
+    assert.equal(recordState([page('pending'), page('pending')]), 'waiting');
+    assert.equal(recordState([page('ready'), page('scanning')]), 'waiting');
+    assert.equal(recordState([page('ready'), page('verifying')]), 'ready');
+    assert.equal(recordState([page('ready'), page('failed')]), 'blocked');
+    assert.equal(recordState([page('imported'), page('imported')]), 'done');
+    assert.equal(recordState([page('rejected')]), 'done');
+    // Its partner removed, the page left is a record on its own.
+    assert.equal(recordState([page('ready')]), 'ready');
+});
+
+test('record readiness covers every record by its key', () => {
+    const mix = records(
+        [page('ready'), page('ready')],
+        [page('ready'), page('failed')],
+        [page('saved')],
+        [page('imported'), page('imported')],
+    );
+    assert.deepEqual([...recordReadiness(mix)], [['r1', 'ready'], ['r2', 'blocked'], ['r3', 'waiting'], ['r4', 'done']]);
+    assert.equal(recordReadiness([]).size, 0);
+});
+
+test('the batch phase is worked out from its pages', () => {
+    assert.equal(batchSummaryPhase([]), 'idle');
+    // All pending, or some queued and some not: aligning.
+    assert.equal(batchSummaryPhase([page('pending'), page('pending')]), 'aligning');
+    assert.equal(batchSummaryPhase([page('saved'), page('pending')]), 'aligning');
+    // Every page queued, waiting for Scan all.
+    assert.equal(batchSummaryPhase([page('saved'), page('saved')]), 'aligning');
+    // Scan all running.
+    assert.equal(batchSummaryPhase([page('ready'), page('scanning')]), 'reading');
+    // Some read: verifying, even with a failed page waiting.
+    assert.equal(batchSummaryPhase([page('ready'), page('verifying'), page('imported')]), 'verifying');
+    assert.equal(batchSummaryPhase([page('ready'), page('failed')]), 'verifying');
+    // Only a failed page left: it has to be aligned again (or removed).
+    assert.equal(batchSummaryPhase([page('imported'), page('failed')]), 'aligning');
+    // A page sent back to Align while others are read.
+    assert.equal(batchSummaryPhase([page('ready'), page('pending')]), 'aligning');
+    // Everything saved or left out.
+    assert.equal(batchSummaryPhase([page('imported'), page('rejected', { skipped: true })]), 'done');
 });

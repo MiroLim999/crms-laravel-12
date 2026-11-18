@@ -140,20 +140,20 @@ Effort: **S** small (hours), **M** medium (about a day), **L** large (several da
 
 The foundation for A3, D1 and E1. No visible change on its own.
 
-- [ ] List the 15 places that check `batchState.phase` (`grep -n "batchState.phase" resources/views/scan/workspace.blade.php`) and decide for each whether it becomes a per-page or per-record check.
-- [ ] Add small pure helpers in `resources/js/scan-source.js`, using the states in section 3:
-  - [ ] `pageCanAlign(item)`: pending, queued, failed, or sent back by Re-align;
-  - [ ] `recordReadiness(records)`: each record as `ready` (all pages read), `waiting` (some pages not read yet) or `blocked` (a page failed);
-  - [ ] `batchSummaryPhase(items)`: the phase shown on screen (aligning, reading, verifying, done), **worked out from the pages** instead of stored.
-- [ ] Replace the phase checks:
-  - [ ] Align allows any page that `pageCanAlign`;
-  - [ ] Verify opens any record that is `ready`;
-  - [ ] the queue bar shows `batchSummaryPhase`.
-- [ ] Keep today's flow exactly: align all → Scan all → verify. This task only changes how it is decided.
+- [x] List the 15 places that check `batchState.phase` (`grep -n "batchState.phase" resources/views/scan/workspace.blade.php`) and decide for each whether it becomes a per-page or per-record check.
+- [x] Add small pure helpers in `resources/js/scan-source.js`, using the states in section 3:
+  - [x] `pageCanAlign(item)`: pending, queued, failed, or sent back by Re-align;
+  - [x] `recordReadiness(records)`: each record as `ready` (all pages read), `waiting` (some pages not read yet) or `blocked` (a page failed);
+  - [x] `batchSummaryPhase(items)`: the phase shown on screen (aligning, reading, verifying, done), **worked out from the pages** instead of stored.
+- [x] Replace the phase checks:
+  - [x] Align allows any page that `pageCanAlign`;
+  - [x] Verify opens any record that is `ready`;
+  - [x] the queue bar shows `batchSummaryPhase`.
+- [x] Keep today's flow exactly: align all → Scan all → verify. This task only changes how it is decided.
 - [ ] **Tests:**
-  - [ ] JS: each helper with page mixes (all pending; some read; a pair with one failed page; everything saved).
+  - [x] JS: each helper with page mixes (all pending; some read; a pair with one failed page; everything saved).
   - [ ] *(manual)* a full batch as today (section 6, items 1, 3 end mode, 8 and 10) behaves exactly as before.
-- [ ] **Verify:** `grep -c "batchState.phase ==="` is down to display-only uses, and every remaining one is commented.
+- [x] **Verify:** `grep -c "batchState.phase ==="` is down to display-only uses, and every remaining one is commented. (Result: 0. The stored phase is gone; the bar's wording uses a local `phase` from `batchSummaryPhase`, and `batchAligning()` tells whether the open page is in Align.)
 
 ### Phase A: quick fixes (S)
 
