@@ -33,6 +33,35 @@
                                 </div>
                                 <div class="batch-queue-chips" id="batchQueueChips" role="list"
                                     aria-label="Queued documents"></div>
+                                <div class="batch-queue-banner__actions">
+                                    {{-- More files for this batch, while pages can still be aligned. --}}
+                                    <div class="btn-group btn-group-sm d-none" role="group" id="batchAddMoreGroup"
+                                        aria-label="Add to this batch">
+                                        <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" id="batchAddMoreBtn"
+                                            title="Add more files to this batch: their pages go after the queue">
+                                            <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i><span
+                                                id="batchAddMoreLabel">Add files</span>
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle dropdown-toggle-split"
+                                            id="batchAddMoreMenuBtn" data-bs-toggle="dropdown" aria-expanded="false"
+                                            aria-label="More ways to add"></button>
+                                        <ul class="dropdown-menu dropdown-menu-end">
+                                            <li>
+                                                <button type="button" class="dropdown-item" id="batchAddFolderBtn">
+                                                    <i class="icon-base bx bx-archive icon-sm me-2" aria-hidden="true"></i>Add a folder
+                                                </button>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                            {{-- Pages that could not be read: the batch goes on, and each can be re-aligned or removed. --}}
+                            <div class="batch-queue-banner__notice d-none" id="batchQueueNotice" role="status">
+                                <i class="icon-base bx bx-error-circle" aria-hidden="true"></i>
+                                <span id="batchQueueNoticeText"></span>
+                                <button type="button" class="btn btn-sm btn-label-danger text-nowrap" id="batchQueueNoticeBtn">
+                                    Open it
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1094,12 +1123,18 @@
                     </div>
                     <ul class="batch-delete-notes" id="batchDocumentNotes"></ul>
 
-                    <div class="leave-scan-modal__actions">
+                    <div class="leave-scan-modal__actions batch-delete-actions" id="batchDocumentActions">
                         <button type="button" class="btn btn-label-secondary text-nowrap" id="batchDocCancelBtn" data-bs-dismiss="modal">
                             Keep it
                         </button>
+                        {{-- Only one page of the file: the other pages stay queued. --}}
+                        <button type="button" class="btn btn-label-danger text-nowrap d-none" id="confirmDeleteBatchPageBtn">
+                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i><span
+                                id="confirmDeleteBatchPageLabel">Remove this page</span>
+                        </button>
                         <button type="button" class="btn btn-danger text-nowrap" id="confirmDeleteBatchDocBtn">
-                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>Remove from queue
+                            <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i><span
+                                id="confirmDeleteBatchDocLabel">Remove from queue</span>
                         </button>
                     </div>
                 </div>
@@ -1298,6 +1333,7 @@
             ReviewTable,
         } from '{{ Vite::asset('resources/js/review-table.js') }}';
         import {
+            appendToQueue,
             batchSummaryPhase,
             fileFingerprint,
             firstUnsavedPage,
@@ -1309,6 +1345,7 @@
             pageDone,
             pageRanges,
             pageFileName,
+            pageKey,
             pdfPageFile,
             recordLeadPage,
             recordState,
@@ -4162,6 +4199,68 @@
             return records.find((record) => batchState.items.indexOf(record.members[0]) > start) ?? records[0] ?? null;
         }
 
+        /** Pages Scan all reads: queued and not read yet, or queued and failed (read again as they are). */
+        function batchPagesToRead() {
+            return batchState.items.filter((it) => it.pageId && ['saved', 'failed'].includes(it.status));
+        }
+
+        /** The first page to open in Align: one not queued yet or failed, else one queued. -1: none. */
+        function firstAlignableIndex(from = 0) {
+            const wanted = (it) => pageCanAlign(it) && it.status !== 'saved';
+            const after = batchState.items.findIndex((it, index) => index >= from && wanted(it));
+            if (after !== -1) return after;
+            const any = batchState.items.findIndex(wanted);
+            return any !== -1 ? any : batchState.items.findIndex(pageCanAlign);
+        }
+
+        /**
+         * After a record is saved, skipped or rejected (or a page removed, or Scan
+         * all finished): the next record that is read opens in Verify; else a page
+         * still to align (one that failed, say) opens in Align; else the summary.
+         */
+        async function continueBatch(after = null) {
+            const next = nextOpenRecord(after);
+            if (next) {
+                await openBatchVerifyItem(batchState.items.indexOf(next.members[0]));
+                return;
+            }
+            const alignIndex = firstAlignableIndex();
+            if (alignIndex !== -1) {
+                leaveBatchVerify();
+                await openBatchQueueItem(alignIndex);
+                return;
+            }
+            showBatchSummary();
+        }
+
+        /** "2 pages failed: re-align or remove", with a button to open the first one. */
+        function renderBatchNotice() {
+            const notice = document.getElementById('batchQueueNotice');
+            if (!notice) return;
+            const failed = batchState.items.filter((it) => it.status === 'failed');
+            const current = batchState.items[batchState.currentIndex];
+            const show = failed.length > 0 && !batchState.readingAll;
+            notice.classList.toggle('d-none', !show);
+            if (!show) return;
+            const onFailed = current?.status === 'failed' && batchAligning();
+            const text = failed.length === 1
+                ? `1 page failed (${failed[0].name}): re-align or remove it.`
+                : `${failed.length} pages failed: re-align or remove them.`;
+            el('batchQueueNoticeText').textContent = onFailed && failed.length === 1
+                ? `This page failed${current.error ? ` (${current.error})` : ''}: re-align it and queue it again, or remove it.`
+                : text;
+            // Open the first failed page that is not the one open now.
+            const target = batchState.items.findIndex((it) => it.status === 'failed' && it !== current);
+            el('batchQueueNoticeBtn').classList.toggle('d-none', target === -1);
+            el('batchQueueNoticeBtn').textContent = onFailed ? 'Next failed page' : 'Open it';
+            el('batchQueueNoticeBtn').dataset.index = String(target);
+        }
+
+        document.getElementById('batchQueueNoticeBtn')?.addEventListener('click', (event) => {
+            const index = Number(event.currentTarget.dataset.index);
+            if (Number.isInteger(index) && index >= 0) openBatchDocument(index);
+        });
+
         function renderBatchQueueBanner() {
             const banner = document.getElementById('batchQueueBanner');
             if (!banner) return;
@@ -4181,13 +4280,15 @@
             const progressTrack = document.getElementById('batchQueueProgressTrack');
             const progressBar = document.getElementById('batchQueueProgressBar');
             const chipsContainer = document.getElementById('batchQueueChips');
-            const addMoreBtn = document.getElementById('batchAddMoreBtn');
+            // Add files shows in Align while pages can still be aligned.
+            const addMoreBtn = document.getElementById('batchAddMoreGroup');
             const saveQueueBtn = document.getElementById('saveQueueNextBtn');
             const saveQueueLabel = document.getElementById('saveQueueNextLabel');
             const scanNowBtn = document.getElementById('scanNowBtn');
             const scanNowLabel = document.getElementById('scanNowBtnLabel');
 
-            const savedCount = batchState.items.filter((it) => ['saved', 'scanning', 'ready', 'verifying', 'imported', 'rejected'].includes(it.status)).length;
+            const savedCount = batchState.items.filter((it) => ['saved', 'scanning', 'ready', 'verifying', 'imported', 'rejected'].includes(it.status)
+                || (it.status === 'failed' && it.pageId)).length;
             const readyCount = batchState.items.filter((it) => ['ready', 'verifying', 'imported', 'rejected'].includes(it.status)).length;
             // Pages are what is aligned and scanned one by one; documents are what is imported.
             const unit = batchGroups().length === total ? 'document' : 'page';
@@ -4206,20 +4307,30 @@
                 }
                 if (counter) counter.textContent = `${savedCount} / ${total} saved`;
                 updateProgress(Math.round((savedCount / total) * 100));
-                if (addMoreBtn) addMoreBtn.classList.remove('d-none');
+                if (addMoreBtn) addMoreBtn.classList.toggle('d-none', !batchAligning());
                 if (saveQueueBtn) {
-                    saveQueueBtn.classList.toggle('d-none', allSaved);
+                    const currentItem = batchState.items[batchState.currentIndex];
+                    // A failed page open in Align can be queued again, re-aligned.
+                    const failedHere = currentItem?.status === 'failed';
+                    saveQueueBtn.classList.toggle('d-none', allSaved && !failedHere);
                     if (saveQueueLabel) {
-                        const currentItem = batchState.items[batchState.currentIndex];
                         const hasMoreUnsaved = batchState.items.some((it, idx) => idx !== batchState.currentIndex && it.status === 'pending');
-                        saveQueueLabel.textContent = currentItem?.status === 'saved'
-                            ? (hasMoreUnsaved ? 'Update & Next Document' : 'Update Queued Document')
-                            : (hasMoreUnsaved ? `Save & Next (${savedCount + 1}/${total})` : `Save Final Document (${total}/${total})`);
+                        saveQueueLabel.textContent = failedHere
+                            ? (hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again')
+                            : currentItem?.status === 'saved'
+                                ? (hasMoreUnsaved ? 'Update & Next Document' : 'Update Queued Document')
+                                : (hasMoreUnsaved ? `Save & Next (${savedCount + 1}/${total})` : `Save Final Document (${total}/${total})`);
                     }
                 }
                 if (scanNowBtn) {
-                    scanNowBtn.classList.toggle('d-none', !allSaved);
-                    if (scanNowLabel) scanNowLabel.textContent = `Scan All Queued Documents (${total})`;
+                    // The pages Scan all reads: queued and not read yet, or failed (read again).
+                    const toRead = batchPagesToRead().length;
+                    scanNowBtn.classList.toggle('d-none', !allSaved || toRead === 0);
+                    if (scanNowLabel) {
+                        scanNowLabel.textContent = toRead === total
+                            ? `Scan All Queued Documents (${total})`
+                            : `Scan Queued Pages (${toRead})`;
+                    }
                 }
             } else if (phase === 'reading') {
                 if (phaseTitle) phaseTitle.textContent = `Scanning all queued documents with OCR (${readyCount} of ${total} ${unit}s scanned)...`;
@@ -4242,6 +4353,8 @@
                 if (addMoreBtn) addMoreBtn.classList.add('d-none');
                 if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
             }
+
+            renderBatchNotice();
 
             if (chipsContainer) {
                 chipsContainer.innerHTML = '';
@@ -4266,7 +4379,7 @@
                         saved: { cls: 'is-queued', icon: 'bx-check-circle', text: 'Queued' },
                         scanning: { cls: 'is-working', icon: 'bx-radar', text: 'Scanning' },
                         ready: { cls: 'is-ready', icon: 'bx-scan', text: 'Scanned' },
-                        verifying: { cls: 'is-verifying', icon: 'bx-edit-alt', text: 'Validating' },
+                        verifying: { cls: 'is-verifying', icon: 'bx-edit-alt', text: 'Verifying' },
                         imported: { cls: 'is-imported', icon: 'bx-check-shield', text: 'Saved' },
                         rejected: { cls: 'is-failed', icon: 'bx-x-circle', text: 'Rejected (Existing)' },
                         failed: { cls: 'is-failed', icon: 'bx-error-circle', text: 'Failed' },
@@ -4321,7 +4434,8 @@
                         removeBtn.innerHTML = '<i class="icon-base bx bx-x" aria-hidden="true"></i>';
                         removeBtn.addEventListener('click', (event) => {
                             event.stopPropagation();
-                            openBatchDocumentModal(group.indices[0]);
+                            const currentHere = group.indices.includes(batchState.currentIndex) ? batchState.currentIndex : null;
+                            openBatchDocumentModal(group.indices[0], { pageIndex: currentHere });
                         });
                         chip.appendChild(removeBtn);
                     }
@@ -4398,50 +4512,92 @@
 
         let draggedBatchIndex = null;
         let batchChipDidDrag = false;
-        let selectedBatchModalIndex = null;
+        // The file (index) and page (pageIndex, or null) the remove dialog is about.
+        let selectedBatchModal = null;
 
-        function openBatchDocumentModal(index) {
+        /** What each page status means, in the remove dialog. */
+        const BATCH_STATUS_TEXT = {
+            pending: 'Not aligned yet',
+            saving: 'Saving',
+            saved: 'Aligned and queued',
+            scanning: 'Being read',
+            ready: 'Scanned, waiting to be verified',
+            verifying: 'Being verified',
+            imported: 'Saved as a record',
+            rejected: 'Rejected (already saved)',
+            failed: 'Failed',
+        };
+
+        /** The pages of a file that can still be removed (saved and rejected ones are records). */
+        function removableGroupPages(item) {
+            return batchState.items.filter((it) => (it === item || (item.group && it.group === item.group)) && !pageDone(it));
+        }
+
+        /**
+         * Ask before taking pages out of the batch. `pageIndex` is a page of the
+         * file the user may remove alone (null: only the whole file is offered).
+         */
+        function openBatchDocumentModal(index, { pageIndex = null } = {}) {
             const item = batchState.items[index];
             if (!item) return;
+            const filePages = removableGroupPages(item);
+            if (filePages.length === 0) return;
+            const page = pageIndex !== null ? batchState.items[pageIndex] : null;
+            // A page alone is offered when its file has other pages to keep.
+            const pageOffered = Boolean(page) && !pageDone(page) && filePages.length > 1 && filePages.includes(page);
 
-            selectedBatchModalIndex = index;
+            selectedBatchModal = { index, pageIndex: pageOffered ? pageIndex : null };
             const modalEl = document.getElementById('batchDocumentModal');
-            const total = batchState.items.length;
-            const statusText = {
-                pending: 'Not aligned yet',
-                saving: 'Saving',
-                saved: 'Aligned and queued',
-                scanning: 'Being scanned',
-                ready: 'Scanned, waiting for validation',
-                verifying: 'Being verified',
-                imported: 'Saved as a record',
-                rejected: 'Rejected (already saved)',
-                failed: 'Failed',
-            }[item.status] || 'Queued';
 
             const setText = (id, text) => {
                 const node = document.getElementById(id);
                 if (node) node.textContent = text;
             };
+            const fileName = item.sourceName ?? item.name;
             const pagesInDoc = item.group ? batchState.items.filter((it) => it.group === item.group).length : 1;
-            setText('batchDocumentName', pagesInDoc > 1 ? `${item.sourceName ?? item.name} (${pagesInDoc} pages)` : item.name);
-            setText('batchDocumentMeta', `Priority ${index + 1} of ${total} · ${statusText}`);
+            setText('batchDocumentModalTitle', pageOffered ? 'Remove from the batch?' : 'Remove from batch queue?');
+            setText('batchDocumentName', pagesInDoc > 1 ? `${fileName} (${pagesInDoc} pages)` : item.name);
+            setText('batchDocumentMeta', pageOffered
+                ? `Page ${page.pageNo} of ${page.pageTotal} · ${BATCH_STATUS_TEXT[page.status] ?? 'Queued'}`
+                : `Priority ${batchGroups().findIndex((group) => group.items.includes(item)) + 1} of ${batchGroups().length} · ${BATCH_STATUS_TEXT[groupStatus({ items: filePages })] ?? 'Queued'}`);
 
             const notes = [];
-            if (index === batchState.currentIndex) notes.push('This is the document you are working on now. The next one in the queue opens in its place.');
-            if (['saved', 'ready', 'scanning', 'verifying'].includes(item.status) || item.pageId) {
-                notes.push('Its alignment and any scan results will be discarded.');
+            const current = batchState.items[batchState.currentIndex];
+            if (pageOffered && page === current) {
+                notes.push('This is the page you are working on now. The next one opens in its place.');
+            } else if (filePages.includes(current)) {
+                notes.push(`You are working on ${pageOffered ? 'a page of this file' : 'this file'} now. The next page opens in its place if it is removed.`);
+            }
+            // Removing one page of a pair leaves the other as a record on its own.
+            if (pageOffered) {
+                const partner = recordOf(page).members.find((it) => it !== page && !pageDone(it));
+                if (partner) {
+                    notes.push(`Page ${page.pageNo} is read with page ${partner.pageNo} as one record. If only this page is removed, page ${partner.pageNo} is saved as a record on its own.`);
+                }
+            }
+            if (filePages.some((it) => it.pageId || ['saved', 'ready', 'scanning', 'verifying'].includes(it.status))) {
+                notes.push('Alignment and scan results of what is removed are discarded.');
+            }
+            const kept = batchState.items.filter((it) => item.group && it.group === item.group && pageDone(it)).length;
+            if (kept > 0) {
+                notes.push(`${kept} page${kept === 1 ? ' is' : 's are'} saved as records (or left out) already: ${kept === 1 ? 'it stays' : 'they stay'} in the batch summary.`);
             }
             notes.push('The file on your computer is not changed. You can add it again later.');
             const notesEl = document.getElementById('batchDocumentNotes');
             if (notesEl) {
-                notesEl.innerHTML = '';
-                notes.forEach((text) => {
+                notesEl.replaceChildren(...notes.map((text) => {
                     const li = document.createElement('li');
                     li.textContent = text;
-                    notesEl.appendChild(li);
-                });
+                    return li;
+                }));
             }
+
+            el('confirmDeleteBatchPageBtn').classList.toggle('d-none', !pageOffered);
+            setText('confirmDeleteBatchPageLabel', pageOffered ? `Remove page ${page.pageNo} only` : 'Remove this page');
+            setText('confirmDeleteBatchDocLabel', filePages.length > 1
+                ? `Remove the whole file (${filePages.length} pages)`
+                : 'Remove from queue');
+            el('batchDocumentActions').classList.toggle('is-three', pageOffered);
 
             if (modalEl) {
                 window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -4486,39 +4642,43 @@
             });
         }
 
-        document.getElementById('confirmDeleteBatchDocBtn')?.addEventListener('click', async () => {
+        document.getElementById('confirmDeleteBatchDocBtn')?.addEventListener('click', () => confirmBatchRemoval('file'));
+        document.getElementById('confirmDeleteBatchPageBtn')?.addEventListener('click', () => confirmBatchRemoval('page'));
+
+        async function confirmBatchRemoval(scope) {
             const modalEl = document.getElementById('batchDocumentModal');
             if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
-            if (selectedBatchModalIndex === null) return;
+            const selected = selectedBatchModal;
+            selectedBatchModal = null;
+            if (!selected) return;
 
-            const deleteIdx = selectedBatchModalIndex;
-            selectedBatchModalIndex = null;
-            const targetItem = batchState.items[deleteIdx];
+            const targetItem = batchState.items[selected.index];
+            const pageItem = selected.pageIndex !== null ? batchState.items[selected.pageIndex] : null;
             if (!targetItem) return;
-            // Its pages saved already stay: they are records now, and the summary lists them.
-            const removing = batchState.items.filter((it) => (it === targetItem || (targetItem.group && it.group === targetItem.group))
-                && !['imported', 'rejected'].includes(it.status));
-            if (removing.length === 0) return;
+            // Saved and rejected pages stay: they are records now, and the summary lists them.
+            const removing = scope === 'page' && pageItem
+                ? [pageItem].filter((it) => !pageDone(it))
+                : removableGroupPages(targetItem);
+            await removeBatchPages(removing);
+        }
 
-            const wasCurrent = removing.includes(batchState.items[batchState.currentIndex]);
+        /**
+         * Take pages out of the batch: each is let go on the server, and what the
+         * user is on carries on (the next page or record opens in its place).
+         */
+        async function removeBatchPages(removing) {
+            if (removing.length === 0) return;
             const currentItem = batchState.items[batchState.currentIndex];
+            const firstIndex = Math.min(...removing.map((it) => batchState.items.indexOf(it)));
             // Where the user is: in Align, or on a record in Verify.
             const aligning = batchAligning();
+            // In Verify, the record shown changes when any of its pages goes.
+            const shown = aligning ? [currentItem] : (currentItem ? recordOf(currentItem).members : []);
+            const wasCurrent = removing.some((it) => shown.includes(it));
             if (!wasCurrent) keepCurrentAlignment();
+            else if (!aligning) leaveBatchVerify();
 
-            removing.forEach((gone) => {
-                if (!gone.pageId) return;
-                fetch(config.pageCancelUrl.replace('__PAGE__', String(gone.pageId)), {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRF-TOKEN': config.csrf,
-                        'X-Requested-With': 'XMLHttpRequest',
-                        Accept: 'application/json',
-                    },
-                    credentials: 'same-origin',
-                }).catch(() => {});
-            });
-
+            removing.forEach((gone) => cancelPageOnServer(gone.pageId));
             batchState.items = batchState.items.filter((it) => !removing.includes(it));
 
             if (batchState.items.length === 0) {
@@ -4534,27 +4694,21 @@
             if (wasCurrent) {
                 // In Align, the next page that can be aligned (from where the removed
                 // one was); in Verify, the next record that is read.
-                const alignable = batchState.items
-                    .map((it, index) => (pageCanAlign(it) ? index : -1))
-                    .filter((index) => index !== -1);
-                const nextAlign = alignable.find((index) => index >= deleteIdx) ?? alignable[alignable.length - 1];
-                if (aligning && nextAlign !== undefined) {
+                const nextAlign = firstAlignableIndex(firstIndex);
+                if (aligning && nextAlign !== -1) {
                     await openBatchQueueItem(nextAlign);
                 } else {
-                    const next = nextOpenRecord();
-                    if (next) await openBatchVerifyItem(batchState.items.indexOf(next.members[0]));
-                    else if (nextAlign !== undefined) await openBatchQueueItem(nextAlign);
-                    else showBatchSummary();
+                    batchState.currentIndex = Math.min(firstIndex, batchState.items.length - 1);
+                    await continueBatch();
                 }
             } else {
                 batchState.currentIndex = Math.max(0, batchState.items.indexOf(currentItem));
-                if (currentItem) {
-                    el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${batchState.currentIndex + 1}/${batchState.items.length}) · ${currentItem.name}`;
-                    el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
-                }
+                showBatchContext();
+                // The page beside this one may be the one removed.
+                if (aligning) updateSpread();
                 renderBatchQueueBanner();
             }
-        });
+        }
 
         const SUPPORTED_SCAN_EXT = /\.(pdf|png|jpe?g|webp|bmp)$/i;
         // What a folder brings that is not a scan, left out without a word: hidden
@@ -4780,20 +4934,22 @@
             const queued = [];
             const groupStamp = Date.now().toString(36);
             let groupSeq = 0;
-            const inQueue = new Set(batchState.active
-                ? batchState.items.filter((it) => it.sourceHash).map((it) => `${it.sourceHash}#${it.pageNo}`)
-                : []);
+            const inQueue = new Set(batchState.active ? batchState.items.map(pageKey).filter(Boolean) : []);
+            // Added to a batch under way (Add files): the page being worked on stays open.
+            const adding = batchState.active && batchState.items.length > 0;
 
             preparingBatch = true;
             if (picked.length > 0) {
                 dropzone.classList.add('is-loading');
                 dropzone.setAttribute('aria-busy', 'true');
+                setBatchAddBusy(adding ? 'Preparing…' : null);
             }
             try {
                 for (const [position, file] of picked.entries()) {
                     if (dropzoneTitleEl && picked.length > 1) {
                         dropzoneTitleEl.textContent = `Preparing ${position + 1} of ${picked.length}…`;
                     }
+                    if (adding && picked.length > 1) setBatchAddBusy(`Preparing ${position + 1} of ${picked.length}…`);
                     const group = `${groupStamp}-${groupSeq += 1}`;
 
                     // Its fingerprint and saved pages are looked up while its pages are counted.
@@ -4848,6 +5004,7 @@
             } finally {
                 preparingBatch = false;
                 showUploadModeText();
+                setBatchAddBusy(null);
                 dropzone.classList.remove('is-loading');
                 dropzone.removeAttribute('aria-busy');
             }
@@ -4857,6 +5014,7 @@
             // already, or as copies of what this batch has, can be added anyway:
             // each is still checked before it is saved twice (Save again or Skip).
             if (await askAboutLeftOut(notes, queued.length, leftOutPages.length) === 'add') {
+                leftOutPages.forEach((entry) => { entry.info.addedAnyway = true; });
                 queued.push(...leftOutPages);
                 queued.sort((a, b) => a.info.order - b.info.order || a.info.pageNo - b.info.pageNo);
             }
@@ -4874,35 +5032,58 @@
                 batchState.currentIndex = 0;
             }
 
-            queued.forEach(({ file, info }) => {
-                batchState.items.push({
-                    // The file itself: a PDF's page is drawn from it, and cut out when queued.
-                    file,
-                    name: info.pageTotal > 1 ? pageFileName(file.name, info.pageNo) : file.name,
-                    group: info.group,
-                    // The record this page is saved in, named by its first page.
-                    record: `${info.group}#${recordLeadPage(info.pageNo, info.pageTotal, pairs)}`,
-                    pageNo: info.pageNo,
-                    pageTotal: info.pageTotal,
-                    sourceName: info.sourceName,
-                    sourceHash: info.sourceHash,
-                    status: 'pending',
-                    pageId: null,
-                    page: null,
-                    workspaceScanPath: null,
-                    scanKind: 'full',
-                    geometry: null,
-                    recordUrl: null,
-                    recordId: null,
-                    error: null,
-                    boxes: null,
-                    rows: null,
-                    tilts: null,
-                });
-            });
+            // The new pages go after the queue (appendToQueue), in their own order.
+            const added = queued.map(({ file, info }) => ({
+                // The file itself: a PDF's page is drawn from it, and cut out when queued.
+                file,
+                name: info.pageTotal > 1 ? pageFileName(file.name, info.pageNo) : file.name,
+                group: info.group,
+                // The record this page is saved in, named by its first page.
+                record: `${info.group}#${recordLeadPage(info.pageNo, info.pageTotal, pairs)}`,
+                pageNo: info.pageNo,
+                pageTotal: info.pageTotal,
+                sourceName: info.sourceName,
+                sourceHash: info.sourceHash,
+                status: 'pending',
+                pageId: null,
+                page: null,
+                workspaceScanPath: null,
+                scanKind: 'full',
+                geometry: null,
+                recordUrl: null,
+                recordId: null,
+                error: null,
+                boxes: null,
+                rows: null,
+                tilts: null,
+                addedAnyway: Boolean(info.addedAnyway),
+            }));
+            batchState.items = appendToQueue(batchState.items, added);
 
             scanFileInput.value = '';
+            if (adding) {
+                // The page being worked on stays open, as it is.
+                showBatchContext();
+                renderBatchQueueBanner();
+                return;
+            }
             await openBatchQueueItem(batchState.currentIndex);
+        }
+
+        /** "Preparing 2 of 5…" on Add files while added files are read, or its own label (null). */
+        function setBatchAddBusy(text) {
+            const label = document.getElementById('batchAddMoreLabel');
+            if (label) label.textContent = text ?? 'Add files';
+            document.getElementById('batchAddMoreBtn')?.toggleAttribute('disabled', text !== null);
+            document.getElementById('batchAddMoreMenuBtn')?.toggleAttribute('disabled', text !== null);
+        }
+
+        /** The top bar's "Batch (3/12) · name" for the page open now. */
+        function showBatchContext() {
+            const item = batchState.items[batchState.currentIndex];
+            if (!item || !batchAligning()) return;
+            el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${batchState.currentIndex + 1}/${batchState.items.length}) · ${item.name}`;
+            el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
         }
 
         async function openBatchQueueItem(index) {
@@ -4962,6 +5143,10 @@
                     setGrid(templateBoxes, templateRows);
                 }
                 if (tested) await applyDetection(tested, { imageShown: true, keepView: swap });
+                clearOcrError();
+                if (item.status === 'failed' && item.error) {
+                    showOcrError(`This page could not be read: ${String(item.error).replace(/[.\s]+$/, '')}. Re-align it and queue it again, or remove it.`);
+                }
                 fetchSnapLines();
                 renderBatchQueueBanner();
                 // The other page of the pair is zoomed on and centred; a different
@@ -4979,9 +5164,19 @@
             }
         }
 
+        // Add files: more files (or a folder) for this batch, their pages after the queue.
         document.getElementById('batchAddMoreBtn')?.addEventListener('click', () => {
+            if (preparingBatch) return;
+            keepCurrentAlignment();
             scanFileInput.setAttribute('multiple', 'multiple');
+            scanFileInput.value = '';
             scanFileInput.click();
+        });
+        document.getElementById('batchAddFolderBtn')?.addEventListener('click', () => {
+            if (preparingBatch || !(scanFolderInput instanceof HTMLInputElement)) return;
+            keepCurrentAlignment();
+            scanFolderInput.value = '';
+            scanFolderInput.click();
         });
 
         document.getElementById('saveQueueNextBtn')?.addEventListener('click', async () => {
@@ -5108,7 +5303,9 @@
         async function runBatchScanAll() {
             if (scanInProgress || !batchState.active) return;
 
-            const itemsToScan = batchState.items.filter((it) => it.pageId);
+            // Queued pages not read yet, and failed ones (read again as they are).
+            // A page already read is not read again.
+            const itemsToScan = batchPagesToRead();
             const total = itemsToScan.length;
             if (total === 0) return;
 
@@ -5214,7 +5411,9 @@
                         ? await triggerRes.json()
                         : null;
                     if (!triggerRes.ok || !triggeredPayload?.statusUrl) {
-                        throw new Error(responseErrorMessage(triggerRes, triggeredPayload));
+                        // This page could not be sent: it fails alone, and the batch goes on.
+                        failBatchEntry(entry, responseErrorMessage(triggerRes, triggeredPayload));
+                        continue;
                     }
                     item.page = triggeredPayload;
                     item.sentToScan = true;
@@ -5258,15 +5457,21 @@
                             ? await response.json()
                             : null;
                         if (!response.ok || !next) {
-                            throw new Error(responseErrorMessage(response, next));
+                            // The page is gone from the server (or answers wrongly): it fails alone.
+                            failBatchEntry(entry, responseErrorMessage(response, next));
+                            lastFinishedAt = performance.now();
+                            continue;
                         }
                         entry.page = next;
                         entry.item.page = next;
 
                         if (next.status === 'failed') {
-                            entry.item.status = 'failed';
-                            renderBatchQueueBanner();
-                            throw new Error(next.error || `The page "${entry.item.name}" could not be processed.`);
+                            // A page that cannot be read does not stop the batch: the
+                            // others are read, and this one can be re-aligned or removed.
+                            failBatchEntry(entry, next.error || `The page "${entry.item.name}" could not be processed.`);
+                            lastFinishedAt = performance.now();
+                            waitFirst = 0;
+                            continue;
                         }
                         if (next.status === 'ready') {
                             entry.done = true;
@@ -5282,12 +5487,24 @@
                     }
                 }
 
-                trackList.forEach((entry) => { entry.item.status = 'ready'; });
-                el('ocrProgressFields').textContent = `${total} of ${total} ${unitWord} scanned`;
-                await completeOcrProgress('Batch scan complete', 'Opening the first record for verification.');
+                trackList.forEach((entry) => {
+                    if (!entry.failed) entry.item.status = 'ready';
+                });
+                const failedCount = trackList.filter((entry) => entry.failed).length;
+                const readCount = total - failedCount;
+                el('ocrProgressFields').textContent = `${readCount} of ${total} ${unitWord} scanned`;
+                if (failedCount === 0) {
+                    await completeOcrProgress('Batch scan complete', 'Opening the first record for verification.');
+                } else {
+                    const them = failedCount === 1 ? 'it' : 'them';
+                    await completeOcrProgress(
+                        `${readCount} of ${total} ${unitWord} read`,
+                        `${failedCount} ${failedCount === 1 ? 'page' : 'pages'} could not be read: re-align or remove ${them}.`,
+                    );
+                }
                 batchState.readingAll = false;
-                const first = nextOpenRecord();
-                if (first) await openBatchVerifyItem(batchState.items.indexOf(first.members[0]));
+                // The first record read opens in Verify; with none, the first failed page in Align.
+                await continueBatch();
             } catch (error) {
                 if (!run.cancelled) {
                     showOcrError(error.message || 'Batch scan failed.');
@@ -5309,6 +5526,16 @@
                 el('detectBtn').disabled = false;
                 renderBatchQueueBanner();
             }
+        }
+
+        /** A page Scan all could not read: marked failed with the reason, and the run goes on. */
+        function failBatchEntry(entry, message) {
+            entry.done = true;
+            entry.failed = true;
+            entry.item.status = 'failed';
+            entry.item.error = message || 'This page could not be read.';
+            entry.item.sentToScan = false;
+            renderBatchQueueBanner();
         }
 
         /**
@@ -5439,6 +5666,7 @@
                 if (batchState.active) {
                     const current = recordOf(batchState.items[batchState.currentIndex]);
                     const hasMore = batchRecords().some((record) => record.key !== current.key && !recordDone(record));
+                    // (A record still waiting or blocked comes after: its page opens in Align.)
                     rejectLabel.textContent = hasMore ? 'Reject & Next Record' : 'Reject & Complete Batch';
                 } else {
                     rejectLabel.textContent = 'Reject & End';
@@ -5486,12 +5714,8 @@
                 }
                 renderBatchQueueBanner();
 
-                const next = nextOpenRecord(currentItem ?? null);
-                if (next) {
-                    await openBatchVerifyItem(batchState.items.indexOf(next.members[0]));
-                } else {
-                    showBatchSummary();
-                }
+                // The next record read; else a page still to align (one that failed); else the summary.
+                await continueBatch(currentItem ?? null);
                 return;
             }
 
@@ -6377,7 +6601,7 @@ Cancel opens only the first file.`)) {
             ocrProgressTimer = null;
         }
 
-        async function completeOcrProgress(title = 'Scan complete', note = 'Opening the validation results.') {
+        async function completeOcrProgress(title = 'Scan complete', note = 'Opening the results in Verify.') {
             endOcrPhases('Done');
             stopOcrProgress();
             setOcrProgress(100, title, note);
@@ -6840,7 +7064,7 @@ Cancel opens only the first file.`)) {
                 el('summaryModel').textContent = processedPage.model || '—';
 
                 endOcrPhases('Almost done');
-                setOcrProgress(96, 'Preparing validation', partner
+                setOcrProgress(96, 'Preparing Verify', partner
                     ? 'Putting both pages side by side, one person to a row.'
                     : 'The handwriting results are ready for your review.');
                 renderVerifyRows();
@@ -10923,11 +11147,11 @@ Cancel opens only the first file.`)) {
                     currentBatchItem.exportTable = exportedTable;
                     renderBatchQueueBanner();
 
-                    const next = nextOpenRecord(currentBatchItem);
-                    if (next) {
+                    // The next record read, or a page still to align (one that failed, say).
+                    if (batchState.items.some((it) => !pageDone(it))) {
                         recordSubmitting = false;
                         button.innerHTML = idleButton;
-                        await openBatchVerifyItem(batchState.items.indexOf(next.members[0]));
+                        await continueBatch(currentBatchItem);
                         return;
                     }
                     submissionSucceeded = true;

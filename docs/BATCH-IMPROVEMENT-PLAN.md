@@ -158,37 +158,37 @@ The foundation for A3, D1 and E1. No visible change on its own.
 ### Phase A: quick fixes (S)
 
 **A1. One word per step (#10)**
-- [ ] Change the two user-facing texts in `workspace.blade.php`:
+- [x] Change the two user-facing texts in `workspace.blade.php`:
   - queue badge `text: 'Validating'` → `'Verifying'`;
   - remove dialog `ready: 'Scanned, waiting for validation'` → `'Scanned, waiting to be verified'`.
-- [ ] Check the batch bar, dialogs and summary for any other user-facing "validate" or "validation". Internal names such as `validationRow` stay.
-- [ ] **Verify:** `grep -nE "'Validating'|waiting for validation" resources/views/scan/workspace.blade.php` finds nothing. Blade compiles. JS tests unchanged.
+- [x] Check the batch bar, dialogs and summary for any other user-facing "validate" or "validation". Internal names such as `validationRow` stay. (Also the progress window: "Preparing Verify", "Opening the results in Verify.")
+- [x] **Verify:** `grep -nE "'Validating'|waiting for validation" resources/views/scan/workspace.blade.php` finds nothing. Blade compiles. JS tests unchanged.
 
 **A2. "Add more files" (#11)**
-- [ ] Add the button to the queue bar (the code already looks for `batchAddMoreBtn`).
+- [x] Add the button to the queue bar (the code already looks for `batchAddMoreBtn`).
   - It shows in Align while pages can still be aligned.
   - It opens the file picker; a small menu also offers "Add a folder".
-- [ ] Added files go through the normal intake: fingerprint, the left-out window, natural order.
-- [ ] Added pages go **after** the current queue. The page the user is on stays open.
-- [ ] Put the merge rule in a pure helper, `appendToQueue(items, added)` in `resources/js/scan-source.js`.
+- [x] Added files go through the normal intake: fingerprint, the left-out window, natural order.
+- [x] Added pages go **after** the current queue. The page the user is on stays open.
+- [x] Put the merge rule in a pure helper, `appendToQueue(items, added)` in `resources/js/scan-source.js`.
 - [ ] **Tests:**
-  - [ ] JS (`tests/JavaScript/scan-source.test.js`): added pages go last and keep their order; a page already queued (same hash and page) is not added twice.
+  - [x] JS (`tests/JavaScript/scan-source.test.js`): added pages go last and keep their order; a page already queued (same hash and page) is not added twice.
   - [ ] *(manual)* queue 2 files, add 1 more mid-queue. Then add a copy of a queued file: it appears in the left-out window.
-- [ ] **Verify:** the new JS tests pass; the manual steps behave as described.
+- [ ] **Verify:** the new JS tests pass; the manual steps behave as described. (JS part passes; the manual part is left for G3.)
 
 **A3. A failed page does not stop the batch, and anything can be removed (#3)**
-- [ ] `runBatchScanAll`: on a failed page, mark it `failed` with the server's reason (`item.error`) and keep reading the others.
-- [ ] Records that are `ready` open in Verify. Records that are `blocked` wait, and the banner says "N pages failed: re-align or remove".
-- [ ] A failed page can be opened in Align (`pageCanAlign`), re-aligned and queued again. It is then read by Scan all, or, once Phase D exists, by Scan remaining.
-- [ ] Remove dialog: **Remove this page** and **Remove the whole file**.
-  - [ ] Removing cancels the page(s) on the server.
-  - [ ] A page of a pair warns that its partner will be saved alone.
-  - [ ] Saved and rejected pages are not offered.
+- [x] `runBatchScanAll`: on a failed page, mark it `failed` with the server's reason (`item.error`) and keep reading the others.
+- [x] Records that are `ready` open in Verify. Records that are `blocked` wait, and the banner says "N pages failed: re-align or remove".
+- [x] A failed page can be opened in Align (`pageCanAlign`), re-aligned and queued again. It is then read by Scan all, or, once Phase D exists, by Scan remaining.
+- [x] Remove dialog: **Remove this page** and **Remove the whole file**.
+  - [x] Removing cancels the page(s) on the server.
+  - [x] A page of a pair warns that its partner will be saved alone.
+  - [x] Saved and rejected pages are not offered.
 - [ ] **Tests:**
-  - [ ] JS: `recordReadiness` with a failed page, and after that page is removed (its partner becomes `ready`).
+  - [x] JS: `recordReadiness` with a failed page, and after that page is removed (its partner becomes `ready`).
   - [ ] *(manual)* stop the OCR service in the middle of Scan all. The other pages still finish, and the failed one can be re-aligned or removed.
   - [ ] *(manual)* remove a single page, a page of a pair, and a whole file.
-- [ ] **Verify:** tests pass; the summary still lists saved records after removals.
+- [ ] **Verify:** tests pass; the summary still lists saved records after removals. (Tests pass. Saved and rejected pages are never removed, so the summary keeps them; to confirm in the browser in G3.)
 
 > **Phase A gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 1, 4, 5, 8 and 10.
 

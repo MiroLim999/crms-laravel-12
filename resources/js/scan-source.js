@@ -315,3 +315,26 @@ export function batchSummaryPhase(items) {
     if (any('failed')) return 'aligning';
     return 'done';
 }
+
+/** "hash#page": one page of one exact file, or null when the file has no fingerprint. */
+export function pageKey(item) {
+    return item?.sourceHash ? `${item.sourceHash}#${item.pageNo ?? 1}` : null;
+}
+
+/**
+ * The queue with pages added to it: they go after the pages already queued,
+ * in the order given, so the page being worked on stays where it is. A page
+ * the queue has already (same file fingerprint and page) is not added again,
+ * unless the user asked for it (`addedAnyway`, from the left-out window).
+ */
+export function appendToQueue(items, added) {
+    const queue = Array.from(items ?? []);
+    const seen = new Set(queue.map(pageKey).filter(Boolean));
+    for (const item of added ?? []) {
+        const key = pageKey(item);
+        if (key !== null && seen.has(key) && !item.addedAnyway) continue;
+        if (key !== null) seen.add(key);
+        queue.push(item);
+    }
+    return queue;
+}

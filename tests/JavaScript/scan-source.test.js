@@ -5,6 +5,7 @@ import test from 'node:test';
 import { PDFDocument } from 'pdf-lib';
 
 import {
+    appendToQueue,
     batchSummaryPhase,
     fileFingerprint,
     firstUnsavedPage,
@@ -155,6 +156,16 @@ test('record readiness covers every record by its key', () => {
     assert.equal(recordReadiness([]).size, 0);
 });
 
+test('a record blocked by a failed page is ready once that page is removed', () => {
+    const lead = page('ready', { pageNo: 1 });
+    const failed = page('failed', { pageNo: 2 });
+    assert.equal(recordReadiness([{ key: 'pair', members: [lead, failed] }]).get('pair'), 'blocked');
+    // Removing the failed page leaves its partner as a record on its own.
+    assert.equal(recordReadiness([{ key: 'pair', members: [lead] }]).get('pair'), 'ready');
+    // Queued again after a re-align, it waits to be read.
+    assert.equal(recordReadiness([{ key: 'pair', members: [lead, page('saved')] }]).get('pair'), 'waiting');
+});
+
 test('the batch phase is worked out from its pages', () => {
     assert.equal(batchSummaryPhase([]), 'idle');
     // All pending, or some queued and some not: aligning.
@@ -173,4 +184,44 @@ test('the batch phase is worked out from its pages', () => {
     assert.equal(batchSummaryPhase([page('ready'), page('pending')]), 'aligning');
     // Everything saved or left out.
     assert.equal(batchSummaryPhase([page('imported'), page('rejected', { skipped: true })]), 'done');
+});
+
+test('added pages go after the queue, in their own order', () => {
+    const queued = [
+        { name: 'a1', sourceHash: 'aa', pageNo: 1 },
+        { name: 'a2', sourceHash: 'aa', pageNo: 2 },
+    ];
+    const added = [
+        { name: 'c1', sourceHash: 'cc', pageNo: 1 },
+        { name: 'b1', sourceHash: 'bb', pageNo: 1 },
+        { name: 'b2', sourceHash: 'bb', pageNo: 2 },
+    ];
+    const queue = appendToQueue(queued, added);
+    assert.deepEqual(queue.map((item) => item.name), ['a1', 'a2', 'c1', 'b1', 'b2']);
+    // The queue given is left as it was; the items are the same objects.
+    assert.equal(queued.length, 2);
+    assert.equal(queue[0], queued[0]);
+});
+
+test('a page already queued is not added twice', () => {
+    const queued = [{ name: 'a1', sourceHash: 'aa', pageNo: 1 }, { name: 'a2', sourceHash: 'aa', pageNo: 2 }];
+    // A copy of a queued file (same fingerprint), and one page given twice.
+    const added = [
+        { name: 'copy-a1', sourceHash: 'aa', pageNo: 1 },
+        { name: 'copy-a3', sourceHash: 'aa', pageNo: 3 },
+        { name: 'b1', sourceHash: 'bb', pageNo: 1 },
+        { name: 'b1-again', sourceHash: 'bb', pageNo: 1 },
+    ];
+    assert.deepEqual(appendToQueue(queued, added).map((item) => item.name), ['a1', 'a2', 'copy-a3', 'b1']);
+});
+
+test('a copy asked for in the left-out window, or a file with no fingerprint, is added', () => {
+    const queued = [{ name: 'a1', sourceHash: 'aa', pageNo: 1 }];
+    const added = [
+        { name: 'copy-a1', sourceHash: 'aa', pageNo: 1, addedAnyway: true },
+        { name: 'unknown', sourceHash: null, pageNo: 1 },
+        { name: 'unknown-too', sourceHash: null, pageNo: 1 },
+    ];
+    assert.deepEqual(appendToQueue(queued, added).map((item) => item.name), ['a1', 'copy-a1', 'unknown', 'unknown-too']);
+    assert.deepEqual(appendToQueue(null, null), []);
 });

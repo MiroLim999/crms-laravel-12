@@ -1839,6 +1839,41 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   font-variant-numeric: tabular-nums;
 }
 
+.batch-queue-banner__notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem .55rem;
+  margin-block: .4rem .2rem;
+  padding: .3rem .55rem;
+  color: var(--bs-danger);
+  background: rgba(var(--bs-danger-rgb), .08);
+  border-radius: .4rem;
+  font-size: .75rem;
+  font-weight: 600;
+
+  > span {
+    flex: 1 1 12rem;
+    min-inline-size: 0;
+  }
+
+  .btn {
+    padding-block: .1rem;
+    font-size: .72rem;
+  }
+}
+
+.batch-queue-banner__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .35rem;
+
+  &:not(:has(> :not(.d-none))) {
+    display: none;
+  }
+}
+
 .batch-queue-chips {
   display: flex;
   flex-wrap: nowrap;
@@ -3114,6 +3149,15 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: .75rem;
+}
+
+// Batch queue: Keep it, and up to two ways to remove (a page, or the whole file).
+.batch-delete-actions.is-three {
+  grid-template-columns: 1fr;
+
+  #batchDocCancelBtn {
+    order: 3;
+  }
 }
 
 // Batch queue: the file being removed, and what removing it means.
