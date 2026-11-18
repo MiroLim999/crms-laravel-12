@@ -1307,7 +1307,7 @@
 
                     <div class="batch-intake" id="batchIntakeGroups"></div>
                     <p class="batch-intake__note d-none" id="batchIntakeAddNote">
-                        Added anyway, each is still checked when it is saved: you choose to save it again or skip it.
+                        If you add them anyway, each page is checked again when it is saved: you choose to save it again or skip it.
                     </p>
 
                     <div class="leave-scan-modal__actions">
@@ -1486,6 +1486,7 @@
         import {
             appendToQueue,
             batchSummaryPhase,
+            compareQueuePaths,
             fileFingerprint,
             firstUnsavedPage,
             isPdfFile,
@@ -5145,7 +5146,9 @@
         const SYSTEM_FILE = /^(\..*|thumbs\.db|desktop\.ini)$/i;
         // Where a dropped file sat in what was dropped ("/Book 1/page-2.pdf").
         const droppedPaths = new WeakMap();
-        // "page-2" before "page-10", and a folder's files in its own order.
+        // "page-2" before "page-10", a folder's files in its own order, and an
+        // original before its copies (compareQueuePaths), so of identical files
+        // the one queued is the original.
         const naturalOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
         const queuePath = (file) => droppedPaths.get(file) || file.webkitRelativePath || file.name;
 
@@ -5283,7 +5286,7 @@
                 section.className = 'batch-intake__group';
                 const heading = document.createElement('h6');
                 heading.className = 'batch-intake__title';
-                heading.textContent = `${title} · ${names.length}`;
+                heading.textContent = `${title} · ${names.length} file${names.length === 1 ? '' : 's'}`;
                 const list = document.createElement('ul');
                 list.className = 'batch-intake__list';
                 names.slice(0, 8).forEach((name) => {
@@ -5333,7 +5336,7 @@
             const leftOutPages = [];
             const picked = Array.from(fileList || [])
                 .filter((file) => !SYSTEM_FILE.test(file.name))
-                .sort((a, b) => naturalOrder.compare(queuePath(a), queuePath(b)))
+                .sort((a, b) => compareQueuePaths(queuePath(a), queuePath(b), naturalOrder))
                 .filter((file) => {
                     if (!SUPPORTED_SCAN_EXT.test(file.name)) {
                         notes.unsupported.push(file.name);
@@ -5364,6 +5367,8 @@
             const groupStamp = Date.now().toString(36);
             let groupSeq = 0;
             const inQueue = new Set(batchState.active ? batchState.items.map(pageKey).filter(Boolean) : []);
+            // Which pages of a file are saved, asked once per file (its copies share the answer).
+            const savedLookups = new Map();
             // Added to a batch under way (Add files): the page being worked on stays open.
             const adding = batchState.active && batchState.items.length > 0;
 
@@ -5389,7 +5394,8 @@
                         } catch (error) {
                             console.warn(`${file.name} could not be fingerprinted:`, error);
                         }
-                        return { fingerprint, saved: await savedPagesOfFile(fingerprint) };
+                        if (fingerprint && !savedLookups.has(fingerprint)) savedLookups.set(fingerprint, savedPagesOfFile(fingerprint));
+                        return { fingerprint, saved: fingerprint ? await savedLookups.get(fingerprint) : new Set() };
                     })();
                     const counting = isPdfFile(file)
                         ? marker.pdfPageCount(file).then((count) => Math.max(1, count), (error) => {
@@ -7408,7 +7414,7 @@ Cancel opens only the first file.`)) {
             }
             const first = files
                 .filter((file) => SUPPORTED_SCAN_EXT.test(file.name) && !SYSTEM_FILE.test(file.name))
-                .sort((a, b) => naturalOrder.compare(queuePath(a), queuePath(b)))[0];
+                .sort((a, b) => compareQueuePaths(queuePath(a), queuePath(b), naturalOrder))[0];
             if (first) openDocument(first);
             else alert('No PDF or image file was found in what was dropped.');
         });

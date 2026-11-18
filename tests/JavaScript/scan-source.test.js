@@ -7,6 +7,8 @@ import { PDFDocument } from 'pdf-lib';
 import {
     appendToQueue,
     batchSummaryPhase,
+    compareQueuePaths,
+    copyOf,
     fileFingerprint,
     firstUnsavedPage,
     isPdfFile,
@@ -410,4 +412,30 @@ test('a file of a page queued already matches without being wanted; nothing pick
     assert.deepEqual(result.unmatched, []);
     assert.deepEqual(result.missing, [{ sourceName: 'BOOK.pdf', sourceHash: HASH_A, pages: 2 }]);
     assert.deepEqual(matchFilesToBatch([], []).missing, []);
+});
+
+// ---------------------------------------------------------------- queue order
+
+test('a copy is known by its name, as Windows, macOS and browsers name copies', () => {
+    assert.deepEqual(copyOf('1.pdf'), { base: '1.pdf', rank: 0 });
+    assert.deepEqual(copyOf('1 - Copy.pdf'), { base: '1.pdf', rank: 1 });
+    assert.deepEqual(copyOf('1 - Copy (3).pdf'), { base: '1.pdf', rank: 3 });
+    assert.deepEqual(copyOf('BOOK copy.pdf'), { base: 'BOOK.pdf', rank: 1 });
+    assert.deepEqual(copyOf('BOOK copy 2.pdf'), { base: 'BOOK.pdf', rank: 2 });
+    assert.deepEqual(copyOf('BOOK (1).pdf'), { base: 'BOOK.pdf', rank: 1 });
+    assert.deepEqual(copyOf('Copy of BOOK.pdf'), { base: 'BOOK.pdf', rank: 1 });
+    assert.deepEqual(copyOf('page-10.png'), { base: 'page-10.png', rank: 0 });
+});
+
+test('files are queued in natural order, each original before its copies', () => {
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    const paths = [
+        'scans/1 - Copy (10).pdf', 'scans/1 - Copy (2).pdf', 'scans/1 - Copy.pdf', 'scans/1.pdf',
+        'scans/page-10.png', 'scans/page-2.png', 'other/a.pdf',
+    ];
+    assert.deepEqual([...paths].sort((a, b) => compareQueuePaths(a, b, collator)), [
+        'other/a.pdf',
+        'scans/1.pdf', 'scans/1 - Copy.pdf', 'scans/1 - Copy (2).pdf', 'scans/1 - Copy (10).pdf',
+        'scans/page-2.png', 'scans/page-10.png',
+    ]);
 });

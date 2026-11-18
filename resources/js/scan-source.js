@@ -523,3 +523,59 @@ export function matchFilesToBatch(files, pages) {
 
     return { matched, unmatched, missing };
 }
+
+// ---------------------------------------------------------------- queue order
+
+/**
+ * A file name as an original and how far a copy it is: "BOOK - Copy (2).pdf"
+ * -> { base: "BOOK.pdf", rank: 2 }. Copies as Windows, macOS and browsers name
+ * them ("- Copy", "- Copy (n)", " copy", " copy n", "Copy of …", " (n)");
+ * an original has rank 0.
+ */
+export function copyOf(name) {
+    const text = String(name ?? '');
+    const dot = text.lastIndexOf('.');
+    const ext = dot > 0 ? text.slice(dot) : '';
+    let stem = dot > 0 ? text.slice(0, dot) : text;
+    let rank = 0;
+    const patterns = [
+        [/\s+-\s+copy\s*\((\d+)\)$/i, (m) => Number(m[1])],
+        [/\s+-\s+copy$/i, () => 1],
+        [/\s+copy\s+(\d+)$/i, (m) => Number(m[1])],
+        [/\s+copy$/i, () => 1],
+        [/\s*\((\d+)\)$/, (m) => Number(m[1])],
+    ];
+    for (const [pattern, rankOf] of patterns) {
+        const match = stem.match(pattern);
+        if (match) {
+            rank = rankOf(match);
+            stem = stem.slice(0, match.index);
+            break;
+        }
+    }
+    const copyOfPrefix = stem.match(/^copy(?:\s*\((\d+)\))?\s+of\s+/i);
+    if (rank === 0 && copyOfPrefix) {
+        rank = Number(copyOfPrefix[1] ?? 1);
+        stem = stem.slice(copyOfPrefix[0].length);
+    }
+    return { base: `${stem}${ext}`, rank };
+}
+
+/**
+ * The order files are queued in: a folder's own order, "page-2" before
+ * "page-10" (`collator` compares numbers as numbers), and an original before
+ * its copies, so of identical files the one queued is the original.
+ */
+export function compareQueuePaths(a, b, collator) {
+    const split = (path) => {
+        const text = String(path ?? '');
+        const slash = Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\'));
+        return { dir: text.slice(0, slash + 1), ...copyOf(text.slice(slash + 1)) };
+    };
+    const left = split(a);
+    const right = split(b);
+    return collator.compare(left.dir, right.dir)
+        || collator.compare(left.base, right.base)
+        || left.rank - right.rank
+        || collator.compare(String(a ?? ''), String(b ?? ''));
+}
