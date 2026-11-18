@@ -248,22 +248,22 @@ The foundation for A3, D1 and E1. No visible change on its own.
 ### Phase D: when pages are read (M)
 
 **D1. Scan while aligning, or all at the end (#2, #12)**
-- [ ] Add a switch to the queue bar: **Scan while I align** (default) or **Scan all at the end**, remembered per browser.
-- [ ] **While I align:**
-  - [ ] Save & Queue sends the page without `defer_scan`, so reading starts at once.
-  - [ ] A Smoke-tested page is queued and read at once.
-  - [ ] The queue panel shows each page's reading state.
-  - [ ] A record opens in Verify as soon as it is `ready`. When the last page is queued, the bar offers **Verify**, with a short progress line for pages still being read.
-  - [ ] **Scan remaining** reads pages queued in "at the end" mode, or queued again after a failure.
-  - [ ] Re-saving a page that was read already cancels the reading and reads it again.
-  - [ ] Smoke test's progress window says when it is waiting behind pages being read.
-- [ ] **At the end:** the Scan all button and behaviour stay as today.
-- [ ] Server: `documents.pages.queue` accepts `read=1` to start reading a Smoke-tested page.
+- [x] Add a switch to the queue bar: **Scan while I align** (default) or **Scan all at the end**, remembered per browser.
+- [x] **While I align:**
+  - [x] Save & Queue sends the page without `defer_scan`, so reading starts at once.
+  - [x] A Smoke-tested page is queued and read at once.
+  - [x] The queue panel shows each page's reading state.
+  - [x] A record opens in Verify as soon as it is `ready`. When the last page is queued, the bar offers **Verify**, with a short progress line for pages still being read.
+  - [x] **Scan remaining** reads pages queued in "at the end" mode, or queued again after a failure.
+  - [x] Re-saving a page that was read already cancels the reading and reads it again. (The page queued before is let go on the server, its reading with it, and the new one is read.)
+  - [x] Smoke test's progress window says when it is waiting behind pages being read.
+- [x] **At the end:** the Scan all button and behaviour stay as today.
+- [x] Server: `documents.pages.queue` accepts `read=1` to start reading a Smoke-tested page.
 - [ ] **Tests:**
-  - [ ] PHP: queuing a Smoke-tested page with `read=1` starts its reading (`Queue::assertPushed`); without it, nothing starts.
+  - [x] PHP: queuing a Smoke-tested page with `read=1` starts its reading (`Queue::assertPushed`); without it, nothing starts.
   - [ ] *(manual)* 6 pages in background mode. Align steadily; Verify starts with little or no wait.
   - [ ] *(manual)* switch the mode mid-batch.
-- [ ] **Verify:** end mode works exactly as before.
+- [ ] **Verify:** end mode works exactly as before. (End mode keeps Scan all's code path; to confirm in the browser in G3.)
 
 > **Phase D gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 3, 4 and 10.
 

@@ -125,6 +125,9 @@ class DocumentPageController extends Controller
      * in the batch's workspace folder (as Save to queue keeps a new page's),
      * so Scan all reads the lines Detect found, with any outline fixed by
      * hand, instead of a fresh copy of the page that is outlined again.
+     *
+     * With `read`, it is read at once (the batch is scanned while the user
+     * aligns), as Scan with OCR reads a page after Detect.
      */
     public function queue(Request $request, DocumentPage $page): JsonResponse
     {
@@ -133,6 +136,7 @@ class DocumentPageController extends Controller
         $validated = $request->validate([
             'scan' => ['required', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
             'batch_key' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'read' => ['sometimes', 'boolean'],
         ], [
             'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
         ]);
@@ -141,10 +145,21 @@ class DocumentPageController extends Controller
             return response()->json(['message' => 'Run Smoke test scan on this page again before queuing it.'], 409);
         }
 
-        $payload = $this->payload($page);
-        $payload['workspaceScanPath'] = $this->storeWorkspaceScan($page, $request->file('scan'), $validated['batch_key'] ?? null);
+        $workspaceScanPath = $this->storeWorkspaceScan($page, $request->file('scan'), $validated['batch_key'] ?? null);
 
-        return response()->json($payload);
+        if ($request->boolean('read')) {
+            $page->forceFill([
+                'status' => DocumentPage::STATUS_READING,
+                'ocr_model_key' => $this->modelChoice->resolve(),
+            ])->save();
+
+            ProcessDocumentPage::dispatch($page->getKey(), ProcessDocumentPage::MODE_READ);
+        }
+
+        $payload = $this->payload($page->fresh());
+        $payload['workspaceScanPath'] = $workspaceScanPath;
+
+        return response()->json($payload, $request->boolean('read') ? 202 : 200);
     }
 
     /**

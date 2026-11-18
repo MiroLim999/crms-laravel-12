@@ -1879,6 +1879,27 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   margin-inline-start: auto;
 }
 
+// When a batch's pages are read: a choice of two, each with a line about it.
+.batch-read-mode-menu {
+  max-inline-size: 20rem;
+
+  .dropdown-item {
+    display: grid;
+    gap: .1rem;
+    white-space: normal;
+
+    small {
+      color: var(--bs-secondary-color);
+      font-size: .72rem;
+    }
+
+    &.active small {
+      color: inherit;
+      opacity: .85;
+    }
+  }
+}
+
 // The collapsed queue: where the user is, and a way to open the panel.
 .batch-queue-toggle {
   display: inline-flex;

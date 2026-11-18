@@ -351,6 +351,28 @@ class LineOutlinePipelineTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_a_smoke_tested_page_queued_with_read_is_read_at_once(): void
+    {
+        $page = $this->detectedPage();
+        Queue::fake();
+
+        $this->actingAs($page->creator)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.queue', $page), [
+                'scan' => UploadedFile::fake()->create('BIRTHS-1995 (page 3).pdf', 12, 'application/pdf'),
+                'batch_key' => 'batch_123_abc',
+                'read' => '1',
+            ])
+            ->assertAccepted()
+            ->assertJsonPath('id', $page->getKey())
+            ->assertJsonPath('status', DocumentPage::STATUS_READING);
+
+        // Its lines are read as Smoke test left them: nothing is detected again.
+        Queue::assertPushed(ProcessDocumentPage::class, fn ($job) => $job->pageId === $page->getKey()
+            && $job->mode === ProcessDocumentPage::MODE_READ);
+        $this->assertSame(3, $page->lines()->count());
+    }
+
     public function test_only_a_smoke_tested_page_of_ones_own_joins_a_batch_queue(): void
     {
         $scan = fn () => ['scan' => UploadedFile::fake()->create('scan.pdf', 12, 'application/pdf')];

@@ -39,6 +39,25 @@
                                         <span class="batch-queue-toggle__text" id="batchQueueToggleText">Queue</span>
                                         <i class="icon-base bx bx-chevron-down icon-sm batch-queue-toggle__chevron" aria-hidden="true"></i>
                                     </button>
+                                    {{-- When pages are read: as each is queued (default), or all at the end. --}}
+                                    <div class="dropdown d-none" id="batchReadModeGroup">
+                                        <button type="button" class="btn btn-sm btn-label-secondary dropdown-toggle text-nowrap"
+                                            id="batchReadModeBtn" data-bs-toggle="dropdown" aria-expanded="false"
+                                            title="When the queued pages are read">
+                                            <i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i><span
+                                                id="batchReadModeLabel">Scan while I align</span>
+                                        </button>
+                                        <div class="dropdown-menu dropdown-menu-end batch-read-mode-menu">
+                                            <button type="button" class="dropdown-item" data-read-mode="background">
+                                                <strong>Scan while I align</strong>
+                                                <small>Each page is read as soon as it is queued, so Verify starts with little or no wait.</small>
+                                            </button>
+                                            <button type="button" class="dropdown-item" data-read-mode="end">
+                                                <strong>Scan all at the end</strong>
+                                                <small>Pages wait in the queue until Scan all reads them together.</small>
+                                            </button>
+                                        </div>
+                                    </div>
                                     {{-- More files for this batch, while pages can still be aligned. --}}
                                     <div class="btn-group btn-group-sm d-none" role="group" id="batchAddMoreGroup"
                                         aria-label="Add to this batch">
@@ -1158,6 +1177,30 @@
                         <button type="button" class="btn btn-danger text-nowrap" id="confirmDeleteBatchDocBtn">
                             <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i><span
                                 id="confirmDeleteBatchDocLabel">Remove from queue</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- A batch read while aligning: the next record is not read yet. It opens by itself once it is. --}}
+    <div class="modal fade" id="batchWaitModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"
+        aria-labelledby="batchWaitTitle" aria-describedby="batchWaitText" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog" style="max-inline-size: min(25rem, calc(100% - 2rem));">
+            <div class="modal-content leave-scan-modal">
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-primary" aria-hidden="true">
+                        <span class="spinner-border spinner-border-sm"></span>
+                    </span>
+                    <h5 class="modal-title" id="batchWaitTitle">Reading the next record</h5>
+                    <p class="leave-scan-modal__text" id="batchWaitText">It opens as soon as its pages are read.</p>
+                    <div class="leave-scan-modal__actions">
+                        <button type="button" class="btn btn-label-secondary text-nowrap" id="batchWaitStopBtn">
+                            Stop waiting
+                        </button>
+                        <button type="button" class="btn btn-primary text-nowrap d-none" id="batchWaitAlignBtn">
+                            Align meanwhile
                         </button>
                     </div>
                 </div>
@@ -4319,9 +4362,16 @@
         async function continueBatch(after = null) {
             const next = nextOpenRecord(after);
             if (next) {
+                closeBatchWait();
                 await openBatchVerifyItem(batchState.items.indexOf(next.members[0]));
                 return;
             }
+            // A record still being read (Scan while I align): it opens once it is.
+            if (batchState.items.some((it) => it.status === 'scanning' && it.sentToScan)) {
+                showBatchWait(after);
+                return;
+            }
+            closeBatchWait();
             const alignIndex = firstAlignableIndex();
             if (alignIndex !== -1) {
                 leaveBatchVerify();
@@ -4395,16 +4445,36 @@
                 if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(pct));
             };
 
-            if (phase === 'aligning') {
+            // What the bar offers follows where the user is: Scan all running, the
+            // batch done, a page in Align, or a record in Verify.
+            const counts = queueCounts(batchState.items);
+            const inFlight = counts.byStatus.scanning ?? 0;
+            const readModeGroup = document.getElementById('batchReadModeGroup');
+            readModeGroup?.classList.toggle('d-none', !batchAligning());
+            if (addMoreBtn) addMoreBtn.classList.toggle('d-none', !batchAligning());
+
+            if (batchState.readingAll) {
+                if (phaseTitle) phaseTitle.textContent = `Scanning all queued documents with OCR (${readyCount} of ${total} ${unit}s scanned)...`;
+                if (counter) counter.textContent = `${readyCount} / ${total} ${unit}s scanned`;
+                updateProgress(Math.round((readyCount / total) * 100));
+                if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
+                if (scanNowBtn) scanNowBtn.classList.remove('d-none');
+            } else if (batchAligning()) {
                 const allSaved = savedCount === total;
+                const background = batchReadMode === 'background';
                 if (phaseTitle) {
-                    phaseTitle.textContent = allSaved
-                        ? 'All documents saved in workspace queue — ready to scan all'
-                        : `Align & save each ${unit} to queue (${savedCount} of ${total} saved)`;
+                    phaseTitle.textContent = !allSaved
+                        ? `Align & save each ${unit} to queue (${savedCount} of ${total} saved)`
+                        : (background
+                            ? `All pages queued: ${counts.read} of ${total} read`
+                            : 'All documents saved in workspace queue — ready to scan all');
                 }
-                if (counter) counter.textContent = `${savedCount} / ${total} saved`;
+                if (counter) {
+                    counter.textContent = background || counts.read > 0
+                        ? `${savedCount} / ${total} saved · ${counts.read} read`
+                        : `${savedCount} / ${total} saved`;
+                }
                 updateProgress(Math.round((savedCount / total) * 100));
-                if (addMoreBtn) addMoreBtn.classList.toggle('d-none', !batchAligning());
                 if (saveQueueBtn) {
                     const currentItem = batchState.items[batchState.currentIndex];
                     // A failed page open in Align can be queued again, re-aligned.
@@ -4420,23 +4490,14 @@
                     }
                 }
                 if (scanNowBtn) {
-                    // The pages Scan all reads: queued and not read yet, or failed (read again).
-                    const toRead = batchPagesToRead().length;
-                    scanNowBtn.classList.toggle('d-none', !allSaved || toRead === 0);
-                    if (scanNowLabel) {
-                        scanNowLabel.textContent = toRead === total
-                            ? `Scan All Queued Documents (${total})`
-                            : `Scan Queued Pages (${toRead})`;
-                    }
+                    // At the end: Scan all reads what is queued (and failed pages again).
+                    // While aligning: Scan remaining sends what waits in the queue (queued
+                    // in end mode); once every page is queued, Verify opens the records.
+                    const action = batchScanAction();
+                    scanNowBtn.classList.toggle('d-none', action.kind === 'none');
+                    if (scanNowLabel) scanNowLabel.textContent = action.label;
                 }
-            } else if (phase === 'reading') {
-                if (phaseTitle) phaseTitle.textContent = `Scanning all queued documents with OCR (${readyCount} of ${total} ${unit}s scanned)...`;
-                if (counter) counter.textContent = `${readyCount} / ${total} ${unit}s scanned`;
-                updateProgress(Math.round((readyCount / total) * 100));
-                if (addMoreBtn) addMoreBtn.classList.add('d-none');
-                if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
-                if (scanNowBtn) scanNowBtn.classList.remove('d-none');
-            } else if (phase === 'verifying' || phase === 'done') {
+            } else {
                 // Saved a record at a time, as in single mode: a page, or a pair of pages.
                 const records = batchRecords();
                 const finished = records.filter(recordDone).length;
@@ -4445,9 +4506,11 @@
                         ? 'Batch complete'
                         : `Verify, review & save each record (${finished} of ${records.length} done)`;
                 }
-                if (counter) counter.textContent = `${finished} / ${records.length} record${records.length === 1 ? '' : 's'} done`;
+                if (counter) {
+                    counter.textContent = `${finished} / ${records.length} record${records.length === 1 ? '' : 's'} done`
+                        + (inFlight > 0 ? ` · ${inFlight} page${inFlight === 1 ? '' : 's'} still being read` : '');
+                }
                 updateProgress(records.length > 0 ? Math.round((finished / records.length) * 100) : 100);
-                if (addMoreBtn) addMoreBtn.classList.add('d-none');
                 if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
             }
 
@@ -5487,13 +5550,20 @@
                 form.set('scan', scan, scan.name);
                 form.set('batch_key', batchState.key);
                 let url = config.pagesUrl;
+                // What reading this page still takes (sets Scan all's pace too): only
+                // reading a Smoke test result, outlining it again from moved markers,
+                // or the whole page.
+                const scanKind = tested ? (detectionIsCurrent() ? 'read' : 'reoutline') : 'full';
+                // Scan while I align: the page is read as soon as it is queued.
+                const readNow = batchReadMode === 'background';
                 if (tested) {
                     url = config.pageQueueUrl.replace('__PAGE__', String(tested.id));
+                    if (readNow && scanKind === 'read') form.set('read', '1');
                 } else {
                     form.set('document_template_id', String(config.templateId));
                     form.set('geometry_json', JSON.stringify(item.geometry));
                     form.set('page', await canvasBlob(marker.canvas), 'page.png');
-                    form.set('defer_scan', '1');
+                    if (!readNow) form.set('defer_scan', '1');
                 }
 
                 const response = await fetch(url, {
@@ -5513,16 +5583,25 @@
                     throw new Error(responseErrorMessage(response, payload));
                 }
 
-                // A page queued before in its place (Update queued document) is let go.
+                // A page queued before in its place (Update queued document, or a
+                // page read before and queued again) is let go, its reading with it.
                 if (item.pageId && item.pageId !== payload.id) cancelPageOnServer(item.pageId);
                 item.pageId = payload.id;
                 item.page = payload;
-                // Not sent to the worker yet (Scan all sends it).
-                item.sentToScan = false;
+                item.error = null;
                 item.workspaceScanPath = payload.workspaceScanPath || null;
-                // What Scan all still has to do on this page (sets its pace too).
-                item.scanKind = tested ? (detectionIsCurrent() ? 'read' : 'reoutline') : 'full';
-                item.status = 'saved';
+                item.scanKind = scanKind;
+                // Sent to the worker already (Scan while I align), or not yet (Scan all sends it).
+                const sent = readNow && ['queued', 'detecting', 'reading'].includes(payload.status);
+                item.sentToScan = sent;
+                item.status = sent ? 'scanning' : 'saved';
+                if (sent) {
+                    item.sentAt = Date.now();
+                    watchBatchReading();
+                } else if (readNow) {
+                    // A Smoke test result to outline again from moved markers: sent now.
+                    sendBatchPageToRead(item);
+                }
                 renderBatchQueueBanner();
 
                 // Move to next unsaved document if any
@@ -5754,7 +5833,8 @@
                 if (!run.cancelled) {
                     showOcrError(error.message || 'Batch scan failed.');
                 }
-                batchState.items.forEach((it) => {
+                // Its own pages wait again; pages read in the background carry on.
+                itemsToScan.forEach((it) => {
                     if (it.status === 'scanning') it.status = 'saved';
                 });
                 batchState.readingAll = false;
@@ -5772,6 +5852,235 @@
                 renderBatchQueueBanner();
             }
         }
+
+        // ------------------------------------------- when a batch's pages are read
+        // Scan while I align (the default): each page is sent to the worker as
+        // it is queued, and watched here in the background; once every page is
+        // queued, Verify opens the records as they are read. Scan all at the end:
+        // pages wait in the queue until Scan all reads them, as before.
+
+        const BATCH_READ_MODE_KEY = 'crms.scan.batchReading';
+        let batchReadMode = 'background';
+        try {
+            if (window.localStorage.getItem(BATCH_READ_MODE_KEY) === 'end') batchReadMode = 'end';
+        } catch {
+            // Not kept (a private window): while aligning is the default.
+        }
+
+        function setBatchReadMode(mode) {
+            batchReadMode = mode === 'end' ? 'end' : 'background';
+            try {
+                window.localStorage.setItem(BATCH_READ_MODE_KEY, batchReadMode);
+            } catch {
+                // Not kept: this page still uses it.
+            }
+            showBatchReadMode();
+            renderBatchQueueBanner();
+        }
+
+        function showBatchReadMode() {
+            el('batchReadModeLabel').textContent = batchReadMode === 'end' ? 'Scan all at the end' : 'Scan while I align';
+            document.querySelectorAll('[data-read-mode]').forEach((option) => {
+                const active = option.dataset.readMode === batchReadMode;
+                option.classList.toggle('active', active);
+                option.setAttribute('aria-current', active ? 'true' : 'false');
+            });
+        }
+        document.querySelectorAll('[data-read-mode]').forEach((option) => {
+            option.addEventListener('click', () => setBatchReadMode(option.dataset.readMode));
+        });
+        showBatchReadMode();
+
+        /** Pages sent to the worker in the background and not finished yet. */
+        function batchPagesInFlight() {
+            return batchState.active && !batchState.readingAll
+                ? batchState.items.filter((it) => it.status === 'scanning' && it.sentToScan).length
+                : 0;
+        }
+
+        /** Queued pages not sent to the worker yet (queued at the end, or before a mode change). */
+        const unsentBatchPages = () => batchState.items.filter((it) => it.pageId && it.status === 'saved');
+
+        /** What the big button in Align does in a batch now, and its label. */
+        function batchScanAction() {
+            const queuedAll = batchState.items.every((it) => it.status !== 'pending' && it.status !== 'saving'
+                && !(it.status === 'failed' && !it.pageId));
+            if (batchReadMode === 'end') {
+                const toRead = batchPagesToRead().length;
+                if (queuedAll && toRead > 0) {
+                    return {
+                        kind: 'scan-all',
+                        label: toRead === batchState.items.length ? `Scan All Queued Documents (${toRead})` : `Scan Queued Pages (${toRead})`,
+                        run: runBatchScanAll,
+                    };
+                }
+            } else {
+                const unsent = unsentBatchPages().length;
+                if (unsent > 0) return { kind: 'scan-remaining', label: `Scan Remaining Pages (${unsent})`, run: sendRemainingToRead };
+            }
+            if (!queuedAll) return { kind: 'none', label: '', run: async () => {} };
+            const records = batchRecords().filter((record) => !recordDone(record));
+            const ready = records.filter((record) => recordState(record.members) === 'ready').length;
+            if (records.length === 0) return { kind: 'none', label: '', run: async () => {} };
+            return {
+                kind: 'verify',
+                label: ready === records.length ? `Verify (${records.length} record${records.length === 1 ? '' : 's'})` : `Verify (${ready} of ${records.length} read)`,
+                run: startBatchVerify,
+            };
+        }
+
+        /** Every page is queued: on to Verify (waiting for the first record, if it is still being read). */
+        async function startBatchVerify() {
+            if (scanInProgress) return;
+            if (batchAutoSnap) await batchAutoSnap;
+            keepCurrentAlignment();
+            await continueBatch();
+        }
+
+        /**
+         * Send a queued page to the worker: read what Smoke test found, or outline
+         * it again from its markers, or the whole page. Failing alone, it is
+         * marked failed and the batch goes on.
+         */
+        async function sendBatchPageToRead(item) {
+            const read = item.scanKind === 'read' && item.page?.status === 'detected';
+            try {
+                const response = await fetch(read ? item.page.readUrl : config.pageGeometryUrl.replace('__PAGE__', String(item.pageId)), {
+                    method: read ? 'POST' : 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': config.csrf,
+                        'X-Requested-With': 'XMLHttpRequest',
+                        Accept: 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(read ? {} : {
+                        geometry_json: JSON.stringify(item.geometry ?? item.page?.geometry ?? currentGeometry()),
+                    }),
+                });
+                const payload = (response.headers.get('content-type') || '').includes('application/json')
+                    ? await response.json()
+                    : null;
+                if (!response.ok || !payload?.statusUrl) throw new Error(responseErrorMessage(response, payload));
+                item.page = payload;
+                item.sentToScan = true;
+                item.sentAt = Date.now();
+                item.status = payload.status === 'ready' ? 'ready' : 'scanning';
+                watchBatchReading();
+            } catch (error) {
+                item.status = 'failed';
+                item.error = error.message || 'This page could not be sent to be read.';
+                item.sentToScan = false;
+            }
+            renderBatchQueueBanner();
+        }
+
+        /** Scan remaining: every page waiting in the queue goes to the worker. */
+        async function sendRemainingToRead() {
+            const pages = unsentBatchPages();
+            pages.forEach((item) => {
+                item.status = 'scanning';
+            });
+            renderBatchQueueBanner();
+            for (const item of pages) {
+                // eslint-disable-next-line no-await-in-loop
+                await sendBatchPageToRead(item);
+            }
+        }
+
+        // The pages read in the background are looked at in the order they were
+        // sent (the worker takes them in that order): the first two, now and then.
+        let batchReadingTimer = null;
+        let batchReadingBusy = false;
+
+        function watchBatchReading() {
+            if (batchReadingTimer !== null) return;
+            batchReadingTimer = window.setInterval(pollBatchReading, 1500);
+        }
+
+        async function pollBatchReading() {
+            if (batchReadingBusy || batchState.readingAll) return;
+            const inFlight = batchState.items
+                .filter((it) => it.status === 'scanning' && it.sentToScan && it.page?.statusUrl)
+                .sort((a, b) => (a.sentAt ?? 0) - (b.sentAt ?? 0));
+            if (!batchState.active || inFlight.length === 0) {
+                window.clearInterval(batchReadingTimer);
+                batchReadingTimer = null;
+                return;
+            }
+            batchReadingBusy = true;
+            let changed = false;
+            try {
+                for (const item of inFlight.slice(0, 2)) {
+                    const asked = item.page;
+                    let next = null;
+                    try {
+                        // eslint-disable-next-line no-await-in-loop
+                        const response = await fetch(asked.statusUrl, {
+                            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                            credentials: 'same-origin',
+                            signal: AbortSignal.timeout?.(10000),
+                        });
+                        // eslint-disable-next-line no-await-in-loop
+                        next = response.ok ? await response.json() : null;
+                        if (!response.ok && response.status === 404) next = { status: 'failed', error: 'This page is no longer on the server.' };
+                    } catch (error) {
+                        console.warn(`The reading of ${item.name} could not be checked:`, error);
+                    }
+                    // Queued again (or removed) meanwhile: that answer is about the page let go.
+                    if (!next || item.page !== asked || item.status !== 'scanning') continue;
+                    if (next.status === 'ready') {
+                        item.page = next;
+                        item.status = 'ready';
+                        changed = true;
+                    } else if (next.status === 'failed') {
+                        item.status = 'failed';
+                        item.error = next.error || 'This page could not be read.';
+                        item.sentToScan = false;
+                        changed = true;
+                    } else if (next.status === 'cancelled') {
+                        // Let go on the server without a word from here: it waits to be sent again.
+                        item.status = 'saved';
+                        item.sentToScan = false;
+                        changed = true;
+                    } else {
+                        item.page = { ...next, readUrl: next.readUrl ?? asked.readUrl };
+                    }
+                }
+            } finally {
+                batchReadingBusy = false;
+            }
+            if (!changed) return;
+            renderBatchQueueBanner();
+            if (batchWaiting) await continueBatch(batchWaiting.after);
+        }
+
+        // Waiting for the next record to be read (null: not waiting).
+        let batchWaiting = null;
+
+        function showBatchWait(after) {
+            batchWaiting = { after };
+            const inFlight = batchPagesInFlight();
+            el('batchWaitText').textContent = `It opens as soon as its pages are read (${inFlight} page${inFlight === 1 ? '' : 's'} still being read).`;
+            el('batchWaitAlignBtn').classList.toggle('d-none', firstAlignableIndex() === -1);
+            window.bootstrap.Modal.getOrCreateInstance(el('batchWaitModal')).show();
+            watchBatchReading();
+        }
+
+        function closeBatchWait() {
+            if (!batchWaiting) return;
+            batchWaiting = null;
+            window.bootstrap.Modal.getInstance(el('batchWaitModal'))?.hide();
+        }
+
+        el('batchWaitStopBtn').addEventListener('click', () => closeBatchWait());
+        el('batchWaitAlignBtn').addEventListener('click', async () => {
+            closeBatchWait();
+            const index = firstAlignableIndex();
+            if (index === -1) return;
+            leaveBatchVerify();
+            await openBatchQueueItem(index);
+        });
 
         /** A page Scan all could not read: marked failed with the reason, and the run goes on. */
         function failBatchEntry(entry, message) {
@@ -6767,9 +7076,11 @@ Cancel opens only the first file.`)) {
                 readPhase(
                     15, 18, scanSeconds.wait,
                     'Waiting for the line detector',
-                    waitedMs > 20000
-                        ? 'No background worker has picked this page up. Run php artisan queue:work (serve.ps1 does it for you).'
-                        : 'The page is queued for line detection.',
+                    batchPagesInFlight() > 0
+                        ? `Waiting behind ${batchPagesInFlight()} page${batchPagesInFlight() === 1 ? '' : 's'} of the batch being read: the worker takes pages in order.`
+                        : (waitedMs > 20000
+                            ? 'No background worker has picked this page up. Run php artisan queue:work (serve.ps1 does it for you).'
+                            : 'The page is queued for line detection.'),
                     mode === 'detect'
                         ? pageSeconds('detect', scanSeconds) + (detectPhase?.after ?? 0)
                         : pageSeconds(scanKind, scanSeconds),
@@ -7255,9 +7566,9 @@ Cancel opens only the first file.`)) {
 
         el('scanNowBtn').addEventListener('click', async () => {
             if (scanInProgress) return;
-            // In a batch, this button is Scan all (Align is the only step that shows it).
+            // In a batch, this button is Scan all, Scan remaining or Verify (see batchScanAction).
             if (batchState.active) {
-                await runBatchScanAll();
+                await batchScanAction().run();
                 return;
             }
 
@@ -11295,6 +11606,13 @@ Cancel opens only the first file.`)) {
         // allowDuplicate, after the same checks again.
         async function submitRecord({ allowMissing = false, allowDuplicate = false } = {}) {
             if (recordSubmitting) return;
+            // A batch record saved (or left out) already, still on screen while the
+            // next one is read: it is not sent twice.
+            const shownBatchItem = batchState.active ? batchState.items[batchState.currentIndex] : null;
+            if (shownBatchItem && pageDone(shownBatchItem)) {
+                showValidationSubmitError('This record is saved already. The next one opens as soon as it is read, or open another from the queue.');
+                return;
+            }
             // Continue anyway was chosen when the scan matched a saved record.
             allowDuplicate = allowDuplicate || existingRecordAccepted;
             lastSubmitChoices = { allowMissing, allowDuplicate };
