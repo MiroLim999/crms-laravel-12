@@ -5,6 +5,7 @@ import {
     buildReviewModel,
     cellProblem,
     clampSplit,
+    combineTables,
     columnType,
     csvSafe,
     exportFileName,
@@ -147,3 +148,18 @@ test('clipboard text becomes rows and cells', () => {
     assert.deepEqual(parseClipboard(''), []);
 });
 
+
+test('a batch downloads as one table: each row says its record and document', () => {
+    const table = combineTables([
+        { recordId: 7, label: 'BIRTHS.pdf · pages 1–2', table: [['Row', 'Name', 'Sex'], ['01', 'Ana', 'F'], ['02', 'Ben', 'M']] },
+        { recordId: 8, label: 'BIRTHS.pdf · page 3', table: [['Row', 'Name', 'Father'], ['01', 'Cara', 'Jose']] },
+    ]);
+
+    assert.deepEqual(table, [
+        ['Record ID', 'Document', 'Row', 'Name', 'Sex', 'Father'],
+        ['7', 'BIRTHS.pdf · pages 1–2', '01', 'Ana', 'F', ''],
+        ['7', 'BIRTHS.pdf · pages 1–2', '02', 'Ben', 'M', ''],
+        ['8', 'BIRTHS.pdf · page 3', '01', 'Cara', '', 'Jose'],
+    ]);
+    assert.deepEqual(combineTables([]), [['Record ID', 'Document']]);
+});

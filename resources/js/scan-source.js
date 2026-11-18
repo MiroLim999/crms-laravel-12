@@ -221,6 +221,18 @@ export function nextUnsavedPage(current, pageCount, saved) {
     return null;
 }
 
+/**
+ * The first page of the record a page of a file is saved in, the same in
+ * single and batch mode: a page is its own record, unless the layout has a
+ * page 2 (`pairs`), when pages go two at a time like an open book (1–2,
+ * 3–4) and a lone last page is a record of its own.
+ */
+export function recordLeadPage(pageNumber, pageCount, pairs) {
+    const page = Math.max(1, Math.trunc(Number(pageNumber)) || 1);
+    if (!pairs || !(pageCount > 1)) return page;
+    return page % 2 === 1 ? page : page - 1;
+}
+
 /** Page numbers as short runs: [1, 2, 3, 5, 7, 8] -> "1–3, 5 and 7–8". */
 export function pageRanges(pages) {
     const runs = [];

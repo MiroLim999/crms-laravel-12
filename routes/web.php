@@ -101,6 +101,9 @@ Route::middleware('auth')->group(function () {
             ->name('documents.pages.reoutline');
         Route::post('documents/pages/{page}/cancel', [DocumentPageController::class, 'cancel'])
             ->name('documents.pages.cancel');
+        // Batch: a page Smoke test went over joins the queue as it is, with its file.
+        Route::post('documents/pages/{page}/queue', [DocumentPageController::class, 'queue'])
+            ->name('documents.pages.queue');
         Route::get('documents/pages/{page}/lines/{line}/crop', [DocumentPageController::class, 'crop'])
             ->scopeBindings()
             ->name('documents.pages.lines.crop');

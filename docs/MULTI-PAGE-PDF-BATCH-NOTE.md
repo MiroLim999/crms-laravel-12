@@ -1,5 +1,15 @@
 # Multi-page PDFs in batch mode (note for the `gono` branch)
 
+> **Status (review-export-page-creation):** done in `workspace.blade.php`. Batch
+> mode now saves pages as single mode does: a page is its own record, or a pair
+> (1–2, 3–4) when the layout has a page 2 (`recordLeadPage` in `scan-source.js`).
+> A pair is verified side by side as one document (`verifyDoc`). Each file is
+> fingerprinted, pages already saved or already queued are left out, and records
+> keep `source_*`. Every record goes Verify → Review & Export → Save. A page
+> Smoke test went over is queued as it is (`documents.pages.queue`), so Scan all
+> only reads it. The batch ends on a summary with **Download all**
+> (`combineTables` in `review-table.js`). The plan below is kept for history.
+
 Real LGU scans arrive as one PDF per register book, many pages each. `main` now
 reads such a PDF one page at a time in single mode, and saves each page as its
 own record. Batch mode on `gono` still opens only page 1 of each PDF. This note

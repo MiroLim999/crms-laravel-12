@@ -163,6 +163,38 @@ export function toSheetData(table) {
     })));
 }
 
+/**
+ * A batch's records as one table, for "Download all": each part is one
+ * record's table ([header, ...rows], as ReviewTable.exportTable() gives it),
+ * with its record number and the document it was read from in front of every
+ * row. Columns are joined by their header, in the order they first appear;
+ * a record without a column leaves its cells empty.
+ *
+ * @param {{ recordId?: number|string|null, label?: string, table: string[][] }[]} parts
+ */
+export function combineTables(parts) {
+    const headers = [];
+    const seen = new Set();
+    parts.forEach(({ table }) => (table?.[0] ?? []).forEach((header) => {
+        const key = String(header);
+        if (seen.has(key)) return;
+        seen.add(key);
+        headers.push(key);
+    }));
+
+    const rows = parts.flatMap(({ recordId = null, label = '', table }) => {
+        const [header = [], ...body] = table ?? [];
+        const position = new Map(header.map((name, index) => [String(name), index]));
+        return body.map((row) => [
+            recordId === null ? '' : String(recordId),
+            String(label ?? ''),
+            ...headers.map((name) => (position.has(name) ? String(row[position.get(name)] ?? '') : '')),
+        ]);
+    });
+
+    return [['Record ID', 'Document', ...headers], ...rows];
+}
+
 /** "births-2splitpages-2026-11-15", safe for a file name. */
 export function exportFileName(...parts) {
     const slug = parts

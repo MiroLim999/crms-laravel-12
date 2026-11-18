@@ -667,7 +667,7 @@
 
                         {{-- A document of two pages (a register's left and right) is one document: both
                              pages sit side by side in the one scroll container, so one set of scrollbars
-                             and one zoom move them together. Click the other page to verify it instead. --}}
+                             and one zoom move them together. Both are verified where they are; a click zooms in on one. --}}
                         <div class="doc-viewport validation-doc-viewport" id="validationDocViewport">
                             <div class="doc-spread" id="validationSpread">
                                 <div class="doc-spread__page doc-spread__page--main" id="validationMainPage">
@@ -679,16 +679,11 @@
                                 </div>
 
                                 <div class="doc-spread__page doc-spread__page--companion validation-companion d-none"
-                                     id="validationCompanionPage" title="Verify this page instead">
+                                     id="validationCompanionPage">
                                     <div class="doc-spread__label" id="validationCompanionLabel"></div>
                                     <div class="doc-stage" id="validationCompanionStage">
                                         <canvas id="validationCompanionCanvas"></canvas>
                                         <div class="field-overlay validation-field-overlay" id="validationCompanionOverlay"></div>
-                                        <button type="button" class="btn btn-primary doc-spread__switch" id="validationCompanionSwitch"
-                                                aria-label="Verify this page instead">
-                                            <i class="icon-base bx bx-edit-alt me-1" aria-hidden="true"></i>
-                                            <span>Verify this page</span>
-                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -767,12 +762,17 @@
                                 <button class="btn btn-outline-secondary" type="button" id="backToMark">
                                     <i class="icon-base bx bx-chevron-left icon-sm me-1"></i> Back to marking
                                 </button>
-                                {{-- Batch mode saves from here; one document goes on to Review & Export. --}}
+                                {{-- Not shown: every document, one at a time or queued, is saved from Review & Export.
+                                     It stays as the form's submit button. --}}
                                 <button class="btn btn-primary d-none" type="submit" id="submitBtn" disabled>
                                     <i class="icon-base bx bx-check-shield icon-sm me-1"></i>
                                     {{-- One inline span: .btn is a flex container, which drops the
                                     spaces between separate text and element children. --}}
                                     <span><span id="submitLabelHead">Submit</span> <span id="submitVerifiedCount">0</span> verified</span>
+                                </button>
+                                {{-- A batch only: leave this record out (a blank page, a cover) and go on. --}}
+                                <button class="btn btn-label-danger d-none" type="button" id="batchSkipRecordBtn">
+                                    <i class="icon-base bx bx-skip-next icon-sm me-1" aria-hidden="true"></i>Skip record
                                 </button>
                                 <button class="btn btn-primary" type="button" id="reviewExportBtn">
                                     <span>Review &amp; export</span>
@@ -843,9 +843,13 @@
                             <button class="btn btn-outline-secondary" type="button" id="backToVerify">
                                 <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i> Back to verify
                             </button>
+                            <button class="btn btn-label-danger d-none" type="button" id="reviewSkipRecordBtn">
+                                <i class="icon-base bx bx-skip-next icon-sm me-1" aria-hidden="true"></i>Skip record
+                            </button>
                             <button class="btn btn-primary" type="button" id="reviewSaveBtn" disabled>
                                 <i class="icon-base bx bx-check-shield icon-sm me-1" aria-hidden="true"></i>
-                                <span>Save record</span>
+                                {{-- A batch says where saving goes next ("Save & next (3/7)"). --}}
+                                <span id="reviewSaveLabel">Save record</span>
                             </button>
                         </div>
                     </footer>
@@ -953,6 +957,10 @@
                         <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal"
                             id="duplicatePageBackBtn">
                             Go back
+                        </button>
+                        {{-- A batch only: leave this record out (the saved one stays) and go on. --}}
+                        <button type="button" class="btn btn-label-danger d-none" id="duplicatePageSkipBtn">
+                            Skip this record
                         </button>
                         <button type="button" class="btn btn-warning" id="confirmDuplicatePageBtn">
                             Save again
@@ -1087,12 +1095,85 @@
                     <ul class="batch-delete-notes" id="batchDocumentNotes"></ul>
 
                     <div class="leave-scan-modal__actions">
-                        <button type="button" class="btn btn-secondary text-nowrap" id="batchDocCancelBtn" data-bs-dismiss="modal">
+                        <button type="button" class="btn btn-label-secondary text-nowrap" id="batchDocCancelBtn" data-bs-dismiss="modal">
                             Keep it
                         </button>
                         <button type="button" class="btn btn-danger text-nowrap" id="confirmDeleteBatchDocBtn">
                             <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>Remove from queue
                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- Files just added to a batch that were left out, and a way to add the duplicates after all. --}}
+    <div class="modal fade" id="batchIntakeModal" tabindex="-1" aria-labelledby="batchIntakeModalTitle"
+        aria-describedby="batchIntakeSummary" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog" style="max-inline-size: min(34rem, calc(100% - 2rem));">
+            <div class="modal-content leave-scan-modal">
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-warning" aria-hidden="true">
+                        <i class="icon-base bx bx-copy"></i>
+                    </span>
+                    <h5 class="modal-title" id="batchIntakeModalTitle">Some files were left out</h5>
+                    <p class="leave-scan-modal__text" id="batchIntakeSummary"></p>
+
+                    <div class="batch-intake" id="batchIntakeGroups"></div>
+                    <p class="batch-intake__note d-none" id="batchIntakeAddNote">
+                        Added anyway, each is still checked when it is saved: you choose to save it again or skip it.
+                    </p>
+
+                    <div class="leave-scan-modal__actions">
+                        <button type="button" class="btn btn-label-secondary text-nowrap" id="batchIntakeAddBtn">
+                            Add them anyway
+                        </button>
+                        {{-- Closes the window from the script, so it can stay the main button. --}}
+                        <button type="button" class="btn btn-primary text-nowrap" id="batchIntakeOkBtn">
+                            OK
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- The end of a batch: what was saved, each record's link, and every record's table as one download. --}}
+    <div class="modal fade" id="batchSummaryModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"
+        aria-labelledby="batchSummaryModalTitle" aria-describedby="batchSummaryModalDescription" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog" style="max-inline-size: min(32rem, calc(100% - 2rem));">
+            <div class="modal-content leave-scan-modal">
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-success" aria-hidden="true">
+                        <i class="icon-base bx bx-check-shield"></i>
+                    </span>
+                    <h5 class="modal-title" id="batchSummaryModalTitle">Batch complete</h5>
+                    <p class="leave-scan-modal__text" id="batchSummaryModalDescription"></p>
+
+                    <ul class="batch-summary-list" id="batchSummaryList"></ul>
+
+                    <div class="leave-scan-modal__actions">
+                        <div class="dropdown" id="batchSummaryDownload">
+                            <button type="button" class="btn btn-outline-primary dropdown-toggle text-nowrap" id="batchSummaryDownloadBtn"
+                                    data-bs-toggle="dropdown" aria-expanded="false">
+                                <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                                <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>Download all
+                            </button>
+                            <ul class="dropdown-menu" aria-labelledby="batchSummaryDownloadBtn">
+                                <li>
+                                    <button type="button" class="dropdown-item" id="batchSummaryCsv">
+                                        <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)
+                                    </button>
+                                </li>
+                                <li>
+                                    <button type="button" class="dropdown-item" id="batchSummaryXlsx">
+                                        <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)
+                                    </button>
+                                </li>
+                            </ul>
+                        </div>
+                        <a href="#" class="btn btn-label-secondary text-nowrap" id="batchSummaryRecordsBtn">Records archive</a>
+                        <a href="#" class="btn btn-primary text-nowrap" id="batchSummaryRestartBtn">Scan another batch</a>
                     </div>
                 </div>
             </div>
@@ -1210,6 +1291,7 @@
         import {
             attachSplit,
             buildReviewModel,
+            combineTables,
             downloadCsv,
             downloadXlsx,
             exportFileName,
@@ -1223,7 +1305,9 @@
             MAX_SCAN_BYTES,
             nextUnsavedPage,
             pageRanges,
+            pageFileName,
             pdfPageFile,
+            recordLeadPage,
         } from '{{ Vite::asset('resources/js/scan-source.js') }}';
         import {
             pageSeconds,
@@ -1260,6 +1344,11 @@
             pageRowsUrl: @json(route('documents.pages.rows', ['page' => '__PAGE__'])),
         lineRedrawUrl: @json(route('documents.pages.lines.redraw', ['page' => '__PAGE__', 'line' => '__LINE__'])),
             pageCancelUrl: @json(route('documents.pages.cancel', ['page' => '__PAGE__'])),
+            // Batch: queue a page Smoke test went over, as it is.
+            pageQueueUrl: @json(route('documents.pages.queue', ['page' => '__PAGE__'])),
+            // A finished batch: the archive, or this workspace again for the next one.
+            recordsUrl: @json(route('records.index')),
+            restartUrl: @json(route('documents.workspace', ['type' => $docType->value])),
             // The pages of one file already saved; 64 zeros stand in for its fingerprint.
             sourcePagesUrl: @json(route('documents.sources.pages', ['hash' => str_repeat('0', 64)])),
             csrf: @json(csrf_token()),
@@ -3241,8 +3330,10 @@
                 if (name === 'mark') {
                     const toolbar = document.querySelector('#step-mark .marker-toolbar');
                     toolbar?.parentNode?.insertBefore(batchBanner, toolbar);
-                } else if (name === 'verify') {
-                    const verifyHeader = document.querySelector('#step-verify .validation-document-pane .validation-pane__header');
+                } else if (name === 'verify' || name === 'review') {
+                    // Above the scan, in Verify and in Review & Export (setReviewMode
+                    // has already moved Verify's document pane where it belongs).
+                    const verifyHeader = document.querySelector('.validation-document-pane .validation-pane__header');
                     verifyHeader?.parentNode?.insertBefore(batchBanner, verifyHeader);
                 }
             }
@@ -3673,7 +3764,7 @@
                 companionPreview.clear();
                 try {
                     if (tested) await companionMarker.loadFromUrl(tested.imageUrl);
-                    else await companionMarker.load(companionSource, { page: mate ? 1 : other });
+                    else await companionMarker.load(companionSource, { page: mate ? (mate.item.pageNo ?? 1) : other });
                 } catch (error) {
                     console.warn(`Page ${other} could not be shown beside the page:`, error);
                     companionPage = null;
@@ -3892,7 +3983,11 @@
             active: false,
             key: null,
             phase: 'idle', // 'queuing' | 'scanning' | 'verifying' | 'done'
-            items: [],     // { file, name, status, pageId, page, workspaceScanPath, recordUrl, error, boxes, rows, tilts }
+            // One page each: { file, name, group (its file), record (its record), pageNo, pageTotal,
+            // sourceName, sourceHash, status, pageId, page, workspaceScanPath, scanKind, geometry,
+            // recordUrl, recordId, error, boxes, rows, tilts, detected, verifyDraft, reviewExtras,
+            // existingAccepted, exportTable, sentToScan }
+            items: [],
             currentIndex: 0,
         };
 
@@ -3904,27 +3999,51 @@
         const dropzoneFolderBtnEl = document.getElementById('dropzoneFolderButton');
         const scanFolderInput = document.getElementById('scanFolder');
 
-        uploadModeRadios.forEach((radio) => {
-            radio.addEventListener('change', (e) => {
-                uploadMode = e.target.value;
-                uploadModeCards.forEach((card) => {
-                    card.classList.toggle('is-active', card.dataset.modeCard === uploadMode);
-                });
-                if (uploadMode === 'batch') {
-                    scanFileInput.setAttribute('multiple', 'multiple');
-                    if (dropzoneTitleEl) dropzoneTitleEl.textContent = 'Drop batch scans or a folder here';
-                    if (dropzoneButtonEl) dropzoneButtonEl.textContent = 'Choose files';
-                    if (dropzoneFolderBtnEl) dropzoneFolderBtnEl.classList.remove('d-none');
-                    if (uploadModeHintEl) uploadModeHintEl.textContent = 'Upload files or a folder to /documents/workspace, scan all, then validate';
-                } else {
-                    scanFileInput.removeAttribute('multiple');
-                    if (dropzoneTitleEl) dropzoneTitleEl.textContent = 'Drop the scan here';
-                    if (dropzoneButtonEl) dropzoneButtonEl.textContent = 'Choose file';
-                    if (dropzoneFolderBtnEl) dropzoneFolderBtnEl.classList.add('d-none');
-                    if (uploadModeHintEl) uploadModeHintEl.textContent = 'Upload and process one document at a time';
-                }
+        // The mode chosen last, in this browser only (a convenience: none is the default).
+        const UPLOAD_MODE_KEY = 'crms.scan.uploadMode';
+
+        /** The drop area's words for the mode (also put back after files are prepared). */
+        function showUploadModeText() {
+            const batch = uploadMode === 'batch';
+            if (dropzoneTitleEl) dropzoneTitleEl.textContent = batch ? 'Drop scans or a folder here' : 'Drop the scan here';
+            if (dropzoneButtonEl) dropzoneButtonEl.textContent = batch ? 'Choose files' : 'Choose file';
+            if (uploadModeHintEl) {
+                uploadModeHintEl.textContent = batch
+                    ? 'Many files or a folder: align each page, scan them all, then review and save each record'
+                    : 'Upload and process one document at a time';
+            }
+        }
+
+        function setUploadMode(mode, { remember = true } = {}) {
+            uploadMode = mode === 'batch' ? 'batch' : 'single';
+            uploadModeRadios.forEach((radio) => {
+                radio.checked = radio.value === uploadMode;
             });
+            uploadModeCards.forEach((card) => {
+                card.classList.toggle('is-active', card.dataset.modeCard === uploadMode);
+            });
+            if (uploadMode === 'batch') scanFileInput.setAttribute('multiple', 'multiple');
+            else scanFileInput.removeAttribute('multiple');
+            dropzoneFolderBtnEl?.classList.toggle('d-none', uploadMode !== 'batch');
+            showUploadModeText();
+            if (!remember) return;
+            try {
+                window.localStorage.setItem(UPLOAD_MODE_KEY, uploadMode);
+            } catch {
+                // Not kept (a private window, or storage turned off): single is the default.
+            }
+        }
+
+        uploadModeRadios.forEach((radio) => {
+            radio.addEventListener('change', (event) => setUploadMode(event.target.value));
         });
+        try {
+            if (uploadModeRadios.length > 0 && window.localStorage.getItem(UPLOAD_MODE_KEY) === 'batch') {
+                setUploadMode('batch', { remember: false });
+            }
+        } catch {
+            // Storage unavailable: the page starts in single mode.
+        }
 
         dropzoneFolderBtnEl?.addEventListener('click', (event) => {
             event.preventDefault();
@@ -3960,8 +4079,52 @@
 
         /** One status for a document: what still needs attention wins. */
         function groupStatus(group) {
-            const order = ['failed', 'saving', 'scanning', 'verifying', 'checked', 'pending', 'saved', 'ready', 'rejected', 'imported'];
+            const order = ['failed', 'saving', 'scanning', 'verifying', 'pending', 'saved', 'ready', 'rejected', 'imported'];
             return order.find((status) => group.items.some((it) => it.status === status)) ?? 'pending';
+        }
+
+        /**
+         * The queue's records, in queue order, each with its pages in page order.
+         * Pages go into records as in single mode (see recordLeadPage): a page
+         * alone, or a pair (1–2, 3–4) when the layout has a page 2.
+         */
+        function batchRecords() {
+            const records = [];
+            const byKey = new Map();
+            batchState.items.forEach((item) => {
+                const key = item.record ?? item;
+                let record = byKey.get(key);
+                if (!record) {
+                    record = { key, members: [] };
+                    byKey.set(key, record);
+                    records.push(record);
+                }
+                record.members.push(item);
+            });
+            records.forEach((record) => record.members.sort((a, b) => (a.pageNo ?? 1) - (b.pageNo ?? 1)));
+            return records;
+        }
+
+        function recordOf(item) {
+            return batchRecords().find((record) => record.members.includes(item)) ?? { key: item, members: [item] };
+        }
+
+        const recordDone = (record) => record.members.every((it) => ['imported', 'rejected'].includes(it.status));
+
+        /** "BIRTHS-1995.pdf · pages 1–2", "BIRTHS-1995.pdf · page 3", or the file's name. */
+        function recordLabel(record) {
+            const [first] = record.members;
+            const name = first.sourceName ?? first.name;
+            if (!(first.pageTotal > 1)) return name;
+            const pages = record.members.map((it) => it.pageNo);
+            return `${name} · page${pages.length > 1 ? 's' : ''} ${pageRanges(pages)}`;
+        }
+
+        /** The first record (from `after` on, then from the start) still to save, or null. */
+        function nextOpenRecord(after = null) {
+            const records = batchRecords().filter((record) => !recordDone(record));
+            const start = after === null ? -1 : batchState.items.indexOf(after);
+            return records.find((record) => batchState.items.indexOf(record.members[0]) > start) ?? records[0] ?? null;
         }
 
         function renderBatchQueueBanner() {
@@ -3991,14 +4154,6 @@
             const readyCount = batchState.items.filter((it) => ['ready', 'verifying', 'imported', 'rejected'].includes(it.status)).length;
             // Pages are what is aligned and scanned one by one; documents are what is imported.
             const unit = batchGroups().length === total ? 'document' : 'page';
-
-            const stageOrder = ['queuing', 'scanning', 'verifying'];
-            const activeStageIdx = stageOrder.indexOf(batchState.phase);
-            banner.querySelectorAll('[data-batch-stage]').forEach((stageNode) => {
-                const idx = stageOrder.indexOf(stageNode.dataset.batchStage);
-                stageNode.classList.toggle('is-active', idx === activeStageIdx);
-                stageNode.classList.toggle('is-complete', idx < activeStageIdx);
-            });
 
             const updateProgress = (pct) => {
                 if (progressBar) progressBar.style.width = `${pct}%`;
@@ -4036,15 +4191,17 @@
                 if (addMoreBtn) addMoreBtn.classList.add('d-none');
                 if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
                 if (scanNowBtn) scanNowBtn.classList.remove('d-none');
-            } else if (batchState.phase === 'verifying') {
-                // A PDF of many pages is one document: it is imported once, all its pages together.
-                const documents = batchGroups();
-                const importedDocuments = documents.filter((group) => (
-                    group.items.every((it) => ['imported', 'rejected'].includes(it.status))
-                )).length;
-                if (phaseTitle) phaseTitle.textContent = `Validate & import each document (${importedDocuments} of ${documents.length} imported)`;
-                if (counter) counter.textContent = `${importedDocuments} / ${documents.length} imported`;
-                updateProgress(Math.round((importedDocuments / documents.length) * 100));
+            } else if (batchState.phase === 'verifying' || batchState.phase === 'done') {
+                // Saved a record at a time, as in single mode: a page, or a pair of pages.
+                const records = batchRecords();
+                const finished = records.filter(recordDone).length;
+                if (phaseTitle) {
+                    phaseTitle.textContent = batchState.phase === 'done'
+                        ? 'Batch complete'
+                        : `Verify, review & save each record (${finished} of ${records.length} done)`;
+                }
+                if (counter) counter.textContent = `${finished} / ${records.length} record${records.length === 1 ? '' : 's'} done`;
+                updateProgress(records.length > 0 ? Math.round((finished / records.length) * 100) : 100);
                 if (addMoreBtn) addMoreBtn.classList.add('d-none');
                 if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
             }
@@ -4054,10 +4211,17 @@
                 const groups = batchGroups();
                 groups.forEach((group, index) => {
                     const first = group.items[0];
+                    // The file's own name, and its pages beside it (never cut off with the name):
+                    // "2 pages", or "2 of 5 pages" when some were left out as saved already.
+                    const fileName = first.sourceName ?? first.name;
+                    const fileTotal = first.pageTotal ?? 1;
+                    const pagesText = fileTotal > 1
+                        ? (group.items.length < fileTotal ? `${group.items.length} of ${fileTotal} pages` : `${fileTotal} pages`)
+                        : '';
                     const item = {
                         ...first,
                         status: groupStatus(group),
-                        name: group.items.length > 1 ? `${first.sourceName ?? first.name} (${group.items.length} pages)` : first.name,
+                        name: pagesText ? `${fileName} (${pagesText})` : fileName,
                     };
                     const badgeMap = {
                         pending: { cls: 'is-pending', icon: 'bx-time-five', text: 'Pending' },
@@ -4066,19 +4230,22 @@
                         scanning: { cls: 'is-working', icon: 'bx-radar', text: 'Scanning' },
                         ready: { cls: 'is-ready', icon: 'bx-scan', text: 'Scanned' },
                         verifying: { cls: 'is-verifying', icon: 'bx-edit-alt', text: 'Validating' },
-                        checked: { cls: 'is-verifying', icon: 'bx-check', text: 'Page checked' },
-                        imported: { cls: 'is-imported', icon: 'bx-check-shield', text: 'Imported' },
+                        imported: { cls: 'is-imported', icon: 'bx-check-shield', text: 'Saved' },
                         rejected: { cls: 'is-failed', icon: 'bx-x-circle', text: 'Rejected (Existing)' },
                         failed: { cls: 'is-failed', icon: 'bx-error-circle', text: 'Failed' },
                     };
                     const badgeInfo = { ...(badgeMap[item.status] || badgeMap.pending) };
-                    // A document of several pages says how many of them are checked.
-                    if (group.items.length > 1 && batchState.phase === 'verifying' && ['verifying', 'checked'].includes(item.status)) {
-                        const checkedPages = group.items.filter((it) => it.staged || it.status === 'imported').length;
-                        badgeInfo.text = `${checkedPages}/${group.items.length} pages checked`;
+                    if (item.status === 'rejected' && group.items.every((it) => it.status !== 'rejected' || it.skipped)) {
+                        badgeInfo.text = 'Skipped';
+                    }
+                    // A file of several pages (several records) says how many of its pages are saved.
+                    if (group.items.length > 1 && batchState.phase === 'verifying' && item.status === 'verifying') {
+                        const savedPages = group.items.filter((it) => it.status === 'imported').length;
+                        badgeInfo.text = `${savedPages}/${group.items.length} pages saved`;
                     }
                     const isCurrent = group.indices.includes(batchState.currentIndex);
-                    const canInteract = batchState.phase !== 'scanning' && !(batchState.phase === 'verifying' && group.items.every((it) => ['imported', 'rejected'].includes(it.status)));
+                    const canInteract = !['scanning', 'done'].includes(batchState.phase)
+                        && !(batchState.phase === 'verifying' && group.items.every((it) => ['imported', 'rejected'].includes(it.status)));
 
                     // The chip opens its document on click; the small × beside it removes it.
                     const chip = document.createElement('div');
@@ -4094,12 +4261,18 @@
                     openBtn.innerHTML = `
                         <span class="batch-queue-chip__index">${index + 1}</span>
                         <span class="batch-queue-chip__name"></span>
+                        <span class="batch-queue-chip__pages d-none"></span>
                         <span class="batch-queue-chip__status">
                             <i class="icon-base bx ${badgeInfo.icon}" aria-hidden="true"></i>
                             <span>${badgeInfo.text}</span>
                         </span>
                     `;
-                    openBtn.querySelector('.batch-queue-chip__name').textContent = item.name;
+                    openBtn.querySelector('.batch-queue-chip__name').textContent = fileName;
+                    if (pagesText) {
+                        const pages = openBtn.querySelector('.batch-queue-chip__pages');
+                        pages.textContent = pagesText;
+                        pages.classList.remove('d-none');
+                    }
                     chip.appendChild(openBtn);
 
                     if (canInteract) {
@@ -4176,7 +4349,7 @@
                         if (batchChipDidDrag || !canInteract) return;
                         if (isCurrent) return;
                         // The page still to do, else the first.
-                        const done = batchState.phase === 'verifying' ? ['imported', 'rejected', 'checked'] : ['saved'];
+                        const done = batchState.phase === 'verifying' ? ['imported', 'rejected'] : ['saved'];
                         const target = group.items.findIndex((it) => !done.includes(it.status));
                         openBatchDocument(group.indices[target === -1 ? 0 : target]);
                     });
@@ -4205,7 +4378,9 @@
                 saved: 'Aligned and queued',
                 scanning: 'Being scanned',
                 ready: 'Scanned, waiting for validation',
-                verifying: 'Being validated',
+                verifying: 'Being verified',
+                imported: 'Saved as a record',
+                rejected: 'Rejected (already saved)',
                 failed: 'Failed',
             }[item.status] || 'Queued';
 
@@ -4255,6 +4430,8 @@
                 }
                 await openBatchQueueItem(idx);
             } else if (batchState.phase === 'verifying') {
+                // The other page of the record open now is open already.
+                if (recordOf(batchState.items[idx]).members.includes(batchState.items[batchState.currentIndex])) return;
                 await openBatchVerifyItem(idx);
             }
         }
@@ -4268,7 +4445,10 @@
             selectedBatchModalIndex = null;
             const targetItem = batchState.items[deleteIdx];
             if (!targetItem) return;
-            const removing = batchState.items.filter((it) => it === targetItem || (targetItem.group && it.group === targetItem.group));
+            // Its pages saved already stay: they are records now, and the summary lists them.
+            const removing = batchState.items.filter((it) => (it === targetItem || (targetItem.group && it.group === targetItem.group))
+                && !['imported', 'rejected'].includes(it.status));
+            if (removing.length === 0) return;
 
             const wasCurrent = removing.includes(batchState.items[batchState.currentIndex]);
             const currentItem = batchState.items[batchState.currentIndex];
@@ -4307,7 +4487,9 @@
             if (wasCurrent) {
                 const nextIndex = Math.min(deleteIdx, batchState.items.length - 1);
                 if (batchState.phase === 'verifying') {
-                    await openBatchVerifyItem(nextIndex);
+                    const next = nextOpenRecord();
+                    if (next) await openBatchVerifyItem(batchState.items.indexOf(next.members[0]));
+                    else showBatchSummary();
                 } else {
                     await openBatchQueueItem(nextIndex);
                 }
@@ -4322,9 +4504,25 @@
         });
 
         const SUPPORTED_SCAN_EXT = /\.(pdf|png|jpe?g|webp|bmp)$/i;
+        // What a folder brings that is not a scan, left out without a word: hidden
+        // files (".DS_Store") and the ones Windows keeps beside pictures.
+        const SYSTEM_FILE = /^(\..*|thumbs\.db|desktop\.ini)$/i;
+        // Where a dropped file sat in what was dropped ("/Book 1/page-2.pdf").
+        const droppedPaths = new WeakMap();
+        // "page-2" before "page-10", and a folder's files in its own order.
+        const naturalOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+        const queuePath = (file) => droppedPaths.get(file) || file.webkitRelativePath || file.name;
 
+        /** Whether a drop holds a folder (read while the drop event lasts). */
+        function dropHasFolder(dataTransfer) {
+            return Array.from(dataTransfer?.items ?? [])
+                .some((item) => typeof item.webkitGetAsEntry === 'function' && item.webkitGetAsEntry()?.isDirectory);
+        }
+
+        /** Every file a drop brings, folders opened (call it while the drop event lasts). */
         async function extractDroppedScanFiles(dataTransfer) {
             if (!dataTransfer) return [];
+            // The entries are taken at once: the drop's items are gone after the event.
             const items = dataTransfer.items ? Array.from(dataTransfer.items) : [];
             const entries = items
                 .map((item) => (typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null))
@@ -4338,11 +4536,13 @@
             const readEntry = (entry) => new Promise((resolve) => {
                 if (entry.isFile) {
                     entry.file((file) => {
-                        if (SUPPORTED_SCAN_EXT.test(file.name)) collected.push(file);
+                        droppedPaths.set(file, entry.fullPath || file.name);
+                        collected.push(file);
                         resolve();
                     }, () => resolve());
                 } else if (entry.isDirectory) {
                     const reader = entry.createReader();
+                    // A folder is read in batches until one comes back empty.
                     const readBatch = () => {
                         reader.readEntries(async (batch) => {
                             if (!batch || batch.length === 0) {
@@ -4368,66 +4568,247 @@
             return collected.length > 0 ? collected : Array.from(dataTransfer.files || []);
         }
 
-        async function startBatchQueue(fileList) {
-            // A PDF may be large (only one page of it is ever sent); an image may not.
-            const picked = Array.from(fileList || []).filter((file) => {
-                if (!SUPPORTED_SCAN_EXT.test(file.name)) {
-                    return false;
-                }
-                const limit = isPdfFile(file) ? MAX_PDF_BYTES : MAX_SCAN_BYTES;
-                if (file.size > limit) {
-                    alert(`${file.name} is larger than ${limit / 1024 / 1024} MB and was skipped.`);
-                    return false;
-                }
-                return true;
-            });
+        /**
+         * Which pages of a file are saved already, by its fingerprint. A lookup
+         * that fails says none: the server still asks before a page is saved twice.
+         */
+        async function savedPagesOfFile(fingerprint) {
+            if (!fingerprint) return new Set();
+            try {
+                const response = await fetch(config.sourcePagesUrl.replace('0'.repeat(64), fingerprint), {
+                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    signal: AbortSignal.timeout?.(10000),
+                });
+                if (!response.ok) throw new Error(`The server answered ${response.status}.`);
+                const payload = await response.json();
+                return new Set((payload.pages ?? []).map((entry) => Number(entry.page)));
+            } catch (error) {
+                console.warn('The saved pages of this file could not be looked up:', error);
+                return new Set();
+            }
+        }
 
-            // Each page of a PDF is its own document in the queue, cut out with
-            // its original quality, so it is aligned, scanned and saved on its own.
-            const validFiles = [];
-            const pageInfo = new Map(); // file -> { group, pageNo, pageTotal, sourceName }
-            let groupSeq = 0;
+        /** Let the server drop a queued page no longer wanted (best effort). */
+        function cancelPageOnServer(pageId) {
+            if (!pageId) return;
+            fetch(config.pageCancelUrl.replace('__PAGE__', String(pageId)), {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+            }).catch(() => {});
+        }
+
+        /**
+         * The file a queued page keeps with its record: of a PDF of many pages,
+         * that page alone, cut out with its original quality when it is queued
+         * (not when the file is added); any other file as it is. A PDF that
+         * cannot be cut goes whole when it is small enough, and the record still
+         * knows its page.
+         */
+        async function queuedScanFile(item) {
+            if (!(item.pageTotal > 1)) return item.file;
+            try {
+                return await pdfPageFile(item.file, item.pageNo);
+            } catch (error) {
+                console.warn(`Page ${item.pageNo} could not be cut out of ${item.sourceName}:`, error);
+                if (item.file.size <= MAX_SCAN_BYTES) return item.file;
+                throw new Error(`Page ${item.pageNo} could not be taken out of ${item.sourceName}. Save that page as its own file and add it to a batch.`);
+            }
+        }
+
+        /**
+         * Say what was left out of the files just added, grouped by why, and offer
+         * to add the pages left out as saved already or already in this batch.
+         * Resolves 'add' or 'ok' (at once, when there is nothing to say).
+         */
+        function askAboutLeftOut(notes, queuedCount, addableCount) {
+            const groups = [
+                ['Already saved as records', notes.saved],
+                ['Already in this batch (the same file added twice, or a copy of it)', notes.inBatch],
+                ['Not a PDF or an image', notes.unsupported],
+                ['Too large', notes.tooLarge],
+                ['Could not be opened (empty, damaged or password-protected)', notes.unreadable],
+            ].filter(([, names]) => names.length > 0);
+            if (groups.length === 0 && queuedCount > 0) return Promise.resolve('ok');
+
+            const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+            el('batchIntakeModalTitle').textContent = queuedCount > 0 ? 'Some files were left out' : 'Nothing was added';
+            el('batchIntakeSummary').textContent = groups.length === 0
+                ? 'No PDF or image files were found.'
+                : `${queuedCount > 0 ? `${plural(queuedCount, 'page')} added to the batch.` : 'No page was added to the batch.'} These were left out:`;
+            el('batchIntakeGroups').classList.toggle('d-none', groups.length === 0);
+            el('batchIntakeGroups').replaceChildren(...groups.map(([title, names]) => {
+                const section = document.createElement('section');
+                section.className = 'batch-intake__group';
+                const heading = document.createElement('h6');
+                heading.className = 'batch-intake__title';
+                heading.textContent = `${title} · ${names.length}`;
+                const list = document.createElement('ul');
+                list.className = 'batch-intake__list';
+                names.slice(0, 8).forEach((name) => {
+                    const li = document.createElement('li');
+                    li.textContent = name;
+                    list.append(li);
+                });
+                if (names.length > 8) {
+                    const more = document.createElement('li');
+                    more.textContent = `… and ${names.length - 8} more`;
+                    list.append(more);
+                }
+                section.append(heading, list);
+                return section;
+            }));
+
+            const addButton = el('batchIntakeAddBtn');
+            addButton.classList.toggle('d-none', addableCount === 0);
+            addButton.textContent = `Add them anyway (${plural(addableCount, 'page')})`;
+            el('batchIntakeAddNote').classList.toggle('d-none', addableCount === 0);
+
+            return new Promise((resolve) => {
+                const modalEl = el('batchIntakeModal');
+                let choice = 'ok';
+                addButton.onclick = () => {
+                    choice = 'add';
+                    window.bootstrap.Modal.getInstance(modalEl)?.hide();
+                };
+                el('batchIntakeOkBtn').onclick = () => window.bootstrap.Modal.getInstance(modalEl)?.hide();
+                modalEl.addEventListener('hidden.bs.modal', () => resolve(choice), { once: true });
+                window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+            });
+        }
+
+        // Files are being prepared for the queue: another drop waits until they are.
+        let preparingBatch = false;
+
+        async function startBatchQueue(fileList) {
+            if (preparingBatch) {
+                alert('The files added a moment ago are still being prepared. Add these once they are in the queue.');
+                return;
+            }
+
+            // A folder is queued in its own order, "page-2" before "page-10".
+            const notes = { saved: [], inBatch: [], unsupported: [], tooLarge: [], unreadable: [] };
+            // Pages left out as saved already or already in this batch: added after all if asked.
+            const leftOutPages = [];
+            const picked = Array.from(fileList || [])
+                .filter((file) => !SYSTEM_FILE.test(file.name))
+                .sort((a, b) => naturalOrder.compare(queuePath(a), queuePath(b)))
+                .filter((file) => {
+                    if (!SUPPORTED_SCAN_EXT.test(file.name)) {
+                        notes.unsupported.push(file.name);
+                        return false;
+                    }
+                    if (file.size === 0) {
+                        notes.unreadable.push(file.name);
+                        return false;
+                    }
+                    // A PDF may be large (only one page of it is ever sent); an image may not.
+                    const limit = isPdfFile(file) ? MAX_PDF_BYTES : MAX_SCAN_BYTES;
+                    if (file.size > limit) {
+                        notes.tooLarge.push(`${file.name} (over ${limit / 1024 / 1024} MB)`);
+                        return false;
+                    }
+                    return true;
+                });
+
+            // Each page of a PDF is queued on its own and aligned and scanned on its
+            // own. It is drawn from the file itself, and cut out only when it is
+            // queued, so adding a register of hundreds of pages takes a moment, not
+            // a copy of every page. Pages are saved as in single mode: a page is a
+            // record, or a pair (1–2, 3–4) when the layout has a page 2. Every file
+            // is fingerprinted, so the record knows where it came from, and a page
+            // saved before (or queued already in this batch) is left out.
+            const pairs = Boolean(config.pageTwo);
+            const queued = [];
             const groupStamp = Date.now().toString(36);
-            if (picked.some(isPdfFile)) {
+            let groupSeq = 0;
+            const inQueue = new Set(batchState.active
+                ? batchState.items.filter((it) => it.sourceHash).map((it) => `${it.sourceHash}#${it.pageNo}`)
+                : []);
+
+            preparingBatch = true;
+            if (picked.length > 0) {
                 dropzone.classList.add('is-loading');
                 dropzone.setAttribute('aria-busy', 'true');
             }
             try {
-                for (const file of picked) {
+                for (const [position, file] of picked.entries()) {
+                    if (dropzoneTitleEl && picked.length > 1) {
+                        dropzoneTitleEl.textContent = `Preparing ${position + 1} of ${picked.length}…`;
+                    }
                     const group = `${groupStamp}-${groupSeq += 1}`;
-                    if (!isPdfFile(file)) {
-                        pageInfo.set(file, { group, pageNo: 1, pageTotal: 1, sourceName: file.name });
-                        validFiles.push(file);
+
+                    // Its fingerprint and saved pages are looked up while its pages are counted.
+                    const source = (async () => {
+                        let fingerprint = null;
+                        try {
+                            fingerprint = await fileFingerprint(file);
+                        } catch (error) {
+                            console.warn(`${file.name} could not be fingerprinted:`, error);
+                        }
+                        return { fingerprint, saved: await savedPagesOfFile(fingerprint) };
+                    })();
+                    const counting = isPdfFile(file)
+                        ? marker.pdfPageCount(file).then((count) => Math.max(1, count), (error) => {
+                            console.warn(`${file.name} could not be read:`, error);
+                            return 0;
+                        })
+                        : Promise.resolve(1);
+                    const [{ fingerprint, saved }, pageCount] = await Promise.all([source, counting]);
+                    if (pageCount === 0) {
+                        notes.unreadable.push(file.name);
                         continue;
                     }
-                    try {
-                        const pages = await marker.pdfPageCount(file);
-                        if (pages <= 1) {
-                            pageInfo.set(file, { group, pageNo: 1, pageTotal: 1, sourceName: file.name });
-                            validFiles.push(file);
-                            continue;
-                        }
-                        for (let page = 1; page <= pages; page += 1) {
-                            const pageFile = await pdfPageFile(file, page);
-                            pageInfo.set(pageFile, { group, pageNo: page, pageTotal: pages, sourceName: file.name });
-                            validFiles.push(pageFile);
-                        }
-                    } catch (error) {
-                        console.warn(`${file.name} could not be split into pages:`, error);
-                        if (file.size > MAX_SCAN_BYTES) {
-                            alert(`${file.name} could not be opened page by page, and is too large to queue whole. It was skipped.`);
+
+                    // A page saved before, or one this batch has already (a copy of a
+                    // file added twice), is left out, unless asked for below.
+                    const savedHere = [];
+                    const inBatchHere = [];
+                    for (let page = 1; page <= pageCount; page += 1) {
+                        const key = fingerprint !== null ? `${fingerprint}#${page}` : null;
+                        const entry = {
+                            file,
+                            info: { order: position, group, pageNo: page, pageTotal: pageCount, sourceName: file.name, sourceHash: fingerprint },
+                        };
+                        if (saved.has(page)) {
+                            savedHere.push(page);
+                            leftOutPages.push(entry);
+                        } else if (key !== null && inQueue.has(key)) {
+                            inBatchHere.push(page);
+                            leftOutPages.push(entry);
                         } else {
-                            pageInfo.set(file, { group, pageNo: 1, pageTotal: 1, sourceName: file.name });
-                            validFiles.push(file);
+                            if (key !== null) inQueue.add(key);
+                            queued.push(entry);
                         }
                     }
+                    const named = (pages) => (pageCount > 1
+                        ? `${file.name}: page${pages.length === 1 ? '' : 's'} ${pageRanges(pages)}`
+                        : file.name);
+                    if (savedHere.length > 0) notes.saved.push(named(savedHere));
+                    if (inBatchHere.length > 0) notes.inBatch.push(named(inBatchHere));
                 }
             } finally {
+                preparingBatch = false;
+                showUploadModeText();
                 dropzone.classList.remove('is-loading');
                 dropzone.removeAttribute('aria-busy');
             }
 
-            if (validFiles.length === 0) {
+            // What was left out, in the page's own window (not a browser alert,
+            // which froze the drop area mid-update). Pages left out as saved
+            // already, or as copies of what this batch has, can be added anyway:
+            // each is still checked before it is saved twice (Save again or Skip).
+            if (await askAboutLeftOut(notes, queued.length, leftOutPages.length) === 'add') {
+                queued.push(...leftOutPages);
+                queued.sort((a, b) => a.info.order - b.info.order || a.info.pageNo - b.info.pageNo);
+            }
+
+            if (queued.length === 0) {
                 scanFileInput.value = '';
                 return;
             }
@@ -4440,20 +4821,26 @@
                 batchState.currentIndex = 0;
             }
 
-            validFiles.forEach((file) => {
-                const info = pageInfo.get(file) ?? { group: `${groupStamp}-${groupSeq += 1}`, pageNo: 1, pageTotal: 1, sourceName: file.name };
+            queued.forEach(({ file, info }) => {
                 batchState.items.push({
+                    // The file itself: a PDF's page is drawn from it, and cut out when queued.
                     file,
-                    name: file.name,
+                    name: info.pageTotal > 1 ? pageFileName(file.name, info.pageNo) : file.name,
                     group: info.group,
+                    // The record this page is saved in, named by its first page.
+                    record: `${info.group}#${recordLeadPage(info.pageNo, info.pageTotal, pairs)}`,
                     pageNo: info.pageNo,
                     pageTotal: info.pageTotal,
                     sourceName: info.sourceName,
+                    sourceHash: info.sourceHash,
                     status: 'pending',
                     pageId: null,
                     page: null,
                     workspaceScanPath: null,
+                    scanKind: 'full',
+                    geometry: null,
                     recordUrl: null,
+                    recordId: null,
                     error: null,
                     boxes: null,
                     rows: null,
@@ -4495,7 +4882,8 @@
                 } else if (tested) {
                     await marker.loadFromUrl(tested.imageUrl);
                 } else {
-                    await marker.load(item.file, { page: 1 });
+                    // A PDF's page is drawn from the file itself (kept open between its pages).
+                    await marker.load(item.file, { page: item.pageNo ?? 1 });
                 }
                 scanPageCount = 1;
                 scanPageNumber = 1;
@@ -4555,6 +4943,39 @@
             const item = batchState.items[batchState.currentIndex];
             if (!item) return;
 
+            // Smoke test went over this page: it joins the queue as tested, with
+            // the lines it found and any outline fixed by hand, so Scan all only
+            // reads it (or outlines it again from markers moved since) instead of
+            // finding its lines afresh. Outline changes count once saved, as Scan
+            // with OCR asks in single mode.
+            applyOpenDrawing();
+            const tested = detection !== null && !detection.stale ? detection.page : null;
+            if (tested) {
+                const unsaved = unsavedLineCount();
+                if (unsaved > 0) {
+                    const plural = unsaved === 1 ? 'line has an outline change' : 'lines have outline changes';
+                    if (!window.confirm(`${unsaved} ${plural} that ${unsaved === 1 ? 'is' : 'are'} not saved.\n\nOK: save and queue.\nCancel: go back without queuing.`)) {
+                        return;
+                    }
+                    await saveAllUnsavedLines();
+                    if (unsavedLineCount() > 0) {
+                        showOcrError('Some outline changes could not be saved. Check the lines marked not saved and try again.');
+                        return;
+                    }
+                }
+                if (canReoutline()) {
+                    const adjusted = tested.lines.filter((line) => line.adjusted || isLineUnsaved(line)).length;
+                    if (adjusted > 0 && !window.confirm(
+                        `You moved a marker after Smoke test, so every line is worked out again when the batch is scanned, `
+                        + `and your ${adjusted} outline adjustment${adjusted === 1 ? '' : 's'} will be lost.\n\n`
+                        + `OK: queue it with the markers as they are.\n`
+                        + `Cancel: go back (Ctrl+Z brings the Smoke test result back).`,
+                    )) {
+                        return;
+                    }
+                }
+            }
+
             const btn = el('saveQueueNextBtn');
             btn.disabled = true;
             clearOcrError();
@@ -4565,16 +4986,24 @@
                 item.boxes = cloneBoxes(marker.toJSON());
                 item.rows = [...gridRows];
                 item.tilts = [...rowTilts];
+                item.geometry = currentGeometry();
 
                 const form = new FormData();
-                form.set('document_template_id', String(config.templateId));
-                form.set('geometry_json', JSON.stringify(currentGeometry()));
-                form.set('page', await canvasBlob(marker.canvas), 'page.png');
-                form.set('scan', item.file, item.file.name);
+                // Of a PDF, this page alone, cut out now.
+                const scan = await queuedScanFile(item);
+                form.set('scan', scan, scan.name);
                 form.set('batch_key', batchState.key);
-                form.set('defer_scan', '1');
+                let url = config.pagesUrl;
+                if (tested) {
+                    url = config.pageQueueUrl.replace('__PAGE__', String(tested.id));
+                } else {
+                    form.set('document_template_id', String(config.templateId));
+                    form.set('geometry_json', JSON.stringify(item.geometry));
+                    form.set('page', await canvasBlob(marker.canvas), 'page.png');
+                    form.set('defer_scan', '1');
+                }
 
-                const response = await fetch(config.pagesUrl, {
+                const response = await fetch(url, {
                     method: 'POST',
                     headers: {
                         'X-CSRF-TOKEN': config.csrf,
@@ -4591,9 +5020,15 @@
                     throw new Error(responseErrorMessage(response, payload));
                 }
 
+                // A page queued before in its place (Update queued document) is let go.
+                if (item.pageId && item.pageId !== payload.id) cancelPageOnServer(item.pageId);
                 item.pageId = payload.id;
                 item.page = payload;
+                // Not sent to the worker yet (Scan all sends it).
+                item.sentToScan = false;
                 item.workspaceScanPath = payload.workspaceScanPath || null;
+                // What Scan all still has to do on this page (sets its pace too).
+                item.scanKind = tested ? (detectionIsCurrent() ? 'read' : 'reoutline') : 'full';
                 item.status = 'saved';
                 renderBatchQueueBanner();
 
@@ -4643,25 +5078,73 @@
             button.disabled = true;
             el('detectBtn').disabled = true;
 
+            // What each page still needs, as in single mode (see scanKind): a page
+            // Smoke test went over is only read, or outlined again from its moved
+            // markers; any other page has its lines found first. A page already
+            // read (a run stopped partway) is not read again.
+            // A page the worker still has from that run ('busy') is only waited for.
+            const kindOf = (item) => {
+                if (item.page?.status === 'ready') return 'done';
+                if (item.sentToScan && ['queued', 'detecting', 'reading'].includes(item.page?.status)) return 'busy';
+                if (item.scanKind === 'read' && item.page?.status === 'detected') return 'read';
+                return item.scanKind === 'reoutline' ? 'reoutline' : 'full';
+            };
+            const secondsOf = (item, kind) => {
+                if (kind === 'done') return 0;
+                if (kind === 'busy') return pageSeconds(item.scanKind === 'read' ? 'read' : 'full', scanSeconds);
+                return pageSeconds(kind, scanSeconds);
+            };
+            const unitWord = `page${total === 1 ? '' : 's'}`;
+
             try {
                 progress = openProgressModal();
                 stopOcrProgress();
-                ocrProgress = 0;
-                el('ocrProgressFields').textContent = `0 of ${total} documents scanned`;
-                setOcrProgress(
-                    4,
-                    `Scanning batch (0 of ${total} complete)`,
-                    `Queueing all ${total} documents in the batch for OCR processing...`,
-                );
+
+                // A run stopped partway (cancelled, or a page failed): what the
+                // server holds now for the pages it had sent, so each is taken up
+                // where it is instead of from a status remembered here.
+                for (const item of itemsToScan.filter((it) => it.sentToScan && it.page?.statusUrl)) {
+                    try {
+                        const response = await fetch(item.page.statusUrl, {
+                            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                            credentials: 'same-origin',
+                            signal: controller.signal,
+                        });
+                        if (response.ok) item.page = await response.json();
+                    } catch (error) {
+                        if (error.name === 'AbortError') throw error;
+                        console.warn(`The status of ${item.name} could not be checked:`, error);
+                    }
+                }
+
+                const trackList = itemsToScan.map((item) => {
+                    const kind = kindOf(item);
+                    return { item, kind, seconds: secondsOf(item, kind), done: kind === 'done' };
+                });
+                // Stopping this run keeps what Smoke test found on a page being only
+                // read (the server puts it back to "detected"), as in single mode.
+                run.keepDetectionIds = new Set(trackList.filter((entry) => entry.kind === 'read').map((entry) => entry.item.pageId));
+                // The ring crosses the whole batch at a steady pace over the time
+                // its pages usually take on this machine (one at a time, as the
+                // worker takes them), and the pill says the time left.
+                const expected = scanSeconds.wait + trackList.reduce((sum, entry) => sum + entry.seconds, 0);
+                beginOcrProgress(total, expected);
+                setOcrPhase(4, 96, expected, `Scanning batch (0 of ${total} ${unitWord})`,
+                    `Queueing all ${total} ${unitWord} of the batch for OCR.`, null);
+                // Pages, not markers, while they are sent.
+                el('ocrProgressFields').textContent = `${trackList.filter((entry) => entry.done).length} of ${total} ${unitWord} scanned`;
                 timeoutId = window.setTimeout(() => controller.abort(), 30 * 60 * 1000);
 
-                // Trigger ProcessDocumentPage for all documents in the batch upfront
-                // so the entire batch is queued and tracked as one unified loading job.
-                const trackList = [];
-                for (let i = 0; i < itemsToScan.length; i++) {
-                    const item = itemsToScan[i];
-                    const triggerRes = await fetch(config.pageGeometryUrl.replace('__PAGE__', String(item.pageId)), {
-                        method: 'PUT',
+                // Every page goes to the worker up front, so the batch is one run.
+                for (const entry of trackList) {
+                    if (entry.done || entry.kind === 'busy') {
+                        entry.page = entry.item.page;
+                        continue;
+                    }
+                    const { item } = entry;
+                    const read = entry.kind === 'read';
+                    const triggerRes = await fetch(read ? item.page.readUrl : config.pageGeometryUrl.replace('__PAGE__', String(item.pageId)), {
+                        method: read ? 'POST' : 'PUT',
                         headers: {
                             'Content-Type': 'application/json',
                             'X-CSRF-TOKEN': config.csrf,
@@ -4670,8 +5153,8 @@
                         },
                         credentials: 'same-origin',
                         signal: controller.signal,
-                        body: JSON.stringify({
-                            geometry_json: JSON.stringify(item.page?.geometry || currentGeometry()),
+                        body: JSON.stringify(read ? {} : {
+                            geometry_json: JSON.stringify(item.geometry ?? item.page?.geometry ?? currentGeometry()),
                         }),
                     });
                     const triggeredPayload = (triggerRes.headers.get('content-type') || '').includes('application/json')
@@ -4681,77 +5164,39 @@
                         throw new Error(responseErrorMessage(triggerRes, triggeredPayload));
                     }
                     item.page = triggeredPayload;
-                    trackList.push({
-                        item,
-                        page: triggeredPayload,
-                        statusUrl: triggeredPayload.statusUrl,
-                        phaseStartedAt: Date.now(),
-                        lastStatus: triggeredPayload.status || 'queued',
-                        done: triggeredPayload.status === 'ready',
-                    });
+                    item.sentToScan = true;
+                    entry.page = triggeredPayload;
+                    entry.done = triggeredPayload.status === 'ready';
                 }
 
-                // Poll all queued documents together and compute one combined 0-100% progress across the entire batch
+                // The worker takes the pages in turn: the first not done is the one
+                // being worked on, since the last one finished.
+                let lastFinishedAt = performance.now();
+                let waitFirst = scanSeconds.wait;
                 for (;;) {
-                    let sumFraction = 0;
-                    let readyCount = 0;
-                    let activeItemName = null;
-                    let activeStageLabel = 'Finding handwritten lines & reading handwriting';
-                    const now = Date.now();
+                    const readyCount = trackList.filter((entry) => entry.done).length;
+                    const active = trackList.find((entry) => !entry.done) ?? null;
+                    const doneSeconds = trackList.filter((entry) => entry.done).reduce((sum, entry) => sum + entry.seconds, 0);
+                    // The ring never lags the pages actually done.
+                    if (expected > 0) setOcrProgress(Math.max(ocrProgress, 4 + 92 * (doneSeconds / expected)));
 
-                    for (const entry of trackList) {
-                        const st = entry.page.status;
-                        if (st !== entry.lastStatus) {
-                            entry.lastStatus = st;
-                            entry.phaseStartedAt = now;
-                        }
-                        const elapsedSec = Math.max(0, (now - entry.phaseStartedAt) / 1000);
+                    if (!active) break;
 
-                        if (st === 'ready') {
-                            sumFraction += 1;
-                            readyCount += 1;
-                        } else if (st === 'reading') {
-                            const creep = 1 - Math.exp(-elapsedSec / 6);
-                            sumFraction += 0.72 + creep * 0.24;
-                            if (!activeItemName) {
-                                activeItemName = entry.item.name;
-                                activeStageLabel = 'Reading handwriting with TrOCR';
-                            }
-                        } else if (st === 'detecting') {
-                            const creep = 1 - Math.exp(-elapsedSec / 20);
-                            sumFraction += 0.16 + creep * 0.54;
-                            if (!activeItemName) {
-                                activeItemName = entry.item.name;
-                                activeStageLabel = 'Finding handwritten lines';
-                            }
-                        } else {
-                            const creep = 1 - Math.exp(-elapsedSec / 8);
-                            sumFraction += 0.04 + creep * 0.10;
-                            if (!activeItemName) {
-                                activeItemName = entry.item.name;
-                            }
-                        }
-                    }
-
-                    const overallPct = 4 + (sumFraction / total) * 92;
-                    el('ocrProgressFields').textContent = `${readyCount} of ${total} documents scanned`;
-                    setOcrProgress(
-                        Math.max(ocrProgress, overallPct),
-                        `Scanning batch (${readyCount} of ${total} complete)`,
-                        activeItemName
-                            ? `${activeStageLabel} across ${total} batch documents (currently processing ${activeItemName}).`
-                            : `Processing all ${total} documents in the batch...`,
-                    );
-
-                    if (readyCount === total) {
-                        break;
-                    }
+                    const status = active.page?.status;
+                    const stage = status === 'reading' ? 'Reading handwriting with TrOCR'
+                        : status === 'detecting' ? 'Finding handwritten lines'
+                            : 'Waiting for the line detector';
+                    const later = trackList.filter((entry) => !entry.done && entry !== active).reduce((sum, entry) => sum + entry.seconds, 0);
+                    const left = timeLeftText((performance.now() - lastFinishedAt) / 1000, active.seconds + waitFirst, later);
+                    el('ocrProgressFields').textContent = `${readyCount} of ${total} ${unitWord} scanned · ${left}`;
+                    setOcrProgress(ocrProgress, `Scanning batch (${readyCount} of ${total} ${unitWord})`,
+                        `${stage} · ${active.item.name}`);
 
                     await wait(700, controller.signal);
 
                     for (const entry of trackList) {
                         if (entry.done) continue;
-                        const response = await fetch(entry.statusUrl, {
+                        const response = await fetch(entry.page.statusUrl, {
                             headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                             credentials: 'same-origin',
                             signal: controller.signal,
@@ -4768,11 +5213,13 @@
                         if (next.status === 'failed') {
                             entry.item.status = 'failed';
                             renderBatchQueueBanner();
-                            throw new Error(next.error || `The document "${entry.item.name}" could not be processed.`);
+                            throw new Error(next.error || `The page "${entry.item.name}" could not be processed.`);
                         }
                         if (next.status === 'ready') {
                             entry.done = true;
                             entry.item.status = 'ready';
+                            lastFinishedAt = performance.now();
+                            waitFirst = 0;
                             const nextActiveIdx = batchState.items.findIndex((it) => it.status === 'scanning');
                             if (nextActiveIdx !== -1) {
                                 batchState.currentIndex = nextActiveIdx;
@@ -4782,10 +5229,12 @@
                     }
                 }
 
-                el('ocrProgressFields').textContent = `${total} of ${total} documents scanned`;
-                await completeOcrProgress('Batch scan complete', 'Opening the first document for validation.');
+                trackList.forEach((entry) => { entry.item.status = 'ready'; });
+                el('ocrProgressFields').textContent = `${total} of ${total} ${unitWord} scanned`;
+                await completeOcrProgress('Batch scan complete', 'Opening the first record for verification.');
                 batchState.phase = 'verifying';
-                await openBatchVerifyItem(0);
+                const first = nextOpenRecord();
+                if (first) await openBatchVerifyItem(batchState.items.indexOf(first.members[0]));
             } catch (error) {
                 if (!run.cancelled) {
                     showOcrError(error.message || 'Batch scan failed.');
@@ -4808,51 +5257,84 @@
             }
         }
 
+        /**
+         * Verify a queued record, as single mode does once a scan is read: a page
+         * alone, or a pair of pages (1–2, 3–4, when the layout has a page 2) side
+         * by side, both live, saved together as one record. `index` may be any
+         * page of the record; its first page stands for it (currentIndex).
+         */
         async function openBatchVerifyItem(index) {
-            const item = batchState.items[index];
-            if (!item || !item.page) return;
-            verifyDoc = null;
+            const picked = batchState.items[index];
+            if (!picked) return;
+            const record = recordOf(picked);
+            const members = record.members.filter((it) => it.page?.imageUrl && !['rejected', 'failed'].includes(it.status));
+            const lead = members[0];
+            if (!lead) return;
 
-            // Leaving a page keeps what was typed and ticked on it, and a page only
-            // looked at goes back to "Scanned" instead of staying "Validating".
+            // Leaving a record keeps what was typed and ticked on it (in Verify and
+            // in Review & Export), and one only looked at goes back to "Scanned".
             const leaving = batchState.items[batchState.currentIndex];
-            if (leaving && leaving !== item) {
+            if (leaving && !members.includes(leaving)) {
                 keepVerifyDraft(leaving);
-                if (leaving.status === 'verifying' && !leaving.staged) leaving.status = 'ready';
+                recordOf(leaving).members.forEach((it) => {
+                    if (it.status === 'verifying') it.status = 'ready';
+                });
             }
 
-            batchState.currentIndex = index;
-            useLayoutForPage(item.pageNo ?? 1);
-            // A page opened again is checked again: it may have changed since.
-            item.staged = null;
-            if (item.status !== 'imported') {
-                item.status = 'verifying';
-            }
+            batchState.currentIndex = batchState.items.indexOf(lead);
+            useLayoutForPage(lead.pageNo ?? 1);
+            members.forEach((it) => {
+                if (it.status !== 'imported') it.status = 'verifying';
+            });
             renderBatchQueueBanner();
 
-            scanFile = item.file;
-            const page = item.page;
+            // The record knows the file and page(s) it came from, as a single scan does.
+            scanFile = lead.file;
+            scanPageNumber = lead.pageNo ?? 1;
+            scanPageCount = lead.pageTotal ?? 1;
+            scanFingerprint = lead.sourceHash ?? null;
+            verifyDoc = members.length > 1
+                ? {
+                    pages: members.map((it) => ({ number: it.pageNo, page: it.page, layout: layoutFor(it.pageNo), item: it })),
+                    offsets: [0, 0],
+                }
+                : null;
+            processedPage = lead.page;
 
-            await marker.loadFromUrl(page.imageUrl);
-            if (item.boxes && item.rows) {
-                setGrid(geometryMarkers(page.geometry, page), page.geometry?.ruled_ys ?? item.rows);
+            if (!verifyDoc) {
+                await marker.loadFromUrl(lead.page.imageUrl);
+                if (lead.boxes && lead.rows) {
+                    setGrid(geometryMarkers(lead.page.geometry, lead.page), lead.page.geometry?.ruled_ys ?? lead.rows);
+                }
             }
 
-            processedPage = page;
-            cropped = verificationItems(page.lines, page);
+            cropped = verifyItems();
             readings = cropped.map((entry) => entry.reading);
-            requiredInput(document, '#ocrModelKey').value = (page.modelKey || '').trim();
-            requiredInput(document, '#documentPageId').value = String(page.id);
-            el('summaryModel').textContent = page.model || '—';
-            el('workspaceContextDetail').textContent = `${config.typeLabel} · Verify (${index + 1}/${batchState.items.length}) · ${item.name}`;
+            requiredInput(document, '#ocrModelKey').value = (processedPage.modelKey || '').trim();
+            requiredInput(document, '#documentPageId').value = String(processedPage.id);
+            el('summaryModel').textContent = processedPage.model || '—';
+            const records = batchRecords();
+            const position = records.findIndex((candidate) => candidate.members.includes(lead));
+            el('workspaceContextDetail').textContent = `${config.typeLabel} · Record ${position + 1}/${records.length} · ${recordLabel(record)}`;
             el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
 
             clearValidationSubmitError();
             renderVerifyRows();
-            restoreVerifyDraft(item);
+            if (verifyDoc) await loadVerifySpread();
             showStep('verify');
-            prepareValidationComparison();
-            checkAndShowExistingRecord(page.existingRecord || null);
+            if (verifyDoc) prepareSpreadComparison();
+            else prepareValidationComparison();
+            // What was typed and ticked on it before (after the step is set up afresh).
+            restoreVerifyDraft(lead);
+            // A blank page (a cover, an empty sheet) has nothing to tick or save.
+            if (cropped.length === 0) {
+                showValidationSubmitError('No handwriting was found on this page, so there is nothing to save. Use Skip record to go on.');
+            }
+
+            // Continue anyway, once chosen for this record, is not asked again.
+            const existing = members.map((it) => it.page.existingRecord).find(Boolean) ?? null;
+            checkAndShowExistingRecord(lead.existingAccepted ? null : existing);
+            existingRecordAccepted = Boolean(lead.existingAccepted);
         }
 
         // Continue anyway was chosen for this scan's match with a saved record.
@@ -4900,8 +5382,9 @@
             }
             if (rejectLabel) {
                 if (batchState.active) {
-                    const hasMore = batchState.items.some((it, idx) => idx !== batchState.currentIndex && !['imported', 'rejected'].includes(it.status));
-                    rejectLabel.textContent = hasMore ? 'Reject & Next File' : 'Reject & Complete Batch';
+                    const current = recordOf(batchState.items[batchState.currentIndex]);
+                    const hasMore = batchRecords().some((record) => record.key !== current.key && !recordDone(record));
+                    rejectLabel.textContent = hasMore ? 'Reject & Next Record' : 'Reject & Complete Batch';
                 } else {
                     rejectLabel.textContent = 'Reject & End';
                 }
@@ -4911,7 +5394,12 @@
             }
         }
 
-        async function rejectCurrentExistingDocument() {
+        /**
+         * Leave the scan out. In a batch, this record's pages are marked (rejected
+         * as a match, or `skipped`: a blank page, a cover, one saved already) and
+         * the next record opens, or the batch's summary.
+         */
+        async function rejectCurrentExistingDocument({ skipped = false } = {}) {
             const modalEl = document.getElementById('existingRecordModal');
             if (modalEl) window.bootstrap.Modal.getInstance(modalEl)?.hide();
             document.getElementById('validationExistingBanner')?.classList.add('d-none');
@@ -4931,35 +5419,25 @@
             verifyDoc = null;
 
             if (batchState.active) {
-                // The file, and the other pages of the same document with it.
+                // This record (its page, or both pages of a pair); the file's other pages go on.
                 const currentItem = batchState.items[batchState.currentIndex];
                 if (currentItem) {
-                    batchState.items
-                        .filter((it) => it === currentItem || (currentItem.group && it.group === currentItem.group))
-                        .forEach((it) => { it.status = 'rejected'; it.staged = null; });
+                    recordOf(currentItem).members.forEach((it) => {
+                        it.status = 'rejected';
+                        it.skipped = skipped;
+                        it.verifyDraft = null;
+                        it.reviewExtras = null;
+                    });
                 }
                 renderBatchQueueBanner();
 
-                const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && !['imported', 'rejected'].includes(it.status));
-                const firstRemainingIndex = batchState.items.findIndex((it) => !['imported', 'rejected'].includes(it.status));
-                const targetVerifyIndex = nextVerifyIndex !== -1 ? nextVerifyIndex : firstRemainingIndex;
-
-                if (targetVerifyIndex !== -1) {
-                    await openBatchVerifyItem(targetVerifyIndex);
-                    return;
+                const next = nextOpenRecord(currentItem ?? null);
+                if (next) {
+                    await openBatchVerifyItem(batchState.items.indexOf(next.members[0]));
+                } else {
+                    showBatchSummary();
                 }
-
-                const lastImported = [...batchState.items].reverse().find((it) => it.recordUrl);
-                if (lastImported?.recordUrl) {
-                    window.location.assign(lastImported.recordUrl);
-                    return;
-                }
-
-                batchState.active = false;
-                batchState.phase = 'idle';
-                batchState.items = [];
-                batchState.currentIndex = 0;
-                renderBatchQueueBanner();
+                return;
             }
 
             scanFile = null;
@@ -4968,16 +5446,116 @@
             showStep('upload');
         }
 
-        document.getElementById('confirmRejectExistingBtn')?.addEventListener('click', rejectCurrentExistingDocument);
-        document.getElementById('validationExistingRejectBtn')?.addEventListener('click', rejectCurrentExistingDocument);
+        document.getElementById('confirmRejectExistingBtn')?.addEventListener('click', () => rejectCurrentExistingDocument());
+        document.getElementById('validationExistingRejectBtn')?.addEventListener('click', () => rejectCurrentExistingDocument());
+
+        /** A batch's Skip record (Verify, Review & Export): nothing is saved for it, and the batch goes on. */
+        function skipCurrentBatchRecord() {
+            if (!batchState.active || recordSubmitting) return;
+            const record = recordOf(batchState.items[batchState.currentIndex]);
+            if (!window.confirm(`Skip ${recordLabel(record)}?
+
+Nothing is saved for it, and the next record opens. `
+                + 'To save it later, open its file in Single Upload.')) return;
+            rejectCurrentExistingDocument({ skipped: true });
+        }
+        el('batchSkipRecordBtn').addEventListener('click', skipCurrentBatchRecord);
+        el('reviewSkipRecordBtn').addEventListener('click', skipCurrentBatchRecord);
 
         // Continue anyway: the scan is kept and verified as usual, and saving it
         // makes a new record without asking again.
         function continueWithExistingRecord() {
             existingRecordAccepted = true;
+            // A queued record remembers it, so opening it again does not ask again.
+            const current = currentVerifyItem();
+            if (current) current.existingAccepted = true;
             window.bootstrap.Modal.getInstance(el('existingRecordModal'))?.hide();
             el('validationExistingBanner').classList.add('d-none');
         }
+        // ------------------------------------------------ the end of a batch
+        // Every record is saved or rejected: say what was saved, link each
+        // record, and offer every saved record's table as one download (taken
+        // as Review & Export showed it when that record was saved).
+        function batchExportTable() {
+            return combineTables(batchRecords()
+                .filter((record) => record.members[0].exportTable)
+                .map((record) => ({
+                    recordId: record.members[0].recordId,
+                    label: recordLabel(record),
+                    table: record.members[0].exportTable,
+                })));
+        }
+
+        function showBatchSummary() {
+            batchState.phase = 'done';
+            // Nothing is left to lose: leaving the page no longer asks.
+            scanFile = null;
+            renderBatchQueueBanner();
+
+            const records = batchRecords();
+            const saved = records.filter((record) => record.members.every((it) => it.status === 'imported'));
+            const left = records.filter((record) => record.members.some((it) => it.status === 'rejected'));
+            const skipped = left.filter((record) => record.members[0].skipped).length;
+            const rejected = left.length - skipped;
+            const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+            el('batchSummaryModalDescription').textContent = [
+                `${plural(saved.length, 'record')} saved`,
+                ...(rejected > 0 ? [`${rejected} rejected`] : []),
+                ...(skipped > 0 ? [`${skipped} skipped`] : []),
+            ].join(', ') + '.';
+
+            el('batchSummaryList').replaceChildren(...records.map((record) => {
+                const [lead] = record.members;
+                const li = document.createElement('li');
+                const status = lead.status === 'imported' ? 'is-saved' : 'is-rejected';
+                li.className = `batch-summary-list__item ${status}`;
+                const icon = document.createElement('i');
+                icon.className = `icon-base bx ${lead.status === 'imported' ? 'bx-check-circle' : 'bx-x-circle'}`;
+                icon.setAttribute('aria-hidden', 'true');
+                li.append(icon);
+                if (lead.status === 'imported' && lead.recordUrl) {
+                    const link = document.createElement('a');
+                    link.href = lead.recordUrl;
+                    link.target = '_blank';
+                    link.rel = 'noopener';
+                    link.textContent = `${recordLabel(record)}${lead.recordId ? ` · record #${lead.recordId}` : ''}`;
+                    li.append(link);
+                } else {
+                    const text = document.createElement('span');
+                    text.textContent = `${recordLabel(record)} · ${lead.skipped ? 'skipped' : 'rejected'}`;
+                    li.append(text);
+                }
+                return li;
+            }));
+
+            const canDownload = batchExportTable().length > 1;
+            el('batchSummaryDownloadBtn').disabled = !canDownload;
+            el('batchSummaryRecordsBtn').href = config.recordsUrl;
+            el('batchSummaryRestartBtn').href = config.restartUrl;
+            window.bootstrap.Modal.getOrCreateInstance(el('batchSummaryModal')).show();
+        }
+
+        const batchFileName = () => exportFileName(config.typeLabel, 'batch', new Date().toISOString().slice(0, 10));
+        el('batchSummaryCsv').addEventListener('click', () => downloadCsv(batchExportTable(), batchFileName()));
+        el('batchSummaryXlsx').addEventListener('click', async () => {
+            const button = el('batchSummaryDownloadBtn');
+            const spinner = button.querySelector('.spinner-border');
+            button.disabled = true;
+            spinner?.classList.remove('d-none');
+            try {
+                await downloadXlsx(batchExportTable(), batchFileName());
+            } catch (error) {
+                console.error('Excel export failed:', error);
+                alert('The Excel file could not be made. Try CSV instead.');
+            } finally {
+                button.disabled = false;
+                spinner?.classList.add('d-none');
+            }
+        });
+        el('batchSummaryModal').addEventListener('shown.bs.modal', () => el('batchSummaryRestartBtn').focus());
+        // OK is the safe default: Enter never adds duplicates by accident.
+        el('batchIntakeModal').addEventListener('shown.bs.modal', () => el('batchIntakeOkBtn').focus());
+
         el('continueExistingBtn').addEventListener('click', continueWithExistingRecord);
         el('validationExistingContinueBtn').addEventListener('click', continueWithExistingRecord);
 
@@ -5083,12 +5661,45 @@
             });
         });
         dropzone.addEventListener('drop', async (event) => {
-            if (uploadMode === 'batch' || batchState.active) {
-                const files = await extractDroppedScanFiles(event.dataTransfer);
-                startBatchQueue(files);
-            } else {
-                openDocument(event.dataTransfer?.files?.[0]);
+            const transfer = event.dataTransfer;
+            // Read while the drop event lasts: its items are gone after it.
+            const folder = dropHasFolder(transfer);
+            const several = folder || (transfer?.files?.length ?? 0) > 1;
+            if (uploadMode !== 'batch' && !batchState.active && !several) {
+                openDocument(transfer?.files?.[0]);
+                return;
             }
+
+            const files = await extractDroppedScanFiles(transfer);
+            if (uploadMode === 'batch' || batchState.active) {
+                startBatchQueue(files);
+                return;
+            }
+
+            // Several files, or a folder, in single mode: that is a batch.
+            const what = folder ? 'A folder' : `${files.length} files`;
+            if (window.confirm(`${what} dropped. Switch to Batch File Upload and queue ${folder ? 'everything in it' : 'them all'}?
+
+Cancel opens only the first file.`)) {
+                setUploadMode('batch');
+                startBatchQueue(files);
+                return;
+            }
+            const first = files
+                .filter((file) => SUPPORTED_SCAN_EXT.test(file.name) && !SYSTEM_FILE.test(file.name))
+                .sort((a, b) => naturalOrder.compare(queuePath(a), queuePath(b)))[0];
+            if (first) openDocument(first);
+            else alert('No PDF or image file was found in what was dropped.');
+        });
+
+        // A file dropped beside the drop area (or while files are being prepared,
+        // when the area takes no pointer) must not open in this tab instead.
+        ['dragover', 'drop'].forEach((eventName) => {
+            window.addEventListener(eventName, (event) => {
+                if (!event.defaultPrevented && Array.from(event.dataTransfer?.types ?? []).includes('Files')) {
+                    event.preventDefault();
+                }
+            });
         });
         dropzone.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -5991,7 +6602,8 @@
                     },
                     credentials: 'same-origin',
                     keepalive: true,
-                    body: JSON.stringify({ keep_detection: run.kind === 'read' }),
+                    // A batch keeps the Smoke test result of each page it was only reading.
+                    body: JSON.stringify({ keep_detection: run.kind === 'read' || Boolean(run.keepDetectionIds?.has(id)) }),
                 }).catch((error) => console.warn('Cancelling the page on the server failed:', error));
             });
         }
@@ -6705,142 +7317,47 @@
             });
         }
 
-        // ------------------------------------------- a document of several pages
-        // A PDF of many pages is one document (one record). In Verify its pages sit
-        // side by side, two at a time like an open book (1-2, 3-4): the page being
-        // verified has the live outlines, its partner sits beside it, read-only.
-        // Click the partner to verify that page instead; each page keeps what was
-        // typed and ticked on it, so going back loses nothing.
+        // ------------------------------------------- Verify's layout, and a batch's drafts
+        // One page fills Verify. A two-page register (verifyDoc), from a single
+        // scan or a batch, has both pages side by side (prepareSpreadComparison).
+        // A batch keeps what was typed and ticked on each record while another
+        // one is shown, so going back to it loses nothing.
 
-        /** The queued pages of one document, in page order. */
-        function documentPagesOf(item) {
-            return item?.group && item.pageTotal > 1
-                ? batchState.items.filter((it) => it.group === item.group).sort((a, b) => a.pageNo - b.pageNo)
-                : [];
-        }
-
-        /** The other page of this page's pair, once it has been scanned. */
-        function verifyPartnerOf(item) {
-            const pages = documentPagesOf(item);
-            if (pages.length < 2) return null;
-            const first = item.pageNo % 2 === 1 ? item.pageNo : item.pageNo - 1;
-            const wanted = item.pageNo === first ? first + 1 : first;
-            const mate = pages.find((it) => it.pageNo === wanted);
-            return mate?.page?.imageUrl && mate.status !== 'failed' ? mate : null;
-        }
-
-        /** The queued page being verified, while a batch is in Verify. */
+        /** The queued record being verified (its first page), while a batch is in Verify. */
         function currentVerifyItem() {
             return batchState.active && batchState.phase === 'verifying'
                 ? batchState.items[batchState.currentIndex] ?? null
                 : null;
         }
 
-        const pageIsChecked = (item) => Boolean(item.staged) || item.status === 'imported';
-
-        /**
-         * What the Submit button and the note beside it promise: on a page with
-         * another still to check it moves on ("Continue to page 2"), and only the
-         * last one saves the record, so nothing is saved before that.
-         */
-        function updateSubmitLabel(item, pages) {
-            const head = el('submitLabelHead');
-            const note = el('validationPagesNote');
-            note.classList.toggle('d-none', pages.length < 2);
-            if (pages.length < 2) {
-                head.textContent = 'Submit';
-                return;
-            }
-
-            const next = pages.find((it) => it !== item && !pageIsChecked(it));
-            const all = pages.length === 2 ? 'Both pages are' : 'All pages are';
-            if (next) {
-                head.textContent = `Next: page ${next.pageNo} ·`;
-                el('validationPagesNoteText').textContent = `${all} saved together as one record once the last page is checked. Nothing is saved yet.`;
-            } else {
-                head.textContent = 'Save record ·';
-                el('validationPagesNoteText').textContent = `Saving puts ${pages.length === 2 ? 'both pages' : 'all pages'} together as one record.`;
-            }
-        }
-
-        /** The page labels, the partner's place and the Submit wording; before the outlines are drawn. */
-        function setVerifySpreadLayout(item) {
-            const pages = documentPagesOf(item);
-            const mate = verifyPartnerOf(item);
+        /** One page in Verify: its labels, its width and the Submit wording. */
+        function setVerifySpreadLayout() {
             const pill = el('validationPagePill');
+            pill.textContent = `Page ${scanPageNumber} of ${scanPageCount}`;
+            pill.classList.toggle('d-none', !multiPage());
+            el('validationMainLabel').classList.add('d-none');
 
-            if (pages.length > 1) {
-                const checked = pages.filter((it) => it !== item && pageIsChecked(it)).length;
-                pill.textContent = `Page ${item.pageNo} of ${pages.length} · ${checked} of ${pages.length} checked`;
-                pill.classList.remove('d-none');
-            } else if (!item && multiPage()) {
-                pill.textContent = `Page ${scanPageNumber} of ${scanPageCount}`;
-                pill.classList.remove('d-none');
-            } else {
-                pill.classList.add('d-none');
-            }
-
-            const mainLabel = el('validationMainLabel');
-            mainLabel.classList.toggle('d-none', pages.length < 2);
-            if (pages.length > 1) mainLabel.textContent = `Page ${item.pageNo} · verifying`;
-
-            // One page fills the width; two share it.
-            validationMarker.fitShare = mate ? 0.5 : 1;
-            el('validationCompanionPage').classList.toggle('d-none', !mate);
+            validationMarker.fitShare = 1;
+            el('validationCompanionPage').classList.add('d-none');
             el('validationCompanionPage').classList.remove('is-live');
-            el('validationCompanionPage').title = 'Verify this page instead';
             el('validationSpread').classList.remove('is-joined', 'is-page-focused');
-            // One page (or a batch's pages, verified one at a time): the usual layout.
             document.querySelector('#step-verify .validation-comparison-grid')?.classList.remove('is-two-page'); window.dispatchEvent(new Event('crms:verify-layout'));
             verifyFocus = null;
             verifyFocusZoom = null;
             updateRowHint();
-            if (mate) {
-                // Pages stay where they are in the book: the lower page on the left.
-                el('validationCompanionPage').style.order = mate.pageNo < item.pageNo ? '-1' : '1';
-                el('validationCompanionLabel').textContent = pageIsChecked(mate)
-                    ? `Page ${mate.pageNo} · checked ✓`
-                    : `Page ${mate.pageNo} · not checked yet`;
-            }
-            updateSubmitLabel(item, pages);
+            el('submitLabelHead').textContent = 'Submit';
+            el('validationPagesNote').classList.add('d-none');
         }
 
-        let verifyCompanionToken = 0;
-
-        /** Draw the partner page and its outlines beside the page being verified. */
-        async function loadVerifyCompanion(item) {
-            const token = ++verifyCompanionToken;
-            const mate = verifyPartnerOf(item);
-            if (!mate) {
-                companionLines.clear();
-                return;
-            }
-
-            try {
-                await validationCompanionMarker.loadFromUrl(mate.page.imageUrl);
-            } catch (error) {
-                console.warn(`Page ${mate.pageNo} could not be shown beside the page:`, error);
-                if (token === verifyCompanionToken) {
-                    el('validationCompanionPage').classList.add('d-none');
-                    validationMarker.fitShare = 1;
-                    validationMarker.resetZoom();
-                }
-                return;
-            }
-            if (token !== verifyCompanionToken) return;
-
-            const entries = verificationItems(mate.page.lines, mate.page);
-            companionLines.setLines(mate.page, entries);
-            // What was checked on that page shows green.
-            const checked = new Set((mate.staged?.fields ?? []).map((field) => field.line_id));
-            entries.forEach((entry, index) => companionLines.setVerified(index, checked.has(entry.lineId)));
-            // Same zoom for both, so the pair stays level.
-            window.requestAnimationFrame(() => validationMarker.resetZoom());
-        }
-
-        /** What was typed and ticked on a page, kept while another page is shown. */
+        /**
+         * What was typed and ticked on a queued record (in Verify, and in the
+         * cells of Review & Export where nothing was read), kept on its first
+         * page while another record is shown.
+         */
         function keepVerifyDraft(item) {
-            if (!item || !processedPage || processedPage !== item.page) return;
+            if (!item || !processedPage || !docEntries().some((entry) => entry.page === item.page)) return;
+            // A cell still being typed in counts.
+            reviewTable?.commit();
             const draft = new Map();
             cropped.forEach((entry, index) => {
                 const row = validationRow(index);
@@ -6851,9 +7368,12 @@
                 });
             });
             item.verifyDraft = draft;
+            item.reviewExtras = new Map(reviewExtras);
         }
 
+        /** Call after Verify is set up for the record (that clears what was typed in Review & Export). */
         function restoreVerifyDraft(item) {
+            item?.reviewExtras?.forEach((value, key) => reviewExtras.set(key, value));
             const draft = item?.verifyDraft;
             if (!draft) return;
             cropped.forEach((entry, index) => {
@@ -6867,21 +7387,6 @@
             updateVerificationSummary();
         }
 
-        let switchingVerifyPage = false;
-        el('validationCompanionPage').addEventListener('click', async () => {
-            // A two-page document: both pages are verified where they are.
-            if (verifyDoc) return;
-            const item = currentVerifyItem();
-            const mate = verifyPartnerOf(item);
-            if (!mate || switchingVerifyPage || recordSubmitting || undoingVerifyChange) return;
-            switchingVerifyPage = true;
-            try {
-                await openBatchVerifyItem(batchState.items.indexOf(mate));
-            } finally {
-                switchingVerifyPage = false;
-            }
-        });
-
         function prepareValidationComparison() {
             const source = el('pageCanvas');
             const target = el('validationPageCanvas');
@@ -6891,15 +7396,16 @@
                 throw new Error('The original document could not be prepared for comparison. Please scan again.');
             }
 
-            const spreadItem = currentVerifyItem();
-            setVerifySpreadLayout(spreadItem);
+            setVerifySpreadLayout();
             activeValidationIndex = null;
             // A new scan: nothing typed in Review & Export yet.
             reviewExtras.clear();
             reviewModel = null;
             reviewTable?.reset();
             stopAddingMissedField();
-        stopGroupingFields();
+            stopGroupingFields();
+            // A deleted field being drawn again belongs to the page before.
+            stopRedrawField();
             target.width = source.width;
             target.height = source.height;
             context.fillStyle = '#ffffff';
@@ -6920,7 +7426,7 @@
                 if (initialGroup) activateValidationGroup(initialGroup.id, 'initial');
                 if (initialGroup) focusFirstVerifyField(initialGroup);
             });
-            loadVerifyCompanion(spreadItem);
+            companionLines.clear();
         }
 
         // On while the first field gets the cursor after a scan, so the view stays whole.
@@ -6973,6 +7479,7 @@
             reviewTable?.reset();
             stopAddingMissedField();
             stopGroupingFields();
+            stopRedrawField();
             cancelOutlineEdit();
 
             const pill = el('validationPagePill');
@@ -9507,9 +10014,12 @@
             submitRecord({ ...lastSubmitChoices, allowMissing: true });
         });
 
+        // A record is saved from Review & Export (Save record), one document or a
+        // batch alike. Enter in one of Verify's value boxes would submit this form
+        // through its hidden button and save the record from Verify, past step 4
+        // (and, in a batch, without its table for Download all): it does nothing.
         el('submitForm').addEventListener('submit', (event) => {
             event.preventDefault();
-            submitRecord();
         });
 
         // ------------------------------------------------ step 4: Review & Export
@@ -9521,11 +10031,31 @@
         // Verify's own document pane, which is moved into this step while it is
         // shown (as the batch banner is moved between steps).
 
-        /** Verify (one document) goes on to Review & Export; batch mode still saves from Verify. */
+        /**
+         * Verify goes on to Review & Export, where the record is saved, one
+         * document or a batch alike. A queued page was read as it was queued:
+         * it is aligned again by queuing it again, so Back to marking is not
+         * offered in a batch (its Scan would read a page the queue does not know).
+         */
         function syncVerifyButtons() {
-            const batch = Boolean(batchState?.active);
-            el('submitBtn').classList.toggle('d-none', !batch);
-            el('reviewExportBtn').classList.toggle('d-none', batch);
+            el('submitBtn').classList.add('d-none');
+            el('reviewExportBtn').classList.remove('d-none');
+            el('backToMark').classList.toggle('d-none', Boolean(batchState?.active));
+            el('batchSkipRecordBtn').classList.toggle('d-none', !batchState?.active);
+        }
+
+        /** "Save record", or in a batch where saving goes next: "Save & next (3/7)", "Save & finish batch". */
+        function updateReviewSaveLabel() {
+            let label = 'Save record';
+            if (batchState.active) {
+                const records = batchRecords();
+                const current = recordOf(batchState.items[batchState.currentIndex]);
+                const done = records.filter(recordDone).length;
+                const more = records.some((record) => record.key !== current.key && !recordDone(record));
+                label = more ? `Save & next (${done + 1}/${records.length})` : 'Save & finish batch';
+            }
+            el('reviewSaveLabel').textContent = label;
+            el('reviewSkipRecordBtn').classList.toggle('d-none', !batchState.active);
         }
 
         /** Move Verify's document pane and its notices into step 4 (on) or back to Verify (off). */
@@ -9798,6 +10328,7 @@
             }
 
             showStep('review');
+            updateReviewSaveLabel();
             reviewTable.render(reviewModel);
             updateVerificationSummary();
             // Start on the first cell, without zooming the scan.
@@ -9888,7 +10419,9 @@
             const pages = verifyDoc
                 ? `pages ${verifyDoc.pages.map((entry) => entry.number).join(' ')}`
                 : (multiPage() ? `page ${scanPageNumber}` : '');
-            return exportFileName(config.typeLabel, scanFile?.name, pages, new Date().toISOString().slice(0, 10));
+            // A queued page's file is cut from its PDF ("… (page 3).pdf"): name the PDF itself.
+            const name = batchState.active ? (batchState.items[batchState.currentIndex]?.sourceName ?? scanFile?.name) : scanFile?.name;
+            return exportFileName(config.typeLabel, name, pages, new Date().toISOString().slice(0, 10));
         }
 
         el('reviewExportCsv').addEventListener('click', () => {
@@ -9960,7 +10493,7 @@
         /** The cells typed in Review & Export where nothing was read: person id -> [{side, name}]. */
         function reviewTypedCells() {
             const typed = new Map();
-            if (!reviewModel || batchState.active) return typed;
+            if (!reviewModel) return typed;
             reviewModel.rows.forEach((row) => {
                 reviewModel.columns.forEach((column) => {
                     if (column.detail || (row.cells[column.key]?.refs.length ?? 0) > 0) return;
@@ -10000,13 +10533,22 @@
             if (payload?.record) {
                 // The page the server found saved: of two pages, either one.
                 savedPages.set(payload.record.page ?? scanPageNumber, payload.record);
-                updateScanNotices();
+                // Align's page bar is a single PDF's; a batch has its queue instead.
+                if (!batchState.active) updateScanNotices();
             }
+            // A batch can leave the record out and go on, so it is never stuck here.
+            el('duplicatePageSkipBtn').classList.toggle('d-none', !batchState.active);
             window.bootstrap.Modal.getOrCreateInstance(el('duplicatePageModal')).show();
         }
 
         // The safe choice has the focus, so Enter never saves a page twice by accident.
         el('duplicatePageModal').addEventListener('shown.bs.modal', () => el('duplicatePageBackBtn').focus());
+
+        el('duplicatePageSkipBtn').addEventListener('click', () => {
+            window.bootstrap.Modal.getInstance(el('duplicatePageModal'))?.hide();
+            // As Reject does for a match: its pages are let go, and the next record opens.
+            rejectCurrentExistingDocument({ skipped: true });
+        });
 
         el('confirmDuplicatePageBtn').addEventListener('click', () => {
             window.bootstrap.Modal.getInstance(el('duplicatePageModal'))?.hide();
@@ -10157,7 +10699,7 @@
 
             // Values typed in Review & Export where nothing was read: saved as fields with no outline.
             const personGroupsForExtras = validationGroups.filter((candidate) => candidate.kind === 'person');
-            const extraFields = batchState.active ? [] : reviewExtraFields(personGroupsForExtras);
+            const extraFields = reviewExtraFields(personGroupsForExtras);
 
             if (!allowMissing) {
                 const missing = requiredNotSubmitted(verifiedIndexes);
@@ -10179,8 +10721,8 @@
             }
             if (allowMissing) data.set('allow_missing', '1');
             if (allowDuplicate) data.set('allow_duplicate', '1');
-            // Which file, and which of its pages, this record is.
-            data.set('source_name', scanFile.name);
+            // Which file, and which of its pages, this record is (a queued page: the PDF it was cut from).
+            data.set('source_name', currentBatchItem?.sourceName ?? scanFile.name);
             data.set('source_page', String(scanPageNumber));
             data.set('source_page_count', String(scanPageCount));
             if (scanFingerprint) data.set('source_hash', scanFingerprint);
@@ -10247,75 +10789,16 @@
                 data.set('source_page', String(first.number));
                 data.set('extra_pages_json', JSON.stringify([{
                     document_page_id: second.page.id,
+                    // A queued pair: the server keeps page 2's file from the batch's folder.
+                    ...(second.item?.workspaceScanPath ? { workspace_scan_path: second.item.workspaceScanPath } : {}),
                     source_page: second.number,
                     fields: secondFields,
                 }]));
                 spreadPages = verifyDoc.pages.map((entry) => entry.number);
                 combined = true;
             }
-            const documentPages = !spreadPages && currentBatchItem?.group && currentBatchItem.pageTotal > 1
-                ? batchState.items.filter((it) => it.group === currentBatchItem.group).sort((a, b) => a.pageNo - b.pageNo)
-                : [];
-            if (documentPages.length > 1) {
-                const rowMarker = /· row (\d+)/;
-                const parsedRows = submittedFields.map((field) => Number(String(field.name).match(rowMarker)?.[1] ?? 0));
-                currentBatchItem.staged = {
-                    fields: submittedFields,
-                    pageId: processedPage.id,
-                    modelKey: (processedPage.modelKey || '').trim(),
-                    rowSpan: Math.max(Math.max(0, (processedPage.geometry?.ruled_ys?.length ?? 0) - 1), ...parsedRows),
-                    personCount: personGroups.length,
-                };
-
-                const waiting = documentPages.find((it) => !it.staged);
-                if (waiting) {
-                    currentBatchItem.status = 'checked';
-                    renderBatchQueueBanner();
-                    await openBatchVerifyItem(batchState.items.indexOf(waiting));
-                    return;
-                }
-
-                // Pages after the first carry on the row and person numbers of the page before,
-                // so the record reads as one table with unique field names.
-                let rowOffset = 0;
-                let personOffset = 0;
-                const ordered = documentPages.map((item) => {
-                    const fields = item.staged.fields.map((field) => {
-                        let name = String(field.name);
-                        if (item.pageNo > 1) {
-                            name = rowMarker.test(name)
-                                ? name.replace(rowMarker, (_, row) => `· row ${Number(row) + rowOffset}`)
-                                : `${name} · page ${item.pageNo}`;
-                        }
-                        return {
-                            ...field,
-                            name,
-                            person_group: field.person_group == null ? null : field.person_group + personOffset,
-                        };
-                    });
-                    rowOffset += item.staged.rowSpan;
-                    personOffset += item.staged.personCount;
-                    return { item, fields };
-                });
-
-                const [first, ...others] = ordered;
-                data.set('fields_json', JSON.stringify(first.fields));
-                // The record is page 1's layout; the server reads the other pages with its page 2 layout.
-                data.set('document_template_id', String(mainLayout.templateId));
-                data.set('document_page_id', String(first.item.staged.pageId));
-                data.set('ocr_model_key', first.item.staged.modelKey);
-                data.set('workspace_scan_path', first.item.workspaceScanPath ?? '');
-                data.set('source_name', first.item.sourceName ?? scanFile.name);
-                data.set('source_page', String(first.item.pageNo));
-                data.set('source_page_count', String(first.item.pageTotal));
-                data.set('extra_pages_json', JSON.stringify(others.map(({ item, fields }) => ({
-                    document_page_id: item.staged.pageId,
-                    workspace_scan_path: item.workspaceScanPath,
-                    source_page: item.pageNo,
-                    fields,
-                }))));
-                combined = true;
-            }
+            // What the table showed when this record was saved: a batch downloads its records as one.
+            const exportedTable = batchState.active && reviewing && reviewTable ? reviewTable.exportTable() : null;
 
             const button = reviewing ? el('reviewSaveBtn') : el('submitBtn');
             const idleButton = button.innerHTML;
@@ -10327,12 +10810,14 @@
             button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Submitting verified fields...';
 
             try {
-                if (spreadPages) {
+                if (currentBatchItem?.workspaceScanPath) {
+                    // Queued: the server keeps each page's file from the batch's folder.
+                } else if (spreadPages) {
                     // Each page as its own file, cut out of the PDF.
                     const [firstScan, secondScan] = await Promise.all(spreadPages.map((page) => scanForRecord(page)));
                     data.set('scan', firstScan, firstScan.name);
                     data.set('extra_scans[0]', secondScan, secondScan.name);
-                } else if (!currentBatchItem?.workspaceScanPath) {
+                } else {
                     const scanUpload = await scanForRecord();
                     data.set('scan', scanUpload, scanUpload.name);
                 }
@@ -10373,24 +10858,28 @@
                 }
 
                 if (batchState.active && currentBatchItem) {
-                    (combined ? documentPages : [currentBatchItem]).forEach((item) => {
+                    // This record's page(s) are saved; on to the next record, or the batch's summary.
+                    recordOf(currentBatchItem).members.forEach((item) => {
                         item.status = 'imported';
                         item.recordUrl = payload.redirect;
-                        item.staged = null;
+                        item.recordId = payload.record?.recordId ?? null;
                         item.verifyDraft = null;
+                        item.reviewExtras = null;
                     });
+                    currentBatchItem.exportTable = exportedTable;
                     renderBatchQueueBanner();
 
-                    const nextVerifyIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && !['imported', 'rejected'].includes(it.status));
-                    const firstRemainingIndex = batchState.items.findIndex((it) => !['imported', 'rejected'].includes(it.status));
-                    const targetVerifyIndex = nextVerifyIndex !== -1 ? nextVerifyIndex : firstRemainingIndex;
-
-                    if (targetVerifyIndex !== -1) {
+                    const next = nextOpenRecord(currentBatchItem);
+                    if (next) {
                         recordSubmitting = false;
                         button.innerHTML = idleButton;
-                        await openBatchVerifyItem(targetVerifyIndex);
+                        await openBatchVerifyItem(batchState.items.indexOf(next.members[0]));
                         return;
                     }
+                    submissionSucceeded = true;
+                    button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved';
+                    showBatchSummary();
+                    return;
                 }
 
                 const savedNow = spreadPages ?? [scanPageNumber];

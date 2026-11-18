@@ -280,4 +280,44 @@ class LedgerTemplateAndExportTest extends TestCase
         Storage::disk('local')->assertMissing($stale->directory().'/page.png');
         Storage::disk('local')->assertExists($fresh->directory().'/page.png');
     }
+
+    /**
+     * A batch keeps each queued page's original scan in documents/workspace,
+     * outside the page's folder: it is pruned with its page, and one whose page
+     * is gone already is swept once it is old.
+     */
+    public function test_a_batch_pages_queued_scan_is_pruned_with_it(): void
+    {
+        Storage::fake('local');
+        $disk = Storage::disk('local');
+        $user = User::factory()->superAdmin()->create();
+        $make = function (string $age) use ($user, $disk) {
+            $page = DocumentPage::create([
+                'created_by' => $user->getKey(), 'status' => 'queued', 'image_path' => 'x',
+                'width' => 10, 'height' => 10, 'geometry' => ['columns' => [], 'ruled_ys' => [], 'fields' => []],
+            ]);
+            $scan = "documents/workspace/batch_1/{$page->getKey()}-BIRTHS.pdf";
+            $disk->put($scan, 'pdf');
+            $disk->put($page->directory().'/workspace_scan.json', json_encode(['path' => $scan]));
+            $page->forceFill(['updated_at' => now()->sub($age)])->saveQuietly();
+
+            return [$page, $scan];
+        };
+        [$stale, $staleScan] = $make('2 days');
+        [$fresh, $freshScan] = $make('1 hour');
+        // A scan left by a page already gone (old), and one still in use by no page but new.
+        $disk->put('documents/workspace/batch_2/999999-OLD.pdf', 'pdf');
+        touch($disk->path('documents/workspace/batch_2/999999-OLD.pdf'), now()->subDays(2)->getTimestamp());
+        $disk->put('documents/workspace/batch_3/999998-NEW.pdf', 'pdf');
+
+        $this->artisan('documents:prune-pages')->assertSuccessful();
+
+        $this->assertModelMissing($stale);
+        $disk->assertMissing($staleScan);
+        $this->assertModelExists($fresh);
+        $disk->assertExists($freshScan);
+        $disk->assertMissing('documents/workspace/batch_2/999999-OLD.pdf');
+        $disk->assertMissing('documents/workspace/batch_2');
+        $disk->assertExists('documents/workspace/batch_3/999998-NEW.pdf');
+    }
 }

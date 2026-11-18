@@ -100,20 +100,10 @@ class DocumentPageController extends Controller
         $path = $disk->putFileAs($page->directory(), $image, 'page.png');
         $page->forceFill(['image_path' => $path])->save();
 
-        $workspaceScanPath = null;
         $scan = $request->file('scan');
-        if ($scan instanceof UploadedFile) {
-            $batchKey = $validated['batch_key'] ?? 'batch-' . $page->getKey();
-            $ext = strtolower($scan->getClientOriginalExtension() ?: ($scan->extension() ?: 'bin'));
-            $safeName = sprintf('%d-%s.%s', $page->getKey(), preg_replace('/[^A-Za-z0-9_-]/', '_', pathinfo($scan->getClientOriginalName(), PATHINFO_FILENAME)) ?: 'scan', $ext);
-            $workspaceScanPath = $disk->putFileAs('documents/workspace/' . $batchKey, $scan, $safeName);
-            $disk->put($page->directory() . '/workspace_scan.json', json_encode([
-                'path' => $workspaceScanPath,
-                'name' => $scan->getClientOriginalName(),
-                'mime' => $scan->getMimeType(),
-                'batch_key' => $batchKey,
-            ], JSON_UNESCAPED_SLASHES));
-        }
+        $workspaceScanPath = $scan instanceof UploadedFile
+            ? $this->storeWorkspaceScan($page, $scan, $validated['batch_key'] ?? null)
+            : null;
 
         if (! $request->boolean('defer_scan')) {
             ProcessDocumentPage::dispatch(
@@ -128,6 +118,54 @@ class DocumentPageController extends Controller
         }
 
         return response()->json($payload, 202);
+    }
+
+    /**
+     * Batch: a page Smoke test went over is queued as it is. Its file is kept
+     * in the batch's workspace folder (as Save to queue keeps a new page's),
+     * so Scan all reads the lines Detect found, with any outline fixed by
+     * hand, instead of a fresh copy of the page that is outlined again.
+     */
+    public function queue(Request $request, DocumentPage $page): JsonResponse
+    {
+        $this->authorizePage($request, $page);
+
+        $validated = $request->validate([
+            'scan' => ['required', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'batch_key' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
+        ], [
+            'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
+        ]);
+
+        if ($page->status !== DocumentPage::STATUS_DETECTED) {
+            return response()->json(['message' => 'Run Smoke test scan on this page again before queuing it.'], 409);
+        }
+
+        $payload = $this->payload($page);
+        $payload['workspaceScanPath'] = $this->storeWorkspaceScan($page, $request->file('scan'), $validated['batch_key'] ?? null);
+
+        return response()->json($payload);
+    }
+
+    /**
+     * Keep a queued page's original file in its batch's workspace folder, where
+     * the record takes it from when it is saved.
+     */
+    private function storeWorkspaceScan(DocumentPage $page, UploadedFile $scan, ?string $batchKey): string
+    {
+        $disk = Storage::disk('local');
+        $batchKey ??= 'batch-' . $page->getKey();
+        $ext = strtolower($scan->getClientOriginalExtension() ?: ($scan->extension() ?: 'bin'));
+        $safeName = sprintf('%d-%s.%s', $page->getKey(), preg_replace('/[^A-Za-z0-9_-]/', '_', pathinfo($scan->getClientOriginalName(), PATHINFO_FILENAME)) ?: 'scan', $ext);
+        $workspaceScanPath = $disk->putFileAs('documents/workspace/' . $batchKey, $scan, $safeName);
+        $disk->put($page->directory() . '/workspace_scan.json', json_encode([
+            'path' => $workspaceScanPath,
+            'name' => $scan->getClientOriginalName(),
+            'mime' => $scan->getMimeType(),
+            'batch_key' => $batchKey,
+        ], JSON_UNESCAPED_SLASHES));
+
+        return $workspaceScanPath;
     }
 
     /**

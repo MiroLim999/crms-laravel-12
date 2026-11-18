@@ -1968,10 +1968,18 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .batch-queue-chip__name {
-  max-inline-size: 8.5rem;
+  max-inline-size: 16rem;
   overflow: hidden;
   font-weight: 500;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// A file of several pages: how many, kept whole beside its (cut-off) name.
+.batch-queue-chip__pages {
+  flex: 0 0 auto;
+  color: var(--bs-secondary-color);
+  font-size: .68rem;
   white-space: nowrap;
 }
 
@@ -2035,7 +2043,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   .batch-queue-chip__name {
-    max-inline-size: 6rem;
+    max-inline-size: 9rem;
   }
 }
 
@@ -3151,6 +3159,88 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   li+li {
     margin-block-start: .25rem;
   }
+}
+
+// Files just added to a batch that were left out, grouped by why.
+.batch-intake {
+  max-block-size: 40vh;
+  margin: 0 0 1rem;
+  padding: .75rem .9rem;
+  overflow-y: auto;
+  text-align: start;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+}
+
+.batch-intake__group + .batch-intake__group {
+  margin-block-start: .75rem;
+}
+
+.batch-intake__title {
+  margin: 0 0 .3rem;
+  font-size: .8rem;
+  font-weight: 600;
+}
+
+.batch-intake__list {
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  color: var(--bs-secondary-color);
+  font-size: .8rem;
+  overflow-wrap: anywhere;
+
+  li + li {
+    margin-block-start: .15rem;
+  }
+}
+
+.batch-intake__note {
+  margin: 0 0 1.25rem;
+  color: var(--bs-secondary-color);
+  font-size: .78rem;
+  text-align: start;
+}
+
+// The end of a batch: each record, saved (linked) or rejected.
+.batch-summary-list {
+  max-block-size: 14rem;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  overflow-y: auto;
+  font-size: .85rem;
+  text-align: start;
+  list-style: none;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+}
+
+.batch-summary-list__item {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  padding: .45rem .75rem;
+  overflow-wrap: anywhere;
+
+  &+& {
+    border-block-start: 1px solid var(--bs-border-color);
+  }
+
+  &.is-saved i {
+    color: var(--bs-success);
+  }
+
+  &.is-rejected {
+    color: var(--bs-secondary-color);
+
+    i {
+      color: var(--bs-danger);
+    }
+  }
+}
+
+#batchSummaryModal .leave-scan-modal__actions {
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 // Verify: asks before a record is submitted without required fields.

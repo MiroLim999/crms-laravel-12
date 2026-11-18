@@ -327,6 +327,49 @@ class LineOutlinePipelineTest extends TestCase
         $this->actingAs($page->creator)->postJson(route('documents.pages.read', $page))->assertAccepted();
     }
 
+    public function test_a_smoke_tested_page_joins_a_batch_queue_as_it_is(): void
+    {
+        $page = $this->detectedPage();
+        // Queuing it starts nothing: Scan all reads it later.
+        Queue::fake();
+
+        $response = $this->actingAs($page->creator)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.queue', $page), [
+                'scan' => UploadedFile::fake()->create('BIRTHS-1995 (page 3).pdf', 12, 'application/pdf'),
+                'batch_key' => 'batch_123_abc',
+            ]);
+
+        $path = "documents/workspace/batch_123_abc/{$page->getKey()}-BIRTHS-1995__page_3_.pdf";
+        $response->assertOk()
+            ->assertJsonPath('id', $page->getKey())
+            ->assertJsonPath('status', DocumentPage::STATUS_DETECTED)
+            ->assertJsonPath('workspaceScanPath', $path);
+        Storage::disk('local')->assertExists($path);
+        // Its lines are kept: Scan all only reads them.
+        $this->assertSame(3, $page->lines()->count());
+        Queue::assertNothingPushed();
+    }
+
+    public function test_only_a_smoke_tested_page_of_ones_own_joins_a_batch_queue(): void
+    {
+        $scan = fn () => ['scan' => UploadedFile::fake()->create('scan.pdf', 12, 'application/pdf')];
+
+        $read = $this->processedPage();
+        $this->actingAs($read->creator)->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.queue', $read), $scan())
+            ->assertStatus(409);
+
+        $detected = $this->detectedPage();
+        $this->actingAs(User::factory()->superAdmin()->create())->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.queue', $detected), $scan())
+            ->assertNotFound();
+        $this->actingAs($detected->creator)->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.queue', $detected), [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('scan');
+    }
+
     public function test_a_finished_page_or_someone_elses_cannot_be_cancelled(): void
     {
         $page = $this->processedPage();

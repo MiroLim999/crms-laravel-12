@@ -12,6 +12,7 @@ import {
     pageFileName,
     pageRanges,
     pdfPageFile,
+    recordLeadPage,
     sha256Hex,
 } from '../../resources/js/scan-source.js';
 
@@ -104,4 +105,13 @@ test('saved pages read as short runs', () => {
     assert.equal(pageRanges([3, 1, 2]), '1–3');
     assert.equal(pageRanges([1, 2, 3, 5, 7, 8]), '1–3, 5 and 7–8');
     assert.equal(pageRanges(new Set([2, 9])), '2 and 9');
+});
+
+test('a page is its own record, or goes with its pair when the layout has a page 2', () => {
+    // No page 2 in the layout: every page alone.
+    assert.deepEqual([1, 2, 3, 4].map((page) => recordLeadPage(page, 4, false)), [1, 2, 3, 4]);
+    // A page 2: 1–2 and 3–4, and a lone last page alone.
+    assert.deepEqual([1, 2, 3, 4, 5].map((page) => recordLeadPage(page, 5, true)), [1, 1, 3, 3, 5]);
+    // A file of one page has no pair.
+    assert.equal(recordLeadPage(1, 1, true), 1);
 });
