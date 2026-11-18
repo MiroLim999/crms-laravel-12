@@ -4483,13 +4483,26 @@
                 await openBatchQueueItem(alignIndex);
                 return;
             }
+            // Queued pages not read yet, and none can be opened in Align (a resumed
+            // batch has not their files): they are read now, and waited for.
+            if (unsentBatchPages().length > 0) {
+                await sendRemainingToRead();
+                if (batchState.items.some((it) => it.status === 'scanning' && it.sentToScan)) {
+                    showBatchWait(after);
+                    return;
+                }
+                await continueBatch(after, { askForFiles });
+                return;
+            }
             // A resumed batch: pages wait for their file to be picked again.
             if (batchState.items.some(pageNeedsFile)) {
                 if (askForFiles) await askForBatchFiles({ thenContinue: true });
                 else showResumeOffer();
                 return;
             }
-            showBatchSummary();
+            // The summary only once every page is saved or left out.
+            if (batchState.items.every(pageDone)) showBatchSummary();
+            else renderBatchQueueBanner();
         }
 
         /** "2 pages failed: re-align or remove", with a button to open the first one. */
@@ -4598,7 +4611,7 @@
                     const failedHere = currentItem?.status === 'failed';
                     saveQueueBtn.classList.toggle('d-none', allSaved && !failedHere);
                     if (saveQueueLabel) {
-                        const hasMoreUnsaved = batchState.items.some((it, idx) => idx !== batchState.currentIndex && it.status === 'pending');
+                        const hasMoreUnsaved = batchState.items.some((it, idx) => idx !== batchState.currentIndex && it.status === 'pending' && pageAlignable(it));
                         saveQueueLabel.textContent = currentItem?.realign
                             ? (hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again & Verify')
                             : failedHere
@@ -5098,6 +5111,10 @@
                 batchState.currentIndex = 0;
                 scanFile = null;
                 scanFileInput.value = '';
+                // Nothing left to resume: the batch kept on the server goes too.
+                const emptied = batchServer.id;
+                resetServerBatch();
+                if (emptied !== null) discardServerBatch(emptied);
                 renderBatchQueueBanner();
                 showStep('upload');
                 return;
@@ -5738,8 +5755,10 @@
                 renderBatchQueueBanner();
 
                 // Move to next unsaved document if any
-                const nextPendingIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && it.status === 'pending');
-                const firstPendingIndex = batchState.items.findIndex((it) => it.status === 'pending');
+                // (A resumed page whose file is not picked again yet is skipped.)
+                const toAlign = (it) => it.status === 'pending' && pageAlignable(it);
+                const nextPendingIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && toAlign(it));
+                const firstPendingIndex = batchState.items.findIndex(toAlign);
                 const targetIndex = nextPendingIndex !== -1 ? nextPendingIndex : firstPendingIndex;
 
                 if (targetIndex !== -1) {
@@ -6265,6 +6284,16 @@
 
         const batchOpenOnServer = () => batchState.active && batchServer.id !== null && !batchServer.lost;
 
+        /** No batch kept on the server any more (its queue was emptied): the next one is created afresh. */
+        function resetServerBatch() {
+            window.clearTimeout(batchServer.syncTimer);
+            window.clearTimeout(batchServer.draftTimer);
+            window.clearInterval(batchServer.pingTimer);
+            Object.assign(batchServer, {
+                id: null, version: 0, chain: Promise.resolve(), sent: new Map(), drafts: new Map(), removed: new Set(), lost: false,
+            });
+        }
+
         /** The scan of the record open now is on the server (a queued batch page): no local file is needed. */
         function batchScanOnServer() {
             return batchState.active && Boolean(batchState.items[batchState.currentIndex]?.workspaceScanPath);
@@ -6297,7 +6326,11 @@
                 error.batchLost = true;
                 throw error;
             }
-            if (!response.ok) throw new Error(responseErrorMessage(response, payload));
+            if (!response.ok) {
+                const error = new Error(responseErrorMessage(response, payload));
+                error.status = response.status;
+                throw error;
+            }
             if (typeof payload?.version === 'number') batchServer.version = payload.version;
             return payload;
         }
@@ -6314,11 +6347,11 @@
             return {
                 key: item.key,
                 position,
-                source_name: item.sourceName ?? item.name ?? 'scan',
+                source_name: String(item.sourceName ?? item.name ?? 'scan').slice(0, 255),
                 source_hash: item.sourceHash ?? null,
                 page_no: item.pageNo ?? 1,
                 page_total: item.pageTotal ?? 1,
-                record_key: String(item.record ?? item.key),
+                record_key: String(item.record ?? item.key).slice(0, 120),
                 status,
                 document_page_id: item.pageId ?? null,
                 workspace_scan_path: item.workspaceScanPath ?? null,
@@ -6341,7 +6374,7 @@
                     recordId: item.recordId ?? null,
                     recordUrl: item.recordUrl ?? null,
                 },
-                error: item.error ?? null,
+                error: item.error ? String(item.error).slice(0, 2000) : null,
             };
         }
 
@@ -6384,6 +6417,11 @@
             batchServer.syncTimer = window.setTimeout(() => {
                 batchWrite(syncBatchPages).catch((error) => {
                     if (error.batchLost) return;
+                    // Refused as it is (422): sending it again would not help.
+                    if (error.status === 422) {
+                        console.error('The server refused a change to this batch:', error);
+                        return;
+                    }
                     console.warn('The batch could not be saved on the server; trying again shortly:', error);
                     scheduleBatchSync(5000);
                 });
@@ -6401,8 +6439,8 @@
             const removed = [...batchServer.removed];
             if (changed.length === 0 && removed.length === 0) return;
             // In parts, so a register of hundreds of pages is never one large request.
-            for (let start = 0; start === 0 || start < changed.length; start += 300) {
-                const part = changed.slice(start, start + 300);
+            for (let start = 0; start === 0 || start < changed.length; start += 100) {
+                const part = changed.slice(start, start + 100);
                 // eslint-disable-next-line no-await-in-loop
                 await batchRequest('pages', 'PUT', { pages: part.map((entry) => entry.row), removed: start === 0 ? removed : [] });
                 part.forEach((entry) => batchServer.sent.set(entry.key, entry.json));
@@ -6429,7 +6467,7 @@
 
         function syncBatchDraft(item) {
             if (!batchOpenOnServer() || !item) return;
-            const recordKey = String(item.record ?? item.key);
+            const recordKey = String(item.record ?? item.key).slice(0, 120);
             const draft = draftOf(item);
             const json = JSON.stringify(draft);
             if ((batchServer.drafts.get(recordKey) ?? 'null') === json) return;
@@ -6478,7 +6516,7 @@
 
         /** Every record is saved or left out: the batch is finished. */
         function finishServerBatch() {
-            if (!batchOpenOnServer()) return;
+            if (!batchOpenOnServer() || !batchState.items.every(pageDone)) return;
             window.clearTimeout(batchServer.syncTimer);
             batchWrite(syncBatchPages)
                 .then(() => batchWrite(() => batchRequest('done', 'POST')))
@@ -6675,10 +6713,12 @@
         /**
          * A resumed record's pages: only where they are on the server is known,
          * so what was read is asked for. A page the server no longer has fails
-         * (to be re-aligned or removed). False when the record cannot open.
+         * (to be re-aligned or removed). Answers 'ok', 'changed' (a page is not
+         * read, or is gone: the record cannot open) or 'offline' (the server
+         * could not be reached: nothing changed, so it can be opened again).
          */
         async function loadBatchPages(members) {
-            let ok = true;
+            let ok = 'ok';
             for (const item of members) {
                 if (!item.page?.statusUrl || item.page.imageUrl || pageDone(item)) continue;
                 try {
@@ -6689,21 +6729,22 @@
                     });
                     // eslint-disable-next-line no-await-in-loop
                     const page = response.ok ? await response.json() : null;
+                    if (!response.ok && response.status !== 404) return 'offline';
                     if (!page || page.status !== 'ready') {
                         item.status = page && ['queued', 'detecting', 'reading'].includes(page.status) ? 'scanning' : 'failed';
-                        item.error = item.status === 'failed' ? 'This page is no longer on the server. Re-align it and queue it again.' : null;
+                        item.error = item.status === 'failed' ? 'This page could not be loaded from the server. Re-align it and queue it again.' : null;
                         if (page) item.page = page;
                         if (item.status === 'scanning') {
                             item.sentToScan = true;
                             watchBatchReading();
                         }
-                        ok = false;
+                        ok = 'changed';
                         continue;
                     }
                     item.page = page;
                 } catch (error) {
                     console.warn(`${item.name} could not be loaded:`, error);
-                    ok = false;
+                    return 'offline';
                 }
             }
             return ok;
@@ -6712,10 +6753,13 @@
         // ------------------------------------------- pick the files again
         let batchFilesResolve = null;
         let batchFilesContinue = false;
+        // Pages read already whose file is wanted too (to re-align them).
+        let batchFilesAlso = [];
 
         /** Say which files are wanted, and match what is picked. Resolves when the window closes. */
-        function askForBatchFiles({ thenContinue = false } = {}) {
+        function askForBatchFiles({ thenContinue = false, also = [] } = {}) {
             batchFilesContinue = batchFilesContinue || thenContinue;
+            batchFilesAlso = also;
             renderBatchFilesList();
             el('batchFilesResult').classList.add('d-none');
             const modal = window.bootstrap.Modal.getOrCreateInstance(el('batchFilesModal'));
@@ -6731,6 +6775,11 @@
 
         function renderBatchFilesList() {
             const { missing } = matchFilesToBatch([], batchState.items);
+            batchFilesAlso = batchFilesAlso.filter((it) => !it.file);
+            batchFilesAlso.forEach((it) => {
+                if (missing.some((entry) => entry.sourceHash === it.sourceHash)) return;
+                missing.push({ sourceName: it.sourceName ?? it.name, sourceHash: it.sourceHash, pages: 1 });
+            });
             el('batchFilesList').replaceChildren(...missing.map((entry) => {
                 const li = document.createElement('li');
                 li.textContent = `${entry.sourceName} · ${entry.pages} page${entry.pages === 1 ? '' : 's'} to align`;
@@ -6826,7 +6875,13 @@
             // Only a record whose pages are all read opens in Verify.
             if (!picked || recordStateOf(picked) !== 'ready') return;
             // A resumed batch knows only where its pages are: what was read is asked for now.
-            if (!(await loadBatchPages(recordOf(picked).members))) {
+            const loaded = await loadBatchPages(recordOf(picked).members);
+            if (loaded === 'offline') {
+                alert('This record could not be loaded: the server could not be reached. Check the connection, then open it again from the queue.');
+                renderBatchQueueBanner();
+                return;
+            }
+            if (loaded === 'changed') {
                 renderBatchQueueBanner();
                 await continueBatch(picked);
                 return;
@@ -7068,6 +7123,13 @@ Nothing is saved for it, and the next record opens. `
             const menu = el(`${prefix}RealignMenu`);
             button.addEventListener('click', (event) => {
                 const pages = realignablePages();
+                // A resumed record: its file is picked again first.
+                const current = batchState.items[batchState.currentIndex];
+                const fileless = current ? recordOf(current).members.filter((it) => !pageDone(it) && !it.file) : [];
+                if (pages.length === 0 && fileless.length > 0) {
+                    askForBatchFiles({ also: fileless });
+                    return;
+                }
                 if (pages.length <= 1) {
                     realignBatchPages(pages);
                     return;
@@ -7242,6 +7304,8 @@ Nothing is saved for it, and the next record opens. `
 
         function askToLeave(target) {
             leaveTo = target;
+            el('confirmLeaveScanBtn').disabled = false;
+            el('discardBatchLeaveBtn').disabled = false;
             const keep = batchToKeep();
             el('leaveScanModalTitle').textContent = keep ? 'Leave this batch?' : 'Leave this scan?';
             el('leaveScanModalDescription').textContent = keep
@@ -8157,7 +8221,7 @@ Cancel opens only the first file.`)) {
         async function snapAheadFrom(index) {
             snapAheadRun?.abort();
             snapAheadRun = null;
-            const nextIndex = batchState.items.findIndex((it, at) => at > index && freshBatchPage(it));
+            const nextIndex = batchState.items.findIndex((it, at) => at > index && freshBatchPage(it) && it.file);
             const next = batchState.items[nextIndex];
             if (!next || next.snapAhead) return;
             const run = new AbortController();
