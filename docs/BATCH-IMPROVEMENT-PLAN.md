@@ -195,14 +195,14 @@ The foundation for A3, D1 and E1. No visible change on its own.
 ### Phase B: Align takes less work (S–M)
 
 **B1. Auto Snap when a page opens (#1)**
-- [ ] `openBatchQueueItem`: for a page **never opened** (`item.boxes` empty) **and with no Smoke-test result** (`item.detected` empty), draw it on the template grid, then run Snap to table.
-- [ ] On success: apply the fitted grid as one undoable change; fields moved by hand stay put.
-- [ ] On failure or no table:
+- [x] `openBatchQueueItem`: for a page **never opened** (`item.boxes` empty) **and with no Smoke-test result** (`item.detected` empty), draw it on the template grid, then run Snap to table.
+- [x] On success: apply the fitted grid as one undoable change; fields moved by hand stay put.
+- [x] On failure or no table:
   - keep the template grid;
   - set `item.alignCheck = true`;
   - show the reason in the Align message area.
-- [ ] A page opened before, or one that was Smoke-tested (alone or as the page beside another), keeps its own markers.
-- [ ] Show the spinner on Snap to table while it runs; Save & Queue waits for it.
+- [x] A page opened before, or one that was Smoke-tested (alone or as the page beside another), keeps its own markers.
+- [x] Show the spinner on Snap to table while it runs; Save & Queue waits for it.
 - [ ] *(manual)* **Test** with two different PDFs.
   - Each new page opens already snapped.
   - A page with faint lines is flagged, not moved.
@@ -211,10 +211,10 @@ The foundation for A3, D1 and E1. No visible change on its own.
 - [ ] **Verify:** going back to an adjusted page keeps the adjustments.
 
 **B2. Snap the next page ahead (optional speed-up)**
-- [ ] While the user is on page N, draw page N+1 off-screen and run its Snap. Keep the result on the item.
-- [ ] Opening N+1 applies the kept result at once (no second request).
-- [ ] Only one page ahead. Drop it if the user opens another page.
-- [ ] **Verify:** Save & Next opens an already-fitted page in under half a second on this PC.
+- [x] While the user is on page N, draw page N+1 off-screen and run its Snap. Keep the result on the item.
+- [x] Opening N+1 applies the kept result at once (no second request).
+- [x] Only one page ahead. Drop it if the user opens another page.
+- [ ] **Verify:** Save & Next opens an already-fitted page in under half a second on this PC. (Needs a timing in the browser: left for G3.)
 
 > **Phase B gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 2 and 10.
 

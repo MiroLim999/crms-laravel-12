@@ -4181,6 +4181,7 @@
             current.boxes = cloneBoxes(marker.toJSON());
             current.rows = [...gridRows];
             current.tilts = [...rowTilts];
+            current.autoFields = new Map(autoFields);
         }
 
         /** "BIRTHS-1995.pdf · pages 1–2", "BIRTHS-1995.pdf · page 3", or the file's name. */
@@ -5099,6 +5100,9 @@
             if (left !== item) item.detected = null;
             const swap = batchPartner()?.index === index && companionMarker.canvas.width > 0
                 && companionFile === (tested?.imageUrl ?? item.file);
+            // A page never opened, and not Smoke-tested, is snapped on its own once drawn.
+            const fresh = freshBatchPage(item) && !tested;
+            stopAutoSnap();
             batchState.currentIndex = index;
             renderBatchQueueBanner();
 
@@ -5138,16 +5142,24 @@
                 rowsSource = null;
 
                 if (item.boxes && item.rows) {
-                    setGrid(item.boxes, item.rows, { tilts: item.tilts });
+                    // A page opened before keeps its own markers, and which of them were placed by hand.
+                    setGrid(item.boxes, item.rows, { tilts: item.tilts, remember: !item.autoFields });
+                    if (item.autoFields) autoFields = new Map(item.autoFields);
                 } else {
-                    setGrid(templateBoxes, templateRows);
+                    // A new page starts on its layout's template grid; Snap fits it below.
+                    setGrid(templateBoxes, templateRows, { remember: true });
                 }
                 if (tested) await applyDetection(tested, { imageShown: true, keepView: swap });
                 clearOcrError();
                 if (item.status === 'failed' && item.error) {
                     showOcrError(`This page could not be read: ${String(item.error).replace(/[.\s]+$/, '')}. Re-align it and queue it again, or remove it.`);
+                } else if (item.alignCheck && !fresh) {
+                    showOcrError('Check alignment: Snap to table could not fit this page. Fit the markers by hand, or try Snap to table again.');
                 }
-                fetchSnapLines();
+                if (fresh) autoSnapBatchPage(item);
+                else fetchSnapLines();
+                // The next new page is drawn and snapped meanwhile.
+                snapAheadFrom(index);
                 renderBatchQueueBanner();
                 // The other page of the pair is zoomed on and centred; a different
                 // document is fitted afresh.
@@ -5180,6 +5192,16 @@
         });
 
         document.getElementById('saveQueueNextBtn')?.addEventListener('click', async () => {
+            // An automatic Snap still running on this page finishes first.
+            if (batchAutoSnap) {
+                const btn = el('saveQueueNextBtn');
+                btn.disabled = true;
+                try {
+                    await batchAutoSnap;
+                } finally {
+                    btn.disabled = false;
+                }
+            }
             if (scanInProgress || !batchState.active) return;
 
             const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
@@ -5234,6 +5256,7 @@
                 item.boxes = cloneBoxes(marker.toJSON());
                 item.rows = [...gridRows];
                 item.tilts = [...rowTilts];
+                item.autoFields = new Map(autoFields);
                 item.geometry = currentGeometry();
 
                 const form = new FormData();
@@ -6624,10 +6647,11 @@ Cancel opens only the first file.`)) {
 
         let snapToken = 0;
 
-        async function requestSnap(signal = null) {
+        /** The page's printed lines and the markers fitted to them (this page, or another drawn off-screen). */
+        async function requestSnap(signal = null, { canvas = marker.canvas, geometry = currentGeometry() } = {}) {
             const form = new FormData();
-            form.set('geometry_json', JSON.stringify(currentGeometry()));
-            form.set('page', await canvasBlob(marker.canvas), 'page.png');
+            form.set('geometry_json', JSON.stringify(geometry));
+            form.set('page', await canvasBlob(canvas), 'page.png');
             const response = await fetch(config.snapUrl, {
                 method: 'POST',
                 headers: { 'X-CSRF-TOKEN': config.csrf, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' },
@@ -6666,8 +6690,142 @@ Cancel opens only the first file.`)) {
             button.disabled = busy;
         }
 
+        /**
+         * Fit the markers to what Snap to table found: the columns on the table and
+         * the page's own row lines, as one undoable change (Ctrl+Z) like any marker
+         * edit. Fields moved (or added) by hand stay where they were put.
+         */
+        function applySnapFit(payload) {
+            const rows = payload.geometry?.ruled_ys ?? gridRows;
+            rowsSource = payload.rows ?? null;
+            const before = marker.toJSON();
+            const kept = handPlacedFields(before);
+            const keptBoxes = new Map(before.filter((box) => kept.has(nameKey(box.name)) && box.kind !== 'column')
+                .map((box) => [nameKey(box.name), box]));
+            const snapped = geometryMarkers(payload.geometry, null)
+                .map((box) => (box.kind !== 'column' && keptBoxes.has(nameKey(box.name)) ? keptBoxes.get(nameKey(box.name)) : box));
+            setGrid(snapped, rows, {
+                estimated: (payload.rows?.estimated ?? []).filter((index) => rows[index] !== undefined)
+                    .map((index) => rowKey(rows[index])),
+            });
+            // The fields Snap placed are the new starting point; the ones kept stay as placed by hand.
+            rememberAutoFields(snapped, kept);
+            if (keptBoxes.size > 0) {
+                showGridMessage(`Snap left ${keptBoxes.size} field${keptBoxes.size === 1 ? '' : 's'} you moved where ${keptBoxes.size === 1 ? 'it is' : 'they are'}.`);
+            }
+        }
+
+        // ------------------------------------------- a batch: Snap on its own
+        // A batch page never opened (and not Smoke-tested) starts on its layout's
+        // template grid, and Snap to table runs on it at once. A page Snap cannot
+        // fit keeps the template grid and is flagged "Check alignment". While the
+        // user aligns a page, the next new page is drawn off-screen and snapped
+        // ahead, so it opens already fitted.
+
+        // The automatic Snap running now (Save & Queue waits for it), and its run.
+        let batchAutoSnap = null;
+        let autoSnapToken = 0;
+
+        /** A batch page that opens on the template and is snapped on its own. */
+        const freshBatchPage = (item) => item?.status === 'pending' && !item.boxes && !item.detected;
+
+        function stopAutoSnap() {
+            autoSnapToken += 1;
+            if (!el('snapTableBtn').classList.contains('is-loading') || scanInProgress) return;
+            setSnapBusy(false);
+            const boxes = marker.toJSON();
+            el('detectBtn').disabled = boxes.length === 0 || markerSetValidationMessage(boxes) !== null;
+        }
+
+        function flagAlignCheck(item, reason) {
+            item.alignCheck = true;
+            const why = String(reason || 'Snap to table could not fit the markers to this page.').replace(/[.\s]+$/, '');
+            showOcrError(`Check alignment: ${why}. The template grid is kept: fit the markers by hand, or try Snap to table again.`);
+            renderBatchQueueBanner();
+        }
+
+        /** Snap to table on a batch page just opened (with the result found ahead, when there is one). */
+        function autoSnapBatchPage(item) {
+            const token = ++autoSnapToken;
+            const lines = ++snapToken;
+            const ahead = item.snapAhead ?? null;
+            item.snapAhead = null;
+            const startGrid = JSON.stringify(gridState());
+            const current = () => token === autoSnapToken && lines === snapToken && batchState.items[batchState.currentIndex] === item;
+            marker.setSnapLines(null);
+            if (!ahead) {
+                setSnapBusy(true);
+                el('detectBtn').disabled = true;
+            }
+            batchAutoSnap = (async () => {
+                try {
+                    const payload = ahead ?? await requestSnap(AbortSignal.timeout?.(60 * 1000) ?? null);
+                    if (!current()) return;
+                    marker.setSnapLines(payload.lines);
+                    // Markers moved by hand meanwhile stay as they are.
+                    if (JSON.stringify(gridState()) !== startGrid) return;
+                    if (!payload.fitted) {
+                        flagAlignCheck(item, payload.reason || 'No printed table matching these markers was found on this page.');
+                        return;
+                    }
+                    applySnapFit(payload);
+                    item.alignCheck = false;
+                } catch (error) {
+                    if (!current()) return;
+                    flagAlignCheck(item, ['AbortError', 'TimeoutError'].includes(error.name)
+                        ? 'Snap to table timed out'
+                        : (error.message || 'Snap to table could not run'));
+                } finally {
+                    if (token === autoSnapToken) {
+                        setSnapBusy(false);
+                        const boxes = marker.toJSON();
+                        el('detectBtn').disabled = boxes.length === 0 || markerSetValidationMessage(boxes) !== null;
+                        renderBatchQueueBanner();
+                    }
+                }
+            })();
+            return batchAutoSnap;
+        }
+
+        // The next new page, drawn off-screen and snapped while this one is aligned.
+        const snapAheadMarker = new FieldMarker({
+            canvas: document.createElement('canvas'),
+            overlay: document.createElement('div'),
+            readOnly: true,
+        });
+        let snapAheadRun = null;
+
+        /** Snap the next new page after `index` ahead (one page only; a new open drops it). */
+        async function snapAheadFrom(index) {
+            snapAheadRun?.abort();
+            snapAheadRun = null;
+            const nextIndex = batchState.items.findIndex((it, at) => at > index && freshBatchPage(it));
+            const next = batchState.items[nextIndex];
+            if (!next || next.snapAhead) return;
+            const run = new AbortController();
+            snapAheadRun = run;
+            try {
+                // This page's own Snap goes first.
+                await batchAutoSnap;
+                if (run.signal.aborted) return;
+                await snapAheadMarker.load(next.file, { page: next.pageNo ?? 1 });
+                if (run.signal.aborted) return;
+                const start = layoutStart(next.pageNo ?? 1);
+                const payload = await requestSnap(run.signal, {
+                    canvas: snapAheadMarker.canvas,
+                    geometry: alignedGeometry(start.boxes, start.rows),
+                });
+                if (!run.signal.aborted && freshBatchPage(next)) next.snapAhead = payload;
+            } catch (error) {
+                if (error.name !== 'AbortError') console.warn(`The next page (${next.name}) could not be snapped ahead:`, error);
+            } finally {
+                if (snapAheadRun === run) snapAheadRun = null;
+            }
+        }
+
         el('snapTableBtn').addEventListener('click', async () => {
             if (scanInProgress) return;
+            stopAutoSnap();
             const token = ++snapToken;
             const controller = new AbortController();
             const timeoutId = window.setTimeout(() => controller.abort(), 60 * 1000);
@@ -6686,26 +6844,11 @@ Cancel opens only the first file.`)) {
                     showOcrError(payload.reason || 'No printed table matching these markers was found on this page.');
                     return;
                 }
-                // The columns fitted to the table and the page's own row lines, as
-                // one undoable change (Ctrl+Z) like any marker edit.
-                const rows = payload.geometry?.ruled_ys ?? gridRows;
-                rowsSource = payload.rows ?? null;
-                // Fields moved (or added) by hand stay where they were put: Snap only
-                // fits the table and the fields not touched.
-                const before = marker.toJSON();
-                const kept = handPlacedFields(before);
-                const keptBoxes = new Map(before.filter((box) => kept.has(nameKey(box.name)) && box.kind !== 'column')
-                    .map((box) => [nameKey(box.name), box]));
-                const snapped = geometryMarkers(payload.geometry, null)
-                    .map((box) => (box.kind !== 'column' && keptBoxes.has(nameKey(box.name)) ? keptBoxes.get(nameKey(box.name)) : box));
-                setGrid(snapped, rows, {
-                    estimated: (payload.rows?.estimated ?? []).filter((index) => rows[index] !== undefined)
-                        .map((index) => rowKey(rows[index])),
-                });
-                // The fields Snap placed are the new starting point; the ones kept stay as placed by hand.
-                rememberAutoFields(snapped, kept);
-                if (keptBoxes.size > 0) {
-                    showGridMessage(`Snap left ${keptBoxes.size} field${keptBoxes.size === 1 ? '' : 's'} you moved where ${keptBoxes.size === 1 ? 'it is' : 'they are'}.`);
+                applySnapFit(payload);
+                const current = batchState.active ? batchState.items[batchState.currentIndex] : null;
+                if (current && batchAligning()) {
+                    current.alignCheck = false;
+                    renderBatchQueueBanner();
                 }
             } catch (error) {
                 showOcrError(error.name === 'AbortError'
