@@ -3314,6 +3314,77 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   gap: .75rem;
 }
 
+// Three choices stacked (Stay, Discard batch, Keep for later; Later, folder, files).
+.leave-scan-modal__actions.is-three {
+  grid-template-columns: 1fr;
+}
+
+// A resumed batch: the files to pick again.
+.batch-files-list {
+  max-block-size: 12rem;
+  margin-block-end: .85rem;
+  overflow-y: auto;
+}
+
+// The upload step: a batch left unfinished, to resume or discard.
+.batch-resume {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .6rem .85rem;
+  margin-block-end: 1rem;
+  padding: .75rem .9rem;
+  border: 1px solid rgba(var(--bs-primary-rgb), .35);
+  border-radius: .6rem;
+  background: rgba(var(--bs-primary-rgb), .06);
+}
+
+.batch-resume__icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  inline-size: 2.25rem;
+  block-size: 2.25rem;
+  color: var(--bs-primary);
+  background: rgba(var(--bs-primary-rgb), .14);
+  border-radius: 50%;
+  font-size: 1.15rem;
+}
+
+.batch-resume__text {
+  display: grid;
+  flex: 1 1 14rem;
+  gap: .1rem;
+  min-inline-size: 0;
+
+  strong {
+    color: var(--bs-heading-color);
+    font-size: .875rem;
+  }
+
+  span {
+    color: var(--bs-secondary-color);
+    font-size: .78rem;
+  }
+}
+
+.batch-resume__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.batch-resume-other {
+  margin: -.4rem 0 1rem;
+  color: var(--bs-secondary-color);
+  font-size: .78rem;
+}
+
+.batch-queue-banner__notice.is-info {
+  color: var(--bs-primary);
+  background: rgba(var(--bs-primary-rgb), .08);
+}
+
 // Batch queue: Keep it, and up to two ways to remove (a page, or the whole file).
 .batch-delete-actions.is-three {
   grid-template-columns: 1fr;

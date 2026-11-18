@@ -177,6 +177,23 @@
             </div>
 
             @if ($currentType)
+                {{-- A batch left unfinished: resume it, or discard it (filled in by the workspace). --}}
+                <div class="batch-resume d-none" id="batchResume" role="region" aria-labelledby="batchResumeTitle">
+                    <span class="batch-resume__icon" aria-hidden="true"><i class="icon-base bx bx-history"></i></span>
+                    <div class="batch-resume__text">
+                        <strong id="batchResumeTitle">An unfinished batch</strong>
+                        <span id="batchResumeDetail"></span>
+                    </div>
+                    <div class="batch-resume__actions">
+                        <button type="button" class="btn btn-sm btn-label-danger" id="batchResumeDiscardBtn">Discard</button>
+                        <button type="button" class="btn btn-sm btn-primary" id="batchResumeBtn">
+                            <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span><span
+                                id="batchResumeLabel">Resume batch</span>
+                        </button>
+                    </div>
+                </div>
+                {{-- Batches left open for other document types: where they are. --}}
+                <div class="batch-resume-other d-none" id="batchResumeOther"></div>
                 <div class="document-upload-mode-bar" role="radiogroup" aria-label="Choose upload mode">
                     <div class="document-upload-mode-header">
                         <span class="document-upload-mode-label">Upload mode</span>

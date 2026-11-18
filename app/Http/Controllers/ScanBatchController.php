@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\DocumentPage;
 use App\Models\DocumentTemplate;
+use App\Models\DocumentTypeDefinition;
 use App\Models\ScanBatch;
 use App\Models\ScanBatchDraft;
 use App\Models\ScanBatchPage;
@@ -238,18 +239,25 @@ class ScanBatchController extends Controller
      */
     public static function openBatchesFor(int $userId): array
     {
-        return ScanBatch::query()
+        $batches = ScanBatch::query()
             ->where('user_id', $userId)
             ->where('status', ScanBatch::STATUS_OPEN)
             ->with('pages:id,scan_batch_id,record_key,status')
             ->latest('updated_at')
+            ->get();
+        $labels = DocumentTypeDefinition::query()
+            ->whereIn('key', $batches->pluck('doc_type')->unique())
             ->get()
-            ->map(function (ScanBatch $batch) {
+            ->mapWithKeys(fn (DocumentTypeDefinition $type) => [$type->key => $type->label()]);
+
+        return $batches
+            ->map(function (ScanBatch $batch) use ($labels) {
                 $records = $batch->pages->groupBy('record_key');
 
                 return [
                     'id' => $batch->getKey(),
                     'docType' => $batch->doc_type,
+                    'typeLabel' => $labels[$batch->doc_type] ?? $batch->doc_type,
                     'records' => $records->count(),
                     'saved' => $records->filter(fn ($pages) => $pages->every(fn ($page) => $page->status === 'imported'))->count(),
                     'pages' => $batch->pages->count(),

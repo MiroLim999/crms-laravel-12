@@ -10,12 +10,15 @@ import {
     fileFingerprint,
     firstUnsavedPage,
     isPdfFile,
+    matchFilesToBatch,
     nextUnsavedPage,
     pageCanAlign,
     pageFileName,
+    pageNeedsFile,
     pageRanges,
     pdfPageFile,
     queueCounts,
+    rebuildBatchState,
     recordLeadPage,
     recordReadiness,
     recordState,
@@ -266,4 +269,145 @@ test('needs attention: failed pages, and pages Snap could not fit that are not d
     assert.equal(counts.filters.attention, 2);
     assert.equal(counts.alignCheck, 1);
     assert.deepEqual(queueCounts([]).filters, { all: 0, attention: 0, pending: 0, saved: 0 });
+});
+
+// ---------------------------------------------------------------- resume a batch
+
+const HASH_A = 'a'.repeat(64);
+const HASH_B = 'b'.repeat(64);
+
+/** A batch as documents.batches.show sends it: a two-page file (a pair) and a one-page file. */
+function serverBatch() {
+    const page = (key, position, extra) => ({
+        key,
+        position,
+        sourceName: 'BOOK-1995.pdf',
+        sourceHash: HASH_A,
+        pageNo: position + 1,
+        pageTotal: 2,
+        recordKey: 'g1#1',
+        status: 'pending',
+        documentPageId: null,
+        statusUrl: null,
+        workspaceScanPath: null,
+        alignment: null,
+        flags: {},
+        error: null,
+        recordId: null,
+        recordUrl: null,
+        ...extra,
+    });
+    return {
+        key: 'batch_1_abc',
+        version: 7,
+        pages: [
+            // Out of order on purpose: the queue follows `position`.
+            page('p3', 2, {
+                sourceName: 'cover.png', sourceHash: HASH_B, pageNo: 1, pageTotal: 1, recordKey: 'g2#1', status: 'imported',
+                recordId: 12, recordUrl: '/records/12',
+            }),
+            page('p1', 0, {
+                status: 'ready', documentPageId: 41, statusUrl: '/documents/pages/41', workspaceScanPath: 'documents/workspace/batch_1_abc/41-BOOK.pdf',
+                alignment: { boxes: [{ name: 'Name', x: 0.1 }], rows: [0.2, 0.3], tilts: [0, 0], autoFields: [['name', { x: 0.1 }]] },
+                flags: { scanKind: 'read', alignCheck: true },
+            }),
+            page('p2', 1, { status: 'verifying', documentPageId: 42, statusUrl: '/documents/pages/42' }),
+        ],
+        drafts: [
+            { recordKey: 'g1#1', draft: { verify: [{ line: 5, value: 'Juan', verified: true }], review: [['k', 'v']] } },
+            { recordKey: 'g2#1', draft: { exportTable: [['Name'], ['Cover']] } },
+        ],
+    };
+}
+
+test('a batch kept on the server is rebuilt in queue order, with its states and drafts', () => {
+    const { key, items } = rebuildBatchState(serverBatch());
+    assert.equal(key, 'batch_1_abc');
+    assert.deepEqual(items.map((item) => item.key), ['p1', 'p2', 'p3']);
+
+    const [first, second, cover] = items;
+    // Read pages need no file; their page on the server is asked for again.
+    assert.equal(first.file, null);
+    assert.equal(first.status, 'ready');
+    assert.deepEqual(first.page, { id: 41, statusUrl: '/documents/pages/41' });
+    assert.equal(first.workspaceScanPath, 'documents/workspace/batch_1_abc/41-BOOK.pdf');
+    assert.equal(first.name, 'BOOK-1995 (page 1).pdf');
+    assert.equal(first.group, 'g1');
+    assert.equal(first.record, 'g1#1');
+    assert.deepEqual(first.rows, [0.2, 0.3]);
+    assert.equal(first.autoFields.get('name').x, 0.1);
+    assert.equal(first.alignCheck, true);
+    assert.equal(first.scanKind, 'read');
+    // A record open in Verify comes back read, waiting to be verified.
+    assert.equal(second.status, 'ready');
+    // The draft comes back on the record's first page.
+    assert.deepEqual([...first.verifyDraft], [[5, { value: 'Juan', verified: true }]]);
+    assert.deepEqual([...first.reviewExtras], [['k', 'v']]);
+    assert.equal(second.verifyDraft, null);
+    // A saved record keeps its link and the table it was saved with (Download all).
+    assert.equal(cover.status, 'imported');
+    assert.equal(cover.recordUrl, '/records/12');
+    assert.deepEqual(cover.exportTable, [['Name'], ['Cover']]);
+});
+
+test('a queued page the server no longer has comes back failed; one being read is watched again', () => {
+    const batch = serverBatch();
+    batch.pages[1].documentPageId = null;
+    batch.pages[1].statusUrl = null;
+    batch.pages[2].status = 'scanning';
+    const { items } = rebuildBatchState(batch);
+    assert.equal(items[0].status, 'failed');
+    assert.match(items[0].error, /no longer on the server/);
+    assert.equal(items[1].status, 'scanning');
+    assert.equal(items[1].sentToScan, true);
+});
+
+test('after a layout change, pages not queued yet start on the current layout', () => {
+    const batch = serverBatch();
+    batch.pages.push({
+        key: 'p4', position: 3, sourceName: 'loose.pdf', sourceHash: HASH_B, pageNo: 1, pageTotal: 1, recordKey: 'g3#1',
+        status: 'pending', alignment: { boxes: [{ name: 'Old field' }], rows: [0.5] }, flags: {},
+    });
+    const kept = rebuildBatchState(batch).items.find((item) => item.key === 'p4');
+    assert.deepEqual(kept.boxes, [{ name: 'Old field' }]);
+
+    const changed = rebuildBatchState(batch, { layoutChanged: true }).items;
+    assert.equal(changed.find((item) => item.key === 'p4').boxes, null);
+    // A page queued already keeps the layout it was read with.
+    assert.deepEqual(changed.find((item) => item.key === 'p1').rows, [0.2, 0.3]);
+});
+
+test('files picked again are matched by fingerprint, whatever their names', () => {
+    const pages = [
+        { sourceName: 'BOOK-1995.pdf', sourceHash: HASH_A, status: 'pending', file: null },
+        { sourceName: 'BOOK-1995.pdf', sourceHash: HASH_A, status: 'failed', file: null },
+        { sourceName: 'cover.png', sourceHash: HASH_B, status: 'imported', file: null },
+        { sourceName: 'LEDGER.pdf', sourceHash: 'c'.repeat(64), status: 'pending', file: null },
+    ];
+    const renamed = { name: 'book (copy).pdf' };
+    const extra = { name: 'holiday.jpg' };
+    const result = matchFilesToBatch([{ file: renamed, hash: HASH_A }, { file: extra, hash: 'f'.repeat(64) }], pages);
+
+    // The renamed file matches; the extra one is reported.
+    assert.equal(result.matched.get(HASH_A), renamed);
+    assert.deepEqual(result.unmatched, ['holiday.jpg']);
+    // The file not picked leaves its page waiting.
+    assert.deepEqual(result.missing, [{ sourceName: 'LEDGER.pdf', sourceHash: 'c'.repeat(64), pages: 1 }]);
+    assert.equal(pageNeedsFile(pages[0]), true);
+    assert.equal(pageNeedsFile(pages[2]), false);
+    assert.equal(pageNeedsFile({ status: 'pending', file: renamed }), false);
+});
+
+test('a file of a page queued already matches without being wanted; nothing picked leaves all wanted', () => {
+    const pages = [
+        { sourceName: 'cover.png', sourceHash: HASH_B, status: 'ready', file: null },
+        { sourceName: 'BOOK.pdf', sourceHash: HASH_A, status: 'pending', file: null },
+        { sourceName: 'BOOK.pdf', sourceHash: HASH_A, status: 'pending', file: null },
+    ];
+    const cover = { name: 'cover.png' };
+    const result = matchFilesToBatch([{ file: cover, hash: HASH_B }], pages);
+    assert.equal(result.matched.get(HASH_B), cover);
+    assert.deepEqual(result.unmatched, []);
+    assert.deepEqual(result.missing, [{ sourceName: 'BOOK.pdf', sourceHash: HASH_A, pages: 2 }]);
+    assert.deepEqual(matchFilesToBatch([], []).missing, []);
 });

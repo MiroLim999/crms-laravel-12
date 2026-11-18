@@ -316,35 +316,35 @@ Needs A0 (pages go back from Verify) and D1 (the page is read again).
   - [x] a record saved from a batch links back to it.
 
 **F2. Browser: save as you go**
-- [ ] Create the server batch when the first files are queued.
-- [ ] Send each page's state, alignment and flags when they change (small requests, retried on failure, never blocking the UI).
-- [ ] Save the record's draft a moment after typing stops in Verify or Review & Export.
-- [ ] Mark the batch done at the summary.
-- [ ] **Cancel asks:** **Keep for later** (the batch stays open) or **Discard batch** (abandoned).
+- [x] Create the server batch when the first files are queued.
+- [x] Send each page's state, alignment and flags when they change (small requests, retried on failure, never blocking the UI).
+- [x] Save the record's draft a moment after typing stops in Verify or Review & Export.
+- [x] Mark the batch done at the summary.
+- [x] **Cancel asks:** **Keep for later** (the batch stays open) or **Discard batch** (abandoned).
   - Leaving the page any other way keeps it open.
-- [ ] **Verify:** the network tab shows small saves while working, with no noticeable slow-down.
+- [ ] **Verify:** the network tab shows small saves while working, with no noticeable slow-down. (Needs the browser: left for G3.)
 
 **F3. Browser: resume**
-- [ ] Opening the workspace with an open batch **of this document type** shows a banner: **Resume batch (18 of 40 records saved)** or **Discard**.
+- [x] Opening the workspace with an open batch **of this document type** shows a banner: **Resume batch (18 of 40 records saved)** or **Discard**.
   - An open batch of **another** type is mentioned with a link to its workspace.
-- [ ] Resume rebuilds the queue from the server. Pages already queued or read need no file.
-- [ ] Files still needed are listed by name and page count. The user re-picks them (files or a folder), and each is matched by **fingerprint**, so names may differ.
+- [x] Resume rebuilds the queue from the server. Pages already queued or read need no file.
+- [x] Files still needed are listed by name and page count. The user re-picks them (files or a folder), and each is matched by **fingerprint**, so names may differ.
   - A picked file that matches nothing is reported.
   - A file not picked leaves its pages waiting, and they can be added later.
-- [ ] **The layout changed since:** pages already queued keep the layout they were read with.
+- [x] **The layout changed since:** pages already queued keep the layout they were read with.
   - Pending pages use the **current** published layout.
   - If the batch's layout was deleted (archived), its pending pages say so and use the current one, after a confirmation.
-- [ ] **The same batch open in another tab:** the second tab says so and offers to take over (the first tab then shows "This batch continued in another tab").
-- [ ] Verify and Review & Export drafts come back on their records.
-- [ ] Discard abandons the batch on the server.
-- [ ] Pure helpers: `rebuildBatchState(serverBatch)` and `matchFilesToBatch(files, pages)`.
+- [x] **The same batch open in another tab:** the second tab says so and offers to take over (the first tab then shows "This batch continued in another tab").
+- [x] Verify and Review & Export drafts come back on their records.
+- [x] Discard abandons the batch on the server.
+- [x] Pure helpers: `rebuildBatchState(serverBatch)` and `matchFilesToBatch(files, pages)`.
 - [ ] **Tests:**
-  - [ ] JS: rebuild from a sample server batch; match by fingerprint with renamed files, a missing file and an extra file.
+  - [x] JS: rebuild from a sample server batch; match by fingerprint with renamed files, a missing file and an extra file.
   - [ ] *(manual)*
     - [ ] reload during Align, during Verify (with typed values) and during Review & Export, then resume each;
     - [ ] resume after the layout was changed;
     - [ ] open the batch in two tabs.
-- [ ] **Verify:** after a resume, the summary and Download all include records saved before the reload.
+- [ ] **Verify:** after a resume, the summary and Download all include records saved before the reload. (Saved records come back with their links and saved tables (rebuildBatchState test); to confirm in the browser in G3.)
 
 > **Phase F gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 9 and 10.
 

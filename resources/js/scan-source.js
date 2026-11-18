@@ -376,3 +376,150 @@ export function queueCounts(items) {
         byStatus,
     };
 }
+
+// ---------------------------------------------------------------- resume a batch
+
+/** How a page's status kept on the server comes back (one being saved is not queued). */
+const RESTORED_STATUS = {
+    pending: 'pending',
+    saving: 'pending',
+    saved: 'saved',
+    scanning: 'scanning',
+    ready: 'ready',
+    verifying: 'ready',
+    imported: 'imported',
+    rejected: 'rejected',
+    failed: 'failed',
+};
+
+/** A page that needs its original file again (to be aligned): not queued yet, or failed. */
+export function pageNeedsFile(item) {
+    return !item?.file && ['pending', 'failed'].includes(item?.status);
+}
+
+/**
+ * The workspace's queue, rebuilt from a batch kept on the server (as
+ * documents.batches.show sends it). Every page comes back without its file:
+ * pages queued already need none, and the others wait until their file is
+ * picked again (matchFilesToBatch). A page the server no longer has comes
+ * back failed. Each record's draft comes back on its first page. With
+ * `layoutChanged`, pages not queued yet drop their markers, so they start on
+ * the layout published now.
+ *
+ * @returns {{ key: string, items: object[] }}
+ */
+export function rebuildBatchState(serverBatch, { layoutChanged = false } = {}) {
+    const drafts = new Map((serverBatch?.drafts ?? []).map((entry) => [entry.recordKey, entry.draft ?? {}]));
+    const pages = [...(serverBatch?.pages ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+
+    const items = pages.map((page) => {
+        const flags = page.flags ?? {};
+        const pageNo = Number(page.pageNo) || 1;
+        const pageTotal = Number(page.pageTotal) || 1;
+        const sourceName = String(page.sourceName ?? 'scan');
+        let status = RESTORED_STATUS[page.status] ?? 'pending';
+        let error = page.error ?? null;
+        // Queued or read, but the server no longer has the page: it is aligned and queued again.
+        if (['saved', 'scanning', 'ready'].includes(status) && !page.documentPageId) {
+            status = 'failed';
+            error = 'This page is no longer on the server. Re-align it and queue it again.';
+        }
+        const alignment = page.alignment ?? null;
+        const keepAlignment = Boolean(alignment?.boxes) && !(layoutChanged && ['pending', 'failed'].includes(status));
+
+        return {
+            key: page.key,
+            file: null,
+            name: pageTotal > 1 ? pageFileName(sourceName, pageNo) : sourceName,
+            group: String(page.recordKey ?? page.key).replace(/#\d+$/, ''),
+            record: page.recordKey ?? page.key,
+            pageNo,
+            pageTotal,
+            sourceName,
+            sourceHash: page.sourceHash ?? null,
+            status,
+            pageId: page.documentPageId ?? null,
+            page: page.documentPageId && page.statusUrl ? { id: page.documentPageId, statusUrl: page.statusUrl } : null,
+            workspaceScanPath: page.workspaceScanPath ?? null,
+            scanKind: flags.scanKind ?? 'full',
+            geometry: alignment?.geometry ?? null,
+            recordUrl: page.recordUrl ?? flags.recordUrl ?? null,
+            recordId: page.recordId ?? flags.recordId ?? null,
+            error,
+            boxes: keepAlignment ? alignment.boxes : null,
+            rows: keepAlignment ? (alignment.rows ?? []) : null,
+            tilts: keepAlignment ? (alignment.tilts ?? null) : null,
+            autoFields: keepAlignment && Array.isArray(alignment.autoFields) ? new Map(alignment.autoFields) : null,
+            detected: null,
+            skipped: Boolean(flags.skipped),
+            alignCheck: Boolean(flags.alignCheck),
+            existingAccepted: Boolean(flags.existingAccepted),
+            realign: Boolean(flags.realign) && status === 'pending',
+            addedAnyway: Boolean(flags.addedAnyway),
+            // Being read when the batch was left: the workspace watches it again.
+            sentToScan: status === 'scanning',
+            sentAt: page.position ?? 0,
+            verifyDraft: null,
+            reviewExtras: null,
+            exportTable: null,
+        };
+    });
+
+    // Each record's draft and saved table, on its first page.
+    const leads = new Map();
+    items.forEach((item) => {
+        const lead = leads.get(item.record);
+        if (!lead || item.pageNo < lead.pageNo) leads.set(item.record, item);
+    });
+    leads.forEach((lead, recordKey) => {
+        const draft = drafts.get(recordKey);
+        if (!draft) return;
+        if (Array.isArray(draft.verify)) {
+            lead.verifyDraft = new Map(draft.verify.map((entry) => [entry.line, { value: String(entry.value ?? ''), verified: Boolean(entry.verified) }]));
+        }
+        if (Array.isArray(draft.review)) lead.reviewExtras = new Map(draft.review);
+        if (Array.isArray(draft.exportTable)) lead.exportTable = draft.exportTable;
+    });
+
+    return { key: serverBatch?.key ?? null, items };
+}
+
+/**
+ * Files picked again on resume, matched to the batch's pages by their
+ * fingerprint, so a renamed file still matches. `files` are `{ file, hash }`.
+ * Returns the file for each fingerprint the batch has (`matched`), the names
+ * of picked files the batch has no page of (`unmatched`), and the files still
+ * wanted: pages that need their file (pageNeedsFile) and got none
+ * (`missing`, each `{ sourceName, sourceHash, pages }`).
+ */
+export function matchFilesToBatch(files, pages) {
+    const known = new Set();
+    const wanted = new Map();
+    Array.from(pages ?? []).forEach((page) => {
+        if (!page.sourceHash) return;
+        known.add(page.sourceHash);
+        if (!pageNeedsFile(page)) return;
+        const entry = wanted.get(page.sourceHash) ?? { sourceName: page.sourceName ?? page.name, sourceHash: page.sourceHash, pages: 0 };
+        entry.pages += 1;
+        wanted.set(page.sourceHash, entry);
+    });
+
+    const matched = new Map();
+    const unmatched = [];
+    Array.from(files ?? []).forEach(({ file, hash }) => {
+        if (hash && known.has(hash)) {
+            if (!matched.has(hash)) matched.set(hash, file);
+        } else {
+            unmatched.push(file?.name ?? 'file');
+        }
+    });
+
+    // Pages with no fingerprint cannot be matched: they stay wanted.
+    const nameless = Array.from(pages ?? []).filter((page) => !page.sourceHash && pageNeedsFile(page));
+    const missing = [...wanted.values()].filter((entry) => !matched.has(entry.sourceHash));
+    if (nameless.length > 0) {
+        missing.push({ sourceName: nameless[0].sourceName ?? nameless[0].name, sourceHash: null, pages: nameless.length });
+    }
+
+    return { matched, unmatched, missing };
+}
