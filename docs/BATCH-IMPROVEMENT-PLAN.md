@@ -272,19 +272,19 @@ The foundation for A3, D1 and E1. No visible change on its own.
 Needs A0 (pages go back from Verify) and D1 (the page is read again).
 
 **E1. Re-align from Verify or Review & Export (#6)**
-- [ ] Add a **Re-align** button beside Skip record, in Verify and in Review & Export (batch only).
-- [ ] On click:
-  - [ ] keep the record's typed and ticked values;
-  - [ ] put its page (or both pages of a pair) back to `pending`, with the markers they were read with;
-  - [ ] cancel the old reading on the server;
-  - [ ] open the page in Align.
-- [ ] Once queued again, the page is read **at once, whichever reading mode is set**, so the user is never stuck waiting for Scan all.
-- [ ] The record returns to Verify in its old place in the queue.
+- [x] Add a **Re-align** button beside Skip record, in Verify and in Review & Export (batch only). (A two-page record asks which page, or both.)
+- [x] On click:
+  - [x] keep the record's typed and ticked values;
+  - [x] put its page (or both pages of a pair) back to `pending`, with the markers they were read with;
+  - [x] cancel the old reading on the server;
+  - [x] open the page in Align.
+- [x] Once queued again, the page is read **at once, whichever reading mode is set**, so the user is never stuck waiting for Scan all.
+- [x] The record returns to Verify in its old place in the queue.
   - Fields on an unchanged page keep their values.
   - A re-read page starts fresh.
-- [ ] Back to marking stays hidden in batch.
+- [x] Back to marking stays hidden in batch.
 - [ ] *(manual)* **Test:** re-align one page of a pair, queue it, verify, Review & Export, save. The record has both pages, and the unchanged page kept its typed values.
-- [ ] **Verify:** Skip record and Reject still work after a re-align.
+- [ ] **Verify:** Skip record and Reject still work after a re-align. (Their code is unchanged; to confirm in the browser in G3.)
 
 > **Phase E gate:** automated checks pass, then commit and go straight on. *(manual)* browser items to try later (section 6): 7 and 8.
 

@@ -841,6 +841,14 @@
                                     spaces between separate text and element children. --}}
                                     <span><span id="submitLabelHead">Submit</span> <span id="submitVerifiedCount">0</span> verified</span>
                                 </button>
+                                {{-- A batch only: this record's page back to Align, read again once queued. --}}
+                                <div class="dropdown d-none" id="verifyRealignGroup">
+                                    <button class="btn btn-outline-secondary" type="button" id="verifyRealignBtn" aria-haspopup="true"
+                                        title="Back to Align for this record's page: it is read again once queued">
+                                        <i class="icon-base bx bx-target-lock icon-sm me-1" aria-hidden="true"></i>Re-align
+                                    </button>
+                                    <div class="dropdown-menu" id="verifyRealignMenu"></div>
+                                </div>
                                 {{-- A batch only: leave this record out (a blank page, a cover) and go on. --}}
                                 <button class="btn btn-label-danger d-none" type="button" id="batchSkipRecordBtn">
                                     <i class="icon-base bx bx-skip-next icon-sm me-1" aria-hidden="true"></i>Skip record
@@ -914,6 +922,14 @@
                             <button class="btn btn-outline-secondary" type="button" id="backToVerify">
                                 <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i> Back to verify
                             </button>
+                            {{-- A batch only: this record's page back to Align, read again once queued. --}}
+                            <div class="dropdown d-none" id="reviewRealignGroup">
+                                <button class="btn btn-outline-secondary" type="button" id="reviewRealignBtn" aria-haspopup="true"
+                                    title="Back to Align for this record's page: it is read again once queued">
+                                    <i class="icon-base bx bx-target-lock icon-sm me-1" aria-hidden="true"></i>Re-align
+                                </button>
+                                <div class="dropdown-menu" id="reviewRealignMenu"></div>
+                            </div>
                             <button class="btn btn-label-danger d-none" type="button" id="reviewSkipRecordBtn">
                                 <i class="icon-base bx bx-skip-next icon-sm me-1" aria-hidden="true"></i>Skip record
                             </button>
@@ -4482,7 +4498,9 @@
                     saveQueueBtn.classList.toggle('d-none', allSaved && !failedHere);
                     if (saveQueueLabel) {
                         const hasMoreUnsaved = batchState.items.some((it, idx) => idx !== batchState.currentIndex && it.status === 'pending');
-                        saveQueueLabel.textContent = failedHere
+                        saveQueueLabel.textContent = currentItem?.realign
+                            ? (hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again & Verify')
+                            : failedHere
                             ? (hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again')
                             : currentItem?.status === 'saved'
                                 ? (hasMoreUnsaved ? 'Update & Next Document' : 'Update Queued Document')
@@ -5554,8 +5572,10 @@
                 // reading a Smoke test result, outlining it again from moved markers,
                 // or the whole page.
                 const scanKind = tested ? (detectionIsCurrent() ? 'read' : 'reoutline') : 'full';
-                // Scan while I align: the page is read as soon as it is queued.
-                const readNow = batchReadMode === 'background';
+                // Scan while I align: the page is read as soon as it is queued. A page
+                // sent back from Verify is read at once in either mode.
+                const realigned = Boolean(item.realign);
+                const readNow = batchReadMode === 'background' || realigned;
                 if (tested) {
                     url = config.pageQueueUrl.replace('__PAGE__', String(tested.id));
                     if (readNow && scanKind === 'read') form.set('read', '1');
@@ -5589,6 +5609,7 @@
                 item.pageId = payload.id;
                 item.page = payload;
                 item.error = null;
+                item.realign = false;
                 item.workspaceScanPath = payload.workspaceScanPath || null;
                 item.scanKind = scanKind;
                 // Sent to the worker already (Scan while I align), or not yet (Scan all sends it).
@@ -5611,6 +5632,9 @@
 
                 if (targetIndex !== -1) {
                     await openBatchQueueItem(targetIndex);
+                } else if (realigned) {
+                    // Back to Verify: the next record read (this one, once read again, in its place).
+                    await continueBatch(item);
                 } else {
                     renderBatchQueueBanner();
                 }
@@ -6294,6 +6318,73 @@ Nothing is saved for it, and the next record opens. `
         }
         el('batchSkipRecordBtn').addEventListener('click', skipCurrentBatchRecord);
         el('reviewSkipRecordBtn').addEventListener('click', skipCurrentBatchRecord);
+
+        // ------------------------------------------------ Re-align (a batch)
+        // A record in Verify (or Review & Export) whose page was read badly goes
+        // back to Align with the markers it was read with. What was typed and
+        // ticked stays with the record: the page not read again keeps its values,
+        // and a page read again starts fresh. Queued again, it is read at once,
+        // whichever reading mode is set, and the record comes back to Verify in
+        // its place in the queue.
+
+        /** The pages of the record open now that can be sent back to Align. */
+        function realignablePages() {
+            const current = batchState.active ? batchState.items[batchState.currentIndex] : null;
+            if (!current || recordSubmitting) return [];
+            return recordOf(current).members.filter((it) => !pageDone(it) && it.page);
+        }
+
+        async function realignBatchPages(pages) {
+            if (pages.length === 0 || recordSubmitting) return;
+            const whole = pages.length === realignablePages().length;
+            const names = pages.map((it) => it.pageNo).join(' and ');
+            const message = pages.length === 1 && whole
+                ? `Re-align page ${names}?\n\nIt goes back to Align with the markers it was read with, and is read again once you queue it. What you typed on it is not kept.`
+                : `Re-align page${pages.length === 1 ? '' : 's'} ${names}?\n\nIt goes back to Align with the markers it was read with, and is read again once you queue it. `
+                    + (whole ? 'What you typed on these pages is not kept.' : 'What you typed on the other page is kept.');
+            if (!window.confirm(message)) return;
+
+            // The record's draft is kept, and it waits for its page(s) to be read again.
+            leaveBatchVerify();
+            pages.forEach((it) => {
+                cancelPageOnServer(it.pageId);
+                it.status = 'pending';
+                it.realign = true;
+                it.detected = null;
+                it.sentToScan = false;
+                it.error = null;
+            });
+            await openBatchQueueItem(batchState.items.indexOf(pages[0]));
+        }
+
+        function setUpRealign(prefix) {
+            const button = el(`${prefix}RealignBtn`);
+            const menu = el(`${prefix}RealignMenu`);
+            button.addEventListener('click', (event) => {
+                const pages = realignablePages();
+                if (pages.length <= 1) {
+                    realignBatchPages(pages);
+                    return;
+                }
+                // A pair: which page (or both) goes back.
+                event.stopPropagation();
+                const option = (label, chosen) => {
+                    const item = document.createElement('button');
+                    item.type = 'button';
+                    item.className = 'dropdown-item';
+                    item.textContent = label;
+                    item.addEventListener('click', () => realignBatchPages(chosen));
+                    return item;
+                };
+                menu.replaceChildren(
+                    ...pages.map((it) => option(`Re-align page ${it.pageNo}`, [it])),
+                    option('Re-align both pages', pages),
+                );
+                window.bootstrap.Dropdown.getOrCreateInstance(button).toggle();
+            });
+        }
+        setUpRealign('verify');
+        setUpRealign('review');
 
         // Continue anyway: the scan is kept and verified as usual, and saving it
         // makes a new record without asking again.
@@ -10996,6 +11087,7 @@ Cancel opens only the first file.`)) {
             el('reviewExportBtn').classList.remove('d-none');
             el('backToMark').classList.toggle('d-none', Boolean(batchState?.active));
             el('batchSkipRecordBtn').classList.toggle('d-none', !batchState?.active);
+            el('verifyRealignGroup').classList.toggle('d-none', !batchState?.active);
         }
 
         /** "Save record", or in a batch where saving goes next: "Save & next (3/7)", "Save & finish batch". */
@@ -11010,6 +11102,7 @@ Cancel opens only the first file.`)) {
             }
             el('reviewSaveLabel').textContent = label;
             el('reviewSkipRecordBtn').classList.toggle('d-none', !batchState.active);
+            el('reviewRealignGroup').classList.toggle('d-none', !batchState.active);
         }
 
         /** Move Verify's document pane and its notices into step 4 (on) or back to Verify (off). */
