@@ -40,7 +40,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 | - Authentication & RBAC           |    | - PyTorch / Hugging Face TrOCR   |     |
 | - Document & Template Management  |    | - Handwriting Recognition (/ocr) |     |
 | - Bounding-Box Marker Control     |    | - Direct Model Storage & Unpack  |-----+
-| - Audit Logging & Change Requests |    | - Evaluation Report Verification | (Model Registration)
+| - Audit Logging & Review/Export   |    | - Evaluation Report Verification | (Model Registration)
 | - Analytics & CSV Reports         |    +----------------------------------+
 +-----------------------------------+                     ^
        |                    |                             |
@@ -53,7 +53,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 
 | Component | Stack | Primary Responsibilities |
 | :--- | :--- | :--- |
-| **Web Application** | Laravel 12, Blade, Bootstrap 5 (SNEAT), Vite, MySQL | User interfaces, authentication, template builder, verification workspace, record archival, change request moderation, audit logging, reporting. |
+| **Web Application** | Laravel 12, Blade, Bootstrap 5 (SNEAT), Vite, MySQL | User interfaces, authentication, template builder, verification workspace, Review & Export (records table, CSV and Excel), record archival, audit logging, reporting. |
 | **Queue Worker** | `php artisan queue:work` (database queue), `ml/line_markers.py`, Kraken in `ml/.venv-kraken` | Runs the page job queued by **Detect** and **Scan with OCR**: straightens the page, fits the template to it, outlines every handwritten line, crops along the outlines and sends the crops to the OCR service. Without a running worker, pages wait at "Waiting for the line detector". |
 | **Scheduler** | `php artisan schedule:work` | Runs `documents:prune-pages` every hour, which deletes aligned pages nobody submitted once they are older than `LINE_MARKERS_KEEP_HOURS` (default 24). |
 | **OCR Microservice** | FastAPI, PyTorch, Hugging Face `transformers`, Pillow | TrOCR handwriting inference in batches of 16 crops, model inventory discovery, signed direct-upload ingestion, model lifecycle management. |
@@ -86,7 +86,10 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Checked Values**: Verify uses each template field's settings (see the Template Builder). A person is titled by the field that holds their name. Under a value it shows the template's hint, and it points out a value that does not fit its field ("This does not look like a date", "Expected one of: M, F"). A person whose required columns had nothing read is marked "N missing", with the columns named. None of these hints blocks a submission: registers hold odd values.
 - **Missing Required Fields Ask First**: Submitting with a required field, or a required register column, left unticked opens a confirmation that lists what will be left out ("Person 01: Column 2"), with **Go back** and **Submit anyway**. Register rows with nothing ticked are named in one line, because they are not saved and the page is removed after submitting. It asks rather than blocks, because some real certificates do leave a field blank. The server checks the same thing, so an edited form cannot skip the question, and an accepted omission is listed in the `record.submitted` audit entry (`missing_required_fields`).
 - **Accepted Scan Formats**: PDF up to 200 MB (only the page being read is ever sent), or PNG, JPG, WEBP or BMP up to 20 MB. TIFF is refused with a clear message, because Chrome and Edge cannot display it; scan to PDF or PNG instead.
-- **PDFs of Many Pages**: A register book scanned as one PDF is read one page at a time, each page saved as its own record. The Align toolbar shows a page bar (‹ Page 3 of 12 ›); each page keeps its own markers, row lines, tilt and <kbd>Ctrl</kbd>+<kbd>Z</kbd> history (`pageLayouts`): going back to a page finds it as it was left, a page opened for the first time starts as a copy of the page just left (not linked: changing one never moves another), **Reset** resets the page shown only, and turning a page lets go of Detect's result. After Submit a window offers the next page not saved yet, starting Align from a copy of the page just saved, without uploading the file again. The record keeps only its own page, cut out in the browser by pdf-lib with the original scan quality (`resources/js/scan-source.js`, `pdfPageFile`), and `records.source_name`, `source_page`, `source_page_count` and `source_hash` (the file's SHA-256, worked out by `fileFingerprint`, with a built-in SHA-256 for pages opened over plain http). `GET documents/sources/{hash}/pages` lists the saved pages: they get a ✓, the file opens at its first unsaved page, and the side panel says when the open page is saved already. Saving a page of the same file again answers 409 (`duplicate_page`) until Staff choose **Save again** (`allow_duplicate`, noted in the audit log as `saved_again_after_record`). A PDF record whose page Detect kept is shown as a picture with its field boxes. Batch mode (branch `gono`) can reuse the same helpers: see `docs/MULTI-PAGE-PDF-BATCH-NOTE.md`.
+- **PDFs of Many Pages**: A register book scanned as one PDF is read one page at a time, each page saved as its own record. The Align toolbar shows a page bar (‹ Page 3 of 12 ›); each page keeps its own markers, row lines, tilt and <kbd>Ctrl</kbd>+<kbd>Z</kbd> history (`pageLayouts`): going back to a page finds it as it was left, a page opened for the first time starts as a copy of the page just left (not linked: changing one never moves another), **Reset** resets the page shown only, and turning a page lets go of Detect's result. After Submit a window offers the next page not saved yet, starting Align from a copy of the page just saved, without uploading the file again. The record keeps only its own page, cut out in the browser by pdf-lib with the original scan quality (`resources/js/scan-source.js`, `pdfPageFile`), and `records.source_name`, `source_page`, `source_page_count` and `source_hash` (the file's SHA-256, worked out by `fileFingerprint`, with a built-in SHA-256 for pages opened over plain http). `GET documents/sources/{hash}/pages` lists the saved pages: they get a ✓, the file opens at its first unsaved page, and the side panel says when the open page is saved already. Saving a page of the same file again answers 409 (`duplicate_page`) until Staff choose **Save again** (`allow_duplicate`, noted in the audit log as `saved_again_after_record`). A PDF record whose page Detect kept is shown as a picture with its field boxes.
+- **Batch Mode**: Several files (or every page of a multi-page PDF) are queued and saved one record at a time, exactly as single mode saves them: a page is its own record, or a pair (pages 1–2, 3–4) when the layout has a page 2 (`recordLeadPage` in `scan-source.js`), and a pair is verified side by side as one document. Each file is fingerprinted, and pages already saved or already queued are left out. **Scan all** reads the queue; a page **Smoke test scan** already went over joins the queue as it is (`POST documents/pages/{page}/queue`), so Scan all only reads it instead of outlining it again. Every record goes Verify → Review & Export → **Save & next**, and **Skip record** moves on without saving. The batch ends on a summary listing each record, with **Download all** (CSV or Excel) joining every record's table (`combineTables` in `review-table.js`). Queued originals wait in `storage/app/private/documents/workspace/<batch>/` until their record is saved; `documents:prune-pages` removes them with their page. See `docs/MULTI-PAGE-PDF-BATCH-NOTE.md`.
+- **Already Saved?**: When a page is read, Verify checks whether its values match a record already in the archive and, if so, asks (**Already saved?**, with a link to that record) instead of refusing it. **Continue anyway** verifies and saves it as usual. Saving the same page of the same file again is still refused with 409 (`duplicate_page`) until **Save again** is chosen.
+- **Review & Export (step 4)**: After Verify, the scan screen's fourth step shows the document as a **records table**: one row per person, one column per field (page 1 then page 2), with the scan beside it (drag the bar between them; double-click for 30/70). Click or type in a cell to edit it, and the cell is shown on the scan. Drag down a column to pick several cells and type one value into them all, paste a list or an Excel block to fill down, and <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> to undo and redo. Columns resize by dragging their header edge (double-click auto-fits). Double-click a header or row number to rename it in the download. Empty cells are yellow, and the **issues** button goes to the next one. **Download** gives the table as CSV or Excel (`.xlsx`, written in the browser by `write-excel-file`, loaded only when asked for). A cell typed where nothing was read is saved as a new field named `Column · row N`. **Save record** submits the record with the table's values. The **Shortcuts** menu lists every key, Windows and Mac (`resources/js/review-table.js`, `records/partials/review-shortcuts.blade.php`).
 - **Human-in-the-Loop Enforcement**: Only explicitly verified fields are committed to the permanent record upon submission.
 
 ### 2. Handwritten Line Detection (Detect)
@@ -116,12 +119,12 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Grid Checks**: The ledger card lists what is wrong while you work. Row lines outside the columns, or almost on top of each other, stop the save, and the server refuses them too. A column that spans other rows than the rest is a warning. A field that covers the middle of ledger cells is reported (**Select them** / **Remove them**), because line detection would read that handwriting as the field and the rows would lose those cells; saving asks first. A tilted marker whose corner leaves the page is refused. Publishing needs a sample, real column names (no "Column 3") and a column or field that holds the person's name; the Publish window lists what is missing, and the server checks the same.
 - **Unsaved Changes**: Leaving the builder with unsaved changes (closing the tab, going back, following a link) asks first.
 
-### 4. Immutable Record Archival & Change Request Governance
-- **Permanent Record Locking**: Once verified and submitted, records are sealed against direct in-place modification.
-- **Correct Record**: On a record, **Correct record** opens a form with every value; change the wrong ones, optionally give a reason, and **Save correction** changes the record at once. It is stored as a change request that is approved the moment it is saved (`ChangeRequestService::correct()`), so the record's **Change history** and the dashboard keep working. The old and new values go to the Audit Log as `record.corrected`. The sidebar's **Corrections** page lists them, read-only.
-- **Download CSV**: A record's **Download CSV** button gives that document's checked values (corrections included), one row per person, for import into the client's old system. Columns follow the layout's field names, page 1 then page 2; fields that belong to no person repeat on every row. The pages of a two-page document join by their row on the page (`record_fields.line_row`), so row 5 of page 1 and row 5 of page 2 are one CSV row. UTF-8 with a byte-order mark, so Excel shows ñ correctly; each download is in the Audit Log as `record.exported` (`app/Services/RecordCsv.php`).
-- **Data Integrity Constraints**: Mandatory captured fields cannot be blanked during correction; all historical iterations remain auditable.
-- **Safe Against Double Clicks**: Saving a correction locks the record row first, so two saves of one record take turns. The Save button also disables after the first click.
+### 4. Record Archival & Edits in Review & Export
+- **Locked Records**: Once verified and submitted, a record's values change in one place only, its Review & Export page, and every change is logged.
+- **Edit in Review & Export**: On a record, **Edit in Review & Export** (`GET records/{record}/review`, ability `records.edit`) opens the same records table as the scan's step 4, beside the record's scan. Change cells, fill cells where nothing was read, download CSV or Excel, and **Save changes** writes the changed values at once (`RecordReviewController`, `PATCH records/{record}/review`). Each save is one Audit Log entry, `record.edited`, with every old and new value. The record page shows **Edit history** (each save, who, when and what changed, with a link to the Audit Log), "Edited 2 days ago" under each changed value, and an **Edited after saving** count.
+- **Change Requests Removed (2026-11-15)**: Correct record, the **Corrections** page and the `change_requests` / `change_request_items` tables are gone; the migration `2026_11_15_000100_drop_change_requests_tables` drops the tables, and their rows are **not** restored on rollback. Old `change_request.*` and `record.corrected` entries stay in the Audit Log.
+- **Download CSV**: A record's **Download CSV** button gives that document's checked values (edits included), one row per person, for import into the client's old system. Columns follow the layout's field names, page 1 then page 2; fields that belong to no person repeat on every row. The pages of a two-page document join by their row on the page (`record_fields.line_row`), so row 5 of page 1 and row 5 of page 2 are one CSV row. UTF-8 with a byte-order mark, so Excel shows ñ correctly; each download is in the Audit Log as `record.exported` (`app/Services/RecordCsv.php`).
+- **Auditable Edits**: Every value a save changes or adds is kept in the `record.edited` entry, old and new, so nothing is lost. A save that changes nothing writes no entry. The Save button disables after the first click.
 - **The Record Shows the Page That Was Read**: A submitted record keeps the page image its boxes were measured on (straightened, when Detect straightened a tilted page) and draws its value boxes on it, so each box sits on its handwriting. (Drawn over the original upload instead, a 3° tilt put the boxes about one line off.) **Open full size** still opens the original upload, and records submitted before this change keep showing their upload.
 - **Archive Search & Filters**: Search by any verified value, and filter by document type and submission date. A bad filter from an edited URL (an impossible date, a list where one value belongs) is left out with a message under it, instead of an error page.
 - **One Record Status**: Every record is saved as **Submitted**, and therefore locked, the moment it is submitted. The unused "Draft" status was removed.
@@ -137,7 +140,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Automatic Secret Redaction**: Sensitive attributes (passwords, tokens, credentials) are stripped before persistence.
 
 ### 7. Analytics & Administrative Oversight
-- **One Dashboard**: KPI summaries, digitisation volume and trend, document type distribution, OCR quality (average confidence, correction rate, fields below the confidence threshold), a **Processing** panel, a **Corrections** panel (corrections saved in the period, records corrected, fields changed), **Recent changes**, and an OCR performance radar comparing the active model with the base model (labelled with the test set it was scored on, because those scores are not accuracy on real scans; OCR Quality is that).
+- **One Dashboard**: KPI summaries, digitisation volume and trend, document type distribution, OCR quality (average confidence, correction rate, fields below the confidence threshold), a **Processing** panel, an **Edits after saving** panel (Review & Export saves in the period, records edited, fields changed, counted from `record.edited` audit entries, with **All edits** opening them in the Audit Log), **Recent changes**, and an OCR performance radar comparing the active model with the base model (labelled with the test set it was scored on, because those scores are not accuracy on real scans; OCR Quality is that).
 - **Processing**: how many Detect and Scan runs finished, failed or were cancelled, the average time of each, and TrOCR's reading speed in milliseconds per line. These come from the `page_runs` table, which `ProcessDocumentPage` writes to for every run (mode, outcome, total time, reading time, line count, model). It exists because a cancelled page is deleted at once and every other unsubmitted page after a day, so `document_pages` cannot be counted later. It holds no document text or images. Runs before the table existed are not counted, and a failed run has no time (the worker cannot say how long it ran).
 - **A Reporting Period per Panel**: Each dashboard panel (volume and trend, OCR quality, corrections, processing) has its own period: the last 30 days, the last 90 days, the last 12 months (the default, in whole calendar months), or custom dates. The trend compares a period with the one of the same length before it. A bad period in an edited URL shows a message on that panel and the default period, instead of an error page.
 - **Philippine Time Everywhere**: Times are stored in UTC and shown in `CRMS_REPORTING_TIMEZONE` (default `Asia/Manila`) on every page and in the CSV export, through one helper (`App\Support\LocalTime`). The date filters on Records, Audit Log and Reports all use Philippine days, so a record submitted at 7:30 AM on 2 October is found under 2 October.
@@ -154,7 +157,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 The client runs CRMS on one offline PC with one account, the Super Admin. The Staff and Admin roles, the User Accounts page, change-request approval, account deactivation and the demo logins were removed on 2026-11-11 (`docs/SUPER-ADMIN-ONLY-PLAN.md`).
 
 - **Roles**: `app/Enums/RoleSlug.php` has one case, `SuperAdmin`. The `roles` table keeps its one row so the permission checks have one place to ask.
-- **Abilities**: `app/Providers/AuthServiceProvider.php` defines `documents.process`, `change-requests.create`, `records.view`, `audit.view`, `reports.generate`, `templates.manage` and `ocr.manage`, and each one asks only "is this the Super Admin?". Routes and views keep their `can:` checks, so a new page still needs an ability.
+- **Abilities**: `app/Providers/AuthServiceProvider.php` defines `documents.process`, `records.edit` (Review & Export on a saved record), `records.view`, `audit.view`, `reports.generate`, `templates.manage` and `ocr.manage`, and each one asks only "is this the Super Admin?". Routes and views keep their `can:` checks, so a new page still needs an ability.
 - **Tests**: `tests/Feature/CapabilityMatrixTest.php` checks that the account opens every page, a guest is sent to sign in, and `/users` and `/analytics` give Not Found.
 - **The account**: `SuperAdminSeeder` makes it only when it is missing (running `db:seed` again never resets it), with the password from `config/crms.php` and "choose a new password" switched on. `php artisan crms:reset-password` gives it a new temporary password, printed once, and asks for a new one at the next sign-in.
 - **Old data**: the migration `2026_11_11_000200_remove_staff_and_admin_accounts` moved the other accounts' records and change requests to the Super Admin and deleted those accounts. Audit Log entries keep the person's name (`actor_name`, `actor_role`).
@@ -169,15 +172,14 @@ crms-laravel-12/
 ├── app/                                # Core Laravel application logic
 │   ├── Console/Commands/               # crms:export-training, documents:prune-pages
 │   ├── Enums/                          # RoleSlug, DocumentType, RecordStatus, etc.
-│   ├── Exceptions/                     # ChangeRequestException (a refused change request, shown to the user)
 │   ├── Http/
-│   │   ├── Controllers/                # Gated web controllers (Scan, Record, ChangeRequest, etc.)
+│   │   ├── Controllers/                # Gated web controllers (Scan, Record, RecordReview, etc.); Dev/ holds the dev-only Review & Export shortcut
 │   │   ├── Middleware/                 # EnsureAccountIsActive, EnsurePasswordIsChanged
 │   │   └── Requests/                   # Form validation request classes
 │   ├── Jobs/                           # ProcessDocumentPage (Detect / outline / read)
 │   ├── Models/                         # Eloquent models (CivilRecord, RecordField, DocumentPage, PageLine, AuditLog, etc.)
 │   ├── Providers/                      # AuthServiceProvider (Capability Matrix Gate definitions)
-│   ├── Services/                       # Business logic (AuditLogger, ChangeRequestService, etc.)
+│   ├── Services/                       # Business logic (AuditLogger, RecordCsv, DashboardAnalytics, etc.)
 │   │   ├── Lines/                      # LineMarkers (runs ml/line_markers.py), PageLineReader, GeometryInput
 │   │   └── Ocr/                        # OcrClient (sends the service key), OcrModelManager, OcrUploadAuthorizer, EngineStatus
 │   └── Support/                        # LocalTime (Philippine time), Limits (450 fields), MarkerBounds, Navigation
@@ -515,7 +517,7 @@ ml\.venv-kraken\Scripts\python.exe ml\line_markers.py grid    --page sample.png 
 
 ### Housekeeping and Training Data
 ```powershell
-php artisan documents:prune-pages                   # Delete unsubmitted pages older than LINE_MARKERS_KEEP_HOURS (default 24)
+php artisan documents:prune-pages                   # Delete unsubmitted pages, and batch scans queued with them, older than LINE_MARKERS_KEEP_HOURS (default 24)
 php artisan documents:prune-pages --hours=2         # ... older than 2 hours
 php artisan schedule:list                           # What the scheduler runs, and when (prune-pages: every hour)
 php artisan schedule:work                           # Run prune-pages every hour; serve.ps1 starts it (use Task Scheduler in production)
@@ -795,39 +797,44 @@ The same suites also pass inside the Docker containers (see [DOCKER-SETUP.md](DO
 
 ```
 tests/
-├── Feature/                    # 23 PHPUnit feature test classes (312 tests)
+├── Feature/                    # 26 PHPUnit feature test classes
 │   ├── AnalyticsDashboardTest.php           # Includes each panel's own period and bad periods in the URL
 │   ├── ArrayQueryParameterTest.php          # An array in the URL (?q[]=x) never gives an error page
 │   ├── AuditLogTest.php
 │   ├── AuditLogViewerTest.php               # Includes times shown in Philippine time
 │   ├── AuthenticationTest.php
 │   ├── CapabilityMatrixTest.php             # The one account opens every page; removed pages give Not Found
-│   ├── ChangeRequestPresentationTest.php
-│   ├── ChangeRequestWorkflowTest.php        # Correct record: values change at once, old and new kept
 │   ├── DocumentTemplateBuilderTest.php      # Includes refusing to delete a layout records use
 │   ├── DocumentTypeArchiveTest.php          # Archiving hides a type from scanning but keeps it; restoring
 │   ├── DocumentUploadWorkflowTest.php       # Includes the missing-required-fields confirmation and TIFF refusal
 │   ├── LedgerTemplateAndExportTest.php      # Ledger grids, training CSV export
-│   ├── LineOutlinePipelineTest.php          # Page job, Detect, outlines, manual fixes
+│   ├── LineOutlinePipelineTest.php          # Page job, Detect, outlines, manual fixes, queuing a smoke-tested page
+│   ├── MultiPageSourceTest.php              # Pages of one PDF: fingerprint, saved pages, Save again
 │   ├── OcrClientTest.php                    # Every call to the OCR service carries the service key
 │   ├── OcrModelPerformanceTest.php
 │   ├── OcrWorkspaceTest.php
 │   ├── RecordCsvExportTest.php              # Download CSV: one row per person, two pages joined, ñ, formula guard
 │   ├── RecordArchiveFilterTest.php          # Records filters: bad dates, Philippine days
 │   ├── RecordDetailPresentationTest.php     # Includes the straightened page kept with a record
+│   ├── RecordReviewTest.php                 # Review & Export on a saved record: edits, added cells, record.edited
 │   ├── ReportExportTest.php                 # Includes CSV injection and Philippine time in the CSV
+│   ├── SingleAccountTest.php                # Your details, first-sign-in password, crms:reset-password
 │   ├── TemplateBuilderGridChecksTest.php    # Grid checks, tilted markers, printed rules
 │   ├── TemplateFieldSettingsTest.php        # Roles, value types, required fields, record identity
-│   ├── SingleAccountTest.php                # Your details, first-sign-in password, crms:reset-password
-│   └── TemplateVersioningTest.php           # New versions of layouts in use, stale saves, duplicates
+│   ├── TemplatePublishFlowTest.php
+│   ├── TemplateVersioningTest.php           # New versions of layouts in use, stale saves, duplicates
+│   └── TwoPageRecordTest.php                # Layouts with a page 2, saved as one record
 ├── JavaScript/                 # Node.js unit tests (SNEAT controls, shortcuts, markers, line geometry)
-│   ├── change-request.test.js
 │   ├── field-marker.test.js
 │   ├── icon-coverage.test.js
-│   ├── ledger-grid.test.js                  # Row lines following the table, row tools, adding a column, grid checks
-│   ├── line-geometry.test.js
+│   ├── layout-publish-checks.test.js
+│   ├── ledger-grid.test.js                  # Row lines following the table, row tools, adding a column, merging fields, grid checks
+│   ├── line-geometry.test.js                # Includes polygon resampling and outline-to-box morphing
 │   ├── person-grouping.test.js
 │   ├── record-detail.test.js
+│   ├── review-table.test.js                 # Review & Export table: rows and columns, cell inputs, CSV and Excel, keys, a batch as one table
+│   ├── scan-progress.test.js
+│   ├── scan-source.test.js                  # File fingerprints, pages of a PDF, page pairs
 │   ├── sneat-controls.test.js
 │   ├── template-builder-shortcuts.test.js
 │   ├── template-history.test.js             # Undo covering row lines
@@ -836,7 +843,8 @@ tests/
 └── Python/                     # Python unit tests
     ├── test_evaluation_report.py   # ML evaluation report verification
     ├── test_grid_layouts.py        # Row grid on ledgers of many layouts, rows taken from the page, and the grid notes (needs ml/.venv-kraken)
-    ├── test_line_markers.py        # Line detection on synthetic pages (needs ml/.venv-kraken)
+    ├── test_line_markers.py        # Line detection on synthetic pages, page-wide marks ignored (needs ml/.venv-kraken)
+    ├── test_no_model_installed.py  # With no model installed: lists none, downloads nothing, says so
     ├── test_ocr_batch.py           # Batched reading (a broken crop, order, per-crop confidence) and the switch to the CPU when the GPU fails
     └── test_service_key.py         # The OCR service refuses calls without the right key; /health stays open
 ```
@@ -914,6 +922,7 @@ vendor\bin\pint --test                   # Verify PHP code style
 | `CRMS_SUPER_ADMIN_NAME` | `"Super Admin"` | Initial name for the bootstrap Super Admin seeder. |
 | `CRMS_SUPER_ADMIN_EMAIL` | `superadmin@admin.com` | Initial email for the bootstrap Super Admin seeder. |
 | `CRMS_SUPER_ADMIN_PASSWORD` | `superadmin@admin.com` | Initial password for the bootstrap Super Admin seeder. |
+| `DEV_REVIEW_SHORTCUT` | `false` | **Development only, temporary.** With `APP_ENV=local`, shows a button on the scan screen that skips Document, Align and Verify and opens step 4 (Review & Export) on a scan saved once, for working on that page. Ignored in any other environment. To remove the feature, see `config/dev_review_shortcut.php`. |
 
 ---
 
@@ -922,6 +931,6 @@ vendor\bin\pint --test                   # Verify PHP code style
 These items from the code review of 2026-10-02 were deliberately left for after the capstone defense. (The review's notes and plan were removed from `docs/` on 2026-10-13; they remain in the git history.) None of them changes what users see.
 
 - **The document type is stored twice.** The `document_types` table is the source of truth, but the older `doc_type` column (on `records` and `document_templates`) and the `DocumentType` enum still repeat it, and every custom type is saved there as `custom`. Removing them touches most models and controllers.
-- **Three very large files.** `resources/views/scan/workspace.blade.php` (4,274 lines, most of it inline JavaScript), `app/Http/Controllers/DocumentTemplateController.php` (1,245 lines) and `ml/line_markers.py` (2,747 lines) are due to be split into smaller modules. The tests that cover them are in place first.
+- **Three very large files.** `resources/views/scan/workspace.blade.php` (10,922 lines, most of it inline JavaScript), `app/Http/Controllers/DocumentTemplateController.php` (1,680 lines) and `ml/line_markers.py` (3,604 lines) are due to be split into smaller modules. The tests that cover them are in place first.
 - **Archive search uses `LIKE`.** That is fast enough for a few hundred records. Once there is much more data, a FULLTEXT index on `record_fields.verified_value` would be faster, but it matches whole words only, so search results would change slightly.
 - **Old migrations create and later drop `ml_jobs` and `ml_datasets`.** Model training and dataset preparation once ran from the website; that work moved to the command-line scripts in `ml/`. The migrations stay, because a migration that has already run on a database is never edited or deleted.

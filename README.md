@@ -6,13 +6,13 @@
 [![Docker](https://img.shields.io/badge/Docker-Windows%20%C2%B7%20Linux%20%C2%B7%20Mac-2496ED?style=flat&logo=docker&logoColor=white)](#installation-docker)
 [![Tests](https://img.shields.io/badge/Tests-477%20passed-success)](#tests)
 
-CRMS turns handwritten civil registry pages (birth, death and marriage certificates, and register ledgers) into searchable digital records. You scan a page, CRMS finds every handwritten line and reads it with a fine-tuned **TrOCR** model, a person checks every value, and the record is archived with a full audit trail.
+CRMS turns handwritten civil registry pages (birth, death and marriage certificates, and register ledgers) into searchable digital records. You scan a page, CRMS finds every handwritten line and reads it with a fine-tuned **TrOCR** model, a person checks every value, reviews the result as a table (one row per person) that downloads as CSV or Excel, and the record is archived with a full audit trail.
 
 **Everything runs on the computer itself.** Scans and their text are never sent to the internet or a cloud service, because the records are covered by the Data Privacy Act.
 
 **Quick start:** [Installation (Docker)](#installation-docker) · [Docker guide](docs/DOCKER-SETUP.md) · [First login](#first-login)
 
-**Contents:** [Installation](#installation-docker) · [First login](#first-login) · [What it does](#what-it-does) · [How it works](#how-it-works) · [Who can do what](#who-can-do-what) · [Manual setup](#manual-setup-windows-for-developers) · [Tests](#tests) · [Documentation](#documentation)
+**Contents:** [Installation](#installation-docker) · [First login](#first-login) · [What it does](#what-it-does) · [How it works](#how-it-works) · [Manual setup](#manual-setup-windows-for-developers) · [Tests](#tests) · [Documentation](#documentation)
 
 ---
 
@@ -125,11 +125,13 @@ It prints a new temporary password once. Sign in with it, and CRMS asks you to c
 
 | Feature | What it means |
 | :--- | :--- |
-| **Scan and align** | Upload a PDF or image and place the template's markers on it. |
+| **Scan and align** | Upload a PDF or image and place the template's markers on it. A PDF of many pages is read one page at a time. |
+| **Batch mode** | Queue several files, or a whole register book, read them all with **Scan all**, then check and save them one record at a time. The batch ends with **Download all** as one CSV or Excel file. |
 | **Find the handwriting** | Kraken outlines every handwritten line and straightens a tilted page. |
 | **Read it** | A fine-tuned TrOCR model reads each line and gives a confidence score. Low scores are flagged. |
 | **Verify** | Check every value beside the page. Only checked values are saved. |
-| **Archive** | Submitted records are locked. **Correct record** changes a value at once and keeps the old one in the record's history and the Audit Log. **Download CSV** gives one document's values, one row per person, for import into another system. |
+| **Review & Export** | Step 4: the document as a table, one row per person, beside the scan. Edit cells (fill several at once, paste from Excel, undo), then **Download** as CSV or Excel, and **Save record**. |
+| **Archive** | Submitted records are locked. **Edit in Review & Export** changes a saved record's values on the same table, and every old and new value goes to the Audit Log. **Download CSV** gives one document's values, one row per person, for import into another system. |
 | **Template Builder** | Design the layout of each document type. |
 | **OCR Workspace** | Install models, choose the active one, and compare benchmarks (CER, WER, exact match). |
 | **Audit log** | Every action is recorded: who, when, and what changed. |
@@ -183,10 +185,12 @@ Run them all with `.\tools\test-all.ps1`. MySQL must be running; PHP tests use t
 | :--- | :--- |
 | [docs/DOCKER-SETUP.md](docs/DOCKER-SETUP.md) | Docker prep per OS, updates, backups, NVIDIA GPU, troubleshooting |
 | [docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md) | Architecture, features, commands, `.env` settings, ML pipeline, OCR API |
+| [docs/SYSTEM-OVERVIEW.md](docs/SYSTEM-OVERVIEW.md) | The whole system in one document: screens, work flows, database, security, testing, review |
+| [docs/MULTI-PAGE-PDF-BATCH-NOTE.md](docs/MULTI-PAGE-PDF-BATCH-NOTE.md) | How batch mode saves multi-page PDFs and page pairs |
 
 ## Technology
 
-Laravel 12 (PHP 8.2) · Bootstrap 5 (SNEAT) · Vite · MySQL · FastAPI · PyTorch · Hugging Face TrOCR · Kraken · PDF.js · ApexCharts · Docker
+Laravel 12 (PHP 8.2) · Bootstrap 5 (SNEAT) · Vite · MySQL · FastAPI · PyTorch · Hugging Face TrOCR · Kraken · PDF.js · pdf-lib · write-excel-file · ApexCharts · Docker
 
 ## License
 

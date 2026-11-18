@@ -15,6 +15,15 @@
 > 4.1, 4.2, 4.7, 4.8, 4.10, 4.14, 5.4 and 5.5 describe the new system. Other sections may still say "Staff" for the
 > person scanning; read it as "the user". **Any manuscript diagram or table with three user types now needs one.**
 
+> **Changed on 15 November 2026: Review & Export replaces corrections.** The scan screen has a fourth step,
+> **Review & Export**: the document as a records table (one row per person), edited in place and downloaded as CSV or
+> Excel before the record is saved. A saved record is edited on the same table (**Edit in Review & Export**), and every
+> old and new value goes to the audit log as `record.edited`. **Correct record**, the **Corrections** page and the
+> `change_requests` / `change_request_items` tables were removed (branch `review-export-page-creation`). Sections 1.2,
+> 1.4, 2, 3.5, 4, 5, 6, 8, 11 to 13 and Appendices A to C describe the new system; the test figures in section 9.1
+> are still those of 3 November. Batch scanning, which the original snapshot lists as planned, is also in the code
+> now (see [4.3](#43-new-document-step-1-document)).
+
 > **About the numbers.** Every figure says where it comes from. "Measured" means a real run produced it. The AI accuracy figures come from a **synthetic** (computer-generated) test set, not from real registry pages. Section [7.7](#77-results) explains what that means and what not to claim.
 
 ## Contents
@@ -73,9 +82,10 @@ CRMS is a web application that runs on one office computer. When Staff scan a pa
 2. finds every handwritten line on the page and cuts it out,
 3. reads each line with an AI handwriting model (**TrOCR**) and gives each reading a confidence score,
 4. shows every reading beside the page, so a person can check and correct it,
-5. saves only the values the person ticked as checked, locks the record, and writes the action to the audit log.
+5. shows the checked values as a records table (one row per person) to review, edit and download as CSV or Excel,
+6. saves only the values the person ticked as checked, locks the record, and writes the action to the audit log.
 
-After that, records can be searched, viewed beside the original scan, reported and exported. A locked record changes only through a **change request** that an Admin approves.
+After that, records can be searched, viewed beside the original scan, reported and exported. A locked record's values change only in **Review & Export**, which writes every old and new value to the audit log.
 
 ### 1.3 What it is not
 
@@ -92,7 +102,7 @@ These rules shape the whole system. Each one is enforced in code, not only in th
 | :--- | :--- | :--- |
 | **Human in the loop** | Only values a person ticked are saved. Unticked values are dropped. | `DocumentScanController::store` requires every saved field to be marked verified |
 | **Local only** | Every part runs on one machine; the website and the OCR service listen on `127.0.0.1` only. | `docker-compose.yml`, `serve.ps1` |
-| **Records do not change silently** | Submitted records are locked. There is no edit route for anyone. Corrections need an approved change request. | `routes/web.php`, `ChangeRequestService` |
+| **Records do not change silently** | Submitted records are locked. Their values change only in Review & Export, and each save logs every old and new value (`record.edited`). There is no delete route. | `routes/web.php`, `RecordReviewController` |
 | **Separation of duties** | Staff encode. Admins approve and supervise but cannot encode or edit values. Only the Super Admin configures templates and AI models. | `AuthServiceProvider` (permission rules) |
 | **Everything is logged** | Sign-ins, submissions, approvals, account changes, template and model changes all go into the audit log, which the code refuses to edit or delete. | `AuditLogger`, `AuditLog` model |
 | **Honest numbers** | AI scores are shown only from a test-set report tied to the exact model file. Confidence is labelled as the model's own certainty, not accuracy. | `ml/api/main.py`, `OcrModelPerformance` |
@@ -110,7 +120,7 @@ managing users.
 
 | Account | Typical person | Main job |
 | :--- | :--- | :--- |
-| **Super Admin** | The registry's encoder or system administrator | Everything: New Document, Records Archive, Corrections, Reports, Audit Log, Template Builder, OCR Workspace, Account Settings |
+| **Super Admin** | The registry's encoder or system administrator | Everything: New Document, Records Archive, Review & Export, Reports, Audit Log, Template Builder, OCR Workspace, Account Settings |
 
 ### 2.2 What the account can do
 
@@ -118,8 +128,8 @@ managing users.
 | :--- | :---: |
 | Scan, verify and submit records (New Document) | ✔ |
 | Search and view the Records Archive | ✔ |
-| Correct a saved record (Correct record) and see every correction | ✔ |
-| Download one record as CSV | ✔ |
+| Edit a saved record (Edit in Review & Export) and see its edit history | ✔ |
+| Download one record as CSV, or its table as CSV or Excel | ✔ |
 | Dashboard with analytics | ✔ |
 | Reports and CSV export | ✔ |
 | View the audit log | ✔ |
@@ -133,7 +143,7 @@ Rules behind the table:
   the Super Admin?". An automated test checks that the account opens every page and a guest is sent to sign in
   (`tests/Feature/CapabilityMatrixTest.php`).
 - There is **no sign-up page** and no User Accounts page. The account is created at installation.
-- A saved record changes only through **Correct record**, which keeps the old values (see [4.8](#48-corrections)).
+- A saved record changes only in **Review & Export**, which logs the old and new values (see [4.8](#48-review--export-step-4-and-editing-a-saved-record)).
 
 ### 2.3 The account at installation
 
@@ -275,7 +285,7 @@ What each module contains:
  ├── DASHBOARD
  │   ├── Staff summary: own submissions, own requests, own activity
  │   └── Oversight analytics: OCR Quality, OCR Performance, Volume and Trend,
- │       Archive by type, Processing and staff activity, Change requests,
+ │       Archive by type, Processing and staff activity, Edits after saving,
  │       Recent changes
  ├── DIGITIZATION
  │   ├── New Document
@@ -283,9 +293,11 @@ What each module contains:
  │   │   ├── Step 2 Align: place the markers (Snap to table, rows, columns, tilt)
  │   │   ├── Detect (optional): straighten, fit the grid, outline and fix lines
  │   │   ├── Scan with OCR: find the lines (Kraken), read them (TrOCR)
- │   │   └── Step 3 Verify: check, correct, tick, add missed fields, submit
- │   ├── Records Archive: search, filter, view a record beside its scan
- │   └── Change Requests: request a correction, approve or reject, withdraw
+ │   │   ├── Step 3 Verify: check, correct, tick, add missed fields
+ │   │   ├── Step 4 Review & Export: records table, CSV / Excel, save
+ │   │   └── Batch mode: queue many files or pages, Scan all, Download all
+ │   └── Records Archive: search, filter, view a record beside its scan,
+ │       edit it in Review & Export
  ├── OVERSIGHT
  │   ├── Reports: filter, summary, CSV export
  │   ├── User Accounts: create, edit, reset password, deactivate, reactivate
@@ -310,7 +322,7 @@ What each module contains:
 | :--- | :--- | :--- |
 | Access | Everyone | `app/Http/Controllers/Auth/`, `app/Http/Middleware/`, `app/Providers/AuthServiceProvider.php` |
 | Dashboard | Everyone: Staff see their own work, Admin and Super Admin see analytics | `DashboardController.php`, `app/Services/DashboardAnalytics.php` |
-| Digitization | New Document: Staff and Super Admin. Records Archive: everyone. Change Requests: Staff and Super Admin ask, Admin and Super Admin decide. | `DocumentScanController.php`, `DocumentPageController.php`, `RecordController.php`, `ChangeRequestController.php` |
+| Digitization | The Super Admin: New Document, Records Archive, Review & Export | `DocumentScanController.php`, `DocumentPageController.php`, `RecordController.php`, `RecordReviewController.php` |
 | Oversight | Admin and Super Admin (an Admin manages Staff accounts only) | `ReportController.php`, `UserController.php`, `AuditLogController.php` |
 | System setup | Super Admin | `DocumentTemplateController.php`, `DocumentTypeDefinitionController.php`, `OcrModelController.php`, `OcrUploadController.php` |
 | Background services | Nobody directly; they start with the system | `app/Jobs/`, `ml/line_markers.py`, `ml/api/main.py`, `routes/console.php` |
@@ -321,9 +333,8 @@ What each module contains:
  CRMS
  └── SUPER ADMIN (the one account)
      ├── Dashboard
-     ├── New Document: Document > Align > Verify > Submit
-     ├── Records Archive: search, view, Correct record, Download CSV
-     ├── Corrections: every correction, read-only
+     ├── New Document: Document > Align > Verify > Review & Export > Save
+     ├── Records Archive: search, view, Edit in Review & Export, Download CSV
      ├── Reports and CSV export
      ├── Audit Log
      ├── OCR Workspace
@@ -331,8 +342,8 @@ What each module contains:
      └── Account Settings: name, email, password
 ```
 
-Nobody can edit a submitted record directly: **Correct record** saves a correction that keeps the old values
-(see [4.8](#48-corrections)).
+A submitted record is edited only in **Review & Export**, which logs every old and new value
+(see [4.8](#48-review--export-step-4-and-editing-a-saved-record)).
 
 #### 3.5.3 Layer structure
 
@@ -360,22 +371,21 @@ CRMS follows Laravel's **Model-View-Controller (MVC)** pattern: **views** draw t
    Outside CRMS: the Kaggle notebooks (finetuning-kaggle/) train the models.
 ```
 
-**How one request passes through the layers**, using an Admin approving a correction as the example:
+**How one request passes through the layers**, using a save in a saved record's Review & Export as the example:
 
 ```
- Admin clicks Approve on a change request
-   > routes/web.php           POST change-requests/{id}/approve
+ Super Admin clicks Save changes in Review & Export
+   > routes/web.php           PATCH records/{id}/review
    > middleware               valid form token (CSRF)? signed in? account active?
                               password changed?
-   > permission check         change-requests.moderate (Admin and Super Admin only),
-                              checked by the route and again by the controller
-   > ChangeRequestController  reads the optional note (up to 2,000 characters)
-   > ChangeRequestService     locks the request, checks it is still pending,
-                              writes the new values into the record,
-                              marks the request approved
-   > AuditLogger              writes change_request.approved with old and new values
-   > models > MySQL           all of it in one database transaction
-   < back to the request page: "Approved. The record has been updated."
+   > permission check         records.edit (the Super Admin), checked by the route
+   > RecordReviewController   checks each changed cell belongs to this record and
+                              each added cell to one of its pages;
+                              skips values that did not really change
+   > models > MySQL           writes the changed values and the added cells,
+                              in one database transaction
+   > AuditLogger              writes record.edited with every old and new value
+   < back to the record page: "3 values saved."
 ```
 
 #### 3.5.4 Folder structure
@@ -385,17 +395,16 @@ The main folders and files of the project. Anything marked "not in git" exists o
 ```
 crms-laravel-12/
 ├── app/                                 Laravel application code (PHP)
-│   ├── Console/Commands/                2 commands: hourly clean-up, training export
+│   ├── Console/Commands/                3 commands: hourly clean-up, training export, password reset
 │   ├── Enums/                           fixed lists: roles, document types, statuses
-│   ├── Exceptions/                      a refused change request, shown to the user
 │   ├── Http/
-│   │   ├── Controllers/                 17 controllers, one per screen area
+│   │   ├── Controllers/                 16 controllers, one per screen area (Dev/: a dev-only shortcut)
 │   │   ├── Middleware/                  account active? password changed?
 │   │   └── Requests/                    form checks: sign-in, new and edited users
 │   ├── Jobs/                            background job: page processing
-│   ├── Models/                          15 models, one per database table
+│   ├── Models/                          14 models, one per database table
 │   ├── Providers/                       the permission rules (AuthServiceProvider)
-│   ├── Services/                        business rules: audit log, change requests,
+│   ├── Services/                        business rules: audit log, record CSV,
 │   │   │                                dashboard figures, user accounts, record grouping
 │   │   ├── Lines/                       bridge to the line detector
 │   │   └── Ocr/                         bridge to the OCR service, model registry
@@ -404,7 +413,7 @@ crms-laravel-12/
 ├── config/                              settings; crms.php is CRMS's own, services.php
 │                                        holds the OCR service and line detector settings
 ├── database/
-│   ├── migrations/                      45 files that build the tables
+│   ├── migrations/                      54 files that build the tables
 │   ├── seeders/                         roles, first Super Admin, starter templates,
 │   │                                    demo users
 │   └── factories/                       made-up data for the tests
@@ -428,18 +437,18 @@ crms-laravel-12/
 │   └── datasets/                        local test sets (not in git)
 ├── public/                              the web root: index.php, built CSS and JS, logo
 ├── resources/
-│   ├── views/                           39 Blade screens, by area (scan, records, ...)
+│   ├── views/                           35 Blade screens, by area (scan, records, ...)
 │   ├── js/                              23 JavaScript modules + 5 SNEAT theme scripts
 │   ├── scss/, css/                      SNEAT theme and CRMS styles, dark mode
 │   └── fonts/                           icon font (Boxicons subset)
 ├── routes/
 │   ├── web.php                          every web address and the permission it needs
 │   └── console.php                      the hourly clean-up schedule
-├── storage/app/private/                 private files (not in git): scans/, pages/,
+├── storage/app/private/                 private files (not in git): scans/, pages/, documents/workspace/ (batch queue),
 │                                        records/, template-samples/, template-tests/
 ├── tests/
-│   ├── Feature/                         23 PHP test classes
-│   ├── JavaScript/                      13 JavaScript test files
+│   ├── Feature/                         26 PHP test classes
+│   ├── JavaScript/                      15 JavaScript test files
 │   └── Python/                          6 Python test files
 ├── tools/                               test-all.ps1 (runs every suite), build helpers
 ├── OCR-REDESIGN-VERSIONS/               design mock-ups (not used by the app)
@@ -465,8 +474,7 @@ Where each feature's code is, file by file, is listed in [section 12](#12-where-
  ├── Dashboard
  ├── Digitization
  │   ├── New Document
- │   ├── Records Archive
- │   └── Corrections
+ │   └── Records Archive (each record: Edit in Review & Export)
  ├── Reports & history
  │   ├── Reports
  │   └── Audit Log
@@ -500,20 +508,25 @@ One dashboard. Each panel has its own reporting period (last 30 days, last 90 da
 | **Digitization Volume & Trend** | Records archived per document type over time (by day for up to 90 days, by month beyond) |
 | Archive by type | Records per document type |
 | **Processing** | Detect and Scan runs that finished, failed or were cancelled; their average time; reading speed in milliseconds per line |
-| **Corrections** | Corrections saved in the period, the records they changed, and how many fields |
+| **Edits after saving** | Review & Export saves on saved records in the period, the records they changed, and how many fields (from the `record.edited` audit entries; **All edits** opens them in the audit log) |
 | **Recent changes** | The latest 5 audit entries, leaving out routine sign-ins, submissions and CSV downloads |
 
 Times are stored in UTC and shown in Philippine time (`Asia/Manila`) on every page and in the CSV export. A bad date typed into the address bar shows a message on that panel instead of an error page.
 
 ### 4.3 New Document, step 1: Document
 
-The scan screen has three steps, shown at the top: **1 Document**, **2 Align**, **3 Verify**.
+The scan screen has four steps, shown at the top: **1 Document**, **2 Align**, **3 Verify**, **4 Review & Export**.
 
 - Choose the **document type**. Only types with a published template can be scanned; the others are listed but disabled.
 - Drop or choose the **scan**: a PDF up to 200 MB, or a PNG, JPG, WEBP or BMP image up to 20 MB. TIFF is refused, because Chrome and Edge cannot display it.
 - A PDF is shown in the browser by PDF.js. **A PDF of many pages (a register book) is read one page at a time**: a page bar (‹ Page 3 of 12 ›) picks the page, each page is saved as its own record, and after Submit a window offers the next page without uploading the file again. The record keeps only its own page, cut out of the PDF in the browser with the original scan quality, plus the file's name and page number ("Page 3 of 12 · BIRTHS-1995.pdf" on the record).
 - CRMS remembers which pages of that exact file are saved (by the file's SHA-256 fingerprint): saved pages get a ✓, the file opens at its first page not saved yet, and saving a page (or a one-page file) a second time asks first (**Go back** or **Save again**; the audit log notes a page saved again).
 - CRMS remembers the last type used, so the next visit opens straight to it, ready for the next page of the same book.
+- **Batch mode** queues several files, or every page of a book, and saves them one record at a time, each through
+  Verify and Review & Export (**Save & next**, or **Skip record**). A layout with a page 2 pairs pages 1–2, 3–4 and
+  verifies each pair side by side as one document. Pages already saved or already queued are left out. **Scan all**
+  reads the queue; a page **Smoke test scan** already went over is queued as it is, so it is only read. The batch ends
+  on a summary of every record, with **Download all** (one CSV or Excel file of every record's table).
 - The screen shows whether the OCR service is online and which model is active.
 
 ### 4.4 New Document, step 2: Align
@@ -546,7 +559,11 @@ After **Detect**, every outlined line shows on the page, and Staff can fix the c
 
 ### 4.6 New Document, step 3: Verify and submit
 
-The page and the list of values sit side by side.
+The page and the list of values sit side by side. (Submitting now happens from step 4, Review & Export; see
+[4.8](#48-review--export-step-4-and-editing-a-saved-record). The checks and steps below are unchanged.)
+
+- When the page is read, CRMS checks whether its values match a record already saved. If so, Verify asks
+  (**Already saved?**, with a link to that record) instead of refusing the scan; **Continue anyway** goes on as usual.
 
 - Each value shows the **exact image the AI read**, the text it read, and its **confidence**.
 - Values below the confidence threshold (default **80%**) are flagged for a closer look.
@@ -572,25 +589,40 @@ On submission CRMS:
 
 - **Search** by any verified value (the top bar's search, or press `/`), and filter by document type and submission date (Philippine days). 15 records per page.
 - The **record page** shows the values grouped by person, and the page that was read with each value's box drawn on its handwriting. **Open full size** opens the original upload.
-- It marks values that were corrected during verification and lists every later correction (**Change history**), field by field.
-- **Correct record** changes values (see [4.8](#48-corrections)).
-- **Download CSV** gives this document's checked values, corrections included, **one row per person**, for import
+- It marks values that were corrected during verification, notes under a value when it was last edited ("Edited 2
+  days ago"), and lists every later save (**Edit history**: who, when and which values, with a link to the audit log).
+- **Edit in Review & Export** changes values (see [4.8](#48-review--export-step-4-and-editing-a-saved-record)).
+- **Download CSV** gives this document's checked values, edits included, **one row per person**, for import
   into the client's old system. The columns follow the layout's field names, page 1 then page 2; fields that belong
   to no person (for example Page No.) repeat on every row. The two pages of a document join by row: row 5 of page 1
   and row 5 of page 2 are one CSV row. The file is UTF-8 with a byte-order mark, so Excel shows ñ and accents, and
   each download is in the audit log (`record.exported`).
 
-### 4.8 Corrections
+### 4.8 Review & Export (step 4) and editing a saved record
 
-1. On a record, choose **Correct record**. Every value is shown beside a box for the right value. A **reason** is
-   optional (up to 2,000 characters). Only values that really differ are kept.
-2. **Save correction** changes the record at once. Required fields cannot be blanked; a save with no real change is refused.
-3. The old and new values are kept: on the record's **Change history**, on the **Corrections** page (sidebar,
-   read-only), and in the audit log (`record.corrected`).
-4. Saving locks the record's database row first, so two saves of one record take turns.
+**Step 4 of the scan screen.** After Verify, the document is shown as a **records table**: one row per person, one
+column per field (page 1, then page 2), with the scan beside it. The bar between them drags (double-click: 30/70).
 
-In the database a correction is a change request saved as already approved, so older requests (from before
-11 November 2026) and new corrections are listed together.
+- Click or type in a cell to edit it; the cell is shown on the scan. Enter goes down, Tab goes right.
+- Drag down a column to pick several cells: type one value into them all, delete them, or paste a list or an Excel
+  block to fill down. Ctrl+Z and Ctrl+Y undo and redo. The **Shortcuts** menu lists every key, Windows and Mac.
+- Empty cells are marked, and the issues button goes to the next one. Columns resize by dragging (double-click fits).
+- Double-click a header or row number to rename it in the download.
+- **Download**: the table as **CSV** or **Excel (.xlsx)**, made in the browser.
+- A value typed into a cell where nothing was read becomes a new field of that person (`Column · row N`).
+- **Save record** submits the record (see "On submission" in [4.6](#46-new-document-step-3-verify-and-submit)).
+  **Back to verify** returns to step 3.
+
+**A saved record.** On the record page, **Edit in Review & Export** opens the same table for that record.
+
+1. Change cells, or fill cells where nothing was read. Download CSV or Excel at any time.
+2. **Save changes** writes the changed values at once. A save that changes nothing writes nothing.
+3. Each save is one audit entry, `record.edited`, with every old and new value. The record page shows it in its
+   **Edit history**, and the dashboard counts it under **Edits after saving**.
+
+Until 15 November 2026 a saved record was changed with **Correct record** (stored as change requests, listed on a
+**Corrections** page). Those tables were dropped; the audit log keeps their old `change_request.*` and
+`record.corrected` entries.
 
 ### 4.9 Reports
 
@@ -700,8 +732,11 @@ be unused; the change is in the audit log as `user.updated`), and **Change passw
    progress and shows <---  lines and readings
    the readings
  9 checks, corrects,
-   ticks every value
-10 Submit         --->  checks again, creates the
+   ticks every value,
+   then reviews the
+   records table (step 4;
+   CSV / Excel download)
+10 Save record    --->  checks again, creates the
                         record, copies the page and
                         line images, locks it,
                         writes the audit entry,
@@ -741,17 +776,17 @@ The worker runs one job, `ProcessDocumentPage`, in one of three modes:
 
 Every run, finished, failed or cancelled, adds a row to `page_runs` (who, mode, outcome, total time, reading time, number of lines, model). The dashboard counts from it, because the pages themselves are deleted. It holds no document text or images.
 
-### 5.4 Correcting a locked record
+### 5.4 Editing a locked record
 
 ```
- record page --> Correct record --> change values (reason optional) --> Save correction
-                                                                            |
-             record updated at once  <-- one database transaction  <--------+
-             Change history + Corrections page + audit entry record.corrected (old and new values)
+ record page --> Edit in Review & Export --> change or fill cells --> Save changes
+                                                                          |
+             record updated at once  <-- one database transaction  <------+
+             Edit history on the record page + audit entry record.edited (old and new values)
 ```
 
-A correction is stored as a change request with the status `approved`. Requests from before 11 November 2026 may
-also show `rejected` or `withdrawn`; those never changed the record.
+Before 15 November 2026 this was **Correct record**, stored as change requests; those tables were dropped, and
+their audit entries (`change_request.*`, `record.corrected`) are kept.
 
 ### 5.5 Forgotten password
 
@@ -797,6 +832,7 @@ All files are under `storage/app/private/` (outside the public web folder) and a
 | What | Where | Created | Deleted |
 | :--- | :--- | :--- | :--- |
 | Page being worked on | `pages/{id}/`: `page.png`, `geometry.json`, `lines.json`, `detector.json`, `crops/` | When Detect or Scan starts | On submit (after copying), on cancel (at once), or after 24 hours untouched |
+| Batch page's original file, queued | `documents/workspace/<batch>/` | When the page joins a batch's queue | When its record is saved, or by the hourly clean-up with its page |
 | Original upload | `scans/` | On submit | Never (records cannot be deleted) |
 | Page as read, and line images | `records/{id}/page.png`, `records/{id}/crops/` | On submit | Never |
 | Template sample | `template-samples/` | On upload | When replaced or deleted |
@@ -825,18 +861,14 @@ In Docker the same files live in `docker-data/storage/` in the project folder, a
  +-------+ 1  * +-------+ 1  *    +----+-----+ 1     * +---------------+
  | roles +------+ users +---------+ records  +---------+ record_fields |
  +-------+      +---+---+         +----+-----+         +-------+-------+
-                    |                  | 1                     | 1
-                    |                  | *                     | *
-                    |         +--------+--------+ 1   * +------+---------------+
-                    |         | change_requests +-------+ change_request_items |
-                    |         +-----------------+       +----------------------+
                     | 1
                     +---- * audit_logs, page_runs (and "who did it" on most tables)
+                            (a record's edits are its record.edited audit entries)
 
  Stand-alone: ocr_models (the model registry), ocr_settings (one row)
 ```
 
-`users` link to almost everything as "who created / submitted / asked / reviewed". `document_templates.parent_id` points at the version a layout was made from.
+`users` link to almost everything as "who created / submitted". The `change_requests` and `change_request_items` tables were dropped on 15 November 2026 (migration `2026_11_15_000100_drop_change_requests_tables`; a rollback brings them back empty). `document_templates.parent_id` points at the version a layout was made from.
 
 ### 6.2 The tables
 
@@ -849,8 +881,6 @@ In Docker the same files live in `docker-data/storage/` in the project folder, a
 | `document_template_fields` | The rectangle fields of a layout | `name`, `x`, `y`, `width`, `height`, `angle`, `person_group`, `role` (name or entry number), `value_type`, `options`, `hint`, `is_required` |
 | `records` | One submitted page | `document_type_id`, `document_template_id` (the exact version), `status` (`submitted`), `scan_path`, `page_image_path`, `scan_rotation`, `ocr_model_key`, `submitted_by`, `submitted_at` |
 | `record_fields` | One value of a record | `name`, **`ocr_text`** (what the AI read), `ocr_confidence`, **`verified_value`** (what the person approved), `is_required`, `person_group`, `crop_path`, position (`x`, `y`, `width`, `height`, `polygon`), ledger cell (`line_column`, `line_row`, `line_flags`) |
-| `change_requests` | Correction requests | `record_id`, `status`, `reason`, `requested_by`, `reviewed_by`, `reviewed_at`, `decision_note` |
-| `change_request_items` | One proposed change | `record_field_id`, `current_value`, `proposed_value` |
 | `document_pages` | A page between Align and Submit | `status`, `error`, `image_path`, `width`, `height`, `deskew_degrees`, `geometry` (markers, JSON), `notes` (grid notes), `ocr_model_key`, `created_by` |
 | `page_lines` | One outlined line on a page | `source`, `column_name`, `row`, `polygon`, `baseline`, `bbox`, `crop_path`, `flags`, `ocr_text`, `ocr_confidence`, `adjusted_at`, `deleted_at` (kept for undo) |
 | `page_runs` | One Detect or Scan run, for the dashboard | `user_id`, `mode`, `outcome`, `duration_ms`, `read_ms`, `lines`, `ocr_model_key`, `error` |
@@ -1048,9 +1078,9 @@ Measured during development (not a formal benchmark):
 
 ### 8.3 Protecting the records
 
-- **No edit or delete route** exists for records, for anyone. Values change only through an approved change request.
-- Change request decisions **lock the database row** first, so they cannot be decided twice.
-- Required values cannot be blanked by a correction.
+- **No delete route** exists for records. Values change only in Review & Export (`PATCH records/{id}/review`), which
+  refuses a value of another record or a page the record does not have, and saves in one database transaction.
+- Every such save writes **one `record.edited` audit entry** with each old and new value, so no value is lost.
 - The **audit log is append-only**: the code refuses to update or delete an entry, and passwords and tokens are redacted.
 - A submission is saved in **one database transaction**: if anything fails, nothing is half-saved and the copied files are removed.
 - Every record keeps the exact layout version and the exact images the AI read.
@@ -1077,7 +1107,8 @@ Measured during development (not a formal benchmark):
 | MySQL 9.3 on Windows | Out of support; the Windows MySQL also accepts network connections, though only `root@localhost` exists | Bind MySQL to 127.0.0.1; move to 9.7 (Docker already uses it) |
 | No encryption at rest | The database and scan files are plain on disk | Turn on disk encryption (BitLocker on Windows, FileVault on Mac) |
 | Audit log protected by the application only | Someone with direct database access could still change rows; there is no hash chain | Restrict database access; optionally chain entry hashes |
-| A Super Admin can approve their own change request | Separation of duties is weaker for that one role | Refuse approval when the reviewer is the requester |
+| A saved record's values are edited directly, with no second person approving | With one account there is no separation of duties; a wrong edit is caught only by reading the audit log | Review `record.edited` entries regularly (the dashboard's **Edits after saving** links to them) |
+| The dev-only Review & Export shortcut (`DEV_REVIEW_SHORTCUT`) is still in the code | It opens step 4 on a saved test scan; it is on only with `APP_ENV=local` and the setting turned on | Remove it before release (the files are listed in `config/dev_review_shortcut.php`) |
 | Backups are manual | A disk failure could lose records | Schedule the backup in [DOCKER-SETUP.md](DOCKER-SETUP.md#backup-and-restore) (database dump plus the `docker-data` folder) |
 | `php artisan serve` is a development web server | Fine for one local computer, not for a shared office server | Use Nginx or Apache with PHP-FPM if CRMS is ever shared on a network |
 
@@ -1115,7 +1146,7 @@ None points to wrong data being saved, but they should be fixed or updated befor
 | Sign-in and accounts | `AuthenticationTest`, `UserManagementTest`: temporary passwords, forced change, deactivation, Admin limited to Staff |
 | Scanning and submitting | `DocumentUploadWorkflowTest`, `LineOutlinePipelineTest`: page job, Detect, outlines, manual fixes, missing required fields, TIFF refused |
 | Records | `RecordArchiveFilterTest`, `RecordDetailPresentationTest`: search, filters by Philippine day, straightened page kept |
-| Change requests | `ChangeRequestWorkflowTest`: approve, reject, withdraw, row locks, long notes |
+| Review & Export | `RecordReviewTest`: only changed values saved, old and new logged, added cells, other records' fields refused; `review-table.test.js`: rows per person, CSV and Excel, keys, a batch as one table |
 | Reports | `ReportExportTest`: CSV injection, Philippine time in the CSV |
 | Templates | `DocumentTemplateBuilderTest`, `TemplateVersioningTest`, `TemplateBuilderGridChecksTest`, `TemplateFieldSettingsTest` |
 | Dashboard | `AnalyticsDashboardTest`: each panel's own period, bad periods in the address |
@@ -1177,7 +1208,7 @@ Daily use: `docker compose up -d` to start, `docker compose down` to stop. **Nev
 | **AI accuracy measured on synthetic data only** | The 79.2% exact match is not a measure of real ledger reading. A real-line test set has not been made yet. |
 | Training data is synthetic | Real Filipino registry handwriting, ink, paper and scan quality were not in training. |
 | Confidence not calibrated | A high confidence does not guarantee a correct reading. |
-| One page at a time | A PDF of many pages is read page by page in the workspace (Next page after each save). Batch scanning of a whole book is being built on the `gono` branch. |
+| One record at a time | A PDF of many pages, or a batch of files, is still checked one record at a time (Verify and Review & Export for each); batch mode only queues and reads them in one go. |
 | One reading model for everything | Typed or printed text on a page is read by the same handwriting model; there is no separate engine for printed text. |
 | One record per page | A ledger page with many people is stored as one record; search finds the page, not a single person's own record. |
 | Only this computer can open it | Ports are bound to `127.0.0.1`, so several staff on different computers cannot use one installation as set up today. |
@@ -1189,7 +1220,7 @@ Daily use: `docker compose up -d` to start, `docker compose down` to stop. **Nev
 ### 11.3 Risks and gaps found in this review
 
 1. **5 failing tests** ([9.1](#91-automated-tests)). Probably out-of-date tests, but the register-row check should be confirmed in the browser.
-2. **Security items in [8.6](#86-known-security-gaps)**: public default Super Admin password, outdated PHP and MySQL, no encryption at rest, Super Admin self-approval, manual backups.
+2. **Security items in [8.6](#86-known-security-gaps)**: public default Super Admin password, outdated PHP and MySQL, no encryption at rest, record edits with no second approver, the dev-only Review & Export shortcut, manual backups.
 3. **Documentation drift.** The README and DEVELOPER-GUIDE still name `TrOcr-50k-broken-samples` as the model to install and quote its older scores, and still say "477 tests". The active model is now `100k-finetuned-dataset-model`.
 4. **Technical debt** (does not affect users today):
    - The document type is stored twice (`document_type_id` and an older `doc_type` column with a fixed list).
@@ -1203,9 +1234,9 @@ In order of value for the defense and for real use:
 1. **Measure accuracy on real lines.** Scan and verify a sample of real pages, run `php artisan crms:export-training --test-set=real-lines`, then score the base and active models with `ml/test_finetuned.py`. This is the most important missing evidence. Report it per document type, as Part 3 of the evaluation kit asks.
 2. **Run the user evaluation** in `docs/System-Evaluation.pdf` (functional checklist, timing against manual encoding, questionnaire and SUS) with real registry staff.
 3. **Fix or update the 5 failing tests** so the full suite passes.
-4. **Close the quick security gaps**: force the Super Admin password change, update PHP, bind MySQL to 127.0.0.1, refuse self-approval, turn on disk encryption, schedule backups.
+4. **Close the quick security gaps**: force the Super Admin password change, update PHP, bind MySQL to 127.0.0.1, remove the dev-only Review & Export shortcut, turn on disk encryption, schedule backups.
 5. **Update the README and DEVELOPER-GUIDE** to the current model and test numbers.
-6. Later: batch scanning (on the `gono` branch; multi-page PDFs are read page by page already), network access for several staff computers (with HTTPS), full-text search, splitting the largest files.
+6. Later: network access for several staff computers (with HTTPS), full-text search, splitting the largest files.
 
 ---
 
@@ -1218,12 +1249,13 @@ In order of value for the defense and for real use:
 | Sidebar menu | `app/Support/Navigation.php` |
 | Sign-in, forced password change | `app/Http/Controllers/Auth/`, `app/Http/Middleware/`, `app/Http/Requests/Auth/LoginRequest.php` |
 | Dashboard | `app/Http/Controllers/DashboardController.php`, `app/Services/DashboardAnalytics.php`, `resources/views/dashboard.blade.php`, `resources/js/dashboard-analytics.js` |
-| Scan screen (Document, Align, Verify) | `app/Http/Controllers/DocumentScanController.php`, `resources/views/scan/workspace.blade.php`, `resources/js/field-marker.js`, `line-overlay.js`, `ledger-grid.js`, `row-lines.js`, `line-geometry.js` |
+| Scan screen (Document, Align, Verify, Review & Export, batch mode) | `app/Http/Controllers/DocumentScanController.php`, `resources/views/scan/workspace.blade.php`, `resources/js/field-marker.js`, `line-overlay.js`, `ledger-grid.js`, `row-lines.js`, `line-geometry.js`, `review-table.js`, `scan-source.js` |
 | Pages in progress, Detect, line fixes | `app/Http/Controllers/DocumentPageController.php`, `app/Jobs/ProcessDocumentPage.php`, `app/Services/Lines/` |
 | Line detection | `ml/line_markers.py` |
 | Reading service | `ml/api/main.py`, `ml/trocr_common.py`, `app/Services/Ocr/OcrClient.php` |
 | Records archive | `app/Http/Controllers/RecordController.php`, `app/Services/RecordFieldGrouper.php`, `resources/views/records/` |
-| Change requests | `app/Http/Controllers/ChangeRequestController.php`, `app/Services/ChangeRequestService.php` |
+| Review & Export of a saved record | `app/Http/Controllers/RecordReviewController.php`, `resources/views/records/review.blade.php`, `resources/js/record-review.js`, `review-table.js` |
+| Dev-only Review & Export shortcut (temporary) | `config/dev_review_shortcut.php`, `routes/dev-review-shortcut.php`, `app/Http/Controllers/Dev/ReviewShortcutController.php` |
 | Reports and CSV | `app/Http/Controllers/ReportController.php` |
 | User accounts | `app/Http/Controllers/UserController.php`, `app/Services/UserProvisioner.php` |
 | Audit log | `app/Services/AuditLogger.php`, `app/Models/AuditLog.php`, `app/Http/Controllers/AuditLogController.php` |
@@ -1245,7 +1277,6 @@ In order of value for the defense and for real use:
 | **Audit log** | The permanent list of who did what and when |
 | **Baseline** | The imaginary line handwriting sits on; Kraken finds it for every line |
 | **CER / WER** | Character / word error rate: how much of the text the model got wrong (lower is better) |
-| **Change request** | A request to correct a locked record, decided by an Admin |
 | **Confidence** | The model's certainty in its own reading (0–100%), not its accuracy |
 | **Crop** | The small image of one line, cut from the page, that TrOCR reads |
 | **Deskew** | Straightening a page that was scanned slightly turned |
@@ -1263,6 +1294,7 @@ In order of value for the defense and for real use:
 | **Outline / polygon** | The shape traced around one line of writing |
 | **Person group** | The values that belong to one person (one ledger row, or the mother's fields on a certificate) |
 | **Queue worker** | The background program that does slow work so the website stays fast |
+| **Review & Export** | Step 4 of scanning, and the edit page of a saved record: the values as a table, one row per person, to edit and download as CSV or Excel |
 | **Scheduler** | The background program that runs the hourly clean-up |
 | **Service key** | The shared secret the website sends with every call to the OCR service |
 | **SHA-256** | A fingerprint of a file; any change to the file changes it |
@@ -1318,7 +1350,7 @@ In order of value for the defense and for real use:
 | `rows_do_not_fit` | The writing does not follow the rows, so the columns were read as free text |
 | `rows_empty` | Rows of the table with no writing |
 
-**Change request status:** `pending`, `approved`, `rejected`, `withdrawn`. **Record status:** `submitted` (the only one; every record is locked when submitted).
+**Record status:** `submitted` (the only one; every record is locked when submitted).
 
 ## Appendix B. Audit log actions
 
@@ -1326,8 +1358,8 @@ In order of value for the defense and for real use:
 | :--- | :--- |
 | Sign-in | `auth.login`, `auth.logout` |
 | Accounts | `user.created`, `user.updated`, `user.password_changed`, `user.password_reset`, `user.activated`, `user.deactivated` |
-| Records | `record.submitted` |
-| Change requests | `change_request.opened`, `change_request.approved`, `change_request.rejected`, `change_request.withdrawn` |
+| Records | `record.submitted`, `record.edited` (a save in Review & Export, with every old and new value), `record.exported` (Download CSV) |
+| Change requests (removed; older entries only) | `change_request.opened`, `change_request.approved`, `change_request.rejected`, `change_request.withdrawn`, `record.corrected` |
 | Reports and exports | `report.generated`, `training.exported` |
 | Document types | `document-type.created`, `document-type.renamed`, `document-type.archived`, `document-type.restored`, `document-type.deleted` |
 | Templates | `template.created`, `template.updated`, `template.versioned`, `template.duplicated`, `template.activated`, `template.deleted`, `template.sample-uploaded`, `template.sample-replaced`, `template.sample-deleted` |
@@ -1357,6 +1389,7 @@ Set in the `.env` file. Defaults from `.env.example`.
 | `CRMS_CONFIDENCE_THRESHOLD` | `80` | Readings below this confidence are flagged |
 | `CRMS_REPORTING_TIMEZONE` | `Asia/Manila` | Time zone for screens, filters and the CSV |
 | `CRMS_SUPER_ADMIN_EMAIL`, `CRMS_SUPER_ADMIN_PASSWORD` | `superadmin@admin.com` | The first Super Admin, used only at installation |
+| `DEV_REVIEW_SHORTCUT` | `false` | Development only: with `APP_ENV=local`, a button that opens step 4 on a saved test scan |
 
 ## Appendix D. OCR service endpoints
 
