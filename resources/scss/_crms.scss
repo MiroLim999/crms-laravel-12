@@ -1823,6 +1823,31 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// Verify and Review & Export: the bar is its own short card above both panes.
+.batch-queue-banner.is-standalone {
+  margin-block-end: 1rem;
+  border-radius: .65rem;
+  box-shadow: var(--bs-card-box-shadow, 0 .125rem .5rem rgba(var(--crms-shadow-rgb), .12));
+
+  .batch-queue-banner__body {
+    padding: .5rem .9rem;
+  }
+
+  // The line stays inside the rounded corners.
+  .batch-queue-progress {
+    inset-inline: .65rem;
+    border-radius: 2px;
+  }
+}
+
+// ...and the panes give up the bar's height, so the page still fits the window.
+@media (min-width: 992px) {
+  .has-batch-bar .validation-comparison-grid {
+    block-size: calc(100dvh - 8.25rem - var(--batch-bar-block, 0px) - 1rem);
+    min-block-size: 28rem;
+  }
+}
+
 // A thin line along the bottom of the bar: how far the batch is.
 .batch-queue-progress {
   position: absolute;

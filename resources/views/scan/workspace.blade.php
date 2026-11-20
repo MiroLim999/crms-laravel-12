@@ -3499,6 +3499,24 @@
             }));
         }
 
+        /**
+         * Verify and Review & Export fill the window exactly: with the batch's bar
+         * above them, their panes give up its height, so the page never scrolls.
+         */
+        function syncBatchBarSpace() {
+            const bar = document.getElementById('batchQueueBanner');
+            ['step-verify', 'step-review'].forEach((id) => {
+                const step = document.getElementById(id);
+                const here = Boolean(bar) && step?.contains(bar) && !bar.classList.contains('d-none');
+                step?.classList.toggle('has-batch-bar', here);
+                if (here) step.style.setProperty('--batch-bar-block', `${bar.offsetHeight}px`);
+            });
+        }
+        // A notice in the bar (a failed page) makes it taller: the panes follow.
+        if (window.ResizeObserver && document.getElementById('batchQueueBanner')) {
+            new ResizeObserver(() => syncBatchBarSpace()).observe(document.getElementById('batchQueueBanner'));
+        }
+
         function showStep(name) {
             activeStep = name;
             Object.entries(steps).forEach(([key, node]) => node.classList.toggle('d-none', key !== name));
@@ -3506,17 +3524,24 @@
             setReviewMode(name === 'review');
             if (name === 'verify') syncVerifyButtons();
 
+            // A batch's bar: on top of the document in Align; in Verify and in Review &
+            // Export, its own short row above both panes (the panes give up its height).
             const batchBanner = document.getElementById('batchQueueBanner');
             if (batchBanner) {
                 if (name === 'mark') {
                     const toolbar = document.querySelector('#step-mark .marker-toolbar');
                     toolbar?.parentNode?.insertBefore(batchBanner, toolbar);
+                    batchBanner.classList.remove('is-standalone');
                 } else if (name === 'verify' || name === 'review') {
-                    // Above the scan, in Verify and in Review & Export (setReviewMode
-                    // has already moved Verify's document pane where it belongs).
-                    const verifyHeader = document.querySelector('.validation-document-pane .validation-pane__header');
-                    verifyHeader?.parentNode?.insertBefore(batchBanner, verifyHeader);
+                    const grid = document.querySelector(`#step-${name} .validation-comparison-grid`);
+                    grid?.parentNode?.insertBefore(batchBanner, grid);
+                    batchBanner.classList.add('is-standalone');
                 }
+                // Its words follow the step (run once the page's script has set up the batch).
+                window.queueMicrotask(() => {
+                    if (batchState.active) renderBatchQueueBanner();
+                    syncBatchBarSpace();
+                });
             }
 
             const marking = name === 'mark';
@@ -4579,9 +4604,18 @@
                 // Saved a record at a time, as in single mode: a page, or a pair of pages.
                 const records = batchRecords();
                 const finished = records.filter(recordDone).length;
-                if (phaseTitle) phaseTitle.textContent = phase === 'done' ? 'Batch complete' : 'Verify each record';
+                // Which record is open, while it is still to save.
+                const current = batchState.items[batchState.currentIndex];
+                const position = current ? records.findIndex((record) => record.members.includes(current)) : -1;
+                const onRecord = position !== -1 && !recordDone(records[position]);
+                if (phaseTitle) {
+                    phaseTitle.textContent = phase === 'done' ? 'Batch complete'
+                        : (activeStep === 'review' ? 'Review & save' : 'Verify each record');
+                }
                 if (counter) {
-                    counter.textContent = `${finished} of ${records.length} record${records.length === 1 ? '' : 's'} done`;
+                    counter.textContent = phase === 'done' || !onRecord
+                        ? `${finished} of ${records.length} record${records.length === 1 ? '' : 's'} done`
+                        : `Record ${position + 1} of ${records.length} · ${finished} done`;
                 }
                 updateProgress(records.length > 0 ? Math.round((finished / records.length) * 100) : 100);
                 if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
@@ -4589,6 +4623,13 @@
 
             renderBatchNotice();
             if (activeStep === 'mark') updateBatchPageBar();
+            // While Scan all reads, the queue cannot be opened (nothing can be switched to).
+            el('batchQueueToggle').disabled = batchState.readingAll;
+            if (batchState.readingAll && queuePanel.open) {
+                queuePanel.open = false;
+                el('batchQueueToggle').setAttribute('aria-expanded', 'false');
+            }
+            syncBatchBarSpace();
 
             renderBatchQueuePanel();
             scheduleBatchSync();
@@ -4645,8 +4686,25 @@
 
         /** Whether a page can be opened from the queue: in Align, or (its record read) in Verify. */
         function batchPageOpenable(item) {
-            return !batchState.readingAll && (pageAlignable(item) || pageNeedsFile(item) || recordStateOf(item) === 'ready');
+            if (batchState.readingAll) return false;
+            // Verifying: only another record that is read opens (in Verify); the rest wait their turn.
+            if (batchVerifying()) return recordStateOf(item) === 'ready';
+            return pageAlignable(item) || pageNeedsFile(item) || recordStateOf(item) === 'ready';
         }
+
+        /** Whether a record is open in Verify or Review & Export now. */
+        const batchVerifying = () => !batchAligning() && ['verify', 'review'].includes(activeStep);
+
+        /** Why a page cannot be opened while records are verified (shown on it). */
+        const VERIFY_WAIT_REASON = {
+            pending: 'Not aligned yet: it comes after the records that are read',
+            saving: 'Being queued',
+            saved: 'Queued, not read yet',
+            scanning: 'Being read',
+            failed: 'Could not be read: re-align it once the records that are read are done',
+            imported: 'Saved as a record',
+            rejected: 'Left out of the batch',
+        };
 
         /** "BIRTHS-1995.pdf · page 3 of 12", or the record in Verify, for the collapsed line. */
         function batchWhereText() {
@@ -4903,7 +4961,8 @@
                 open.append(error);
             }
             open.title = isCurrent ? 'Open now'
-                : (recordStateOf(item) === 'ready' ? 'Open in Verify'
+                : (batchVerifying() && open.disabled ? (VERIFY_WAIT_REASON[item.status] ?? '')
+                : recordStateOf(item) === 'ready' ? 'Open in Verify'
                     : (pageAlignable(item) ? 'Open in Align' : (pageNeedsFile(item) ? 'Pick its file again to align it' : '')));
             open.addEventListener('click', () => {
                 if (open.disabled) return;
@@ -5682,8 +5741,9 @@
         function showBatchContext() {
             const item = batchState.items[batchState.currentIndex];
             if (!item || !batchAligning()) return;
-            el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${batchState.currentIndex + 1}/${batchState.items.length}) · ${item.name}`;
-            el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+            // The bar below names the file, the page and how far the batch is.
+            el('workspaceContextDetail').textContent = config.typeLabel;
+            el('workspaceContextDetail').title = config.typeLabel;
         }
 
         async function openBatchQueueItem(index) {
@@ -5730,8 +5790,9 @@
                     resetSpread();
                 }
                 updateScanNotices();
-                el('workspaceContextDetail').textContent = `${config.typeLabel} · Batch (${index + 1}/${batchState.items.length}) · ${item.name}`;
-                el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+                // The bar names the file, the page and how far the batch is.
+                el('workspaceContextDetail').textContent = config.typeLabel;
+                el('workspaceContextDetail').title = config.typeLabel;
                 showStep('mark');
                 guardBackButton();
                 resetFieldHistory();
@@ -6900,8 +6961,9 @@
             el('summaryModel').textContent = processedPage.model || '—';
             const records = batchRecords();
             const position = records.findIndex((candidate) => candidate.members.includes(lead));
-            el('workspaceContextDetail').textContent = `${config.typeLabel} · Record ${position + 1}/${records.length} · ${recordLabel(record)}`;
-            el('workspaceContextDetail').title = el('workspaceContextDetail').textContent;
+            // The bar says which record of how many, and its file and pages.
+            el('workspaceContextDetail').textContent = config.typeLabel;
+            el('workspaceContextDetail').title = `${config.typeLabel} · Record ${position + 1} of ${records.length} · ${recordLabel(record)}`;
 
             clearValidationSubmitError();
             renderVerifyRows();
