@@ -3518,7 +3518,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-#leaveScanModalDescription {
+#leaveScanModalDescription,
+#realignConfirmText {
   color: var(--bs-body-color);
 }
 
@@ -3703,48 +3704,16 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   text-align: start;
 }
 
-// Re-align of a two-page record: which page goes back, and what happens to what was typed.
-.realign-menu__heading {
-  padding-block: .35rem .25rem;
-  color: var(--bs-secondary-color);
-  font-size: .72rem;
+// Re-align: the document that goes back (its file and pages), in the window that asks.
+.realign-doc {
+  margin: 0 0 .6rem;
+  padding: .5rem .8rem;
+  color: var(--bs-heading-color);
+  background: var(--bs-tertiary-bg);
+  border-radius: var(--bs-border-radius);
+  font-size: .85rem;
   font-weight: 600;
-  letter-spacing: .02em;
-  text-transform: none;
-}
-
-.dropdown-item.realign-option {
-  display: grid;
-  gap: .1rem;
-  min-inline-size: 16.5rem;
-  white-space: normal;
-
-  small {
-    color: var(--bs-secondary-color);
-    font-size: .72rem;
-  }
-
-  .realign-option__title {
-    display: flex;
-    align-items: center;
-    gap: .5rem;
-    font-weight: 600;
-  }
-
-  .realign-option__tag {
-    padding: .05rem .35rem;
-    color: var(--bs-primary);
-    background: rgba(var(--bs-primary-rgb), .1);
-    border-radius: .25rem;
-    font-size: .65rem;
-    font-weight: 600;
-  }
-
-  &:hover small,
-  &:focus small {
-    color: inherit;
-    opacity: .8;
-  }
+  overflow-wrap: anywhere;
 }
 
 // The left-out window: the line above the list is read, not skimmed, and the
@@ -3754,6 +3723,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 #batchIntakeModal .btn-close,
+#realignConfirmModal .btn-close,
 #leaveScanModal .btn-close {
   position: absolute;
   inset-block-start: .75rem;

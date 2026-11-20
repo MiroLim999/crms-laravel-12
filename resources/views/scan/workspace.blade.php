@@ -524,6 +524,11 @@
                     <button class="btn btn-primary btn-lg" type="button" id="scanNowBtn">
                         <i class="icon-base bx bx-scan icon-sm me-1"></i> <span id="scanNowBtnLabel">Scan with OCR</span>
                     </button>
+                    {{-- A page sent back from Verify: keep the reading it had and go back to Verify. --}}
+                    <button class="btn btn-label-secondary d-none" type="button" id="cancelRealignBtn"
+                        title="Keep the reading this page had and go back to Verify">
+                        <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>Cancel re-align
+                    </button>
                 </div>
             </div>
         </div>
@@ -830,13 +835,12 @@
                                     spaces between separate text and element children. --}}
                                     <span><span id="submitLabelHead">Submit</span> <span id="submitVerifiedCount">0</span> verified</span>
                                 </button>
-                                {{-- A batch only: this record's page back to Align, read again once queued. --}}
-                                <div class="dropdown d-none" id="verifyRealignGroup">
-                                    <button class="btn btn-outline-secondary" type="button" id="verifyRealignBtn" aria-haspopup="true"
-                                        title="Back to Align for this record's page: it is read again once queued">
+                                {{-- A batch only: this whole document (every page of the record) back to Align, read again once queued. --}}
+                                <div class="d-none" id="verifyRealignGroup">
+                                    <button class="btn btn-outline-secondary" type="button" id="verifyRealignBtn"
+                                        title="Back to Align for this whole document: it is read again once queued">
                                         <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>Re-align
                                     </button>
-                                    <div class="dropdown-menu" id="verifyRealignMenu"></div>
                                 </div>
                                 <button class="btn btn-primary" type="button" id="reviewExportBtn">
                                     <span>Review &amp; export</span>
@@ -907,13 +911,12 @@
                             <button class="btn btn-outline-secondary" type="button" id="backToVerify">
                                 <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i> Back to verify
                             </button>
-                            {{-- A batch only: this record's page back to Align, read again once queued. --}}
-                            <div class="dropdown d-none" id="reviewRealignGroup">
-                                <button class="btn btn-outline-secondary" type="button" id="reviewRealignBtn" aria-haspopup="true"
-                                    title="Back to Align for this record's page: it is read again once queued">
+                            {{-- A batch only: this whole document (every page of the record) back to Align, read again once queued. --}}
+                            <div class="d-none" id="reviewRealignGroup">
+                                <button class="btn btn-outline-secondary" type="button" id="reviewRealignBtn"
+                                    title="Back to Align for this whole document: it is read again once queued">
                                     <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>Re-align
                                 </button>
-                                <div class="dropdown-menu" id="reviewRealignMenu"></div>
                             </div>
                             <button class="btn btn-primary" type="button" id="reviewSaveBtn" disabled>
                                 <i class="icon-base bx bx-check-shield icon-sm me-1" aria-hidden="true"></i>
@@ -1242,6 +1245,30 @@
                     <div class="leave-scan-modal__actions">
                         <a class="btn btn-label-secondary" id="batchTakenRecordsLink" href="#">Records Archive</a>
                         <button type="button" class="btn btn-primary" id="batchTakenReloadBtn">Reload</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- Re-align: sending a read page back to Align, and what happens to what was typed. --}}
+    <div class="modal fade" id="realignConfirmModal" tabindex="-1" aria-labelledby="realignConfirmTitle"
+        aria-describedby="realignConfirmText" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog" style="max-inline-size: min(23rem, calc(100% - 2rem));">
+            <div class="modal-content leave-scan-modal">
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <div class="modal-body">
+                    <h5 class="modal-title" id="realignConfirmTitle">Re-align this document?</h5>
+                    {{-- Which document: its file and pages. --}}
+                    <p class="realign-doc" id="realignConfirmDoc"></p>
+                    <p class="leave-scan-modal__text" id="realignConfirmText"></p>
+                    <div class="leave-scan-modal__actions">
+                        <button type="button" class="btn btn-label-secondary text-nowrap" data-bs-dismiss="modal">
+                            Cancel
+                        </button>
+                        <button type="button" class="btn btn-primary text-nowrap" id="realignConfirmBtn">
+                            Re-align
+                        </button>
                     </div>
                 </div>
             </div>
@@ -4455,8 +4482,10 @@
          * all finished): the next record that is read opens in Verify; else a page
          * still to align (one that failed, say) opens in Align; else the summary.
          */
-        async function continueBatch(after = null, { askForFiles = true } = {}) {
-            const next = nextOpenRecord(after);
+        async function continueBatch(after = null, { askForFiles = true, prefer = null } = {}) {
+            // A record just read again opens itself; otherwise the next one that is read.
+            const preferred = prefer && recordState(recordOf(prefer).members) === 'ready' ? recordOf(prefer) : null;
+            const next = preferred ?? nextOpenRecord(after);
             if (next) {
                 await openBatchVerifyItem(batchState.items.indexOf(next.members[0]));
                 return;
@@ -4568,10 +4597,22 @@
             } else if (batchAligning()) {
                 const allSaved = savedCount === total;
                 // "Queued", not "saved": a page is saved as a record only after Verify.
-                if (phaseTitle) phaseTitle.textContent = allSaved ? 'Ready to scan' : `Align each ${unit}`;
+                const openItem = batchState.items[batchState.currentIndex];
+                if (phaseTitle) {
+                    phaseTitle.textContent = openItem?.realign
+                        ? 'Re-aligning'
+                        : allSaved ? 'Ready to scan' : `Align each ${unit}`;
+                }
                 if (counter) {
-                    counter.textContent = `${savedCount} of ${total} queued`
-                        + (counts.read > 0 ? ` · ${counts.read} read` : '');
+                    if (openItem?.realign) {
+                        // Which document: its file and pages, and where it is in the batch.
+                        const records = batchRecords();
+                        const record = recordOf(openItem);
+                        counter.textContent = `${recordLabel(record)} · Record ${records.findIndex((r) => r.key === record.key) + 1} of ${records.length}`;
+                    } else {
+                        counter.textContent = `${savedCount} of ${total} queued`
+                            + (counts.read > 0 ? ` · ${counts.read} read` : '');
+                    }
                 }
                 updateProgress(Math.round((savedCount / total) * 100));
                 if (saveQueueBtn) {
@@ -4630,6 +4671,11 @@
                 updateProgress(records.length > 0 ? Math.round((finished / records.length) * 100) : 100);
                 if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
             }
+
+            // A page sent back from Verify can be taken back, while it is open in Align.
+            const realigning = batchAligning() && !batchState.readingAll
+                && [batchState.items[batchState.currentIndex], batchPartner()?.item].some((it) => it?.realign && it.page);
+            el('cancelRealignBtn').classList.toggle('d-none', !realigning);
 
             renderBatchNotice();
             if (activeStep === 'mark') updateBatchPageBar();
@@ -4975,9 +5021,11 @@
                 error.textContent = item.error;
                 open.append(error);
             }
+            const waitsFor = recordOf(item).members.find((member) => member !== item && member.realign);
             open.title = inRecord ? 'Show this page'
                 : isCurrent ? 'Open now'
-                : (batchVerifying() && open.disabled ? (VERIFY_WAIT_REASON[item.status] ?? '')
+                : (open.disabled && waitsFor ? `Waits for page ${waitsFor.pageNo} to be read again`
+                : batchVerifying() && open.disabled ? (VERIFY_WAIT_REASON[item.status] ?? '')
                 : recordStateOf(item) === 'ready' ? 'Open in Verify'
                     : (pageAlignable(item) ? 'Open in Align' : (pageNeedsFile(item) ? 'Pick its file again to align it' : '')));
             open.addEventListener('click', () => {
@@ -6074,9 +6122,13 @@
                 if (targetIndex !== -1) {
                     await openBatchQueueItem(targetIndex);
                 } else if (realigned) {
-                    // A page sent back from Verify is read again now (Scan all, for what waits
-                    // in the queue), then the records open (this one, in its place).
-                    await runBatchScanAll({ pages: unsentBatchPages(), after: item });
+                    // A page sent back from Verify is read again now: just this record's pages
+                    // (Scan all's window), and the record opens again once they are read.
+                    await runBatchScanAll({
+                        pages: recordOf(item).members.filter((it) => it.status === 'saved' && it.pageId),
+                        after: item,
+                        prefer: item,
+                    });
                 } else {
                     renderBatchQueueBanner();
                 }
@@ -6110,7 +6162,7 @@
          * again. `pages` narrows it (a page sent back by Re-align), and `after`
          * is the record the batch returns to once they are read.
          */
-        async function runBatchScanAll({ pages = null, after = null } = {}) {
+        async function runBatchScanAll({ pages = null, after = null, prefer = null } = {}) {
             if (scanInProgress || !batchState.active) return;
 
             const itemsToScan = pages ?? batchPagesToRead();
@@ -6310,7 +6362,7 @@
                 }
                 batchState.readingAll = false;
                 // The first record read opens in Verify; with none, the first failed page in Align.
-                await continueBatch(after);
+                await continueBatch(after, { prefer });
             } catch (error) {
                 if (!run.cancelled) {
                     showOcrError(error.message || 'Batch scan failed.');
@@ -7218,20 +7270,56 @@
             return recordOf(current).members.filter((it) => !pageDone(it) && it.page && it.file);
         }
 
+        /** Ask in the app's own window (not the browser's box); resolves true on Re-align. */
+        function askRealign(title, doc, text) {
+            el('realignConfirmTitle').textContent = title;
+            el('realignConfirmDoc').textContent = doc;
+            el('realignConfirmText').textContent = text;
+            return new Promise((resolve) => {
+                const modalEl = el('realignConfirmModal');
+                let chosen = false;
+                el('realignConfirmBtn').onclick = () => {
+                    chosen = true;
+                    window.bootstrap.Modal.getInstance(modalEl)?.hide();
+                };
+                modalEl.addEventListener('hidden.bs.modal', () => resolve(chosen), { once: true });
+                window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+            });
+        }
+
+        /**
+         * What was typed in Review & Export for the pages sent back is cleared: those cells
+         * belong to the old reading (the rows may come out different). `lead` holds the
+         * record's draft; a page's cells are told apart by the side of their column.
+         */
+        function dropReviewExtrasOf(lead, pages, whole) {
+            if (!lead?.reviewExtras || lead.reviewExtras.size === 0) return;
+            if (whole) {
+                lead.reviewExtras = null;
+            } else {
+                const sides = new Set(pages.map((it) => (verifyDoc ? verifyDoc.pages.findIndex((entry) => entry.item === it) : 0)));
+                const sideOf = new Map((reviewModel?.columns ?? []).map((column) => [column.key, column.side ?? 0]));
+                lead.reviewExtras = new Map([...lead.reviewExtras].filter(([key]) => {
+                    const side = sideOf.get(String(key).slice(String(key).lastIndexOf('|') + 1));
+                    return side === undefined || !sides.has(side);
+                }));
+            }
+            syncBatchDraft(lead);
+        }
+
+        /** The whole document goes back: every page of the record open now (a pair goes as one). */
         async function realignBatchPages(pages) {
             if (pages.length === 0 || recordSubmitting) return;
-            const whole = pages.length === realignablePages().length;
-            const names = pages.map((it) => it.pageNo).join(' and ');
-            const message = pages.length === 1 && whole
-                ? `Re-align page ${names}?\n\nIt goes back to Align with the markers it was read with, and is read again once you queue it. What you typed on it is not kept.`
-                : `Re-align page${pages.length === 1 ? '' : 's'} ${names}?\n\nIt goes back to Align with the markers it was read with, and is read again once you queue it. `
-                    + (whole ? 'What you typed on these pages is not kept.' : 'What you typed on the other page is kept.');
-            if (!window.confirm(message)) return;
+            const doc = recordLabel(recordOf(pages[0]));
+            const many = pages.length > 1;
+            const text = `${many ? 'Both pages go' : 'The page goes'} back to Align and ${many ? 'are' : 'is'} read again. What you typed is cleared.`;
+            if (!(await askRealign('Re-align this document?', doc, text))) return;
 
-            // The record's draft is kept, and it waits for its page(s) to be read again.
+            // The old reading stays until the new one is queued, so Cancel re-align can bring it back.
+            const lead = batchState.items[batchState.currentIndex];
             leaveBatchVerify();
+            dropReviewExtrasOf(lead, pages, true);
             pages.forEach((it) => {
-                cancelPageOnServer(it.pageId);
                 it.status = 'pending';
                 it.realign = true;
                 it.detected = null;
@@ -7241,10 +7329,25 @@
             await openBatchQueueItem(batchState.items.indexOf(pages[0]));
         }
 
+        /** Re-align, taken back: the pages keep the reading they had, and the record opens in Verify again. */
+        async function cancelRealign() {
+            const current = batchState.items[batchState.currentIndex];
+            if (!current || !batchAligning() || batchState.readingAll) return;
+            const record = recordOf(current);
+            const back = record.members.filter((it) => it.realign && it.page);
+            if (back.length === 0) return;
+            back.forEach((it) => {
+                it.realign = false;
+                it.status = 'ready';
+                it.error = null;
+            });
+            renderBatchQueueBanner();
+            await openBatchVerifyItem(batchState.items.indexOf(record.members[0]));
+        }
+        el('cancelRealignBtn').addEventListener('click', cancelRealign);
+
         function setUpRealign(prefix) {
-            const button = el(`${prefix}RealignBtn`);
-            const menu = el(`${prefix}RealignMenu`);
-            button.addEventListener('click', (event) => {
+            el(`${prefix}RealignBtn`).addEventListener('click', () => {
                 const pages = realignablePages();
                 // A resumed record: its file is picked again first.
                 const current = batchState.items[batchState.currentIndex];
@@ -7253,50 +7356,7 @@
                     askForBatchFiles({ also: fileless });
                     return;
                 }
-                if (pages.length <= 1) {
-                    realignBatchPages(pages);
-                    return;
-                }
-                // A pair: which page (or both) goes back to Align.
-                event.stopPropagation();
-                // The page slid to in the view (none while both are in view): said in its row.
-                const inView = verifyDoc && verifyFocus !== null ? verifyDoc.pages[verifyFocus]?.item : null;
-                const option = (title, note, chosen, { tag = false } = {}) => {
-                    const item = document.createElement('button');
-                    item.type = 'button';
-                    item.className = 'dropdown-item realign-option';
-                    const head = document.createElement('span');
-                    head.className = 'realign-option__title';
-                    head.textContent = title;
-                    if (tag) {
-                        const badge = document.createElement('span');
-                        badge.className = 'realign-option__tag';
-                        badge.textContent = 'in view';
-                        head.append(badge);
-                    }
-                    const small = document.createElement('small');
-                    small.textContent = note;
-                    item.append(head, small);
-                    item.addEventListener('click', () => realignBatchPages(chosen));
-                    return item;
-                };
-                const heading = document.createElement('h6');
-                heading.className = 'dropdown-header realign-menu__heading';
-                heading.textContent = 'Send back to Align';
-                menu.replaceChildren(
-                    heading,
-                    ...pages.map((it) => {
-                        const other = pages.find((candidate) => candidate !== it);
-                        return option(
-                            `Page ${it.pageNo} only`,
-                            `What you typed on page ${other.pageNo} is kept.`,
-                            [it],
-                            { tag: it === inView },
-                        );
-                    }),
-                    option('Both pages', 'What you typed on both pages is cleared.', pages),
-                );
-                window.bootstrap.Dropdown.getOrCreateInstance(button).toggle();
+                realignBatchPages(pages);
             });
         }
         setUpRealign('verify');
@@ -9324,6 +9384,11 @@ Cancel opens only the first file.`)) {
             item?.reviewExtras?.forEach((value, key) => reviewExtras.set(key, value));
             const draft = item?.verifyDraft;
             if (!draft) return;
+            // Lines of a page read again are new: what was kept for the old ones goes.
+            if (cropped.length > 0) {
+                const live = new Set(cropped.map((entry) => entry.lineId));
+                item.verifyDraft = new Map([...draft].filter(([line]) => live.has(line)));
+            }
             cropped.forEach((entry, index) => {
                 const previous = draft.get(entry.lineId);
                 const row = validationRow(index);
