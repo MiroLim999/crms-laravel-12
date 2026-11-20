@@ -523,7 +523,7 @@ The scan screen has four steps, shown at the top: **1 Document**, **2 Align**, *
 - CRMS remembers which pages of that exact file are saved (by the file's SHA-256 fingerprint): saved pages get a ✓, the file opens at its first page not saved yet, and saving a page (or a one-page file) a second time asks first (**Go back** or **Save again**; the audit log notes a page saved again).
 - CRMS remembers the last type used, so the next visit opens straight to it, ready for the next page of the same book.
 - **Batch mode** queues several files, or every page of a book, and saves them one record at a time, each through
-  Verify and Review & Export (**Save & next**, or **Skip record**). A layout with a page 2 pairs pages 1–2, 3–4 and
+  Verify and Review & Export (**Save & next**; a record not to be saved is taken out with its × in the queue list). A layout with a page 2 pairs pages 1–2, 3–4 and
   verifies each pair side by side as one document. Pages already saved or already queued are left out. **Scan all**
   reads the queue; a page **Smoke test scan** already went over is queued as it is, so it is only read. The batch ends
   on a summary of every record, with **Download all** (one CSV or Excel file of every record's table).

@@ -834,14 +834,10 @@
                                 <div class="dropdown d-none" id="verifyRealignGroup">
                                     <button class="btn btn-outline-secondary" type="button" id="verifyRealignBtn" aria-haspopup="true"
                                         title="Back to Align for this record's page: it is read again once queued">
-                                        <i class="icon-base bx bx-target-lock icon-sm me-1" aria-hidden="true"></i>Re-align
+                                        <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>Re-align
                                     </button>
                                     <div class="dropdown-menu" id="verifyRealignMenu"></div>
                                 </div>
-                                {{-- A batch only: leave this record out (a blank page, a cover) and go on. --}}
-                                <button class="btn btn-label-danger d-none" type="button" id="batchSkipRecordBtn">
-                                    <i class="icon-base bx bx-skip-next icon-sm me-1" aria-hidden="true"></i>Skip record
-                                </button>
                                 <button class="btn btn-primary" type="button" id="reviewExportBtn">
                                     <span>Review &amp; export</span>
                                     <i class="icon-base bx bx-chevron-right icon-sm ms-1" aria-hidden="true"></i>
@@ -915,13 +911,10 @@
                             <div class="dropdown d-none" id="reviewRealignGroup">
                                 <button class="btn btn-outline-secondary" type="button" id="reviewRealignBtn" aria-haspopup="true"
                                     title="Back to Align for this record's page: it is read again once queued">
-                                    <i class="icon-base bx bx-target-lock icon-sm me-1" aria-hidden="true"></i>Re-align
+                                    <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>Re-align
                                 </button>
                                 <div class="dropdown-menu" id="reviewRealignMenu"></div>
                             </div>
-                            <button class="btn btn-label-danger d-none" type="button" id="reviewSkipRecordBtn">
-                                <i class="icon-base bx bx-skip-next icon-sm me-1" aria-hidden="true"></i>Skip record
-                            </button>
                             <button class="btn btn-primary" type="button" id="reviewSaveBtn" disabled>
                                 <i class="icon-base bx bx-check-shield icon-sm me-1" aria-hidden="true"></i>
                                 {{-- A batch says where saving goes next ("Save & next (3/7)"). --}}
@@ -4687,8 +4680,9 @@
         /** Whether a page can be opened from the queue: in Align, or (its record read) in Verify. */
         function batchPageOpenable(item) {
             if (batchState.readingAll) return false;
-            // Verifying: only another record that is read opens (in Verify); the rest wait their turn.
-            if (batchVerifying()) return recordStateOf(item) === 'ready';
+            // Verifying: a page of the open record shows (it slides into view); of another
+            // record, only one that is read opens; the rest wait their turn.
+            if (batchVerifying()) return inOpenVerifyRecord(item) || recordStateOf(item) === 'ready';
             return pageAlignable(item) || pageNeedsFile(item) || recordStateOf(item) === 'ready';
         }
 
@@ -4940,14 +4934,18 @@
         /** One page of the file expanded: its state and flags, open on click, and remove. */
         function pageRow(item, group) {
             const index = batchState.items.indexOf(item);
-            const isCurrent = index === batchState.currentIndex;
+            // In Verify one page is marked: the one slid to, or the first while both are in view.
+            const inRecord = inOpenVerifyRecord(item);
+            const isCurrent = inRecord && verifyDoc
+                ? verifyDoc.pages[verifyFocus ?? 0]?.item === item
+                : index === batchState.currentIndex;
             const li = document.createElement('li');
             li.className = `batch-queue-page${isCurrent ? ' is-current' : ''}`;
 
             const open = document.createElement('button');
             open.type = 'button';
             open.className = 'batch-queue-page__open';
-            open.disabled = isCurrent || !batchPageOpenable(item);
+            open.disabled = (index === batchState.currentIndex && !inRecord) || !batchPageOpenable(item);
             const number = document.createElement('span');
             number.className = 'batch-queue-page__number';
             number.textContent = `Page ${item.pageNo}`;
@@ -4960,7 +4958,8 @@
                 error.textContent = item.error;
                 open.append(error);
             }
-            open.title = isCurrent ? 'Open now'
+            open.title = inRecord ? 'Show this page'
+                : isCurrent ? 'Open now'
                 : (batchVerifying() && open.disabled ? (VERIFY_WAIT_REASON[item.status] ?? '')
                 : recordStateOf(item) === 'ready' ? 'Open in Verify'
                     : (pageAlignable(item) ? 'Open in Align' : (pageNeedsFile(item) ? 'Pick its file again to align it' : '')));
@@ -5162,12 +5161,30 @@
          * a page whose record is read opens in Verify; a page not read yet (or
          * one that failed) opens in Align.
          */
+        /** A page of the record open now in Verify or Review & Export (not Align). */
+        function inOpenVerifyRecord(item) {
+            const current = batchState.items[batchState.currentIndex];
+            return batchVerifying() && Boolean(current) && recordOf(current).members.includes(item);
+        }
+
+        /** The view slides to a page of the record open now (both pages are in view until one is picked). */
+        function viewBatchRecordPage(item) {
+            if (!verifyDoc) return;
+            const side = verifyDoc.pages.findIndex((entry) => entry.item === item);
+            if (side === -1 || (verifyFocusIsCurrent() && verifyFocus === side)) return;
+            focusVerifyPage(side);
+        }
+
         async function openBatchDocument(idx) {
             const item = batchState.items[idx];
-            if (!item || idx === batchState.currentIndex || batchState.readingAll) return;
+            if (!item || batchState.readingAll) return;
+            // A page of the record open now: it is in view already, so the view slides to it.
+            if (inOpenVerifyRecord(item)) {
+                viewBatchRecordPage(item);
+                return;
+            }
+            if (idx === batchState.currentIndex) return;
             if (recordStateOf(item) === 'ready') {
-                // The other page of the record open now is open already.
-                if (!batchAligning() && recordOf(item).members.includes(batchState.items[batchState.currentIndex])) return;
                 keepCurrentAlignment();
                 await openBatchVerifyItem(idx);
             } else if (pageAlignable(item)) {
@@ -6975,7 +6992,7 @@
             restoreVerifyDraft(lead);
             // A blank page (a cover, an empty sheet) has nothing to tick or save.
             if (cropped.length === 0) {
-                showValidationSubmitError('No handwriting was found on this page, so there is nothing to save. Use Skip record to go on.');
+                showValidationSubmitError('No handwriting was found on this page, so there is nothing to save. Take it out of the batch with the × beside it in the queue list to go on.');
             }
 
             // Continue anyway, once chosen for this record, is not asked again.
@@ -7093,19 +7110,6 @@
 
         document.getElementById('confirmRejectExistingBtn')?.addEventListener('click', () => rejectCurrentExistingDocument());
         document.getElementById('validationExistingRejectBtn')?.addEventListener('click', () => rejectCurrentExistingDocument());
-
-        /** A batch's Skip record (Verify, Review & Export): nothing is saved for it, and the batch goes on. */
-        function skipCurrentBatchRecord() {
-            if (!batchState.active || recordSubmitting) return;
-            const record = recordOf(batchState.items[batchState.currentIndex]);
-            if (!window.confirm(`Skip ${recordLabel(record)}?
-
-Nothing is saved for it, and the next record opens. `
-                + 'To save it later, open its file in Single Upload.')) return;
-            rejectCurrentExistingDocument({ skipped: true });
-        }
-        el('batchSkipRecordBtn').addEventListener('click', skipCurrentBatchRecord);
-        el('reviewSkipRecordBtn').addEventListener('click', skipCurrentBatchRecord);
 
         // ------------------------------------------------ Re-align (a batch)
         // A record in Verify (or Review & Export) whose page was read badly goes
@@ -9397,6 +9401,8 @@ Cancel opens only the first file.`)) {
             // Zoomed in on a field (or by hand), no page in focus: a click must not undo it.
             el('validationSpread').classList.toggle('is-zoomed-in', !focused && validationMarker.zoom > 1.011);
             el('validationSpread').dataset.focus = focused ? String(verifyFocus) : '';
+            // The queue list (when open) marks the page in view.
+            if (queuePanel.open) renderBatchQueuePanel();
             scheduleRowHint();
         }
 
@@ -11868,7 +11874,6 @@ Cancel opens only the first file.`)) {
             el('submitBtn').classList.add('d-none');
             el('reviewExportBtn').classList.remove('d-none');
             el('backToMark').classList.toggle('d-none', Boolean(batchState?.active));
-            el('batchSkipRecordBtn').classList.toggle('d-none', !batchState?.active);
             el('verifyRealignGroup').classList.toggle('d-none', !batchState?.active);
         }
 
@@ -11883,7 +11888,6 @@ Cancel opens only the first file.`)) {
                 label = more ? `Save & next (${done + 1}/${records.length})` : 'Save & finish batch';
             }
             el('reviewSaveLabel').textContent = label;
-            el('reviewSkipRecordBtn').classList.toggle('d-none', !batchState.active);
             el('reviewRealignGroup').classList.toggle('d-none', !batchState.active);
         }
 

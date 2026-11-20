@@ -6,6 +6,7 @@
 >   A page sent back by Re-align (E1) is read by Scan all, for that page, once it is queued again.
 > - Scan all has no 30-minute limit.
 > - A page that cannot be **uploaded** stays as it was and shows a message; it is not marked Failed ("could not be read").
+> - **Skip record is removed** (Verify and Review & Export): a record not to be saved is taken out of the batch with its × in the queue list. Re-align shows a "‹" icon.
 >
 > The sections below are kept as they were written.
 
