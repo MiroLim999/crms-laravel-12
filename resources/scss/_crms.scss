@@ -3442,8 +3442,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .batch-intake__list {
   margin: 0;
   padding-inline-start: 1.1rem;
-  color: var(--bs-secondary-color);
-  font-size: .8rem;
+  color: var(--bs-body-color);
+  font-size: .82rem;
   overflow-wrap: anywhere;
 
   li + li {
@@ -3451,11 +3451,50 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// "and 4 more: show" sits under the list, without a bullet.
+.batch-intake__more {
+  margin-inline-start: -1.1rem;
+  list-style: none;
+}
+
+.batch-intake__toggle {
+  font-size: .8rem;
+  text-decoration: none;
+}
+
+// Copies of several files: which file each group repeats.
+.batch-intake__of {
+  margin: .5rem 0 .2rem;
+  font-size: .8rem;
+
+  &:first-of-type {
+    margin-block-start: 0;
+  }
+}
+
 .batch-intake__note {
   margin: 0 0 1.25rem;
-  color: var(--bs-secondary-color);
-  font-size: .78rem;
+  color: var(--bs-body-color);
+  font-size: .8rem;
   text-align: start;
+}
+
+// The left-out window: the line above the list is read, not skimmed, and the
+// close button sits inside the card's corner (not floating outside it).
+#batchIntakeSummary {
+  color: var(--bs-body-color);
+}
+
+#batchIntakeModal .btn-close {
+  position: absolute;
+  inset-block-start: .75rem;
+  inset-inline: auto .75rem;
+  z-index: 2;
+  padding: .5rem;
+  margin: 0;
+  background-color: transparent;
+  box-shadow: none;
+  transform: none;
 }
 
 // The end of a batch: each record, saved (linked) or rejected.

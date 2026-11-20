@@ -1255,6 +1255,8 @@
         aria-describedby="batchIntakeSummary" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered leave-scan-dialog" style="max-inline-size: min(34rem, calc(100% - 2rem));">
             <div class="modal-content leave-scan-modal">
+                {{-- Closing it (x, Esc, or outside) is the same as Leave them out. --}}
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 <div class="modal-body">
                     <span class="leave-scan-modal__icon bg-label-warning" aria-hidden="true">
                         <i class="icon-base bx bx-copy"></i>
@@ -1264,16 +1266,16 @@
 
                     <div class="batch-intake" id="batchIntakeGroups"></div>
                     <p class="batch-intake__note d-none" id="batchIntakeAddNote">
-                        If you add them anyway, each page is checked again when it is saved: you choose to save it again or skip it.
+                        Pages added anyway are checked again when saved: you choose to save again or skip.
                     </p>
 
                     <div class="leave-scan-modal__actions">
-                        <button type="button" class="btn btn-label-secondary text-nowrap" id="batchIntakeAddBtn">
+                        <button type="button" class="btn btn-outline-secondary text-nowrap" id="batchIntakeAddBtn">
                             Add them anyway
                         </button>
                         {{-- Closes the window from the script, so it can stay the main button. --}}
                         <button type="button" class="btn btn-primary text-nowrap" id="batchIntakeOkBtn">
-                            OK
+                            Leave them out
                         </button>
                     </div>
                 </div>
@@ -5198,43 +5200,117 @@
         /**
          * Say what was left out of the files just added, grouped by why, and offer
          * to add the pages left out as saved already or already in this batch.
+         * Files of pages are `{ name, pages, pageCount, of }` (`of`: the file in the
+         * batch a copy repeats); `added` is `{ name, pages }` per file queued.
          * Resolves 'add' or 'ok' (at once, when there is nothing to say).
          */
-        function askAboutLeftOut(notes, queuedCount, addableCount) {
+        function askAboutLeftOut(notes, queuedCount, addableCount, added = []) {
+            const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
             const groups = [
-                ['Already saved as records', notes.saved],
-                ['Already in this batch (the same file added twice, or a copy of it)', notes.inBatch],
-                ['Not a PDF or an image', notes.unsupported],
-                ['Too large', notes.tooLarge],
-                ['Could not be opened (empty, damaged or password-protected)', notes.unreadable],
-            ].filter(([, names]) => names.length > 0);
+                { title: 'Already saved as records', entries: notes.saved },
+                { title: 'Copies of a file already in the batch', entries: notes.inBatch, copies: true },
+                { title: 'Not a PDF or an image', entries: notes.unsupported },
+                { title: 'Too large', entries: notes.tooLarge },
+                { title: 'Could not be opened (empty, damaged or password-protected)', entries: notes.unreadable },
+            ].filter((group) => group.entries.length > 0);
             if (groups.length === 0 && queuedCount > 0) return Promise.resolve('ok');
 
-            const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+            // Files of pages (saved, or copies) are objects; the other reasons list names.
+            const isFileEntry = (entry) => typeof entry === 'object';
+            // "2 pages each" when every file lost all of its pages and they all have as many.
+            const pagesEach = (entries) => {
+                if (entries.length === 0 || !entries.every(isFileEntry)) return null;
+                const whole = entries.every((entry) => entry.pages.length === entry.pageCount);
+                return whole && new Set(entries.map((entry) => entry.pageCount)).size === 1 && entries[0].pageCount > 1
+                    ? entries[0].pageCount
+                    : null;
+            };
+            const entryLabel = (entry, each) => {
+                if (!isFileEntry(entry)) return entry;
+                if (each !== null || entry.pageCount <= 1) return entry.name;
+                return `${entry.name}: pages ${pageRanges(entry.pages)}`;
+            };
+
+            // The first three, and the rest behind "show".
+            const LIST_SHOWN = 3;
+            const intakeList = (labels) => {
+                const list = document.createElement('ul');
+                list.className = 'batch-intake__list';
+                labels.forEach((text, position) => {
+                    const li = document.createElement('li');
+                    li.textContent = text;
+                    li.hidden = position >= LIST_SHOWN;
+                    list.append(li);
+                });
+                if (labels.length > LIST_SHOWN) {
+                    const more = document.createElement('li');
+                    more.className = 'batch-intake__more';
+                    const toggle = document.createElement('button');
+                    toggle.type = 'button';
+                    toggle.className = 'btn btn-link p-0 batch-intake__toggle';
+                    let open = false;
+                    const label = () => {
+                        toggle.textContent = open ? 'Show fewer' : `and ${labels.length - LIST_SHOWN} more: show`;
+                        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    };
+                    label();
+                    toggle.addEventListener('click', () => {
+                        open = !open;
+                        Array.from(list.children).forEach((item, position) => {
+                            if (position >= LIST_SHOWN && item !== more) item.hidden = !open;
+                        });
+                        label();
+                    });
+                    more.append(toggle);
+                    list.append(more);
+                }
+                return list;
+            };
+
             el('batchIntakeModalTitle').textContent = queuedCount > 0 ? 'Some files were left out' : 'Nothing was added';
+            const addedPages = added.reduce((sum, entry) => sum + entry.pages, 0);
+            let addedText = `${plural(added.length, 'file')} (${plural(addedPages, 'page')}) were added to the batch.`;
+            if (queuedCount === 0 || added.length === 0) addedText = 'No page was added to the batch.';
+            else if (added.length === 1) addedText = `${added[0].name} (${plural(addedPages, 'page')}) was added to the batch.`;
             el('batchIntakeSummary').textContent = groups.length === 0
                 ? 'No PDF or image files were found.'
-                : `${queuedCount > 0 ? `${plural(queuedCount, 'page')} added to the batch.` : 'No page was added to the batch.'} These were left out:`;
+                : `${addedText} These were left out:`;
             el('batchIntakeGroups').classList.toggle('d-none', groups.length === 0);
-            el('batchIntakeGroups').replaceChildren(...groups.map(([title, names]) => {
+            el('batchIntakeGroups').replaceChildren(...groups.map((group) => {
+                const { entries } = group;
+                const each = pagesEach(entries);
+                const originals = group.copies ? [...new Set(entries.map((entry) => entry.of ?? null))] : [];
+                const single = group.copies && originals.length === 1 && originals[0] !== null ? originals[0] : null;
+
                 const section = document.createElement('section');
                 section.className = 'batch-intake__group';
                 const heading = document.createElement('h6');
                 heading.className = 'batch-intake__title';
-                heading.textContent = `${title} · ${names.length} file${names.length === 1 ? '' : 's'}`;
-                const list = document.createElement('ul');
-                list.className = 'batch-intake__list';
-                names.slice(0, 8).forEach((name) => {
-                    const li = document.createElement('li');
-                    li.textContent = name;
-                    list.append(li);
-                });
-                if (names.length > 8) {
-                    const more = document.createElement('li');
-                    more.textContent = `… and ${names.length - 8} more`;
-                    list.append(more);
+                let title = group.title;
+                if (single !== null) title = `Copies of ${single}`;
+                else if (group.copies) title = 'Copies of files already in the batch';
+                heading.textContent = [
+                    title,
+                    plural(entries.length, 'file'),
+                    ...(each !== null ? [`${each} pages each`] : []),
+                ].join(' · ');
+                section.append(heading);
+
+                if (group.copies && single === null) {
+                    // Copies of several files: each file's copies together, under its name.
+                    originals.forEach((original) => {
+                        const mine = entries.filter((entry) => (entry.of ?? null) === original);
+                        const caption = document.createElement('p');
+                        caption.className = 'batch-intake__of';
+                        caption.append('Copies of ');
+                        const strong = document.createElement('strong');
+                        strong.textContent = original ?? 'a file already in the batch';
+                        caption.append(strong, ':');
+                        section.append(caption, intakeList(mine.map((entry) => entryLabel(entry, each))));
+                    });
+                } else {
+                    section.append(intakeList(entries.map((entry) => entryLabel(entry, each))));
                 }
-                section.append(heading, list);
                 return section;
             }));
 
@@ -5242,6 +5318,8 @@
             addButton.classList.toggle('d-none', addableCount === 0);
             addButton.textContent = `Add them anyway (${plural(addableCount, 'page')})`;
             el('batchIntakeAddNote').classList.toggle('d-none', addableCount === 0);
+            // Leaving out is only a choice when something could be added after all.
+            el('batchIntakeOkBtn').textContent = addableCount > 0 ? 'Leave them out' : 'OK';
 
             return new Promise((resolve) => {
                 const modalEl = el('batchIntakeModal');
@@ -5302,6 +5380,13 @@
             const groupStamp = Date.now().toString(36);
             let groupSeq = 0;
             const inQueue = new Set(batchState.active ? batchState.items.map(pageKey).filter(Boolean) : []);
+            // The first file in the batch with each fingerprint: what a copy is a copy of.
+            const keptBy = new Map();
+            if (batchState.active) {
+                batchState.items.forEach((item) => {
+                    if (item.sourceHash && !keptBy.has(item.sourceHash)) keptBy.set(item.sourceHash, item.sourceName ?? item.name);
+                });
+            }
             // Which pages of a file are saved, asked once per file (its copies share the answer).
             const savedLookups = new Map();
             // Added to a batch under way (Add files): the page being worked on stays open.
@@ -5362,14 +5447,14 @@
                             leftOutPages.push(entry);
                         } else {
                             if (key !== null) inQueue.add(key);
+                            if (fingerprint && !keptBy.has(fingerprint)) keptBy.set(fingerprint, file.name);
                             queued.push(entry);
                         }
                     }
-                    const named = (pages) => (pageCount > 1
-                        ? `${file.name}: page${pages.length === 1 ? '' : 's'} ${pageRanges(pages)}`
-                        : file.name);
-                    if (savedHere.length > 0) notes.saved.push(named(savedHere));
-                    if (inBatchHere.length > 0) notes.inBatch.push(named(inBatchHere));
+                    if (savedHere.length > 0) notes.saved.push({ name: file.name, pages: savedHere, pageCount });
+                    if (inBatchHere.length > 0) {
+                        notes.inBatch.push({ name: file.name, pages: inBatchHere, pageCount, of: keptBy.get(fingerprint) ?? null });
+                    }
                 }
             } finally {
                 preparingBatch = false;
@@ -5383,7 +5468,10 @@
             // which froze the drop area mid-update). Pages left out as saved
             // already, or as copies of what this batch has, can be added anyway:
             // each is still checked before it is saved twice (Save again or Skip).
-            if (await askAboutLeftOut(notes, queued.length, leftOutPages.length) === 'add') {
+            const addedFiles = new Map();
+            queued.forEach(({ file }) => addedFiles.set(file, (addedFiles.get(file) ?? 0) + 1));
+            const addedSummary = [...addedFiles].map(([file, pages]) => ({ name: file.name, pages }));
+            if (await askAboutLeftOut(notes, queued.length, leftOutPages.length, addedSummary) === 'add') {
                 leftOutPages.forEach((entry) => { entry.info.addedAnyway = true; });
                 queued.push(...leftOutPages);
                 queued.sort((a, b) => a.info.order - b.info.order || a.info.pageNo - b.info.pageNo);
