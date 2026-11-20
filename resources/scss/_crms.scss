@@ -3298,6 +3298,40 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   grid-template-columns: 1fr;
 }
 
+// Leaving a batch: the main choice first, the one that throws work away last.
+#leaveScanActions.is-three {
+  #confirmLeaveScanBtn { order: 1; }
+  #leaveScanStayBtn { order: 2; }
+  #discardBatchLeaveBtn { order: 3; }
+}
+
+// Discard's question: yes (danger), then go back, stacked.
+#leaveScanActions.is-discard {
+  grid-template-columns: 1fr;
+
+  #leaveScanStayBtn { order: 2; }
+  #discardBatchLeaveBtn { order: 1; }
+}
+
+// Where the batch stands, in the window that asks about leaving it.
+.leave-scan-modal__summary {
+  margin: 0 0 1.25rem;
+  padding: .65rem .9rem;
+  font-size: .85rem;
+  text-align: start;
+  list-style: none;
+  background: var(--bs-tertiary-bg);
+  border-radius: var(--bs-border-radius);
+
+  li + li {
+    margin-block-start: .2rem;
+  }
+}
+
+#leaveScanModalDescription {
+  color: var(--bs-body-color);
+}
+
 // A resumed batch: the files to pick again.
 .batch-files-list {
   max-block-size: 12rem;
@@ -3485,7 +3519,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   color: var(--bs-body-color);
 }
 
-#batchIntakeModal .btn-close {
+#batchIntakeModal .btn-close,
+#leaveScanModal .btn-close {
   position: absolute;
   inset-block-start: .75rem;
   inset-inline: auto .75rem;

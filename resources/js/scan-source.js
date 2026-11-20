@@ -325,14 +325,15 @@ export function pageKey(item) {
  * The queue with pages added to it: they go after the pages already queued,
  * in the order given, so the page being worked on stays where it is. A page
  * the queue has already (same file fingerprint and page) is not added again,
- * unless the user asked for it (`addedAnyway`, from the left-out window).
+ * unless the user asked for it (`addedAnyway`, from the left-out window) or the
+ * duplicate file check is off (`allowCopies`).
  */
-export function appendToQueue(items, added) {
+export function appendToQueue(items, added, { allowCopies = false } = {}) {
     const queue = Array.from(items ?? []);
     const seen = new Set(queue.map(pageKey).filter(Boolean));
     for (const item of added ?? []) {
         const key = pageKey(item);
-        if (key !== null && seen.has(key) && !item.addedAnyway) continue;
+        if (key !== null && seen.has(key) && !item.addedAnyway && !allowCopies) continue;
         if (key !== null) seen.add(key);
         queue.push(item);
     }

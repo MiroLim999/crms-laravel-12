@@ -1125,21 +1125,26 @@
         aria-describedby="leaveScanModalDescription" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered leave-scan-dialog">
             <div class="modal-content leave-scan-modal">
+                {{-- Closing it (x, Esc, or outside) is the same as Stay. --}}
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 <div class="modal-body">
-                    <span class="leave-scan-modal__icon bg-label-warning" aria-hidden="true">
-                        <i class="icon-base bx bx-error"></i>
+                    <span class="leave-scan-modal__icon bg-label-warning" aria-hidden="true" id="leaveScanIcon">
+                        <i class="icon-base bx bx-error" id="leaveScanIconGlyph"></i>
                     </span>
                     <h5 class="modal-title" id="leaveScanModalTitle">Leave this scan?</h5>
                     <p class="leave-scan-modal__text" id="leaveScanModalDescription">
                         Your markers and checked values are not saved yet.
                     </p>
+                    {{-- A batch: where it stands, so the choice below is an informed one. --}}
+                    <ul class="leave-scan-modal__summary d-none" id="leaveScanSummary"></ul>
 
                     <div class="leave-scan-modal__actions" id="leaveScanActions">
-                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal" id="leaveScanStayBtn">
+                        {{-- Closes the window from the script (it also steps back out of Discard's question). --}}
+                        <button type="button" class="btn btn-outline-secondary" id="leaveScanStayBtn">
                             Stay
                         </button>
-                        {{-- A batch kept on the server: it can be thrown away instead of kept. --}}
-                        <button type="button" class="btn btn-label-danger d-none" id="discardBatchLeaveBtn">
+                        {{-- A batch kept on the server: it can be thrown away instead of kept (asked again first). --}}
+                        <button type="button" class="btn btn-outline-danger d-none" id="discardBatchLeaveBtn">
                             Discard batch
                         </button>
                         <button type="button" class="btn btn-danger" id="confirmLeaveScanBtn">
@@ -1508,6 +1513,8 @@
             restartUrl: @json(route('documents.workspace', ['type' => $docType->value])),
             // The pages of one file already saved; 64 zeros stand in for its fingerprint.
             sourcePagesUrl: @json(route('documents.sources.pages', ['hash' => str_repeat('0', 64)])),
+            // Account settings > Uploads: check files for copies and saved pages (off unless turned on).
+            duplicateFileCheck: @json((bool) auth()->user()?->duplicate_file_check),
             // Batch File Upload kept on the server (resume after a reload or a crash).
             docType: @json($docType->value),
             batchUrls: {
@@ -3659,7 +3666,9 @@
             try {
                 const fingerprint = await fileFingerprint(file);
                 if (scanFile !== file) return;
+                // Always kept with the record; only asking which pages are saved is up to the account setting.
                 scanFingerprint = fingerprint;
+                if (!config.duplicateFileCheck) return;
 
                 const response = await fetch(config.sourcePagesUrl.replace('0'.repeat(64), fingerprint), {
                     headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -5228,7 +5237,7 @@
             const entryLabel = (entry, each) => {
                 if (!isFileEntry(entry)) return entry;
                 if (each !== null || entry.pageCount <= 1) return entry.name;
-                return `${entry.name}: pages ${pageRanges(entry.pages)}`;
+                return `${entry.name}: page${entry.pages.length === 1 ? '' : 's'} ${pageRanges(entry.pages)}`;
             };
 
             // The first three, and the rest behind "show".
@@ -5389,6 +5398,8 @@
             }
             // Which pages of a file are saved, asked once per file (its copies share the answer).
             const savedLookups = new Map();
+            // Account settings > Uploads: with the check off, no file is left out as saved or as a copy.
+            const checkDuplicates = Boolean(config.duplicateFileCheck);
             // Added to a batch under way (Add files): the page being worked on stays open.
             const adding = batchState.active && batchState.items.length > 0;
 
@@ -5414,8 +5425,8 @@
                         } catch (error) {
                             console.warn(`${file.name} could not be fingerprinted:`, error);
                         }
-                        if (fingerprint && !savedLookups.has(fingerprint)) savedLookups.set(fingerprint, savedPagesOfFile(fingerprint));
-                        return { fingerprint, saved: fingerprint ? await savedLookups.get(fingerprint) : new Set() };
+                        if (fingerprint && checkDuplicates && !savedLookups.has(fingerprint)) savedLookups.set(fingerprint, savedPagesOfFile(fingerprint));
+                        return { fingerprint, saved: fingerprint && checkDuplicates ? await savedLookups.get(fingerprint) : new Set() };
                     })();
                     const counting = isPdfFile(file)
                         ? marker.pdfPageCount(file).then((count) => Math.max(1, count), (error) => {
@@ -5442,7 +5453,7 @@
                         if (saved.has(page)) {
                             savedHere.push(page);
                             leftOutPages.push(entry);
-                        } else if (key !== null && inQueue.has(key)) {
+                        } else if (checkDuplicates && key !== null && inQueue.has(key)) {
                             inBatchHere.push(page);
                             leftOutPages.push(entry);
                         } else {
@@ -5518,7 +5529,7 @@
                 tilts: null,
                 addedAnyway: Boolean(info.addedAnyway),
             }));
-            batchState.items = appendToQueue(batchState.items, added);
+            batchState.items = appendToQueue(batchState.items, added, { allowCopies: !checkDuplicates });
             // Kept on the server from the first files, to resume after a reload or a crash.
             if (!adding) startServerBatch();
 
@@ -7129,22 +7140,84 @@ Nothing is saved for it, and the next record opens. `
             if (workInProgress() || batchToKeep()) askToLeave(BACK);
         });
 
+        /** Where the batch stands, one short line each: what is saved, and what is still to do. */
+        function batchLeaveSummary() {
+            const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+            const records = batchRecords();
+            const saved = records.filter((record) => record.members.every((it) => it.status === 'imported')).length;
+            const inStatus = (...statuses) => batchState.items.filter((it) => statuses.includes(it.status)).length;
+            const toAlign = inStatus('pending', 'saving', 'failed');
+            const toRead = inStatus('saved', 'scanning', 'ready', 'verifying');
+            return {
+                lines: [
+                    `${saved} of ${plural(records.length, 'record')} saved`,
+                    ...(toRead > 0 ? [`${plural(toRead, 'page')} queued or read, not saved yet`] : []),
+                    ...(toAlign > 0 ? [`${plural(toAlign, 'page')} still to align`] : []),
+                ],
+                unsaved: toAlign + toRead,
+            };
+        }
+
+        // Discard is asked twice: its question replaces the first one in the same window.
+        let discardAsked = false;
+
+        /** The window's two faces: Keep for later / Stay / Discard, and "Discard this batch?". */
+        function showLeaveChoice({ discard = false } = {}) {
+            discardAsked = discard;
+            const keep = batchToKeep();
+            const summary = keep ? batchLeaveSummary() : null;
+            const icon = discard ? 'bx-trash' : keep ? 'bx-time-five' : 'bx-error';
+            el('leaveScanIcon').className = `leave-scan-modal__icon ${discard ? 'bg-label-danger' : keep ? 'bg-label-primary' : 'bg-label-warning'}`;
+            el('leaveScanIconGlyph').className = `icon-base bx ${icon}`;
+
+            if (discard) {
+                el('leaveScanModalTitle').textContent = 'Discard this batch?';
+                el('leaveScanModalDescription').textContent = summary.unsaved > 0
+                    ? `${summary.unsaved} page${summary.unsaved === 1 ? '' : 's'} not saved yet, and anything typed on ${summary.unsaved === 1 ? 'it' : 'them'}, will be thrown away. Records already saved stay saved.`
+                    : 'The batch will be thrown away. Records already saved stay saved.';
+            } else {
+                el('leaveScanModalTitle').textContent = keep ? 'Leave this batch?' : 'Leave this scan?';
+                el('leaveScanModalDescription').textContent = keep
+                    ? `Your work is saved. Open this document type's workspace within ${config.batchKeepDays} days and press Resume to carry on.`
+                    : 'Your markers and checked values are not saved yet.';
+            }
+
+            // The summary stays under the first question only.
+            el('leaveScanSummary').classList.toggle('d-none', !keep || discard);
+            if (keep) {
+                el('leaveScanSummary').replaceChildren(...summary.lines.map((text) => {
+                    const li = document.createElement('li');
+                    li.textContent = text;
+                    return li;
+                }));
+            }
+
+            el('leaveScanStayBtn').textContent = discard ? 'Go back' : 'Stay';
+            el('confirmLeaveScanBtn').textContent = keep ? 'Keep for later' : 'Leave';
+            el('confirmLeaveScanBtn').classList.toggle('btn-danger', !keep);
+            el('confirmLeaveScanBtn').classList.toggle('btn-primary', keep);
+            el('confirmLeaveScanBtn').classList.toggle('d-none', discard);
+            el('discardBatchLeaveBtn').textContent = discard ? 'Yes, discard batch' : 'Discard batch';
+            el('discardBatchLeaveBtn').classList.toggle('d-none', !keep);
+            el('discardBatchLeaveBtn').classList.toggle('btn-outline-danger', !discard);
+            el('discardBatchLeaveBtn').classList.toggle('btn-danger', discard);
+            el('leaveScanActions').classList.toggle('is-three', keep && !discard);
+            el('leaveScanActions').classList.toggle('is-discard', discard);
+        }
+
         function askToLeave(target) {
             leaveTo = target;
             el('confirmLeaveScanBtn').disabled = false;
             el('discardBatchLeaveBtn').disabled = false;
-            const keep = batchToKeep();
-            el('leaveScanModalTitle').textContent = keep ? 'Leave this batch?' : 'Leave this scan?';
-            el('leaveScanModalDescription').textContent = keep
-                ? `It is kept for later: open this document type's workspace again within ${config.batchKeepDays} days to resume it. Discard it to throw it away.`
-                : 'Your markers and checked values are not saved yet.';
-            el('confirmLeaveScanBtn').textContent = keep ? 'Keep for later' : 'Leave';
-            el('confirmLeaveScanBtn').classList.toggle('btn-danger', !keep);
-            el('confirmLeaveScanBtn').classList.toggle('btn-primary', keep);
-            el('discardBatchLeaveBtn').classList.toggle('d-none', !keep);
-            el('leaveScanActions').classList.toggle('is-three', keep);
+            showLeaveChoice();
             window.bootstrap.Modal.getOrCreateInstance(el('leaveScanModal')).show();
         }
+
+        // Stay: closes the window; in Discard's question it goes back to the first choice instead.
+        el('leaveScanStayBtn').addEventListener('click', () => {
+            if (discardAsked) showLeaveChoice();
+            else window.bootstrap.Modal.getInstance(el('leaveScanModal'))?.hide();
+        });
 
         // The safe choice has the focus, so Enter never leaves by accident.
         el('leaveScanModal').addEventListener('shown.bs.modal', () => el('leaveScanStayBtn').focus());
@@ -7176,9 +7249,16 @@ Nothing is saved for it, and the next record opens. `
         // Discard: the batch is thrown away (its queued pages let go), then leave.
         el('discardBatchLeaveBtn').addEventListener('click', async () => {
             if (!leaveTo) return;
+            // First click: ask. Second ("Yes, discard batch"): do it.
+            if (!discardAsked) {
+                showLeaveChoice({ discard: true });
+                return;
+            }
             el('discardBatchLeaveBtn').disabled = true;
             await discardServerBatch();
             el('confirmLeaveScanBtn').disabled = false;
+            // It was kept until now: leaving after a discard has nothing left to flush.
+            leaving = true;
             el('confirmLeaveScanBtn').click();
         });
 

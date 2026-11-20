@@ -309,7 +309,10 @@ class DocumentScanController extends Controller
         // which the audit log notes. A spread asks about each of its pages.
         $extraSourcePages = collect($validated['extra_pages'] ?? [])
             ->pluck('source_page')->filter()->map(fn ($page) => (int) $page)->values()->all();
-        [$savedBefore, $savedPage] = $this->savedSourcePage($source, $extraSourcePages);
+        // Only when the account has the duplicate file check on (account settings).
+        [$savedBefore, $savedPage] = $request->user()?->duplicate_file_check
+            ? $this->savedSourcePage($source, $extraSourcePages)
+            : [null, null];
         if ($savedBefore !== null && !$request->boolean('allow_duplicate')) {
             $message = ($source['page_count'] ?? 1) > 1
                 ? "Page {$savedPage} of this file is already saved as record #{$savedBefore->getKey()}."

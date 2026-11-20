@@ -33,6 +33,7 @@ class User extends Authenticatable
         return [
             'password' => 'hashed',
             'must_change_password' => 'boolean',
+            'duplicate_file_check' => 'boolean',
             'password_changed_at' => 'datetime',
             'last_login_at' => 'datetime',
         ];

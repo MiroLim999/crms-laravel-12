@@ -48,7 +48,8 @@ class TwoPageRecordTest extends TestCase
 
         $this->template = DocumentTemplate::firstOrFail();
         $this->assertTrue($this->template->is_active);
-        $this->account = User::factory()->superAdmin()->create();
+        // The duplicate file check is off unless an account turns it on.
+        $this->account = User::factory()->superAdmin()->create(['duplicate_file_check' => true]);
     }
 
     /**

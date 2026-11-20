@@ -3,7 +3,7 @@
 @section('title', 'Account Settings')
 
 @section('content')
-    <x-page-header title="Account Settings" subtitle="Your name, email and password." />
+    <x-page-header title="Account Settings" subtitle="Your name, email, password and upload checks." />
 
     <div class="row g-4">
         <div class="col-lg-5">
@@ -58,6 +58,34 @@
                         {{ $user->last_login_at?->diffForHumans() ?? '—' }}
                     </dd>
                 </dl>
+            </x-card>
+
+            <x-card title="Uploads" class="mt-4">
+                <form method="POST" action="{{ route('settings.uploads.update') }}">
+                    @csrf
+                    @method('PUT')
+
+                    {{-- An unchecked box sends nothing: the hidden 0 says "off". --}}
+                    <input type="hidden" name="duplicate_file_check" value="0">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input"
+                               type="checkbox"
+                               role="switch"
+                               id="duplicate_file_check"
+                               name="duplicate_file_check"
+                               value="1"
+                               @checked(old('duplicate_file_check', $user->duplicate_file_check))>
+                        <label class="form-check-label fw-semibold" for="duplicate_file_check">Check uploads for duplicate files</label>
+                    </div>
+                    <p class="form-text mb-4">
+                        When on, a file that is a copy of one already in the batch, or a page already saved as a record,
+                        is left out of a batch (you can add it anyway), a saved page of a PDF is ticked, and saving a page
+                        twice asks first. When off, none of this is checked and every file is queued as it is. The file's
+                        fingerprint is still kept with each record, so turning this on later checks against them too.
+                    </p>
+
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </form>
             </x-card>
         </div>
 

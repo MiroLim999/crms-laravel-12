@@ -52,7 +52,8 @@ class MultiPageSourceTest extends TestCase
         ])->assertSessionHasNoErrors();
 
         $this->template = DocumentTemplate::firstOrFail();
-        $this->account = User::factory()->superAdmin()->create();
+        // The duplicate file check is off unless an account turns it on.
+        $this->account = User::factory()->superAdmin()->create(['duplicate_file_check' => true]);
     }
 
     /** @param  array<string, mixed>  $source */
@@ -130,6 +131,24 @@ class MultiPageSourceTest extends TestCase
         $this->assertDatabaseCount('records', 4);
         $audit = AuditLog::where('action', 'record.submitted')->latest('id')->first();
         $this->assertSame($first->getKey(), $audit->new_values['saved_again_after_record']);
+    }
+
+    public function test_with_the_duplicate_file_check_off_a_page_is_saved_again_without_asking(): void
+    {
+        // Off is the default: the same page of the same file is saved as asked, and no "saved again" note is made.
+        $this->account->forceFill(['duplicate_file_check' => false])->save();
+
+        $this->submitPage($this->page(3))->assertCreated();
+        $second = $this->submitPage($this->page(3), 'Pedro Reyes')->assertCreated();
+
+        $this->assertSame(2, CivilRecord::where('source_hash', self::BOOK)->where('source_page', 3)->count());
+        $entry = AuditLog::where('auditable_id', $second->json('record.recordId'))->where('action', 'record.submitted')->firstOrFail();
+        $this->assertArrayNotHasKey('saved_again_after_record', $entry->new_values);
+
+        // The fingerprint is still kept, so turning the check on later finds these records.
+        $this->assertSame(self::BOOK, CivilRecord::findOrFail($second->json('record.recordId'))->source_hash);
+        $this->account->forceFill(['duplicate_file_check' => true])->save();
+        $this->submitPage($this->page(3))->assertStatus(409)->assertJsonPath('duplicate_page', true);
     }
 
     public function test_a_file_of_one_page_saved_twice_is_called_this_file(): void

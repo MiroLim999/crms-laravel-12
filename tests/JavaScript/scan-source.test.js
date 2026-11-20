@@ -221,6 +221,17 @@ test('a page already queued is not added twice', () => {
     assert.deepEqual(appendToQueue(queued, added).map((item) => item.name), ['a1', 'a2', 'copy-a3', 'b1']);
 });
 
+test('with the duplicate file check off, copies and repeated pages are all added', () => {
+    const queued = [{ name: 'a1', sourceHash: 'aa', pageNo: 1 }];
+    const added = [
+        { name: 'copy-a1', sourceHash: 'aa', pageNo: 1 },
+        { name: 'copy-a1-again', sourceHash: 'aa', pageNo: 1 },
+    ];
+    assert.deepEqual(appendToQueue(queued, added, { allowCopies: true }).map((item) => item.name), ['a1', 'copy-a1', 'copy-a1-again']);
+    // The default still leaves them out.
+    assert.deepEqual(appendToQueue(queued, added).map((item) => item.name), ['a1']);
+});
+
 test('a copy asked for in the left-out window, or a file with no fingerprint, is added', () => {
     const queued = [{ name: 'a1', sourceHash: 'aa', pageNo: 1 }];
     const added = [
