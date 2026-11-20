@@ -3950,6 +3950,7 @@
                 companionLoadToken += 1;
                 companionPreview.clear();
                 updateScanButtonLabel();
+                if (batchState.active) renderBatchQueueBanner();
                 return;
             }
 
@@ -3994,6 +3995,8 @@
                 companionPreview.clear();
             }
             updateScanButtonLabel();
+            // The Save button says "both pages" once the page beside this one is drawn.
+            if (batchState.active) renderBatchQueueBanner();
         }
 
         /**
@@ -4414,6 +4417,7 @@
             current.rows = [...gridRows];
             current.tilts = [...rowTilts];
             current.autoFields = new Map(autoFields);
+            current.rowsByHand = rowsByHand;
         }
 
         /** "BIRTHS-1995.pdf · pages 1–2", "BIRTHS-1995.pdf · page 3", or the file's name. */
@@ -4576,14 +4580,27 @@
                     const failedHere = currentItem?.status === 'failed';
                     saveQueueBtn.classList.toggle('d-none', allSaved && !failedHere);
                     if (saveQueueLabel) {
-                        const hasMoreUnsaved = batchState.items.some((it, idx) => idx !== batchState.currentIndex && it.status === 'pending' && pageAlignable(it));
-                        saveQueueLabel.textContent = currentItem?.realign
-                            ? (hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again & Scan')
-                            : failedHere
-                            ? (hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again')
-                            : currentItem?.status === 'saved'
-                                ? (hasMoreUnsaved ? 'Update & Next Document' : 'Update Queued Document')
-                                : (hasMoreUnsaved ? `Save & Next (${savedCount + 1}/${total})` : `Save Final Document (${total}/${total})`);
+                        // A pair: this page and the one beside it are queued together.
+                        const pairing = batchPairToQueue();
+                        const hasMoreUnsaved = batchState.items.some((it, idx) => idx !== batchState.currentIndex
+                            && it !== pairing?.mate.item && it.status === 'pending' && pageAlignable(it));
+                        if (pairing) {
+                            saveQueueLabel.textContent = currentItem?.realign
+                                ? (hasMoreUnsaved ? 'Queue Both Again & Next' : 'Queue Both Again & Scan')
+                                : failedHere
+                                    ? (hasMoreUnsaved ? 'Queue Both Again & Next' : 'Queue Both Again')
+                                    : currentItem?.status === 'saved'
+                                        ? (hasMoreUnsaved ? 'Update & Save Both & Next' : 'Update & Save Both Pages')
+                                        : (hasMoreUnsaved ? `Save Both Pages & Next (${savedCount + 2}/${total})` : `Save Both Pages (${total}/${total})`);
+                        } else {
+                            saveQueueLabel.textContent = currentItem?.realign
+                                ? (hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again & Scan')
+                                : failedHere
+                                    ? (hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again')
+                                    : currentItem?.status === 'saved'
+                                        ? (hasMoreUnsaved ? 'Update & Next Document' : 'Update Queued Document')
+                                        : (hasMoreUnsaved ? `Save & Next (${savedCount + 1}/${total})` : `Save Final Document (${total}/${total})`);
+                        }
                     }
                 }
                 if (scanNowBtn) {
@@ -5867,6 +5884,77 @@
             scanFolderInput.click();
         });
 
+        /**
+         * The other page of the pair open in Align (pages 1-2, 3-4), when Save & Next
+         * queues it together with this one: it is not queued yet, its file is at hand,
+         * and it is drawn beside this page with markers a page can be read on. Null:
+         * this page is saved alone. Nothing about how well it is aligned is asked.
+         *
+         * @returns {{mate: {index: number, item: object}, grid: object}|null}
+         */
+        function batchPairToQueue() {
+            if (!batchAligning()) return null;
+            const mate = batchPartner();
+            if (!mate || !mate.item.file || !['pending', 'failed'].includes(mate.item.status)) return null;
+            if (companionPage !== mate.item.pageNo || !(companionMarker.canvas.width > 0)) return null;
+            const grid = companionGridFor(mate.item.pageNo, mate);
+            if (grid.boxes.length === 0 || markerSetValidationMessage(grid.boxes) !== null) return null;
+            return { mate, grid };
+        }
+
+        /**
+         * Send one page to the queue, where it waits for Scan all: its file (of a PDF,
+         * the page alone, cut out now) and, unless Smoke test went over it, the page as
+         * drawn with its markers. Marks the item queued; throws when it could not be sent.
+         */
+        async function sendBatchPageToQueue(item, {
+            canvas, geometry, templateId, tested, scanKind,
+        }) {
+            const form = new FormData();
+            const scan = await queuedScanFile(item);
+            form.set('scan', scan, scan.name);
+            form.set('batch_key', batchState.key);
+            let url = config.pagesUrl;
+            if (tested) {
+                url = config.pageQueueUrl.replace('__PAGE__', String(tested.id));
+            } else {
+                form.set('document_template_id', String(templateId));
+                form.set('geometry_json', JSON.stringify(geometry));
+                form.set('page', await canvasBlob(canvas), 'page.png');
+                form.set('defer_scan', '1');
+            }
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: form,
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            if (!response.ok || !payload?.id) {
+                throw new Error(responseErrorMessage(response, payload));
+            }
+
+            // A page queued before in its place (Update queued document, or a
+            // page read before and queued again) is let go, its reading with it.
+            if (item.pageId && item.pageId !== payload.id) cancelPageOnServer(item.pageId);
+            item.pageId = payload.id;
+            item.page = payload;
+            item.error = null;
+            item.realign = false;
+            item.workspaceScanPath = payload.workspaceScanPath || null;
+            item.scanKind = scanKind;
+            item.sentToScan = false;
+            item.status = 'saved';
+            return payload;
+        }
+
         document.getElementById('saveQueueNextBtn')?.addEventListener('click', async () => {
             if (scanInProgress || !batchState.active) return;
 
@@ -5915,10 +6003,17 @@
             const btn = el('saveQueueNextBtn');
             btn.disabled = true;
             clearOcrError();
-            // What the page was before, to go back to if it cannot be sent (it was never read).
+            // The other page of the pair goes to the queue with this one (null: this page alone).
+            const pairing = batchPairToQueue();
+            const mate = pairing?.mate.item ?? null;
+            // What the pages were before, to go back to if one cannot be sent (it was never read).
             const statusBefore = item.status;
+            const mateStatusBefore = mate?.status;
             let uploaded = false;
+            let mateJob = Promise.resolve();
+            let mateError = null;
             item.status = 'saving';
+            if (mate) mate.status = 'saving';
             renderBatchQueueBanner();
 
             try {
@@ -5926,58 +6021,47 @@
                 item.rows = [...gridRows];
                 item.tilts = [...rowTilts];
                 item.autoFields = new Map(autoFields);
+                item.rowsByHand = rowsByHand;
                 item.geometry = currentGeometry();
 
-                const form = new FormData();
-                // Of a PDF, this page alone, cut out now.
-                const scan = await queuedScanFile(item);
-                form.set('scan', scan, scan.name);
-                form.set('batch_key', batchState.key);
-                let url = config.pagesUrl;
                 // What reading this page still takes (sets Scan all's pace too): only
                 // reading a Smoke test result, outlining it again from moved markers,
-                // or the whole page.
+                // or the whole page. The page only waits in the queue: Scan all reads it.
                 const scanKind = tested ? (detectionIsCurrent() ? 'read' : 'reoutline') : 'full';
-                // The page only waits in the queue: Scan all reads it.
-                const realigned = Boolean(item.realign);
-                if (tested) {
-                    url = config.pageQueueUrl.replace('__PAGE__', String(tested.id));
-                } else {
-                    form.set('document_template_id', String(config.templateId));
-                    form.set('geometry_json', JSON.stringify(item.geometry));
-                    form.set('page', await canvasBlob(marker.canvas), 'page.png');
-                    form.set('defer_scan', '1');
-                }
-
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRF-TOKEN': config.csrf,
-                        'X-Requested-With': 'XMLHttpRequest',
-                        Accept: 'application/json',
-                    },
-                    credentials: 'same-origin',
-                    body: form,
+                const realigned = Boolean(item.realign) || Boolean(mate?.realign);
+                const mainJob = sendBatchPageToQueue(item, {
+                    canvas: marker.canvas,
+                    geometry: item.geometry,
+                    templateId: config.templateId,
+                    tested,
+                    scanKind,
                 });
-                const payload = (response.headers.get('content-type') || '').includes('application/json')
-                    ? await response.json()
-                    : null;
-                if (!response.ok || !payload?.id) {
-                    throw new Error(responseErrorMessage(response, payload));
+
+                if (mate) {
+                    // The other page as it is shown beside this one, sent at the same time.
+                    const { grid } = pairing;
+                    mate.boxes = cloneBoxes(grid.boxes);
+                    mate.rows = [...grid.rows];
+                    mate.tilts = grid.tilts ? [...grid.tilts] : grid.rows.map(() => 0);
+                    mate.geometry = alignedGeometry(grid.boxes, grid.rows, { keepRows: Boolean(mate.rowsByHand) });
+                    // A page Smoke test went over joins as it was tested (its markers still fit).
+                    const mateTested = mate.detected ?? null;
+                    mateJob = sendBatchPageToQueue(mate, {
+                        canvas: companionMarker.canvas,
+                        geometry: mate.geometry,
+                        templateId: layoutFor(mate.pageNo).templateId,
+                        tested: mateTested,
+                        scanKind: mateTested ? 'read' : 'full',
+                    }).catch((error) => {
+                        // Alone it goes back to what it was: the batch goes on with this page saved.
+                        mateError = error;
+                        mate.status = mateStatusBefore;
+                    });
                 }
 
-                // A page queued before in its place (Update queued document, or a
-                // page read before and queued again) is let go, its reading with it.
-                if (item.pageId && item.pageId !== payload.id) cancelPageOnServer(item.pageId);
-                item.pageId = payload.id;
-                item.page = payload;
-                item.error = null;
-                item.realign = false;
-                item.workspaceScanPath = payload.workspaceScanPath || null;
-                item.scanKind = scanKind;
-                item.sentToScan = false;
-                item.status = 'saved';
+                await mainJob;
                 uploaded = true;
+                await mateJob;
                 renderBatchQueueBanner();
 
                 // Move to next unsaved document if any
@@ -5996,12 +6080,20 @@
                 } else {
                     renderBatchQueueBanner();
                 }
+
+                // The other page could not be sent: it waits to be queued again (shown after
+                // the next page opened, which clears the message area).
+                if (mateError) {
+                    const why = String(mateError.message || 'the server could not be reached').replace(/[.\s]+$/, '');
+                    showOcrError(`Page ${mate.pageNo} could not be added to the queue: ${why}. Nothing was read. Queue it again once that is fixed.`);
+                }
             } catch (error) {
                 if (uploaded) {
                     // Queued; what failed came after (opening the next page, say).
                     showOcrError(error.message || 'The page was queued, but the next step failed.');
                 } else {
                     // Never sent, so never read: it goes back to what it was, not to "Failed".
+                    await mateJob;
                     item.status = statusBefore;
                     const why = String(error.message || 'the server could not be reached').replace(/[.\s]+$/, '');
                     showOcrError(`This page could not be added to the queue: ${why}. Nothing was read. Queue it again once that is fixed.`);
