@@ -1,5 +1,14 @@
 # Batch File Upload: improvement plan
 
+> **Changed 2026-11-20 (after the first review):** decisions 1 and 2 no longer apply as written.
+> - **Snap is manual** (B1 and B2 removed): no automatic Snap when a page opens, no Snap ahead, no "Check alignment" flag.
+> - **Reading is Scan all at the end only** (D1 reduced): no *Scan while I align* switch, no Scan remaining, no background polling, no wait window.
+>   A page sent back by Re-align (E1) is read by Scan all, for that page, once it is queued again.
+> - Scan all has no 30-minute limit.
+> - A page that cannot be **uploaded** stays as it was and shows a message; it is not marked Failed ("could not be read").
+>
+> The sections below are kept as they were written.
+
 Status: **built, waiting for the manual review (G3)**. Every automated step is done and committed phase by phase (`e2e9811` … the Phase G commit); the boxes left open are the *(manual)* browser checks. Branch: **`miro-dev4`** (at `e35c5a6`, which includes the batch work `de556d5`).
 Scope: the batch flow in `resources/views/scan/workspace.blade.php` and the
 endpoints behind it. **Single Upload must keep working as it does now.**

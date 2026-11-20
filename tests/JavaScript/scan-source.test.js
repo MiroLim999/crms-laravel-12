@@ -235,14 +235,14 @@ test('a copy asked for in the left-out window, or a file with no fingerprint, is
 test('queue counts cover every state', () => {
     const items = [
         page('pending'),
-        page('pending', { alignCheck: true }),
+        page('pending'),
         page('saving'),
         page('saved'),
         page('scanning'),
         page('ready'),
         page('verifying'),
         page('imported'),
-        page('imported', { alignCheck: true }),
+        page('imported'),
         page('rejected'),
         page('rejected', { skipped: true }),
         page('failed'),
@@ -258,18 +258,17 @@ test('queue counts cover every state', () => {
     assert.deepEqual(counts.byStatus, {
         pending: 2, saving: 1, saved: 1, scanning: 1, ready: 1, verifying: 1, imported: 2, rejected: 2, failed: 1,
     });
-    assert.deepEqual(counts.filters, { all: 12, attention: 2, pending: 2, saved: 2 });
+    assert.deepEqual(counts.filters, { all: 12, attention: 1, pending: 2, saved: 2 });
 });
 
-test('needs attention: failed pages, and pages Snap could not fit that are not done', () => {
+test('needs attention: failed pages', () => {
     const counts = queueCounts([
         page('failed'),
-        page('saved', { alignCheck: true }),
-        page('imported', { alignCheck: true }),
+        page('saved'),
+        page('imported'),
         page('ready'),
     ]);
-    assert.equal(counts.filters.attention, 2);
-    assert.equal(counts.alignCheck, 1);
+    assert.equal(counts.filters.attention, 1);
     assert.deepEqual(queueCounts([]).filters, { all: 0, attention: 0, pending: 0, saved: 0 });
 });
 
@@ -311,7 +310,7 @@ function serverBatch() {
             page('p1', 0, {
                 status: 'ready', documentPageId: 41, statusUrl: '/documents/pages/41', workspaceScanPath: 'documents/workspace/batch_1_abc/41-BOOK.pdf',
                 alignment: { boxes: [{ name: 'Name', x: 0.1 }], rows: [0.2, 0.3], tilts: [0, 0], autoFields: [['name', { x: 0.1 }]] },
-                flags: { scanKind: 'read', alignCheck: true },
+                flags: { scanKind: 'read' },
             }),
             page('p2', 1, { status: 'verifying', documentPageId: 42, statusUrl: '/documents/pages/42' }),
         ],
@@ -338,7 +337,6 @@ test('a batch kept on the server is rebuilt in queue order, with its states and 
     assert.equal(first.record, 'g1#1');
     assert.deepEqual(first.rows, [0.2, 0.3]);
     assert.equal(first.autoFields.get('name').x, 0.1);
-    assert.equal(first.alignCheck, true);
     assert.equal(first.scanKind, 'read');
     // A record open in Verify comes back read, waiting to be verified.
     assert.equal(second.status, 'ready');

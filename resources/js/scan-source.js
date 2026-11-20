@@ -339,9 +339,9 @@ export function appendToQueue(items, added) {
     return queue;
 }
 
-/** Whether a page needs the user: it failed, or Snap could not fit it ("Check alignment"). */
+/** Whether a page needs the user: it failed (to be re-aligned, queued again, or removed). */
 export function pageNeedsAttention(item) {
-    return item?.status === 'failed' || (Boolean(item?.alignCheck) && !pageDone(item));
+    return item?.status === 'failed';
 }
 
 /** The queue panel's filters: which pages each one shows. */
@@ -371,7 +371,6 @@ export function queueCounts(items) {
         read: count((item) => ['ready', 'verifying', 'imported'].includes(item.status) || (item.status === 'rejected' && !item.skipped)),
         saved: count((item) => item.status === 'imported'),
         failed: count((item) => item.status === 'failed'),
-        alignCheck: count((item) => Boolean(item.alignCheck) && !pageDone(item)),
         filters: Object.fromEntries(Object.entries(QUEUE_FILTERS).map(([name, test]) => [name, count(test)])),
         byStatus,
     };
@@ -452,7 +451,6 @@ export function rebuildBatchState(serverBatch, { layoutChanged = false } = {}) {
             autoFields: keepAlignment && Array.isArray(alignment.autoFields) ? new Map(alignment.autoFields) : null,
             detected: null,
             skipped: Boolean(flags.skipped),
-            alignCheck: Boolean(flags.alignCheck),
             existingAccepted: Boolean(flags.existingAccepted),
             realign: Boolean(flags.realign) && status === 'pending',
             addedAnyway: Boolean(flags.addedAnyway),

@@ -1,5 +1,16 @@
 # Multi-page PDFs in batch mode (note for the `gono` branch)
 
+> **Update 2026-11-20:** two parts of the rework below were taken out again.
+> Snap is **manual**: nothing is snapped when a page opens, and no page is
+> snapped ahead (`autoSnapBatchPage`, `snapAheadFrom`, `item.alignCheck` are
+> gone). Reading is **Scan all at the end only**: the *Scan while I align*
+> switch, `crms.scan.batchReading`, Scan remaining, the background polling and
+> the "reading the next record" window are gone. A page sent back by Re-align
+> is read by `runBatchScanAll({ pages, after })` once queued again, and
+> `runBatchScanAll` has no 30-minute limit. A page that cannot be uploaded goes
+> back to what it was (not `failed`). `documents.pages.queue` still accepts
+> `read=1`, but the workspace no longer sends it.
+>
 > **Status (miro-dev4, batch improvement plan):** the batch flow was reworked
 > as `docs/BATCH-IMPROVEMENT-PLAN.md` describes. In short:
 >
@@ -10,13 +21,11 @@
 >   `scan-source.js`. In the workspace, `batchAligning()` says whether the page
 >   open now is in Align, and `continueBatch()` picks what opens next (a record
 >   read, a record still being read, a page to align, or the summary).
-> - **Reading.** Scan while I align (default; `crms.scan.batchReading` in the
->   browser) sends each page to the worker as it is queued; pages being read
->   are polled in the background. Scan all at the end keeps `runBatchScanAll`.
->   `documents.pages.queue` takes `read=1` for a Smoke-tested page.
-> - **Align.** A new page starts on the template and is snapped
->   (`autoSnapBatchPage`); the next new page is snapped ahead off-screen.
->   `item.alignCheck` flags a page Snap could not fit.
+> - **Reading.** ~~Scan while I align~~ (removed 2026-11-20): Scan all
+>   (`runBatchScanAll`) reads the queue.
+>   `documents.pages.queue` takes `read=1` for a Smoke-tested page (unused now).
+> - **Align.** A new page starts on the template; Snap to table is pressed by
+>   hand (the automatic Snap and Snap-ahead were removed 2026-11-20).
 > - **Queue panel and page bar.** `renderBatchQueuePanel` (files, pages,
 >   filters from `QUEUE_FILTERS`, totals from `queueCounts`) and
 >   `updateBatchPageBar`. Pages are removed one at a time or a file at once
