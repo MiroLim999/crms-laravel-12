@@ -7165,19 +7165,44 @@
                     realignBatchPages(pages);
                     return;
                 }
-                // A pair: which page (or both) goes back.
+                // A pair: which page (or both) goes back to Align.
                 event.stopPropagation();
-                const option = (label, chosen) => {
+                // The page slid to in the view (none while both are in view): said in its row.
+                const inView = verifyDoc && verifyFocus !== null ? verifyDoc.pages[verifyFocus]?.item : null;
+                const option = (title, note, chosen, { tag = false } = {}) => {
                     const item = document.createElement('button');
                     item.type = 'button';
-                    item.className = 'dropdown-item';
-                    item.textContent = label;
+                    item.className = 'dropdown-item realign-option';
+                    const head = document.createElement('span');
+                    head.className = 'realign-option__title';
+                    head.textContent = title;
+                    if (tag) {
+                        const badge = document.createElement('span');
+                        badge.className = 'realign-option__tag';
+                        badge.textContent = 'in view';
+                        head.append(badge);
+                    }
+                    const small = document.createElement('small');
+                    small.textContent = note;
+                    item.append(head, small);
                     item.addEventListener('click', () => realignBatchPages(chosen));
                     return item;
                 };
+                const heading = document.createElement('h6');
+                heading.className = 'dropdown-header realign-menu__heading';
+                heading.textContent = 'Send back to Align';
                 menu.replaceChildren(
-                    ...pages.map((it) => option(`Re-align page ${it.pageNo}`, [it])),
-                    option('Re-align both pages', pages),
+                    heading,
+                    ...pages.map((it) => {
+                        const other = pages.find((candidate) => candidate !== it);
+                        return option(
+                            `Page ${it.pageNo} only`,
+                            `What you typed on page ${other.pageNo} is kept.`,
+                            [it],
+                            { tag: it === inView },
+                        );
+                    }),
+                    option('Both pages', 'What you typed on both pages is cleared.', pages),
                 );
                 window.bootstrap.Dropdown.getOrCreateInstance(button).toggle();
             });
