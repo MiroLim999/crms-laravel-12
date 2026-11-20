@@ -1767,8 +1767,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 // -------------------------------------------------- Batch Queue Workspace Bar
 .batch-queue-banner {
+  // The queue panel hangs below it, over the page (see .batch-queue-panel).
+  position: relative;
+  z-index: 20;
   flex: 0 0 auto;
-  overflow: hidden;
   background: var(--bs-paper-bg);
   border-radius: .65rem .65rem 0 0;
 
@@ -1779,7 +1781,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .batch-queue-banner__body {
-  padding: .5rem .75rem .15rem;
+  padding: .55rem .75rem .45rem;
 }
 
 .batch-queue-banner__top {
@@ -1787,56 +1789,63 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: .35rem .75rem;
+  gap: .4rem .75rem;
 }
 
 .batch-queue-banner__info {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .35rem .55rem;
+  flex: 1 1 14rem;
+  align-items: baseline;
+  gap: .5rem;
   min-inline-size: 0;
+  white-space: nowrap;
 }
 
-.batch-queue-banner__pill {
-  display: inline-flex;
-  align-items: center;
-  gap: .25rem;
-  padding: .18rem .48rem;
-  color: var(--bs-primary);
-  background: rgba(var(--bs-primary-rgb), .1);
-  border-radius: 999px;
-  font-size: .6875rem;
+// What to do now: a short instruction.
+.batch-queue-banner__heading {
+  color: var(--bs-heading-color);
+  font-size: .875rem;
   font-weight: 600;
-  letter-spacing: .01em;
+}
 
-  i {
-    font-size: .8rem;
+// How far: one count, after a dot.
+.batch-queue-banner__sub {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--bs-secondary-color);
+  font-size: .8rem;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+
+  &:not(:empty)::before {
+    content: "·";
+    margin-inline-end: .5rem;
   }
 }
 
-.batch-queue-banner__titles {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: .25rem .45rem;
-  min-inline-size: 0;
+// A thin line along the bottom of the bar: how far the batch is.
+.batch-queue-progress {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 0;
+  block-size: 2px;
+  overflow: hidden;
+  background: rgba(var(--crms-ink-rgb), .06);
 }
 
-.batch-queue-banner__heading {
-  color: var(--bs-heading-color);
-  font-size: .78rem;
-  font-weight: 600;
-}
+.batch-queue-progress__bar {
+  block-size: 100%;
+  inline-size: 0;
+  background: var(--bs-primary);
+  transition: inline-size .3s ease;
 
-.batch-queue-banner__sub {
-  padding: .08rem .35rem;
-  color: var(--bs-secondary-color);
-  background: rgba(var(--crms-ink-rgb), .05);
-  border-radius: .25rem;
-  font-size: .6875rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+  [data-phase="done"] & {
+    background: var(--bs-success);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
 }
 
 .batch-queue-banner__notice {
@@ -1884,7 +1893,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   display: inline-flex;
   align-items: center;
   gap: .35rem;
-  max-inline-size: min(26rem, 100%);
+  max-inline-size: min(22rem, 100%);
 
   .batch-queue-toggle__text {
     min-inline-size: 0;
@@ -1902,93 +1911,178 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// The queue panel: every file, and the pages of the one expanded.
+// The queue panel: every file, and the pages of the one expanded. It drops
+// down over the page from under the Queue button, so the page stays where it
+// is, and slides open and shut. Plain rows, hairlines between them.
 .batch-queue-panel {
-  margin-block: .45rem .3rem;
+  position: absolute;
+  inset-block-start: calc(100% - .2rem);
+  inset-inline-end: .75rem;
+  inline-size: min(36rem, calc(100% - 1.5rem));
+  overflow: hidden;
   border: 1px solid var(--bs-border-color);
   border-radius: .5rem;
   background: var(--bs-paper-bg);
+  box-shadow: 0 .6rem 1.6rem rgba(var(--crms-ink-rgb), .14);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-.5rem);
+  transform-origin: top right;
+  pointer-events: none;
+  transition:
+    opacity .18s ease,
+    transform .22s cubic-bezier(.2, .8, .2, 1),
+    visibility 0s linear .22s;
+
+  &.is-open {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    pointer-events: auto;
+    transition-delay: 0s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
 }
 
+// Filters as plain tabs with an underline, and the totals beside them.
 .batch-queue-panel__head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: .35rem .75rem;
-  padding: .4rem .5rem;
+  gap: 0 1rem;
+  padding: 0 .9rem;
   border-block-end: 1px solid var(--bs-border-color);
+}
+
+#batchQueueFilters {
+  display: flex;
+  gap: 1.1rem;
 
   .btn {
-    padding-block: .12rem;
-    font-size: .72rem;
+    margin: 0;
+    padding: .6rem 0 .5rem;
+    color: var(--bs-secondary-color);
+    font-size: .8rem;
+    font-weight: 500;
+    background: transparent;
+    border: 0;
+    border-block-end: 2px solid transparent;
+    border-radius: 0;
+    box-shadow: none;
+
+    &:hover {
+      color: var(--bs-body-color);
+      background: transparent;
+    }
+
+    &.active {
+      color: var(--bs-primary);
+      background: transparent;
+      border-block-end-color: var(--bs-primary);
+    }
   }
 }
 
 .batch-queue-filter__count {
   margin-inline-start: .3rem;
   font-variant-numeric: tabular-nums;
-  opacity: .75;
+  opacity: .6;
 }
 
 .batch-queue-panel__totals {
   color: var(--bs-secondary-color);
-  font-size: .72rem;
-  font-weight: 600;
+  font-size: .75rem;
   font-variant-numeric: tabular-nums;
 }
 
 .batch-queue-files {
-  max-block-size: min(42vh, 22rem);
+  max-block-size: min(46vh, 24rem);
   margin: 0;
-  padding: .25rem;
+  padding: 0;
   overflow-y: auto;
   list-style: none;
   scrollbar-width: thin;
 }
 
 .batch-queue-files__empty {
-  padding: .6rem .5rem;
+  padding: 1rem .9rem;
   color: var(--bs-secondary-color);
-  font-size: .75rem;
+  font-size: .8rem;
 }
 
 .batch-queue-file {
-  border: 1px solid transparent;
-  border-radius: .4rem;
-
   & + & {
-    margin-block-start: .15rem;
+    border-block-start: 1px solid rgba(var(--crms-ink-rgb), .07);
   }
 
   &.is-current {
-    border-color: rgba(var(--bs-primary-rgb), .35);
-    background: rgba(var(--bs-primary-rgb), .04);
+    background: rgba(var(--bs-primary-rgb), .045);
   }
 
   &.is-dragging {
     opacity: .45;
   }
 
+  // Where the dragged file will land: a line above or below.
   &.is-drag-over {
-    border-color: var(--bs-primary);
-    border-style: dashed;
     background: rgba(var(--bs-primary-rgb), .06);
+  }
+
+  &.is-drop-before {
+    box-shadow: inset 0 2px 0 var(--bs-primary);
+  }
+
+  &.is-drop-after {
+    box-shadow: inset 0 -2px 0 var(--bs-primary);
   }
 }
 
-// One file: index, name, pages, how its pages stand, and remove.
+// The handle on a file that can be dragged: six dots, shown when the row is pointed at.
+.batch-queue-file__grip {
+  flex: 0 0 .6rem;
+  block-size: .95rem;
+  margin-inline: .1rem -.05rem;
+  background:
+    radial-gradient(circle, currentColor 1.1px, transparent 1.3px) 0 0 / .3rem .32rem;
+  color: var(--bs-secondary-color);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity .12s ease;
+
+  .batch-queue-file__row:hover &,
+  .batch-queue-file.is-dragging & {
+    opacity: .7;
+  }
+
+  // Nothing to drag (one file, or while Scan all runs): its place stays, unseen.
+  &.is-off,
+  .batch-queue-file__row:hover &.is-off {
+    visibility: hidden;
+    cursor: default;
+  }
+
+  // A touch screen has no hover: the handle stays in view.
+  @media (hover: none) {
+    opacity: .5;
+  }
+}
+
+// One file: its number, name, pages, state when it is not pending, and remove.
 .batch-queue-file__row,
 .batch-queue-page {
   display: flex;
   align-items: center;
   gap: .4rem;
-  font-size: .75rem;
-  line-height: 1.2;
+  font-size: .82rem;
+  line-height: 1.25;
 }
 
 .batch-queue-file__row {
-  padding: .1rem .15rem .1rem .1rem;
+  padding-inline: .45rem .7rem;
 
   &[draggable="true"] {
     cursor: grab;
@@ -2002,59 +2096,52 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   font: inherit;
   background: transparent;
   border: 0;
-  border-radius: .3rem;
+  border-radius: .35rem;
 }
 
 .batch-queue-file__toggle {
   display: flex;
   flex: 1 1 auto;
   align-items: center;
-  gap: .4rem;
+  gap: .55rem;
   min-inline-size: 0;
-  padding: .25rem .3rem;
+  padding: .6rem .35rem;
   text-align: start;
   cursor: pointer;
 
-  &:hover {
-    background: rgba(var(--crms-ink-rgb), .04);
-  }
-
-  .bx-chevron-right {
-    flex: 0 0 auto;
+  // The arrow (or the empty space of a one-page file): always as wide, so names line up.
+  .batch-queue-file__chevron {
+    flex: 0 0 1rem;
+    inline-size: 1rem;
     color: var(--bs-secondary-color);
+    font-size: 1rem;
+    text-align: center;
     transition: transform .15s ease;
   }
 
-  &[aria-expanded="true"] .bx-chevron-right {
+  &[aria-expanded="true"] .batch-queue-file__chevron {
     transform: rotate(90deg);
   }
 }
 
+// A plain number, not a box; the current file's is in the accent colour.
 .batch-queue-file__index {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  min-inline-size: 1.15rem;
-  block-size: 1.15rem;
-  padding-inline: .2rem;
+  flex: 0 0 1.1rem;
   color: var(--bs-secondary-color);
-  background: rgba(var(--crms-ink-rgb), .06);
-  border-radius: .25rem;
-  font-size: .65rem;
-  font-weight: 700;
+  font-size: .75rem;
   font-variant-numeric: tabular-nums;
+  text-align: end;
 
   .is-current > .batch-queue-file__row & {
-    color: #fff;
-    background: var(--bs-primary);
+    color: var(--bs-primary);
+    font-weight: 700;
   }
 }
 
 .batch-queue-file__name {
   min-inline-size: 0;
   overflow: hidden;
-  font-weight: 600;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2064,11 +2151,12 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   min-inline-size: 0;
   overflow: hidden;
   color: var(--bs-secondary-color);
-  font-size: .68rem;
+  font-size: .75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+// Remove shows when the row is pointed at (or reached by keyboard), not all the time.
 .batch-queue-row__remove {
   display: inline-grid;
   flex: 0 0 auto;
@@ -2078,6 +2166,19 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   padding: 0;
   color: var(--bs-secondary-color);
   cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease;
+
+  .batch-queue-file__row:hover &,
+  .batch-queue-page:hover &,
+  &:focus-visible {
+    opacity: 1;
+  }
+
+  // A touch screen has no hover: it stays in view.
+  @media (hover: none) {
+    opacity: 1;
+  }
 
   &:hover,
   &:focus-visible {
@@ -2090,22 +2191,64 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// The pages of the file expanded.
+// The pages of the file expanded: their height slides from none to theirs.
+.batch-queue-pages-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows .24s cubic-bezier(.2, .8, .2, 1),
+    opacity .18s ease;
+
+  &.is-open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  > .batch-queue-pages {
+    min-block-size: 0;
+    overflow: hidden;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+
+// The pages start exactly under the file's name: the file row's padding, grip
+// and gap, the toggle's padding, the arrow, the number and their gaps, less the
+// page button's own padding. A faint line down from the number ties them to it.
 .batch-queue-pages {
-  margin: 0 0 .25rem;
-  padding: 0 0 0 1.6rem;
+  --queue-name-start: calc(.45rem + .65rem + .4rem + .35rem + 1rem + .55rem + 1.1rem + .55rem);
+  position: relative;
+  margin: 0;
+  padding: 0 .7rem .45rem calc(var(--queue-name-start) - .5rem);
   list-style: none;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset-block: 0 .7rem;
+    inset-inline-start: calc(var(--queue-name-start) - .55rem - .55rem);
+    inline-size: 1px;
+    background: var(--bs-border-color);
+  }
 }
 
 .batch-queue-page {
-  padding-inline-end: .15rem;
-  border-radius: .3rem;
+  padding-inline-end: .05rem;
+  border-radius: .35rem;
+
+  &:hover {
+    background: rgba(var(--crms-ink-rgb), .04);
+  }
 
   &.is-current {
-    background: rgba(var(--bs-primary-rgb), .1);
+    background: rgba(var(--bs-primary-rgb), .09);
 
     .batch-queue-page__number {
       color: var(--bs-primary);
+      font-weight: 600;
     }
   }
 }
@@ -2115,15 +2258,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   flex: 1 1 auto;
   flex-wrap: wrap;
   align-items: center;
-  gap: .3rem .45rem;
+  gap: .2rem .7rem;
   min-inline-size: 0;
-  padding: .22rem .35rem;
+  padding: .35rem .5rem;
   text-align: start;
   cursor: pointer;
-
-  &:hover:not(:disabled) {
-    background: rgba(var(--crms-ink-rgb), .05);
-  }
 
   &:disabled {
     cursor: default;
@@ -2131,15 +2270,41 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .batch-queue-page__number {
-  min-inline-size: 3.6rem;
-  font-weight: 600;
+  min-inline-size: 3.4rem;
   font-variant-numeric: tabular-nums;
 }
 
 .batch-queue-page__error {
   flex: 1 1 100%;
   color: var(--bs-danger);
-  font-size: .68rem;
+  font-size: .72rem;
+}
+
+// A state in the panel: a dot and a word, coloured by what it is.
+.batch-queue-state {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .35rem;
+  margin-inline-start: auto;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+  white-space: nowrap;
+
+  &::before {
+    content: "";
+    inline-size: .45rem;
+    block-size: .45rem;
+    background: currentColor;
+    border-radius: 50%;
+  }
+
+  &.is-working { color: var(--bs-warning); }
+  &.is-queued,
+  &.is-verifying { color: var(--bs-primary); }
+  &.is-ready { color: var(--bs-info); }
+  &.is-imported { color: var(--bs-success); }
+  &.is-failed { color: var(--bs-danger); }
 }
 
 // A page's (or a file's) state, and its flags.
