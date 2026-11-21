@@ -5236,6 +5236,17 @@
         }
 
         /** One file: its name and pages, how they stand, remove; expanded, its pages. */
+        /** What a file's state tag shows: its one page's own state, else the state that needs attention most. */
+        function groupStateItem(group) {
+            if (group.items.length === 1) return group.items[0];
+            const status = groupStatus(group);
+            return {
+                status,
+                // Every page still to save is Done: the file is Done.
+                approved: status === 'ready' && group.items.every((it) => pageDone(it) || it.approved),
+            };
+        }
+
         function fileRow(group, groupIndex, groupCount, shownPages) {
             const first = group.items[0];
             const fileName = first.sourceName ?? first.name;
@@ -5279,7 +5290,10 @@
                 .map(([status, count]) => `${count} ${(BATCH_STATUS_BADGE[status]?.text ?? status).toLowerCase()}`);
             // The states only when they differ: one state is the badge beside it already.
             const mixed = stateText.length > 1;
-            meta.textContent = [pagesText, ...(mixed ? stateText : [])].filter(Boolean).join(' · ');
+            // Its pages listed right under it say how many there are: not said again
+            // (unless some were left out: "2 of 5 pages" is news).
+            const pagesListed = expanded && group.items.length >= fileTotal;
+            meta.textContent = [pagesListed ? '' : pagesText, ...(mixed ? stateText : [])].filter(Boolean).join(' · ');
             if (fileTotal > 1) {
                 const chevron = document.createElement('i');
                 chevron.className = 'icon-base bx bx-chevron-right icon-sm batch-queue-file__chevron';
@@ -5295,12 +5309,7 @@
             toggle.append(index, name, meta);
             // A file of one page shows its state; one of many, its pages when expanded.
             // What still needs attention in the file wins (see groupStatus).
-            const fileStatus = groupStatus(group);
-            const fileState = stateElement(group.items.length === 1 ? first : {
-                status: fileStatus,
-                // Every page still to save is Done: the file is Done.
-                approved: fileStatus === 'ready' && group.items.every((it) => pageDone(it) || it.approved),
-            });
+            const fileState = stateElement(groupStateItem(group));
             if (fileState) toggle.append(fileState);
             toggle.title = fileTotal > 1 ? 'Click the name to open the file, the arrow to show its pages' : 'Open it';
             toggle.addEventListener('click', (event) => {
@@ -5401,7 +5410,11 @@
             number.className = 'batch-queue-page__number';
             number.textContent = `Page ${item.pageNo}`;
             open.append(number);
-            const pageState = stateElement(item);
+            // The file's tag already says what all its pages are: a page says its own
+            // only when it is different (or failed, which needs a look).
+            const sameAsFile = item.status !== 'failed'
+                && statusBadge(item).text === statusBadge(groupStateItem(group)).text;
+            const pageState = sameAsFile ? null : stateElement(item);
             if (pageState) open.append(pageState);
             if (item.status === 'failed' && item.error) {
                 const error = document.createElement('span');
