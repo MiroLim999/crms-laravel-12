@@ -68,16 +68,6 @@ if (root instanceof HTMLElement && source) {
             const ref = cell.refs.find((candidate) => located.has(Number(candidate)));
             if (ref !== undefined) scan.activateField(String(ref));
         },
-        onIssues: ({ invalid, empty }) => {
-            const parts = [];
-            if (invalid > 0) parts.push(`${invalid} invalid`);
-            if (empty > 0) parts.push(`${empty} empty`);
-            element('reviewIssuesLabel').textContent = parts.length > 0 ? parts.join(' · ') : 'No issues';
-            const button = element('reviewIssuesBtn');
-            button.disabled = parts.length === 0;
-            button.classList.toggle('btn-outline-secondary', parts.length === 0);
-            button.classList.toggle('btn-outline-danger', parts.length > 0);
-        },
     });
     // Ctrl+Z / Ctrl+Y after a click on the scan or elsewhere on the page.
     table.listenForUndoKeys();
@@ -87,7 +77,6 @@ if (root instanceof HTMLElement && source) {
 
     attachSplit({ split: root.querySelector('[data-review-split]'), splitter: element('reviewSplitter') });
 
-    element('reviewIssuesBtn').addEventListener('click', () => table.nextIssue());
     element('reviewExportCsv').addEventListener('click', () => {
         table.commit();
         downloadCsv(table.exportTable(), exportFileName(data.fileName, new Date().toISOString().slice(0, 10)));

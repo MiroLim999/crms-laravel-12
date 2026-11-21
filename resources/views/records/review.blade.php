@@ -42,7 +42,7 @@
         </div>
 
         {{-- The scan (the record page's own card) on the left, the table on the right:
-             30/70 to start, the bar between drags; double-click it for 30/70 again. --}}
+             50/50 to start, the bar between drags; double-click it for 50/50 again. --}}
         <div class="review-split" data-review-split>
             <section class="record-review__scan" aria-label="Original scan">
                 @if ($record->scan_path)
@@ -55,7 +55,7 @@
             <div class="review-splitter" id="reviewSplitter" role="separator" tabindex="0"
                  aria-orientation="vertical" aria-controls="reviewPane" aria-label="Resize the scan and the table"
                  aria-valuemin="20" aria-valuemax="65" aria-valuenow="30"
-                 title="Drag to resize · double-click for 30/70"></div>
+                 title="Drag to resize · double-click for 50/50"></div>
 
             <section class="card validation-pane review-pane" id="reviewPane" aria-labelledby="reviewPaneTitle">
                 <header class="validation-pane__header review-pane__header">
@@ -68,11 +68,6 @@
                         </p>
                     </div>
                     <div class="review-pane__tools">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="reviewIssuesBtn"
-                                title="Go to the next empty or invalid cell">
-                            <i class="icon-base bx bx-error icon-sm me-1" aria-hidden="true"></i>
-                            <span id="reviewIssuesLabel">No issues</span>
-                        </button>
                         @include('records.partials.review-shortcuts', ['savedRecord' => true])
                         <div class="dropdown">
                             <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="reviewDownloadBtn"

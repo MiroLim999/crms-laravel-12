@@ -347,7 +347,7 @@ export async function fetchRecordTables(url, params) {
 
 export const SPLIT_MIN = 20;
 export const SPLIT_MAX = 65;
-export const SPLIT_DEFAULT = 30;
+export const SPLIT_DEFAULT = 50;
 
 export function clampSplit(value, fallback = SPLIT_DEFAULT, min = SPLIT_MIN, max = SPLIT_MAX) {
     if (value === null || value === undefined || value === '') return fallback;

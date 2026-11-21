@@ -11673,7 +11673,7 @@ $dashboard-reveal-step: 40ms;
 
 .review-grid,
 .review-split {
-  --review-scan-width: 30%;
+  --review-scan-width: 50%;
 
   grid-template-columns: minmax(0, var(--review-scan-width)) .875rem minmax(0, 1fr);
   gap: 0;

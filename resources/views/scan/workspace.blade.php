@@ -864,7 +864,7 @@
     {{-- Step 4: Review & Export. Verify's own document pane (and its error notices) is
          moved in here when the step opens and back when Verify is shown again, so
          the scan, its outlines and its zoom are the same ones. The table is on the
-         right; drag the bar between them to resize, double-click it for 30/70. --}}
+         right, half and half; drag the bar between them to resize, double-click it for 50/50. --}}
     <section id="step-review" class="document-step-panel d-none">
         <div class="validation-workspace">
             <div id="reviewNotices"></div>
@@ -872,7 +872,7 @@
                 <div class="review-splitter" id="reviewSplitter" role="separator" tabindex="0"
                      aria-orientation="vertical" aria-controls="reviewPane" aria-label="Resize the scan and the table"
                      aria-valuemin="20" aria-valuemax="65" aria-valuenow="30"
-                     title="Drag to resize · double-click for 30/70"></div>
+                     title="Drag to resize · double-click for 50/50"></div>
 
                 <section class="card validation-pane review-pane" id="reviewPane" aria-labelledby="reviewPaneTitle">
                     <header class="validation-pane__header review-pane__header">
@@ -882,11 +882,6 @@
                             <p class="small text-muted mb-0" id="reviewPaneSummary"></p>
                         </div>
                         <div class="review-pane__tools">
-                            <button type="button" class="btn btn-sm btn-outline-secondary" id="reviewIssuesBtn"
-                                    title="Go to the next empty or invalid cell">
-                                <i class="icon-base bx bx-error icon-sm me-1" aria-hidden="true"></i>
-                                <span id="reviewIssuesLabel">No issues</span>
-                            </button>
                             @include('records.partials.review-shortcuts')
                             <div class="dropdown">
                                 <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="reviewDownloadBtn"
@@ -10909,6 +10904,8 @@
         // The field the view is sliding to. One click on a card focuses it and then
         // clicks it: the slide already on its way is left to finish, not restarted.
         let glidingToField = null;
+        // Step 4: a picked cell's writing is shown this close (500%, the most the view zooms).
+        const REVIEW_CELL_ZOOM = 5;
         function revealValidationMarker(index, { alignTo = null } = {}) {
             if (quietVerifyReveal) return;
             if (placedVerifyBoxes([index]).length === 0) return;
@@ -10916,8 +10913,11 @@
             glidingToField = index;
             // Close enough to read the writing: about twice the whole-page size
             // (a two-page document's 100% is half as wide, so it goes further).
-            // Already zoomed in further by hand: that zoom is kept.
-            const zoom = Math.max(validationMarker.zoom, verifyDoc ? 2.2 : 1.6);
+            // Already zoomed in further by hand: that zoom is kept. Review & Export
+            // compares a cell with its writing: every pick glides in to 500% (the most).
+            const zoom = reviewing
+                ? REVIEW_CELL_ZOOM
+                : Math.max(validationMarker.zoom, verifyDoc ? 2.2 : 1.6);
             verifyFocus = null;
             verifyFocusZoom = null;
             validationMarker.glideTo(zoom, () => {
@@ -13366,17 +13366,6 @@
             if (!cell.column.detail) activateValidationGroup(cell.row.id, 'group');
         }
 
-        function showReviewIssues({ invalid, empty }) {
-            const parts = [];
-            if (invalid > 0) parts.push(`${invalid} invalid`);
-            if (empty > 0) parts.push(`${empty} empty`);
-            el('reviewIssuesLabel').textContent = parts.length > 0 ? parts.join(' · ') : 'No issues';
-            const button = el('reviewIssuesBtn');
-            button.disabled = parts.length === 0;
-            button.classList.toggle('btn-outline-secondary', parts.length === 0);
-            button.classList.toggle('btn-outline-danger', parts.length > 0);
-        }
-
         function updateReviewSummary() {
             if (!reviewModel) return;
             const people = reviewModel.rows.length;
@@ -13491,7 +13480,6 @@
                     valueOf: reviewValue,
                     onChange: reviewChange,
                     onLocate: locateReviewCell,
-                    onIssues: showReviewIssues,
                     // An edit ticks Verified; Ctrl+Z puts each tick back as it was.
                     snapshotOf: (cell) => cell.refs.map((index) => verifyTickOf(index)?.checked ?? null),
                     restore: restoreReviewTicks,
@@ -13550,7 +13538,6 @@
             showStep('verify');
             if (activeValidationIndex !== null) revealValidationRow(activeValidationIndex);
         });
-        el('reviewIssuesBtn').addEventListener('click', () => reviewTable?.nextIssue());
         // Grid off: the scan without its field outlines (the picked field and its row stay).
         el('reviewGridToggle').addEventListener('change', (event) => {
             document.querySelector('.validation-document-pane')?.classList.toggle('is-grid-hidden', !event.target.checked);

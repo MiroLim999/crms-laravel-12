@@ -130,9 +130,9 @@ test('Enter goes down, Tab goes right and wraps, Shift goes back, edges hold', (
     assert.deepEqual(nextCellPosition({ row: 2, column: 1 }, 'ArrowDown', false, 3, 4), { row: 2, column: 1 });
 });
 
-test('the split stays between 20% and 65%, 30% by default', () => {
-    assert.equal(clampSplit(null), 30);
-    assert.equal(clampSplit('abc'), 30);
+test('the split stays between 20% and 65%, half and half by default', () => {
+    assert.equal(clampSplit(null), 50);
+    assert.equal(clampSplit('abc'), 50);
     assert.equal(clampSplit(5), 20);
     assert.equal(clampSplit(90), 65);
     assert.equal(clampSplit('41.63'), 41.6);

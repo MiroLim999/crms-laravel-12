@@ -601,7 +601,7 @@ On submission CRMS:
 ### 4.8 Review & Export (step 4) and editing a saved record
 
 **Step 4 of the scan screen.** After Verify, the document is shown as a **records table**: one row per person, one
-column per field (page 1, then page 2), with the scan beside it. The bar between them drags (double-click: 30/70).
+column per field (page 1, then page 2), with the scan beside it. The bar between them drags (half and half to start; double-click: 50/50).
 
 - Click or type in a cell to edit it; the cell is shown on the scan. Enter goes down, Tab goes right.
 - Drag down a column to pick several cells: type one value into them all, delete them, or paste a list or an Excel
