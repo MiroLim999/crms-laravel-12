@@ -19,6 +19,11 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // The scan workspace view is large (its script is inline): compiling it needs a
+        // little over PHP's default 1,000,000 regex backtracks, and the compile silently
+        // drops most of the page when that runs out. Ten times the default leaves room.
+        ini_set('pcre.backtrack_limit', '10000000');
+
         Vite::prefetch(concurrency: 3);
     }
 }

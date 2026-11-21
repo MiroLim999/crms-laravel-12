@@ -6342,12 +6342,51 @@
         }
 
         /**
+         * The page as drawn now, for sendBatchPageToQueue (null when none is sent: a page
+         * Smoke test went over, or one re-read on the server): a pixel-for-pixel copy, made
+         * at once (the canvas shows the next page soon), turned into a PNG only when sent.
+         */
+        function queuedPageImage(item, canvas, tested) {
+            if (tested || (item.realign && item.serverCopy && item.pageId)) return null;
+            const copy = document.createElement('canvas');
+            copy.width = canvas.width;
+            copy.height = canvas.height;
+            copy.getContext('2d').drawImage(canvas, 0, 0);
+            return copy;
+        }
+
+        // Pages on their way to the queue in the background: Save & Next opens the next
+        // page at once and they are sent behind it, one save after another, in order.
+        let batchUploadChain = Promise.resolve();
+        let batchUploadsInFlight = 0;
+
+        /** Run `job` (an upload) after the ones already on their way; resolves or rejects with it. */
+        function queueBatchUpload(job) {
+            batchUploadsInFlight += 1;
+            const run = batchUploadChain.then(job);
+            batchUploadChain = run.catch(() => {}).finally(() => {
+                batchUploadsInFlight -= 1;
+            });
+            return run;
+        }
+
+        /**
+         * Every page still on its way, sent (or given up on): before Scan all reads the
+         * queue, and before the batch is kept for later or discarded. Waits at most `limitMs`.
+         */
+        async function waitForBatchUploads(limitMs = 30000) {
+            if (batchUploadsInFlight === 0) return;
+            await Promise.race([batchUploadChain, wait(limitMs)]);
+        }
+
+        /**
          * Send one page to the queue, where it waits for Scan all: its file (of a PDF,
          * the page alone, cut out now) and, unless Smoke test went over it, the page as
-         * drawn with its markers. Marks the item queued; throws when it could not be sent.
+         * drawn with its markers (`pageImage`, from queuedPageImage). Marks the item
+         * queued; throws when it could not be sent.
          */
         async function sendBatchPageToQueue(item, {
-            canvas, geometry, templateId, tested, scanKind,
+            pageImage, geometry, templateId, tested, scanKind,
         }) {
             // Re-align: the same page on the server, read again with the markers as they are
             // now. Fields cut out as before keep their reading (and what was typed on them).
@@ -6369,7 +6408,7 @@
             } else {
                 form.set('document_template_id', String(templateId));
                 form.set('geometry_json', JSON.stringify(geometry));
-                form.set('page', await canvasBlob(canvas), 'page.png');
+                form.set('page', await canvasBlob(pageImage), 'page.png');
                 form.set('defer_scan', '1');
             }
 
@@ -6388,6 +6427,11 @@
                 : null;
             if (!response.ok || !payload?.id) {
                 throw new Error(responseErrorMessage(response, payload));
+            }
+            // Taken out of the batch while it was on its way: the page made for it is let go.
+            if (!batchState.items.includes(item)) {
+                cancelPageOnServer(payload.id);
+                return payload;
             }
 
             // A page queued before in its place (Update queued document, or a
@@ -6461,7 +6505,7 @@
 
             const btn = el('saveQueueNextBtn');
             btn.disabled = true;
-            // A loading circle in place of the save icon while the page is sent and the next one opens.
+            // A loading circle in place of the save icon until the next page is open.
             el('saveQueueNextIcon')?.classList.add('d-none');
             el('saveQueueNextSpinner')?.classList.remove('d-none');
             clearOcrError();
@@ -6471,12 +6515,8 @@
             // What the pages were before, to go back to if one cannot be sent (it was never read).
             const statusBefore = item.status;
             const mateStatusBefore = mate?.status;
-            let uploaded = false;
-            let mateJob = Promise.resolve();
             let mateError = null;
-            item.status = 'saving';
-            if (mate) mate.status = 'saving';
-            renderBatchQueueBanner();
+            let uploaded = false;
 
             try {
                 item.boxes = cloneBoxes(marker.toJSON());
@@ -6485,20 +6525,18 @@
                 item.autoFields = new Map(autoFields);
                 item.rowsByHand = rowsByHand;
                 item.geometry = currentGeometry();
+                // What it is queued with, kept now: the grid on screen soon is the next page's.
+                const queuedGrid = gridSnapshot();
 
                 // What reading this page still takes (sets Scan all's pace too): only
                 // reading a Smoke test result, outlining it again from moved markers,
                 // or the whole page. The page only waits in the queue: Scan all reads it.
                 const scanKind = tested ? (detectionIsCurrent() ? 'read' : 'reoutline') : 'full';
                 const realigned = Boolean(item.realign) || Boolean(mate?.realign);
-                const mainJob = sendBatchPageToQueue(item, {
-                    canvas: marker.canvas,
-                    geometry: item.geometry,
-                    templateId: config.templateId,
-                    tested,
-                    scanKind,
-                });
-
+                // Both pages as drawn now, before anything else is drawn on their canvases.
+                const mainImage = queuedPageImage(item, marker.canvas, tested);
+                const mateTested = mate?.detected ?? null;
+                let mateImage = null;
                 if (mate) {
                     // The other page as it is shown beside this one, sent at the same time.
                     const { grid } = pairing;
@@ -6506,37 +6544,90 @@
                     mate.rows = [...grid.rows];
                     mate.tilts = grid.tilts ? [...grid.tilts] : grid.rows.map(() => 0);
                     mate.geometry = alignedGeometry(grid.boxes, grid.rows, { keepRows: Boolean(mate.rowsByHand) });
-                    // A page Smoke test went over joins as it was tested (its markers still fit).
-                    const mateTested = mate.detected ?? null;
-                    mateJob = sendBatchPageToQueue(mate, {
-                        canvas: companionMarker.canvas,
-                        geometry: mate.geometry,
-                        templateId: layoutFor(mate.pageNo).templateId,
-                        tested: mateTested,
-                        scanKind: mateTested ? 'read' : 'full',
-                    }).catch((error) => {
-                        // Alone it goes back to what it was: the batch goes on with this page saved.
-                        mateError = error;
-                        mate.status = mateStatusBefore;
-                    });
+                    mateImage = queuedPageImage(mate, companionMarker.canvas, mateTested);
                 }
+                const mateTemplateId = mate ? layoutFor(mate.pageNo).templateId : null;
+                item.status = 'saving';
+                if (mate) mate.status = 'saving';
 
-                await mainJob;
-                uploaded = true;
-                item.queuedGrid = gridSnapshot();
-                await mateJob;
-                renderBatchQueueBanner();
+                // The upload itself: both pages at once; a page alone that cannot be sent
+                // goes back to what it was, and the batch goes on.
+                const upload = async () => {
+                    const mainJob = sendBatchPageToQueue(item, {
+                        pageImage: mainImage,
+                        geometry: item.geometry,
+                        templateId: config.templateId,
+                        tested,
+                        scanKind,
+                    });
+                    const mateJob = mate
+                        ? sendBatchPageToQueue(mate, {
+                            pageImage: mateImage,
+                            geometry: mate.geometry,
+                            templateId: mateTemplateId,
+                            // A page Smoke test went over joins as it was tested (its markers still fit).
+                            tested: mateTested,
+                            scanKind: mateTested ? 'read' : 'full',
+                        }).catch((error) => {
+                            mateError = error;
+                            mate.status = mateStatusBefore;
+                        })
+                        : Promise.resolve();
+                    try {
+                        await mainJob;
+                    } catch (error) {
+                        await mateJob;
+                        item.status = statusBefore;
+                        throw error;
+                    }
+                    item.queuedGrid = queuedGrid;
+                    await mateJob;
+                };
+                const mateFailed = () => {
+                    const why = String(mateError.message || 'the server could not be reached').replace(/[.\s]+$/, '');
+                    return `${batchPageName(mate)} could not be added to the queue: ${why}. Nothing was read. Align it and save it again once that is fixed.`;
+                };
 
-                // Move to next unsaved document if any
+                // The next page to align (one being sent is not it), if any.
                 // (A resumed page whose file is not picked again yet is skipped.)
                 const toAlign = (it) => it.status === 'pending' && pageAlignable(it);
                 const nextPendingIndex = batchState.items.findIndex((it, idx) => idx > batchState.currentIndex && toAlign(it));
-                const firstPendingIndex = batchState.items.findIndex(toAlign);
-                const targetIndex = nextPendingIndex !== -1 ? nextPendingIndex : firstPendingIndex;
+                const targetIndex = nextPendingIndex !== -1 ? nextPendingIndex : batchState.items.findIndex(toAlign);
+                renderBatchQueueBanner();
 
-                if (targetIndex !== -1) {
-                    await openBatchQueueItem(targetIndex);
-                } else if (realigned) {
+                if (targetIndex !== -1 && !realigned) {
+                    // Sent in the background: the next page opens now, and the queue list shows
+                    // these as saving until they are in. One that cannot be sent goes back to
+                    // Pending (its alignment kept) and says so. The pages are made into PNGs
+                    // and sent once the next page is drawn, so they do not slow that down.
+                    let nextPageShown = () => {};
+                    const nextPageDrawn = new Promise((resolve) => { nextPageShown = resolve; });
+                    queueBatchUpload(async () => {
+                        await nextPageDrawn;
+                        return upload();
+                    }).then(() => {
+                        renderBatchQueueBanner();
+                        if (mateError) showOcrError(mateFailed());
+                    }, (error) => {
+                        renderBatchQueueBanner();
+                        const why = String(error.message || 'the server could not be reached').replace(/[.\s]+$/, '');
+                        showOcrError(`${batchPageName(item)} could not be added to the queue: ${why}. Nothing was read. Open it from the queue list and save it again once that is fixed.`);
+                    });
+                    uploaded = true;
+                    try {
+                        await openBatchQueueItem(targetIndex);
+                    } finally {
+                        nextPageShown();
+                    }
+                    return;
+                }
+
+                // The last page to queue (or one sent back by Re-align): waited for here, after
+                // any still on their way, so what comes next sees every page queued.
+                await queueBatchUpload(upload);
+                uploaded = true;
+                renderBatchQueueBanner();
+                if (realigned) {
                     // A page sent back from Verify is read again now: just this record's pages
                     // (Scan all's window), and the record opens again once they are read.
                     await runBatchScanAll({
@@ -6544,24 +6635,19 @@
                         after: item,
                         prefer: item,
                     });
-                } else {
-                    renderBatchQueueBanner();
+                } else if (targetIndex !== -1) {
+                    await openBatchQueueItem(targetIndex);
                 }
-
-                // The other page could not be sent: it waits to be queued again (shown after
-                // the next page opened, which clears the message area).
-                if (mateError) {
-                    const why = String(mateError.message || 'the server could not be reached').replace(/[.\s]+$/, '');
-                    showOcrError(`Page ${mate.pageNo} could not be added to the queue: ${why}. Nothing was read. Queue it again once that is fixed.`);
-                }
+                // The other page could not be sent: it waits to be queued again.
+                if (mateError) showOcrError(mateFailed());
             } catch (error) {
                 if (uploaded) {
-                    // Queued; what failed came after (opening the next page, say).
+                    // Queued (or on its way); what failed came after (opening the next page, say).
                     showOcrError(error.message || 'The page was queued, but the next step failed.');
                 } else {
-                    // Never sent, so never read: it goes back to what it was, not to "Failed".
-                    await mateJob;
-                    item.status = statusBefore;
+                    // Never sent, so never read: it went back to what it was, not to "Failed".
+                    if (item.status === 'saving') item.status = statusBefore;
+                    if (mate?.status === 'saving') mate.status = mateStatusBefore;
                     const why = String(error.message || 'the server could not be reached').replace(/[.\s]+$/, '');
                     showOcrError(`This page could not be added to the queue: ${why}. Nothing was read. Queue it again once that is fixed.`);
                 }
@@ -6581,6 +6667,8 @@
          */
         async function runBatchScanAll({ pages = null, after = null, prefer = null } = {}) {
             if (scanInProgress || !batchState.active) return;
+            // Pages still on their way to the queue are in first.
+            await waitForBatchUploads();
 
             const itemsToScan = pages ?? batchPagesToRead();
             const total = itemsToScan.length;
@@ -7107,6 +7195,8 @@
         /** Everything on screen now, saved (before leaving with Keep for later). */
         async function flushServerBatch() {
             if (!batchOpenOnServer()) return;
+            // Pages still on their way are in (else they are Pending, aligned, on resume).
+            await waitForBatchUploads();
             keepCurrentAlignment();
             const lead = currentVerifyItem();
             if (lead) keepVerifyDraft(lead);
@@ -7133,6 +7223,8 @@
         /** Discard: the batch is thrown away, and its queued pages let go. */
         async function discardServerBatch(id = batchServer.id) {
             if (id === null) return;
+            // A page on its way gets its id first, so it is let go with the rest.
+            if (id === batchServer.id) await waitForBatchUploads();
             batchState.items.forEach((item) => {
                 if (!pageDone(item)) cancelPageOnServer(item.pageId);
             });
