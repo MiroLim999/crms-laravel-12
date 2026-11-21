@@ -30,7 +30,9 @@
                                     <button type="button" class="btn btn-sm btn-label-secondary batch-queue-toggle" id="batchQueueToggle"
                                         aria-expanded="false" aria-controls="batchQueuePanel" title="Show every file and page in this batch">
                                         <i class="icon-base bx bx-list-check icon-sm" aria-hidden="true"></i>
+                                        <span class="batch-queue-toggle__num d-none" id="batchQueueToggleNum"></span>
                                         <span class="batch-queue-toggle__text" id="batchQueueToggleText">Queue</span>
+                                        <span class="batch-queue-toggle__pages d-none" id="batchQueueTogglePages"></span>
                                         <i class="icon-base bx bx-chevron-down icon-sm batch-queue-toggle__chevron" aria-hidden="true"></i>
                                     </button>
                                     {{-- More files for this batch, while pages can still be aligned. --}}
@@ -520,7 +522,9 @@
                         <i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Smoke test scan
                     </button>
                     <button class="btn btn-primary btn-lg d-none" type="button" id="saveQueueNextBtn">
-                        <i class="icon-base bx bx-save icon-sm me-1"></i> <span id="saveQueueNextLabel">Save &amp; Queue
+                        <i class="icon-base bx bx-save icon-sm me-1" id="saveQueueNextIcon"></i>
+                        <span class="spinner-border spinner-border-sm me-1 d-none" id="saveQueueNextSpinner" role="status" aria-hidden="true"></span>
+                        <span id="saveQueueNextLabel">Save &amp; Queue
                             Document</span>
                     </button>
                     <button class="btn btn-primary btn-lg" type="button" id="scanNowBtn">
@@ -913,13 +917,12 @@
                             <button class="btn btn-outline-secondary" type="button" id="backToVerify">
                                 <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i> Back to verify
                             </button>
-                            {{-- A batch only: this whole document (every page of the record) back to Align, read again once queued. --}}
-                            <div class="d-none" id="reviewRealignGroup">
-                                <button class="btn btn-outline-secondary" type="button" id="reviewRealignBtn"
-                                    title="Back to Align for this whole document: it is read again once queued">
-                                    <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>Re-align
-                                </button>
-                            </div>
+                            {{-- Nothing ticked Verified on this record (opened from the queue on this step):
+                                 in place of Back to verify and Save, one way on, back to Verify. --}}
+                            <button class="btn btn-primary d-none" type="button" id="reviewVerifyFirstBtn"
+                                title="Nothing on this record is verified yet: check its fields in Verify first">
+                                <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i> Verify first
+                            </button>
                             <button class="btn btn-primary" type="button" id="reviewSaveBtn" disabled>
                                 <i class="icon-base bx bx-check-shield icon-sm me-1" aria-hidden="true"></i>
                                 {{-- A batch says where saving goes next ("Save & next (3/7)"). --}}
@@ -4886,10 +4889,8 @@
                         const pairing = batchPairToQueue();
                         const hasMoreUnsaved = batchState.items.some((it, idx) => idx !== batchState.currentIndex
                             && it !== pairing?.mate.item && it.status === 'pending' && pageAlignable(it));
-                        // The words, and (on a first save) how far the queue is: "2/4" in its own tag,
-                        // so the label stays short and the count never wraps under it.
+                        // The words only (how far the queue is shows in the bar above).
                         let text;
-                        let count = null;
                         if (pairing) {
                             if (currentItem?.realign) text = hasMoreUnsaved ? 'Queue Both Again & Next' : 'Queue Both Again & Scan';
                             else if (failedHere) text = hasMoreUnsaved ? 'Queue Both Again & Next' : 'Queue Both Again';
@@ -4897,7 +4898,6 @@
                             else {
                                 // " Pages" shows only where the panel is wide enough (.save-queue-opt).
                                 text = hasMoreUnsaved ? 'Save Both[ Pages] & Next' : 'Save Both[ Pages]';
-                                count = hasMoreUnsaved ? `${savedCount + 2}/${total}` : `${total}/${total}`;
                             }
                         } else if (currentItem?.realign) {
                             text = hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again & Scan';
@@ -4907,7 +4907,6 @@
                             text = hasMoreUnsaved ? 'Update & Next Document' : 'Update Queued Document';
                         } else {
                             text = hasMoreUnsaved ? 'Save & Next' : 'Save Final Document';
-                            count = hasMoreUnsaved ? `${savedCount + 1}/${total}` : `${total}/${total}`;
                         }
                         // Words in [ ] are optional: shown only where the panel has the room.
                         saveQueueLabel.replaceChildren(...text.split(/(\[[^\]]*\])/).filter(Boolean).map((part) => {
@@ -4917,12 +4916,6 @@
                             optional.textContent = part.slice(1, -1);
                             return optional;
                         }));
-                        if (count) {
-                            const tag = document.createElement('span');
-                            tag.className = 'save-queue-count';
-                            tag.textContent = count;
-                            saveQueueLabel.append(tag);
-                        }
                     }
                 }
                 if (scanNowBtn) {
@@ -5054,12 +5047,22 @@
         };
 
         /** "BIRTHS-1995.pdf · page 3 of 12", or the record in Verify, for the collapsed line. */
-        function batchWhereText() {
+        /** Where the user is, in parts: the document's number, its file name, and its page(s). */
+        function batchWhereParts() {
             const current = batchState.items[batchState.currentIndex];
-            if (!current) return 'Queue';
+            if (!current) return { name: 'Queue', pages: '', number: 0 };
             const name = current.sourceName ?? current.name;
-            if (!batchAligning() && !batchState.readingAll) return recordLabel(recordOf(current));
-            return current.pageTotal > 1 ? `${name} · page ${current.pageNo} of ${current.pageTotal}` : name;
+            let pages = '';
+            if (current.pageTotal > 1) {
+                if (!batchAligning() && !batchState.readingAll) {
+                    const numbers = recordOf(current).members.map((it) => it.pageNo);
+                    pages = `page${numbers.length > 1 ? 's' : ''} ${pageRanges(numbers)}`;
+                } else {
+                    pages = `page ${current.pageNo} of ${current.pageTotal}`;
+                }
+            }
+            const number = batchGroups().findIndex((group) => group.items.includes(current)) + 1;
+            return { name, pages, number };
         }
 
         function setQueuePanelOpen(open) {
@@ -5103,7 +5106,18 @@
             const groups = batchGroups();
             const counts = queueCounts(batchState.items);
             const files = groups.length;
-            el('batchQueueToggleText').textContent = files > 1 ? `${batchWhereText()} · ${files} files` : batchWhereText();
+            const where = batchWhereParts();
+            // "2/4" says which document is open, so a pick in the list is easy to follow.
+            const num = el('batchQueueToggleNum');
+            num.textContent = files > 1 && where.number > 0 ? `${where.number}/${files}` : '';
+            num.classList.toggle('d-none', num.textContent === '');
+            el('batchQueueToggleText').textContent = where.name;
+            const pagesTag = el('batchQueueTogglePages');
+            pagesTag.textContent = where.pages;
+            pagesTag.classList.toggle('d-none', where.pages === '');
+            el('batchQueueToggle').title = files > 1 && where.number > 0
+                ? `Document ${where.number} of ${files}: ${where.name}${where.pages ? ` · ${where.pages}` : ''}. Show every file and page in this batch`
+                : 'Show every file and page in this batch';
 
             const panel = el('batchQueuePanel');
             // Closed: it slides away with what it showed; not focusable meanwhile.
@@ -5555,11 +5569,19 @@
                 return;
             }
             if (idx === batchState.currentIndex) return;
+            // Picked while on Review & Export: the record opens there too, not in Verify.
+            const stayInReview = activeStep === 'review';
             // Shown as queued: the server may have read it already.
             if (item.status === 'saved') await refreshQueuedPages(recordOf(item).members);
             if (recordStateOf(item) === 'ready') {
                 keepCurrentAlignment();
+                if (stayInReview) reviewTable?.commit();
                 await openBatchVerifyItem(idx);
+                const opened = batchState.items[batchState.currentIndex];
+                // Set up in Verify and moved on in the same moment, so Verify never shows.
+                if (stayInReview && activeStep === 'verify' && recordOf(item).members.includes(opened)) {
+                    openReview({ switching: true });
+                }
             } else if (batchVerifying() && recordReadable(item)) {
                 await readQueuedRecord(item);
             } else if (pageAlignable(item)) {
@@ -6439,6 +6461,9 @@
 
             const btn = el('saveQueueNextBtn');
             btn.disabled = true;
+            // A loading circle in place of the save icon while the page is sent and the next one opens.
+            el('saveQueueNextIcon')?.classList.add('d-none');
+            el('saveQueueNextSpinner')?.classList.remove('d-none');
             clearOcrError();
             // The other page of the pair goes to the queue with this one (null: this page alone).
             const pairing = batchPairToQueue();
@@ -6543,6 +6568,8 @@
                 renderBatchQueueBanner();
             } finally {
                 btn.disabled = false;
+                el('saveQueueNextSpinner')?.classList.add('d-none');
+                el('saveQueueNextIcon')?.classList.remove('d-none');
             }
         });
 
@@ -8106,7 +8133,6 @@
             });
         }
         setUpRealign('verify');
-        setUpRealign('review');
 
         // Continue anyway: the scan is kept and verified as usual, and saving it
         // makes a new record without asking again.
@@ -10728,15 +10754,39 @@
             error.classList.remove('d-none');
         }
 
+        let submitErrorTimer = 0;
         function clearValidationSubmitError() {
+            window.clearTimeout(submitErrorTimer);
             el('validationSubmitMessage').textContent = '';
+            el('validationSubmitError').classList.remove('is-leaving');
             el('validationSubmitError').classList.add('d-none');
+        }
+
+        /** The message fades up and out, then is cleared (the timer's way; actions clear it at once). */
+        function fadeValidationSubmitError() {
+            const box = el('validationSubmitError');
+            if (box.classList.contains('d-none')) return;
+            if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                clearValidationSubmitError();
+                return;
+            }
+            box.classList.add('is-leaving');
+            box.addEventListener('animationend', () => {
+                if (box.classList.contains('is-leaving')) clearValidationSubmitError();
+            }, { once: true });
         }
 
         function showValidationSubmitError(message) {
             el('validationSubmitMessage').textContent = message;
-            el('validationSubmitError').classList.remove('d-none');
+            el('validationSubmitError').classList.remove('d-none', 'is-leaving');
+            // Replayed for a message shown again while one is up.
+            el('validationSubmitError').style.animation = 'none';
+            void el('validationSubmitError').offsetWidth;
+            el('validationSubmitError').style.animation = '';
             el('validationSubmitError').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            // The message goes by itself (a longer one stays a little longer), as in the Template Builder.
+            window.clearTimeout(submitErrorTimer);
+            submitErrorTimer = window.setTimeout(fadeValidationSubmitError, Math.max(5000, message.length * 70));
         }
 
         function updateVerificationSummary() {
@@ -10757,6 +10807,11 @@
             el('submitVerifiedCount').textContent = String(verified);
             el('submitBtn').disabled = verified === 0 || recordSubmitting;
             el('reviewSaveBtn').disabled = verified === 0 || recordSubmitting;
+            // Nothing ticked yet: Review & Export offers only the way back to Verify.
+            const verifyFirst = verified === 0 && total > 0;
+            el('reviewVerifyFirstBtn').classList.toggle('d-none', !verifyFirst);
+            el('reviewSaveBtn').classList.toggle('d-none', verifyFirst);
+            el('backToVerify').classList.toggle('d-none', verifyFirst);
             updateValidationGroupSummaries();
             updateValidationMarkerStates();
             if (reviewing) {
@@ -12847,7 +12902,6 @@
                 label = more ? `Save & next (${done + 1}/${records.length})` : 'Save & finish batch';
             }
             el('reviewSaveLabel').textContent = label;
-            el('reviewRealignGroup').classList.toggle('d-none', !batchState.active);
         }
 
         /** Move Verify's document pane and its notices into step 4 (on) or back to Verify (off). */
@@ -13026,7 +13080,12 @@
          * Verify's "Review & export": the checks Submit makes in Verify, in the
          * same order as submitRecord(), then the table.
          */
-        function openReview({ allowMissing = false } = {}) {
+        /**
+         * Verify → Review & Export. `switching`: another record picked from the
+         * queue while on this step opens here too, without Verify's checks on the
+         * way in (Save still makes every one of them).
+         */
+        function openReview({ allowMissing = false, switching = false } = {}) {
             clearValidationSubmitError();
             const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
             rows.forEach((row) => clearValidationFieldError(Number(row.dataset.fieldIndex)));
@@ -13035,54 +13094,59 @@
             const verifiedIndexes = rows
                 .filter((row) => requiredInput(row, '.validation-verified').checked)
                 .map((row) => Number(row.dataset.fieldIndex));
-            if (verifiedIndexes.length === 0) {
-                showValidationSubmitError('Check Verified on at least one field before going on.');
-                if (rows[0]) {
-                    activateValidationField(Number(rows[0].dataset.fieldIndex), 'marker');
-                    requiredInput(rows[0], '.validation-verified').focus();
-                }
-                return;
-            }
-
-            const invalidIndexes = verifiedIndexes.filter((index) => {
-                const row = validationRow(index);
-                if (!row) return true;
-                if (requiredInput(row, '.verified').value.trim()) return false;
-                setValidationFieldError(index, 'A verified field must contain a value.');
-                return true;
-            });
-            if (invalidIndexes.length > 0) {
-                showValidationSubmitError('Some checked fields still need a value.');
-                activateValidationField(invalidIndexes[0], 'marker');
-                const invalidRow = validationRow(invalidIndexes[0]);
-                if (invalidRow) requiredInput(invalidRow, '.verified').focus();
-                return;
-            }
-
-            if (!scanFile && !batchScanOnServer()) {
-                showValidationSubmitError('The original scan is no longer available. Return to marking and choose the file again.');
-                return;
-            }
-
-            if (!allowMissing) {
-                const missing = requiredNotSubmitted(verifiedIndexes);
-                if (missing.length > 0) {
-                    missingThenReview = true;
-                    el('missingRequiredModalTitle').textContent = 'Continue without required fields?';
-                    el('confirmMissingRequiredBtn').textContent = 'Continue anyway';
-                    askToSubmitWithoutRequired(missing);
+            if (switching) {
+                if (!scanFile && !batchScanOnServer()) return false;
+                reviewAllowMissing = false;
+            } else {
+                if (verifiedIndexes.length === 0) {
+                    showValidationSubmitError('Check Verified on at least one field before going on.');
+                    if (rows[0]) {
+                        activateValidationField(Number(rows[0].dataset.fieldIndex), 'marker');
+                        requiredInput(rows[0], '.validation-verified').focus();
+                    }
                     return;
                 }
-            }
 
-            if (verifyDoc) {
-                const unchecked = verifyDoc.pages.find((_, side) => !verifiedIndexes.some((index) => (cropped[index]?.pageIndex ?? 0) === side));
-                if (unchecked) {
-                    showValidationSubmitError(`Check Verified on at least one field of page ${unchecked.number}.`);
+                const invalidIndexes = verifiedIndexes.filter((index) => {
+                    const row = validationRow(index);
+                    if (!row) return true;
+                    if (requiredInput(row, '.verified').value.trim()) return false;
+                    setValidationFieldError(index, 'A verified field must contain a value.');
+                    return true;
+                });
+                if (invalidIndexes.length > 0) {
+                    showValidationSubmitError('Some checked fields still need a value.');
+                    activateValidationField(invalidIndexes[0], 'marker');
+                    const invalidRow = validationRow(invalidIndexes[0]);
+                    if (invalidRow) requiredInput(invalidRow, '.verified').focus();
                     return;
                 }
+
+                if (!scanFile && !batchScanOnServer()) {
+                    showValidationSubmitError('The original scan is no longer available. Return to marking and choose the file again.');
+                    return;
+                }
+
+                if (!allowMissing) {
+                    const missing = requiredNotSubmitted(verifiedIndexes);
+                    if (missing.length > 0) {
+                        missingThenReview = true;
+                        el('missingRequiredModalTitle').textContent = 'Continue without required fields?';
+                        el('confirmMissingRequiredBtn').textContent = 'Continue anyway';
+                        askToSubmitWithoutRequired(missing);
+                        return;
+                    }
+                }
+
+                if (verifyDoc) {
+                    const unchecked = verifyDoc.pages.find((_, side) => !verifiedIndexes.some((index) => (cropped[index]?.pageIndex ?? 0) === side));
+                    if (unchecked) {
+                        showValidationSubmitError(`Check Verified on at least one field of page ${unchecked.number}.`);
+                        return;
+                    }
+                }
+                reviewAllowMissing = allowMissing;
             }
-            reviewAllowMissing = allowMissing;
 
             stopAddingMissedField();
             stopGroupingFields();
@@ -13125,7 +13189,11 @@
             updateVerificationSummary();
             // Start on the first cell, without zooming the scan.
             if (reviewModel.rows.length > 0 && reviewModel.columns.length > 0) reviewTable.select(0, 0, { locate: false });
+            return true;
         }
+
+        // Nothing verified on this record yet: back to Verify, as Back to verify does.
+        el('reviewVerifyFirstBtn').addEventListener('click', () => el('backToVerify').click());
 
         // The question Submit asks; asked on the way to step 4 it says Continue.
         el('missingRequiredModal').addEventListener('hidden.bs.modal', () => {

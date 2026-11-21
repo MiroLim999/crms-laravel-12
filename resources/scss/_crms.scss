@@ -1465,6 +1465,31 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   min-block-size: calc(100dvh - 11.75rem);
 }
 
+// The red message under the step bar: slides down in, fades up and out.
+@keyframes submit-error-in {
+  from {
+    opacity: 0;
+    transform: translateY(-.5rem);
+  }
+}
+
+@keyframes submit-error-out {
+  to {
+    opacity: 0;
+    transform: translateY(-.5rem);
+  }
+}
+
+.validation-submit-error.is-leaving {
+  animation: submit-error-out .3s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .validation-submit-error {
+    animation: none;
+  }
+}
+
 @keyframes document-panel-in {
   from {
     opacity: 0;
@@ -1934,16 +1959,46 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   display: inline-flex;
   align-items: center;
   gap: .35rem;
-  max-inline-size: min(22rem, 100%);
+  // One width whatever document is open, so it (and Add files beside it) never
+  // moves when another is picked: the name shortens inside it instead.
+  // (A fixed length: a percentage would follow the bar's own content width.)
+  flex: 0 0 22rem;
+  inline-size: 22rem;
+  max-inline-size: 22rem;
 
   .batch-queue-toggle__text {
+    flex: 0 1 auto;
     min-inline-size: 0;
+    text-align: start;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
+  // Which document is open ("2/4"), and its page(s): kept whole while the name shortens.
+  .batch-queue-toggle__num,
+  .batch-queue-toggle__pages {
+    flex: 0 0 auto;
+    font-size: .75rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .batch-queue-toggle__num {
+    padding: .05rem .4rem;
+    border-radius: .3rem;
+    color: var(--bs-primary);
+    background: rgba(var(--bs-primary-rgb), .12);
+    font-weight: 600;
+  }
+
+  .batch-queue-toggle__pages {
+    color: var(--bs-secondary-color);
+  }
+
   .batch-queue-toggle__chevron {
+    flex: 0 0 auto;
+    margin-inline-start: auto;
     transition: transform .15s ease;
   }
 
@@ -2430,6 +2485,8 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 
   .batch-queue-toggle {
+    flex: 1 1 auto;
+    inline-size: auto;
     max-inline-size: 100%;
   }
 
@@ -4421,6 +4478,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 }
 
 .validation-submit-error {
+  animation: submit-error-in .28s cubic-bezier(.2, .8, .3, 1) both;
   display: flex;
   align-items: flex-start;
   gap: .65rem;
