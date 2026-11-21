@@ -5009,16 +5009,19 @@
                 const current = batchState.items[batchState.currentIndex];
                 const position = current ? records.findIndex((record) => record.members.includes(current)) : -1;
                 const onRecord = position !== -1 && !recordDone(records[position]);
+                const allSaved = records.length > 0 && records.every(recordDone);
                 if (phaseTitle) {
-                    phaseTitle.textContent = phase === 'done' ? 'Batch complete'
-                        : batchFinishing ? 'Saving the batch'
+                    phaseTitle.textContent = phase === 'done' && !batchFinishing ? 'Batch complete'
+                        : batchFinishing ? (allSaved ? 'Batch saved' : 'Saving the batch')
                             : (activeStep === 'review' ? 'Review & save' : 'Verify each record');
                 }
                 // Saving the Done records: which one is being saved, and how many are.
                 const savedRecords = records.filter(recordDone).length;
                 if (counter && batchFinishing) {
-                    counter.textContent = `Saving record ${Math.min(savedRecords + 1, records.length)} of ${records.length}`
-                        + (savedRecords > 0 ? ` · ${savedRecords} saved` : '');
+                    counter.textContent = allSaved
+                        ? `All ${records.length} record${records.length === 1 ? '' : 's'} saved`
+                        : `Saving record ${Math.min(savedRecords + 1, records.length)} of ${records.length}`
+                            + (savedRecords > 0 ? ` · ${savedRecords} saved` : '');
                 } else if (counter) {
                     counter.textContent = phase === 'done' || !onRecord
                         ? `${finished} of ${records.length} record${records.length === 1 ? '' : 's'} done`
@@ -8370,6 +8373,15 @@
          */
         async function approveBatchRecord(lead, { allowMissing, allowDuplicate }) {
             recordSubmitting = true;
+            // The loading circle first, while what was typed is kept with the batch;
+            // only then does the bar move on, and then the next record opens.
+            const button = el('reviewSaveBtn');
+            const idleButton = button.innerHTML;
+            const label = el('reviewSaveLabel')?.textContent.trim() || 'Save & next';
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>';
+            button.append(label);
+            const started = performance.now();
             try {
                 reviewTable?.commit();
                 const approval = { allowMissing: Boolean(allowMissing), allowDuplicate: Boolean(allowDuplicate) };
@@ -8379,14 +8391,25 @@
                     if (existingRecordAccepted) it.existingAccepted = true;
                 });
                 keepVerifyDraft(lead);
+                // On the server (so a resume has it), or given up on after a while: it is kept here anyway.
+                await Promise.race([batchServer.chain, wait(4000)]);
+                // Long enough to be seen.
+                const rest = 450 - (performance.now() - started);
+                if (rest > 0 && !reducedMotion()) await wait(rest);
                 renderBatchQueueBanner();
+                // The bar glides on before the next record takes the screen.
+                if (!reducedMotion()) await wait(350);
+                // The circle stays until the next record is open (no second press meanwhile).
+                if (batchRecords().some((record) => !recordSettled(record))) {
+                    await continueBatch(lead);
+                    return;
+                }
             } finally {
                 recordSubmitting = false;
+                button.innerHTML = idleButton;
+                button.disabled = false;
             }
-            if (batchRecords().some((record) => !recordSettled(record))) {
-                await continueBatch(lead);
-                return;
-            }
+            // None left to check: Save & finish batch saves them all (its own button state).
             await finishBatchSave();
         }
 
@@ -8418,6 +8441,15 @@
                     // eslint-disable-next-line no-await-in-loop
                     const saved = await submitRecord({ ...lead.approved, finalBatchSave: true });
                     if (!saved) break;
+                }
+                // Every record saved: the green line fills to the end, with "All 4 records
+                // saved", before the batch's summary takes the step's place.
+                if (batchState.items.every(pageDone)) {
+                    renderBatchQueueBanner();
+                    const button = el('reviewSaveBtn');
+                    button.disabled = true;
+                    button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved';
+                    if (!reducedMotion()) await wait(1000);
                 }
             } finally {
                 batchFinishing = false;
