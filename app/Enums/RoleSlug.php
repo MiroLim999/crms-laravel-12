@@ -23,7 +23,7 @@ enum RoleSlug: string
     public function description(): string
     {
         return match ($this) {
-            self::SuperAdmin => 'Full access: scanning, records, reports, templates and OCR models.',
+            self::SuperAdmin => 'Full access: scanning, records, templates and OCR models.',
         };
     }
 }

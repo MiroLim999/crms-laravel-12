@@ -13,7 +13,7 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * What the Records Archive list says of each record: a register page by its
+ * What the Saved Records list says of each record: a register page by its
  * file and pages (with how many people and its first column's first and last
  * value), a single certificate by its name; searched by file name too, and
  * filtered by the batch that saved it.
@@ -94,6 +94,74 @@ class RecordsArchiveListTest extends TestCase
             ->assertSee('· 1 record</option>', false)
             ->assertSee('data-record-id="'.$inBatch->getKey().'"', false)
             ->assertDontSee('data-record-id="'.$other->getKey().'"', false);
+    }
+
+    public function test_each_record_says_whether_a_batch_or_a_single_file_saved_it(): void
+    {
+        $user = User::factory()->create();
+        // Saved before any batch was kept: it cannot be told.
+        $old = $this->register($user, 'old.pdf', ['1', '2']);
+        $old->forceFill(['submitted_at' => now()->subDays(3)])->save();
+        $batch = $this->batch($user, now()->subDay());
+        $fromBatch = $this->register($user, 'batch.pdf', ['3', '4']);
+        $this->linkToBatch($batch, $fromBatch);
+        $single = $this->register($user, 'single.pdf', ['5', '6']);
+
+        $page = $this->actingAs($user)->get(route('records.index'))->assertOk();
+        $page->assertSee('href="'.route('records.index', ['batch' => $batch->getKey()]).'"', false)
+            ->assertSee('Single file')
+            ->assertSee('Saved before batches were kept', false);
+
+        // Single files only: the one saved alone since batches are kept.
+        $this->actingAs($user)->get(route('records.index', ['batch' => 'single']))
+            ->assertOk()
+            ->assertSee('data-record-id="'.$single->getKey().'"', false)
+            ->assertDontSee('data-record-id="'.$fromBatch->getKey().'"', false)
+            ->assertDontSee('data-record-id="'.$old->getKey().'"', false);
+    }
+
+    public function test_the_results_page_is_not_mistaken_for_a_filter(): void
+    {
+        $user = User::factory()->create();
+        foreach (range(1, 16) as $number) {
+            $this->register($user, "book-{$number}.pdf", ['1', '2']);
+        }
+
+        // Page 2 of everything: "16 records", not "16 matching records", and no Reset.
+        $this->actingAs($user)->get(route('records.index', ['page' => 2]))
+            ->assertOk()
+            ->assertSee('16 records')
+            ->assertDontSee('matching')
+            ->assertDontSee('Clear all filters');
+    }
+
+    private function batch(User $user, $createdAt): ScanBatch
+    {
+        $batch = ScanBatch::create([
+            'user_id' => $user->getKey(),
+            'doc_type' => 'birth',
+            'batch_key' => 'batch_'.Str::random(8),
+            'status' => ScanBatch::STATUS_DONE,
+            'version' => 1,
+        ]);
+        $batch->forceFill(['created_at' => $createdAt])->save();
+
+        return $batch;
+    }
+
+    private function linkToBatch(ScanBatch $batch, CivilRecord $record): void
+    {
+        ScanBatchPage::create([
+            'scan_batch_id' => $batch->getKey(),
+            'client_key' => (string) Str::uuid(),
+            'position' => 0,
+            'source_name' => (string) $record->source_name,
+            'page_no' => 1,
+            'page_total' => 2,
+            'record_key' => 'g'.$record->getKey().'#1',
+            'status' => 'imported',
+            'record_id' => $record->getKey(),
+        ]);
     }
 
     /** A register page: one record of a 2-page file, a person per row, the first column's values given. */

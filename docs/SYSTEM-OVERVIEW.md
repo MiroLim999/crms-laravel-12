@@ -115,23 +115,23 @@ These rules shape the whole system. Each one is enforced in code, not only in th
 ### 2.1 One account
 
 CRMS runs on one offline PC with **one account, the Super Admin**. The person who signs in does everything: scans,
-verifies, corrects, reports, builds templates and manages the AI models. There are no other roles and no screen for
+verifies, corrects, builds templates and manages the AI models. There are no other roles and no screen for
 managing users.
 
 | Account | Typical person | Main job |
 | :--- | :--- | :--- |
-| **Super Admin** | The registry's encoder or system administrator | Everything: New Document, Records Archive, Review & Export, Reports, Audit Log, Template Builder, OCR Workspace, Account Settings |
+| **Super Admin** | The registry's encoder or system administrator | Everything: New Document, Saved Records, Review & Export, Audit Log, Template Builder, OCR Workspace, Account Settings |
 
 ### 2.2 What the account can do
 
 | Capability | Super Admin |
 | :--- | :---: |
 | Scan, verify and submit records (New Document) | ✔ |
-| Search and view the Records Archive | ✔ |
+| Search and view the Saved Records | ✔ |
 | Edit a saved record (Edit in Review & Export) and see its edit history | ✔ |
 | Download one record as CSV, or its table as CSV or Excel | ✔ |
 | Dashboard with analytics | ✔ |
-| Reports and CSV export | ✔ |
+| Download several records together as one CSV or Excel file | ✔ |
 | View the audit log | ✔ |
 | Template Builder | ✔ |
 | OCR Workspace (AI models) | ✔ |
@@ -296,10 +296,9 @@ What each module contains:
  │   │   ├── Step 3 Verify: check, correct, tick, add missed fields
  │   │   ├── Step 4 Review & Export: records table, CSV / Excel, save
  │   │   └── Batch mode: queue many files or pages, Scan all, Download all
- │   └── Records Archive: search, filter, view a record beside its scan,
+ │   └── Saved Records: search, filter, view a record beside its scan,
  │       edit it in Review & Export
  ├── OVERSIGHT
- │   ├── Reports: filter, summary, CSV export
  │   ├── User Accounts: create, edit, reset password, deactivate, reactivate
  │   └── Audit Log: view, filter, search
  ├── SYSTEM SETUP
@@ -322,8 +321,8 @@ What each module contains:
 | :--- | :--- | :--- |
 | Access | Everyone | `app/Http/Controllers/Auth/`, `app/Http/Middleware/`, `app/Providers/AuthServiceProvider.php` |
 | Dashboard | Everyone: Staff see their own work, Admin and Super Admin see analytics | `DashboardController.php`, `app/Services/DashboardAnalytics.php` |
-| Digitization | The Super Admin: New Document, Records Archive, Review & Export | `DocumentScanController.php`, `DocumentPageController.php`, `RecordController.php`, `RecordReviewController.php` |
-| Oversight | Admin and Super Admin (an Admin manages Staff accounts only) | `ReportController.php`, `UserController.php`, `AuditLogController.php` |
+| Digitization | The Super Admin: New Document, Saved Records, Review & Export | `DocumentScanController.php`, `DocumentPageController.php`, `RecordController.php`, `RecordReviewController.php` |
+| Oversight | Admin and Super Admin (an Admin manages Staff accounts only) | `UserController.php`, `AuditLogController.php` |
 | System setup | Super Admin | `DocumentTemplateController.php`, `DocumentTypeDefinitionController.php`, `OcrModelController.php`, `OcrUploadController.php` |
 | Background services | Nobody directly; they start with the system | `app/Jobs/`, `ml/line_markers.py`, `ml/api/main.py`, `routes/console.php` |
 
@@ -334,8 +333,7 @@ What each module contains:
  └── SUPER ADMIN (the one account)
      ├── Dashboard
      ├── New Document: Document > Align > Verify > Review & Export > Save
-     ├── Records Archive: search, view, Edit in Review & Export, Download CSV
-     ├── Reports and CSV export
+     ├── Saved Records: search, filter, view, Edit in Review & Export, download one or several
      ├── Audit Log
      ├── OCR Workspace
      ├── Template Builder
@@ -474,9 +472,8 @@ Where each feature's code is, file by file, is listed in [section 12](#12-where-
  ├── Dashboard
  ├── Digitization
  │   ├── New Document
- │   └── Records Archive (each record: Edit in Review & Export)
- ├── Reports & history
- │   ├── Reports
+ │   └── Saved Records (each record: Edit in Review & Export)
+ ├── History
  │   └── Audit Log
  └── System
      ├── OCR Workspace
@@ -501,11 +498,11 @@ One dashboard. Each panel has its own reporting period (last 30 days, last 90 da
 
 | Panel | What it shows |
 | :--- | :--- |
-| Headline figures | Records archived (all time, this month, and in the period), the change against the previous period of the same length, and when the last record was submitted |
+| Headline figures | Saved recordsd (all time, this month, and in the period), the change against the previous period of the same length, and when the last record was submitted |
 | New document | Which document types can be scanned now |
 | **OCR Quality** | Average confidence of the AI readings, the **correction rate** (share of values changed while verifying) and how many values fell below the confidence threshold |
 | **OCR Performance** | A radar chart comparing the active model with Microsoft's base model, from their test-set reports |
-| **Digitization Volume & Trend** | Records archived per document type over time (by day for up to 90 days, by month beyond) |
+| **Digitization Volume & Trend** | Saved recordsd per document type over time (by day for up to 90 days, by month beyond) |
 | Archive by type | Records per document type |
 | **Processing** | Detect and Scan runs that finished, failed or were cancelled; their average time; reading speed in milliseconds per line |
 | **Edits after saving** | Review & Export saves on saved records in the period, the records they changed, and how many fields (from the `record.edited` audit entries; **All edits** opens them in the audit log) |
@@ -585,9 +582,11 @@ On submission CRMS:
 3. writes a `record.submitted` audit entry: number of fields, how many were corrected, the model used, and any missing required fields the person accepted,
 4. deletes the page's working files.
 
-### 4.7 Records Archive
+### 4.7 Saved Records
 
-- **Search** by any verified value (the top bar's search, or press `/`), and filter by document type and submission date (Philippine days). 15 records per page.
+- **Search** by any verified value or the name of the file a record came from (the top bar's search, or press `/`), and filter by document type, by the **batch** that saved it (or **Single files only**) and by submission date (Philippine days). 15 records per page. Filters, search and the pages of results load in place, without reloading the page.
+- Each row is named by its file and pages (a register page also says how many people it holds and its first and last entry number), and a **Source** column says whether a batch or a single file saved it (older records, saved before batches were kept, show "—").
+- **Download selected** (tick records, across pages) or **Download all N** (everything the filters match, at most 1,000) give the records' tables as one CSV, or as one Excel file with an "All records" sheet and a sheet per record. Each download is one audit entry (`record.exported`).
 - The **record page** shows the values grouped by person, and the page that was read with each value's box drawn on its handwriting. **Open full size** opens the original upload.
 - It marks values that were corrected during verification, notes under a value when it was last edited ("Edited 2
   days ago"), and lists every later save (**Edit history**: who, when and which values, with a link to the audit log).
@@ -624,13 +623,11 @@ Until 15 November 2026 a saved record was changed with **Correct record** (store
 **Corrections** page). Those tables were dropped; the audit log keeps their old `change_request.*` and
 `record.corrected` entries.
 
-### 4.9 Reports
+### 4.9 Reports (removed)
 
-- Filter records by document type and date range; see a summary and a list (25 per page).
-- **Export CSV** writes the matching records: ID, type, status, main value, created and submitted (time and person), OCR model, number of fields, average confidence.
-- The file is written 200 records at a time straight to the download, so even the whole archive does not overload the computer.
-- A cell that starts with `=`, `+`, `-` or `@` gets a leading `'`, so Excel shows it as text instead of running it as a formula ("CSV injection").
-- Every export is written to the audit log with its filters (`report.generated`).
+Removed on 22 November 2026: the Reports page and its CSV export of record summaries. What is left of it: a record's
+**Download CSV**, and **Download selected** / **Download all** in Saved Records ([4.7](#47-saved-records)), which give the
+records' own tables. The audit log keeps the old `report.generated` entries.
 
 ### 4.10 User Accounts (removed)
 
@@ -1122,7 +1119,7 @@ All four suites were run on **3 November 2026** for this document:
 
 | Suite | What it tests | Tests | Passed | Failed | Skipped | Time |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| PHP (PHPUnit), 23 test classes | Website: permissions, workflows, records, reports, templates, OCR client | 346 | 343 | **3** | 0 | 61 s |
+| PHP (PHPUnit), 23 test classes | Website: permissions, workflows, records, templates, OCR client | 346 | 343 | **3** | 0 | 61 s |
 | JavaScript (Node test runner), 13 files | Screen logic: markers, ledger grid, line geometry, value checks, undo | 107 | 105 | **2** | 0 | – |
 | Python, line detection (Kraken environment) | Line finding on synthetic pages and many ledger layouts | 87 | 86 | 0 | 1 (Linux only) | 106 s |
 | Python, OCR service | Service key, batched reading, GPU fallback, report checks, no model installed | 19 | 19 | 0 | 0 | 6 s |
@@ -1147,7 +1144,6 @@ None points to wrong data being saved, but they should be fixed or updated befor
 | Scanning and submitting | `DocumentUploadWorkflowTest`, `LineOutlinePipelineTest`: page job, Detect, outlines, manual fixes, missing required fields, TIFF refused |
 | Records | `RecordArchiveFilterTest`, `RecordDetailPresentationTest`: search, filters by Philippine day, straightened page kept |
 | Review & Export | `RecordReviewTest`: only changed values saved, old and new logged, added cells, other records' fields refused; `review-table.test.js`: rows per person, CSV and Excel, keys, a batch as one table |
-| Reports | `ReportExportTest`: CSV injection, Philippine time in the CSV |
 | Templates | `DocumentTemplateBuilderTest`, `TemplateVersioningTest`, `TemplateBuilderGridChecksTest`, `TemplateFieldSettingsTest` |
 | Dashboard | `AnalyticsDashboardTest`: each panel's own period, bad periods in the address |
 | OCR | `OcrClientTest` (the service key on every call), `OcrWorkspaceTest`, `OcrModelPerformanceTest`; Python: `test_service_key`, `test_ocr_batch`, `test_evaluation_report` |
@@ -1253,10 +1249,9 @@ In order of value for the defense and for real use:
 | Pages in progress, Detect, line fixes | `app/Http/Controllers/DocumentPageController.php`, `app/Jobs/ProcessDocumentPage.php`, `app/Services/Lines/` |
 | Line detection | `ml/line_markers.py` |
 | Reading service | `ml/api/main.py`, `ml/trocr_common.py`, `app/Services/Ocr/OcrClient.php` |
-| Records archive | `app/Http/Controllers/RecordController.php`, `app/Services/RecordFieldGrouper.php`, `resources/views/records/` |
+| Saved Records | `app/Http/Controllers/RecordController.php`, `app/Services/RecordFieldGrouper.php`, `resources/views/records/` |
 | Review & Export of a saved record | `app/Http/Controllers/RecordReviewController.php`, `resources/views/records/review.blade.php`, `resources/js/record-review.js`, `review-table.js` |
 | Dev-only Review & Export shortcut (temporary) | `config/dev_review_shortcut.php`, `routes/dev-review-shortcut.php`, `app/Http/Controllers/Dev/ReviewShortcutController.php` |
-| Reports and CSV | `app/Http/Controllers/ReportController.php` |
 | User accounts | `app/Http/Controllers/UserController.php`, `app/Services/UserProvisioner.php` |
 | Audit log | `app/Services/AuditLogger.php`, `app/Models/AuditLog.php`, `app/Http/Controllers/AuditLogController.php` |
 | Template Builder | `app/Http/Controllers/DocumentTemplateController.php`, `DocumentTypeDefinitionController.php`, `resources/js/template-builder.js` |
@@ -1360,7 +1355,8 @@ In order of value for the defense and for real use:
 | Accounts | `user.created`, `user.updated`, `user.password_changed`, `user.password_reset`, `user.activated`, `user.deactivated` |
 | Records | `record.submitted`, `record.edited` (a save in Review & Export, with every old and new value), `record.exported` (Download CSV) |
 | Change requests (removed; older entries only) | `change_request.opened`, `change_request.approved`, `change_request.rejected`, `change_request.withdrawn`, `record.corrected` |
-| Reports and exports | `report.generated`, `training.exported` |
+| Exports | `training.exported` |
+| Reports (removed; older entries only) | `report.generated` |
 | Document types | `document-type.created`, `document-type.renamed`, `document-type.archived`, `document-type.restored`, `document-type.deleted` |
 | Templates | `template.created`, `template.updated`, `template.versioned`, `template.duplicated`, `template.activated`, `template.deleted`, `template.sample-uploaded`, `template.sample-replaced`, `template.sample-deleted` |
 | AI models | `ocr_model.added`, `ocr_model.registered`, `ocr_model.activated`, `ocr_model.renamed`, `ocr_model.color_changed`, `ocr_model.deleted`, `ocr_model.marked_missing`, `ocr_model.evaluation_imported`, `ocr_model.evaluation_cleared`, `ocr_settings.updated` |

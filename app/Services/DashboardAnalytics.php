@@ -517,7 +517,7 @@ class DashboardAnalytics
 
     /**
      * The newest changes to how CRMS is set up, from the audit log: templates,
-     * OCR models, reports, corrections.
+     * OCR models, corrections.
      * Sign-ins and archived records are left out.
      *
      * @return Collection<int, AuditLog>

@@ -431,11 +431,11 @@
                     <div class="dashboard-kpi-subcard">
                         <div class="dashboard-kpi__head">
                             <span class="dashboard-kpi__mini-icon bg-label-primary">
-                                <i class="icon-base bx bx-archive" aria-hidden="true"></i>
+                                <i class="icon-base bx bx-folder-open" aria-hidden="true"></i>
                             </span>
                             <span class="dashboard-kpi__label">Total digitized records</span>
-                            <a href="{{ route('reports.index', ['status' => 'submitted']) }}" class="btn btn-xs btn-label-primary px-2" title="Open the report of submitted records">
-                                <span>View report</span>
+                            <a href="{{ route('records.index') }}" class="btn btn-xs btn-label-primary px-2" title="Open the saved records">
+                                <span>View records</span>
                                 <i class="icon-base bx bx-right-arrow-alt ms-1" aria-hidden="true"></i>
                             </a>
                         </div>

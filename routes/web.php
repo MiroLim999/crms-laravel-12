@@ -14,7 +14,6 @@ use App\Http\Controllers\OcrModelController;
 use App\Http\Controllers\OcrUploadController;
 use App\Http\Controllers\RecordController;
 use App\Http\Controllers\RecordReviewController;
-use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ScanBatchController;
 use Illuminate\Support\Facades\Route;
 
@@ -183,12 +182,6 @@ Route::middleware('auth')->group(function () {
             ->name('records.review');
         Route::patch('records/{record}/review', [RecordReviewController::class, 'update'])
             ->name('records.review.update');
-    });
-
-    // Reports list and export records. Neither is a write path to record values.
-    Route::middleware('can:reports.generate')->group(function () {
-        Route::get('reports', [ReportController::class, 'index'])->name('reports.index');
-        Route::get('reports/export', [ReportController::class, 'export'])->name('reports.export');
     });
 
     /*

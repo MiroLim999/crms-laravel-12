@@ -43,7 +43,8 @@ class AnalyticsDashboardTest extends TestCase
             ->assertSee('OCR Quality')
             ->assertSee('Edits after saving')
             ->assertSee('Recent changes')
-            ->assertSee('View report')
+            ->assertSee('View records')
+            ->assertDontSee('View report')
             ->assertDontSee('Your submissions this month')
             ->assertDontSee('Manage users')
             ->assertDontSee('accounts active')
@@ -676,7 +677,7 @@ class AnalyticsDashboardTest extends TestCase
             ->get(route('dashboard'))
             ->assertOk()
             ->assertDontSee('>Analytics<', escape: false)
-            ->assertSee('>Reports<', escape: false)
+            ->assertDontSee('>Reports<', escape: false)
             ->assertSee('>Audit Log<', escape: false);
     }
 

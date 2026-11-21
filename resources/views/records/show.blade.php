@@ -33,7 +33,7 @@
                     <i class="icon-base bx bx-edit icon-sm me-1" aria-hidden="true"></i> Edit in Review &amp; Export
                 </a>
             @endcan
-            <a href="{{ route('records.index') }}" class="btn btn-sm btn-outline-secondary">Back to archive</a>
+            <a href="{{ route('records.index') }}" class="btn btn-sm btn-outline-secondary">Back to saved records</a>
         </div>
     </nav>
 @endsection

@@ -108,13 +108,32 @@ textarea,
 }
 
 // The archive's download bar: what is ticked, then Download selected and Download all.
-// The Records Archive list: a record's file (or name) can be long, and so can its type.
+// The Saved Records list: a record's file (or name) can be long, and so can its type.
 .records-list__record {
   min-inline-size: 16rem;
 }
 
 .records-list__title {
   overflow-wrap: anywhere;
+}
+
+// Batch (a link to that batch's records) or Single file.
+.records-list__source {
+  white-space: nowrap;
+
+  a.badge:hover {
+    text-decoration: underline;
+  }
+}
+
+// Loading the next results in place: the old ones fade a little meanwhile.
+#recordsResults {
+  transition: opacity .15s ease;
+
+  &.is-loading {
+    opacity: .55;
+    pointer-events: none;
+  }
 }
 
 .records-list__type {

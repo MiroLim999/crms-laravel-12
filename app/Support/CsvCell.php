@@ -3,7 +3,7 @@
 namespace App\Support;
 
 /**
- * Shared by every CSV CRMS writes (Reports → Export, a record's Download CSV).
+ * Shared by every CSV CRMS writes (a record's Download CSV, and the saved records' download).
  */
 final class CsvCell
 {

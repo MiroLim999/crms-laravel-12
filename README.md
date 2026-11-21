@@ -135,7 +135,7 @@ It prints a new temporary password once. Sign in with it, and CRMS asks you to c
 | **Template Builder** | Design the layout of each document type. |
 | **OCR Workspace** | Install models, choose the active one, and compare benchmarks (CER, WER, exact match). |
 | **Audit log** | Every action is recorded: who, when, and what changed. |
-| **Dashboard and reports** | Volume, document types, OCR quality and throughput, plus CSV export. |
+| **Dashboard** | Volume, document types, OCR quality and throughput. |
 
 ---
 

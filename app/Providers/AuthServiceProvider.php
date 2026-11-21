@@ -22,7 +22,6 @@ class AuthServiceProvider extends ServiceProvider
             'records.edit',
             'records.view',
             'audit.view',
-            'reports.generate',
             'templates.manage',
             'ocr.manage',
         ] as $ability) {

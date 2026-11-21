@@ -32,13 +32,12 @@ class Navigation
                 'header' => 'Digitization',
                 'items' => [
                     self::item('New Document', 'documents.create', 'bx-scan', 'documents.process'),
-                    self::item('Records Archive', 'records.index', 'bx-archive', 'records.view'),
+                    self::item('Saved Records', 'records.index', 'bx-folder-open', 'records.view'),
                 ],
             ],
             [
-                'header' => 'Reports & history',
+                'header' => 'History',
                 'items' => [
-                    self::item('Reports', 'reports.index', 'bx-file', 'reports.generate'),
                     self::item('Audit Log', 'audit.index', 'bx-history', 'audit.view'),
                 ],
             ],
@@ -92,7 +91,7 @@ class Navigation
 
     /**
      * A nav item is active for its own route and any nested route beneath it,
-     * so `records.show` still highlights "Records Archive".
+     * so `records.show` still highlights "Saved Records".
      */
     private static function isActive(string $route): bool
     {

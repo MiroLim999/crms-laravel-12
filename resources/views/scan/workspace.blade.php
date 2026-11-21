@@ -986,7 +986,7 @@
                 <footer class="validation-submit-bar">
                     <div class="validation-submit-actions">
                         <a href="#" class="btn btn-outline-secondary" id="batchSummaryRecordsBtn">
-                            <i class="icon-base bx bx-archive icon-sm me-1" aria-hidden="true"></i>Records archive
+                            <i class="icon-base bx bx-folder-open icon-sm me-1" aria-hidden="true"></i>Saved records
                         </a>
                         <a href="#" class="btn btn-primary" id="batchSummaryRestartBtn">
                             <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Scan another batch
@@ -1310,7 +1310,7 @@
                         What you do here is no longer saved. Reload this page to pick the batch up where it stands, or close this tab.
                     </p>
                     <div class="leave-scan-modal__actions">
-                        <a class="btn btn-label-secondary" id="batchTakenRecordsLink" href="#">Records Archive</a>
+                        <a class="btn btn-label-secondary" id="batchTakenRecordsLink" href="#">Saved Records</a>
                         <button type="button" class="btn btn-primary" id="batchTakenReloadBtn">Reload</button>
                     </div>
                 </div>
@@ -4602,7 +4602,7 @@
         /**
          * Save & next was pressed on it (Done): it waits, still open to change, for
          * Save & finish batch, which saves every record Done at once. Nothing goes
-         * to the Records Archive before that.
+         * to the Saved Records before that.
          */
         const recordApproved = (record) => !recordDone(record)
             && recordState(record.members) === 'ready'
@@ -8367,7 +8367,7 @@
         /**
          * Save & next in a batch: the record passed the same checks Save does,
          * and is Done. What was typed and ticked is kept with the batch (so a
-         * resume has it), nothing is saved to the Records Archive yet, and it can
+         * resume has it), nothing is saved to Saved Records yet, and it can
          * be opened and changed again from the queue. Then the next record to
          * check opens, or, with none left, Save & finish batch saves them all.
          */
@@ -14143,7 +14143,7 @@
                 }
 
                 if (!payload?.redirect) {
-                    throw new Error('The record was saved, but the archive location was not returned. Open Records Archive to confirm it.');
+                    throw new Error('The record was saved, but its page was not returned. Open Saved Records to confirm it.');
                 }
 
                 if (batchState.active && currentBatchItem) {
@@ -14188,7 +14188,7 @@
             } catch (error) {
                 console.error('Record submission failed:', error);
                 const message = error.name === 'AbortError'
-                    ? 'Submission timed out. Check your connection, then confirm the record in Records Archive before trying again.'
+                    ? 'Submission timed out. Check your connection, then confirm the record in Saved Records before trying again.'
                     : (error instanceof TypeError
                         ? 'The server could not be reached. Check your connection and try again.'
                         : (error.message || 'The record could not be submitted. Nothing was saved.'));

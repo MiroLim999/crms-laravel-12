@@ -24,8 +24,7 @@ class CapabilityMatrixTest extends TestCase
         return [
             'dashboard' => ['dashboard'],
             'new document' => ['documents.create'],
-            'records archive' => ['records.index'],
-            'reports' => ['reports.index'],
+            'saved records' => ['records.index'],
             'audit log' => ['audit.index'],
             'template builder' => ['templates.index'],
             'OCR workspace' => ['ocr.index'],
@@ -53,7 +52,7 @@ class CapabilityMatrixTest extends TestCase
 
         foreach ([
             'documents.process', 'records.edit', 'records.view', 'audit.view',
-            'reports.generate', 'templates.manage', 'ocr.manage',
+            'templates.manage', 'ocr.manage',
         ] as $ability) {
             $this->assertTrue($user->can($ability), "The account should have '{$ability}'.");
         }
@@ -68,6 +67,8 @@ class CapabilityMatrixTest extends TestCase
             'user accounts' => ['/users'],
             'new account' => ['/users/create'],
             'old analytics link' => ['/analytics'],
+            'reports (removed)' => ['/reports'],
+            'reports export (removed)' => ['/reports/export'],
             'corrections (replaced by Review & Export)' => ['/change-requests'],
         ];
     }
@@ -87,7 +88,12 @@ class CapabilityMatrixTest extends TestCase
             ->assertOk()
             ->assertDontSee('User Accounts')
             ->assertDontSee('href="'.url('change-requests').'"', false)
-            ->assertSee('Reports &amp; history', false)
+            // Reports is gone; what was under it, the Audit Log, sits under History.
+            ->assertDontSee('>Reports<', false)
+            ->assertDontSee('Reports &amp; history', false)
+            ->assertSee('>History<', false)
+            ->assertSee('>Saved Records<', false)
+            ->assertDontSee('Records Archive')
             ->assertDontSee('Signed in as');
     }
 }

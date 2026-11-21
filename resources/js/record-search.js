@@ -2,7 +2,7 @@
  * Record search keyboard shortcut and empty-search check, on every page.
  *
  * "/" puts the cursor in the record search: the top bar's field, or on the
- * Records Archive, the archive's own Search field. Both carry
+ * Saved Records, its own Search field. Both carry
  * data-record-search. The key is left alone while someone is typing, when a
  * dialog is open, and on pages without a visible search field.
  *

@@ -39,6 +39,9 @@ class RecordController extends Controller
     /** The most records one download joins (Download selected, or all matching). */
     public const EXPORT_LIMIT = 1000;
 
+    /** See batchesKeptSince(): false until asked. */
+    private \Illuminate\Support\Carbon|false|null $batchesKeptSince = false;
+
     public function __construct(private readonly RecordFieldGrouper $fieldGrouper) {}
 
     /**
@@ -53,7 +56,8 @@ class RecordController extends Controller
             'q' => ['nullable', 'string', 'max:255'],
             'type' => ['nullable', 'string', 'exists:document_types,key'],
             'status' => ['nullable', 'string', 'in:'.implode(',', array_column(RecordStatus::cases(), 'value'))],
-            'batch' => ['nullable', 'integer', 'exists:scan_batches,id'],
+            // A batch's id, or "single": records saved one file at a time.
+            'batch' => ['nullable', 'string', 'regex:/^(single|[1-9][0-9]{0,9})$/'],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
         ];
@@ -74,11 +78,12 @@ class RecordController extends Controller
                 fn ($typeQuery) => $typeQuery->where('key', $type),
             ))
             ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
-            // The records one batch saved (its pages know their record).
-            ->when($filters['batch'] ?? null, fn ($q, $batch) => $q->whereIn(
-                'id',
-                ScanBatchPage::query()->select('record_id')->where('scan_batch_id', (int) $batch)->whereNotNull('record_id'),
-            ))
+            // The records one batch saved (its pages know their record), or those saved
+            // one file at a time since batches are kept (older ones cannot be told apart).
+            ->when($filters['batch'] ?? null, fn ($q, $batch) => $batch === 'single'
+                ? $q->whereNotIn('id', ScanBatchPage::query()->select('record_id')->whereNotNull('record_id'))
+                    ->where('submitted_at', '>=', $this->batchesKeptSince() ?? now()->addYear())
+                : $q->whereIn('id', ScanBatchPage::query()->select('record_id')->where('scan_batch_id', (int) $batch)->whereNotNull('record_id')))
             ->when($filters['from'] ?? null, fn ($q, $from) => $q->where('submitted_at', '>=', LocalTime::dayStart($from)))
             ->when($filters['to'] ?? null, fn ($q, $to) => $q->where('submitted_at', '<=', LocalTime::dayEnd($to)));
     }
@@ -95,7 +100,9 @@ class RecordController extends Controller
             view()->share('errors', (new ViewErrorBag)->put('default', $validator->errors()));
         }
 
-        $filters = $validator->valid();
+        // valid() also hands back every other value in the address (the results page, say),
+        // which is not a filter: only the filters themselves are kept.
+        $filters = array_intersect_key($validator->valid(), $this->filterRules());
         $words = SearchWords::from($filters['q'] ?? null);
 
         $records = $this->applyFilters(
@@ -114,7 +121,7 @@ class RecordController extends Controller
         return view('records.index', [
             'records' => $records,
             'details' => $this->listDetails($records),
-            'batches' => $this->savedBatches(isset($filters['batch']) ? (int) $filters['batch'] : null),
+            'batches' => $this->savedBatches(isset($filters['batch']) && $filters['batch'] !== 'single' ? (int) $filters['batch'] : null),
             'filters' => $filters,
             'documentTypes' => DocumentTypeDefinition::ordered(),
             'statuses' => RecordStatus::cases(),
@@ -127,7 +134,11 @@ class RecordController extends Controller
      * first and last value of its first column ("1978-0001 to 1978-0020"); a
      * single certificate by its first value (a name), with its file under it.
      *
-     * @return array<int, array{title: string, people: int, range: array{0: string, 1: string}|null, file: string|null}>
+     * Each also says where it came from: the batch that saved it (with when),
+     * "single" (one file at a time), or "unknown" (saved before batches were
+     * kept, so either).
+     *
+     * @return array<int, array{title: string, people: int, range: array{0: string, 1: string}|null, file: string|null, source: string, batch: array{id: int, label: string}|null}>
      */
     private function listDetails(LengthAwarePaginator $records): array
     {
@@ -154,8 +165,15 @@ class RecordController extends Controller
             ->get(['record_id', 'page_no', 'line_column', 'line_row', 'verified_value'])
             ->groupBy('record_id');
         $extraPages = RecordPage::query()->whereIn('record_id', $ids)->get(['record_id', 'source_page'])->groupBy('record_id');
+        // The batch each one was saved from (its pages know their record).
+        $batchOf = ScanBatchPage::query()
+            ->whereIn('record_id', $ids)
+            ->join('scan_batches', 'scan_batches.id', '=', 'scan_batch_pages.scan_batch_id')
+            ->get(['scan_batch_pages.record_id', 'scan_batches.id as batch_id', 'scan_batches.created_at as batch_created'])
+            ->keyBy('record_id');
+        $keptSince = $this->batchesKeptSince();
 
-        return $page->mapWithKeys(function (CivilRecord $record) use ($people, $lines, $extraPages) {
+        return $page->mapWithKeys(function (CivilRecord $record) use ($people, $lines, $extraPages, $batchOf, $keptSince) {
             $count = (int) ($people[$record->getKey()] ?? 0);
             $titleField = $record->fields->first();
 
@@ -191,13 +209,37 @@ class RecordController extends Controller
             $file = filled($record->source_name) ? $record->source_name.($pages ? " · {$pages}" : '') : null;
             $register = $count > 1 && $file !== null;
 
+            $fromBatch = $batchOf[$record->getKey()] ?? null;
+            $source = $fromBatch ? 'batch'
+                : ($keptSince !== null && $record->submitted_at !== null && $record->submitted_at->gte($keptSince) ? 'single' : 'unknown');
+
             return [$record->getKey() => [
                 'title' => $register ? $file : $record->title(),
                 'people' => $count,
                 'range' => $range,
                 'file' => $register ? null : $file,
+                'source' => $source,
+                'batch' => $fromBatch ? [
+                    'id' => (int) $fromBatch->batch_id,
+                    'label' => LocalTime::format(\Illuminate\Support\Carbon::parse($fromBatch->batch_created), 'j M, g:i a'),
+                ] : null,
             ]];
         })->all();
+    }
+
+    /**
+     * Since when a batch is kept on the server, so a record saved since then
+     * without one was saved one file at a time. Null: no batch yet.
+     */
+    private function batchesKeptSince(): ?\Illuminate\Support\Carbon
+    {
+        // Asked once per request (never kept between requests: batches come and go).
+        if ($this->batchesKeptSince === false) {
+            $first = ScanBatch::query()->min('created_at');
+            $this->batchesKeptSince = $first ? \Illuminate\Support\Carbon::parse($first) : null;
+        }
+
+        return $this->batchesKeptSince;
     }
 
     /**

@@ -1,16 +1,17 @@
 @extends('layouts.app')
 
-@section('title', 'Records Archive')
+@section('title', 'Saved Records')
 
 @php
     // Every record has one status (Submitted), so there is no status filter or
-    // column here, same as Reports.
+    // column here.
     $hasFilters = collect($filters)->filter(fn ($value) => $value !== null && $value !== '')->isNotEmpty();
 @endphp
 
 @section('content')
-    <x-page-header title="Records Archive" />
+    <x-page-header title="Saved Records" />
 
+    <div id="recordsFilterCard">
     <x-card>
         {{-- Type, Batch and the dates filter as soon as they change; the search words on Search or Enter. --}}
         <form method="GET" action="{{ route('records.index') }}" class="row g-3 align-items-end" id="recordsFilters">
@@ -48,8 +49,9 @@
                 <label for="batch" class="form-label">Batch</label>
                 <select id="batch" name="batch" class="form-select @error('batch') is-invalid @enderror">
                     <option value="">All</option>
+                    <option value="single" @selected(($filters['batch'] ?? null) === 'single')>Single files only</option>
                     @foreach ($batches as $batch)
-                        <option value="{{ $batch['id'] }}" @selected((int) ($filters['batch'] ?? 0) === $batch['id'])>{{ $batch['label'] }}</option>
+                        <option value="{{ $batch['id'] }}" @selected((string) ($filters['batch'] ?? '') === (string) $batch['id'])>Batch · {{ $batch['label'] }}</option>
                     @endforeach
                 </select>
                 @error('batch')<div class="invalid-feedback">{{ $message }}</div>@enderror
@@ -68,10 +70,13 @@
             </div>
         </form>
     </x-card>
+    </div>
 
+    {{-- Swapped in place by the script below (filters, search, pages): no whole-page reload. --}}
+    <div id="recordsResults" aria-live="polite">
     <x-card class="mt-4" :title="number_format($records->total()).' '.($hasFilters ? 'matching ' : '').str('record')->plural($records->total())">
         @if ($records->isEmpty())
-            <x-empty-state icon="bx-archive" title="No records match"
+            <x-empty-state icon="bx-folder-open" title="No records match"
                            message="Adjust the search, or digitise a new certificate." />
         @else
             {{-- Several records' typed tables as one download: those ticked (kept across pages), or all that match. --}}
@@ -122,6 +127,7 @@
                             </th>
                             <th>Record</th>
                             <th>Type</th>
+                            <th>Source</th>
                             <th>Submitted</th>
                         </tr>
                     </thead>
@@ -132,7 +138,7 @@
                                     <input type="checkbox" class="form-check-input" data-record-id="{{ $record->getKey() }}"
                                            aria-label="Tick record #{{ $record->getKey() }} to download it">
                                 </td>
-                                @php($detail = $details[$record->getKey()] ?? ['title' => $record->title(), 'people' => 0, 'range' => null, 'file' => null])
+                                @php($detail = $details[$record->getKey()] ?? ['title' => $record->title(), 'people' => 0, 'range' => null, 'file' => null, 'source' => 'unknown', 'batch' => null])
                                 <td class="records-list__record">
                                     <a href="{{ route('records.show', $record) }}" class="fw-medium records-list__title">{{ $detail['title'] }}</a>
                                     {{-- Every record is locked once submitted: only one that is not says so. --}}
@@ -174,6 +180,18 @@
                                         <span class="text-truncate">{{ $record->typeShortLabel() }}</span>
                                     </span>
                                 </td>
+                                {{-- From a batch (click: that batch's records), one file at a time, or not known. --}}
+                                <td class="records-list__source">
+                                    @if ($detail['source'] === 'batch')
+                                        <a href="{{ route('records.index', ['batch' => $detail['batch']['id']]) }}" class="badge bg-label-primary"
+                                           data-records-link title="Show the records this batch saved">Batch</a>
+                                        <small class="d-block text-muted">{{ $detail['batch']['label'] }}</small>
+                                    @elseif ($detail['source'] === 'single')
+                                        <span class="badge bg-label-secondary">Single file</span>
+                                    @else
+                                        <span class="text-muted" title="Saved before batches were kept, so it cannot be told">—</span>
+                                    @endif
+                                </td>
                                 <td class="text-muted text-nowrap">
                                     {{ \App\Support\LocalTime::format($record->submitted_at, 'j M Y, g:i a') ?: '—' }}
                                 </td>
@@ -186,112 +204,198 @@
             {{ $records->links() }}
         @endif
     </x-card>
+    </div>
 @endsection
 
 @push('scripts')
     <script type="module">
         import { downloadRecordTables, exportFileName, fetchRecordTables } from '{{ Vite::asset('resources/js/review-table.js') }}';
 
-        // Type, Batch and the dates filter as soon as they change (no Search press). A date
-        // typed by hand waits until it is whole (a 4-digit year), so 0002 is never sent.
-        const filters = document.getElementById('recordsFilters');
-        if (filters) {
-            let timer = null;
-            const go = () => {
-                window.clearTimeout(timer);
-                timer = window.setTimeout(() => filters.requestSubmit(), 350);
-            };
-            filters.querySelectorAll('select').forEach((select) => select.addEventListener('change', go));
-            filters.querySelectorAll('input[type="date"]').forEach((input) => input.addEventListener('change', () => {
-                if (input.value === '' || /^\d{4}-/.test(input.value) && Number(input.value.slice(0, 4)) >= 1800) go();
-            }));
+        // ---------------------------------------------------------------- in place
+        // A filter, a search, a page of results or a Batch link loads the results
+        // into this page (no whole-page reload): the page is fetched, its filters
+        // and results swapped in, and the address bar follows (Back works).
+        const filterCard = document.getElementById('recordsFilterCard');
+        const results = document.getElementById('recordsResults');
+        let loading = null;
+
+        async function loadRecords(url, { push = true, scroll = false } = {}) {
+            loading?.abort();
+            const controller = new AbortController();
+            loading = controller;
+            results.classList.add('is-loading');
+            try {
+                const response = await fetch(url, {
+                    headers: { Accept: 'text/html', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    signal: controller.signal,
+                });
+                if (!response.ok) throw new Error(`The server answered ${response.status}.`);
+                const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+                const nextResults = page.getElementById('recordsResults');
+                const nextFilters = page.getElementById('recordsFilterCard');
+                if (!nextResults || !nextFilters) throw new Error('Not the saved records page.');
+
+                // The field being typed in keeps what was typed meanwhile, and its caret.
+                const active = document.activeElement;
+                const keep = active && filterCard.contains(active) && active.id
+                    ? { id: active.id, value: active.value, start: active.selectionStart, end: active.selectionEnd }
+                    : null;
+                filterCard.replaceChildren(...nextFilters.childNodes);
+                results.replaceChildren(...nextResults.childNodes);
+                if (keep) {
+                    const field = document.getElementById(keep.id);
+                    if (field) {
+                        if (field.type === 'search' || field.type === 'text') field.value = keep.value;
+                        field.focus({ preventScroll: true });
+                        try { if (keep.start !== null) field.setSelectionRange(keep.start, keep.end); } catch { /* not a text box */ }
+                    }
+                }
+                if (push) window.history.pushState({ records: true }, '', response.url || url);
+                document.title = page.title || document.title;
+                setUpResults();
+                if (scroll) results.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            } catch (error) {
+                if (error.name === 'AbortError') return;
+                // Something went wrong: the page loads the usual way.
+                window.location.assign(url);
+            } finally {
+                if (loading === controller) {
+                    loading = null;
+                    results.classList.remove('is-loading');
+                }
+            }
         }
 
-        const bar = document.getElementById('recordsExport');
-        if (bar) {
-            // What is ticked stays ticked from page to page (in this tab), until Clear.
-            const KEY = 'crms-records-selected';
-            const load = () => {
-                try {
-                    return new Set(JSON.parse(sessionStorage.getItem(KEY) || '[]').map(Number).filter(Boolean));
-                } catch {
-                    return new Set();
-                }
-            };
-            const selected = load();
-            const save = () => {
-                try {
-                    sessionStorage.setItem(KEY, JSON.stringify([...selected]));
-                } catch {
-                    // Not kept between pages, then: the download still works on this one.
-                }
-            };
-            const boxes = [...document.querySelectorAll('input[data-record-id]')];
-            const pageBox = document.getElementById('recordsSelectPage');
-            const errorLine = document.getElementById('recordsExportError');
+        // Type, Batch and the dates filter as soon as they change (no Search press). A date
+        // typed by hand waits until it is whole (a 4-digit year), so 0002 is never sent.
+        let filterTimer = null;
+        const submitFilters = () => {
+            window.clearTimeout(filterTimer);
+            filterTimer = window.setTimeout(() => {
+                const form = document.getElementById('recordsFilters');
+                if (!form) return;
+                const params = new URLSearchParams(new FormData(form));
+                // Empty filters are left out of the address.
+                [...params.keys()].forEach((key) => { if (params.get(key) === '') params.delete(key); });
+                const query = params.toString();
+                loadRecords(`${form.action}${query ? `?${query}` : ''}`);
+            }, 300);
+        };
+        filterCard.addEventListener('change', (event) => {
+            const field = event.target;
+            if (field.matches('select')) submitFilters();
+            if (field.matches('input[type="date"]')
+                && (field.value === '' || (/^\d{4}-/.test(field.value) && Number(field.value.slice(0, 4)) >= 1800))) submitFilters();
+        });
+        filterCard.addEventListener('submit', (event) => {
+            if (!event.target.matches('#recordsFilters')) return;
+            event.preventDefault();
+            submitFilters();
+        });
+        // Reset (clear every filter), the pages of results, and a record's Batch link.
+        document.addEventListener('click', (event) => {
+            const paging = 'nav[aria-label="Pagination Navigation"] a[href], .pagination a[href]';
+            const link = event.target.closest(`#recordsFilterCard a[href], #recordsResults ${paging.split(', ').join(', #recordsResults ')}, #recordsResults a[data-records-link]`);
+            if (!link || event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
+            event.preventDefault();
+            loadRecords(link.href, { scroll: link.matches(paging) });
+        });
+        window.addEventListener('popstate', () => loadRecords(window.location.href, { push: false }));
+        window.history.replaceState({ records: true }, '', window.location.href);
 
-            function render() {
-                boxes.forEach((box) => { box.checked = selected.has(Number(box.dataset.recordId)); });
-                const onPage = boxes.filter((box) => box.checked).length;
-                pageBox.checked = onPage > 0 && onPage === boxes.length;
-                pageBox.indeterminate = onPage > 0 && onPage < boxes.length;
-                const count = selected.size;
-                // Ticks stay from page to page: say how many are on this one.
-                const where = onPage === count ? '' : (onPage === 0 ? ' (none on this page)' : ` (${onPage} on this page)`);
-                document.getElementById('recordsSelectedCount').textContent = count === 0
-                    ? 'Tick records to download them together'
-                    : `${count.toLocaleString()} record${count === 1 ? '' : 's'} ticked${where}`;
-                document.getElementById('recordsClearSelection').classList.toggle('d-none', count === 0);
-                document.getElementById('recordsDownloadSelected').disabled = count === 0;
+        // ---------------------------------------------------------------- ticks and downloads
+        // What is ticked stays ticked from page to page (in this tab), until Clear.
+        const KEY = 'crms-records-selected';
+        const selected = (() => {
+            try {
+                return new Set(JSON.parse(sessionStorage.getItem(KEY) || '[]').map(Number).filter(Boolean));
+            } catch {
+                return new Set();
             }
+        })();
+        const save = () => {
+            try {
+                sessionStorage.setItem(KEY, JSON.stringify([...selected]));
+            } catch {
+                // Not kept between pages, then: the download still works on this one.
+            }
+        };
+        const boxes = () => [...results.querySelectorAll('input[data-record-id]')];
 
-            boxes.forEach((box) => box.addEventListener('change', () => {
+        function render() {
+            const bar = document.getElementById('recordsExport');
+            if (!bar) return;
+            const shown = boxes();
+            shown.forEach((box) => { box.checked = selected.has(Number(box.dataset.recordId)); });
+            const onPage = shown.filter((box) => box.checked).length;
+            const pageBox = document.getElementById('recordsSelectPage');
+            pageBox.checked = onPage > 0 && onPage === shown.length;
+            pageBox.indeterminate = onPage > 0 && onPage < shown.length;
+            const count = selected.size;
+            // Ticks stay from page to page: say how many are on this one.
+            const where = onPage === count ? '' : (onPage === 0 ? ' (none on this page)' : ` (${onPage} on this page)`);
+            document.getElementById('recordsSelectedCount').textContent = count === 0
+                ? 'Tick records to download them together'
+                : `${count.toLocaleString()} record${count === 1 ? '' : 's'} ticked${where}`;
+            document.getElementById('recordsClearSelection').classList.toggle('d-none', count === 0);
+            document.getElementById('recordsDownloadSelected').disabled = count === 0;
+        }
+        const setUpResults = render;
+
+        results.addEventListener('change', (event) => {
+            const box = event.target;
+            if (box.matches('input[data-record-id]')) {
                 const id = Number(box.dataset.recordId);
                 if (box.checked) selected.add(id);
                 else selected.delete(id);
-                save();
-                render();
-            }));
-            pageBox.addEventListener('change', () => {
-                boxes.forEach((box) => {
-                    const id = Number(box.dataset.recordId);
-                    if (pageBox.checked) selected.add(id);
+            } else if (box.matches('#recordsSelectPage')) {
+                boxes().forEach((one) => {
+                    const id = Number(one.dataset.recordId);
+                    if (box.checked) selected.add(id);
                     else selected.delete(id);
                 });
-                save();
-                render();
-            });
-            document.getElementById('recordsClearSelection').addEventListener('click', () => {
+            } else {
+                return;
+            }
+            save();
+            render();
+        });
+        results.addEventListener('click', async (event) => {
+            if (event.target.closest('#recordsClearSelection')) {
                 selected.clear();
                 save();
                 render();
-            });
+                return;
+            }
+            const item = event.target.closest('[data-export]');
+            const bar = document.getElementById('recordsExport');
+            if (!item || !bar) return;
+            const which = item.dataset.export;
+            const toggle = document.getElementById(which === 'all' ? 'recordsDownloadAll' : 'recordsDownloadSelected');
+            const spinner = toggle.querySelector('.spinner-border');
+            const errorLine = document.getElementById('recordsExportError');
+            const params = new URLSearchParams(which === 'all' ? bar.dataset.filters : '');
+            if (which === 'all') params.set('all', '1');
+            else [...selected].sort((a, b) => a - b).forEach((id) => params.append('ids[]', String(id)));
 
-            bar.querySelectorAll('[data-export]').forEach((item) => item.addEventListener('click', async () => {
-                const which = item.dataset.export;
-                const toggle = document.getElementById(which === 'all' ? 'recordsDownloadAll' : 'recordsDownloadSelected');
-                const spinner = toggle.querySelector('.spinner-border');
-                const params = new URLSearchParams(which === 'all' ? bar.dataset.filters : '');
-                if (which === 'all') params.set('all', '1');
-                else [...selected].sort((a, b) => a - b).forEach((id) => params.append('ids[]', String(id)));
+            errorLine.classList.add('d-none');
+            toggle.disabled = true;
+            spinner?.classList.remove('d-none');
+            try {
+                const records = await fetchRecordTables(bar.dataset.exportUrl, params);
+                if (records.length === 0) throw new Error('none of those records could be found.');
+                await downloadRecordTables(records, exportFileName('records', new Date().toISOString().slice(0, 10)), item.dataset.format);
+            } catch (error) {
+                errorLine.textContent = `The download could not be made: ${error.message || 'try again.'}`;
+                errorLine.classList.remove('d-none');
+            } finally {
+                spinner?.classList.add('d-none');
+                render();
+                toggle.disabled = which === 'all' ? false : selected.size === 0;
+            }
+        });
 
-                errorLine.classList.add('d-none');
-                toggle.disabled = true;
-                spinner?.classList.remove('d-none');
-                try {
-                    const records = await fetchRecordTables(bar.dataset.exportUrl, params);
-                    if (records.length === 0) throw new Error('none of those records could be found.');
-                    await downloadRecordTables(records, exportFileName('records', new Date().toISOString().slice(0, 10)), item.dataset.format);
-                } catch (error) {
-                    errorLine.textContent = `The download could not be made: ${error.message || 'try again.'}`;
-                    errorLine.classList.remove('d-none');
-                } finally {
-                    spinner?.classList.add('d-none');
-                    toggle.disabled = which === 'all' ? false : selected.size === 0;
-                }
-            }));
-
-            render();
-        }
+        setUpResults();
     </script>
 @endpush
