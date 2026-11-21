@@ -6,14 +6,20 @@ use App\Enums\RecordStatus;
 use App\Models\AuditLog;
 use App\Models\CivilRecord;
 use App\Models\DocumentTypeDefinition;
+use App\Models\RecordField;
+use App\Models\RecordPage;
+use App\Models\ScanBatch;
+use App\Models\ScanBatchPage;
 use App\Services\AuditLogger;
 use App\Services\RecordCsv;
 use App\Services\RecordFieldGrouper;
 use App\Support\LocalTime;
 use App\Support\SearchWords;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -36,7 +42,8 @@ class RecordController extends Controller
     public function __construct(private readonly RecordFieldGrouper $fieldGrouper) {}
 
     /**
-     * The archive's filters: the search words, type, status and submitted dates.
+     * The archive's filters: the search words, type, status, the batch the
+     * records were saved from, and submitted dates.
      *
      * @return array<string, array<int, string>>
      */
@@ -46,6 +53,7 @@ class RecordController extends Controller
             'q' => ['nullable', 'string', 'max:255'],
             'type' => ['nullable', 'string', 'exists:document_types,key'],
             'status' => ['nullable', 'string', 'in:'.implode(',', array_column(RecordStatus::cases(), 'value'))],
+            'batch' => ['nullable', 'integer', 'exists:scan_batches,id'],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
         ];
@@ -66,6 +74,11 @@ class RecordController extends Controller
                 fn ($typeQuery) => $typeQuery->where('key', $type),
             ))
             ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+            // The records one batch saved (its pages know their record).
+            ->when($filters['batch'] ?? null, fn ($q, $batch) => $q->whereIn(
+                'id',
+                ScanBatchPage::query()->select('record_id')->where('scan_batch_id', (int) $batch)->whereNotNull('record_id'),
+            ))
             ->when($filters['from'] ?? null, fn ($q, $from) => $q->where('submitted_at', '>=', LocalTime::dayStart($from)))
             ->when($filters['to'] ?? null, fn ($q, $to) => $q->where('submitted_at', '<=', LocalTime::dayEnd($to)));
     }
@@ -100,10 +113,128 @@ class RecordController extends Controller
 
         return view('records.index', [
             'records' => $records,
+            'details' => $this->listDetails($records),
+            'batches' => $this->savedBatches(isset($filters['batch']) ? (int) $filters['batch'] : null),
             'filters' => $filters,
             'documentTypes' => DocumentTypeDefinition::ordered(),
             'statuses' => RecordStatus::cases(),
         ]);
+    }
+
+    /**
+     * What the list says of each record on the page. A register page (several
+     * people) is named by its file and pages, with how many people and the
+     * first and last value of its first column ("1978-0001 to 1978-0020"); a
+     * single certificate by its first value (a name), with its file under it.
+     *
+     * @return array<int, array{title: string, people: int, range: array{0: string, 1: string}|null, file: string|null}>
+     */
+    private function listDetails(LengthAwarePaginator $records): array
+    {
+        $page = $records->getCollection();
+        $ids = $page->modelKeys();
+        if ($ids === []) {
+            return [];
+        }
+
+        $people = RecordField::query()
+            ->whereIn('record_id', $ids)
+            ->whereNotNull('person_group')
+            ->groupBy('record_id')
+            ->selectRaw('record_id, count(distinct person_group) as people')
+            ->pluck('people', 'record_id');
+        // The title field's column, down the register: its first and last value.
+        $columns = $page->map(fn (CivilRecord $record) => $record->fields->first()?->line_column)->filter()->unique()->values();
+        $lines = $columns->isEmpty() ? collect() : RecordField::query()
+            ->whereIn('record_id', $ids)
+            ->whereIn('line_column', $columns)
+            ->whereNotNull('line_row')
+            ->where('verified_value', '!=', '')
+            ->orderBy('line_row')
+            ->get(['record_id', 'page_no', 'line_column', 'line_row', 'verified_value'])
+            ->groupBy('record_id');
+        $extraPages = RecordPage::query()->whereIn('record_id', $ids)->get(['record_id', 'source_page'])->groupBy('record_id');
+
+        return $page->mapWithKeys(function (CivilRecord $record) use ($people, $lines, $extraPages) {
+            $count = (int) ($people[$record->getKey()] ?? 0);
+            $titleField = $record->fields->first();
+
+            $range = null;
+            if ($count > 1 && $titleField?->line_column) {
+                $values = ($lines[$record->getKey()] ?? collect())
+                    // Page 2 of a register has columns of the same name: the title field's page only.
+                    ->where('line_column', $titleField->line_column)
+                    ->where('page_no', $titleField->page_no)
+                    ->pluck('verified_value')
+                    ->values();
+                if ($values->count() > 1 && $values->first() !== $values->last()) {
+                    $range = [(string) $values->first(), (string) $values->last()];
+                }
+            }
+
+            // "page 3", "pages 1–2" (only for a file of several pages).
+            $numbers = collect([$record->source_page])
+                ->merge(($extraPages[$record->getKey()] ?? collect())->pluck('source_page'))
+                ->filter()
+                ->map(fn ($number) => (int) $number)
+                ->unique()
+                ->sort()
+                ->values();
+            $pages = null;
+            if ((int) $record->source_page_count > 1 && $numbers->isNotEmpty()) {
+                $pages = $numbers->count() === 1
+                    ? 'page '.$numbers->first()
+                    : ($numbers->last() - $numbers->first() + 1 === $numbers->count()
+                        ? 'pages '.$numbers->first().'–'.$numbers->last()
+                        : 'pages '.$numbers->implode(', '));
+            }
+            $file = filled($record->source_name) ? $record->source_name.($pages ? " · {$pages}" : '') : null;
+            $register = $count > 1 && $file !== null;
+
+            return [$record->getKey() => [
+                'title' => $register ? $file : $record->title(),
+                'people' => $count,
+                'range' => $range,
+                'file' => $register ? null : $file,
+            ]];
+        })->all();
+    }
+
+    /**
+     * Batches that saved records, newest first, for the archive's Batch filter:
+     * "22 Nov 2026, 1:13 am · 4 records". The one picked stays in the list.
+     *
+     * @return list<array{id: int, label: string}>
+     */
+    private function savedBatches(?int $picked): array
+    {
+        return ScanBatch::query()
+            ->whereHas('pages', fn ($pages) => $pages->whereNotNull('record_id'))
+            ->withCount(['pages as saved_records' => fn ($pages) => $pages
+                ->whereNotNull('record_id')
+                ->select(DB::raw('count(distinct record_id)'))])
+            ->latest('id')
+            ->limit(50)
+            ->get(['id', 'created_at'])
+            ->when($picked !== null, function ($batches) use ($picked) {
+                if ($batches->contains('id', $picked)) {
+                    return $batches;
+                }
+                $one = ScanBatch::query()
+                    ->withCount(['pages as saved_records' => fn ($pages) => $pages
+                        ->whereNotNull('record_id')
+                        ->select(DB::raw('count(distinct record_id)'))])
+                    ->find($picked, ['id', 'created_at']);
+
+                return $one ? $batches->push($one) : $batches;
+            })
+            ->map(fn (ScanBatch $batch) => [
+                'id' => $batch->getKey(),
+                'label' => LocalTime::format($batch->created_at, 'j M Y, g:i a')
+                    .' · '.$batch->saved_records.' '.str('record')->plural($batch->saved_records),
+            ])
+            ->values()
+            ->all();
     }
 
     public function show(CivilRecord $record): View

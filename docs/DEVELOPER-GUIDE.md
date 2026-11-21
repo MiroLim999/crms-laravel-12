@@ -127,7 +127,7 @@ CRMS runs as **four local processes** from a single repository: the Laravel web 
 - **Download CSV**: A record's **Download CSV** button gives that document's checked values (edits included), one row per person, for import into the client's old system. Columns follow the layout's field names, page 1 then page 2; fields that belong to no person repeat on every row. The pages of a two-page document join by their row on the page (`record_fields.line_row`), so row 5 of page 1 and row 5 of page 2 are one CSV row. UTF-8 with a byte-order mark, so Excel shows ñ correctly; each download is in the Audit Log as `record.exported` (`app/Services/RecordCsv.php`).
 - **Auditable Edits**: Every value a save changes or adds is kept in the `record.edited` entry, old and new, so nothing is lost. A save that changes nothing writes no entry. The Save button disables after the first click.
 - **The Record Shows the Page That Was Read**: A submitted record keeps the page image its boxes were measured on (straightened, when Detect straightened a tilted page) and draws its value boxes on it, so each box sits on its handwriting. (Drawn over the original upload instead, a 3° tilt put the boxes about one line off.) **Open full size** still opens the original upload, and records submitted before this change keep showing their upload.
-- **Archive Search & Filters**: Search by any verified value, and filter by document type and submission date. A bad filter from an edited URL (an impossible date, a list where one value belongs) is left out with a message under it, instead of an error page.
+- **Archive Search & Filters**: Search by any verified value or by the file a record was scanned from, and filter by document type, by the **batch** that saved it (`batch`, via `scan_batch_pages.record_id`), and by submission date; the lists and dates filter as soon as they change. Each row names a register page by its file and pages, with how many people and its first column's first and last value ("1978-0001 to 1978-0020", same page only); a single certificate keeps its name, with its file under it (`RecordController::listDetails`). The name opens the record (no View button), the time is shown with the date, a long type name ends in "…", and only a record that is not locked is marked. A bad filter from an edited URL (an impossible date, a list where one value belongs) is left out with a message under it, instead of an error page.
 - **One Record Status**: Every record is saved as **Submitted**, and therefore locked, the moment it is submitted. The unused "Draft" status was removed.
 
 ### 5. OCR Model Management & Benchmark Provenance
@@ -827,6 +827,7 @@ tests/
 │   ├── OcrWorkspaceTest.php
 │   ├── RecordCsvExportTest.php              # Download CSV: one row per person, two pages joined, ñ, formula guard
 │   ├── RecordArchiveFilterTest.php          # Records filters: bad dates, Philippine days
+│   ├── RecordsArchiveListTest.php           # Archive rows: file and pages, people, range; file-name search; batch filter
 │   ├── RecordDetailPresentationTest.php     # Includes the straightened page kept with a record
 │   ├── RecordReviewTest.php                 # Review & Export on a saved record: edits, added cells, record.edited
 │   ├── ReportExportTest.php                 # Includes CSV injection and Philippine time in the CSV

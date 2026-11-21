@@ -9,18 +9,18 @@
 @endphp
 
 @section('content')
-    <x-page-header title="Records Archive"
-                   subtitle="Search submitted civil registry records by name or any verified value." />
+    <x-page-header title="Records Archive" />
 
     <x-card>
-        <form method="GET" action="{{ route('records.index') }}" class="row g-3 align-items-end">
+        {{-- Type, Batch and the dates filter as soon as they change; the search words on Search or Enter. --}}
+        <form method="GET" action="{{ route('records.index') }}" class="row g-3 align-items-end" id="recordsFilters">
             {{-- Values come from the validated filters, so a bad one is not echoed back. --}}
-            <div class="col-sm-12 col-xl-6">
+            <div class="col-sm-12 col-xl-4">
                 <label for="q" class="form-label">Search</label>
                 <div class="d-flex gap-2">
                     {{-- data-record-search: the "/" shortcut lands here, since the top bar's search is hidden on this page. --}}
                     <input type="search" id="q" name="q" value="{{ $filters['q'] ?? '' }}" maxlength="255"
-                           class="form-control flex-grow-1 @error('q') is-invalid @enderror" placeholder="Name or any verified value"
+                           class="form-control flex-grow-1 @error('q') is-invalid @enderror" placeholder="Name, any value, or file name"
                            aria-keyshortcuts="/" data-record-search>
                     <button class="btn btn-primary" type="submit">
                         <i class="icon-base bx bx-search icon-sm me-1" aria-hidden="true"></i> Search
@@ -31,7 +31,7 @@
                 </div>
                 @error('q')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
             </div>
-            <div class="col-sm-4 col-xl-2">
+            <div class="col-sm-6 col-lg-3 col-xl-2">
                 <label for="type" class="form-label">Type</label>
                 <select id="type" name="type" class="form-select @error('type') is-invalid @enderror">
                     <option value="">All</option>
@@ -43,13 +43,24 @@
                 </select>
                 @error('type')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
-            <div class="col-sm-4 col-xl-2">
+            {{-- The records one batch saved (Save & finish batch), newest batch first. --}}
+            <div class="col-sm-6 col-lg-3 col-xl-2">
+                <label for="batch" class="form-label">Batch</label>
+                <select id="batch" name="batch" class="form-select @error('batch') is-invalid @enderror">
+                    <option value="">All</option>
+                    @foreach ($batches as $batch)
+                        <option value="{{ $batch['id'] }}" @selected((int) ($filters['batch'] ?? 0) === $batch['id'])>{{ $batch['label'] }}</option>
+                    @endforeach
+                </select>
+                @error('batch')<div class="invalid-feedback">{{ $message }}</div>@enderror
+            </div>
+            <div class="col-sm-6 col-lg-3 col-xl-2">
                 <label for="from" class="form-label">From</label>
                 <input type="date" id="from" name="from" value="{{ $filters['from'] ?? '' }}"
                        class="form-control @error('from') is-invalid @enderror">
                 @error('from')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
-            <div class="col-sm-4 col-xl-2">
+            <div class="col-sm-6 col-lg-3 col-xl-2">
                 <label for="to" class="form-label">To</label>
                 <input type="date" id="to" name="to" value="{{ $filters['to'] ?? '' }}"
                        class="form-control @error('to') is-invalid @enderror">
@@ -112,7 +123,6 @@
                             <th>Record</th>
                             <th>Type</th>
                             <th>Submitted</th>
-                            <th class="text-end"></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -122,17 +132,25 @@
                                     <input type="checkbox" class="form-check-input" data-record-id="{{ $record->getKey() }}"
                                            aria-label="Tick record #{{ $record->getKey() }} to download it">
                                 </td>
-                                <td>
-                                    <a href="{{ route('records.show', $record) }}" class="fw-medium">
-                                        {{ $record->title() }}
-                                    </a>
-                                    @if ($record->isLocked())
-                                        <i class="icon-base bx bx-lock-alt icon-sm text-muted ms-1"
-                                           title="Locked — change values with Correct record"></i>
-                                    @endif
+                                @php($detail = $details[$record->getKey()] ?? ['title' => $record->title(), 'people' => 0, 'range' => null, 'file' => null])
+                                <td class="records-list__record">
+                                    <a href="{{ route('records.show', $record) }}" class="fw-medium records-list__title">{{ $detail['title'] }}</a>
+                                    {{-- Every record is locked once submitted: only one that is not says so. --}}
+                                    @unless ($record->isLocked())
+                                        <span class="badge bg-label-warning ms-1">Not locked</span>
+                                    @endunless
                                     <div>
                                         <small class="text-muted">
                                             Record #{{ $record->getKey() }}
+                                            @if ($detail['people'] > 1)
+                                                · {{ $detail['people'] }} people
+                                            @endif
+                                            @if ($detail['range'])
+                                                · {{ $detail['range'][0] }} to {{ $detail['range'][1] }}
+                                            @endif
+                                            @if ($detail['file'])
+                                                · {{ $detail['file'] }}
+                                            @endif
                                         </small>
                                     </div>
                                     {{-- Why a search found this record, when the title above does not show it. --}}
@@ -151,17 +169,13 @@
                                     @endif
                                 </td>
                                 <td>
-                                    <span class="d-inline-flex align-items-center gap-1">
-                                        <i class="icon-base bx {{ $record->typeIcon() }} icon-sm text-muted"></i>
-                                        {{ $record->typeShortLabel() }}
+                                    <span class="records-list__type" title="{{ $record->typeLabel() }}">
+                                        <i class="icon-base bx {{ $record->typeIcon() }} icon-sm text-muted" aria-hidden="true"></i>
+                                        <span class="text-truncate">{{ $record->typeShortLabel() }}</span>
                                     </span>
                                 </td>
-                                <td class="text-muted">
-                                    {{ \App\Support\LocalTime::format($record->submitted_at, 'j M Y') ?: '—' }}
-                                </td>
-                                <td class="text-end">
-                                    <a href="{{ route('records.show', $record) }}"
-                                       class="btn btn-sm btn-outline-secondary">View</a>
+                                <td class="text-muted text-nowrap">
+                                    {{ \App\Support\LocalTime::format($record->submitted_at, 'j M Y, g:i a') ?: '—' }}
                                 </td>
                             </tr>
                         @endforeach
@@ -177,6 +191,21 @@
 @push('scripts')
     <script type="module">
         import { downloadRecordTables, exportFileName, fetchRecordTables } from '{{ Vite::asset('resources/js/review-table.js') }}';
+
+        // Type, Batch and the dates filter as soon as they change (no Search press). A date
+        // typed by hand waits until it is whole (a 4-digit year), so 0002 is never sent.
+        const filters = document.getElementById('recordsFilters');
+        if (filters) {
+            let timer = null;
+            const go = () => {
+                window.clearTimeout(timer);
+                timer = window.setTimeout(() => filters.requestSubmit(), 350);
+            };
+            filters.querySelectorAll('select').forEach((select) => select.addEventListener('change', go));
+            filters.querySelectorAll('input[type="date"]').forEach((input) => input.addEventListener('change', () => {
+                if (input.value === '' || /^\d{4}-/.test(input.value) && Number(input.value.slice(0, 4)) >= 1800) go();
+            }));
+        }
 
         const bar = document.getElementById('recordsExport');
         if (bar) {
@@ -207,9 +236,11 @@
                 pageBox.checked = onPage > 0 && onPage === boxes.length;
                 pageBox.indeterminate = onPage > 0 && onPage < boxes.length;
                 const count = selected.size;
+                // Ticks stay from page to page: say how many are on this one.
+                const where = onPage === count ? '' : (onPage === 0 ? ' (none on this page)' : ` (${onPage} on this page)`);
                 document.getElementById('recordsSelectedCount').textContent = count === 0
                     ? 'Tick records to download them together'
-                    : `${count.toLocaleString()} record${count === 1 ? '' : 's'} ticked`;
+                    : `${count.toLocaleString()} record${count === 1 ? '' : 's'} ticked${where}`;
                 document.getElementById('recordsClearSelection').classList.toggle('d-none', count === 0);
                 document.getElementById('recordsDownloadSelected').disabled = count === 0;
             }

@@ -195,7 +195,10 @@ class CivilRecord extends Model
             return;
         }
 
-        $query->whereHas('fields', fn (Builder $field) => SearchWords::whereContainsAll($field, 'verified_value', $words));
+        // Any verified value, or the name of the file it was scanned from ("aged - Copy").
+        $query->where(fn (Builder $match) => $match
+            ->whereHas('fields', fn (Builder $field) => SearchWords::whereContainsAll($field, 'verified_value', $words))
+            ->orWhere(fn (Builder $file) => SearchWords::whereContainsAll($file, 'source_name', $words)));
     }
 
     /**

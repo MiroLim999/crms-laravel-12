@@ -108,6 +108,23 @@ textarea,
 }
 
 // The archive's download bar: what is ticked, then Download selected and Download all.
+// The Records Archive list: a record's file (or name) can be long, and so can its type.
+.records-list__record {
+  min-inline-size: 16rem;
+}
+
+.records-list__title {
+  overflow-wrap: anywhere;
+}
+
+.records-list__type {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  max-inline-size: 14rem;
+  vertical-align: middle;
+}
+
 .records-export {
   display: flex;
   flex-wrap: wrap;
