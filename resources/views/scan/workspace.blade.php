@@ -80,7 +80,8 @@
                             {{-- Every file of the batch; the one expanded lists its pages. It floats over
                                  the page (it does not push it down), and slides open and shut. --}}
                             <div class="batch-queue-panel" id="batchQueuePanel" inert>
-                                <div class="batch-queue-panel__head">
+                                {{-- Only the tabs that have pages in them; none at all when All is the only one. --}}
+                                <div class="batch-queue-panel__head" id="batchQueueHead">
                                     <div class="btn-group btn-group-sm" role="group" aria-label="Show pages" id="batchQueueFilters">
                                         <button type="button" class="btn btn-sm btn-outline-secondary active" data-queue-filter="all"
                                             aria-pressed="true">All<span class="batch-queue-filter__count"></span></button>
@@ -92,7 +93,6 @@
                                         <button type="button" class="btn btn-sm btn-outline-secondary" data-queue-filter="saved"
                                             aria-pressed="false">Saved<span class="batch-queue-filter__count"></span></button>
                                     </div>
-                                    <span class="batch-queue-panel__totals" id="batchQueueTotals"></span>
                                 </div>
                                 <ol class="batch-queue-files" id="batchQueueFiles" aria-label="Files in this batch"></ol>
                             </div>
@@ -932,6 +932,71 @@
                     </footer>
                 </section>
             </div>
+
+            {{-- The end of a batch, in this step's place (the scan and the table go): what
+                 was saved, each record's link, and every record's table as one download. --}}
+            <section class="card validation-pane batch-done d-none" id="batchSummaryPanel" aria-labelledby="batchSummaryTitle">
+                <header class="validation-pane__header">
+                    <div class="batch-done__heading min-w-0">
+                        <span class="batch-done__icon bg-label-success" aria-hidden="true">
+                            <i class="icon-base bx bx-check-shield"></i>
+                        </span>
+                        <div class="min-w-0">
+                            <span class="validation-pane__eyebrow">Review &amp; Export</span>
+                            <h3 class="h5 mb-0" id="batchSummaryTitle">Batch complete</h3>
+                            <p class="small text-muted mb-0" id="batchSummaryDescription"></p>
+                        </div>
+                    </div>
+                    <div class="review-pane__tools">
+                        <div class="dropdown" id="batchSummaryDownload">
+                            <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="batchSummaryDownloadBtn"
+                                    data-bs-toggle="dropdown" aria-expanded="false">
+                                <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                                <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>Download all
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="batchSummaryDownloadBtn">
+                                <li>
+                                    <button type="button" class="dropdown-item" id="batchSummaryCsv">
+                                        <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)
+                                    </button>
+                                </li>
+                                <li>
+                                    <button type="button" class="dropdown-item" id="batchSummaryXlsx">
+                                        <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)
+                                    </button>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </header>
+
+                <div class="batch-done__body">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th class="batch-done__num">#</th>
+                                <th>Document</th>
+                                <th>Pages</th>
+                                <th class="text-end">Rows</th>
+                                <th>Status</th>
+                                <th class="text-end"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="batchSummaryList"></tbody>
+                    </table>
+                </div>
+
+                <footer class="validation-submit-bar">
+                    <div class="validation-submit-actions">
+                        <a href="#" class="btn btn-outline-secondary" id="batchSummaryRecordsBtn">
+                            <i class="icon-base bx bx-archive icon-sm me-1" aria-hidden="true"></i>Records archive
+                        </a>
+                        <a href="#" class="btn btn-primary" id="batchSummaryRestartBtn">
+                            <i class="icon-base bx bx-plus icon-sm me-1" aria-hidden="true"></i>Scan another batch
+                        </a>
+                    </div>
+                </footer>
+            </section>
         </div>
     </section>
 
@@ -1353,48 +1418,6 @@
                         <button type="button" class="btn btn-primary text-nowrap" id="batchIntakeOkBtn">
                             Leave them out
                         </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    {{-- The end of a batch: what was saved, each record's link, and every record's table as one download. --}}
-    <div class="modal fade" id="batchSummaryModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"
-        aria-labelledby="batchSummaryModalTitle" aria-describedby="batchSummaryModalDescription" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered leave-scan-dialog" style="max-inline-size: min(32rem, calc(100% - 2rem));">
-            <div class="modal-content leave-scan-modal">
-                <div class="modal-body">
-                    <span class="leave-scan-modal__icon bg-label-success" aria-hidden="true">
-                        <i class="icon-base bx bx-check-shield"></i>
-                    </span>
-                    <h5 class="modal-title" id="batchSummaryModalTitle">Batch complete</h5>
-                    <p class="leave-scan-modal__text" id="batchSummaryModalDescription"></p>
-
-                    <ul class="batch-summary-list" id="batchSummaryList"></ul>
-
-                    <div class="leave-scan-modal__actions">
-                        <div class="dropdown" id="batchSummaryDownload">
-                            <button type="button" class="btn btn-outline-primary dropdown-toggle text-nowrap" id="batchSummaryDownloadBtn"
-                                    data-bs-toggle="dropdown" aria-expanded="false">
-                                <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
-                                <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>Download all
-                            </button>
-                            <ul class="dropdown-menu" aria-labelledby="batchSummaryDownloadBtn">
-                                <li>
-                                    <button type="button" class="dropdown-item" id="batchSummaryCsv">
-                                        <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)
-                                    </button>
-                                </li>
-                                <li>
-                                    <button type="button" class="dropdown-item" id="batchSummaryXlsx">
-                                        <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)
-                                    </button>
-                                </li>
-                            </ul>
-                        </div>
-                        <a href="#" class="btn btn-outline-secondary text-nowrap" id="batchSummaryRecordsBtn">Records archive</a>
-                        <a href="#" class="btn btn-primary text-nowrap" id="batchSummaryRestartBtn">Scan another batch</a>
                     </div>
                 </div>
             </div>
@@ -4438,6 +4461,9 @@
 
         // ---------------------------------------------------------------- Upload Mode & Batch Queue System
         let uploadMode = 'single';
+        // Set once the batch is done (showBatchSummary): step 4 shows the summary card
+        // in place of the scan and the table, and the batch's bar (its queue) is put away.
+        let batchSummaryShown = false;
         // There is no phase for the whole batch: what can be done with a page is
         // decided by its own status (see scan-source.js), and the phase the bar
         // shows is worked out from the pages (batchSummaryPhase).
@@ -4809,6 +4835,13 @@
                 el('detectBtn').classList.remove('d-none');
                 return;
             }
+            // The batch is done: its summary card says it all, so the bar (and its queue) goes.
+            if (batchSummaryShown) {
+                banner.classList.add('d-none');
+                setQueuePanelOpen(false);
+                syncBatchBarSpace();
+                return;
+            }
             banner.classList.remove('d-none');
             // Display only: the bar's wording, worked out from the pages.
             const phase = batchSummaryPhase(batchState.items);
@@ -5137,22 +5170,23 @@
                 });
             }
 
-            // Filters and their counts; the totals.
+            // Filters and their counts. A tab with nothing in it is hidden (All stays),
+            // and the open one falls back to All when it empties; with only All left,
+            // the whole row goes and the list starts at the top.
+            const filterCount = (name) => counts.filters[name] ?? 0;
+            if (queuePanel.filter !== 'all' && filterCount(queuePanel.filter) === 0) queuePanel.filter = 'all';
+            let tabsShown = 0;
             el('batchQueueFilters').querySelectorAll('[data-queue-filter]').forEach((button) => {
                 const name = button.dataset.queueFilter;
                 const active = name === queuePanel.filter;
+                const shown = name !== 'all' && filterCount(name) > 0;
+                if (shown) tabsShown += 1;
+                button.classList.toggle('d-none', name !== 'all' && !shown);
                 button.classList.toggle('active', active);
                 button.setAttribute('aria-pressed', active ? 'true' : 'false');
-                button.querySelector('.batch-queue-filter__count').textContent = String(counts.filters[name] ?? 0);
+                button.querySelector('.batch-queue-filter__count').textContent = String(filterCount(name));
             });
-            const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
-            // Only what there is: "16 pages", then "3 queued · 1 saved" as pages get there.
-            el('batchQueueTotals').textContent = [
-                plural(counts.total, 'page'),
-                ...(counts.queued > 0 ? [`${counts.queued} queued`] : []),
-                ...(counts.read > 0 ? [`${counts.read} read`] : []),
-                ...(counts.saved > 0 ? [`${counts.saved} saved`] : []),
-            ].join(' · ');
+            el('batchQueueHead').classList.toggle('d-none', tabsShown === 0);
 
             const matches = QUEUE_FILTERS[queuePanel.filter] ?? QUEUE_FILTERS.all;
             const list = el('batchQueueFiles');
@@ -8258,6 +8292,8 @@
             finishServerBatch();
             // Nothing is left to lose: leaving the page no longer asks.
             scanFile = null;
+            batchSummaryShown = true;
+            if (activeStep !== 'review') showStep('review');
             renderBatchQueueBanner();
 
             const records = batchRecords();
@@ -8266,41 +8302,79 @@
             const skipped = left.filter((record) => record.members[0].skipped).length;
             const rejected = left.length - skipped;
             const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
-            el('batchSummaryModalDescription').textContent = [
+            el('batchSummaryDescription').textContent = [
                 `${plural(saved.length, 'record')} saved`,
                 ...(rejected > 0 ? [`${rejected} rejected`] : []),
                 ...(skipped > 0 ? [`${skipped} skipped`] : []),
-            ].join(', ') + '.';
+            ].join(' · ');
 
-            el('batchSummaryList').replaceChildren(...records.map((record) => {
+            const cell = (text, className = '') => {
+                const td = document.createElement('td');
+                if (className) td.className = className;
+                td.textContent = text;
+                return td;
+            };
+            el('batchSummaryList').replaceChildren(...records.map((record, index) => {
                 const [lead] = record.members;
-                const li = document.createElement('li');
-                const status = lead.status === 'imported' ? 'is-saved' : 'is-rejected';
-                li.className = `batch-summary-list__item ${status}`;
-                const icon = document.createElement('i');
-                icon.className = `icon-base bx ${lead.status === 'imported' ? 'bx-check-circle' : 'bx-x-circle'}`;
-                icon.setAttribute('aria-hidden', 'true');
-                li.append(icon);
-                if (lead.status === 'imported' && lead.recordUrl) {
+                const isSaved = lead.status === 'imported';
+                const tr = document.createElement('tr');
+                if (!isSaved) tr.className = 'is-left-out';
+
+                // The file's name, and the record's number under it (as the archive shows it).
+                const doc = document.createElement('td');
+                const name = document.createElement('span');
+                name.className = 'batch-done__name';
+                name.textContent = lead.sourceName ?? lead.name;
+                name.title = name.textContent;
+                doc.append(name);
+                if (isSaved && lead.recordId) {
+                    const sub = document.createElement('small');
+                    sub.className = 'd-block text-muted';
+                    sub.textContent = `Record #${lead.recordId}`;
+                    doc.append(sub);
+                }
+
+                const pages = lead.pageTotal > 1 ? pageRanges(record.members.map((it) => it.pageNo)) : '1';
+                // Rows as Review & Export showed them when it was saved (the header left out).
+                const rows = isSaved && Array.isArray(lead.exportTable) ? String(lead.exportTable.length - 1) : '—';
+
+                const status = document.createElement('td');
+                const badge = document.createElement('span');
+                badge.className = `badge ${isSaved ? 'bg-label-success' : lead.skipped ? 'bg-label-secondary' : 'bg-label-danger'}`;
+                badge.textContent = isSaved ? 'Saved' : lead.skipped ? 'Skipped' : 'Rejected';
+                status.append(badge);
+
+                const open = document.createElement('td');
+                open.className = 'text-end';
+                if (isSaved && lead.recordUrl) {
                     const link = document.createElement('a');
                     link.href = lead.recordUrl;
                     link.target = '_blank';
                     link.rel = 'noopener';
-                    link.textContent = `${recordLabel(record)}${lead.recordId ? ` · record #${lead.recordId}` : ''}`;
-                    li.append(link);
-                } else {
-                    const text = document.createElement('span');
-                    text.textContent = `${recordLabel(record)} · ${lead.skipped ? 'skipped' : 'rejected'}`;
-                    li.append(text);
+                    link.className = 'btn btn-sm btn-outline-secondary';
+                    link.textContent = 'View';
+                    link.title = `Open record #${lead.recordId ?? ''} in a new tab`.trim();
+                    open.append(link);
                 }
-                return li;
+
+                tr.append(cell(String(index + 1), 'batch-done__num text-muted'), doc, cell(pages),
+                    cell(rows, 'text-end'), status, open);
+                return tr;
             }));
 
             const canDownload = batchSavedRecordIds().length > 0 || batchExportTable().length > 1;
             el('batchSummaryDownloadBtn').disabled = !canDownload;
             el('batchSummaryRecordsBtn').href = config.recordsUrl;
             el('batchSummaryRestartBtn').href = config.restartUrl;
-            window.bootstrap.Modal.getOrCreateInstance(el('batchSummaryModal')).show();
+
+            // In the step's place: the scan and the table go, the card comes in.
+            el('reviewNotices').classList.add('d-none');
+            el('reviewGrid').classList.add('d-none');
+            el('batchSummaryPanel').classList.remove('d-none');
+            // Step 4 is done too: every step shows its tick, and there is nothing left to cancel.
+            document.querySelector('[data-flow-step="review"]')?.classList.add('is-complete');
+            el('workspaceCancel').classList.add('d-none');
+            el('batchSummaryRestartBtn').focus({ preventScroll: true });
         }
 
         const batchFileName = () => exportFileName(config.typeLabel, 'batch', new Date().toISOString().slice(0, 10));
@@ -8349,7 +8423,6 @@
         }
         el('batchSummaryCsv').addEventListener('click', () => downloadBatch('csv'));
         el('batchSummaryXlsx').addEventListener('click', () => downloadBatch('xlsx'));
-        el('batchSummaryModal').addEventListener('shown.bs.modal', () => el('batchSummaryRestartBtn').focus());
         // OK is the safe default: Enter never adds duplicates by accident.
         el('batchIntakeModal').addEventListener('shown.bs.modal', () => el('batchIntakeOkBtn').focus());
 

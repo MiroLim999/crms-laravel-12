@@ -2084,7 +2084,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// Filters as plain tabs with an underline, and the totals beside them.
+// Filters as plain tabs with an underline (only those with pages in them).
 .batch-queue-panel__head {
   display: flex;
   flex-wrap: wrap;
@@ -2128,12 +2128,6 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   margin-inline-start: .3rem;
   font-variant-numeric: tabular-nums;
   opacity: .6;
-}
-
-.batch-queue-panel__totals {
-  color: var(--bs-secondary-color);
-  font-size: .75rem;
-  font-variant-numeric: tabular-nums;
 }
 
 .batch-queue-files {
@@ -4144,53 +4138,95 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   transform: none;
 }
 
-// The end of a batch: each record, saved (linked) or rejected.
-.batch-summary-list {
-  max-block-size: 14rem;
-  margin: 0 0 1.5rem;
-  padding: 0;
-  overflow-y: auto;
-  font-size: .85rem;
-  text-align: start;
-  list-style: none;
-  border: 1px solid var(--bs-border-color);
-  border-radius: var(--bs-border-radius);
+// The end of a batch, in step 4's place: a card like the Records table one
+// (same header, tools top right, buttons in the bar at the bottom), as tall as
+// the panes it stands in for; the list of records scrolls inside it.
+.batch-done {
+  block-size: calc(100vh - 8.25rem);
+  block-size: calc(100dvh - 8.25rem);
+  min-block-size: 28rem;
+  animation: batch-done-in .3s ease-out both;
+
+  .validation-submit-bar {
+    justify-content: flex-end;
+  }
 }
 
-.batch-summary-list__item {
+@keyframes batch-done-in {
+  from {
+    opacity: 0;
+    transform: translateY(.5rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.batch-done__heading {
   display: flex;
-  gap: .5rem;
   align-items: center;
-  padding: .45rem .75rem;
-  overflow-wrap: anywhere;
+  gap: .85rem;
+}
 
-  &+& {
-    border-block-start: 1px solid var(--bs-border-color);
-  }
+.batch-done__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  border-radius: .5rem;
 
-  &.is-saved i {
-    color: var(--bs-success);
-  }
-
-  &.is-rejected {
-    color: var(--bs-secondary-color);
-
-    i {
-      color: var(--bs-danger);
-    }
+  .bx {
+    font-size: 1.35rem;
   }
 }
 
-// The end of a batch: Download all and Records archive side by side, Scan another batch under them.
-#batchSummaryModal .leave-scan-modal__actions {
-  grid-template-columns: 1fr 1fr;
+.batch-done__body {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  overflow: auto;
+  background: var(--bs-paper-bg);
 
-  #batchSummaryDownloadBtn {
-    inline-size: 100%;
+  thead th {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 1;
+    background: var(--bs-paper-bg);
   }
 
-  #batchSummaryRestartBtn {
-    grid-column: 1 / -1;
+  // Rejected or skipped: in the list, but quieter.
+  .is-left-out td {
+    color: var(--bs-secondary-color);
+  }
+}
+
+.batch-done__num {
+  inline-size: 3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-done__name {
+  display: block;
+  max-inline-size: 36rem;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 991.98px) {
+  .batch-done {
+    block-size: auto;
+    min-block-size: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .batch-done {
+    animation: none;
   }
 }
 
