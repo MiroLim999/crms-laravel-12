@@ -4464,6 +4464,8 @@
         // Set once the batch is done (showBatchSummary): step 4 shows the summary card
         // in place of the scan and the table, and the batch's bar (its queue) is put away.
         let batchSummaryShown = false;
+        // Save & finish batch is saving the Done records, one after another (finishBatchSave).
+        let batchFinishing = false;
         // There is no phase for the whole batch: what can be done with a page is
         // decided by its own status (see scan-source.js), and the phase the bar
         // shows is worked out from the pages (batchSummaryPhase).
@@ -4600,6 +4602,18 @@
 
         const recordDone = (record) => record.members.every(pageDone);
 
+        /**
+         * Save & next was pressed on it (Done): it waits, still open to change, for
+         * Save & finish batch, which saves every record Done at once. Nothing goes
+         * to the Records Archive before that.
+         */
+        const recordApproved = (record) => !recordDone(record)
+            && recordState(record.members) === 'ready'
+            && Boolean(record.members[0]?.approved);
+
+        /** Nothing more to do on it before Save & finish batch: saved, left out, or Done. */
+        const recordSettled = (record) => recordDone(record) || recordApproved(record);
+
         /** A page that can be opened in Align here: not read yet (or failed), and its file is at hand. */
         const pageAlignable = (item) => pageCanAlign(item) && (Boolean(item?.file) || Boolean(item?.serverCopy));
 
@@ -4735,7 +4749,8 @@
 
         /** The first record (from `after` on, then from the start) read and still to save, or null. */
         function nextOpenRecord(after = null) {
-            const records = batchRecords().filter((record) => recordState(record.members) === 'ready');
+            // Done records wait for Save & finish batch: the next one to check is one not Done.
+            const records = batchRecords().filter((record) => recordState(record.members) === 'ready' && !recordApproved(record));
             const start = after === null ? -1 : batchState.items.indexOf(after);
             return records.find((record) => batchState.items.indexOf(record.members[0]) > start) ?? records[0] ?? null;
         }
@@ -4785,6 +4800,13 @@
             if (batchState.items.some(pageNeedsFile)) {
                 if (askForFiles) await askForBatchFiles({ thenContinue: true });
                 else showResumeOffer();
+                return;
+            }
+            // Every record Done, not saved yet (a resume, say): the last one opens,
+            // where Save & finish batch saves them all.
+            const done = batchRecords().filter(recordApproved);
+            if (done.length > 0 && batchRecords().every(recordSettled)) {
+                await openBatchVerifyItem(batchState.items.indexOf(done[done.length - 1].members[0]));
                 return;
             }
             // The summary only once every page is saved or left out.
@@ -4974,16 +4996,20 @@
             } else {
                 // Saved a record at a time, as in single mode: a page, or a pair of pages.
                 const records = batchRecords();
-                const finished = records.filter(recordDone).length;
+                // Done counts as soon as Save & next is pressed (saved with the rest at the end).
+                const finished = records.filter(recordSettled).length;
                 // Which record is open, while it is still to save.
                 const current = batchState.items[batchState.currentIndex];
                 const position = current ? records.findIndex((record) => record.members.includes(current)) : -1;
                 const onRecord = position !== -1 && !recordDone(records[position]);
                 if (phaseTitle) {
                     phaseTitle.textContent = phase === 'done' ? 'Batch complete'
-                        : (activeStep === 'review' ? 'Review & save' : 'Verify each record');
+                        : batchFinishing ? 'Saving the batch'
+                            : (activeStep === 'review' ? 'Review & save' : 'Verify each record');
                 }
-                if (counter) {
+                if (counter && batchFinishing) {
+                    counter.textContent = `${records.filter(recordDone).length} of ${records.length} saved`;
+                } else if (counter) {
                     counter.textContent = phase === 'done' || !onRecord
                         ? `${finished} of ${records.length} record${records.length === 1 ? '' : 's'} done`
                         : `Record ${position + 1} of ${records.length} · ${finished} done`;
@@ -5000,8 +5026,9 @@
             renderBatchNotice();
             if (activeStep === 'mark') updateBatchPageBar();
             // While Scan all reads, the queue cannot be opened (nothing can be switched to).
-            el('batchQueueToggle').disabled = batchState.readingAll;
-            if (batchState.readingAll && queuePanel.open) {
+            // Nor while Save & finish batch saves the records one after another.
+            el('batchQueueToggle').disabled = batchState.readingAll || batchFinishing;
+            if ((batchState.readingAll || batchFinishing) && queuePanel.open) {
                 queuePanel.open = false;
                 el('batchQueueToggle').setAttribute('aria-expanded', 'false');
             }
@@ -5031,6 +5058,10 @@
         };
 
         function statusBadge(item) {
+            // Save & next pressed on it: Done, saved with the rest by Save & finish batch.
+            if (item.status === 'ready' && item.approved) {
+                return { cls: 'is-done', icon: 'bx-check', text: 'Done' };
+            }
             const badge = { ...(BATCH_STATUS_BADGE[item.status] ?? BATCH_STATUS_BADGE.pending) };
             if (item.status === 'rejected' && item.skipped) badge.text = 'Skipped';
             return badge;
@@ -5269,7 +5300,12 @@
             toggle.append(index, name, meta);
             // A file of one page shows its state; one of many, its pages when expanded.
             // What still needs attention in the file wins (see groupStatus).
-            const fileState = stateElement(group.items.length === 1 ? first : { status: groupStatus(group) });
+            const fileStatus = groupStatus(group);
+            const fileState = stateElement(group.items.length === 1 ? first : {
+                status: fileStatus,
+                // Every page still to save is Done: the file is Done.
+                approved: fileStatus === 'ready' && group.items.every((it) => pageDone(it) || it.approved),
+            });
             if (fileState) toggle.append(fileState);
             toggle.title = fileTotal > 1 ? 'Click the name to open the file, the arrow to show its pages' : 'Open it';
             toggle.addEventListener('click', (event) => {
@@ -7100,6 +7136,7 @@
                     realign: Boolean(item.realign),
                     addedAnyway: Boolean(item.addedAnyway),
                     serverCopy: Boolean(item.serverCopy),
+                    approved: item.approved ?? null,
                     scanKind: item.scanKind ?? 'full',
                     recordId: item.recordId ?? null,
                     recordUrl: item.recordUrl ?? null,
@@ -8221,6 +8258,8 @@
             pages.forEach((it) => {
                 it.status = 'pending';
                 it.realign = true;
+                // Read again once queued: it is checked again before it counts as Done.
+                it.approved = null;
                 it.detected = null;
                 it.sentToScan = false;
                 it.error = null;
@@ -8286,6 +8325,76 @@
                     label: recordLabel(record),
                     table: record.members[0].exportTable,
                 })));
+        }
+
+        /**
+         * Save & next in a batch: the record passed the same checks Save does,
+         * and is Done. What was typed and ticked is kept with the batch (so a
+         * resume has it), nothing is saved to the Records Archive yet, and it can
+         * be opened and changed again from the queue. Then the next record to
+         * check opens, or, with none left, Save & finish batch saves them all.
+         */
+        async function approveBatchRecord(lead, { allowMissing, allowDuplicate }) {
+            recordSubmitting = true;
+            try {
+                reviewTable?.commit();
+                const approval = { allowMissing: Boolean(allowMissing), allowDuplicate: Boolean(allowDuplicate) };
+                recordOf(lead).members.forEach((it) => {
+                    it.approved = approval;
+                    // Saving it was chosen: "Continue anyway" is not asked again when it is saved.
+                    if (existingRecordAccepted) it.existingAccepted = true;
+                });
+                keepVerifyDraft(lead);
+                renderBatchQueueBanner();
+            } finally {
+                recordSubmitting = false;
+            }
+            if (batchRecords().some((record) => !recordSettled(record))) {
+                await continueBatch(lead);
+                return;
+            }
+            await finishBatchSave();
+        }
+
+        /**
+         * Save & finish batch: every Done record is saved, one after another, each
+         * opened in Review & Export and saved by submitRecord as a record always
+         * is. A record that cannot be saved stops it there, with its message, and
+         * stays Done; Save & finish batch (or the question's answer) goes on.
+         */
+        async function finishBatchSave() {
+            if (batchFinishing) return;
+            batchFinishing = true;
+            el('backToVerify').disabled = true;
+            renderBatchQueueBanner();
+            try {
+                for (;;) {
+                    const record = batchRecords().find(recordApproved);
+                    if (!record) break;
+                    const lead = record.members[0];
+                    const onScreen = () => record.members.includes(batchState.items[batchState.currentIndex]);
+                    if (!onScreen() || activeStep !== 'review') {
+                        // eslint-disable-next-line no-await-in-loop
+                        await openBatchVerifyItem(batchState.items.indexOf(lead));
+                        if (!onScreen()) break;
+                        if (activeStep === 'verify' && !openReview({ switching: true })) break;
+                    }
+                    // Saving it was chosen when it was made Done.
+                    window.bootstrap.Modal.getInstance(el('existingRecordModal'))?.hide();
+                    // eslint-disable-next-line no-await-in-loop
+                    const saved = await submitRecord({ ...lead.approved, finalBatchSave: true });
+                    if (!saved) break;
+                }
+            } finally {
+                batchFinishing = false;
+                el('backToVerify').disabled = false;
+            }
+            if (batchState.items.every(pageDone)) {
+                showBatchSummary();
+                return;
+            }
+            renderBatchQueueBanner();
+            updateReviewSaveLabel();
         }
 
         function showBatchSummary() {
@@ -13089,15 +13198,18 @@
             el('verifyRealignGroup').classList.toggle('d-none', !batchState?.active);
         }
 
-        /** "Save record", or in a batch where saving goes next: "Save & next (3/7)", "Save & finish batch". */
+        /**
+         * "Save record", or in a batch: "Save & next" while another record still
+         * has to be checked (this one is then Done, saved with the rest at the
+         * end), else "Save & finish batch", which saves every Done record.
+         */
         function updateReviewSaveLabel() {
             let label = 'Save record';
             if (batchState.active) {
                 const records = batchRecords();
                 const current = recordOf(batchState.items[batchState.currentIndex]);
-                const done = records.filter(recordDone).length;
-                const more = records.some((record) => record.key !== current.key && !recordDone(record));
-                label = more ? `Save & next (${done + 1}/${records.length})` : 'Save & finish batch';
+                const more = records.some((record) => record.key !== current.key && !recordSettled(record));
+                label = more ? 'Save & next' : 'Save & finish batch';
             }
             el('reviewSaveLabel').textContent = label;
         }
@@ -13264,9 +13376,17 @@
             if (!reviewModel) return;
             const people = reviewModel.rows.length;
             const pages = docEntries().length;
+            // Values shown greyed: none of their fields ticked Verified, so not saved.
+            const unverified = reviewModel.rows.reduce((count, row) => count + reviewModel.columns.filter((column) => {
+                const refs = row.cells[column.key]?.refs ?? [];
+                return refs.length > 0
+                    && refs.every((index) => !verifyTickOf(index)?.checked)
+                    && refs.some((index) => verifyValueOf(index).trim() !== '');
+            }).length, 0);
             el('reviewPaneSummary').textContent = `${people} ${people === 1 ? 'person' : 'people'} · `
                 + `${reviewModel.columns.length} column${reviewModel.columns.length === 1 ? '' : 's'}`
-                + (pages > 1 ? ` · ${pages} pages` : '');
+                + (pages > 1 ? ` · ${pages} pages` : '')
+                + (unverified > 0 ? ` · ${unverified} not verified (greyed, not saved)` : '');
         }
 
         // Required fields left out were accepted on the way in (Continue anyway):
@@ -13376,6 +13496,11 @@
                     },
                     // Emptied cells show red on the scan as well.
                     onCleared: (refs) => lineOverlay.setCleared(reviewing ? refs : []),
+                    // Only fields ticked Verified are saved (submitRecord): a cell none of
+                    // whose fields is ticked shows greyed and is left out of the downloads.
+                    // A cell typed into where nothing was read is saved, so it counts.
+                    isUnverified: (cell) => cell.refs.length > 0
+                        && cell.refs.every((index) => !verifyTickOf(index)?.checked),
                 });
                 // Ctrl+Z / Ctrl+Y after a click on the scan or elsewhere on this step.
                 reviewTable.listenForUndoKeys(() => reviewing);
@@ -13708,8 +13833,13 @@
 
         // Only "Submit anyway" passes allowMissing, and only "Save again"
         // allowDuplicate, after the same checks again.
-        async function submitRecord({ allowMissing = false, allowDuplicate = false } = {}) {
-            if (recordSubmitting) return;
+        //
+        // In a batch, Save & next does not save: after the same checks the record
+        // is Done (approveBatchRecord), kept with the batch and still open to
+        // change. Save & finish batch saves every Done record, each through here
+        // with `finalBatchSave` (finishBatchSave); that answers true once saved.
+        async function submitRecord({ allowMissing = false, allowDuplicate = false, finalBatchSave = false } = {}) {
+            if (recordSubmitting) return false;
             // A batch record saved (or left out) already, still on screen while the
             // next one is read: it is not sent twice.
             const shownBatchItem = batchState.active ? batchState.items[batchState.currentIndex] : null;
@@ -13719,7 +13849,8 @@
             }
             // Continue anyway was chosen when the scan matched a saved record.
             allowDuplicate = allowDuplicate || existingRecordAccepted;
-            lastSubmitChoices = { allowMissing, allowDuplicate };
+            // Kept so a question's answer (Submit anyway, Save again) goes on the same way.
+            lastSubmitChoices = { allowMissing, allowDuplicate, finalBatchSave };
 
             clearValidationSubmitError();
             const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
@@ -13772,6 +13903,24 @@
                     askToSubmitWithoutRequired(missing);
                     return;
                 }
+            }
+
+            // A batch: Save & next makes the record Done; it is saved with the rest
+            // by Save & finish batch.
+            if (batchState.active && !finalBatchSave && batchState.items[batchState.currentIndex]) {
+                if (verifyDoc) {
+                    const sides = new Set([
+                        ...verifiedIndexes.map((index) => cropped[index]?.pageIndex ?? 0),
+                        ...extraFields.map((extra) => extra.side),
+                    ]);
+                    const unchecked = verifyDoc.pages.find((_, side) => !sides.has(side));
+                    if (unchecked) {
+                        showValidationSubmitError(`Check Verified on at least one field of page ${unchecked.number}.`);
+                        return false;
+                    }
+                }
+                await approveBatchRecord(batchState.items[batchState.currentIndex], { allowMissing, allowDuplicate });
+                return false;
             }
 
             const form = el('submitForm');
@@ -13942,17 +14091,12 @@
                     syncBatchDraft(currentBatchItem);
                     renderBatchQueueBanner();
 
-                    // The next record read, or a page still to align (one that failed, say).
-                    if (batchState.items.some((it) => !pageDone(it))) {
-                        recordSubmitting = false;
-                        button.innerHTML = idleButton;
-                        await continueBatch(currentBatchItem);
-                        return;
-                    }
-                    submissionSucceeded = true;
-                    button.innerHTML = '<i class="icon-base bx bx-check me-2" aria-hidden="true"></i>Saved';
-                    showBatchSummary();
-                    return;
+                    // Saved as part of Save & finish batch: it goes on with the next Done
+                    // record (and goes on again here after a question was answered).
+                    recordSubmitting = false;
+                    button.innerHTML = idleButton;
+                    if (!batchFinishing) finishBatchSave();
+                    return true;
                 }
 
                 const savedNow = spreadPages ?? [scanPageNumber];

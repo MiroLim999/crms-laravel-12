@@ -9,6 +9,12 @@
 | opens step 4 on a scan saved once, so the Review & Export page can be
 | worked on without scanning again each time.
 |
+| In Batch mode it asks how many documents and makes a batch of that many
+| copies of the saved scan on the server (read, fields ticked), then the
+| workspace resumes it as any batch is resumed. Batches it makes are named
+| dev_<time>_… (scan_batches.batch_key); leftover ones can be discarded from
+| the Resume offer like any batch.
+|
 | On only when APP_ENV=local AND DEV_REVIEW_SHORTCUT=true in .env.
 |
 | To remove it completely, delete:

@@ -12,6 +12,7 @@ import {
     joinTables,
     nextCellPosition,
     parseClipboard,
+    ReviewTable,
     rowSpan,
     selectStart,
     sheetName,
@@ -187,4 +188,22 @@ test('Excel sheet names are short, without the characters Excel refuses, and nev
     assert.equal(sheetName('all RECORDS', used), 'all RECORDS (2)');
     assert.equal(sheetName('x'.repeat(40), used).length, 31);
     assert.equal(sheetName('', used), 'Sheet');
+});
+
+test('a value not ticked Verified is shown but left out of the download, as it is not saved', () => {
+    const ticked = new Set([0]);
+    const values = ['Ana Cruz', 'F'];
+    const table = new ReviewTable({
+        container: { addEventListener() {} },
+        valueOf: (cell) => cell.refs.map((index) => values[index]).join(' '),
+        onChange: () => {},
+        isUnverified: (cell) => cell.refs.length > 0 && cell.refs.every((index) => !ticked.has(index)),
+    });
+    table.model = {
+        columns: [{ key: 'name', header: 'Name' }, { key: 'sex', header: 'Sex' }],
+        rows: [{ id: 'person-1', label: '01', cells: { name: { refs: [0] }, sex: { refs: [1] } } }],
+    };
+    assert.deepEqual(table.exportTable(), [['Row', 'Name', 'Sex'], ['01', 'Ana Cruz', '']]);
+    ticked.add(1);
+    assert.deepEqual(table.exportTable(), [['Row', 'Name', 'Sex'], ['01', 'Ana Cruz', 'F']]);
 });

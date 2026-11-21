@@ -450,3 +450,20 @@ test('files are queued in natural order, each original before its copies', () =>
         'scans/page-2.png', 'scans/page-10.png',
     ]);
 });
+
+test('a record made Done (Save & next) is Done again after a resume, until it is saved or read again', () => {
+    const batch = serverBatch();
+    const approved = { allowMissing: true, allowDuplicate: false };
+    batch.pages.forEach((page) => { page.flags = { ...page.flags, approved }; });
+    batch.pages.push({
+        ...batch.pages[0], key: 'p5', position: 4, recordKey: 'g3#1', status: 'pending', documentPageId: null,
+    });
+    const items = rebuildBatchState(batch).items;
+    const byKey = (key) => items.find((item) => item.key === key);
+    // Read and Done: it waits for Save & finish batch with the answers given then.
+    assert.deepEqual(byKey('p1').approved, approved);
+    assert.deepEqual(byKey('p2').approved, approved);
+    // Saved already, or sent back to Align: not Done any more.
+    assert.equal(byKey('p3').approved, null);
+    assert.equal(byKey('p5').approved, null);
+});

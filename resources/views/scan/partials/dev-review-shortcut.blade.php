@@ -9,12 +9,18 @@
         //   Shift+click  scan the open file for real (or the saved one), save that
         //                scan as the new shortcut, then open step 4. Use it the
         //                first time, or after the layout or the OCR model changes.
+        //
+        //   In Batch mode, click asks how many documents, makes a batch of that
+        //   many copies of the saved scan on the server (read, every field with a
+        //   value ticked), resumes it as any batch is resumed, and opens step 4 on
+        //   the first one. Shift+click (scan again) is Single mode only.
         (() => {
             const devUrls = {
                 status: @json(route('dev.review-shortcut.status')),
                 file: @json(route('dev.review-shortcut.file')),
                 store: @json(route('dev.review-shortcut.store')),
                 pages: @json(route('dev.review-shortcut.pages')),
+                batch: @json(route('dev.review-shortcut.batch')),
             };
 
             const devButton = document.createElement('button');
@@ -86,6 +92,10 @@
             }
 
             async function devJump({ rescan }) {
+                if (uploadMode === 'batch') {
+                    await devBatchJump({ rescan });
+                    return;
+                }
                 devSay('Checking…');
                 const status = await devJson(devUrls.status);
 
@@ -172,6 +182,61 @@
                 showStep('verify');
                 if (verifyDoc) prepareSpreadComparison();
                 else prepareValidationComparison();
+            }
+
+            // Batch mode: a batch of copies of the saved scan, made on the server as Scan
+            // all leaves one, then resumed by the workspace's own Resume.
+            async function devBatchJump({ rescan }) {
+                if (rescan) {
+                    throw new Error('Scanning again works in Single mode: switch to Single, open your PDF, '
+                        + 'Shift+click there, then come back to Batch.');
+                }
+                if (batchState.active) {
+                    throw new Error('A batch is open already. Cancel it (Discard batch), or reload the page, then press the button again.');
+                }
+
+                devSay('Checking…');
+                const status = await devJson(devUrls.status);
+                if (!status.hasPages || !status.hasFile) {
+                    throw new Error('Nothing is saved yet. In Single mode, open your PDF and Shift+click the button once.');
+                }
+                const changed = status.pages.filter((saved) => layoutFor(saved.number).templateId !== saved.templateId);
+                if (changed.length > 0 && !window.confirm('DEV shortcut: the saved scan was read with another layout '
+                    + `(page ${changed.map((saved) => saved.number).join(', ')}). Shift+click in Single mode scans again with the current one. `
+                    + 'Go on with the old scan anyway?')) {
+                    throw new Error('Stopped.');
+                }
+
+                const answer = window.prompt('DEV shortcut: how many documents in the batch? (1–20)', '4');
+                if (answer === null) throw new Error('Stopped.');
+                const count = Math.trunc(Number(answer));
+                if (!(count >= 1 && count <= 20)) throw new Error('Type a number from 1 to 20.');
+
+                // Each page of the saved file on its own, as Save & Next keeps a queued page.
+                devSay('Cutting the saved file…');
+                const response = await fetch(devUrls.file, { credentials: 'same-origin' });
+                if (!response.ok) throw new Error('The saved file could not be loaded.');
+                const file = new File([await response.blob()], status.fileName || 'scan.pdf', { type: 'application/pdf' });
+                const data = new FormData();
+                data.set('doc_type', config.docType);
+                data.set('document_template_id', String(PAGE_ONE_TEMPLATE_ID));
+                if (config.pageTwo?.templateId) data.set('page_two_template_id', String(config.pageTwo.templateId));
+                data.set('count', String(count));
+                for (const saved of status.pages) {
+                    // eslint-disable-next-line no-await-in-loop
+                    data.set(`scans[${saved.number}]`, await pdfPageFile(file, saved.number), `page-${saved.number}.pdf`);
+                }
+
+                devSay(`Making ${count} documents…`);
+                const made = await devJson(devUrls.batch, { method: 'POST', body: data });
+
+                devSay('Resuming the batch…');
+                await resumeBatch(made.batchId);
+                if (!batchState.active) throw new Error('The batch did not open (see the message on the page).');
+                await devWaitFor(() => activeStep === 'verify', 60000, 'the first document to open');
+
+                devSay('Opening step 4…');
+                openReview({ allowMissing: true });
             }
 
             // Step 3 as a person does it: tick Verified on every field that has a value.

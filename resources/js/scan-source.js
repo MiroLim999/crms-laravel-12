@@ -461,6 +461,11 @@ export function rebuildBatchState(serverBatch, { layoutChanged = false } = {}) {
             // Sent back by Re-align without its file: drawn from the server's copy.
             serverCopy: Boolean(flags.serverCopy) && status === 'pending',
             addedAnyway: Boolean(flags.addedAnyway),
+            // Save & next pressed on it (Done): saved with the rest by Save & finish
+            // batch, with the answers given then ({ allowMissing, allowDuplicate }).
+            approved: ['ready', 'verifying'].includes(status) && flags.approved && typeof flags.approved === 'object'
+                ? { allowMissing: Boolean(flags.approved.allowMissing), allowDuplicate: Boolean(flags.approved.allowDuplicate) }
+                : null,
             // Being read when the batch was left: the workspace watches it again.
             sentToScan: status === 'scanning',
             sentAt: page.position ?? 0,

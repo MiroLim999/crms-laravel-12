@@ -526,6 +526,9 @@ const MAX_AUTO_WIDTH = 420;
  *   onCleared(refs)  the fields whose cell the reviewer emptied (for the scan)
  *   onRange(cells)  the cells picked together changed ([] when one or none);
  *                   the page shows them on the scan (optional)
+ *   isUnverified(cell)  its value is shown but will not be saved (Verify: no
+ *                   field of the cell ticked Verified). Shown greyed, and left
+ *                   out of the downloads (optional)
  *
  * The picked cell (blue) and its row (orange) are marked is-active. Several
  * cells of one column can be picked together, by dragging down or up it, by
@@ -539,7 +542,9 @@ export class ReviewTable {
     constructor({
         container, valueOf, onChange, onLocate = () => {}, onIssues = () => {},
         snapshotOf = () => null, restore = () => {}, onRange = () => {}, onCleared = () => {},
+        isUnverified = () => false,
     }) {
+        this.isUnverified = isUnverified;
         this.onRange = onRange;
         this.onCleared = onCleared;
         this.container = container;
@@ -904,7 +909,11 @@ export class ReviewTable {
         td.classList.toggle('is-empty', problem?.kind === 'empty');
         td.classList.toggle('is-cleared', problem?.kind === 'empty' && this.cleared.has(`${cell.row.id}|${cell.column.key}`));
         td.classList.toggle('is-invalid', problem?.kind === 'invalid');
-        td.title = problem?.message ?? '';
+        // Shown, but not saved: greyed, with why (an edit saves it).
+        const unverified = value.trim() !== '' && Boolean(this.isUnverified(cell));
+        td.classList.toggle('is-unverified', unverified);
+        td.title = problem?.message
+            ?? (unverified ? 'Not verified: this value is not saved or downloaded. Edit it, or tick it in Verify, to keep it.' : '');
         td.setAttribute('aria-invalid', String(Boolean(problem)));
         return problem;
     }
@@ -1569,12 +1578,16 @@ export class ReviewTable {
         }
     }
 
-    /** [header, ...rows] of what the table shows now, for the files (with any renamed labels). */
+    /**
+     * [header, ...rows] of what the table shows now, for the files (with any
+     * renamed labels). A value not verified is left out, as it is not saved.
+     */
     exportTable() {
         const header = ['Row', ...this.model.columns.map((column) => this.headerOf(column))];
+        const exported = (cell) => (this.isUnverified(cell) ? '' : String(this.valueOf(cell) ?? ''));
         const rows = this.model.rows.map((row, rowIndex) => [
             this.rowLabelOf(row),
-            ...this.model.columns.map((_, columnIndex) => String(this.valueOf(this.cell(rowIndex, columnIndex)) ?? '')),
+            ...this.model.columns.map((_, columnIndex) => exported(this.cell(rowIndex, columnIndex))),
         ]);
         return [header, ...rows];
     }

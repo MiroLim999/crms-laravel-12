@@ -2442,6 +2442,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   &.is-queued,
   &.is-verifying { color: var(--bs-primary); }
   &.is-ready { color: var(--bs-info); }
+  &.is-done,
   &.is-imported { color: var(--bs-success); }
   &.is-failed { color: var(--bs-danger); }
 }
@@ -2486,6 +2487,7 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     background: rgba(var(--bs-primary-rgb), .14);
   }
 
+  &.is-done,
   &.is-imported {
     color: var(--bs-success);
     background: rgba(113, 221, 55, .15);
@@ -11935,6 +11937,12 @@ $dashboard-reveal-step: 40ms;
   &.is-invalid {
     color: var(--bs-danger-text-emphasis);
     background: rgba(var(--bs-danger-rgb), .13);
+  }
+
+  // Not ticked Verified: shown, but not saved or downloaded (greyed, in italics).
+  &.is-unverified {
+    color: rgba(var(--bs-secondary-rgb), .75);
+    font-style: italic;
   }
 
   // The rest of the picked cell's row: orange.

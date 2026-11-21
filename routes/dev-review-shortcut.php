@@ -18,4 +18,6 @@ Route::middleware(['auth', 'can:documents.process'])
         Route::post('/', [ReviewShortcutController::class, 'store'])->name('store');
         // Fresh copies of the saved pages, ready to verify, as a real scan leaves them.
         Route::post('pages', [ReviewShortcutController::class, 'pages'])->name('pages');
+        // Batch mode: a batch of copies of the saved scan, read and ticked, to resume.
+        Route::post('batch', [ReviewShortcutController::class, 'batch'])->name('batch');
     });
