@@ -18,6 +18,12 @@ Route::middleware(['auth', 'can:documents.process'])
         Route::post('/', [ReviewShortcutController::class, 'store'])->name('store');
         // Fresh copies of the saved pages, ready to verify, as a real scan leaves them.
         Route::post('pages', [ReviewShortcutController::class, 'pages'])->name('pages');
-        // Batch mode: a batch of copies of the saved scan, read and ticked, to resume.
+        // Batch mode: the PDFs in pdf-files and what is saved of their reading.
+        Route::get('batch', [ReviewShortcutController::class, 'batchStatus'])->name('batch.status');
+        // One of those PDFs (to cut its pages as originals).
+        Route::get('batch/file', [ReviewShortcutController::class, 'batchFile'])->name('batch.file');
+        // Shift+click in a batch: save the pages it has read for the shortcut.
+        Route::post('batch/store', [ReviewShortcutController::class, 'batchStore'])->name('batch.store');
+        // A batch of those PDFs, read and ticked, to resume.
         Route::post('batch', [ReviewShortcutController::class, 'batch'])->name('batch');
     });

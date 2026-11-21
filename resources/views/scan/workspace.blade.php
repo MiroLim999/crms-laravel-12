@@ -13269,8 +13269,13 @@
                 column: cropped[index]?.label || readings[index]?.name || `Field ${index + 1}`,
                 ref: index,
             });
+            // A row (person) with no field ticked Verified is not saved, so it is not in
+            // the table (nor the downloads); one with something typed in step 4 stays.
+            const ticked = (index) => Boolean(verifyTickOf(index)?.checked);
+            const typedIn = (group) => [...reviewExtras.keys()].some((key) => key.startsWith(`${group.id}|`) && String(reviewExtras.get(key) ?? '').trim() !== '');
             const people = validationGroups
                 .filter((group) => group.kind === 'person')
+                .filter((group) => group.indexes.some(ticked) || typedIn(group))
                 .map((group, position) => ({
                     id: group.id,
                     // The register row, as the record's CSV numbers it (else the person's place).
@@ -13383,9 +13388,12 @@
                     && refs.every((index) => !verifyTickOf(index)?.checked)
                     && refs.some((index) => verifyValueOf(index).trim() !== '');
             }).length, 0);
+            // Rows left out: nothing on them ticked Verified (see reviewInput).
+            const hiddenRows = validationGroups.filter((group) => group.kind === 'person').length - people;
             el('reviewPaneSummary').textContent = `${people} ${people === 1 ? 'person' : 'people'} · `
                 + `${reviewModel.columns.length} column${reviewModel.columns.length === 1 ? '' : 's'}`
                 + (pages > 1 ? ` · ${pages} pages` : '')
+                + (hiddenRows > 0 ? ` · ${hiddenRows} row${hiddenRows === 1 ? '' : 's'} not verified (left out)` : '')
                 + (unverified > 0 ? ` · ${unverified} not verified (greyed, not saved)` : '');
         }
 

@@ -9,11 +9,14 @@
 | opens step 4 on a scan saved once, so the Review & Export page can be
 | worked on without scanning again each time.
 |
-| In Batch mode it asks how many documents and makes a batch of that many
-| copies of the saved scan on the server (read, fields ticked), then the
-| workspace resumes it as any batch is resumed. Batches it makes are named
-| dev_<time>_… (scan_batches.batch_key); leftover ones can be discarded from
-| the Resume offer like any batch.
+| In Batch mode it uses every PDF in the codebase's pdf-files folder. Once:
+| scan them in a real batch (align, Scan all) and Shift+click the button in
+| Verify, which saves their reading (per file fingerprint) in
+| storage/app/private/dev-review-shortcut/batch/. Then a click makes a batch
+| of those files on the server (read, fields ticked) and the workspace
+| resumes it as any batch is resumed. Batches it makes are named dev_<time>_…
+| (scan_batches.batch_key); leftover ones can be discarded from the Resume
+| offer like any batch.
 |
 | On only when APP_ENV=local AND DEV_REVIEW_SHORTCUT=true in .env.
 |
