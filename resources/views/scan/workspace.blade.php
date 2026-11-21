@@ -76,6 +76,8 @@
                             <div class="batch-queue-progress" id="batchQueueProgressTrack" role="progressbar"
                                 aria-label="Batch progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                                 <div class="batch-queue-progress__bar" id="batchQueueProgressBar"></div>
+                                {{-- Save & finish batch: the records saved so far, over the ones that are Done. --}}
+                                <div class="batch-queue-progress__saved" id="batchQueueProgressSaved"></div>
                             </div>
                             {{-- Every file of the batch; the one expanded lists its pages. It floats over
                                  the page (it does not push it down), and slides open and shut. --}}
@@ -4882,9 +4884,19 @@
             // Pages are what is aligned and scanned one by one; documents are what is imported.
             const unit = batchGroups().length === total ? 'document' : 'page';
 
-            const updateProgress = (pct) => {
+            // `pct` is how far the step is. Saving the Done records (Save & finish batch)
+            // fills a second, green bar over it with `savedPct`, and says it in words.
+            const progressSaved = document.getElementById('batchQueueProgressSaved');
+            const updateProgress = (pct, { savedPct = null, text = '' } = {}) => {
+                const saving = savedPct !== null;
                 if (progressBar) progressBar.style.width = `${pct}%`;
-                if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(pct));
+                if (progressSaved) progressSaved.style.width = `${saving ? savedPct : 0}%`;
+                if (progressTrack) {
+                    progressTrack.classList.toggle('is-saving', saving);
+                    progressTrack.setAttribute('aria-valuenow', String(saving ? savedPct : pct));
+                    if (text) progressTrack.setAttribute('aria-valuetext', text);
+                    else progressTrack.removeAttribute('aria-valuetext');
+                }
             };
 
             // What the bar offers follows where the user is: Scan all running, the
@@ -5002,14 +5014,26 @@
                         : batchFinishing ? 'Saving the batch'
                             : (activeStep === 'review' ? 'Review & save' : 'Verify each record');
                 }
+                // Saving the Done records: which one is being saved, and how many are.
+                const savedRecords = records.filter(recordDone).length;
                 if (counter && batchFinishing) {
-                    counter.textContent = `${records.filter(recordDone).length} of ${records.length} saved`;
+                    counter.textContent = `Saving record ${Math.min(savedRecords + 1, records.length)} of ${records.length}`
+                        + (savedRecords > 0 ? ` · ${savedRecords} saved` : '');
                 } else if (counter) {
                     counter.textContent = phase === 'done' || !onRecord
                         ? `${finished} of ${records.length} record${records.length === 1 ? '' : 's'} done`
                         : `Record ${position + 1} of ${records.length} · ${finished} done`;
                 }
-                updateProgress(records.length > 0 ? Math.round((finished / records.length) * 100) : 100);
+                const donePct = records.length > 0 ? Math.round((finished / records.length) * 100) : 100;
+                if (batchFinishing && records.length > 0) {
+                    // Every record is Done by now: the saved ones fill over them in green.
+                    updateProgress(donePct, {
+                        savedPct: Math.round((savedRecords / records.length) * 100),
+                        text: `${savedRecords} of ${records.length} records saved`,
+                    });
+                } else {
+                    updateProgress(donePct, { text: `${finished} of ${records.length} records done` });
+                }
                 if (saveQueueBtn) saveQueueBtn.classList.add('d-none');
             }
 
@@ -6523,6 +6547,8 @@
             item.page = payload;
             item.error = null;
             item.realign = false;
+            // Queued (again) means read (again): it is checked again before it is Done.
+            item.approved = null;
             item.workspaceScanPath = payload.workspaceScanPath || item.workspaceScanPath || null;
             item.serverCopy = false;
             item.scanKind = scanKind;
@@ -13848,6 +13874,8 @@
         // with `finalBatchSave` (finishBatchSave); that answers true once saved.
         async function submitRecord({ allowMissing = false, allowDuplicate = false, finalBatchSave = false } = {}) {
             if (recordSubmitting) return false;
+            // Save & finish batch is saving the Done records: a press meanwhile is not a second save.
+            if (batchFinishing && !finalBatchSave) return false;
             // A batch record saved (or left out) already, still on screen while the
             // next one is read: it is not sent twice.
             const shownBatchItem = batchState.active ? batchState.items[batchState.currentIndex] : null;
@@ -14094,6 +14122,7 @@
                         item.recordId = payload.record?.recordId ?? null;
                         item.verifyDraft = null;
                         item.reviewExtras = null;
+                        item.approved = null;
                     });
                     currentBatchItem.exportTable = exportedTable;
                     syncBatchDraft(currentBatchItem);

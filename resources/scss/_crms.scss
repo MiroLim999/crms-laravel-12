@@ -1935,15 +1935,23 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   position: absolute;
   inset-inline: 0;
   inset-block-end: 0;
-  block-size: 2px;
+  block-size: 3px;
   overflow: hidden;
-  background: rgba(var(--crms-ink-rgb), .06);
+  background: rgba(var(--crms-ink-rgb), .08);
+  transition: block-size .2s ease;
+
+  // Saving the Done records: a little thicker, so it is seen working.
+  &.is-saving {
+    block-size: 4px;
+  }
 }
 
-.batch-queue-progress__bar {
+.batch-queue-progress__bar,
+.batch-queue-progress__saved {
   block-size: 100%;
   inline-size: 0;
   background: var(--bs-primary);
+  border-radius: 0 2px 2px 0;
   transition: inline-size .3s ease;
 
   [data-phase="done"] & {
@@ -1953,6 +1961,19 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   @media (prefers-reduced-motion: reduce) {
     transition: none;
   }
+}
+
+// Saving the batch: the bar of the Done records goes pale, and the saved ones fill over it in green.
+.batch-queue-progress.is-saving .batch-queue-progress__bar {
+  background: rgba(var(--bs-primary-rgb), .3);
+}
+
+.batch-queue-progress__saved {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  background: var(--bs-success);
+  transition-duration: .6s;
 }
 
 .batch-queue-banner__notice {
