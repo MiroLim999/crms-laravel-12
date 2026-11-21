@@ -168,6 +168,28 @@ class ScanBatchTest extends TestCase
                 && $open[0]['id'] === $batch->getKey() && $open[0]['records'] === 1 && $open[0]['saved'] === 0);
     }
 
+    public function test_the_resume_offer_counts_pages_waiting_to_be_re_aligned(): void
+    {
+        $batch = $this->createBatch();
+        $this->actingAs($this->owner)
+            ->putJson(route('documents.batches.pages', $batch), [
+                'version' => 0,
+                'tab' => 'tab-a',
+                'pages' => [
+                    $this->page('p1', 1, ['flags' => ['realign' => true, 'serverCopy' => true]]),
+                    $this->page('p2', 2, ['flags' => ['realign' => true]]),
+                    // Queued again already: not waiting any more.
+                    $this->page('p3', 3, ['status' => 'saved', 'flags' => ['realign' => true]]),
+                    $this->page('p4', 4),
+                ],
+            ])
+            ->assertOk();
+
+        $offer = ScanBatchController::openBatchesFor($this->owner->getKey())[0];
+        $this->assertSame(2, $offer['realigning']);
+        $this->assertSame(4, $offer['pages']);
+    }
+
     public function test_a_batch_is_its_owners_alone(): void
     {
         $batch = $this->createBatch();
@@ -216,6 +238,39 @@ class ScanBatchTest extends TestCase
             ->postJson(route('documents.batches.ping', $batch), ['version' => 2, 'tab' => 'tab-a'])
             ->assertStatus(409);
         $pages(2, 'tab-b')->assertOk()->assertJsonPath('version', 3);
+    }
+
+    public function test_a_tab_that_leaves_lets_the_batch_go_without_giving_it_up(): void
+    {
+        $batch = $this->createBatch();
+        $show = fn () => $this->actingAs($this->owner)->getJson(route('documents.batches.show', $batch));
+        $this->assertNotNull($show()->json('seenAt'));
+
+        // Another tab cannot let it go.
+        $this->actingAs($this->owner)
+            ->postJson(route('documents.batches.release', $batch), ['tab' => 'tab-b'])
+            ->assertOk();
+        $this->assertNotNull($show()->json('seenAt'));
+
+        // The tab that has it can: it is no longer seen as open there, and nothing else changes.
+        $this->actingAs($this->owner)
+            ->postJson(route('documents.batches.release', $batch), ['tab' => 'tab-a'])
+            ->assertOk()
+            ->assertJsonPath('version', 0);
+        $this->assertNull($show()->json('seenAt'));
+        $this->assertSame('tab-a', $show()->json('tab'));
+
+        // Back in the same tab (from the browser's cache), its changes still count.
+        $this->actingAs($this->owner)
+            ->putJson(route('documents.batches.pages', $batch), [
+                'version' => 0, 'tab' => 'tab-a', 'pages' => [$this->page('p1', 1)],
+            ])
+            ->assertOk();
+
+        $other = User::factory()->superAdmin()->create();
+        $this->actingAs($other)
+            ->postJson(route('documents.batches.release', $batch), ['tab' => 'tab-a'])
+            ->assertNotFound();
     }
 
     public function test_a_finished_or_discarded_batch_takes_no_more_changes(): void

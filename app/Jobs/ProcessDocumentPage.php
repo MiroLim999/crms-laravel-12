@@ -42,9 +42,18 @@ class ProcessDocumentPage implements ShouldQueue
 
     public int $timeout = 900;
 
+    /**
+     * Which old line became which new one when readings were kept (old id => new id): a line
+     * cut out exactly as before (its reading kept), or the same outline in the same cell
+     * (read again). What was typed on the old line follows it either way.
+     */
+    public const LINE_MAP = 'line_map.json';
+
     public function __construct(
         public readonly int $pageId,
         public readonly string $mode = self::MODE_FULL,
+        // Re-align: a line whose crop is exactly as before keeps its reading; only the rest is read.
+        public readonly bool $keepReadings = false,
     ) {}
 
     public function handle(LineMarkers $markers, PageLineReader $reader): void
@@ -89,7 +98,12 @@ class ProcessDocumentPage implements ShouldQueue
         // Either cancel (discard the page, or back to Detect's result) ends
         // the read at the next batch.
         $readStarted = hrtime(true);
-        $reader->read($page, $page->lines()->get(), fn () => $this->currentStatus() !== DocumentPage::STATUS_READING);
+        // Kept readings are not read again: only the lines that changed are.
+        $toRead = $page->lines()->get();
+        if ($this->keepReadings) {
+            $toRead = $toRead->whereNull('ocr_text')->values();
+        }
+        $reader->read($page, $toRead, fn () => $this->currentStatus() !== DocumentPage::STATUS_READING);
         $readMs = (int) round((hrtime(true) - $readStarted) / 1_000_000);
 
         // A read cancelled from Detect's result is back to "detected" already;
@@ -173,6 +187,11 @@ class ProcessDocumentPage implements ShouldQueue
         $disk = Storage::disk('local');
         $page->forceFill(['status' => DocumentPage::STATUS_DETECTING, 'error' => null])->save();
 
+        // Re-align: what each line read before, by the exact crop it was read from, so
+        // a line cut out the same again keeps it. A previous map is stale from here on.
+        $disk->delete($page->directory().'/'.self::LINE_MAP);
+        $previous = $this->keepReadings ? $this->readingsByCrop($page) : [];
+
         // Outlining a page again (markers moved after Detect) names its crops
         // afresh, so the previous run's would otherwise be left behind. What
         // the detector found is kept: it is beside the crops, not inside them.
@@ -182,7 +201,9 @@ class ProcessDocumentPage implements ShouldQueue
             ? $markers->detect($disk->path($page->image_path), $page->geometry, $disk->path($page->directory()))
             : $markers->process($disk->path($page->image_path), $page->geometry, $disk->path($page->directory()));
 
-        DB::transaction(function () use ($page, $result) {
+        $kept = [];
+        $unmatched = [];
+        DB::transaction(function () use ($page, $result, $disk, &$previous, &$kept, &$unmatched) {
             // Detect straightens the page in place, and so does a scan whose
             // ledger grid tilted by hand; that can change its size, and the
             // markers were moved onto the straightened page: keep both.
@@ -203,7 +224,7 @@ class ProcessDocumentPage implements ShouldQueue
             $page->lines()->withTrashed()->forceDelete();
 
             foreach ($result['lines'] as $position => $line) {
-                $page->lines()->create([
+                $created = $page->lines()->create([
                     'position' => $position,
                     'source' => $line['source'],
                     'column_index' => $line['column_index'] ?? null,
@@ -220,7 +241,74 @@ class ProcessDocumentPage implements ShouldQueue
                         [PageLine::FLAG_NO_ROW, PageLine::FLAG_SHARED_CELL],
                     )),
                 ]);
+
+                // The same crop as before: the same handwriting, so the same reading.
+                $matched = false;
+                if ($previous !== [] && $disk->exists($created->crop_path)) {
+                    $hash = md5((string) $disk->get($created->crop_path));
+                    if (! empty($previous[$hash])) {
+                        $old = array_shift($previous[$hash]);
+                        $created->forceFill([
+                            'ocr_text' => $old['text'],
+                            'ocr_confidence' => $old['confidence'],
+                            'ocr_error' => $old['error'],
+                        ])->save();
+                        $kept[$old['id']] = $created->getKey();
+                        $matched = true;
+                    }
+                }
+                if ($previous !== [] && ! $matched) {
+                    $unmatched[] = $created;
+                }
+            }
+
+            // Not cut out exactly as before, but the same outline in the same cell (a tilted
+            // page's first re-read cuts a few pixels differently): read again, and what was
+            // typed on it still follows it.
+            $left = collect($previous)->flatten(1)->filter(fn ($old) => ! isset($kept[$old['id']]));
+            foreach ($unmatched as $created) {
+                $key = $this->cellKey($created->polygon, $created->column_index, $created->row);
+                $old = $left->first(fn ($candidate) => $candidate['cell'] === $key);
+                if ($old !== null) {
+                    $kept[$old['id']] = $created->getKey();
+                    $left = $left->reject(fn ($candidate) => $candidate['id'] === $old['id']);
+                }
             }
         });
+
+        if ($this->keepReadings) {
+            $disk->put($page->directory().'/'.self::LINE_MAP, json_encode((object) $kept));
+        }
+    }
+
+    /**
+     * The readings of a page's lines by the content of their crop (lines read before only).
+     *
+     * @return array<string, list<array{id: int, text: string|null, confidence: float|null, error: string|null}>>
+     */
+    private function readingsByCrop(DocumentPage $page): array
+    {
+        $disk = Storage::disk('local');
+        $readings = [];
+        foreach ($page->lines()->whereNotNull('ocr_text')->get() as $line) {
+            if (! $line->crop_path || ! $disk->exists($line->crop_path)) {
+                continue;
+            }
+            $readings[md5((string) $disk->get($line->crop_path))][] = [
+                'id' => (int) $line->getKey(),
+                'text' => $line->ocr_text,
+                'confidence' => $line->ocr_confidence,
+                'error' => $line->ocr_error,
+                'cell' => $this->cellKey($line->polygon, $line->column_index, $line->row),
+            ];
+        }
+
+        return $readings;
+    }
+
+    /** A line's outline and the cell it sits in, to know it again after the page is outlined again. */
+    private function cellKey(mixed $polygon, ?int $column, ?int $row): string
+    {
+        return json_encode([$polygon, $column, $row]);
     }
 }

@@ -406,6 +406,8 @@ test('files picked again are matched by fingerprint, whatever their names', () =
     assert.deepEqual(result.missing, [{ sourceName: 'LEDGER.pdf', sourceHash: 'c'.repeat(64), pages: 1 }]);
     assert.equal(pageNeedsFile(pages[0]), true);
     assert.equal(pageNeedsFile(pages[2]), false);
+    // Sent back by Re-align after a resume: drawn from the server's copy, no file asked for.
+    assert.equal(pageNeedsFile({ status: 'pending', file: null, serverCopy: true }), false);
     assert.equal(pageNeedsFile({ status: 'pending', file: renamed }), false);
 });
 

@@ -91,6 +91,8 @@ Docker builds whatever is in the project folder, so first make sure the folder h
 
 Docker Desktop only has to show **Engine running**; the start script builds and starts the containers itself, so there is no need to start them first. Records and models are not touched.
 
+The rebuild also gives the **worker** the new code. If you ever change the code without rebuilding (or a scan behaves like the old version), restart it: `docker compose restart worker`.
+
 > **Updating past 15 November 2026:** `migrate` deletes the old correction requests (the `change_requests` tables), because saved records are now edited in **Review & Export**. The records and their current values stay, and the Audit Log keeps every old correction. Make a [backup](#backup-and-restore) first if you might need those requests as they were.
 
 ---

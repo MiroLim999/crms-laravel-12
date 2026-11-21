@@ -1494,8 +1494,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   align-items: center;
   justify-content: center;
   // Tall when the window allows, but never so tall that the step scrolls: the
-  // top bar, type select, note and footer around it take about 22.5rem.
-  min-block-size: clamp(16rem, 100dvh - 22.5rem, 26rem);
+  // top bar, type select, upload mode, note and footer around it take about
+  // 24rem (measured at 1536x730), plus the unfinished-batch line when shown.
+  min-block-size: clamp(16rem, 100dvh - 24rem - var(--upload-extra, 0rem), 26rem);
   // Inset by the card's padding, so its edges line up with the type select.
   margin-inline: 1.25rem;
   padding: 2.5rem 2rem;
@@ -1628,10 +1629,11 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 // Short windows (a 1366x768 laptop leaves about 560px inside the browser): a
 // smaller icon and tighter spacing let the whole upload step fit without
-// scrolling. Phones keep their own rules further down.
-@media (min-width: 768px) and (max-height: 700px) {
+// scrolling. Phones keep their own rules further down. 780px, not 700px: a
+// 1536x864 screen leaves about 730px, where the full-size drop area ran over.
+@media (min-width: 768px) and (max-height: 780px) {
   .document-dropzone {
-    min-block-size: clamp(12rem, 100dvh - 24.5rem, 26rem);
+    min-block-size: clamp(12rem, 100dvh - 24.5rem - var(--upload-extra, 0rem), 26rem);
     padding-block: 1.25rem;
   }
 
@@ -1648,6 +1650,20 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
   .document-dropzone__button {
     margin-block: 1rem 0;
+  }
+}
+
+// Shorter still, with the unfinished-batch line shown: the format tags go (the
+// note under the drop area lists the formats) so the step keeps fitting.
+@media (min-width: 768px) and (max-height: 700px) {
+  .document-upload-card:has(.batch-resume:not(.d-none)) {
+    .document-dropzone {
+      padding-block: 1rem;
+    }
+
+    .document-dropzone__formats {
+      display: none;
+    }
   }
 }
 
@@ -2142,6 +2158,14 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     font-size: 1rem;
     text-align: center;
     transition: transform .15s ease;
+  }
+
+  // A bigger target for the arrow, since it alone shows or hides the pages.
+  i.batch-queue-file__chevron {
+    box-sizing: content-box;
+    padding: .5rem .35rem;
+    margin: -.5rem -.35rem;
+    cursor: pointer;
   }
 
   &[aria-expanded="true"] .batch-queue-file__chevron {
@@ -3076,10 +3100,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .doc-spread__switch {
   position: absolute;
-  inset-block-end: 1rem;
-  inset-inline: 0;
+  // In the page's top corner, over the printed heading rather than the handwriting.
+  inset-block-start: .6rem;
+  inset-inline: auto .6rem;
   inline-size: max-content;
-  margin-inline: auto;
   padding: .45rem .9rem;
   color: #fff;
   font-size: .8rem;
@@ -3218,8 +3242,105 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// The batch's Save button: icon, a short label, and the queue count in its own tag (one line).
+// The panel's width decides whether the optional word shows (a container query).
+// Queuing a re-align: the fields that moved, and an amber line when row lines moved.
+.realign-fields {
+  margin: 0 0 .6rem;
+  padding: 0;
+  list-style: none;
+  text-align: center;
+  color: var(--bs-heading-color);
+  font-size: .85rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.realign-warning {
+  margin: .5rem 0 0;
+  padding: .45rem .65rem;
+  color: #8a5300;
+  font-size: .8rem;
+  line-height: 1.35;
+  background: rgba(255, 171, 0, .14);
+  border-radius: var(--bs-border-radius);
+}
+
+[data-bs-theme="dark"] .realign-warning {
+  color: #ffc35a;
+}
+
+.field-marker-actions {
+  container-type: inline-size;
+  container-name: marker-actions;
+}
+
+.save-queue-opt {
+  display: none;
+
+  @container marker-actions (min-width: 22rem) {
+    display: inline;
+  }
+}
+
+#saveQueueNextBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding-inline: .9rem;
+  font-size: 1rem;
+  line-height: 1.2;
+
+  > .icon-base {
+    flex: 0 0 auto;
+    margin: 0;
+
+    // A narrow panel keeps its room for the words.
+    @container marker-actions (max-width: 17rem) {
+      display: none;
+    }
+  }
+
+  #saveQueueNextLabel {
+    display: inline-flex;
+    flex: 0 1 auto;
+    align-items: center;
+    justify-content: center;
+    gap: .55rem;
+    min-inline-size: 0;
+    text-align: center;
+  }
+
+  .save-queue-count {
+    flex: 0 0 auto;
+    padding: .1rem .45rem;
+    font-size: .75rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    background: rgba(255, 255, 255, .22);
+    border-radius: 999px;
+  }
+}
+
 .field-marker-actions {
   flex: 0 0 auto;
+}
+
+// Scan all: its page count in a tag, as on Save, so the label stays on one line.
+#scanNowBtnLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+
+  .save-queue-count {
+    padding: .1rem .45rem;
+    font-size: .75rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    background: rgba(255, 255, 255, .22);
+    border-radius: 999px;
+  }
 }
 
 .document-fields-card .card-body {
@@ -3503,6 +3624,41 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   #discardBatchLeaveBtn { order: 1; }
 }
 
+// "Leave this batch?": squarer and left-aligned, like the Unfinished batches window.
+#leaveScanModal {
+  .modal-dialog {
+    max-inline-size: min(26rem, calc(100% - 2rem));
+  }
+
+  .leave-scan-modal {
+    border-radius: .5rem;
+    text-align: start;
+  }
+
+  .modal-body {
+    padding: 1.5rem 1.5rem 1.25rem;
+  }
+
+  .leave-scan-modal__icon {
+    inline-size: 2.5rem;
+    block-size: 2.5rem;
+    margin-block-end: .85rem;
+    border-radius: .4rem;
+  }
+
+  .modal-title {
+    padding-inline-end: 2.5rem;
+  }
+
+  .leave-scan-modal__text {
+    margin-block-end: 1.1rem;
+  }
+
+  .leave-scan-modal__actions .btn {
+    border-radius: .35rem;
+  }
+}
+
 // Where the batch stands, in the window that asks about leaving it.
 .leave-scan-modal__summary {
   margin: 0 0 1.25rem;
@@ -3530,15 +3686,19 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   overflow-y: auto;
 }
 
-// The upload step: a batch left unfinished, to resume or discard.
+// The upload step: batches left unfinished, as one slim line (the list is in a window).
+// The drop area gives up the line's height (46px + 1rem gap), so the step still fits.
+.document-upload-card:has(.batch-resume:not(.d-none)) {
+  --upload-extra: 3.9rem;
+}
+
 .batch-resume {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: .6rem .85rem;
-  margin-block-end: 1rem;
-  padding: .75rem .9rem;
-  border: 1px solid rgba(var(--bs-primary-rgb), .35);
+  gap: .65rem;
+  margin: 0 1.25rem 1rem;
+  padding: .45rem .5rem .45rem .6rem;
+  border: 1px solid rgba(var(--bs-primary-rgb), .3);
   border-radius: .6rem;
   background: rgba(var(--bs-primary-rgb), .06);
 }
@@ -3547,41 +3707,189 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   display: inline-grid;
   flex: 0 0 auto;
   place-items: center;
-  inline-size: 2.25rem;
-  block-size: 2.25rem;
+  inline-size: 1.85rem;
+  block-size: 1.85rem;
   color: var(--bs-primary);
   background: rgba(var(--bs-primary-rgb), .14);
   border-radius: 50%;
-  font-size: 1.15rem;
+  font-size: 1rem;
 }
 
 .batch-resume__text {
-  display: grid;
-  flex: 1 1 14rem;
-  gap: .1rem;
+  flex: 1 1 auto;
   min-inline-size: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: .82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 
   strong {
+    margin-inline-end: .35rem;
     color: var(--bs-heading-color);
-    font-size: .875rem;
   }
 
   span {
     color: var(--bs-secondary-color);
-    font-size: .78rem;
   }
 }
 
 .batch-resume__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: .5rem;
+  flex: 0 0 auto;
+  gap: .4rem;
 }
 
-.batch-resume-other {
-  margin: -.4rem 0 1rem;
+// The window listing every unfinished batch.
+.batch-resume-modal {
+  border-radius: .5rem;
+
+  .modal-footer {
+    padding-block-start: .25rem;
+
+    > .btn {
+      inline-size: 100%;
+    }
+
+    .batch-resume__ask-group {
+      flex-wrap: wrap;
+      inline-size: 100%;
+      justify-content: flex-end;
+    }
+  }
+
+  .modal-header {
+    padding-block-end: .5rem;
+    padding-inline-end: 3.25rem;
+  }
+
+  .modal-body {
+    padding-block: .25rem .5rem;
+  }
+}
+
+.batch-resume-modal__sub {
+  margin: .2rem 0 0;
   color: var(--bs-secondary-color);
+  font-size: .8rem;
+}
+
+.batch-resume__list {
+  display: grid;
+  gap: .25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.batch-resume__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  min-block-size: 3.4rem;
+  padding: .5rem .6rem .5rem .85rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: .35rem;
+  color: var(--bs-body-color);
+  font-size: .82rem;
+
+  &.is-latest {
+    border-color: rgba(var(--bs-primary-rgb), .35);
+    background: rgba(var(--bs-primary-rgb), .04);
+  }
+
+  &.is-asking {
+    border-color: rgba(var(--bs-danger-rgb), .35);
+    background: rgba(var(--bs-danger-rgb), .04);
+  }
+}
+
+.batch-resume__row-text {
+  display: grid;
+  flex: 1 1 8rem;
+  gap: .15rem;
+  min-inline-size: 0;
+}
+
+.batch-resume__row-title {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-resume__row-meta {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+}
+
+// Asking "Discard this batch?" takes the row's full width, buttons to the right.
+.batch-resume__row.is-asking .batch-resume__row-text {
+  display: none;
+}
+
+.batch-resume__row.is-asking .batch-resume__row-actions {
+  flex: 1 1 auto;
+  justify-content: space-between;
+}
+
+.batch-resume__row-actions,
+.batch-resume__ask-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .3rem;
+}
+
+.batch-resume__ask {
+  margin-inline-end: .25rem;
+  color: var(--bs-danger);
   font-size: .78rem;
+  font-weight: 500;
+}
+
+// A document type's heading over its batches in the window.
+.batch-resume__group {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .5rem;
+  padding: .75rem .15rem .2rem;
+  font-size: .78rem;
+
+  &:first-child {
+    padding-block-start: .1rem;
+  }
+}
+
+.batch-resume__group-name {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--bs-heading-color);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-resume__group-meta {
+  flex: 0 0 auto;
+  color: var(--bs-secondary-color);
+}
+
+.batch-resume__open {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+}
+
+// The newest batch of this type, marked beside its line.
+.batch-resume__latest {
+  flex: 0 0 auto;
+  font-size: .68rem;
 }
 
 .batch-queue-banner__notice.is-info {
@@ -3724,7 +4032,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 #batchIntakeModal .btn-close,
 #realignConfirmModal .btn-close,
-#leaveScanModal .btn-close {
+#leaveScanModal .btn-close,
+.leave-scan-modal > .btn-close,
+.batch-resume-modal > .btn-close {
   position: absolute;
   inset-block-start: .75rem;
   inset-inline: auto .75rem;
@@ -3773,9 +4083,26 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// The end of a batch: Download all and Records archive side by side, Scan another batch under them.
 #batchSummaryModal .leave-scan-modal__actions {
-  flex-wrap: wrap;
-  justify-content: center;
+  grid-template-columns: 1fr 1fr;
+
+  #batchSummaryDownloadBtn {
+    inline-size: 100%;
+  }
+
+  #batchSummaryRestartBtn {
+    grid-column: 1 / -1;
+  }
+}
+
+// The app's own question window: its text may be a few short paragraphs.
+.app-ask-text p {
+  margin: 0 0 .5rem;
+
+  &:last-child {
+    margin-block-end: 0;
+  }
 }
 
 // Verify: asks before a record is submitted without required fields.

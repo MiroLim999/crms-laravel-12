@@ -50,7 +50,7 @@ function Test-Port([int]$Port) {
 # no php process), other than this script itself.
 function Test-QueueWorker {
     $null -ne (Get-CimInstance Win32_Process -Filter "Name='php.exe' OR Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -like '*artisan queue:work*' -or $_.CommandLine -like '*serve.ps1*-Only worker*') })
+        Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -like '*artisan queue:work*' -or $_.CommandLine -like '*artisan queue:listen*' -or $_.CommandLine -like '*serve.ps1*-Only worker*') })
 }
 
 # The scheduler, or the loop that keeps it running, other than this script itself.
@@ -77,12 +77,14 @@ if ($Only) {
             if (Test-QueueWorker) { Write-Warn 'A queue worker is already running - not starting another.'; exit 0 }
             # Finishing Align, and Detect, queue a job that outlines every
             # handwritten line and reads it; without a worker, pages wait in
-            # "queued" forever. The loop brings it back after
-            # `php artisan queue:restart` (it exits so that new code loads),
-            # after a crash, and once MySQL is up if it started before MySQL.
+            # "queued" forever. queue:listen runs each job in a fresh PHP
+            # process, so a change to the code is picked up by the next job with
+            # no restart (about half a second per job; the slow work is Kraken
+            # and the OCR service anyway). The loop brings it back after a crash,
+            # and once MySQL is up if it started before MySQL.
             $host.UI.RawUI.WindowTitle = 'CRMS queue worker'
             while ($true) {
-                php artisan queue:work --timeout=900 --tries=1
+                php artisan queue:listen --timeout=900 --tries=1
                 Write-Host 'Worker stopped. Starting again in 5 s - close this terminal to stop it.' -ForegroundColor Yellow
                 Start-Sleep -Seconds 5
             }

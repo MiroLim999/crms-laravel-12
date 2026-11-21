@@ -79,6 +79,22 @@ class ScanBatchController extends Controller
         return response()->json($this->payload($batch));
     }
 
+    /**
+     * The tab left the batch (Keep for later, or the tab closed): it no longer
+     * counts as open there, so opening it again soon does not warn about
+     * another tab. Only the tab that has it can let it go; nothing else changes.
+     */
+    public function release(Request $request, ScanBatch $batch): JsonResponse
+    {
+        $this->authorizeBatch($request, $batch);
+        $validated = $request->validate(['tab' => ['required', 'string', 'max:64']]);
+        if ($batch->isOpen() && $batch->tab === $validated['tab']) {
+            $batch->forceFill(['seen_at' => null])->save();
+        }
+
+        return response()->json(['version' => $batch->version]);
+    }
+
     /** The tab is still working on it (nothing changes but when it was last heard from). */
     public function ping(Request $request, ScanBatch $batch): JsonResponse
     {
@@ -242,7 +258,7 @@ class ScanBatchController extends Controller
         $batches = ScanBatch::query()
             ->where('user_id', $userId)
             ->where('status', ScanBatch::STATUS_OPEN)
-            ->with('pages:id,scan_batch_id,record_key,status')
+            ->with('pages:id,scan_batch_id,record_key,status,flags')
             ->latest('updated_at')
             ->get();
         $labels = DocumentTypeDefinition::query()
@@ -261,6 +277,8 @@ class ScanBatchController extends Controller
                     'records' => $records->count(),
                     'saved' => $records->filter(fn ($pages) => $pages->every(fn ($page) => $page->status === 'imported'))->count(),
                     'pages' => $batch->pages->count(),
+                    // Pages sent back by Re-align and not queued again yet.
+                    'realigning' => $batch->pages->filter(fn ($page) => $page->status === 'pending' && ! empty($page->flags['realign']))->count(),
                     'updatedAt' => $batch->updated_at?->toIso8601String(),
                     'workspaceUrl' => route('documents.workspace', ['type' => $batch->doc_type]),
                 ];

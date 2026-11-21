@@ -327,6 +327,87 @@ class LineOutlinePipelineTest extends TestCase
         $this->actingAs($page->creator)->postJson(route('documents.pages.read', $page))->assertAccepted();
     }
 
+    public function test_a_page_queued_again_without_its_file_gets_its_own_copy_of_the_original(): void
+    {
+        Queue::fake();
+        $user = User::factory()->superAdmin()->create();
+        $template = $this->ledgerTemplate();
+        $disk = Storage::disk('local');
+        $upload = fn (array $extra) => $this->actingAs($user)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.store'), [
+                'document_template_id' => $template->getKey(),
+                'page' => UploadedFile::fake()->image('page.png', 800, 600),
+                'geometry_json' => json_encode($this->geometry(), JSON_THROW_ON_ERROR),
+                'batch_key' => 'batch_9_xyz',
+                'defer_scan' => '1',
+                ...$extra,
+            ]);
+
+        // Queued first with its file.
+        $first = $upload(['scan' => UploadedFile::fake()->create('BOOK (page 1).pdf', 12, 'application/pdf')])->assertAccepted();
+        $firstPath = $first->json('workspaceScanPath');
+        $disk->assertExists($firstPath);
+
+        // Re-aligned after a resume (no file at hand): the server copies the original.
+        $second = $upload(['scan_from_page' => $first->json('id')])->assertAccepted();
+        $secondId = $second->json('id');
+        $secondPath = "documents/workspace/batch_9_xyz/{$secondId}-BOOK__page_1_.pdf";
+        $second->assertJsonPath('workspaceScanPath', $secondPath);
+        $disk->assertExists($secondPath);
+        $this->assertSame($disk->get($firstPath), $disk->get($secondPath));
+
+        // The copy is the new page's own: the old page's original going does not take it.
+        $disk->delete($firstPath);
+        $disk->assertExists($secondPath);
+
+        // An original that is gone is refused, and nothing is stored for it.
+        $before = DocumentPage::count();
+        $upload(['scan_from_page' => $first->json('id')])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('scan_from_page');
+        $this->assertSame($before, DocumentPage::count());
+
+        // Another account's page is never copied from.
+        $this->actingAs(User::factory()->superAdmin()->create())
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.store'), [
+                'document_template_id' => $template->getKey(),
+                'page' => UploadedFile::fake()->image('page.png', 800, 600),
+                'geometry_json' => json_encode($this->geometry(), JSON_THROW_ON_ERROR),
+                'scan_from_page' => $secondId,
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('scan_from_page');
+    }
+
+    public function test_a_smoke_tested_page_queued_again_without_its_file_gets_a_copy_too(): void
+    {
+        $page = $this->detectedPage();
+        Queue::fake();
+        // An earlier page of the same user, queued with its file.
+        $earlier = $this->actingAs($page->creator)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.store'), [
+                'document_template_id' => $page->document_template_id,
+                'page' => UploadedFile::fake()->image('page.png', 800, 600),
+                'geometry_json' => json_encode($this->geometry(), JSON_THROW_ON_ERROR),
+                'scan' => UploadedFile::fake()->create('BOOK (page 2).pdf', 12, 'application/pdf'),
+                'batch_key' => 'batch_9_xyz',
+                'defer_scan' => '1',
+            ])->assertAccepted();
+
+        $this->actingAs($page->creator)
+            ->withHeader('Accept', 'application/json')
+            ->post(route('documents.pages.queue', $page), [
+                'scan_from_page' => $earlier->json('id'),
+                'batch_key' => 'batch_9_xyz',
+            ])
+            ->assertOk()
+            ->assertJsonPath('workspaceScanPath', "documents/workspace/batch_9_xyz/{$page->getKey()}-BOOK__page_2_.pdf");
+        Storage::disk('local')->assertExists("documents/workspace/batch_9_xyz/{$page->getKey()}-BOOK__page_2_.pdf");
+    }
+
     public function test_a_smoke_tested_page_joins_a_batch_queue_as_it_is(): void
     {
         $page = $this->detectedPage();
@@ -1207,6 +1288,55 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertStringStartsWith('read ', (string) $page->lines()->first()->ocr_text);
         // The previous run's crops do not pile up beside the new ones.
         Storage::disk('local')->assertMissing($page->directory().'/crops/stale.png');
+    }
+
+    public function test_re_aligning_reads_only_the_fields_that_were_cut_differently(): void
+    {
+        $page = $this->processedPage();
+        $before = $page->lines()->orderBy('position')->get();
+        $this->assertCount(3, $before);
+        $this->assertSame('read line-'.$before[0]->getKey(), $before[0]->ocr_text);
+
+        // The third field was moved: its crop is not what it was read from any more.
+        Storage::disk('local')->put($before[2]->crop_path, 'cut where the field was before');
+        $this->ocrCalls = [];
+
+        $response = $this->actingAs($page->creator)
+            ->withHeader('Accept', 'application/json')
+            ->putJson(route('documents.pages.reoutline', $page), [
+                'geometry_json' => json_encode($this->geometry(), JSON_THROW_ON_ERROR),
+                'keep_readings' => true,
+            ])
+            ->assertAccepted();
+
+        $after = $page->fresh()->lines()->orderBy('position')->get();
+        $this->assertCount(3, $after);
+        // Only the moved field went to OCR.
+        $this->assertCount(1, $this->ocrCalls);
+        $this->assertSame(['line-'.$after[2]->getKey()], array_column($this->ocrCalls[0]['fields'], 'name'));
+        // The other two kept what they read (their old line's reading), on new lines.
+        $this->assertSame('read line-'.$before[0]->getKey(), $after[0]->ocr_text);
+        $this->assertSame('read line-'.$before[1]->getKey(), $after[1]->ocr_text);
+        $this->assertSame('read line-'.$after[2]->getKey(), $after[2]->ocr_text);
+        // Which old line became which new one, so what was typed on them follows: the moved
+        // field too (same outline, same cell), though it was read again.
+        $kept = $this->actingAs($page->creator)->getJson(route('documents.pages.show', $page))->json('keptLines');
+        $this->assertEquals([
+            (string) $before[0]->getKey() => $after[0]->getKey(),
+            (string) $before[1]->getKey() => $after[1]->getKey(),
+            (string) $before[2]->getKey() => $after[2]->getKey(),
+        ], $kept);
+
+        // Without keep_readings every line is read again, and the map is gone.
+        $this->ocrCalls = [];
+        $this->actingAs($page->creator)
+            ->withHeader('Accept', 'application/json')
+            ->putJson(route('documents.pages.reoutline', $page), [
+                'geometry_json' => json_encode($this->geometry(), JSON_THROW_ON_ERROR),
+            ])
+            ->assertAccepted()
+            ->assertJsonPath('keptLines', []);
+        $this->assertCount(3, $this->ocrCalls[0]['fields']);
     }
 
     public function test_outlining_again_queues_the_page_without_detects_stale_notes(): void

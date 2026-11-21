@@ -86,6 +86,7 @@ Route::middleware('auth')->group(function () {
         Route::get('documents/batches/{batch}', [ScanBatchController::class, 'show'])->name('documents.batches.show');
         Route::post('documents/batches/{batch}/claim', [ScanBatchController::class, 'claim'])->name('documents.batches.claim');
         Route::post('documents/batches/{batch}/ping', [ScanBatchController::class, 'ping'])->name('documents.batches.ping');
+        Route::post('documents/batches/{batch}/release', [ScanBatchController::class, 'release'])->name('documents.batches.release');
         Route::put('documents/batches/{batch}/pages', [ScanBatchController::class, 'updatePages'])->name('documents.batches.pages');
         Route::put('documents/batches/{batch}/draft', [ScanBatchController::class, 'saveDraft'])->name('documents.batches.draft');
         Route::post('documents/batches/{batch}/done', [ScanBatchController::class, 'done'])->name('documents.batches.done');

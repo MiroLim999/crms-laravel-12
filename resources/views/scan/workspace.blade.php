@@ -165,6 +165,8 @@
                                     </div>
                                     <div><span><kbd>Shift</kbd> + drag</span><small>Add fields to selection</small></div>
                                     <div><span>Drag selection</span><small>Move selected fields</small></div>
+                                    <div><span><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></span><small>Nudge selected fields
+                                            (<kbd>Shift</kbd>: 10 px)</small></div>
                                     <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
                                     <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + drag</span><small>Place without snapping to
                                             printed lines</small></div>
@@ -1261,14 +1263,60 @@
                     <h5 class="modal-title" id="realignConfirmTitle">Re-align this document?</h5>
                     {{-- Which document: its file and pages. --}}
                     <p class="realign-doc" id="realignConfirmDoc"></p>
+                    {{-- Queuing a re-align: the fields that moved, page by page (scanned again). --}}
+                    <ul class="realign-fields d-none" id="realignConfirmList"></ul>
                     <p class="leave-scan-modal__text" id="realignConfirmText"></p>
+                    <p class="realign-warning d-none" id="realignConfirmWarning"></p>
                     <div class="leave-scan-modal__actions">
-                        <button type="button" class="btn btn-label-secondary text-nowrap" data-bs-dismiss="modal">
+                        <button type="button" class="btn btn-label-secondary text-nowrap" data-bs-dismiss="modal"
+                            id="realignConfirmCancel">
                             Cancel
                         </button>
                         <button type="button" class="btn btn-primary text-nowrap" id="realignConfirmBtn">
                             Re-align
                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- Every unfinished batch, one row each (newest first): Resume, or Discard (confirmed in the row). --}}
+    <div class="modal fade" id="batchResumeModal" tabindex="-1" aria-labelledby="batchResumeModalTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" style="max-inline-size: min(30rem, calc(100% - 2rem));">
+            <div class="modal-content batch-resume-modal">
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <div class="modal-header">
+                    <div>
+                        <h5 class="modal-title" id="batchResumeModalTitle">Unfinished batches</h5>
+                        <p class="batch-resume-modal__sub" id="batchResumeModalSub"></p>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <ul class="batch-resume__list" id="batchResumeList" aria-labelledby="batchResumeModalTitle"></ul>
+                </div>
+                <div class="modal-footer" id="batchResumeModalFooter">
+                    <button type="button" class="btn btn-sm btn-danger" id="batchResumeDiscardAllBtn">Discard all</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- The app's own question window, in place of the browser's confirm and alert boxes (askInApp). --}}
+    <div class="modal fade" id="appAskModal" tabindex="-1" aria-labelledby="appAskTitle"
+        aria-describedby="appAskText" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered leave-scan-dialog" style="max-inline-size: min(25rem, calc(100% - 2rem));">
+            <div class="modal-content leave-scan-modal">
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <div class="modal-body">
+                    <span class="leave-scan-modal__icon bg-label-warning" aria-hidden="true" id="appAskIcon">
+                        <i class="icon-base bx bx-error" id="appAskGlyph"></i>
+                    </span>
+                    <h5 class="modal-title" id="appAskTitle"></h5>
+                    <div class="leave-scan-modal__text app-ask-text" id="appAskText"></div>
+                    <div class="leave-scan-modal__actions" id="appAskActions">
+                        <button type="button" class="btn btn-label-secondary text-nowrap" id="appAskCancel">Cancel</button>
+                        <button type="button" class="btn btn-primary text-nowrap" id="appAskConfirm">OK</button>
                     </div>
                 </div>
             </div>
@@ -1342,7 +1390,7 @@
                                 </li>
                             </ul>
                         </div>
-                        <a href="#" class="btn btn-label-secondary text-nowrap" id="batchSummaryRecordsBtn">Records archive</a>
+                        <a href="#" class="btn btn-outline-secondary text-nowrap" id="batchSummaryRecordsBtn">Records archive</a>
                         <a href="#" class="btn btn-primary text-nowrap" id="batchSummaryRestartBtn">Scan another batch</a>
                     </div>
                 </div>
@@ -1473,6 +1521,7 @@
             compareQueuePaths,
             fileFingerprint,
             firstUnsavedPage,
+            forgetBatchFiles,
             isPdfFile,
             matchFilesToBatch,
             MAX_PDF_BYTES,
@@ -1488,8 +1537,10 @@
             QUEUE_FILTERS,
             queueCounts,
             rebuildBatchState,
+            recallBatchFiles,
             recordLeadPage,
             recordState,
+            rememberBatchFile,
         } from '{{ Vite::asset('resources/js/scan-source.js') }}';
         import {
             pageSeconds,
@@ -1546,6 +1597,7 @@
                 draft: @json(route('documents.batches.draft', ['batch' => '__BATCH__'])),
                 done: @json(route('documents.batches.done', ['batch' => '__BATCH__'])),
                 abandon: @json(route('documents.batches.abandon', ['batch' => '__BATCH__'])),
+                release: @json(route('documents.batches.release', ['batch' => '__BATCH__'])),
             },
             openBatches: @json($openBatches ?? []),
             batchKeepDays: @json(\App\Models\ScanBatch::keepDays()),
@@ -2003,9 +2055,21 @@
         // page beside this one may be showing a copy of this grid.
         let onGridRendered = () => {};
 
+        // Re-align: the markers the page open in Align was read with (null otherwise). Reset goes
+        // back to them, not to the layout's template, and what moved since is said under Save.
+        let realignBase = null;
+        // The bar's next refresh after a marker moved (one per frame).
+        let bannerRefresh = 0;
+
+        /** What Reset goes back to: the markers the page was read with (re-align), or the layout's template. */
+        const resetTarget = () => (realignBase
+            ? { boxes: realignBase.boxes, rows: realignBase.rows }
+            : { boxes: templateBoxes, rows: templateRows });
+
         function fieldsMatchTemplate() {
-            return JSON.stringify(marker.toJSON()) === JSON.stringify(templateBoxes)
-                && JSON.stringify(gridRows) === JSON.stringify(templateRows)
+            const target = resetTarget();
+            return JSON.stringify(marker.toJSON()) === JSON.stringify(target.boxes)
+                && JSON.stringify(gridRows) === JSON.stringify(target.rows)
                 && rowTilts.every((tilt) => tilt === 0);
         }
 
@@ -2482,6 +2546,87 @@
             const layoutChanged = !fieldsMatchTemplate();
             const zoomChanged = Math.abs(marker.zoom - 1) > 0.001;
             el('resetFieldsBtn').disabled = !layoutChanged && !zoomChanged;
+            el('resetFieldsBtn').title = realignBase ? 'Back to the markers this page was read with' : '';
+            // A queued page moved: the bar's Save (Update) follows, once a frame.
+            if (batchState.active && !bannerRefresh) {
+                bannerRefresh = window.requestAnimationFrame(() => {
+                    bannerRefresh = 0;
+                    renderBatchQueueBanner();
+                });
+            }
+        }
+
+        /** The markers a page sent back by Re-align was read with (kept on the item), or null. */
+        function realignBaseline(item) {
+            if (!item?.realign || !item.page?.geometry) return null;
+            item.readBaseline ??= {
+                boxes: cloneBoxes(geometryMarkers(item.page.geometry, item.page)),
+                rows: (item.page.geometry.ruled_ys ?? []).map(Number),
+            };
+            return item.readBaseline;
+        }
+
+        /** Which markers (by name) and whether row lines differ from what the page was read with. */
+        function realignDiff(boxes, rows, tilts, base) {
+            // Start and baseline come from the same geometry: anything past float noise is a move the server re-cuts.
+            const near = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) <= 0.0002;
+            const before = new Map(base.boxes.map((box) => [nameKey(box.name), box]));
+            const now = new Set(boxes.map((box) => nameKey(box.name)));
+            const moved = boxes.filter((box) => {
+                const old = before.get(nameKey(box.name));
+                return !old || !['x', 'y', 'w', 'h'].every((key) => near(box[key], old[key])) || !near(box.angle, old.angle);
+            }).map((box) => box.name);
+            const removed = base.boxes.filter((box) => !now.has(nameKey(box.name))).map((box) => `${box.name} (removed)`);
+            const rowsMoved = rows.length !== base.rows.length
+                || rows.some((y, index) => !near(y, base.rows[index]))
+                || (tilts ?? []).some((tilt) => Math.abs(Number(tilt) || 0) > 0.001);
+            return { names: [...moved, ...removed], rowsMoved };
+        }
+
+        /**
+         * While re-aligning: the pages with something moved since the reading (only fields
+         * there are read again). Null when not re-aligning.
+         *
+         * @returns {object|null} pages ({number, names, rowsMoved} each) and rowsMoved
+         */
+        function realignChanges() {
+            if (!realignBase) return null;
+            const current = batchState.items[batchState.currentIndex];
+            const mate = batchPartner()?.item ?? null;
+            const pages = [{ number: current?.pageNo ?? 1, ...realignDiff(marker.toJSON(), gridRows, rowTilts, realignBase) }];
+            const mateBase = mate ? realignBaseline(mate) : null;
+            if (mate && mateBase && mate.boxes) {
+                pages.push({ number: mate.pageNo, ...realignDiff(mate.boxes, mate.rows ?? [], mate.tilts, mateBase) });
+            }
+            pages.sort((a, b) => a.number - b.number);
+            const changed = pages.filter((page) => page.names.length > 0 || page.rowsMoved);
+            return { pages: changed, rowsMoved: changed.some((page) => page.rowsMoved) };
+        }
+
+        /** Queuing a re-align with fields moved: say which are scanned again. Resolves true to go on. */
+        async function confirmRealignChanges() {
+            const changes = realignChanges();
+            if (!changes || changes.pages.length === 0) return true;
+            el('realignConfirmList').replaceChildren(...changes.pages.map((page) => {
+                const li = document.createElement('li');
+                const label = document.createElement('strong');
+                label.textContent = `Page ${page.number}: `;
+                li.append(label, [...page.names, ...(page.rowsMoved ? ['row lines'] : [])].join(', '));
+                return li;
+            }));
+            const fields = changes.pages.reduce((sum, page) => sum + page.names.length, 0);
+            el('realignConfirmWarning').textContent = changes.rowsMoved
+                ? 'Row lines moved: cells typed in Review & Export for this document will be cleared.'
+                : '';
+            const current = batchState.items[batchState.currentIndex];
+            return askRealign(
+                'Scan these fields again?',
+                current ? recordLabel(recordOf(current)) : '',
+                fields === 1 && !changes.rowsMoved
+                    ? 'Only this field is scanned again. Everything else keeps its reading and what you typed.'
+                    : 'Only these are scanned again. Everything else keeps its reading and what you typed.',
+                { confirm: 'Scan again', cancel: 'Keep aligning', list: true, warning: changes.rowsMoved },
+            );
         }
 
         function handleMarkerChange(boxes) {
@@ -3539,6 +3684,8 @@
 
         function showStep(name) {
             activeStep = name;
+            // The re-align baseline belongs to a page open in Align.
+            if (name !== 'mark') realignBase = null;
             Object.entries(steps).forEach(([key, node]) => node.classList.toggle('d-none', key !== name));
             // Verify's document pane goes with Review & Export and comes back to Verify.
             setReviewMode(name === 'review');
@@ -4000,6 +4147,8 @@
                 companionPreview.clear();
                 try {
                     if (tested) await companionMarker.loadFromUrl(tested.imageUrl);
+                    // A page re-aligned from the server's copy is an address, not a file.
+                    else if (typeof companionSource === 'string') await companionMarker.loadFromUrl(companionSource);
                     else await companionMarker.load(companionSource, { page: mate ? (mate.item.pageNo ?? 1) : other });
                 } catch (error) {
                     console.warn(`Page ${other} could not be shown beside the page:`, error);
@@ -4056,7 +4205,7 @@
 
         /** What the page beside this one is drawn from: its tested page, or the file. */
         function companionSourceFor(page, mate = null) {
-            return storedDetection(page, mate)?.imageUrl ?? (mate ? mate.item.file : scanFile);
+            return storedDetection(page, mate)?.imageUrl ?? (mate ? batchPageSource(mate.item) : scanFile);
         }
 
         /**
@@ -4419,10 +4568,99 @@
         const recordDone = (record) => record.members.every(pageDone);
 
         /** A page that can be opened in Align here: not read yet (or failed), and its file is at hand. */
-        const pageAlignable = (item) => pageCanAlign(item) && Boolean(item?.file);
+        const pageAlignable = (item) => pageCanAlign(item) && (Boolean(item?.file) || Boolean(item?.serverCopy));
+
+        /** What a batch page is drawn from in Align: its file, or the server's copy of it (Re-align). */
+        const batchPageSource = (item) => item?.file ?? (item?.serverCopy ? item.page?.imageUrl ?? null : null);
+
+        /** The page as the server has it (its image and markers), asked for when only where it is was known. */
+        async function ensureServerPage(item) {
+            if (item?.page?.imageUrl && item.page.geometry) return;
+            if (!item?.page?.statusUrl) throw new Error('This page is not on the server any more.');
+            const response = await fetch(item.page.statusUrl, {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+            });
+            if (!response.ok) throw new Error(`The server answered ${response.status}.`);
+            item.page = await response.json();
+        }
 
         /** The state of the record a page is in: ready, waiting, blocked or done (see recordState). */
         const recordStateOf = (item) => recordState(recordOf(item).members);
+
+        /**
+         * A record not read yet whose pages are all queued (or read already): it
+         * can be read now, on its own ("Read it now").
+         */
+        function recordReadable(item) {
+            const { members } = recordOf(item);
+            return members.some((it) => it.status === 'saved' && it.pageId)
+                && members.every((it) => it.pageId && ['saved', 'ready'].includes(it.status));
+        }
+
+        /**
+         * Queued pages the worker may have read without this page seeing it (a
+         * Scan all cut short, a stuck worker, a reload): the server is asked, and
+         * what it read (or could not read) is marked so. Answers whether anything changed.
+         */
+        async function refreshQueuedPages(items = batchState.items) {
+            if (batchState.readingAll) return false;
+            const queued = items.filter((it) => it.status === 'saved' && it.page?.statusUrl);
+            let changed = false;
+            await Promise.all(queued.map(async (item) => {
+                try {
+                    const response = await fetch(item.page.statusUrl, {
+                        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        credentials: 'same-origin',
+                    });
+                    if (!response.ok) return;
+                    const page = await response.json();
+                    // Scan all started meanwhile, or the page moved on: it is left as it is.
+                    if (item.status !== 'saved' || batchState.readingAll) return;
+                    if (page?.status === 'ready') {
+                        item.page = page;
+                        item.status = 'ready';
+                        item.sentToScan = false;
+                        changed = true;
+                    } else if (page?.status === 'failed') {
+                        item.page = page;
+                        item.status = 'failed';
+                        item.error = page.error || 'This page could not be read.';
+                        item.sentToScan = false;
+                        changed = true;
+                    }
+                } catch (error) {
+                    console.warn(`The status of ${item.name} could not be checked:`, error);
+                }
+            }));
+            if (changed) renderBatchQueueBanner();
+            return changed;
+        }
+
+        /** A record queued but not read: read it now (on its own), then it opens in Verify. */
+        async function readQueuedRecord(item) {
+            const record = recordOf(item);
+            const pages = record.members.filter((it) => it.status === 'saved' && it.pageId);
+            if (pages.length === 0) return;
+            const answer = await askInApp({
+                title: 'This document is not read yet',
+                text: `${recordLabel(record)} is queued but has not been read. Read it now? It opens in Verify when it is done.`,
+                confirm: 'Read it now',
+                cancel: 'Not now',
+                tone: 'info',
+            });
+            if (answer !== 'confirm') return;
+            // What was typed on the record open now is kept, to come back to.
+            const leaving = batchState.items[batchState.currentIndex];
+            keepCurrentAlignment();
+            leaveBatchVerify();
+            await runBatchScanAll({ pages, prefer: record.members[0] });
+            // Not read (stopped, or it failed): back to the record that was open.
+            // (Its status is still "ready", not "verifying", when nothing opened it since.)
+            if (recordStateOf(record.members[0]) !== 'ready' && leaving?.status === 'ready' && recordStateOf(leaving) === 'ready') {
+                await openBatchVerifyItem(batchState.items.indexOf(leaving));
+            }
+        }
 
         /**
          * Whether the batch page open now is being aligned: true in Align, and
@@ -4448,6 +4686,12 @@
         }
 
         /** "BIRTHS-1995.pdf · pages 1–2", "BIRTHS-1995.pdf · page 3", or the file's name. */
+        /** A page as people know it: "pair-one.pdf · page 1" (a PDF's page), else the file's name. */
+        function batchPageName(item) {
+            const name = item.sourceName ?? item.name;
+            return (item.pageTotal ?? 1) > 1 ? `${name} · page ${item.pageNo}` : name;
+        }
+
         function recordLabel(record) {
             const [first] = record.members;
             const name = first.sourceName ?? first.name;
@@ -4483,6 +4727,8 @@
          * still to align (one that failed, say) opens in Align; else the summary.
          */
         async function continueBatch(after = null, { askForFiles = true, prefer = null } = {}) {
+            // Pages read without this page seeing it are not read again.
+            await refreshQueuedPages();
             // A record just read again opens itself; otherwise the next one that is read.
             const preferred = prefer && recordState(recordOf(prefer).members) === 'ready' ? recordOf(prefer) : null;
             const next = preferred ?? nextOpenRecord(after);
@@ -4553,6 +4799,7 @@
 
             if (!batchState.active || batchState.items.length === 0) {
                 banner.classList.add('d-none');
+                el('detectBtn').classList.remove('d-none');
                 return;
             }
             banner.classList.remove('d-none');
@@ -4586,7 +4833,13 @@
             // What the bar offers follows where the user is: Scan all running, the
             // batch done, a page in Align, or a record in Verify.
             const counts = queueCounts(batchState.items);
-            if (addMoreBtn) addMoreBtn.classList.toggle('d-none', !batchAligning());
+            // Re-aligning a document: what is not about fixing it is out of the way.
+            const realigningNow = batchAligning() && !batchState.readingAll
+                && [batchState.items[batchState.currentIndex], batchPartner()?.item].some((it) => it?.realign && it.page);
+            if (addMoreBtn) addMoreBtn.classList.toggle('d-none', !batchAligning() || realigningNow);
+            // Smoke test makes a fresh scan of the page: queued after it, every field would be read
+            // again and what was typed lost, so it is not offered while re-aligning.
+            el('detectBtn').classList.toggle('d-none', realigningNow);
 
             if (batchState.readingAll) {
                 if (phaseTitle) phaseTitle.textContent = 'Scanning';
@@ -4605,10 +4858,14 @@
                 }
                 if (counter) {
                     if (openItem?.realign) {
-                        // Which document: its file and pages, and where it is in the batch.
+                        // Which record and pages (the file's name is on the queue button beside it).
                         const records = batchRecords();
                         const record = recordOf(openItem);
-                        counter.textContent = `${recordLabel(record)} · Record ${records.findIndex((r) => r.key === record.key) + 1} of ${records.length}`;
+                        const pageNumbers = record.members.map((it) => it.pageNo);
+                        const pagesText = (openItem.pageTotal ?? 1) > 1
+                            ? `page${pageNumbers.length > 1 ? 's' : ''} ${pageRanges(pageNumbers)} · `
+                            : '';
+                        counter.textContent = `${pagesText}Record ${records.findIndex((r) => r.key === record.key) + 1} of ${records.length}`;
                     } else {
                         counter.textContent = `${savedCount} of ${total} queued`
                             + (counts.read > 0 ? ` · ${counts.read} read` : '');
@@ -4619,28 +4876,52 @@
                     const currentItem = batchState.items[batchState.currentIndex];
                     // A failed page open in Align can be queued again, re-aligned.
                     const failedHere = currentItem?.status === 'failed';
-                    saveQueueBtn.classList.toggle('d-none', allSaved && !failedHere);
+                    // A queued page moved since it was queued (all queued, so Save was hidden): Update shows,
+                    // or the change would be lost when Scan all reads the page as it was queued.
+                    const editedHere = activeStep === 'mark' && currentItem?.status === 'saved'
+                        && currentItem.queuedGrid != null && gridSnapshot() !== currentItem.queuedGrid;
+                    saveQueueBtn.classList.toggle('d-none', allSaved && !failedHere && !editedHere);
                     if (saveQueueLabel) {
                         // A pair: this page and the one beside it are queued together.
                         const pairing = batchPairToQueue();
                         const hasMoreUnsaved = batchState.items.some((it, idx) => idx !== batchState.currentIndex
                             && it !== pairing?.mate.item && it.status === 'pending' && pageAlignable(it));
+                        // The words, and (on a first save) how far the queue is: "2/4" in its own tag,
+                        // so the label stays short and the count never wraps under it.
+                        let text;
+                        let count = null;
                         if (pairing) {
-                            saveQueueLabel.textContent = currentItem?.realign
-                                ? (hasMoreUnsaved ? 'Queue Both Again & Next' : 'Queue Both Again & Scan')
-                                : failedHere
-                                    ? (hasMoreUnsaved ? 'Queue Both Again & Next' : 'Queue Both Again')
-                                    : currentItem?.status === 'saved'
-                                        ? (hasMoreUnsaved ? 'Update & Save Both & Next' : 'Update & Save Both Pages')
-                                        : (hasMoreUnsaved ? `Save Both Pages & Next (${savedCount + 2}/${total})` : `Save Both Pages (${total}/${total})`);
+                            if (currentItem?.realign) text = hasMoreUnsaved ? 'Queue Both Again & Next' : 'Queue Both Again & Scan';
+                            else if (failedHere) text = hasMoreUnsaved ? 'Queue Both Again & Next' : 'Queue Both Again';
+                            else if (currentItem?.status === 'saved') text = hasMoreUnsaved ? 'Update & Save Both & Next' : 'Update & Save Both Pages';
+                            else {
+                                // " Pages" shows only where the panel is wide enough (.save-queue-opt).
+                                text = hasMoreUnsaved ? 'Save Both[ Pages] & Next' : 'Save Both[ Pages]';
+                                count = hasMoreUnsaved ? `${savedCount + 2}/${total}` : `${total}/${total}`;
+                            }
+                        } else if (currentItem?.realign) {
+                            text = hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again & Scan';
+                        } else if (failedHere) {
+                            text = hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again';
+                        } else if (currentItem?.status === 'saved') {
+                            text = hasMoreUnsaved ? 'Update & Next Document' : 'Update Queued Document';
                         } else {
-                            saveQueueLabel.textContent = currentItem?.realign
-                                ? (hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again & Scan')
-                                : failedHere
-                                    ? (hasMoreUnsaved ? 'Queue Again & Next' : 'Queue Again')
-                                    : currentItem?.status === 'saved'
-                                        ? (hasMoreUnsaved ? 'Update & Next Document' : 'Update Queued Document')
-                                        : (hasMoreUnsaved ? `Save & Next (${savedCount + 1}/${total})` : `Save Final Document (${total}/${total})`);
+                            text = hasMoreUnsaved ? 'Save & Next' : 'Save Final Document';
+                            count = hasMoreUnsaved ? `${savedCount + 1}/${total}` : `${total}/${total}`;
+                        }
+                        // Words in [ ] are optional: shown only where the panel has the room.
+                        saveQueueLabel.replaceChildren(...text.split(/(\[[^\]]*\])/).filter(Boolean).map((part) => {
+                            if (!part.startsWith('[')) return part;
+                            const optional = document.createElement('span');
+                            optional.className = 'save-queue-opt';
+                            optional.textContent = part.slice(1, -1);
+                            return optional;
+                        }));
+                        if (count) {
+                            const tag = document.createElement('span');
+                            tag.className = 'save-queue-count';
+                            tag.textContent = count;
+                            saveQueueLabel.append(tag);
                         }
                     }
                 }
@@ -4649,7 +4930,16 @@
                     // pages again); with nothing left to read, Verify opens the records.
                     const action = batchScanAction();
                     scanNowBtn.classList.toggle('d-none', action.kind === 'none');
-                    if (scanNowLabel) scanNowLabel.textContent = action.label;
+                    if (scanNowLabel) {
+                        // How many pages in their own tag, as on Save: the label stays on one line.
+                        scanNowLabel.replaceChildren(action.label);
+                        if (action.count) {
+                            const tag = document.createElement('span');
+                            tag.className = 'save-queue-count';
+                            tag.textContent = action.count;
+                            scanNowLabel.append(tag);
+                        }
+                    }
                 }
             } else {
                 // Saved a record at a time, as in single mode: a page, or a pair of pages.
@@ -4745,8 +5035,8 @@
             if (batchState.readingAll) return false;
             // Verifying: a page of the open record shows (it slides into view); of another
             // record, only one that is read opens; the rest wait their turn.
-            if (batchVerifying()) return inOpenVerifyRecord(item) || recordStateOf(item) === 'ready';
-            return pageAlignable(item) || pageNeedsFile(item) || recordStateOf(item) === 'ready';
+            if (batchVerifying()) return inOpenVerifyRecord(item) || recordStateOf(item) === 'ready' || recordReadable(item);
+            return pageAlignable(item) || pageNeedsFile(item) || recordStateOf(item) === 'ready' || recordReadable(item);
         }
 
         /** Whether a record is open in Verify or Review & Export now. */
@@ -4778,6 +5068,12 @@
             if (open) queuePanel.expanded = batchState.items[batchState.currentIndex]?.group ?? queuePanel.expanded;
             el('batchQueueToggle').setAttribute('aria-expanded', open ? 'true' : 'false');
             renderBatchQueuePanel();
+            // What shows as queued is checked with the server, so a page read meanwhile opens.
+            if (open) {
+                refreshQueuedPages().then((changed) => {
+                    if (changed && queuePanel.open) renderBatchQueuePanel();
+                });
+            }
         }
 
         /** Whether the page asks for less motion (then nothing slides). */
@@ -4923,9 +5219,18 @@
             // What still needs attention in the file wins (see groupStatus).
             const fileState = stateElement(group.items.length === 1 ? first : { status: groupStatus(group) });
             if (fileState) toggle.append(fileState);
-            toggle.title = fileTotal > 1 ? 'Show or hide its pages' : 'Open it';
-            toggle.addEventListener('click', () => {
+            toggle.title = fileTotal > 1 ? 'Click the name to open the file, the arrow to show its pages' : 'Open it';
+            toggle.addEventListener('click', (event) => {
                 if (batchChipDidDrag) return;
+                // The name opens the file; only the arrow shows or hides its pages.
+                if (fileTotal > 1 && !event.target.closest('.batch-queue-file__chevron')) {
+                    const target = group.items.findIndex(batchPageOpenable);
+                    if (!isCurrent && target !== -1) {
+                        setQueuePanelOpen(false);
+                        openBatchDocument(group.indices[target]);
+                    }
+                    return;
+                }
                 if (fileTotal > 1) {
                     if (!expanded) {
                         queuePanel.expanded = group.key;
@@ -5025,6 +5330,7 @@
             open.title = inRecord ? 'Show this page'
                 : isCurrent ? 'Open now'
                 : (open.disabled && waitsFor ? `Waits for page ${waitsFor.pageNo} to be read again`
+                : batchVerifying() && recordStateOf(item) !== 'ready' && recordReadable(item) ? 'Not read yet: click to read it now'
                 : batchVerifying() && open.disabled ? (VERIFY_WAIT_REASON[item.status] ?? '')
                 : recordStateOf(item) === 'ready' ? 'Open in Verify'
                     : (pageAlignable(item) ? 'Open in Align' : (pageNeedsFile(item) ? 'Pick its file again to align it' : '')));
@@ -5249,13 +5555,19 @@
                 return;
             }
             if (idx === batchState.currentIndex) return;
+            // Shown as queued: the server may have read it already.
+            if (item.status === 'saved') await refreshQueuedPages(recordOf(item).members);
             if (recordStateOf(item) === 'ready') {
                 keepCurrentAlignment();
                 await openBatchVerifyItem(idx);
+            } else if (batchVerifying() && recordReadable(item)) {
+                await readQueuedRecord(item);
             } else if (pageAlignable(item)) {
                 keepCurrentAlignment();
                 leaveBatchVerify();
                 await openBatchQueueItem(idx);
+            } else if (recordReadable(item)) {
+                await readQueuedRecord(item);
             } else if (pageNeedsFile(item)) {
                 await askForBatchFiles();
             }
@@ -5616,7 +5928,7 @@
 
         async function startBatchQueue(fileList) {
             if (preparingBatch) {
-                alert('The files added a moment ago are still being prepared. Add these once they are in the queue.');
+                tellInApp('Files are still being added', 'The files added a moment ago are still being prepared. Add these once they are in the queue.');
                 return;
             }
 
@@ -5800,6 +6112,9 @@
             batchState.items = appendToQueue(batchState.items, added, { allowCopies: !checkDuplicates });
             // Kept on the server from the first files, to resume after a reload or a crash.
             if (!adding) startServerBatch();
+            // The files stay in this browser (not uploaded), so a resume needs no re-pick.
+            new Map(added.filter((it) => it.sourceHash).map((it) => [it.sourceHash, it.file]))
+                .forEach((file, hash) => { rememberBatchFile(hash, file); });
 
             scanFileInput.value = '';
             if (adding) {
@@ -5839,8 +6154,10 @@
             if (left && left !== item) keepDetection(left);
             const tested = left !== item ? item.detected ?? null : null;
             if (left !== item) item.detected = null;
-            const swap = batchPartner()?.index === index && companionMarker.canvas.width > 0
-                && companionFile === (tested?.imageUrl ?? item.file);
+            // Only from Align (the page beside this one is shown there): coming from Verify (Re-align),
+            // the document opens fitted, not zoomed in on one page.
+            const swap = activeStep === 'mark' && batchPartner()?.index === index && companionMarker.canvas.width > 0
+                && companionFile === (tested?.imageUrl ?? batchPageSource(item));
             batchState.currentIndex = index;
             renderBatchQueueBanner();
 
@@ -5857,6 +6174,11 @@
                     marker.swapPageWith(companionMarker);
                 } else if (tested) {
                     await marker.loadFromUrl(tested.imageUrl);
+                } else if (!item.file && item.serverCopy) {
+                    // Sent back by Re-align without its file: the page as the server has it,
+                    // the other page of the document with it (drawn beside it).
+                    await Promise.all(recordOf(item).members.filter((it) => it.serverCopy).map(ensureServerPage));
+                    await marker.loadFromUrl(item.page.imageUrl);
                 } else {
                     // A PDF's page is drawn from the file itself (kept open between its pages).
                     await marker.load(item.file, { page: item.pageNo ?? 1 });
@@ -5866,7 +6188,7 @@
                 if (swap && left) {
                     // What sits beside the page now is the one just left.
                     companionPage = left.pageNo;
-                    companionFile = left.detected?.imageUrl ?? left.file;
+                    companionFile = left.detected?.imageUrl ?? batchPageSource(left);
                     updateSpread();
                 } else {
                     resetSpread();
@@ -5880,6 +6202,8 @@
                 resetFieldHistory();
                 rowsSource = null;
 
+                // Re-align: what Reset goes back to, and what the note under Save compares with.
+                realignBase = realignBaseline(item);
                 if (item.boxes && item.rows) {
                     // A page opened before keeps its own markers, and which of them were placed by hand.
                     setGrid(item.boxes, item.rows, { tilts: item.tilts, remember: !item.autoFields });
@@ -5898,6 +6222,8 @@
                         ? `This page could not be read: ${why}. Re-align it and queue it again, or remove it.`
                         : `This page could not be opened: ${why}. Try it again, or remove it.`);
                 }
+                // What a queued page was queued with: moved since, it can be updated (Save shows again).
+                item.queuedGrid = item.status === 'saved' ? gridSnapshot() : null;
                 // No Snap runs by itself in a batch: the printed lines come with Snap to table, pressed by hand.
                 snapToken += 1;
                 marker.setSnapLines(null);
@@ -5910,7 +6236,7 @@
                 item.status = 'failed';
                 item.error = error.message || 'Could not open file';
                 renderBatchQueueBanner();
-                alert(error.message || 'That document could not be opened.');
+                tellInApp('This page could not be opened', error.message || '');
             } finally {
                 dropzone.classList.remove('is-loading');
                 dropzone.removeAttribute('aria-busy');
@@ -5933,6 +6259,49 @@
         });
 
         /**
+         * A page sent back by Re-align, read again on the server as the same page: its new
+         * markers go with keep_readings, so only the fields cut out differently are read.
+         * The reading starts at once; Scan all's window then waits for it.
+         */
+        async function rereadBatchPage(item, geometry) {
+            const rowsMoved = JSON.stringify((item.page?.geometry?.ruled_ys ?? []).map(Number))
+                !== JSON.stringify((geometry?.ruled_ys ?? []).map(Number));
+            const response = await fetch(config.pageGeometryUrl.replace('__PAGE__', String(item.pageId)), {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': config.csrf,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ geometry_json: JSON.stringify(geometry), keep_readings: true }),
+            });
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json()
+                : null;
+            if (!response.ok || !payload?.id) throw new Error(responseErrorMessage(response, payload));
+
+            item.page = payload;
+            item.error = null;
+            item.realign = false;
+            item.serverCopy = false;
+            item.scanKind = 'reoutline';
+            item.sentToScan = true;
+            item.status = 'saved';
+            // Row lines moved: the people may line up differently, so cells typed in Review &
+            // Export for this record no longer fit (Verify's typed values follow their lines).
+            if (rowsMoved) {
+                const lead = recordOf(item).members[0];
+                if (lead?.reviewExtras?.size) {
+                    lead.reviewExtras = null;
+                    syncBatchDraft(lead);
+                }
+            }
+            return payload;
+        }
+
+        /**
          * The other page of the pair open in Align (pages 1-2, 3-4), when Save & Next
          * queues it together with this one: it is not queued yet, its file is at hand,
          * and it is drawn beside this page with markers a page can be read on. Null:
@@ -5943,7 +6312,7 @@
         function batchPairToQueue() {
             if (!batchAligning()) return null;
             const mate = batchPartner();
-            if (!mate || !mate.item.file || !['pending', 'failed'].includes(mate.item.status)) return null;
+            if (!mate || !(mate.item.file || mate.item.serverCopy) || !['pending', 'failed'].includes(mate.item.status)) return null;
             if (companionPage !== mate.item.pageNo || !(companionMarker.canvas.width > 0)) return null;
             const grid = companionGridFor(mate.item.pageNo, mate);
             if (grid.boxes.length === 0 || markerSetValidationMessage(grid.boxes) !== null) return null;
@@ -5958,9 +6327,19 @@
         async function sendBatchPageToQueue(item, {
             canvas, geometry, templateId, tested, scanKind,
         }) {
+            // Re-align: the same page on the server, read again with the markers as they are
+            // now. Fields cut out as before keep their reading (and what was typed on them).
+            if (!tested && item.realign && item.serverCopy && item.pageId) {
+                return rereadBatchPage(item, geometry);
+            }
             const form = new FormData();
-            const scan = await queuedScanFile(item);
-            form.set('scan', scan, scan.name);
+            if (item.file) {
+                const scan = await queuedScanFile(item);
+                form.set('scan', scan, scan.name);
+            } else if (item.pageId) {
+                // No file at hand (Re-align after a resume): the server copies the original it keeps.
+                form.set('scan_from_page', String(item.pageId));
+            }
             form.set('batch_key', batchState.key);
             let url = config.pagesUrl;
             if (tested) {
@@ -5996,7 +6375,8 @@
             item.page = payload;
             item.error = null;
             item.realign = false;
-            item.workspaceScanPath = payload.workspaceScanPath || null;
+            item.workspaceScanPath = payload.workspaceScanPath || item.workspaceScanPath || null;
+            item.serverCopy = false;
             item.scanKind = scanKind;
             item.sentToScan = false;
             item.status = 'saved';
@@ -6015,6 +6395,9 @@
             const item = batchState.items[batchState.currentIndex];
             if (!item) return;
 
+            // Re-align with fields moved: say which are scanned again first.
+            if (!(await confirmRealignChanges())) return;
+
             // Smoke test went over this page: it joins the queue as tested, with
             // the lines it found and any outline fixed by hand, so Scan all only
             // reads it (or outlines it again from markers moved since) instead of
@@ -6026,7 +6409,12 @@
                 const unsaved = unsavedLineCount();
                 if (unsaved > 0) {
                     const plural = unsaved === 1 ? 'line has an outline change' : 'lines have outline changes';
-                    if (!window.confirm(`${unsaved} ${plural} that ${unsaved === 1 ? 'is' : 'are'} not saved.\n\nOK: save and queue.\nCancel: go back without queuing.`)) {
+                    if (await askInApp({
+                        title: `${unsaved} ${plural} not saved`,
+                        text: 'Save them and add this page to the queue?',
+                        confirm: 'Save and queue',
+                        cancel: 'Go back',
+                    }) !== 'confirm') {
                         return;
                     }
                     await saveAllUnsavedLines();
@@ -6037,12 +6425,13 @@
                 }
                 if (canReoutline()) {
                     const adjusted = tested.lines.filter((line) => line.adjusted || isLineUnsaved(line)).length;
-                    if (adjusted > 0 && !window.confirm(
-                        `You moved a marker after Smoke test, so every line is worked out again when the batch is scanned, `
-                        + `and your ${adjusted} outline adjustment${adjusted === 1 ? '' : 's'} will be lost.\n\n`
-                        + `OK: queue it with the markers as they are.\n`
-                        + `Cancel: go back (Ctrl+Z brings the Smoke test result back).`,
-                    )) {
+                    if (adjusted > 0 && await askInApp({
+                        title: `${adjusted} outline adjustment${adjusted === 1 ? '' : 's'} will be lost`,
+                        text: 'You moved a marker after Smoke test, so every line is worked out again when the batch is scanned.'
+                            + '\n\nGo back and press Ctrl+Z to bring the Smoke test result back.',
+                        confirm: 'Queue anyway',
+                        cancel: 'Go back',
+                    }) !== 'confirm') {
                         return;
                     }
                 }
@@ -6109,6 +6498,7 @@
 
                 await mainJob;
                 uploaded = true;
+                item.queuedGrid = gridSnapshot();
                 await mateJob;
                 renderBatchQueueBanner();
 
@@ -6200,7 +6590,7 @@
             };
             const secondsOf = (item, kind) => {
                 if (kind === 'done') return 0;
-                if (kind === 'busy') return pageSeconds(item.scanKind === 'read' ? 'read' : 'full', scanSeconds);
+                if (kind === 'busy') return pageSeconds(['read', 'reoutline'].includes(item.scanKind) ? item.scanKind : 'full', scanSeconds);
                 return pageSeconds(kind, scanSeconds);
             };
             const unitWord = `page${total === 1 ? '' : 's'}`;
@@ -6300,7 +6690,7 @@
                     const left = timeLeftText((performance.now() - lastFinishedAt) / 1000, active.seconds + waitFirst, later);
                     el('ocrProgressFields').textContent = `${readyCount} of ${total} ${unitWord} scanned · ${left}`;
                     setOcrProgress(ocrProgress, `Scanning batch (${readyCount} of ${total} ${unitWord})`,
-                        `${stage} · ${active.item.name}`);
+                        `${stage} · ${batchPageName(active.item)}`);
 
                     await wait(700, controller.signal);
 
@@ -6401,7 +6791,8 @@
             if (queuedAll && toRead > 0) {
                 return {
                     kind: 'scan-all',
-                    label: toRead === batchState.items.length ? `Scan All Queued Documents (${toRead})` : `Scan Queued Pages (${toRead})`,
+                    label: toRead === batchState.items.length ? 'Scan All' : 'Scan Queued',
+                    count: `${toRead} page${toRead === 1 ? '' : 's'}`,
                     run: runBatchScanAll,
                 };
             }
@@ -6555,6 +6946,7 @@
                     existingAccepted: Boolean(item.existingAccepted),
                     realign: Boolean(item.realign),
                     addedAnyway: Boolean(item.addedAnyway),
+                    serverCopy: Boolean(item.serverCopy),
                     scanKind: item.scanKind ?? 'full',
                     recordId: item.recordId ?? null,
                     recordUrl: item.recordUrl ?? null,
@@ -6703,6 +7095,8 @@
         function finishServerBatch() {
             if (!batchOpenOnServer() || !batchState.items.every(pageDone)) return;
             window.clearTimeout(batchServer.syncTimer);
+            // Every page is saved or left out: no file is needed again, so this browser lets them go.
+            forgetBatchFiles(batchState.items.map((item) => item.sourceHash));
             batchWrite(syncBatchPages)
                 .then(() => batchWrite(() => batchRequest('done', 'POST')))
                 .then(() => window.clearInterval(batchServer.pingTimer))
@@ -6715,6 +7109,7 @@
             batchState.items.forEach((item) => {
                 if (!pageDone(item)) cancelPageOnServer(item.pageId);
             });
+            forgetBatchFiles(batchState.items.map((item) => item.sourceHash));
             try {
                 await fetch(config.batchUrls.abandon.replace('__BATCH__', String(id)), {
                     method: 'POST',
@@ -6763,33 +7158,250 @@
                 el('batchResumeTitle').textContent = 'Pick the files of this batch again';
                 el('batchResumeDetail').textContent = `${waiting} page${waiting === 1 ? '' : 's'} wait${waiting === 1 ? 's' : ''} for ${waiting === 1 ? 'its file' : 'their files'}: pick them again to align them.`;
                 el('batchResumeLabel').textContent = 'Pick files';
-                el('batchResumeOther').classList.add('d-none');
+                el('batchResumeDiscardBtn').classList.remove('d-none');
+                el('batchResumeViewBtn').classList.add('d-none');
+                el('batchResumeBtn').classList.remove('d-none');
                 return;
             }
             delete el('batchResume').dataset.mode;
             const open = Array.isArray(config.openBatches) ? config.openBatches : [];
-            const here = open.find((batch) => batch.docType === config.docType) ?? null;
-            const others = open.filter((batch) => batch.docType !== config.docType);
-            el('batchResume').classList.toggle('d-none', !here || batchState.active);
-            if (here) {
-                const when = here.updatedAt ? new Date(here.updatedAt) : null;
-                el('batchResumeTitle').textContent = 'You have an unfinished batch';
-                el('batchResumeDetail').textContent = `${here.saved} of ${here.records} record${here.records === 1 ? '' : 's'} saved · ${here.pages} page${here.pages === 1 ? '' : 's'}`
-                    + (when ? ` · last worked on ${when.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}` : '');
-                el('batchResumeLabel').textContent = `Resume batch (${here.saved} of ${here.records} records saved)`;
-                el('batchResumeBtn').dataset.batch = String(here.id);
-                el('batchResumeDiscardBtn').dataset.batch = String(here.id);
+            // Newest first (the server sends them so; kept here in case it does not).
+            const byNewest = (a, b) => Date.parse(b.updatedAt ?? 0) - Date.parse(a.updatedAt ?? 0);
+            const sameType = open.filter((batch) => batch.docType === config.docType).sort(byNewest);
+            const others = open.filter((batch) => batch.docType !== config.docType).sort(byNewest);
+            const total = sameType.length + others.length;
+            el('batchResume').classList.toggle('d-none', total === 0 || batchState.active);
+            renderResumeList(sameType, others);
+            if (total === 0) {
+                window.bootstrap.Modal.getInstance(el('batchResumeModal'))?.hide();
+                return;
             }
-            const other = el('batchResumeOther');
-            other.classList.toggle('d-none', others.length === 0 || batchState.active);
-            other.replaceChildren(...others.flatMap((batch, index) => {
-                const link = document.createElement('a');
-                link.href = batch.workspaceUrl;
-                link.textContent = `open its workspace`;
-                const text = document.createTextNode(`${index > 0 ? ' ' : ''}An unfinished ${batch.typeLabel} batch (${batch.saved} of ${batch.records} records saved): `);
-                return [text, link, document.createTextNode('.')];
-            }));
+
+            // One line on the page; with several batches, the list is in a window (View all).
+            const single = sameType.length === 1 && others.length === 0;
+            const [latest] = sameType;
+            el('batchResumeDiscardBtn').classList.toggle('d-none', !single);
+            el('batchResumeViewBtn').classList.toggle('d-none', single);
+            el('batchResumeViewBtn').textContent = `View all ${total}`;
+            el('batchResumeBtn').classList.toggle('d-none', !latest);
+            if (single) {
+                el('batchResumeTitle').textContent = 'Unfinished batch';
+                el('batchResumeDetail').textContent = batchDetailText(latest);
+                el('batchResumeLabel').textContent = 'Resume';
+            } else if (latest) {
+                el('batchResumeTitle').textContent = `${sameType.length} unfinished batch${sameType.length === 1 ? '' : 'es'}`;
+                el('batchResumeDetail').textContent = [
+                    ...(latest.updatedAt ? [`latest ${friendlyTime(latest.updatedAt)}`] : []),
+                    ...(others.length > 0 ? [`${others.length} in other document types`] : []),
+                ].join(' · ');
+                el('batchResumeLabel').textContent = 'Resume latest';
+            } else {
+                el('batchResumeTitle').textContent = `${others.length} unfinished batch${others.length === 1 ? '' : 'es'}`;
+                el('batchResumeDetail').textContent = 'in other document types';
+            }
+            if (latest) {
+                el('batchResumeBtn').dataset.batch = String(latest.id);
+                el('batchResumeDiscardBtn').dataset.batch = String(latest.id);
+            }
         }
+
+        /**
+         * The window's list, grouped by document type: this page's type first,
+         * then the others. Each group is newest first, its newest marked.
+         */
+        function renderResumeList(sameType, others) {
+            const total = sameType.length + others.length;
+            el('batchResumeModalSub').textContent = total === 0 ? ''
+                : 'Pick one to carry on. Discarding a batch keeps the records already saved from it.';
+            const groups = new Map();
+            if (sameType.length > 0) groups.set(config.docType, sameType);
+            others.forEach((batch) => {
+                if (!groups.has(batch.docType)) groups.set(batch.docType, []);
+                groups.get(batch.docType).push(batch);
+            });
+            const rows = [];
+            groups.forEach((batches, docType) => {
+                const here = docType === config.docType;
+                rows.push(resumeGroupTitle(batches[0].typeLabel ?? docType, batches.length, here));
+                batches.forEach((batch, index) => rows.push(resumeRow({
+                    text: batchProgressText(batch),
+                    when: [batch.realigning > 0 ? `${batch.realigning} to re-align` : '', batch.updatedAt ? friendlyTime(batch.updatedAt) : ''].filter(Boolean).join(' · '),
+                    latest: index === 0 && batches.length > 1,
+                    primary: index === 0,
+                    resume: here ? () => resumeFromList(batch.id) : null,
+                    href: here ? null : resumeUrl(batch),
+                    discard: () => discardBatchById(batch.id, { ask: false }),
+                })));
+            });
+            el('batchResumeList').replaceChildren(...rows);
+            resetDiscardAll(total);
+        }
+
+        /** "Birth Certificate · 2", with "this page" on the type open here. */
+        function resumeGroupTitle(label, count, here) {
+            const li = document.createElement('li');
+            li.className = 'batch-resume__group';
+            li.setAttribute('role', 'presentation');
+            const name = document.createElement('span');
+            name.className = 'batch-resume__group-name';
+            name.textContent = label;
+            name.title = label;
+            const meta = document.createElement('span');
+            meta.className = 'batch-resume__group-meta';
+            meta.textContent = here ? `${count} · this page` : String(count);
+            li.append(name, meta);
+            return li;
+        }
+
+        /** Another type's page, set to resume this batch as it opens. */
+        function resumeUrl(batch) {
+            const url = new URL(batch.workspaceUrl, window.location.href);
+            url.searchParams.set('resume', String(batch.id));
+            return url.toString();
+        }
+
+        /** The window closes first (Resume may ask something in its own window), then the batch opens. */
+        function resumeFromList(id) {
+            const modalEl = el('batchResumeModal');
+            const modal = window.bootstrap.Modal.getInstance(modalEl);
+            if (!modal || !modalEl.classList.contains('show')) return resumeBatch(id);
+            return new Promise((resolve) => {
+                modalEl.addEventListener('hidden.bs.modal', () => resolve(resumeBatch(id)), { once: true });
+                modal.hide();
+            });
+        }
+
+        el('batchResumeViewBtn').addEventListener('click', () => {
+            window.bootstrap.Modal.getOrCreateInstance(el('batchResumeModal')).show();
+        });
+
+        /** "0 of 2 records saved · 4 pages · 1 to re-align · today, 1:12 PM". */
+        function batchDetailText(batch) {
+            return [
+                batchProgressText(batch),
+                ...(batch.realigning > 0 ? [`${batch.realigning} to re-align`] : []),
+                ...(batch.updatedAt ? [friendlyTime(batch.updatedAt)] : []),
+            ].filter(Boolean).join(' · ');
+        }
+
+        /** "0 of 2 records saved · 4 pages". */
+        function batchProgressText(batch) {
+            const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+            return `${batch.saved ?? 0} of ${plural(batch.records ?? 0, 'record')} saved · ${plural(batch.pages ?? 0, 'page')}`;
+        }
+
+        /** "today, 1:12 PM", "yesterday, 9:03 AM", or "Nov 19, 1:12 PM". */
+        function friendlyTime(value) {
+            const when = new Date(value);
+            if (Number.isNaN(when.getTime())) return '';
+            const time = when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+            const day = new Date(when.getFullYear(), when.getMonth(), when.getDate());
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const daysAgo = Math.round((today - day) / 86400000);
+            if (daysAgo === 0) return `today, ${time}`;
+            if (daysAgo === 1) return `yesterday, ${time}`;
+            const date = when.toLocaleDateString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                ...(when.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
+            });
+            return `${date}, ${time}`;
+        }
+
+        /** One quiet row under the offer: what it is, when, and Discard / Resume (or Open). */
+        function resumeRow({ text, when, resume = null, discard = null, href = null, latest = false, primary = latest }) {
+            const li = document.createElement('li');
+            li.className = `batch-resume__row${latest ? ' is-latest' : ''}`;
+            const label = document.createElement('span');
+            label.className = 'batch-resume__row-text';
+            // Two lines: what it holds, then when (and "Latest" on the newest).
+            const title = document.createElement('span');
+            title.className = 'batch-resume__row-title';
+            title.textContent = text;
+            const meta = document.createElement('span');
+            meta.className = 'batch-resume__row-meta';
+            if (latest) {
+                const badge = document.createElement('span');
+                badge.className = 'badge bg-label-primary batch-resume__latest';
+                badge.textContent = 'Latest';
+                meta.append(badge);
+            }
+            if (when) meta.append(when);
+            label.append(title, meta);
+            const actions = document.createElement('span');
+            actions.className = 'batch-resume__row-actions';
+            let discardButton = null;
+            if (discard) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'btn btn-sm btn-icon btn-label-secondary';
+                button.title = 'Discard this batch';
+                button.setAttribute('aria-label', 'Discard this batch');
+                button.innerHTML = '<i class="icon-base bx bx-trash icon-sm" aria-hidden="true"></i>';
+                // Asked in the row itself (a second window over this one would stack).
+                button.addEventListener('click', () => {
+                    const keep = document.createElement('button');
+                    keep.type = 'button';
+                    keep.className = 'btn btn-sm btn-label-secondary';
+                    keep.textContent = 'Keep';
+                    const confirmBtn = document.createElement('button');
+                    confirmBtn.type = 'button';
+                    confirmBtn.className = 'btn btn-sm btn-danger';
+                    confirmBtn.textContent = 'Discard';
+                    const question = document.createElement('span');
+                    question.className = 'batch-resume__ask';
+                    question.textContent = 'Discard this batch?';
+                    const before = [...actions.childNodes];
+                    li.classList.add('is-asking');
+                    actions.replaceChildren(question, keep, confirmBtn);
+                    keep.addEventListener('click', () => {
+                        li.classList.remove('is-asking');
+                        actions.replaceChildren(...before);
+                    });
+                    confirmBtn.addEventListener('click', async () => {
+                        keep.disabled = true;
+                        confirmBtn.disabled = true;
+                        await discard();
+                    });
+                    confirmBtn.focus();
+                });
+                discardButton = button;
+            }
+            if (resume) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = `btn btn-sm ${primary ? 'btn-primary' : 'btn-label-primary'}`;
+                button.textContent = 'Resume';
+                button.addEventListener('click', () => {
+                    button.disabled = true;
+                    Promise.resolve(resume()).finally(() => { button.disabled = false; });
+                });
+                actions.append(button);
+            }
+            if (href) {
+                // Its own type's page, which resumes it as it opens.
+                const link = document.createElement('a');
+                link.className = `btn btn-sm ${primary ? 'btn-primary' : 'btn-label-primary'} batch-resume__open`;
+                link.href = href;
+                link.title = 'Opens its document type and resumes this batch';
+                link.innerHTML = 'Resume <i class="icon-base bx bx-right-arrow-alt icon-sm" aria-hidden="true"></i>';
+                actions.append(link);
+            }
+            // Resume first, the quiet 🗑 last at the edge.
+            if (discardButton) actions.append(discardButton);
+            li.prepend(label);
+            li.append(actions);
+            return li;
+        }
+
+        const askDiscardBatch = () => askInApp({
+            title: 'Discard this batch?',
+            text: 'Its queued pages and drafts are thrown away. Records saved from it stay saved.',
+            confirm: 'Discard batch',
+            cancel: 'Keep it',
+            tone: 'danger',
+        });
 
         el('batchResumeBtn').addEventListener('click', () => {
             if (el('batchResume').dataset.mode === 'files') askForBatchFiles({ thenContinue: true });
@@ -6798,15 +7410,44 @@
         el('batchResumeDiscardBtn').addEventListener('click', async () => {
             // The batch resumed here: discarded, and the workspace starts afresh.
             if (el('batchResume').dataset.mode === 'files') {
-                if (!window.confirm('Discard this batch?\n\nIts queued pages and drafts are thrown away. Records saved from it stay saved.')) return;
+                if (await askDiscardBatch() !== 'confirm') return;
                 await discardServerBatch();
                 leaving = true;
                 window.location.reload();
                 return;
             }
             const id = Number(el('batchResumeDiscardBtn').dataset.batch);
-            if (!id || !window.confirm('Discard this batch?\n\nIts queued pages and drafts are thrown away. Records saved from it stay saved.')) return;
             el('batchResumeDiscardBtn').disabled = true;
+            try {
+                await discardBatchById(id);
+            } finally {
+                el('batchResumeDiscardBtn').disabled = false;
+            }
+        });
+
+        /** The footer's Discard all, back to its button (after a change, or Keep). */
+        function resetDiscardAll(count) {
+            const footer = el('batchResumeModalFooter');
+            footer.querySelector('.batch-resume__ask-group')?.remove();
+            const button = el('batchResumeDiscardAllBtn');
+            button.classList.toggle('d-none', count < 2);
+            button.disabled = false;
+            button.textContent = `Discard all ${count}`;
+        }
+
+        el('batchResumeDiscardAllBtn').addEventListener('click', async () => {
+            const ids = (config.openBatches ?? []).map((batch) => batch.id);
+            if (ids.length === 0) return;
+            el('batchResumeDiscardAllBtn').disabled = true;
+            for (const id of ids) {
+                // eslint-disable-next-line no-await-in-loop
+                await discardBatchById(id, { ask: false });
+            }
+        });
+
+        /** Discard a batch left open (asked first, unless `ask` is false): its queued pages are let go too. */
+        async function discardBatchById(id, { ask = true } = {}) {
+            if (!id || (ask && await askDiscardBatch() !== 'confirm')) return;
             try {
                 const response = await fetch(config.batchUrls.show.replace('__BATCH__', String(id)), {
                     headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -6822,9 +7463,8 @@
             }
             await discardServerBatch(id);
             config.openBatches = (config.openBatches ?? []).filter((batch) => batch.id !== id);
-            el('batchResumeDiscardBtn').disabled = false;
             showResumeOffer();
-        });
+        }
 
         async function resumeBatch(id) {
             if (!id || batchState.active) return;
@@ -6842,15 +7482,21 @@
 
                 // Open in another tab just now: take it over, or leave it there.
                 const seen = batch.seenAt ? Date.now() - Date.parse(batch.seenAt) : Infinity;
-                if (batch.tab && batch.tab !== batchTab && seen < 75 * 1000 && !window.confirm(
-                    'This batch is open in another tab.\n\nOK: continue it here (the other tab stops saving).\nCancel: leave it there.',
-                )) return;
+                if (batch.tab && batch.tab !== batchTab && seen < 75 * 1000 && await askInApp({
+                    title: 'This batch is open in another tab',
+                    text: 'Continue it here? The other tab stops saving it.',
+                    confirm: 'Continue here',
+                    cancel: 'Leave it there',
+                }) !== 'confirm') return;
 
                 // The layout changed since: pages queued keep theirs; the others use the current one.
                 const layoutChanged = Number(batch.templateId) !== Number(PAGE_ONE_TEMPLATE_ID);
-                if (layoutChanged && !window.confirm(batch.templateArchived
-                    ? 'The layout this batch was started with was deleted.\n\nPages already queued keep the layout they were read with. Pages not queued yet use the layout published now.\n\nOK: resume with it.'
-                    : 'The layout changed since this batch was started.\n\nPages already queued keep the layout they were read with. Pages not queued yet use the layout published now.\n\nOK: resume with it.')) return;
+                if (layoutChanged && await askInApp({
+                    title: batch.templateArchived ? 'The layout of this batch was deleted' : 'The layout changed since this batch was started',
+                    text: 'Pages already queued keep the layout they were read with. Pages not queued yet use the layout published now.',
+                    confirm: 'Resume',
+                    tone: 'info',
+                }) !== 'confirm') return;
 
                 batchServer.id = batch.id;
                 batchServer.version = batch.version;
@@ -6876,10 +7522,19 @@
                 showResumeOffer();
 
                 // Pages not queued yet: their files are picked again first.
+                // Files this browser kept are used; only the rest are asked for.
+                if (items.some(pageNeedsFile)) {
+                    const kept = await recallBatchFiles(items.filter(pageNeedsFile).map((item) => item.sourceHash));
+                    const { matched } = matchFilesToBatch(kept, items);
+                    items.forEach((item) => {
+                        const file = item.sourceHash ? matched.get(item.sourceHash) : null;
+                        if (file && !item.file) item.file = file;
+                    });
+                }
                 if (items.some(pageNeedsFile)) await askForBatchFiles();
                 await resumeWhereLeft();
             } catch (error) {
-                if (!error.batchLost) alert(error.message || 'This batch could not be resumed.');
+                if (!error.batchLost) tellInApp('This batch could not be resumed', error.message || '');
                 if (!batchState.active) batchServer.id = null;
             } finally {
                 button.disabled = false;
@@ -6942,11 +7597,24 @@
         let batchFilesContinue = false;
         // Pages read already whose file is wanted too (to re-align them).
         let batchFilesAlso = [];
+        // Picked for a re-align: it goes on once the file is at hand.
+        let batchFilesThenRealign = false;
+        const BATCH_FILES_TITLE = el('batchFilesTitle').textContent.trim();
+        const BATCH_FILES_TEXT = el('batchFilesText').textContent.trim().replace(/\s+/g, ' ');
 
         /** Say which files are wanted, and match what is picked. Resolves when the window closes. */
-        function askForBatchFiles({ thenContinue = false, also = [] } = {}) {
+        function askForBatchFiles({ thenContinue = false, also = [], thenRealign = false } = {}) {
             batchFilesContinue = batchFilesContinue || thenContinue;
             batchFilesAlso = also;
+            batchFilesThenRealign = thenRealign;
+            // A re-align says so, and names the document; otherwise the window's own words.
+            if (thenRealign && also.length > 0) {
+                el('batchFilesTitle').textContent = 'Pick the file to re-align';
+                el('batchFilesText').textContent = `To re-align ${recordLabel(recordOf(also[0]))}, pick its file again (or its folder). A renamed copy still matches.`;
+            } else {
+                el('batchFilesTitle').textContent = BATCH_FILES_TITLE;
+                el('batchFilesText').textContent = BATCH_FILES_TEXT;
+            }
             renderBatchFilesList();
             el('batchFilesResult').classList.add('d-none');
             const modal = window.bootstrap.Modal.getOrCreateInstance(el('batchFilesModal'));
@@ -6964,8 +7632,9 @@
             const { missing } = matchFilesToBatch([], batchState.items);
             batchFilesAlso = batchFilesAlso.filter((it) => !it.file);
             batchFilesAlso.forEach((it) => {
-                if (missing.some((entry) => entry.sourceHash === it.sourceHash)) return;
-                missing.push({ sourceName: it.sourceName ?? it.name, sourceHash: it.sourceHash, pages: 1 });
+                const entry = missing.find((candidate) => candidate.sourceHash === it.sourceHash);
+                if (entry) entry.pages = Math.max(entry.pages, batchFilesAlso.filter((other) => other.sourceHash === it.sourceHash).length);
+                else missing.push({ sourceName: it.sourceName ?? it.name, sourceHash: it.sourceHash, pages: batchFilesAlso.filter((other) => other.sourceHash === it.sourceHash).length });
             });
             el('batchFilesList').replaceChildren(...missing.map((entry) => {
                 const li = document.createElement('li');
@@ -6978,10 +7647,17 @@
         el('batchFilesModal').addEventListener('hidden.bs.modal', async () => {
             const resolve = batchFilesResolve;
             const thenContinue = batchFilesContinue;
+            const thenRealign = batchFilesThenRealign;
             batchFilesResolve = null;
             batchFilesContinue = false;
+            batchFilesThenRealign = false;
             resolve?.();
             renderBatchQueueBanner();
+            // Picked for a re-align: on with it (its question comes next), not a second click.
+            if (thenRealign && realignablePages().length > 0) {
+                await realignBatchPages(realignablePages());
+                return;
+            }
             // Nothing else could open: go on once files are at hand (else the upload step offers them).
             if (thenContinue && batchState.items.some((item) => pageAlignable(item) || recordStateOf(item) === 'ready')) {
                 await continueBatch(null, { askForFiles: false });
@@ -7019,6 +7695,8 @@
                     hashed.push({ file, hash });
                 }
                 const { matched, unmatched } = matchFilesToBatch(hashed, batchState.items);
+                // Kept in this browser too, so the next resume does not ask again.
+                matched.forEach((file, hash) => { rememberBatchFile(hash, file); });
                 batchState.items.forEach((item) => {
                     const file = item.sourceHash ? matched.get(item.sourceHash) : null;
                     if (file && !item.file) item.file = file;
@@ -7040,6 +7718,19 @@
         }));
 
         showResumeOffer();
+
+        // Came from another type's list ("?resume=12"): that batch resumes now.
+        {
+            const url = new URL(window.location.href);
+            const wanted = Number(url.searchParams.get('resume'));
+            if (url.searchParams.has('resume')) {
+                url.searchParams.delete('resume');
+                window.history.replaceState(window.history.state, '', url);
+            }
+            if (wanted && (config.openBatches ?? []).some((batch) => batch.id === wanted && batch.docType === config.docType)) {
+                resumeBatch(wanted);
+            }
+        }
 
         /** A page Scan all could not read: marked failed with the reason, and the run goes on. */
         function failBatchEntry(entry, message) {
@@ -7064,7 +7755,7 @@
             // A resumed batch knows only where its pages are: what was read is asked for now.
             const loaded = await loadBatchPages(recordOf(picked).members);
             if (loaded === 'offline') {
-                alert('This record could not be loaded: the server could not be reached. Check the connection, then open it again from the queue.');
+                tellInApp('This record could not be loaded', 'The server could not be reached. Check the connection, then open it again from the queue.');
                 renderBatchQueueBanner();
                 return;
             }
@@ -7132,6 +7823,12 @@
             showStep('verify');
             if (verifyDoc) prepareSpreadComparison();
             else prepareValidationComparison();
+            // Re-align kept some lines' readings on new lines: what was typed on them follows.
+            members.forEach((it) => {
+                const map = it.page?.keptLines;
+                if (!map || Array.isArray(map) || !lead.verifyDraft) return;
+                lead.verifyDraft = new Map([...lead.verifyDraft].map(([line, entry]) => [map[String(line)] ?? line, entry]));
+            });
             // What was typed and ticked on it before (after the step is set up afresh).
             restoreVerifyDraft(lead);
             // A blank page (a cover, an empty sheet) has nothing to tick or save.
@@ -7267,14 +7964,60 @@
         function realignablePages() {
             const current = batchState.active ? batchState.items[batchState.currentIndex] : null;
             if (!current || recordSubmitting) return [];
-            return recordOf(current).members.filter((it) => !pageDone(it) && it.page && it.file);
+            // With its file, or (after a resume) the server's copy of the page and its original.
+            return recordOf(current).members.filter((it) => !pageDone(it) && it.page && it.pageId);
         }
 
-        /** Ask in the app's own window (not the browser's box); resolves true on Re-align. */
-        function askRealign(title, doc, text) {
+        /**
+         * Ask (or tell) in the app's own window, not the browser's box. Resolves 'confirm',
+         * 'cancel', or null when closed with x or Esc. With `cancel: null` it only tells.
+         * `tone`: 'warning' (default), 'danger' (the main button is red) or 'info'.
+         */
+        function askInApp({ title, text = '', confirm = 'OK', cancel = 'Cancel', tone = 'warning' }) {
+            const modalEl = el('appAskModal');
+            el('appAskTitle').textContent = title;
+            el('appAskText').replaceChildren(...String(text).split(/\n{2,}/).filter(Boolean).map((part) => {
+                const paragraph = document.createElement('p');
+                paragraph.textContent = part;
+                return paragraph;
+            }));
+            const toneClass = tone === 'danger' ? 'bg-label-danger' : (tone === 'info' ? 'bg-label-primary' : 'bg-label-warning');
+            el('appAskIcon').className = `leave-scan-modal__icon ${toneClass}`;
+            el('appAskGlyph').className = `icon-base bx ${tone === 'info' ? 'bx-info-circle' : 'bx-error'}`;
+            const confirmBtn = el('appAskConfirm');
+            confirmBtn.textContent = confirm;
+            confirmBtn.className = `btn ${tone === 'danger' ? 'btn-danger' : 'btn-primary'} text-nowrap`;
+            const cancelBtn = el('appAskCancel');
+            cancelBtn.textContent = cancel ?? '';
+            cancelBtn.classList.toggle('d-none', !cancel);
+            el('appAskActions').classList.toggle('is-three', !cancel);
+            return new Promise((resolve) => {
+                let answer = null;
+                const close = (value) => {
+                    answer = value;
+                    window.bootstrap.Modal.getInstance(modalEl)?.hide();
+                };
+                confirmBtn.onclick = () => close('confirm');
+                cancelBtn.onclick = () => close('cancel');
+                modalEl.addEventListener('hidden.bs.modal', () => resolve(answer), { once: true });
+                window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+            });
+        }
+
+        /** Tell something in the app's own window (one button). */
+        const tellInApp = (title, text = '') => askInApp({ title, text, cancel: null });
+
+        /** Ask in the app's own window (not the browser's box); resolves true on the main button. */
+        function askRealign(title, doc, text, {
+            confirm = 'Re-align', cancel = 'Cancel', list = false, warning = false,
+        } = {}) {
             el('realignConfirmTitle').textContent = title;
             el('realignConfirmDoc').textContent = doc;
             el('realignConfirmText').textContent = text;
+            el('realignConfirmBtn').textContent = confirm;
+            el('realignConfirmCancel').textContent = cancel;
+            el('realignConfirmList').classList.toggle('d-none', !list);
+            el('realignConfirmWarning').classList.toggle('d-none', !warning);
             return new Promise((resolve) => {
                 const modalEl = el('realignConfirmModal');
                 let chosen = false;
@@ -7287,38 +8030,37 @@
             });
         }
 
-        /**
-         * What was typed in Review & Export for the pages sent back is cleared: those cells
-         * belong to the old reading (the rows may come out different). `lead` holds the
-         * record's draft; a page's cells are told apart by the side of their column.
-         */
-        function dropReviewExtrasOf(lead, pages, whole) {
-            if (!lead?.reviewExtras || lead.reviewExtras.size === 0) return;
-            if (whole) {
-                lead.reviewExtras = null;
-            } else {
-                const sides = new Set(pages.map((it) => (verifyDoc ? verifyDoc.pages.findIndex((entry) => entry.item === it) : 0)));
-                const sideOf = new Map((reviewModel?.columns ?? []).map((column) => [column.key, column.side ?? 0]));
-                lead.reviewExtras = new Map([...lead.reviewExtras].filter(([key]) => {
-                    const side = sideOf.get(String(key).slice(String(key).lastIndexOf('|') + 1));
-                    return side === undefined || !sides.has(side);
-                }));
-            }
-            syncBatchDraft(lead);
-        }
-
         /** The whole document goes back: every page of the record open now (a pair goes as one). */
         async function realignBatchPages(pages) {
             if (pages.length === 0 || recordSubmitting) return;
             const doc = recordLabel(recordOf(pages[0]));
             const many = pages.length > 1;
-            const text = `${many ? 'Both pages go' : 'The page goes'} back to Align and ${many ? 'are' : 'is'} read again. What you typed is cleared.`;
+            const text = `${many ? 'Both pages go' : 'The page goes'} back to Align. Only the fields you move are read again; the rest keep their reading and what you typed.`;
             if (!(await askRealign('Re-align this document?', doc, text))) return;
 
+            // Every page is drawn as the server has it, with the markers it was read with on it
+            // (the server may have straightened the page). Queued again, the same page is read
+            // again from there: what the detector found is reused, and only fields cut out
+            // differently are read (the rest keep their reading).
+            const fromServer = pages;
+            try {
+                await Promise.all(fromServer.map(ensureServerPage));
+            } catch (error) {
+                showValidationSubmitError(`This document cannot be re-aligned now: ${error.message}`);
+                return;
+            }
+
             // The old reading stays until the new one is queued, so Cancel re-align can bring it back.
-            const lead = batchState.items[batchState.currentIndex];
             leaveBatchVerify();
-            dropReviewExtrasOf(lead, pages, true);
+            fromServer.forEach((it) => {
+                it.serverCopy = true;
+                it.readBaseline = null;
+                it.boxes = cloneBoxes(geometryMarkers(it.page.geometry, it.page));
+                it.rows = (it.page.geometry?.ruled_ys ?? it.rows ?? []).map(Number);
+                it.tilts = it.rows.map(() => 0);
+                it.autoFields = null;
+                it.rowsByHand = false;
+            });
             pages.forEach((it) => {
                 it.status = 'pending';
                 it.realign = true;
@@ -7338,6 +8080,7 @@
             if (back.length === 0) return;
             back.forEach((it) => {
                 it.realign = false;
+                it.serverCopy = false;
                 it.status = 'ready';
                 it.error = null;
             });
@@ -7351,9 +8094,12 @@
                 const pages = realignablePages();
                 // A resumed record: its file is picked again first.
                 const current = batchState.items[batchState.currentIndex];
-                const fileless = current ? recordOf(current).members.filter((it) => !pageDone(it) && !it.file) : [];
+                // Only a page the server keeps no original of needs its file picked again.
+                const fileless = current
+                    ? recordOf(current).members.filter((it) => !pageDone(it) && !it.file && !(it.pageId && it.workspaceScanPath))
+                    : [];
                 if (pages.length === 0 && fileless.length > 0) {
-                    askForBatchFiles({ also: fileless });
+                    askForBatchFiles({ also: fileless, thenRealign: true });
                     return;
                 }
                 realignBatchPages(pages);
@@ -7614,7 +8360,17 @@
             // Opened in a new tab, there is nothing to go back to: start again.
             backFallback = window.setTimeout(() => window.location.assign(el('workspaceCancel').href), 500);
         });
-        window.addEventListener('pagehide', () => window.clearTimeout(backFallback));
+        window.addEventListener('pagehide', () => {
+            window.clearTimeout(backFallback);
+            // Left (Keep for later, a link, the tab closed): the batch is no longer open here, so
+            // opening it again soon, in another tab, does not warn about this one.
+            if (batchOpenOnServer() && config.batchUrls?.release && navigator.sendBeacon) {
+                const form = new FormData();
+                form.set('_token', config.csrf);
+                form.set('tab', batchTab);
+                navigator.sendBeacon(config.batchUrls.release.replace('__BATCH__', String(batchServer.id)), form);
+            }
+        });
 
         // Discard: the batch is thrown away (its queued pages let go), then leave.
         el('discardBatchLeaveBtn').addEventListener('click', async () => {
@@ -7676,9 +8432,15 @@
 
             // Several files, or a folder, in single mode: that is a batch.
             const what = folder ? 'A folder' : `${files.length} files`;
-            if (window.confirm(`${what} dropped. Switch to Batch File Upload and queue ${folder ? 'everything in it' : 'them all'}?
-
-Cancel opens only the first file.`)) {
+            const choice = await askInApp({
+                title: `${what} dropped`,
+                text: `Queue ${folder ? 'everything in it' : 'them all'} with Batch File Upload, or open only the first file?`,
+                confirm: 'Use Batch File Upload',
+                cancel: 'Open the first file',
+                tone: 'info',
+            });
+            if (choice === null) return;
+            if (choice === 'confirm') {
                 setUploadMode('batch');
                 startBatchQueue(files);
                 return;
@@ -7893,7 +8655,8 @@ Cancel opens only the first file.`)) {
 
         function restoreTemplateFields() {
             rowsSource = null;
-            setGrid(templateBoxes, templateRows, { remember: true });
+            const target = resetTarget();
+            setGrid(cloneBoxes(target.boxes), [...target.rows], { remember: true });
             marker.resetZoom();
             el('docViewport').scrollTo({ top: 0, left: 0 });
             clearOcrError();
@@ -7920,8 +8683,10 @@ Cancel opens only the first file.`)) {
 
         // Each page has its own layout: only this one is reset.
         const pageNote = el('resetFieldsModalPage');
-        pageNote.textContent = `Only page ${scanPageNumber} is reset. The other pages keep their own layouts.`;
-        pageNote.classList.toggle('d-none', !multiPage());
+        pageNote.textContent = realignBase
+            ? 'Re-aligning: this page goes back to the markers it was read with (not the layout\'s blank grid), so nothing on it is read again.'
+            : `Only page ${scanPageNumber} is reset. The other pages keep their own layouts.`;
+        pageNote.classList.toggle('d-none', !multiPage() && !realignBase);
             window.bootstrap.Modal.getOrCreateInstance(el('resetFieldsModal')).show();
         });
         el('confirmResetFieldsBtn').addEventListener('click', () => {
@@ -7973,6 +8738,15 @@ Cancel opens only the first file.`)) {
                     selectRow(null);
                     return;
                 }
+            }
+
+            // The arrow keys move the selected markers one screen pixel (Shift: 10), as in the Template Builder.
+            const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+            if (!commandPressed && !event.altKey && arrow && marker.selectedIndexes().length > 0) {
+                event.preventDefault();
+                const step = event.shiftKey ? 10 : 1;
+                marker.nudgeSelected(arrow[0] * step, arrow[1] * step);
+                return;
             }
 
             if (commandPressed && !event.shiftKey && key === 'a' && marker.toJSON().length > 0) {
@@ -9453,7 +10227,10 @@ Cancel opens only the first file.`)) {
         function focusFirstVerifyField(group) {
             const index = group.indexes.find((candidate) => !cropped[candidate]?.cropDeleted) ?? group.indexes[0];
             if (!Number.isInteger(index)) return;
-            activateValidationField(index, 'marker');
+            // The list stays at its top: the person's notes above the first field (what was
+            // not read, say) are seen first, not scrolled out of view.
+            activateValidationField(index, 'marker', { keepList: true });
+            el('verifyRows').scrollTop = 0;
 
             // The pages stay whole (100%, both side by side): the cursor goes in
             // the box without the view zooming to it.
@@ -9885,7 +10662,7 @@ Cancel opens only the first file.`)) {
             });
         }
 
-        function activateValidationField(index, source = 'row', { alignTo = null } = {}) {
+        function activateValidationField(index, source = 'row', { alignTo = null, keepList = false } = {}) {
             if (!Number.isInteger(index) || index < 0 || index >= readings.length) return;
             const group = validationGroupForField(index);
             if (!group) return;
@@ -9912,7 +10689,7 @@ Cancel opens only the first file.`)) {
             // the list scrolls past it. Skip if another field was picked meanwhile.
             if (source === 'marker') {
                 expansion.then(() => {
-                    if (activeValidationIndex === index) revealValidationRow(index);
+                    if (activeValidationIndex === index && !keepList) revealValidationRow(index);
                 });
                 // Review & Export: the field's cell in the table.
                 if (reviewing) reviewTable?.selectRef(index);

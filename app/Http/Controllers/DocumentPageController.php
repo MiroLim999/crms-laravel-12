@@ -60,6 +60,8 @@ class DocumentPageController extends Controller
             // share one pixel grid.
             'page' => ['required', 'file', 'mimes:png', 'max:40960'],
             'scan' => ['sometimes', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            // Re-align without the file at hand: the original kept for the page this one replaces.
+            'scan_from_page' => ['sometimes', 'integer'],
             'batch_key' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
             // Detect: straighten the page and fit the template to it, outline
             // every line, and stop before reading so the user can check first.
@@ -76,6 +78,9 @@ class DocumentPageController extends Controller
         if (! $image instanceof UploadedFile || ($size = @getimagesize($image->getRealPath())) === false) {
             throw ValidationException::withMessages(['page' => 'The aligned page could not be read as an image.']);
         }
+
+        // Checked before anything is stored: a page whose original is gone is refused.
+        $scanFrom = $request->hasFile('scan') ? null : $this->workspaceScanOf($request, $validated['scan_from_page'] ?? null);
 
         $template = DocumentTemplate::findOrFail((int) $validated['document_template_id']);
         // A deleted layout is kept only for its records: no new page is read with it.
@@ -103,7 +108,7 @@ class DocumentPageController extends Controller
         $scan = $request->file('scan');
         $workspaceScanPath = $scan instanceof UploadedFile
             ? $this->storeWorkspaceScan($page, $scan, $validated['batch_key'] ?? null)
-            : null;
+            : ($scanFrom !== null ? $this->copyWorkspaceScan($scanFrom, $page, $validated['batch_key'] ?? null) : null);
 
         if (! $request->boolean('defer_scan')) {
             ProcessDocumentPage::dispatch(
@@ -134,7 +139,8 @@ class DocumentPageController extends Controller
         $this->authorizePage($request, $page);
 
         $validated = $request->validate([
-            'scan' => ['required', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'scan' => ['required_without:scan_from_page', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'scan_from_page' => ['sometimes', 'integer'],
             'batch_key' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
             'read' => ['sometimes', 'boolean'],
         ], [
@@ -145,7 +151,13 @@ class DocumentPageController extends Controller
             return response()->json(['message' => 'Run Smoke test scan on this page again before queuing it.'], 409);
         }
 
-        $workspaceScanPath = $this->storeWorkspaceScan($page, $request->file('scan'), $validated['batch_key'] ?? null);
+        $workspaceScanPath = $request->hasFile('scan')
+            ? $this->storeWorkspaceScan($page, $request->file('scan'), $validated['batch_key'] ?? null)
+            : $this->copyWorkspaceScan(
+                $this->workspaceScanOf($request, $validated['scan_from_page'] ?? null),
+                $page,
+                $validated['batch_key'] ?? null,
+            );
 
         if ($request->boolean('read')) {
             $page->forceFill([
@@ -166,6 +178,57 @@ class DocumentPageController extends Controller
      * Keep a queued page's original file in its batch's workspace folder, where
      * the record takes it from when it is saved.
      */
+    /**
+     * The original scan kept for an earlier page of the user's own (a page sent back
+     * by Re-align, queued again without its file at hand): what workspace_scan.json
+     * says of it, with its path. Refused when that original is gone.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function workspaceScanOf(Request $request, mixed $pageId): ?array
+    {
+        if ($pageId === null) {
+            return null;
+        }
+        $from = DocumentPage::query()
+            ->whereKey((int) $pageId)
+            ->where('created_by', $request->user()->getKey())
+            ->first();
+        $disk = Storage::disk('local');
+        $note = $from ? $from->directory() . '/workspace_scan.json' : null;
+        $info = $note && $disk->exists($note) ? (json_decode((string) $disk->get($note), true) ?: []) : [];
+        $path = (string) ($info['path'] ?? '');
+        if (! str_starts_with($path, 'documents/workspace/') || str_contains($path, '..') || ! $disk->exists($path)) {
+            throw ValidationException::withMessages([
+                'scan_from_page' => 'The original of this page is no longer on the server. Pick its file again to re-align it.',
+            ]);
+        }
+
+        return $info;
+    }
+
+    /**
+     * A copy of an earlier page's original, kept for this page (named by this page, so
+     * it lives as long as this page does, whatever happens to the earlier one).
+     *
+     * @param  array<string, mixed>  $info
+     */
+    private function copyWorkspaceScan(array $info, DocumentPage $page, ?string $batchKey): string
+    {
+        $disk = Storage::disk('local');
+        $source = (string) $info['path'];
+        $batchKey ??= (string) ($info['batch_key'] ?? ('batch-' . $page->getKey()));
+        $target = 'documents/workspace/' . $batchKey . '/' . $page->getKey() . '-' . preg_replace('/^\d+-/', '', basename($source));
+        $disk->copy($source, $target);
+        $disk->put($page->directory() . '/workspace_scan.json', json_encode([
+            ...$info,
+            'path' => $target,
+            'batch_key' => $batchKey,
+        ], JSON_UNESCAPED_SLASHES));
+
+        return $target;
+    }
+
     private function storeWorkspaceScan(DocumentPage $page, UploadedFile $scan, ?string $batchKey): string
     {
         $disk = Storage::disk('local');
@@ -254,6 +317,8 @@ class DocumentPageController extends Controller
 
         $validated = $request->validate([
             ...GeometryInput::rules(),
+            // Re-align: fields cut out the same as before keep their reading; only the rest is read.
+            'keep_readings' => ['sometimes', 'boolean'],
         ]);
         $geometry = GeometryInput::checked($validated['geometry']);
 
@@ -270,7 +335,7 @@ class DocumentPageController extends Controller
             'ocr_model_key' => $this->modelChoice->resolve(),
         ])->save();
 
-        ProcessDocumentPage::dispatch($page->getKey(), ProcessDocumentPage::MODE_FULL);
+        ProcessDocumentPage::dispatch($page->getKey(), ProcessDocumentPage::MODE_FULL, $request->boolean('keep_readings'));
 
         return response()->json($this->payload($page->fresh()), 202);
     }
@@ -1001,7 +1066,21 @@ class DocumentPageController extends Controller
             'existingRecord' => $page->status === DocumentPage::STATUS_READY
                 ? $this->findExistingRecordForPage($page, $lines)
                 : null,
+            // Re-align kept these lines' readings: old line id => new line id (what was typed follows).
+            'keptLines' => $this->keptLines($page),
         ];
+    }
+
+    /** @return array<string, int> */
+    private function keptLines(DocumentPage $page): array
+    {
+        $disk = Storage::disk('local');
+        $path = $page->directory().'/'.ProcessDocumentPage::LINE_MAP;
+        if (! $disk->exists($path)) {
+            return [];
+        }
+
+        return array_map('intval', (array) json_decode((string) $disk->get($path), true));
     }
 
     /**
