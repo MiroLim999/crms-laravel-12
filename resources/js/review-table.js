@@ -225,17 +225,122 @@ export async function downloadCsv(table, baseName) {
     saveBlob(new Blob([toCsv(table)], { type: 'text/csv;charset=utf-8' }), `${baseName}.csv`);
 }
 
+/** Each column as wide as its longest value (within reason), for write-excel-file. */
+function sheetColumns(table) {
+    return (table[0] ?? []).map((_, column) => ({
+        width: Math.min(48, Math.max(6, ...table.map((row) => String(row[column] ?? '').length + 2))),
+    }));
+}
+
 export async function downloadXlsx(table, baseName) {
+    await downloadXlsxSheets([{ name: 'Records', table }], baseName);
+}
+
+/** An Excel file of several sheets, each `{ name, table }` (a bold, fixed header row). */
+export async function downloadXlsxSheets(sheets, baseName) {
     // Loaded only when asked for, so the page does not carry it.
     const { default: writeExcelFile } = await import('write-excel-file/browser');
-    const widths = table[0].map((_, column) => Math.min(48, Math.max(6,
-        ...table.map((row) => String(row[column] ?? '').length + 2))));
-    const blob = await writeExcelFile(toSheetData(table), {
-        sheet: 'Records',
+    const blob = await writeExcelFile(sheets.map(({ name, table }) => ({
+        data: toSheetData(table),
+        sheet: name,
         stickyRowsCount: 1,
-        columns: widths.map((width) => ({ width })),
-    }).toBlob();
+        columns: sheetColumns(table),
+    }))).toBlob();
     saveBlob(blob, `${baseName}.xlsx`);
+}
+
+// ------------------------------------------------- several records at once
+
+/**
+ * Several records' tables (as the server's RecordCsv gives them: Record ID,
+ * Document type, Row, then the columns) as one table. Columns are joined by
+ * their header, in the order they first appear; a record without a column
+ * leaves its cells empty.
+ *
+ * @param {{ header: string[], rows: (string|number|null)[][] }[]} records
+ */
+export function joinTables(records) {
+    const headers = [];
+    const seen = new Set();
+    records.forEach(({ header }) => (header ?? []).forEach((name) => {
+        const key = String(name);
+        if (seen.has(key)) return;
+        seen.add(key);
+        headers.push(key);
+    }));
+
+    const rows = records.flatMap(({ header = [], rows: body = [] }) => {
+        const position = new Map(header.map((name, index) => [String(name), index]));
+        return body.map((row) => headers.map((name) => (position.has(name) ? String(row[position.get(name)] ?? '') : '')));
+    });
+
+    return [headers, ...rows];
+}
+
+/**
+ * An Excel sheet name: at most 31 characters, none of [ ] : * ? / \, and not
+ * one already in `used` (any case), which it is added to.
+ */
+export function sheetName(text, used = new Set()) {
+    const base = String(text ?? '').replace(/[[\]:*?/\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 31) || 'Sheet';
+    let name = base;
+    for (let copy = 2; used.has(name.toLowerCase()); copy += 1) {
+        const suffix = ` (${copy})`;
+        name = `${base.slice(0, 31 - suffix.length).trim()}${suffix}`;
+    }
+    used.add(name.toLowerCase());
+    return name;
+}
+
+/** Up to this many records, the Excel file also has a sheet for each one. */
+export const SHEET_PER_RECORD_LIMIT = 50;
+
+/**
+ * Records' tables as one download: CSV, one table; or Excel, an "All records"
+ * sheet and, for 2 to SHEET_PER_RECORD_LIMIT records, a sheet for each ("Record #12").
+ *
+ * @param {{ id: number, type?: string, header: string[], rows: (string|number|null)[][] }[]} records
+ * @param {string} baseName
+ * @param {'csv'|'xlsx'} format
+ */
+export async function downloadRecordTables(records, baseName, format) {
+    const all = joinTables(records);
+    if (format === 'csv') {
+        await downloadCsv(all, baseName);
+        return;
+    }
+    const used = new Set();
+    const sheets = [{ name: sheetName('All records', used), table: all }];
+    if (records.length > 1 && records.length <= SHEET_PER_RECORD_LIMIT) {
+        records.forEach((record) => sheets.push({
+            // The type is in every row; a long type name would only be cut short here.
+            name: sheetName(`Record #${record.id}`, used),
+            table: [record.header, ...record.rows],
+        }));
+    }
+    await downloadXlsxSheets(sheets, baseName);
+}
+
+/**
+ * Records' tables from the server (route records.export). `params` picks them:
+ * `ids[]`, or `all=1` with the archive's filters. Throws with the server's message.
+ *
+ * @param {string} url
+ * @param {URLSearchParams} params
+ */
+export async function fetchRecordTables(url, params) {
+    const response = await fetch(`${url}?${params}`, {
+        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin',
+    });
+    const payload = (response.headers.get('content-type') || '').includes('application/json')
+        ? await response.json()
+        : null;
+    if (!response.ok) {
+        const first = payload?.errors ? Object.values(payload.errors).flat()[0] : null;
+        throw new Error(first || payload?.message || `The server answered ${response.status}.`);
+    }
+    return payload?.records ?? [];
 }
 
 // ------------------------------------------------------- resizable split

@@ -11,6 +11,8 @@ use App\Services\RecordCsv;
 use App\Services\RecordFieldGrouper;
 use App\Support\LocalTime;
 use App\Support\SearchWords;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
@@ -28,17 +30,49 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class RecordController extends Controller
 {
+    /** The most records one download joins (Download selected, or all matching). */
+    public const EXPORT_LIMIT = 1000;
+
     public function __construct(private readonly RecordFieldGrouper $fieldGrouper) {}
 
-    public function index(Request $request): View
+    /**
+     * The archive's filters: the search words, type, status and submitted dates.
+     *
+     * @return array<string, array<int, string>>
+     */
+    private function filterRules(): array
     {
-        $validator = Validator::make($request->all(), [
+        return [
             'q' => ['nullable', 'string', 'max:255'],
             'type' => ['nullable', 'string', 'exists:document_types,key'],
             'status' => ['nullable', 'string', 'in:'.implode(',', array_column(RecordStatus::cases(), 'value'))],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
-        ], [], ['q' => 'search', 'from' => 'from date', 'to' => 'to date']);
+        ];
+    }
+
+    /**
+     * @param  Builder<CivilRecord>  $query
+     * @param  array<string, mixed>  $filters
+     * @param  list<string>  $words  from SearchWords::from()
+     * @return Builder<CivilRecord>
+     */
+    private function applyFilters(Builder $query, array $filters, array $words): Builder
+    {
+        return $query
+            ->search($words)
+            ->when($filters['type'] ?? null, fn ($q, $type) => $q->whereHas(
+                'documentTypeDefinition',
+                fn ($typeQuery) => $typeQuery->where('key', $type),
+            ))
+            ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+            ->when($filters['from'] ?? null, fn ($q, $from) => $q->where('submitted_at', '>=', LocalTime::dayStart($from)))
+            ->when($filters['to'] ?? null, fn ($q, $to) => $q->where('submitted_at', '<=', LocalTime::dayEnd($to)));
+    }
+
+    public function index(Request $request): View
+    {
+        $validator = Validator::make($request->all(), $this->filterRules(), [], ['q' => 'search', 'from' => 'from date', 'to' => 'to date']);
 
         // The filters come from the query string, so an edited URL can carry a
         // bad one. Its message is shown on this page and the filter left out,
@@ -51,18 +85,14 @@ class RecordController extends Controller
         $filters = $validator->valid();
         $words = SearchWords::from($filters['q'] ?? null);
 
-        $records = CivilRecord::query()
-            ->withTitleField()
-            ->with(['submitter', 'documentTypeDefinition'])
-            ->search($words)
-            ->withSearchMatches($words)
-            ->when($filters['type'] ?? null, fn ($q, $type) => $q->whereHas(
-                'documentTypeDefinition',
-                fn ($typeQuery) => $typeQuery->where('key', $type),
-            ))
-            ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
-            ->when($filters['from'] ?? null, fn ($q, $from) => $q->where('submitted_at', '>=', LocalTime::dayStart($from)))
-            ->when($filters['to'] ?? null, fn ($q, $to) => $q->where('submitted_at', '<=', LocalTime::dayEnd($to)))
+        $records = $this->applyFilters(
+            CivilRecord::query()
+                ->withTitleField()
+                ->with(['submitter', 'documentTypeDefinition'])
+                ->withSearchMatches($words),
+            $filters,
+            $words,
+        )
             ->orderByDesc('submitted_at')
             ->orderByDesc('id')
             ->paginate(15)
@@ -146,6 +176,68 @@ class RecordController extends Controller
             'Content-Type' => 'text/csv; charset=UTF-8',
             'Cache-Control' => 'no-store, no-cache',
         ]);
+    }
+
+    /**
+     * Several records' typed tables at once: Download selected and Download all
+     * matching in the archive, and Download all at the end of a batch. Each
+     * table is the one that record's own CSV download gives (RecordCsv), so later
+     * edits are in it; the browser joins them into one CSV, or one Excel file with
+     * a sheet for all of them and one per record. Oldest record first.
+     *
+     * `ids` picks the records; without it, `all` takes every record the archive's
+     * filters (q, type, status, from, to) match. At most EXPORT_LIMIT records.
+     */
+    public function export(Request $request, RecordCsv $csv, AuditLogger $audit): JsonResponse
+    {
+        $validated = $request->validate([
+            'ids' => ['required_without:all', 'array', 'min:1', 'max:'.self::EXPORT_LIMIT],
+            'ids.*' => ['integer', 'min:1'],
+            'all' => ['sometimes', 'boolean'],
+            ...$this->filterRules(),
+        ], [
+            'ids.max' => 'Pick at most '.number_format(self::EXPORT_LIMIT).' records for one download.',
+        ]);
+
+        $query = CivilRecord::query()->with(['fields', 'documentTypeDefinition']);
+        if (! empty($validated['ids'])) {
+            $query->whereKey(array_map('intval', $validated['ids']));
+        } else {
+            $this->applyFilters($query, $validated, SearchWords::from($validated['q'] ?? null));
+        }
+
+        $count = (clone $query)->count();
+        if ($count > self::EXPORT_LIMIT) {
+            return response()->json([
+                'message' => number_format($count).' records match. One download takes at most '
+                    .number_format(self::EXPORT_LIMIT).': narrow the search or the dates first.',
+            ], 422);
+        }
+
+        $records = $query->orderBy('id')->get();
+        $tables = $records->map(function (CivilRecord $record) use ($csv) {
+            $table = $csv->table($record);
+
+            return [
+                'id' => $record->getKey(),
+                'type' => $record->typeShortLabel(),
+                'header' => $table['header'],
+                'rows' => $table['rows'],
+            ];
+        })->values();
+
+        $audit->log(
+            'record.exported',
+            new: [
+                'records' => $records->count(),
+                'rows' => $tables->sum(fn (array $table) => count($table['rows'])),
+                'ids' => $records->modelKeys(),
+            ],
+            description: "Downloaded {$records->count()} ".str('record')->plural($records->count()).' as one table.',
+            actor: $request->user(),
+        );
+
+        return response()->json(['records' => $tables], 200, ['Cache-Control' => 'no-store, no-cache']);
     }
 
     /**

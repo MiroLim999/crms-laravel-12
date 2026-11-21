@@ -1514,8 +1514,10 @@
             buildReviewModel,
             combineTables,
             downloadCsv,
+            downloadRecordTables,
             downloadXlsx,
             exportFileName,
+            fetchRecordTables,
             ReviewTable,
         } from '{{ Vite::asset('resources/js/review-table.js') }}';
         import {
@@ -1584,6 +1586,8 @@
             pageQueueUrl: @json(route('documents.pages.queue', ['page' => '__PAGE__'])),
             // A finished batch: the archive, or this workspace again for the next one.
             recordsUrl: @json(route('records.index')),
+            // Several saved records' tables at once (the batch's Download all).
+            recordsExportUrl: @json(route('records.export')),
             restartUrl: @json(route('documents.workspace', ['type' => $docType->value])),
             // The pages of one file already saved; 64 zeros stand in for its fingerprint.
             sourcePagesUrl: @json(route('documents.sources.pages', ['hash' => str_repeat('0', 64)])),
@@ -8292,7 +8296,7 @@
                 return li;
             }));
 
-            const canDownload = batchExportTable().length > 1;
+            const canDownload = batchSavedRecordIds().length > 0 || batchExportTable().length > 1;
             el('batchSummaryDownloadBtn').disabled = !canDownload;
             el('batchSummaryRecordsBtn').href = config.recordsUrl;
             el('batchSummaryRestartBtn').href = config.restartUrl;
@@ -8300,22 +8304,51 @@
         }
 
         const batchFileName = () => exportFileName(config.typeLabel, 'batch', new Date().toISOString().slice(0, 10));
-        el('batchSummaryCsv').addEventListener('click', () => downloadCsv(batchExportTable(), batchFileName()));
-        el('batchSummaryXlsx').addEventListener('click', async () => {
+
+        /** The records this batch saved, in queue order. */
+        function batchSavedRecordIds() {
+            return batchRecords()
+                .map((record) => record.members[0])
+                .filter((lead) => lead.status === 'imported' && lead.recordId)
+                .map((lead) => lead.recordId);
+        }
+
+        /**
+         * Download all: every saved record's table as the archive has it now (later
+         * edits included), as one CSV, or one Excel file with an "All records" sheet
+         * and a sheet per record. If the server cannot give them, the tables kept in
+         * this page (as Review & Export showed them) are used instead.
+         */
+        async function downloadBatch(format) {
             const button = el('batchSummaryDownloadBtn');
             const spinner = button.querySelector('.spinner-border');
             button.disabled = true;
             spinner?.classList.remove('d-none');
             try {
-                await downloadXlsx(batchExportTable(), batchFileName());
+                const ids = batchSavedRecordIds();
+                let records = [];
+                if (ids.length > 0) {
+                    const params = new URLSearchParams();
+                    ids.forEach((id) => params.append('ids[]', String(id)));
+                    try {
+                        records = await fetchRecordTables(config.recordsExportUrl, params);
+                    } catch (error) {
+                        console.warn('The saved records could not be fetched; using the tables kept in this page:', error);
+                    }
+                }
+                if (records.length > 0) await downloadRecordTables(records, batchFileName(), format);
+                else if (format === 'csv') await downloadCsv(batchExportTable(), batchFileName());
+                else await downloadXlsx(batchExportTable(), batchFileName());
             } catch (error) {
-                console.error('Excel export failed:', error);
-                alert('The Excel file could not be made. Try CSV instead.');
+                console.error('The batch download failed:', error);
+                tellInApp('The file could not be made', format === 'xlsx' ? 'Try CSV instead.' : (error.message || 'Try again.'));
             } finally {
                 button.disabled = false;
                 spinner?.classList.add('d-none');
             }
-        });
+        }
+        el('batchSummaryCsv').addEventListener('click', () => downloadBatch('csv'));
+        el('batchSummaryXlsx').addEventListener('click', () => downloadBatch('xlsx'));
         el('batchSummaryModal').addEventListener('shown.bs.modal', () => el('batchSummaryRestartBtn').focus());
         // OK is the safe default: Enter never adds duplicates by accident.
         el('batchIntakeModal').addEventListener('shown.bs.modal', () => el('batchIntakeOkBtn').focus());

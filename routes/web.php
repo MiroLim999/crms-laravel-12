@@ -160,6 +160,8 @@ Route::middleware('auth')->group(function () {
      */
     Route::middleware('can:records.view')->group(function () {
         Route::get('records', [RecordController::class, 'index'])->name('records.index');
+        // Several records' typed tables at once (Download selected / all matching, a batch's Download all).
+        Route::get('records/export', [RecordController::class, 'export'])->name('records.export');
         Route::get('records/{record}', [RecordController::class, 'show'])->name('records.show');
         // One document's checked values as CSV, one row per person, for the client's old system.
         Route::get('records/{record}/csv', [RecordController::class, 'csv'])->name('records.csv');

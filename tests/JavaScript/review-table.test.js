@@ -9,10 +9,12 @@ import {
     columnType,
     csvSafe,
     exportFileName,
+    joinTables,
     nextCellPosition,
     parseClipboard,
     rowSpan,
     selectStart,
+    sheetName,
     toCsv,
     toSheetData,
 } from '../../resources/js/review-table.js';
@@ -162,4 +164,27 @@ test('a batch downloads as one table: each row says its record and document', ()
         ['8', 'BIRTHS.pdf · page 3', '01', 'Cara', '', 'Jose'],
     ]);
     assert.deepEqual(combineTables([]), [['Record ID', 'Document']]);
+});
+
+test('several records join into one table by column name, blanks where a record has no such column', () => {
+    const table = joinTables([
+        { header: ['Record ID', 'Document type', 'Row', 'Name', 'Sex'], rows: [[12, 'Birth Certificate', 1, 'Ana Cruz', 'F']] },
+        { header: ['Record ID', 'Document type', 'Row', 'Name', 'Remarks'], rows: [[13, 'Birth Certificate', 1, 'Ben Reyes', 'late'], [13, 'Birth Certificate', 2, 'Cora Lim', null]] },
+    ]);
+
+    assert.deepEqual(table, [
+        ['Record ID', 'Document type', 'Row', 'Name', 'Sex', 'Remarks'],
+        ['12', 'Birth Certificate', '1', 'Ana Cruz', 'F', ''],
+        ['13', 'Birth Certificate', '1', 'Ben Reyes', '', 'late'],
+        ['13', 'Birth Certificate', '2', 'Cora Lim', '', ''],
+    ]);
+});
+
+test('Excel sheet names are short, without the characters Excel refuses, and never repeated', () => {
+    const used = new Set();
+    assert.equal(sheetName('All records', used), 'All records');
+    assert.equal(sheetName('#12 Birth/Death [old]', used), '#12 Birth Death old');
+    assert.equal(sheetName('all RECORDS', used), 'all RECORDS (2)');
+    assert.equal(sheetName('x'.repeat(40), used).length, 31);
+    assert.equal(sheetName('', used), 'Sheet');
 });

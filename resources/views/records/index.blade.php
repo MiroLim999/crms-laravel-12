@@ -63,10 +63,52 @@
             <x-empty-state icon="bx-archive" title="No records match"
                            message="Adjust the search, or digitise a new certificate." />
         @else
+            {{-- Several records' typed tables as one download: those ticked (kept across pages), or all that match. --}}
+            @php($exportLimit = \App\Http\Controllers\RecordController::EXPORT_LIMIT)
+            <div class="records-export" id="recordsExport" data-export-url="{{ route('records.export') }}"
+                 data-filters="{{ http_build_query(array_filter($filters, fn ($value) => $value !== null && $value !== '')) }}">
+                <span class="records-export__count" id="recordsSelectedCount" aria-live="polite">Tick records to download them together</span>
+                <button type="button" class="btn btn-sm btn-link d-none" id="recordsClearSelection">Clear</button>
+                <div class="records-export__actions">
+                    <div class="dropdown">
+                        <button type="button" class="btn btn-sm btn-primary dropdown-toggle" id="recordsDownloadSelected"
+                                data-bs-toggle="dropdown" aria-expanded="false" disabled>
+                            <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                            <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>Download selected
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="recordsDownloadSelected">
+                            <li><button type="button" class="dropdown-item" data-export="selected" data-format="csv">
+                                <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)</button></li>
+                            <li><button type="button" class="dropdown-item" data-export="selected" data-format="xlsx">
+                                <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)</button></li>
+                        </ul>
+                    </div>
+                    <div class="dropdown">
+                        <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="recordsDownloadAll"
+                                data-bs-toggle="dropdown" aria-expanded="false"
+                                @if ($records->total() > $exportLimit) disabled title="One download takes at most {{ number_format($exportLimit) }} records: narrow the search or the dates first" @endif>
+                            <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                            Download all {{ number_format($records->total()) }}
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="recordsDownloadAll">
+                            <li><button type="button" class="dropdown-item" data-export="all" data-format="csv">
+                                <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)</button></li>
+                            <li><button type="button" class="dropdown-item" data-export="all" data-format="xlsx">
+                                <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)</button></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="records-export__error text-danger small d-none" id="recordsExportError" role="alert"></div>
+            </div>
+
             <div class="table-responsive">
                 <table class="table table-hover align-middle">
                     <thead>
                         <tr>
+                            <th class="records-export__check">
+                                <input type="checkbox" class="form-check-input" id="recordsSelectPage"
+                                       aria-label="Tick every record on this page">
+                            </th>
                             <th>Record</th>
                             <th>Type</th>
                             <th>Submitted</th>
@@ -76,6 +118,10 @@
                     <tbody>
                         @foreach ($records as $record)
                             <tr>
+                                <td class="records-export__check">
+                                    <input type="checkbox" class="form-check-input" data-record-id="{{ $record->getKey() }}"
+                                           aria-label="Tick record #{{ $record->getKey() }} to download it">
+                                </td>
                                 <td>
                                     <a href="{{ route('records.show', $record) }}" class="fw-medium">
                                         {{ $record->title() }}
@@ -127,3 +173,94 @@
         @endif
     </x-card>
 @endsection
+
+@push('scripts')
+    <script type="module">
+        import { downloadRecordTables, exportFileName, fetchRecordTables } from '{{ Vite::asset('resources/js/review-table.js') }}';
+
+        const bar = document.getElementById('recordsExport');
+        if (bar) {
+            // What is ticked stays ticked from page to page (in this tab), until Clear.
+            const KEY = 'crms-records-selected';
+            const load = () => {
+                try {
+                    return new Set(JSON.parse(sessionStorage.getItem(KEY) || '[]').map(Number).filter(Boolean));
+                } catch {
+                    return new Set();
+                }
+            };
+            const selected = load();
+            const save = () => {
+                try {
+                    sessionStorage.setItem(KEY, JSON.stringify([...selected]));
+                } catch {
+                    // Not kept between pages, then: the download still works on this one.
+                }
+            };
+            const boxes = [...document.querySelectorAll('input[data-record-id]')];
+            const pageBox = document.getElementById('recordsSelectPage');
+            const errorLine = document.getElementById('recordsExportError');
+
+            function render() {
+                boxes.forEach((box) => { box.checked = selected.has(Number(box.dataset.recordId)); });
+                const onPage = boxes.filter((box) => box.checked).length;
+                pageBox.checked = onPage > 0 && onPage === boxes.length;
+                pageBox.indeterminate = onPage > 0 && onPage < boxes.length;
+                const count = selected.size;
+                document.getElementById('recordsSelectedCount').textContent = count === 0
+                    ? 'Tick records to download them together'
+                    : `${count.toLocaleString()} record${count === 1 ? '' : 's'} ticked`;
+                document.getElementById('recordsClearSelection').classList.toggle('d-none', count === 0);
+                document.getElementById('recordsDownloadSelected').disabled = count === 0;
+            }
+
+            boxes.forEach((box) => box.addEventListener('change', () => {
+                const id = Number(box.dataset.recordId);
+                if (box.checked) selected.add(id);
+                else selected.delete(id);
+                save();
+                render();
+            }));
+            pageBox.addEventListener('change', () => {
+                boxes.forEach((box) => {
+                    const id = Number(box.dataset.recordId);
+                    if (pageBox.checked) selected.add(id);
+                    else selected.delete(id);
+                });
+                save();
+                render();
+            });
+            document.getElementById('recordsClearSelection').addEventListener('click', () => {
+                selected.clear();
+                save();
+                render();
+            });
+
+            bar.querySelectorAll('[data-export]').forEach((item) => item.addEventListener('click', async () => {
+                const which = item.dataset.export;
+                const toggle = document.getElementById(which === 'all' ? 'recordsDownloadAll' : 'recordsDownloadSelected');
+                const spinner = toggle.querySelector('.spinner-border');
+                const params = new URLSearchParams(which === 'all' ? bar.dataset.filters : '');
+                if (which === 'all') params.set('all', '1');
+                else [...selected].sort((a, b) => a - b).forEach((id) => params.append('ids[]', String(id)));
+
+                errorLine.classList.add('d-none');
+                toggle.disabled = true;
+                spinner?.classList.remove('d-none');
+                try {
+                    const records = await fetchRecordTables(bar.dataset.exportUrl, params);
+                    if (records.length === 0) throw new Error('none of those records could be found.');
+                    await downloadRecordTables(records, exportFileName('records', new Date().toISOString().slice(0, 10)), item.dataset.format);
+                } catch (error) {
+                    errorLine.textContent = `The download could not be made: ${error.message || 'try again.'}`;
+                    errorLine.classList.remove('d-none');
+                } finally {
+                    spinner?.classList.add('d-none');
+                    toggle.disabled = which === 'all' ? false : selected.size === 0;
+                }
+            }));
+
+            render();
+        }
+    </script>
+@endpush
