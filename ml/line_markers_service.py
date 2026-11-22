@@ -114,7 +114,12 @@ def _work():
         job_id = _queue.get()
         with _jobs_lock:
             job = _jobs.get(job_id)
-            if job is None or job["cancelled"]:
+            if job is None:
+                continue
+            if job["cancelled"]:
+                # Never started: done at once, so Laravel waiting on it moves on.
+                job.update(state="done", summary={"ok": False, "error": "Cancelled before it started."},
+                           finished=time.time())
                 continue
             job["state"] = "running"
         started = time.time()
@@ -199,7 +204,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/jobs/") and self.path.endswith("/cancel"):
             job = self._job()
             if job is not None:
-                job["cancelled"] = True  # a queued page is skipped; a running one finishes unseen
+                with _jobs_lock:
+                    # A queued page is skipped (done now); a running one finishes unseen.
+                    job["cancelled"] = True
+                    if job["state"] == "queued":
+                        job.update(state="done", summary={"ok": False, "error": "Cancelled before it started."},
+                                   finished=time.time())
             self._send(200, {"cancelled": job is not None})
             return
         self._send(404, {"error": "Not found."})

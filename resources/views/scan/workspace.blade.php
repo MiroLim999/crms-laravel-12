@@ -6828,8 +6828,12 @@
 
             try {
                 // Without the OCR service no page can be read: say so now, before
-                // every page spends its time finding lines only to fail.
-                if (await ocrServiceDown(controller.signal)) throw new Error(OCR_DOWN_MESSAGE);
+                // every page spends its time finding lines only to fail. A service
+                // that is off takes about 2 s to say so: the button says what it waits on.
+                button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Checking the OCR service…';
+                const ocrDownNow = await ocrServiceDown(controller.signal);
+                button.innerHTML = originalButtonContent;
+                if (ocrDownNow) throw new Error(OCR_DOWN_MESSAGE);
 
                 progress = openProgressModal();
                 stopOcrProgress();

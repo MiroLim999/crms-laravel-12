@@ -369,9 +369,15 @@ def _end_with_parent():
     A cancelled or timed-out page stops this script with SIGTERM. On Windows
     that ends the whole process tree (taskkill /T); on Linux, as in Docker, only
     the main process ends, and the idle helpers would wait for work forever,
-    holding about 1.2 GB between them. Linux's parent-death signal ends them."""
+    holding about 1.2 GB between them. Linux's parent-death signal ends them.
+
+    Elsewhere (Windows) the tree is ended together when the window or task
+    closes, but a process ended on its own (Task Manager, Stop-Process) leaves
+    its helpers behind: the line finder service's stayed, about 370 MB each.
+    A watcher thread ends a helper as soon as its parent is gone."""
     _run_at_full_speed()
     if not sys.platform.startswith("linux"):
+        _watch_parent()
         return
     import ctypes
     import signal
@@ -383,6 +389,36 @@ def _end_with_parent():
         return
     if os.getppid() != parent:  # the parent ended before prctl took hold
         os._exit(0)
+
+
+def _watch_parent():
+    """End this helper when the process that started it ends (not Linux; see _end_with_parent)."""
+    import threading
+
+    parent = os.getppid()
+
+    def wait_on_windows():
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        # SYNCHRONIZE: a handle to wait on. Held from now, so a new process given
+        # the same number later cannot be mistaken for the parent.
+        handle = kernel32.OpenProcess(0x00100000, False, parent)
+        if not handle:  # already gone
+            os._exit(0)
+        kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)  # INFINITE: returns when it ends
+        os._exit(0)
+
+    def poll():
+        while True:
+            time.sleep(2)
+            if os.getppid() != parent:
+                os._exit(0)
+
+    threading.Thread(target=wait_on_windows if sys.platform == "win32" else poll,
+                     name="end-with-parent", daemon=True).start()
 
 
 def _import_kraken_outlines():

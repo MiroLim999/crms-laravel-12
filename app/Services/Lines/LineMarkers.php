@@ -262,10 +262,13 @@ class LineMarkers
 
     private const SERVICE_DOWN_SECONDS = 120;
 
+    /** How long a cancelled page waits for the service to finish it (a page takes about 13 s). */
+    private const CANCEL_WAIT_SECONDS = 120;
+
     /**
      * Run a page on the line finder service: its summary, or null when the
-     * service is not set up, not running, or went away during the page (the
-     * script then does the page, from the start).
+     * service is not set up or not running (the script then does the page).
+     * A service that goes away during the page fails it (see $lost).
      *
      * @param  list<string>  $arguments
      * @return array<string, mixed>|null
@@ -299,24 +302,43 @@ class LineMarkers
             return null;
         }
 
-        $cancel = function () use ($http, $id): void {
+        // The service cannot stop a page halfway: it finishes it unseen. Wait for
+        // that before giving up on the page, or the page's folder could be
+        // deleted (cancelled) or scanned again while the service still writes
+        // crops into it, and those crops would be left behind. The service
+        // does one page at a time, so the next page would wait for it anyway.
+        $stopAndWait = function () use ($http, $id): void {
             try {
                 $http()->post("/jobs/{$id}/cancel");
+                $until = microtime(true) + self::CANCEL_WAIT_SECONDS;
+                while (microtime(true) < $until) {
+                    $status = $http()->get("/jobs/{$id}");
+                    if ($status->status() === 404 || $status->json('state') === 'done') {
+                        return;
+                    }
+                    usleep(300_000);
+                }
             } catch (Throwable) {
-                // Gone already: nothing left to stop.
+                // The service is gone: nothing is writing any more.
             }
         };
         $deadline = microtime(true) + (int) config('services.line_markers.timeout', 600);
         $missed = 0;
+        // Lost during the page: it may be half written (a tilted page already
+        // straightened), so it is not done again here; it fails, and scanning it
+        // again starts from the image its markers were placed on.
+        $lost = fn (): LineMarkersException => new LineMarkersException(
+            'Line detection failed: the line finder service stopped while working on this page. Scan it again.'
+        );
 
         while (true) {
             usleep(300_000);
             if ($this->cancelled !== null && ($this->cancelled)()) {
-                $cancel();
+                $stopAndWait();
                 throw new LineMarkersCancelled('Line detection was stopped: the page was cancelled.');
             }
             if (microtime(true) > $deadline) {
-                $cancel();
+                $stopAndWait();
                 throw new LineMarkersException('Line detection failed: it took longer than '.config('services.line_markers.timeout', 600).' s.');
             }
 
@@ -326,8 +348,7 @@ class LineMarkers
                 // A moment's hiccup is waited out; a service that stopped is not.
                 if (++$missed >= 10) {
                     Cache::put(self::SERVICE_DOWN_KEY, true, self::SERVICE_DOWN_SECONDS);
-
-                    return null;
+                    throw $lost();
                 }
 
                 continue;
@@ -335,7 +356,7 @@ class LineMarkers
             $missed = 0;
 
             if ($status->status() === 404) {
-                return null;  // The service restarted and lost the page.
+                throw $lost();  // The service restarted and lost the page.
             }
             if ($status->successful() && $status->json('state') === 'done') {
                 $summary = $status->json('summary');

@@ -213,6 +213,8 @@ class ProcessDocumentPage implements ShouldQueue
         // the detector found is kept: it is beside the crops, not inside them.
         $disk->deleteDirectory($page->directory().'/crops');
 
+        $this->startFromTheImageTheMarkersWerePlacedOn($page);
+
         $result = $this->mode === self::MODE_DETECT
             ? $markers->detect($disk->path($page->image_path), $page->geometry, $disk->path($page->directory()))
             : $markers->process($disk->path($page->image_path), $page->geometry, $disk->path($page->directory()));
@@ -295,6 +297,46 @@ class ProcessDocumentPage implements ShouldQueue
         if ($this->keepReadings) {
             $disk->put($page->directory().'/'.self::LINE_MAP, json_encode((object) $kept));
         }
+    }
+
+    /**
+     * The page image as it was before the line finder last ran on it (see below).
+     */
+    public const INPUT_IMAGE = 'page.input.png';
+
+    /**
+     * The line finder straightens a tilted page in place (page.png). Sent the
+     * same markers again - a page that failed after its lines were found (the
+     * OCR service down, say), scanned again - it would turn the page a second
+     * time, as those markers were placed on the page before it was turned.
+     * So the image each run starts from is kept, and the same markers start
+     * from it again. New markers (Re-align, moved after Smoke test) were
+     * placed on the page as it is now, which is then kept instead.
+     */
+    private function startFromTheImageTheMarkersWerePlacedOn(DocumentPage $page): void
+    {
+        $disk = Storage::disk('local');
+        if ($page->image_path === '' || ! is_file($disk->path($page->image_path))) {
+            return;
+        }
+        $input = $page->directory().'/'.self::INPUT_IMAGE;
+        $lastMarkers = $page->directory().'/geometry.json';  // what LineMarkers gave the last run
+
+        $sameMarkers = $disk->exists($input) && $disk->exists($lastMarkers)
+            && json_decode((string) $disk->get($lastMarkers), true) == $page->geometry;
+        if (! $sameMarkers) {
+            $disk->put($input, (string) $disk->get($page->image_path));
+
+            return;
+        }
+
+        $disk->put($page->image_path, (string) $disk->get($input));
+        $size = @getimagesize($disk->path($page->image_path));
+        $page->forceFill([
+            'width' => $size[0] ?? $page->width,
+            'height' => $size[1] ?? $page->height,
+            'deskew_degrees' => 0,
+        ])->save();
     }
 
     /**

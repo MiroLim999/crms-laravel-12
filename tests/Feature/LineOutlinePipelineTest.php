@@ -1232,6 +1232,42 @@ class LineOutlinePipelineTest extends TestCase
         $this->assertNull(Cache::get('ocr.down'));
     }
 
+    public function test_a_tilted_page_scanned_again_with_the_same_markers_is_not_turned_twice(): void
+    {
+        $seen = [];
+        $inner = $this->stubMarkers();
+        $this->app->instance(LineMarkers::class, new class($inner, $seen) extends LineMarkers
+        {
+            public function __construct(private readonly LineMarkers $inner, private array &$seen) {}
+
+            public function process(string $pagePath, array $geometry, string $outDirectory): array
+            {
+                // As line_markers.py does with a tilted grid: the page is straightened in place.
+                $this->seen[] = File::get($pagePath);
+                File::put($pagePath, 'straightened '.File::get($pagePath));
+                File::put($outDirectory.'/geometry.json', json_encode($geometry));
+
+                return [...$this->inner->process($pagePath, $geometry, $outDirectory), 'size' => [830, 640], 'deskew' => 2.0];
+            }
+        });
+        $page = $this->storedPage();
+        $page->forceFill(['image_path' => $page->directory().'/page.png'])->save();
+        Storage::disk('local')->put($page->image_path, 'original');
+
+        // Scanned, then scanned again with the very same markers (it failed at the read, say).
+        ProcessDocumentPage::dispatchSync($page->getKey());
+        $page->refresh()->forceFill(['status' => DocumentPage::STATUS_QUEUED, 'geometry' => $this->geometry()])->save();
+        ProcessDocumentPage::dispatchSync($page->getKey());
+        $this->assertSame(['original', 'original'], $seen);
+
+        // New markers were placed on the page as it is now (Re-align draws the straightened page).
+        $moved = $this->geometry();
+        $moved['columns'][0]['box'][0] += 0.01;
+        $page->refresh()->forceFill(['status' => DocumentPage::STATUS_QUEUED, 'geometry' => $moved])->save();
+        ProcessDocumentPage::dispatchSync($page->getKey());
+        $this->assertSame('straightened original', $seen[2]);
+    }
+
     public function test_a_page_failed_for_its_own_reason_is_not_blamed_on_the_ocr_service(): void
     {
         $this->app->instance(LineMarkers::class, new class extends LineMarkers
@@ -1383,15 +1419,19 @@ class LineOutlinePipelineTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    public function test_a_cancelled_page_stops_waiting_for_the_line_finder_service(): void
+    public function test_a_cancelled_page_waits_for_the_line_finder_service_to_finish_it(): void
     {
         config(['services.line_markers.service_url' => 'http://lines.test']);
         Process::fake();
         Http::swap(new HttpFactory);
+        // The service cannot stop halfway: it is still on the page twice, then done.
         Http::fake([
             'lines.test/jobs' => Http::response(['id' => 'job1'], 202),
             'lines.test/jobs/job1/cancel' => Http::response(['cancelled' => true]),
-            'lines.test/jobs/job1' => Http::response(['state' => 'running']),
+            'lines.test/jobs/job1' => Http::sequence()
+                ->push(['state' => 'running'])
+                ->push(['state' => 'running'])
+                ->push(['state' => 'done', 'summary' => ['ok' => true]]),
         ]);
 
         try {
@@ -1402,6 +1442,28 @@ class LineOutlinePipelineTest extends TestCase
         }
 
         Http::assertSent(fn ($request) => $request->url() === 'http://lines.test/jobs/job1/cancel');
+        // Only once it was done is the page let go (its folder can then be deleted safely).
+        $this->assertSame(3, collect(Http::recorded())->filter(fn ($pair) => $pair[0]->url() === 'http://lines.test/jobs/job1')->count());
+        Process::assertNothingRan();
+    }
+
+    public function test_a_page_the_line_finder_service_lost_fails_rather_than_running_again(): void
+    {
+        config(['services.line_markers.service_url' => 'http://lines.test']);
+        Process::fake();
+        Http::swap(new HttpFactory);
+        Http::fake([
+            'lines.test/jobs' => Http::response(['id' => 'job1'], 202),
+            'lines.test/jobs/job1' => Http::response(['error' => 'No such job'], 404),
+        ]);
+
+        try {
+            app(LineMarkers::class)->process('page.png', $this->geometry(), Storage::disk('local')->path('pages/96'));
+            $this->fail('The page should have failed.');
+        } catch (LineMarkersException $exception) {
+            $this->assertStringContainsString('stopped while working on this page', $exception->getMessage());
+        }
+        // Half written maybe: it is scanned again later, from the image its markers were placed on.
         Process::assertNothingRan();
     }
 
