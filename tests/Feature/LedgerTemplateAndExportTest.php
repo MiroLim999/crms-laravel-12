@@ -140,7 +140,8 @@ class LedgerTemplateAndExportTest extends TestCase
         $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('templates.edit', $template))
             ->assertOk()
-            ->assertSee('id="ledgerGridHeading"', escape: false)
+            // The grid controls are offered (the Rows control of the layout card).
+            ->assertSee('id="ledgerRowsLabel"', escape: false)
             ->assertSee('"initialColumns":[]', escape: false);
     }
 

@@ -281,7 +281,7 @@
                                     <div class="doc-stage" id="docCompanionStage">
                                         <canvas id="companionCanvas" width="900" height="1200"></canvas>
                                         <div class="field-overlay" id="companionOverlay"></div>
-                                        <button type="button" class="doc-spread__switch" id="docCompanionSwitch"
+                                        <button type="button" class="doc-spread__switch" id="docCompanionSwitch" data-custom-control
                                                 aria-label="Edit this page's layout instead">
                                             <i class="icon-base bx bx-edit-alt me-1" aria-hidden="true"></i>
                                             <span>Edit this page</span>

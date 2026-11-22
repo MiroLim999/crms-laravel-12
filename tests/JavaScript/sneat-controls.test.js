@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const viewsRoot = new URL('../../resources/views/', import.meta.url);
 const scriptsRoot = new URL('../../resources/js/', import.meta.url);
-const sneatButtonVariant = /^btn-(?:primary|secondary|success|danger|warning|info|light|dark|link|outline-(?:primary|secondary|success|danger|warning|info|light|dark)|label-(?:primary|secondary|success|danger|warning|info|light|dark))$/;
+const sneatButtonVariant = /^btn-(?:primary|secondary|success|danger|warning|info|light|dark|link|text-secondary|outline-(?:primary|secondary|success|danger|warning|info|light|dark)|label-(?:primary|secondary|success|danger|warning|info|light|dark))$/;
 
 function bladeFiles(directory = viewsRoot) {
     return readdirSync(directory).flatMap((name) => {
@@ -37,10 +37,13 @@ test('Blade buttons use a Sneat or Bootstrap control component', () => {
         for (const match of source.matchAll(/<button\b[^>]*>/gis)) {
             const classes = match[0].match(/\bclass\s*=\s*"([^"]*)"/is)?.[1] ?? '';
             const tokens = new Set(classes.split(/\s+/));
+            // A control with its own look on purpose (a chart legend chip, a pill drawn
+            // over a page) says so with data-custom-control.
             const supported = tokens.has('btn')
                 || tokens.has('btn-close')
                 || tokens.has('dropdown-item')
-                || tokens.has('accordion-button');
+                || tokens.has('accordion-button')
+                || /\bdata-custom-control\b/.test(match[0]);
 
             if (!supported) {
                 invalid.push(`${file.pathname}:${lineNumber(source, match.index)} (${classes || 'no class'})`);

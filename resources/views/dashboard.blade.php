@@ -342,7 +342,7 @@
                             aria-label="Chart series. Select a document type to focus its graph.">
                             @foreach ($trend['series'] as $series)
                                 <li>
-                                    <button type="button" class="dashboard-legend__toggle"
+                                    <button type="button" class="dashboard-legend__toggle" data-custom-control
                                             aria-pressed="false"
                                             data-dashboard-series="{{ $loop->index }}"
                                             data-dashboard-series-name="{{ $series['name'] }}"

@@ -251,7 +251,7 @@
                                 <div class="doc-stage" id="docCompanionStage">
                                     <canvas id="companionCanvas"></canvas>
                                     <div class="field-overlay" id="companionOverlay"></div>
-                                    <button type="button" class="doc-spread__switch" id="docCompanionSwitch"
+                                    <button type="button" class="doc-spread__switch" id="docCompanionSwitch" data-custom-control
                                         aria-label="Work on this page instead">
                                         <i class="icon-base bx bx-edit-alt me-1" aria-hidden="true"></i>
                                         <span>Align this page</span>

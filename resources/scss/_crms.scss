@@ -108,6 +108,25 @@ textarea,
 }
 
 // The archive's download bar: what is ticked, then Download selected and Download all.
+// A quiet button: grey text, no background until hovered (Cancel beside a main
+// button, an icon-only menu). Sneat's free theme has no "text" variant, so it is
+// made here the way its other variants are, from the button's own CSS variables.
+.btn-text-secondary {
+  --bs-btn-color: var(--bs-secondary-color);
+  --bs-btn-bg: transparent;
+  --bs-btn-border-color: transparent;
+  --bs-btn-hover-color: var(--bs-body-color);
+  --bs-btn-hover-bg: rgba(var(--bs-secondary-rgb), .12);
+  --bs-btn-hover-border-color: transparent;
+  --bs-btn-active-color: var(--bs-body-color);
+  --bs-btn-active-bg: rgba(var(--bs-secondary-rgb), .18);
+  --bs-btn-active-border-color: transparent;
+  --bs-btn-box-shadow-rgb: var(--bs-secondary-rgb);
+  --bs-btn-disabled-color: var(--bs-secondary-color);
+  --bs-btn-disabled-bg: transparent;
+  --bs-btn-disabled-border-color: transparent;
+}
+
 // The Saved Records list: a record's file (or name) can be long, and so can its type.
 .records-list__record {
   min-inline-size: 16rem;

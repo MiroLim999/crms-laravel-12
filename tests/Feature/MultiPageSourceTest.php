@@ -187,10 +187,10 @@ class MultiPageSourceTest extends TestCase
         // Not a fingerprint at all.
         $this->actingAs($this->account)->getJson('/documents/sources/not-a-hash/pages')->assertNotFound();
 
-        // Admin does not process documents.
-        $this->actingAs(User::factory()->superAdmin()->create())
-            ->getJson(route('documents.sources.pages', ['hash' => self::BOOK]))
-            ->assertForbidden();
+        // Not signed in: refused.
+        $this->app['auth']->forgetGuards();
+        $this->getJson(route('documents.sources.pages', ['hash' => self::BOOK]))
+            ->assertUnauthorized();
     }
 
     public function test_the_page_details_are_checked(): void
