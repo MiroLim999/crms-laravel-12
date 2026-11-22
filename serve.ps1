@@ -2,14 +2,15 @@
     serve.ps1
     Starts the processes CRMS needs, each in its own window, from the repo root:
     Laravel, the queue worker that outlines and reads aligned pages, the
-    scheduler that deletes pages nobody submitted, and the OCR service.
+    scheduler that deletes pages nobody submitted, the OCR service, and the
+    line finder that keeps Kraken loaded between pages.
 
-        .\serve.ps1            start all four: inside this terminal when run
+        .\serve.ps1            start all five: inside this terminal when run
                                from Kiro / VS Code, else one window each
         .\serve.ps1 -Windows   one window each, even from the editor
         .\serve.ps1 -Check     verify the environment and exit
         .\serve.ps1 -NoOcr     everything but the OCR service
-        .\serve.ps1 -Only web|worker|scheduler|ocr
+        .\serve.ps1 -Only web|worker|scheduler|ocr|lines
                                run one of them in this terminal (Kiro's tasks
                                in .vscode\tasks.json do this, one tab each)
 
@@ -28,10 +29,11 @@ param(
     [switch]$Check,
     [switch]$NoOcr,
     [switch]$Windows,
-    [ValidateSet('web', 'worker', 'scheduler', 'ocr')]
+    [ValidateSet('web', 'worker', 'scheduler', 'ocr', 'lines')]
     [string]$Only,
     [int]$AppPort = 8000,
-    [int]$OcrPort = 8001
+    [int]$OcrPort = 8001,
+    [int]$LinesPort = 8002
 )
 
 $ErrorActionPreference = 'Stop'
@@ -108,6 +110,17 @@ if ($Only) {
             # 127.0.0.1 only. The service has no authentication of its own;
             # every authorization decision happens in Laravel.
             python -m uvicorn ml.api.main:app --host 127.0.0.1 --port $OcrPort
+        }
+        'lines' {
+            if (Test-Port $LinesPort) { Write-Warn "Port $LinesPort is already in use - the line finder is already running."; exit 0 }
+            # Keeps Kraken loaded between pages, so each page skips about 8 s of
+            # loading (LINE_MARKERS_SERVICE_URL in .env points Laravel at it).
+            # Without it pages still scan, just slower. Restart it after changing
+            # ml\line_markers.py: it runs the code it started with.
+            $kraken = Join-Path $root 'ml\.venv-kraken\Scripts\python.exe'
+            if (-not (Test-Path $kraken)) { Write-Warn 'ml\.venv-kraken is missing - run ml\setup_kraken.ps1 first.'; exit 1 }
+            $host.UI.RawUI.WindowTitle = 'CRMS line finder'
+            & $kraken ml\line_markers_service.py --host 127.0.0.1 --port $LinesPort
         }
     }
     exit $LASTEXITCODE
@@ -232,7 +245,7 @@ $started = @()
 function Start-ServiceWindow([string]$Service) {
     $arguments = @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass',
-        '-File', "`"$PSCommandPath`"", '-Only', $Service, '-AppPort', $AppPort, '-OcrPort', $OcrPort
+        '-File', "`"$PSCommandPath`"", '-Only', $Service, '-AppPort', $AppPort, '-OcrPort', $OcrPort, '-LinesPort', $LinesPort
     )
     if ($inEditor) {
         $script:started += Start-Process powershell -ArgumentList $arguments -NoNewWindow -PassThru
@@ -269,6 +282,13 @@ if (-not $NoOcr) {
         Write-Step "OCR service    -> http://127.0.0.1:$OcrPort"
         Start-ServiceWindow 'ocr'
     }
+}
+
+if (Test-Port $LinesPort) {
+    Write-Warn "Port $LinesPort is already in use - assuming the line finder is already running."
+} elseif (Test-Path (Join-Path $root 'ml\.venv-kraken\Scripts\python.exe')) {
+    Write-Step "Line finder    -> http://127.0.0.1:$LinesPort (keeps Kraken loaded)"
+    Start-ServiceWindow 'lines'
 }
 
 Write-Host ('-' * 40)

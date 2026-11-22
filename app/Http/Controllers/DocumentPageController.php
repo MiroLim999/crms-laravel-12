@@ -12,6 +12,7 @@ use App\Services\Lines\GeometryInput;
 use App\Services\Lines\LineMarkers;
 use App\Services\Lines\LineMarkersException;
 use App\Services\Lines\PageLineReader;
+use App\Services\Ocr\OcrClient;
 use App\Services\Ocr\OcrServiceException;
 use App\Services\Ocr\ScanModelChoice;
 use App\Support\Limits;
@@ -369,6 +370,20 @@ class DocumentPageController extends Controller
      * the middle of a page). Cancelling the read of a Detect result keeps that
      * result: the page goes back to "detected", ready to be read again.
      */
+    /**
+     * Can the OCR service be reached right now? Scan all asks before sending a
+     * batch, so it can say the service is down instead of every page failing.
+     */
+    public function ocrStatus(OcrClient $ocr): JsonResponse
+    {
+        $health = $ocr->health(fresh: true);
+        if ($health['reachable']) {
+            $ocr->clearDown();
+        }
+
+        return response()->json(['reachable' => $health['reachable'], 'error' => $health['error']]);
+    }
+
     public function cancel(Request $request, DocumentPage $page): JsonResponse
     {
         $this->authorizePage($request, $page);
@@ -1048,6 +1063,10 @@ class DocumentPageController extends Controller
             'id' => $page->getKey(),
             'status' => $page->status,
             'error' => $page->status === DocumentPage::STATUS_FAILED ? $page->error : null,
+            // Failed only because the OCR service was down: not the page's fault, so
+            // Scan all leaves it waiting and stops instead of failing every page.
+            'ocrUnreachable' => $page->status === DocumentPage::STATUS_FAILED
+                && str_starts_with((string) $page->error, OcrServiceException::UNREACHABLE),
             'width' => $page->width,
             'height' => $page->height,
             'deskew' => $page->deskew_degrees ?? 0.0,

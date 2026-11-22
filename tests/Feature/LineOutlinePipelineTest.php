@@ -15,11 +15,14 @@ use App\Services\Lines\LineMarkers;
 use App\Services\Lines\LineMarkersCancelled;
 use App\Services\Lines\LineMarkersException;
 use App\Services\Lines\PageLineReader;
+use App\Services\Ocr\OcrServiceException;
 use Closure;
 use Database\Seeders\DocumentTemplateSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
@@ -1175,6 +1178,100 @@ class LineOutlinePipelineTest extends TestCase
             ->assertJsonPath('error', 'Line detection failed: Kraken is not installed.');
     }
 
+    public function test_once_the_ocr_service_is_found_down_the_next_pages_fail_before_their_lines_are_found(): void
+    {
+        $outlined = 0;
+        $inner = $this->stubMarkers();
+        $this->app->instance(LineMarkers::class, new class($inner, $outlined) extends LineMarkers
+        {
+            public function __construct(private readonly LineMarkers $inner, private int &$outlined) {}
+
+            public function process(string $pagePath, array $geometry, string $outDirectory): array
+            {
+                $this->outlined++;
+
+                return $this->inner->process($pagePath, $geometry, $outDirectory);
+            }
+        });
+        Http::swap(new HttpFactory);
+        Http::fake(['*/ocr' => Http::failedConnection(), '*/health' => Http::failedConnection()]);
+        $scan = function (DocumentPage $page): DocumentPage {
+            try {
+                ProcessDocumentPage::dispatchSync($page->getKey());
+            } catch (OcrServiceException) {
+                // The sync queue rethrows after calling failed().
+            }
+
+            return $page->fresh();
+        };
+
+        // The first page finds its lines, then cannot be read.
+        $first = $scan($this->storedPage());
+        $this->assertSame([DocumentPage::STATUS_FAILED, 1], [$first->status, $outlined]);
+        $this->actingAs($first->creator)
+            ->getJson(route('documents.pages.show', $first))
+            ->assertJsonPath('ocrUnreachable', true);
+
+        // The next one fails at once: its lines are not found for nothing.
+        $second = $scan($this->storedPage());
+        $this->assertSame([DocumentPage::STATUS_FAILED, 1], [$second->status, $outlined]);
+        $this->assertStringStartsWith(OcrServiceException::UNREACHABLE, $second->error);
+
+        // The service is back: pages are read again, and the mark is gone.
+        Http::swap(new HttpFactory);
+        Http::fake([
+            '*/health' => Http::response(['status' => 'ok']),
+            '*/ocr' => fn (HttpRequest $request) => Http::response([
+                'results' => array_map(fn (array $field) => ['name' => $field['name'], 'text' => 'x', 'confidence' => 90.0], $request->data()['fields']),
+                'model' => 'Test model',
+                'modelKey' => 'test-model',
+            ]),
+        ]);
+        $third = $scan($this->storedPage());
+        $this->assertSame([DocumentPage::STATUS_READY, 2], [$third->status, $outlined]);
+        $this->assertNull(Cache::get('ocr.down'));
+    }
+
+    public function test_a_page_failed_for_its_own_reason_is_not_blamed_on_the_ocr_service(): void
+    {
+        $this->app->instance(LineMarkers::class, new class extends LineMarkers
+        {
+            public function process(string $pagePath, array $geometry, string $outDirectory): array
+            {
+                throw new LineMarkersException('Line detection failed: Kraken is not installed.');
+            }
+        });
+        $page = $this->storedPage();
+        try {
+            ProcessDocumentPage::dispatchSync($page->getKey());
+        } catch (LineMarkersException) {
+        }
+
+        $this->actingAs($page->creator)
+            ->getJson(route('documents.pages.show', $page))
+            ->assertJsonPath('status', DocumentPage::STATUS_FAILED)
+            ->assertJsonPath('ocrUnreachable', false);
+    }
+
+    public function test_scan_all_can_ask_whether_the_ocr_service_is_up(): void
+    {
+        $user = User::factory()->superAdmin()->create();
+        Http::swap(new HttpFactory);
+        Http::fake(['*/health' => Http::failedConnection()]);
+        $this->actingAs($user)->getJson(route('documents.ocr-status'))
+            ->assertOk()->assertJsonPath('reachable', false);
+
+        Cache::put('ocr.down', true, 600);
+        Http::swap(new HttpFactory);
+        Http::fake(['*/health' => Http::response(['status' => 'ok'])]);
+        $this->actingAs($user)->getJson(route('documents.ocr-status'))
+            ->assertOk()->assertJsonPath('reachable', true);
+        $this->assertNull(Cache::get('ocr.down'));
+
+        auth()->logout();
+        $this->getJson(route('documents.ocr-status'))->assertUnauthorized();
+    }
+
     public function test_workspace_offers_ledger_columns_as_markers_and_legacy_rectangles_unchanged(): void
     {
         $account = User::factory()->superAdmin()->create();
@@ -1225,6 +1322,100 @@ class LineOutlinePipelineTest extends TestCase
         $this->expectExceptionMessage('bad polygon');
 
         app(LineMarkers::class)->crop('page.png', [[0, 0], [1, 0], [1, 1]], Storage::disk('local')->path('x.png'));
+    }
+
+    public function test_a_page_goes_to_the_line_finder_service_when_it_runs(): void
+    {
+        config(['services.line_markers.service_url' => 'http://lines.test', 'services.ocr.upload_secret' => 'secret']);
+        Process::fake();
+        Http::swap(new HttpFactory);
+        Http::fake([
+            'lines.test/jobs' => Http::response(['id' => 'job1'], 202),
+            'lines.test/jobs/job1' => Http::sequence()
+                ->push(['state' => 'running', 'summary' => null])
+                ->push(['state' => 'done', 'summary' => ['ok' => true, 'lines' => 0]]),
+        ]);
+        $out = Storage::disk('local')->path('pages/99');
+        File::ensureDirectoryExists($out);
+        File::put($out.'/lines.json', json_encode(['lines' => [], 'size' => [10, 10]]));
+
+        $result = app(LineMarkers::class)->process('page.png', $this->geometry(), $out);
+
+        $this->assertSame([], $result['lines']);
+        Process::assertNothingRan();
+        Http::assertSent(fn ($request) => $request->url() === 'http://lines.test/jobs'
+            && $request->header('X-CRMS-Service-Key') === ['secret']
+            && $request->data()['argv'][0] === 'process'
+            && in_array('--geometry', $request->data()['argv'], true));
+    }
+
+    public function test_a_failure_on_the_line_finder_service_is_reported_like_the_scripts(): void
+    {
+        config(['services.line_markers.service_url' => 'http://lines.test']);
+        Process::fake();
+        Http::swap(new HttpFactory);
+        Http::fake([
+            'lines.test/jobs' => Http::response(['id' => 'job1'], 202),
+            'lines.test/jobs/job1' => Http::response(['state' => 'done', 'summary' => ['ok' => false, 'error' => 'ValueError: no table']]),
+        ]);
+
+        $this->expectException(LineMarkersException::class);
+        $this->expectExceptionMessage('Line detection failed: ValueError: no table');
+
+        app(LineMarkers::class)->detect('page.png', $this->geometry(), Storage::disk('local')->path('pages/98'));
+    }
+
+    public function test_without_the_line_finder_service_pages_run_the_script(): void
+    {
+        config(['services.line_markers.service_url' => 'http://lines.test']);
+        Process::fake(['*' => Process::result(output: json_encode(['ok' => true, 'lines' => 0]))]);
+        Http::swap(new HttpFactory);
+        Http::fake(['lines.test/*' => Http::failedConnection()]);
+        $out = Storage::disk('local')->path('pages/99');
+        File::ensureDirectoryExists($out);
+        File::put($out.'/lines.json', json_encode(['lines' => [], 'size' => [10, 10]]));
+
+        app(LineMarkers::class)->process('page.png', $this->geometry(), $out);
+        app(LineMarkers::class)->process('page.png', $this->geometry(), $out);
+
+        Process::assertRanTimes(fn ($process) => in_array('process', $process->command, true), 2);
+        // Asked once: for two minutes after, pages go straight to the script.
+        Http::assertSentCount(1);
+    }
+
+    public function test_a_cancelled_page_stops_waiting_for_the_line_finder_service(): void
+    {
+        config(['services.line_markers.service_url' => 'http://lines.test']);
+        Process::fake();
+        Http::swap(new HttpFactory);
+        Http::fake([
+            'lines.test/jobs' => Http::response(['id' => 'job1'], 202),
+            'lines.test/jobs/job1/cancel' => Http::response(['cancelled' => true]),
+            'lines.test/jobs/job1' => Http::response(['state' => 'running']),
+        ]);
+
+        try {
+            app(LineMarkers::class)->stoppingWhen(fn () => true)
+                ->process('page.png', $this->geometry(), Storage::disk('local')->path('pages/97'));
+            $this->fail('The page should have been stopped.');
+        } catch (LineMarkersCancelled) {
+        }
+
+        Http::assertSent(fn ($request) => $request->url() === 'http://lines.test/jobs/job1/cancel');
+        Process::assertNothingRan();
+    }
+
+    public function test_quick_calls_never_wait_behind_a_page_on_the_line_finder_service(): void
+    {
+        config(['services.line_markers.service_url' => 'http://lines.test']);
+        Process::fake(['*' => Process::result(output: json_encode(['ok' => true, 'bbox' => [0, 0, 1, 1]]))]);
+        Http::swap(new HttpFactory);
+        Http::fake();
+
+        app(LineMarkers::class)->crop('page.png', [[0, 0], [1, 0], [1, 1]], Storage::disk('local')->path('x.png'));
+
+        Process::assertRan(fn ($process) => in_array('crop', $process->command, true));
+        Http::assertNothingSent();
     }
 
     /**

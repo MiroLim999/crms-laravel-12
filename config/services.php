@@ -94,6 +94,10 @@ return [
         // as Kraken does on its own). 4 takes a register page's outlines from
         // about 6.6 s to 2.3 s; more barely helps.
         'workers' => (int) env('LINE_MARKERS_WORKERS', 4),
+        // The line finder service (ml/line_markers_service.py, serve.ps1 -Only lines)
+        // keeps Kraken loaded between pages: about 8 s less per page. Empty, or
+        // the service not running: each page runs the script as before.
+        'service_url' => env('LINE_MARKERS_SERVICE_URL', ''),
         // Unsubmitted pages older than this are removed by documents:prune-pages.
         'keep_hours' => (int) env('LINE_MARKERS_KEEP_HOURS', 24),
     ],

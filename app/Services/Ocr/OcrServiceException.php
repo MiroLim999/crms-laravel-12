@@ -18,9 +18,12 @@ class OcrServiceException extends RuntimeException
      */
     public ?int $status = null;
 
+    /** How an unreachable service's message starts, so a page failed by it is known later. */
+    public const UNREACHABLE = 'The OCR service is not reachable.';
+
     public static function unreachable(string $reason): self
     {
-        return new self("The OCR service is not reachable. {$reason}");
+        return new self(self::UNREACHABLE.' '.$reason);
     }
 
     public static function refused(string $message, int $status): self

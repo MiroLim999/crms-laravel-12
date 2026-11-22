@@ -3,14 +3,21 @@
 namespace App\Services\Lines;
 
 use Closure;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
+use Throwable;
 
 /**
  * Bridge to ml/line_markers.py.
  *
  * Every call is a local subprocess in the line-detection Python environment
- * (see config/services.php). Pages and crops never leave the machine, and the
+ * (see config/services.php), except Scan and Smoke test pages when the line
+ * finder service (ml/line_markers_service.py) is running: it keeps Kraken
+ * loaded, so a page skips about 8 s of loading. Pages and crops never leave the machine, and the
  * Python side is the only place that knows how a line is outlined, placed in
  * a row, or cropped - this class only moves files and JSON.
  */
@@ -188,6 +195,15 @@ class LineMarkers
      */
     private function run(array $arguments): array
     {
+        // Pages go to the line finder service when it answers; anything else,
+        // or a service that is not running, runs the script as before.
+        if (in_array($arguments[0] ?? '', self::SERVICE_COMMANDS, true)) {
+            $summary = $this->runOnService($arguments);
+            if ($summary !== null) {
+                return $this->checked($summary, '');
+            }
+        }
+
         $pending = Process::timeout((int) config('services.line_markers.timeout', 600))
             ->path(base_path())
             ->env([
@@ -215,12 +231,118 @@ class LineMarkers
 
         $summary = $this->lastJsonLine($result->output());
 
-        if (! $result->successful() || ($summary['ok'] ?? false) !== true) {
-            $reason = $summary['error'] ?? trim($result->errorOutput()) ?: 'no output';
+        if (! $result->successful()) {
+            $summary['ok'] = false;
+        }
+
+        return $this->checked($summary, trim($result->errorOutput()));
+    }
+
+    /**
+     * The summary, or the reason it failed as a LineMarkersException.
+     *
+     * @param  array<string, mixed>  $summary
+     * @return array<string, mixed>
+     */
+    private function checked(array $summary, string $errorOutput): array
+    {
+        if (($summary['ok'] ?? false) !== true) {
+            $reason = $summary['error'] ?? ($errorOutput ?: 'no output');
             throw new LineMarkersException('Line detection failed: '.mb_strimwidth($reason, 0, 400, '…'));
         }
 
         return $summary;
+    }
+
+    /** What the line finder service does; the rest always runs as a script (see ml/line_markers_service.py). */
+    private const SERVICE_COMMANDS = ['process', 'detect'];
+
+    /** Set for a while after the service did not answer, so pages go straight to the script. */
+    private const SERVICE_DOWN_KEY = 'line_markers.service_down';
+
+    private const SERVICE_DOWN_SECONDS = 120;
+
+    /**
+     * Run a page on the line finder service: its summary, or null when the
+     * service is not set up, not running, or went away during the page (the
+     * script then does the page, from the start).
+     *
+     * @param  list<string>  $arguments
+     * @return array<string, mixed>|null
+     */
+    private function runOnService(array $arguments): ?array
+    {
+        $url = rtrim((string) config('services.line_markers.service_url'), '/');
+        if ($url === '' || Cache::get(self::SERVICE_DOWN_KEY)) {
+            return null;
+        }
+
+        $http = fn (): PendingRequest => Http::baseUrl($url)
+            ->withHeaders(['X-CRMS-Service-Key' => (string) config('services.ocr.upload_secret')])
+            ->acceptJson()
+            // A running service on this machine answers in milliseconds; one that
+            // is not running would keep Windows retrying for 2 s.
+            ->connectTimeout(0.5)
+            ->timeout(10);
+
+        try {
+            $started = $http()->post('/jobs', ['argv' => $arguments]);
+        } catch (ConnectionException) {
+            Cache::put(self::SERVICE_DOWN_KEY, true, self::SERVICE_DOWN_SECONDS);
+
+            return null;
+        }
+        $id = $started->successful() ? $started->json('id') : null;
+        if (! is_string($id) || $id === '') {
+            report(new LineMarkersException('The line finder service refused a page (HTTP '.$started->status().'); the script did it instead.'));
+
+            return null;
+        }
+
+        $cancel = function () use ($http, $id): void {
+            try {
+                $http()->post("/jobs/{$id}/cancel");
+            } catch (Throwable) {
+                // Gone already: nothing left to stop.
+            }
+        };
+        $deadline = microtime(true) + (int) config('services.line_markers.timeout', 600);
+        $missed = 0;
+
+        while (true) {
+            usleep(300_000);
+            if ($this->cancelled !== null && ($this->cancelled)()) {
+                $cancel();
+                throw new LineMarkersCancelled('Line detection was stopped: the page was cancelled.');
+            }
+            if (microtime(true) > $deadline) {
+                $cancel();
+                throw new LineMarkersException('Line detection failed: it took longer than '.config('services.line_markers.timeout', 600).' s.');
+            }
+
+            try {
+                $status = $http()->get("/jobs/{$id}");
+            } catch (ConnectionException) {
+                // A moment's hiccup is waited out; a service that stopped is not.
+                if (++$missed >= 10) {
+                    Cache::put(self::SERVICE_DOWN_KEY, true, self::SERVICE_DOWN_SECONDS);
+
+                    return null;
+                }
+
+                continue;
+            }
+            $missed = 0;
+
+            if ($status->status() === 404) {
+                return null;  // The service restarted and lost the page.
+            }
+            if ($status->successful() && $status->json('state') === 'done') {
+                $summary = $status->json('summary');
+
+                return is_array($summary) ? $summary : ['ok' => false, 'error' => 'The line finder service sent no result.'];
+            }
+        }
     }
 
     /**

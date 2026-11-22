@@ -8,6 +8,8 @@ use App\Models\PageRun;
 use App\Services\Lines\LineMarkers;
 use App\Services\Lines\LineMarkersCancelled;
 use App\Services\Lines\PageLineReader;
+use App\Services\Ocr\OcrClient;
+use App\Services\Ocr\OcrServiceException;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
@@ -56,7 +58,7 @@ class ProcessDocumentPage implements ShouldQueue
         public readonly bool $keepReadings = false,
     ) {}
 
-    public function handle(LineMarkers $markers, PageLineReader $reader): void
+    public function handle(LineMarkers $markers, PageLineReader $reader, OcrClient $ocr): void
     {
         $page = DocumentPage::find($this->pageId);
         if ($page === null) {
@@ -66,6 +68,13 @@ class ProcessDocumentPage implements ShouldQueue
             $this->record($page, PageRun::CANCELLED);  // Cancelled while waiting: it never started.
 
             return;
+        }
+
+        // A page before this one found the OCR service down: if it still is, fail
+        // now (seconds) rather than find every line first (about 20 s) and fail
+        // at the read. Scan all stops the batch on a second such page.
+        if ($this->mode !== self::MODE_DETECT && ($reason = $ocr->stillDown()) !== null) {
+            throw OcrServiceException::unreachable($reason);
         }
 
         $started = hrtime(true);
@@ -103,7 +112,14 @@ class ProcessDocumentPage implements ShouldQueue
         if ($this->keepReadings) {
             $toRead = $toRead->whereNull('ocr_text')->values();
         }
-        $reader->read($page, $toRead, fn () => $this->currentStatus() !== DocumentPage::STATUS_READING);
+        try {
+            $reader->read($page, $toRead, fn () => $this->currentStatus() !== DocumentPage::STATUS_READING);
+        } catch (OcrServiceException $exception) {
+            if ($exception->isUnreachable()) {
+                $ocr->markDown();  // the next pages check before finding their lines
+            }
+            throw $exception;
+        }
         $readMs = (int) round((hrtime(true) - $readStarted) / 1_000_000);
 
         // A read cancelled from Detect's result is back to "detected" already;

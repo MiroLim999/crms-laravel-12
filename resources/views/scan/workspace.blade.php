@@ -1593,6 +1593,7 @@
             maxFieldNameLength: 500,
             pagesUrl: @json(route('documents.pages.store')),
             pageGeometryUrl: @json(route('documents.pages.reoutline', ['page' => '__PAGE__'])),
+            ocrStatusUrl: @json(route('documents.ocr-status')),
             snapUrl: @json(route('documents.pages.snap')),
             lineUpdateUrl: @json(route('documents.pages.lines.update', ['page' => '__PAGE__', 'line' => '__LINE__'])),
             lineDeleteUrl: @json(route('documents.pages.lines.destroy', ['page' => '__PAGE__', 'line' => '__LINE__'])),
@@ -6826,6 +6827,10 @@
             const unitWord = `page${total === 1 ? '' : 's'}`;
 
             try {
+                // Without the OCR service no page can be read: say so now, before
+                // every page spends its time finding lines only to fail.
+                if (await ocrServiceDown(controller.signal)) throw new Error(OCR_DOWN_MESSAGE);
+
                 progress = openProgressModal();
                 stopOcrProgress();
 
@@ -6899,13 +6904,27 @@
                     entry.done = triggeredPayload.status === 'ready';
                 }
 
-                // The worker takes the pages in turn: the first not done is the one
-                // being worked on, since the last one finished.
+                // The worker takes the pages in turn: the one it is on is the one
+                // finding lines or reading, else the first not done.
                 let lastFinishedAt = performance.now();
                 let waitFirst = scanSeconds.wait;
+                // Each round asks only about the page being worked on and the next
+                // one; every page is asked about now and then, in case one ended
+                // out of turn. Asking about all of them every round kept the
+                // server busy answering for pages still waiting in line.
+                let lastSweepAt = performance.now();
+                // A failed check (a network blip, the server busy) is asked again;
+                // only a server silent for this long ends the run.
+                let lastAnswerAt = performance.now();
+                let reconnecting = false;
+                // When the worker last moved on: a page that stays queued long after
+                // it means no worker is running.
+                let lastMovedAt = performance.now();
+                const ocrDown = [];
+                const inProgress = (entry) => !entry.done && ['detecting', 'reading'].includes(entry.page?.status);
                 for (;;) {
                     const readyCount = trackList.filter((entry) => entry.done).length;
-                    const active = trackList.find((entry) => !entry.done) ?? null;
+                    const active = trackList.find(inProgress) ?? trackList.find((entry) => !entry.done) ?? null;
                     const doneSeconds = trackList.filter((entry) => entry.done).reduce((sum, entry) => sum + entry.seconds, 0);
                     // The ring never lags the pages actually done.
                     if (expected > 0) setOcrProgress(Math.max(ocrProgress, 4 + 92 * (doneSeconds / expected)));
@@ -6913,36 +6932,53 @@
                     if (!active) break;
 
                     const status = active.page?.status;
-                    const stage = status === 'reading' ? 'Reading handwriting with TrOCR'
-                        : status === 'detecting' ? 'Finding handwritten lines'
-                            : 'Waiting for the line detector';
+                    const stage = reconnecting ? 'Reconnecting to the server'
+                        : status === 'reading' ? 'Reading handwriting with TrOCR'
+                            : status === 'detecting' ? 'Finding handwritten lines'
+                                : 'Waiting for the line detector';
+                    const noWorker = !reconnecting && status === 'queued' && performance.now() - lastMovedAt > WORKER_HINT_AFTER_MS;
                     const later = trackList.filter((entry) => !entry.done && entry !== active).reduce((sum, entry) => sum + entry.seconds, 0);
                     const left = timeLeftText((performance.now() - lastFinishedAt) / 1000, active.seconds + waitFirst, later);
                     el('ocrProgressFields').textContent = `${readyCount} of ${total} ${unitWord} scanned · ${left}`;
                     setOcrProgress(ocrProgress, `Scanning batch (${readyCount} of ${total} ${unitWord})`,
-                        `${stage} · ${batchPageName(active.item)}`);
+                        noWorker ? `${stage} · ${batchPageName(active.item)}. ${WORKER_HINT}` : `${stage} · ${batchPageName(active.item)}`);
 
                     await wait(700, controller.signal);
 
-                    for (const entry of trackList) {
-                        if (entry.done) continue;
-                        const response = await fetch(entry.page.statusUrl, {
-                            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                            credentials: 'same-origin',
-                            signal: controller.signal,
-                        });
-                        const next = (response.headers.get('content-type') || '').includes('application/json')
-                            ? await response.json()
-                            : null;
-                        if (!response.ok || !next) {
-                            // The page is gone from the server (or answers wrongly): it fails alone.
-                            failBatchEntry(entry, responseErrorMessage(response, next));
-                            lastFinishedAt = performance.now();
+                    const open = trackList.filter((entry) => !entry.done);
+                    const sweep = performance.now() - lastSweepAt >= BATCH_STATUS_SWEEP_MS;
+                    if (sweep) lastSweepAt = performance.now();
+                    const toCheck = sweep ? open : open.filter((entry, index) => index < 2 || inProgress(entry));
+                    reconnecting = false;
+
+                    for (const entry of toCheck) {
+                        const answer = await fetchBatchPageStatus(entry.page.statusUrl, controller.signal);
+                        if (answer.retry) {
+                            reconnecting = true;
                             continue;
                         }
+                        lastAnswerAt = performance.now();
+                        if (answer.gone) {
+                            // The page is gone from the server (or refused): it fails alone.
+                            failBatchEntry(entry, responseErrorMessage(answer.response, answer.payload));
+                            lastFinishedAt = performance.now();
+                            lastMovedAt = lastFinishedAt;
+                            continue;
+                        }
+                        const next = answer.page;
+                        if (next.status !== entry.page?.status) lastMovedAt = performance.now();
                         entry.page = next;
                         entry.item.page = next;
 
+                        if (next.status === 'failed' && next.ocrUnreachable) {
+                            // Not the page's fault: it waits to be scanned again, and a
+                            // second such page ends the run instead of failing every page.
+                            entry.done = true;
+                            ocrDown.push(entry);
+                            if (ocrDown.length >= 2) throw new Error(OCR_DOWN_MESSAGE);
+                            lastFinishedAt = performance.now();
+                            continue;
+                        }
                         if (next.status === 'failed') {
                             // A page that cannot be read does not stop the batch: the
                             // others are read, and this one can be re-aligned or removed.
@@ -6963,7 +6999,14 @@
                             renderBatchQueueBanner();
                         }
                     }
+
+                    if (reconnecting && performance.now() - lastAnswerAt > BATCH_STATUS_OFFLINE_MS) {
+                        throw new Error('The server stopped answering. The pages are still being read on the server: check the connection, then press Scan All again to pick them up.');
+                    }
                 }
+
+                // The last page could not be read because the OCR service is down.
+                if (ocrDown.length > 0) throw new Error(OCR_DOWN_MESSAGE);
 
                 trackList.forEach((entry) => {
                     if (!entry.failed) entry.item.status = 'ready';
@@ -7964,6 +8007,53 @@
             }
             if (wanted && (config.openBatches ?? []).some((batch) => batch.id === wanted && batch.docType === config.docType)) {
                 resumeBatch(wanted);
+            }
+        }
+
+        // Scan all asks about every waiting page at least this often (see runBatchScanAll).
+        const BATCH_STATUS_SWEEP_MS = 10000;
+        // ...and gives up only after the server has not answered for this long.
+        const BATCH_STATUS_OFFLINE_MS = 15000;
+        const OCR_DOWN_MESSAGE = 'The OCR service is not running, so the pages cannot be read. Start the OCR service, then press Scan All again. Pages already read are kept.';
+
+        /**
+         * A page's status for Scan all: { page } when it answered, { gone } when
+         * the server refused it for good (the page fails alone), or { retry } for
+         * a check worth asking again (no connection, the server busy or restarting).
+         */
+        async function fetchBatchPageStatus(url, signal) {
+            let response;
+            try {
+                response = await fetch(url, {
+                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    signal,
+                });
+            } catch (error) {
+                if (error.name === 'AbortError') throw error;
+                return { retry: true };
+            }
+            const payload = (response.headers.get('content-type') || '').includes('application/json')
+                ? await response.json().catch(() => null)
+                : null;
+            if (response.ok && payload) return { page: payload };
+            if (response.ok || response.status >= 500 || [408, 429].includes(response.status)) return { retry: true };
+            return { gone: true, response, payload };
+        }
+
+        /** True only when the server says the OCR service cannot be reached; a failed check says nothing. */
+        async function ocrServiceDown(signal) {
+            try {
+                const response = await fetch(config.ocrStatusUrl, {
+                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    signal,
+                });
+                if (!response.ok) return false;
+                return (await response.json())?.reachable === false;
+            } catch (error) {
+                if (error.name === 'AbortError') throw error;
+                return false;
             }
         }
 
@@ -9472,6 +9562,10 @@
             setOcrPhase(scale(start), scale(ceiling), seconds, `${title} · ${readSpan.label}`, note, rest);
         }
 
+        // A page still queued this long after the worker last moved on: no worker is running.
+        const WORKER_HINT_AFTER_MS = 20000;
+        const WORKER_HINT = 'No background worker has picked this page up. Run php artisan queue:work (serve.ps1 does it for you).';
+
         function showPageStatus(page, waitedMs, mode = 'scan') {
             if (page.status === 'detecting' && mode === 'detect') {
                 setOcrPhase(detectPhase?.from ?? 18, detectPhase?.to ?? 95, scanSeconds.detect,
@@ -9484,9 +9578,7 @@
                 readPhase(
                     15, 18, scanSeconds.wait,
                     'Waiting for the line detector',
-                    waitedMs > 20000
-                        ? 'No background worker has picked this page up. Run php artisan queue:work (serve.ps1 does it for you).'
-                        : 'The page is queued for line detection.',
+                    waitedMs > WORKER_HINT_AFTER_MS ? WORKER_HINT : 'The page is queued for line detection.',
                     mode === 'detect'
                         ? pageSeconds('detect', scanSeconds) + (detectPhase?.after ?? 0)
                         : pageSeconds(scanKind, scanSeconds),

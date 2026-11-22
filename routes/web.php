@@ -113,6 +113,9 @@ Route::middleware('auth')->group(function () {
         // it, reusing the lines Detect already found instead of detecting again.
         Route::put('documents/pages/{page}/geometry', [DocumentPageController::class, 'reoutline'])
             ->name('documents.pages.reoutline');
+        // Scan all checks the OCR service is up before sending a batch.
+        Route::get('documents/ocr-status', [DocumentPageController::class, 'ocrStatus'])
+            ->name('documents.ocr-status');
         Route::post('documents/pages/{page}/cancel', [DocumentPageController::class, 'cancel'])
             ->name('documents.pages.cancel');
         // Batch: a page Smoke test went over joins the queue as it is, with its file.

@@ -206,7 +206,7 @@ def kraken_lines(image, device=None):
     # that imports Kraken itself (2.5-3.5 s), and that overlaps with this
     # process's own import and the network, so the page does not wait for it.
     workers = outline_workers()
-    pool = _start_outline_pool(workers) if workers > 1 and _can_trace_in_parallel(image) else None
+    pool = _outline_pool(workers) if workers > 1 and _can_trace_in_parallel(image) else None
     try:
         try:
             from kraken import blla
@@ -230,19 +230,22 @@ def kraken_lines(image, device=None):
             kraken_segmentation.filters = _FiltersWithSato(kraken_filters, sato)
         try:
             device = detector_device(device)
+            # None loads Kraken's default model, as segment() does on its own;
+            # a long-running helper passes the one it loaded once (keep_loaded).
+            model = {"model": _kept["model"]} if _kept.get("model") is not None else {}
             try:
-                segmentation = blla.segment(image.convert("RGB"), device=device)
+                segmentation = blla.segment(image.convert("RGB"), device=device, **model)
             except RuntimeError as error:
                 if device == "cpu":
                     raise
                 print(f"[line_markers] GPU line detection failed ({error}); using the CPU.", file=sys.stderr)
                 device = "cpu (GPU failed)"
-                segmentation = blla.segment(image.convert("RGB"), device="cpu")
+                segmentation = blla.segment(image.convert("RGB"), device="cpu", **model)
         finally:
             blla.vec_lines = kraken_vec_lines
             kraken_segmentation.filters = kraken_filters
     finally:
-        if pool is not None:
+        if pool is not None and pool is not _kept.get("pool"):
             pool.shutdown(wait=False, cancel_futures=True)
     # Recorded in lines.json, so a page shows where its lines were found.
     kraken_lines.used_device = device
@@ -278,6 +281,40 @@ def _can_trace_in_parallel(image):
         return version("kraken").startswith(PARALLEL_KRAKEN)
     except Exception:  # not installed: kraken_lines reports that itself
         return False
+
+
+# What a long-running helper (ml/line_markers_service.py) keeps loaded between
+# pages: Kraken's model ("model") and the outline helpers ("pool", "workers").
+# Empty when this file runs as a script, once per page.
+_kept = {}
+
+
+def keep_loaded():
+    """Load Kraken's model and start the outline helpers once, for every page after.
+
+    A page run as a script loads both again each time (about 8 s of a register
+    page's 20 s on the laptop this was measured on). The lines and crops are the
+    same either way: the same model file, the same helpers' code."""
+    from importlib import resources
+
+    from kraken.lib import vgsl
+
+    _kept["model"] = vgsl.TorchVGSLModel.load_model(resources.files("kraken").joinpath("blla.mlmodel"))
+    workers = outline_workers()
+    if workers > 1:
+        _kept["workers"] = workers
+        _kept["pool"] = _start_outline_pool(workers)
+
+
+def _outline_pool(workers):
+    """The kept outline helpers when there are such (started again if one broke), else new ones."""
+    pool = _kept.get("pool")
+    if pool is None or _kept.get("workers") != workers:
+        return _start_outline_pool(workers)
+    if getattr(pool, "_broken", False):  # a helper died: the next page gets fresh ones
+        pool.shutdown(wait=False, cancel_futures=True)
+        pool = _kept["pool"] = _start_outline_pool(workers)
+    return pool
 
 
 def _start_outline_pool(workers):
@@ -3528,6 +3565,16 @@ def _read_json_arg(value):
 
 def main(argv=None):
     _run_at_full_speed()  # before any work, and before the helpers start
+    code, summary = run_command(argv)
+    print(json.dumps(summary))
+    return code
+
+
+def run_command(argv=None):
+    """Run one command line ("process --page ..."): (exit code, the JSON summary).
+
+    The script prints the summary as its last line; the long-running helper
+    (ml/line_markers_service.py) sends it back instead."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -3593,11 +3640,9 @@ def main(argv=None):
         else:
             summary = {"ok": True, **detect_grid(args.page)}
     except Exception as error:  # reported to Laravel as a message, not a traceback
-        print(json.dumps({"ok": False, "error": f"{type(error).__name__}: {error}"}))
-        return 1
+        return 1, {"ok": False, "error": f"{type(error).__name__}: {error}"}
 
-    print(json.dumps(summary))
-    return 0
+    return 0, summary
 
 
 if __name__ == "__main__":

@@ -119,6 +119,46 @@ class OcrClient
     }
 
     /**
+     * How long a page read found the service down is remembered. While it is, each
+     * page asks /health before finding its lines (seconds) instead of finding them
+     * (about 20 s) only to fail at the read.
+     */
+    private const DOWN_KEY = 'ocr.down';
+
+    private const DOWN_SECONDS = 600;
+
+    /** A read just found the service unreachable. */
+    public function markDown(): void
+    {
+        Cache::put(self::DOWN_KEY, true, self::DOWN_SECONDS);
+    }
+
+    /** The service answers again. */
+    public function clearDown(): void
+    {
+        Cache::forget(self::DOWN_KEY);
+    }
+
+    /**
+     * Why the service still cannot be reached, when a recent read found it down;
+     * null when nothing says it is down, or it answers again (the mark is cleared).
+     */
+    public function stillDown(): ?string
+    {
+        if (! Cache::get(self::DOWN_KEY)) {
+            return null;
+        }
+        $health = $this->health(fresh: true);
+        if ($health['reachable']) {
+            $this->clearDown();
+
+            return null;
+        }
+
+        return $health['error'] ?? 'It did not answer.';
+    }
+
+    /**
      * Drop the cached health.
      */
     public function forgetHealth(): void
