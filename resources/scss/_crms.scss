@@ -3467,6 +3467,37 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .field-list-item__remove {
     flex: 0 0 auto;
   }
+
+  // Two pages side by side: "Page 1 · aligning" / "Page 2" over each page's fields.
+  .field-list-page {
+    margin-block: .75rem .25rem;
+    padding: .25rem .375rem;
+    color: var(--bs-heading-color);
+    font-size: .75rem;
+    font-weight: 600;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+
+    &:first-child {
+      margin-block-start: 0;
+    }
+  }
+
+  .field-list-page__note {
+    color: var(--bs-secondary-color);
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  // The other page's fields: shown, but worked on after opening that page.
+  .field-list-item.is-other-page {
+    cursor: pointer;
+
+    .field-list-item__name {
+      color: var(--bs-secondary-color);
+    }
+  }
 }
 
 // The batch's Save button: icon, a short label, and the queue count in its own tag (one line).

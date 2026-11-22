@@ -4152,6 +4152,8 @@
                 companionPreview.clear();
                 updateScanButtonLabel();
                 if (batchState.active) renderBatchQueueBanner();
+                // A lone page: the Fields list has only its own fields again.
+                renderFieldList(marker.toJSON());
                 return;
             }
 
@@ -4190,6 +4192,8 @@
             companionGridKey = '';
             marker.refit();
             renderCompanionGrid(companionGridFor(other, mate));
+            // The Fields list shows the page beside too (both pages in one list).
+            renderFieldList(marker.toJSON());
             if (tested) {
                 companionPreview.setLines(tested, verificationItems(tested.lines, tested));
                 companionPreview.setGuides([]);
@@ -8868,9 +8872,69 @@
         });
 
         // ---------------------------------------------------------------- step 2
+        /**
+         * The page shown beside the one being aligned, for the Fields list: its
+         * number and its fields (as its grid shows them). Null on a lone page.
+         */
+        function otherPageFields() {
+            // Hidden until the spread is set up (updateSpread), so nothing below is read early.
+            if (el('docCompanionPage').classList.contains('d-none')) return null;
+            const mate = batchPartner();
+            const number = mate ? mate.item.pageNo : companionPageFor(scanPageNumber);
+            if (number === null || number === undefined) return null;
+            const mainNumber = mate ? batchState.items[batchState.currentIndex].pageNo : scanPageNumber;
+            return { number, mainNumber, mate, boxes: companionGridFor(number, mate)?.boxes ?? [] };
+        }
+
+        /** "Page 2" over that page's fields in the list. */
+        function fieldListPageHeading(number, note) {
+            const li = document.createElement('li');
+            li.className = 'field-list-page';
+            li.setAttribute('role', 'presentation');
+            li.textContent = `Page ${number}`;
+            if (note) {
+                const small = document.createElement('span');
+                small.className = 'field-list-page__note';
+                small.textContent = ` · ${note}`;
+                li.append(small);
+            }
+            return li;
+        }
+
+        /**
+         * The other page's fields, in the same list: each opens that page and
+         * selects the field (what the page beside does when clicked).
+         */
+        function appendOtherPageFields(list, other) {
+            list.appendChild(fieldListPageHeading(other.number, 'click a field to open it'));
+            other.boxes.forEach((box, index) => {
+                const li = document.createElement('li');
+                li.className = 'field-list-item is-other-page';
+                li.title = `Open page ${other.number} and select ${box.name}`;
+                li.innerHTML = `
+                    <span class="badge bg-label-secondary field-list-item__number">${index + 1}</span>
+                    <span class="field-list-item__name"></span>`;
+                li.querySelector('.field-list-item__name').textContent = box.name;
+                li.addEventListener('click', () => openOtherPageField(other, index));
+                list.appendChild(li);
+            });
+        }
+
+        async function openOtherPageField(other, index) {
+            if (pageTurning || scanInProgress) return;
+            if (other.mate) await openBatchDocument(other.mate.index);
+            else await turnToPage(other.number);
+            if (index < marker.toJSON().length) marker.selectBox(index, { source: 'marker' });
+        }
+
         function renderFieldList(boxes) {
             const list = el('fieldList');
             list.innerHTML = '';
+
+            // Two pages side by side: both pages' fields in one list, in book order.
+            const other = otherPageFields();
+            if (other && other.number < other.mainNumber) appendOtherPageFields(list, other);
+            if (other) list.appendChild(fieldListPageHeading(other.mainNumber, 'aligning'));
 
             if (!boxes.length) {
                 const empty = document.createElement('li');
@@ -8904,6 +8968,8 @@
                 });
                 list.appendChild(li);
             });
+
+            if (other && other.number > other.mainNumber) appendOtherPageFields(list, other);
 
             showFieldCount(boxes);
             selectAllFieldsInput.disabled = boxes.length === 0;
