@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Services\Ocr\OcrClient;
+use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 
@@ -25,5 +26,9 @@ class AppServiceProvider extends ServiceProvider
         ini_set('pcre.backtrack_limit', '10000000');
 
         Vite::prefetch(concurrency: 3);
+
+        // Laravel's own pager is drawn for Tailwind, which CRMS does not load: every
+        // list uses the CRMS one (resources/views/vendor/pagination/crms.blade.php).
+        Paginator::defaultView('vendor.pagination.crms');
     }
 }

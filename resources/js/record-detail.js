@@ -237,8 +237,45 @@ export function initRecordDetail(root, { onActivate = () => {} } = {}) {
         summary.addEventListener('click', (event) => {
             event.preventDefault();
             setGroupExpanded(group, !group.classList.contains('is-expanded'));
+            syncGroupsToggle();
         });
     });
+
+    // Open all / Close all: every person shown (a filter's results only, while one is typed).
+    const groupsToggle = root.querySelector('[data-groups-toggle]');
+    const shownGroups = () => [...root.querySelectorAll('.record-field-group')].filter((group) => !group.hidden);
+    function syncGroupsToggle() {
+        if (!(groupsToggle instanceof HTMLElement)) return;
+        const shown = shownGroups();
+        const allOpen = shown.length > 0 && shown.every((group) => group.classList.contains('is-expanded'));
+        groupsToggle.setAttribute('aria-pressed', allOpen ? 'true' : 'false');
+        groupsToggle.querySelector('span').textContent = allOpen ? 'Close all' : 'Open all';
+    }
+    groupsToggle?.addEventListener('click', () => {
+        const open = groupsToggle.getAttribute('aria-pressed') !== 'true';
+        shownGroups().forEach((group) => {
+            if (group.classList.contains('is-expanded') !== open) setGroupExpanded(group, open);
+        });
+        syncGroupsToggle();
+    });
+
+    // Find a person or value: a person whose number, name or any value holds every
+    // word typed stays; the others are hidden until the box is cleared.
+    const groupFilter = root.querySelector('[data-group-filter]');
+    const filterEmpty = root.querySelector('[data-group-filter-empty]');
+    groupFilter?.addEventListener('input', () => {
+        const words = groupFilter.value.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+        let shown = 0;
+        root.querySelectorAll('.record-field-group').forEach((group) => {
+            const text = group.textContent.toLocaleLowerCase();
+            const match = words.every((word) => text.includes(word));
+            group.hidden = !match;
+            if (match) shown += 1;
+        });
+        filterEmpty?.classList.toggle('d-none', shown > 0);
+        syncGroupsToggle();
+    });
+    syncGroupsToggle();
 
     const viewport = root.querySelector('[data-scan-viewport]');
     const stage = root.querySelector('[data-scan-stage]');

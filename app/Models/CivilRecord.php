@@ -54,15 +54,26 @@ class CivilRecord extends Model
     }
 
     /**
-     * "Page 3 of 12 · BIRTHS-1995.pdf", "BIRTHS-1995.pdf" for a file of one
-     * page, or null for a record saved before the source was kept.
+     * "Page 3 of 12 · BIRTHS-1995.pdf" ("Pages 1–2 of 12" for a two-page
+     * record), "BIRTHS-1995.pdf" for a file of one page, or null for a record
+     * saved before the source was kept.
      */
     public function sourceLabel(): ?string
     {
         $name = filled($this->source_name) ? (string) $this->source_name : null;
-        $page = $this->source_page_count > 1 && $this->source_page !== null
-            ? "Page {$this->source_page} of {$this->source_page_count}"
-            : null;
+        $page = null;
+        if ($this->source_page_count > 1 && $this->source_page !== null) {
+            $numbers = collect([(int) $this->source_page])
+                ->merge($this->extraPages->pluck('source_page')->filter()->map(fn ($number) => (int) $number))
+                ->unique()
+                ->sort()
+                ->values();
+            $page = $numbers->count() > 1 && $numbers->last() - $numbers->first() + 1 === $numbers->count()
+                ? "Pages {$numbers->first()}–{$numbers->last()} of {$this->source_page_count}"
+                : ($numbers->count() > 1
+                    ? 'Pages '.$numbers->implode(', ')." of {$this->source_page_count}"
+                    : "Page {$this->source_page} of {$this->source_page_count}");
+        }
 
         $parts = array_filter([$page, $name]);
 

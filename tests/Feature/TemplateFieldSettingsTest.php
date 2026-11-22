@@ -224,7 +224,9 @@ class TemplateFieldSettingsTest extends TestCase
         $this->assertSame('Maria Santos', $groups[0]['identity']);
         $this->assertSame('7', $groups[0]['entry']);
 
-        // Without the layout, the widest value is still the best guess.
-        $this->assertSame('A very long remark that is the widest value', app(RecordFieldGrouper::class)->groups($fields)[0]['identity']);
+        // Without the layout, the first value that reads like a name (not the widest,
+        // which is often a remark, a place or the attendant on page 2).
+        $this->assertSame('Maria Santos', app(RecordFieldGrouper::class)->groups($fields)[0]['identity']);
+        $this->assertSame('7', app(RecordFieldGrouper::class)->groups($fields)[0]['entry']);
     }
 }

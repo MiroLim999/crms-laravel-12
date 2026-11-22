@@ -192,6 +192,36 @@ textarea,
   flex-basis: 100%;
 }
 
+// The pager under every list (resources/views/vendor/pagination/crms.blade.php):
+// where you are on the left, the page numbers on the right; stacked on a phone.
+.crms-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem 1rem;
+  margin-block-start: 1rem;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid var(--bs-border-color);
+
+  .pagination {
+    flex-wrap: wrap;
+    margin: 0;
+  }
+}
+
+.crms-pager__summary {
+  margin: 0;
+  color: var(--bs-secondary-color);
+  font-size: .85rem;
+  font-variant-numeric: tabular-nums;
+
+  strong {
+    color: var(--bs-heading-color);
+    font-weight: 600;
+  }
+}
+
 // The tick column: just wide enough for its box.
 .records-export__check {
   inline-size: 2.5rem;
@@ -1412,6 +1442,33 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 .document-workspace-topbar__cancel {
   min-inline-size: 5rem;
   justify-self: end;
+}
+
+// A saved record's top bar: its name and source, and its buttons (no steps: it is done).
+.document-workspace-topbar.record-detail-topbar {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+// Find a person or value, and Open all / Close all, beside Compare original.
+.record-group-tools {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+
+  // Close all: the arrow points up.
+  [aria-pressed="true"] .bx {
+    transform: rotate(180deg);
+  }
+}
+
+.record-group-filter {
+  inline-size: 13rem;
+}
+
+.record-field-group__count {
+  color: var(--bs-secondary-color);
+  font-size: .8125rem;
+  white-space: nowrap;
 }
 
 .record-detail-topbar__actions {

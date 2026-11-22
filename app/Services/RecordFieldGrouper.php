@@ -273,7 +273,7 @@ class RecordFieldGrouper
             'kind' => $kind,
             'label' => $label,
             'identity' => $kind === 'person' ? $this->personIdentity($fields, $template) : null,
-            'entry' => $kind === 'person' ? $this->roleValue($fields, $template, 'entry') : null,
+            'entry' => $kind === 'person' ? $this->personEntry($fields, $template) : null,
             'fields' => $fields,
             'field_count' => $fields->count(),
             'corrected_count' => $fields->filter->wasCorrected()->count(),
@@ -305,12 +305,66 @@ class RecordFieldGrouper
         return $value === '' ? null : $value;
     }
 
+    /**
+     * The person's entry number: its field with the "entry" role, or else a
+     * register's first column (on its first page) when that holds a short
+     * value with a digit in it ("1978-0001"). Null when neither.
+     *
+     * @param  Collection<int, RecordField>  $fields
+     */
+    private function personEntry(Collection $fields, ?DocumentTemplate $template): ?string
+    {
+        $entry = $this->roleValue($fields, $template, 'entry');
+        if ($entry !== null) {
+            return $entry;
+        }
+
+        $first = trim((string) $this->inReadingOrder($fields)->first()?->verified_value);
+
+        return $first !== '' && mb_strlen($first) <= 20 && preg_match('/\d/', $first) ? $first : null;
+    }
+
+    /**
+     * The person's fields as they are read: page 1 first, then across the row.
+     *
+     * @param  Collection<int, RecordField>  $fields
+     * @return Collection<int, RecordField>
+     */
+    private function inReadingOrder(Collection $fields): Collection
+    {
+        return $fields->sortBy([
+            fn (RecordField $a, RecordField $b) => ((int) ($a->page_no ?? 1)) <=> ((int) ($b->page_no ?? 1)),
+            fn (RecordField $a, RecordField $b) => ((int) ($a->person_field_order ?? 0)) <=> ((int) ($b->person_field_order ?? 0)),
+            fn (RecordField $a, RecordField $b) => ((int) ($a->sort_order ?? 0)) <=> ((int) ($b->sort_order ?? 0)),
+        ])->values();
+    }
+
+    /** A value that reads like a person's name: 2 to 5 words of letters, no digits ("Ramonte T. Abad"). */
+    private function looksLikeName(string $value): bool
+    {
+        $words = preg_split('/\s+/u', trim($value)) ?: [];
+
+        return count($words) >= 2 && count($words) <= 5
+            && ! preg_match('/\d/', $value)
+            && collect($words)->every(fn (string $word) => preg_match("/^\pL[\pL.'’-]*,?$/u", $word) === 1);
+    }
+
     /** @param Collection<int, RecordField> $fields */
     private function personIdentity(Collection $fields, ?DocumentTemplate $template): string
     {
         $name = $this->roleValue($fields, $template, 'name');
         if ($name !== null) {
             return $name;
+        }
+
+        // Without a name field: the first value that reads like a name, in the
+        // order the row is read. The widest value is often something else (a
+        // place, a remark, the attendant on page 2), so it is only the last guess.
+        $nameLike = $this->inReadingOrder($fields)
+            ->map(fn (RecordField $field) => trim((string) $field->verified_value))
+            ->first(fn (string $value) => $value !== '' && $this->looksLikeName($value));
+        if ($nameLike !== null) {
+            return $nameLike;
         }
 
         return $fields

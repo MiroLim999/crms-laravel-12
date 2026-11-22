@@ -88,9 +88,30 @@ class RecordsExportTest extends TestCase
 
         $this->actingAs($user)->get(route('records.index'))
             ->assertOk()
-            ->assertSee('Download selected')
+            ->assertSee('id="recordsDownloadSelected"', false)
             ->assertSee('Download all 1')
             ->assertSee('data-record-id="'.$record->getKey().'"', false);
+
+        // With a search on, the button says it follows the search.
+        $this->actingAs($user)->get(route('records.index', ['q' => 'Ana']))
+            ->assertOk()
+            ->assertSee('Download these 1')
+            ->assertDontSee('Download all 1');
+    }
+
+    public function test_the_archive_pages_with_the_crms_pager(): void
+    {
+        $user = User::factory()->create();
+        foreach (range(1, 16) as $n) {
+            $this->record($user, 'Person '.$n);
+        }
+
+        $this->actingAs($user)->get(route('records.index'))
+            ->assertOk()
+            ->assertSee('class="crms-pager"', false)
+            ->assertSee('Showing <strong>1–15</strong>', false)
+            ->assertSee('aria-label="Next page"', false)
+            ->assertDontSee('Next &raquo;', false);
     }
 
     private function record(User $user, string $name, DocumentType $type = DocumentType::Birth): CivilRecord

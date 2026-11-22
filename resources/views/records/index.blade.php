@@ -83,14 +83,16 @@
             @php($exportLimit = \App\Http\Controllers\RecordController::EXPORT_LIMIT)
             <div class="records-export" id="recordsExport" data-export-url="{{ route('records.export') }}"
                  data-filters="{{ http_build_query(array_filter($filters, fn ($value) => $value !== null && $value !== '')) }}">
-                <span class="records-export__count" id="recordsSelectedCount" aria-live="polite">Tick records to download them together</span>
+                @php($overLimit = $records->total() > $exportLimit)
+                <span class="records-export__count" id="recordsSelectedCount" aria-live="polite">Tick records to download only some</span>
                 <button type="button" class="btn btn-sm btn-link d-none" id="recordsClearSelection">Clear</button>
                 <div class="records-export__actions">
-                    <div class="dropdown">
+                    {{-- Shown only once something is ticked; then it is the main button. --}}
+                    <div class="dropdown d-none" id="recordsDownloadSelectedWrap">
                         <button type="button" class="btn btn-sm btn-primary dropdown-toggle" id="recordsDownloadSelected"
                                 data-bs-toggle="dropdown" aria-expanded="false" disabled>
                             <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
-                            <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>Download selected
+                            <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i><span id="recordsDownloadSelectedLabel">Download ticked</span>
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="recordsDownloadSelected">
                             <li><button type="button" class="dropdown-item" data-export="selected" data-format="csv">
@@ -99,12 +101,18 @@
                                 <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)</button></li>
                         </ul>
                     </div>
+                    @if ($overLimit)
+                        {{-- Said in plain text: a tooltip on a switched-off button often never shows. --}}
+                        <span class="records-export__limit small text-muted align-self-center">
+                            At most {{ number_format($exportLimit) }} per download: narrow the search or dates
+                        </span>
+                    @endif
                     <div class="dropdown">
-                        <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="recordsDownloadAll"
-                                data-bs-toggle="dropdown" aria-expanded="false"
-                                @if ($records->total() > $exportLimit) disabled title="One download takes at most {{ number_format($exportLimit) }} records: narrow the search or the dates first" @endif>
+                        {{-- Main (solid) button while nothing is ticked; outline once something is. --}}
+                        <button type="button" class="btn btn-sm btn-primary dropdown-toggle" id="recordsDownloadAll"
+                                data-bs-toggle="dropdown" aria-expanded="false" @disabled($overLimit)>
                             <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
-                            Download all {{ number_format($records->total()) }}
+                            <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>{{ $hasFilters ? 'Download these' : 'Download all' }} {{ number_format($records->total()) }}
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="recordsDownloadAll">
                             <li><button type="button" class="dropdown-item" data-export="all" data-format="csv">
@@ -336,10 +344,17 @@
             // Ticks stay from page to page: say how many are on this one.
             const where = onPage === count ? '' : (onPage === 0 ? ' (none on this page)' : ` (${onPage} on this page)`);
             document.getElementById('recordsSelectedCount').textContent = count === 0
-                ? 'Tick records to download them together'
+                ? 'Tick records to download only some'
                 : `${count.toLocaleString()} record${count === 1 ? '' : 's'} ticked${where}`;
             document.getElementById('recordsClearSelection').classList.toggle('d-none', count === 0);
+            // Nothing ticked: only "Download all" shows, as the main button. Something
+            // ticked: "Download N ticked" appears as the main one, "Download all" goes outline.
+            document.getElementById('recordsDownloadSelectedWrap').classList.toggle('d-none', count === 0);
             document.getElementById('recordsDownloadSelected').disabled = count === 0;
+            document.getElementById('recordsDownloadSelectedLabel').textContent = `Download ${count.toLocaleString()} ticked`;
+            const all = document.getElementById('recordsDownloadAll');
+            all.classList.toggle('btn-primary', count === 0);
+            all.classList.toggle('btn-outline-primary', count > 0);
         }
         const setUpResults = render;
 
