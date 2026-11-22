@@ -792,7 +792,8 @@ html.layout-navbar-fixed {
   }
 }
 
-body.modal-open .global-sidebar-toggle {
+body.modal-open .global-sidebar-toggle,
+body:has(.modal.show) .global-sidebar-toggle {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
