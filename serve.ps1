@@ -207,12 +207,17 @@ else:
 # rectangle templates still work).
 $krakenPython = Join-Path $root 'ml\.venv-kraken\Scripts\python.exe'
 if (Test-Path $krakenPython) {
-    $kraken = (& $krakenPython -c "from importlib.metadata import version; print('kraken ' + version('kraken'))" 2>$null)
-    if ($LASTEXITCODE -eq 0) { Write-Good "$kraken (ml\.venv-kraken)" }
+    $kraken = (& $krakenPython -c "try:`n from importlib.metadata import version; print('kraken ' + version('kraken'))`nexcept Exception:`n exit(1)" 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $kraken) { Write-Good "$kraken (ml\.venv-kraken)" }
     else { Write-Warn 'ml\.venv-kraken exists but kraken does not import. Re-run ml\setup_kraken.ps1.'; $problems++ }
 } else {
-    Write-Warn 'Kraken environment missing. Run .\ml\setup_kraken.ps1 to scan ledger templates.'
-    $problems++
+    $sysKraken = (& python -c "try:`n from importlib.metadata import version; print('kraken ' + version('kraken'))`nexcept Exception:`n exit(1)" 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $sysKraken) {
+        Write-Good "$sysKraken (python)"
+    } else {
+        Write-Warn 'Kraken environment missing. Run .\ml\setup_kraken.ps1 to scan ledger templates.'
+        $problems++
+    }
 }
 
 Write-Host ('-' * 40)

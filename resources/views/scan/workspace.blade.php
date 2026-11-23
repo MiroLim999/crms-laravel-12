@@ -287,6 +287,58 @@
                     </span>
                 </div>
 
+                {{-- Document Reference: Book Number & Page Number (Required) --}}
+                <div class="card mb-3 document-reference-card" id="documentReferenceCard">
+                    <div class="card-body p-3">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="small fw-semibold text-uppercase text-body-secondary d-flex align-items-center gap-1" style="font-size: 0.75rem; letter-spacing: 0.04em;">
+                                <i class="icon-base bx bx-book-bookmark text-primary"></i> Document Reference
+                            </span>
+                            <span class="badge bg-label-success d-none" id="docReferenceIdentifiedBadge" style="font-size: 0.7rem;">Identified</span>
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label for="bookNumberInput" class="form-label mb-1 small fw-medium">
+                                    Book No. <span class="text-danger" title="Required">*</span>
+                                </label>
+                                <input type="text"
+                                       class="form-control form-control-sm"
+                                       id="bookNumberInput"
+                                       name="book_no_input"
+                                       placeholder="e.g. 7"
+                                       list="existingBooksList"
+                                       autocomplete="off"
+                                       required>
+                                <datalist id="existingBooksList">
+                                    @foreach ($existingBooks ?? [] as $b)
+                                        <option value="{{ $b }}">
+                                    @endforeach
+                                </datalist>
+                                <div class="invalid-feedback small" id="bookNumberError" style="display: none;">Book number is required.</div>
+                            </div>
+                            <div class="col-6">
+                                <label for="pageNumberInput" class="form-label mb-1 small fw-medium">
+                                    Page No. <span class="text-danger" title="Required">*</span>
+                                </label>
+                                <input type="text"
+                                       class="form-control form-control-sm"
+                                       id="pageNumberInput"
+                                       name="page_no_input"
+                                       placeholder="e.g. 83"
+                                       autocomplete="off"
+                                       required>
+                                <div class="invalid-feedback small" id="pageNumberError" style="display: none;">Page number is required.</div>
+                            </div>
+                        </div>
+                        <div class="mt-2 p-2 rounded small d-none" id="documentIdentifyNotice" style="border: 1px solid var(--bs-border-color, #e9ecef); font-size: 0.8rem; line-height: 1.35;">
+                            <div class="d-flex align-items-start gap-1">
+                                <i class="icon-base bx bx-info-circle text-primary mt-1" id="documentIdentifyIcon"></i>
+                                <span class="flex-grow-1" id="documentIdentifyText"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 {{--
                 The fields to read, in order. On a ledger page the table's
                 rows are set here too: they start as the template's, Snap
@@ -551,6 +603,8 @@
             <input type="hidden" name="document_template_id" value="{{ $template->getKey() }}">
             <input type="hidden" name="ocr_model_key" id="ocrModelKey">
             <input type="hidden" name="document_page_id" id="documentPageId">
+            <input type="hidden" name="book_no" id="submitBookNo">
+            <input type="hidden" name="page_no" id="submitPageNo">
 
             <div class="validation-workspace">
                 <div class="validation-submit-error d-none" id="validationExistingBanner" role="alert"
@@ -1614,6 +1668,7 @@
             sourcePagesUrl: @json(route('documents.sources.pages', ['hash' => str_repeat('0', 64)])),
             // Account settings > Uploads: check files for copies and saved pages (off unless turned on).
             duplicateFileCheck: @json((bool) auth()->user()?->duplicate_file_check),
+            identifyReferenceUrl: @json(route('documents.identify-reference')),
             // Batch File Upload kept on the server (resume after a reload or a crash).
             docType: @json($docType->value),
             batchUrls: {
@@ -1707,6 +1762,217 @@
         let reviewTable = null;
         let reviewModel = null;
         const reviewExtras = new Map();
+
+        // ------------------------------------------------ Document Reference (Book No & Page No)
+        const docRefStorageKey = 'crms_last_book_no_' + config.docType;
+        let lastEnteredBookNo = (function () {
+            try {
+                return sessionStorage.getItem(docRefStorageKey) || '';
+            } catch {
+                return '';
+            }
+        })();
+        const pageReferences = new Map();
+        let identifyDebounceTimer = null;
+
+        const getBookNumber = () => el('bookNumberInput')?.value?.trim() || '';
+        const getPageNumber = () => el('pageNumberInput')?.value?.trim() || '';
+
+        function validateDocumentReference() {
+            const bookInput = el('bookNumberInput');
+            const pageInput = el('pageNumberInput');
+            const bookError = el('bookNumberError');
+            const pageError = el('pageNumberError');
+
+            let valid = true;
+            const bookVal = bookInput ? bookInput.value.trim() : '';
+            const pageVal = pageInput ? pageInput.value.trim() : '';
+
+            if (!bookVal) {
+                valid = false;
+                if (bookInput) bookInput.classList.add('is-invalid');
+                if (bookError) {
+                    bookError.textContent = 'Book number is required before saving.';
+                    bookError.style.display = 'block';
+                }
+            } else {
+                if (bookInput) bookInput.classList.remove('is-invalid');
+                if (bookError) bookError.style.display = 'none';
+            }
+
+            if (!pageVal) {
+                valid = false;
+                if (pageInput) pageInput.classList.add('is-invalid');
+                if (pageError) {
+                    pageError.textContent = 'Page number is required before saving.';
+                    pageError.style.display = 'block';
+                }
+            } else {
+                if (pageInput) pageInput.classList.remove('is-invalid');
+                if (pageError) pageError.style.display = 'none';
+            }
+
+            if (!valid) {
+                if (!bookVal && bookInput) {
+                    bookInput.focus();
+                } else if (!pageVal && pageInput) {
+                    pageInput.focus();
+                }
+                const msg = !bookVal && !pageVal
+                    ? 'Book number and page number are required before saving.'
+                    : (!bookVal ? 'Book number is required before saving.' : 'Page number is required before saving.');
+                showOcrError(msg);
+            }
+            return valid;
+        }
+
+        async function checkDocumentIdentification() {
+            const bookNo = getBookNumber();
+            const pageNo = getPageNumber();
+            const noticeEl = el('documentIdentifyNotice');
+            const textEl = el('documentIdentifyText');
+            const iconEl = el('documentIdentifyIcon');
+            const badgeEl = el('docReferenceIdentifiedBadge');
+
+            if (!noticeEl || !textEl) return;
+
+            if (!bookNo || !pageNo) {
+                noticeEl.classList.add('d-none');
+                badgeEl?.classList.add('d-none');
+                return;
+            }
+
+            if (identifyDebounceTimer) clearTimeout(identifyDebounceTimer);
+            identifyDebounceTimer = setTimeout(async () => {
+                try {
+                    const url = new URL(config.identifyReferenceUrl, window.location.origin);
+                    url.searchParams.set('doc_type', config.docType);
+                    url.searchParams.set('book_no', bookNo);
+                    url.searchParams.set('page_no', pageNo);
+
+                    const res = await fetch(url.toString(), {
+                        headers: {
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest',
+                        }
+                    });
+                    if (!res.ok) return;
+                    const data = await res.json();
+
+                    noticeEl.classList.remove('d-none');
+                    textEl.textContent = data.message;
+                    if (data.identified) {
+                        badgeEl?.classList.remove('d-none');
+                        badgeEl?.classList.remove('bg-label-info');
+                        badgeEl?.classList.add('bg-label-success');
+                        if (iconEl) {
+                            iconEl.className = 'icon-base bx bx-check-circle text-success mt-1';
+                        }
+                        noticeEl.style.backgroundColor = 'rgba(113, 221, 55, 0.08)';
+                        noticeEl.style.borderColor = 'rgba(113, 221, 55, 0.3)';
+                    } else {
+                        badgeEl?.classList.add('d-none');
+                        if (iconEl) {
+                            iconEl.className = 'icon-base bx bx-info-circle text-muted mt-1';
+                        }
+                        noticeEl.style.backgroundColor = 'var(--bs-light, #f8f9fa)';
+                        noticeEl.style.borderColor = 'var(--bs-border-color, #e9ecef)';
+                    }
+                } catch {
+                    // Ignore network error
+                }
+            }, 300);
+        }
+
+        function syncReferenceInputsForCurrentPage() {
+            const bookInput = el('bookNumberInput');
+            const pageInput = el('pageNumberInput');
+            if (!bookInput || !pageInput) return;
+
+            if (batchState.active) {
+                const current = batchState.items[batchState.currentIndex];
+                if (current) {
+                    if (current.bookNo) {
+                        bookInput.value = current.bookNo;
+                    } else if (lastEnteredBookNo) {
+                        bookInput.value = lastEnteredBookNo;
+                        current.bookNo = lastEnteredBookNo;
+                    } else {
+                        bookInput.value = '';
+                    }
+
+                    if (current.pageNoRef !== undefined && current.pageNoRef !== null) {
+                        pageInput.value = current.pageNoRef;
+                    } else {
+                        pageInput.value = '';
+                    }
+                }
+            } else {
+                const ref = pageReferences.get(scanPageNumber);
+                if (ref && ref.bookNo) {
+                    bookInput.value = ref.bookNo;
+                } else if (lastEnteredBookNo) {
+                    bookInput.value = lastEnteredBookNo;
+                } else {
+                    bookInput.value = '';
+                }
+
+                if (ref && ref.pageNo !== undefined && ref.pageNo !== null) {
+                    pageInput.value = ref.pageNo;
+                } else {
+                    pageInput.value = '';
+                }
+            }
+
+            bookInput.classList.remove('is-invalid');
+            pageInput.classList.remove('is-invalid');
+            if (el('bookNumberError')) el('bookNumberError').style.display = 'none';
+            if (el('pageNumberError')) el('pageNumberError').style.display = 'none';
+            checkDocumentIdentification();
+        }
+
+        function saveReferenceInputsForCurrentPage() {
+            const bVal = getBookNumber();
+            const pVal = getPageNumber();
+
+            if (bVal) {
+                lastEnteredBookNo = bVal;
+                try {
+                    sessionStorage.setItem(docRefStorageKey, bVal);
+                } catch {}
+            }
+
+            if (batchState.active) {
+                const current = batchState.items[batchState.currentIndex];
+                if (current) {
+                    if (bVal) current.bookNo = bVal;
+                    if (pVal !== '') current.pageNoRef = pVal;
+                    const mate = batchPartner()?.item;
+                    if (mate && bVal && !mate.bookNo) {
+                        mate.bookNo = bVal;
+                    }
+                }
+            } else {
+                pageReferences.set(scanPageNumber, { bookNo: bVal, pageNo: pVal });
+            }
+
+            if (el('submitBookNo')) el('submitBookNo').value = bVal;
+            if (el('submitPageNo')) el('submitPageNo').value = pVal;
+        }
+
+        el('bookNumberInput')?.addEventListener('input', () => {
+            el('bookNumberInput').classList.remove('is-invalid');
+            if (el('bookNumberError')) el('bookNumberError').style.display = 'none';
+            saveReferenceInputsForCurrentPage();
+            checkDocumentIdentification();
+        });
+
+        el('pageNumberInput')?.addEventListener('input', () => {
+            el('pageNumberInput').classList.remove('is-invalid');
+            if (el('pageNumberError')) el('pageNumberError').style.display = 'none';
+            saveReferenceInputsForCurrentPage();
+            checkDocumentIdentification();
+        });
 
         const markerOverlay = el('fieldOverlay');
         const marker = new FieldMarker({
@@ -4344,6 +4610,7 @@
             updatePageBar();
             try {
                 const left = scanPageNumber;
+                saveReferenceInputsForCurrentPage();
                 keepDetection(left);
                 clearDetection();
                 savePageLayout(left);
@@ -4368,6 +4635,7 @@
                 showPageLayout(page, { copyFrom: left });
                 if (tested) await applyDetection(tested, { imageShown: true, keepView: true });
                 clearOcrError();
+                syncReferenceInputsForCurrentPage();
                 updateScanNotices();
                 showScanContext();
                 fetchSnapLines();
@@ -6286,6 +6554,7 @@
             // The page beside the one being aligned is already drawn: the two trade
             // places on the spot, and the view slides to the page now being aligned.
             const left = batchState.items[batchState.currentIndex];
+            if (left) saveReferenceInputsForCurrentPage();
             // Smoke test's result goes with the page left, and comes with this one.
             if (left && left !== item) keepDetection(left);
             const tested = left !== item ? item.detected ?? null : null;
@@ -6295,6 +6564,7 @@
             const swap = activeStep === 'mark' && batchPartner()?.index === index && companionMarker.canvas.width > 0
                 && companionFile === (tested?.imageUrl ?? batchPageSource(item));
             batchState.currentIndex = index;
+            syncReferenceInputsForCurrentPage();
             renderBatchQueueBanner();
 
             dropzone.classList.add('is-loading');
@@ -6568,6 +6838,11 @@
         document.getElementById('saveQueueNextBtn')?.addEventListener('click', async () => {
             if (scanInProgress || !batchState.active) return;
 
+            saveReferenceInputsForCurrentPage();
+            if (!validateDocumentReference()) {
+                return;
+            }
+
             const markerValidationMessage = markerSetValidationMessage(marker.toJSON());
             if (markerValidationMessage) {
                 showOcrError(markerValidationMessage);
@@ -6641,6 +6916,12 @@
                 item.autoFields = new Map(autoFields);
                 item.rowsByHand = rowsByHand;
                 item.geometry = currentGeometry();
+                item.bookNo = getBookNumber();
+                item.pageNoRef = getPageNumber();
+                if (mate) {
+                    mate.bookNo = item.bookNo;
+                    if (!mate.pageNoRef) mate.pageNoRef = item.pageNoRef;
+                }
                 // What it is queued with, kept now: the grid on screen soon is the next page's.
                 const queuedGrid = gridSnapshot();
 
@@ -8470,6 +8751,13 @@
          * check opens, or, with none left, Save & finish batch saves them all.
          */
         async function approveBatchRecord(lead, { allowMissing, allowDuplicate }) {
+            saveReferenceInputsForCurrentPage();
+            if (!validateDocumentReference()) {
+                recordSubmitting = false;
+                return false;
+            }
+            lead.bookNo = getBookNumber();
+            lead.pageNoRef = getPageNumber();
             recordSubmitting = true;
             // The loading circle first, while what was typed is kept with the batch;
             // only then does the bar move on, and then the next record opens.
@@ -9954,6 +10242,12 @@
 
         el('scanNowBtn').addEventListener('click', async () => {
             if (scanInProgress) return;
+            saveReferenceInputsForCurrentPage();
+            if (!batchState.active) {
+                if (!validateDocumentReference()) {
+                    return;
+                }
+            }
             // In a batch, this button is Scan all or Verify (see batchScanAction).
             if (batchState.active) {
                 await batchScanAction().run();
@@ -14068,6 +14362,10 @@
         // with `finalBatchSave` (finishBatchSave); that answers true once saved.
         async function submitRecord({ allowMissing = false, allowDuplicate = false, finalBatchSave = false } = {}) {
             if (recordSubmitting) return false;
+            saveReferenceInputsForCurrentPage();
+            if (!validateDocumentReference()) {
+                return false;
+            }
             // Save & finish batch is saving the Done records: a press meanwhile is not a second save.
             if (batchFinishing && !finalBatchSave) return false;
             // A batch record saved (or left out) already, still on screen while the
@@ -14177,6 +14475,10 @@
             data.set('source_page', String(scanPageNumber));
             data.set('source_page_count', String(scanPageCount));
             if (scanFingerprint) data.set('source_hash', scanFingerprint);
+            const bookNoToSend = (currentBatchItem && currentBatchItem.bookNo) ? currentBatchItem.bookNo : getBookNumber();
+            const pageNoToSend = (currentBatchItem && currentBatchItem.pageNoRef) ? currentBatchItem.pageNoRef : getPageNumber();
+            data.set('book_no', bookNoToSend);
+            data.set('page_no', pageNoToSend);
 
             const personGroups = validationGroups.filter((candidate) => candidate.kind === 'person');
             const submittedFields = verifiedIndexes.map((sourceIndex) => {
@@ -14364,6 +14666,8 @@
                 }
             }
         }
+
+        syncReferenceInputsForCurrentPage();
 
         {{-- DEV ONLY: Review & Export shortcut (temporary). Delete this line to remove it; see config/dev_review_shortcut.php. --}}
         @includeWhen(config('dev_review_shortcut.enabled'), 'scan.partials.dev-review-shortcut')

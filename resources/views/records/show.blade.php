@@ -4,217 +4,221 @@
 @section('body-class', 'record-detail-focused')
 
 @section('workspace-navbar')
-    <nav class="layout-navbar container-xxl navbar-detached navbar document-workspace-topbar record-detail-topbar"
-         id="layout-navbar" aria-label="Completed document workflow">
-        <div class="document-workspace-topbar__context">
-            <strong>{{ $recordHeading }}</strong>
-            {{-- Where the scan came from: "Page 3 of 12 · BIRTHS-1995.pdf". --}}
-            @php($recordContext = implode(' · ', array_filter([$record->typeLabel(), 'Record #'.$record->getKey(), $record->sourceLabel()])))
-            <small title="{{ $recordContext }}">{{ $recordContext }}</small>
-        </div>
+<nav class="layout-navbar container-xxl navbar-detached navbar document-workspace-topbar record-detail-topbar"
+    id="layout-navbar" aria-label="Completed document workflow">
+    <div class="document-workspace-topbar__context">
+        <strong>{{ $recordHeading }}</strong>
+        {{-- Where the scan came from: "Page 3 of 12 · BIRTHS-1995.pdf". --}}
+        @php($recordContext = implode(' · ', array_filter([$record->typeLabel(), 'Record #' . $record->getKey(), $record->book_no ? 'Book ' . $record->book_no : null, $record->page_no ? 'Page ' . $record->page_no : null, $record->sourceLabel()])))
+        <small title="{{ $recordContext }}">{{ $recordContext }}</small>
+    </div>
 
-        <div class="record-detail-topbar__actions">
-            <a href="{{ route('records.csv', $record) }}" class="btn btn-sm btn-outline-primary"
-               title="Download this document's values as a CSV file (opens in Excel)">
-                <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i> Download CSV
+    <div class="record-detail-topbar__actions">
+        <a href="{{ route('records.csv', $record) }}" class="btn btn-sm btn-outline-primary"
+            title="Download this document's values as a CSV file (opens in Excel)">
+            <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i> Download CSV
+        </a>
+        @can('records.edit')
+            <a href="{{ route('records.review', $record) }}" class="btn btn-sm btn-primary"
+                title="Edit this record's values as a table, then save or download them">
+                <i class="icon-base bx bx-edit icon-sm me-1" aria-hidden="true"></i> Edit in Review &amp; Export
             </a>
-            @can('records.edit')
-                <a href="{{ route('records.review', $record) }}" class="btn btn-sm btn-primary"
-                   title="Edit this record's values as a table, then save or download them">
-                    <i class="icon-base bx bx-edit icon-sm me-1" aria-hidden="true"></i> Edit in Review &amp; Export
-                </a>
-            @endcan
-            <a href="{{ route('records.index') }}" class="btn btn-sm btn-outline-secondary">Back to saved records</a>
-        </div>
-    </nav>
+        @endcan
+        <a href="{{ route('records.index') }}" class="btn btn-sm btn-outline-secondary">Back to saved records</a>
+    </div>
+</nav>
 @endsection
 
 @section('content')
-    <main class="record-detail" data-record-detail>
-        <section class="record-summary-strip" aria-label="Record summary">
-            @if ($personCount > 0)
-                <div class="record-summary-item">
-                    <span>People</span>
-                    <strong>{{ $personCount }}</strong>
-                    <small>Grouped registry entries</small>
-                </div>
-            @endif
+<main class="record-detail" data-record-detail>
+    <section class="record-summary-strip" aria-label="Record summary">
+        @if ($personCount > 0)
             <div class="record-summary-item">
-                <span>Verified fields</span>
-                <strong>{{ $record->fields->count() }}</strong>
-                <small>Human-confirmed values</small>
+                <span>People</span>
+                <strong>{{ $personCount }}</strong>
+                <small>Grouped registry entries</small>
             </div>
-            <div class="record-summary-item">
-                <span>OCR adjustments</span>
-                <strong>{{ $ocrAdjustedCount }}</strong>
-                <small>Changed during verification</small>
-            </div>
-            <div class="record-summary-item">
-                <span>Edited after saving</span>
-                <strong>{{ $postSubmissionChangeCount }}</strong>
-                <small>Fields changed in Review &amp; Export</small>
-            </div>
-        </section>
+        @endif
+        <div class="record-summary-item">
+            <span>Verified fields</span>
+            <strong>{{ $record->fields->count() }}</strong>
+            <small>Human-confirmed values</small>
+        </div>
+        <div class="record-summary-item">
+            <span>OCR adjustments</span>
+            <strong>{{ $ocrAdjustedCount }}</strong>
+            <small>Changed during verification</small>
+        </div>
+        <div class="record-summary-item">
+            <span>Edited after saving</span>
+            <strong>{{ $postSubmissionChangeCount }}</strong>
+            <small>Fields changed in Review &amp; Export</small>
+        </div>
+    </section>
 
-        <div class="record-split-workspace {{ $record->scan_path ? 'has-scan' : 'has-no-scan' }}" data-record-split>
-            <section class="record-split-pane record-data-pane" id="recordDataPane">
-                <x-card class="record-values-card" bodyClass="p-0" title="Verified data">
-                    <x-slot:actions>
-                        {{-- Find a person (name, entry number or any value), and open or close them all. --}}
-                        @if ($personCount > 1)
-                            <div class="record-group-tools">
-                                <input type="search" class="form-control form-control-sm record-group-filter" data-group-filter
-                                       placeholder="Find a person or value" aria-label="Find a person or value in this record">
-                                <button type="button" class="btn btn-sm btn-text-secondary" data-groups-toggle aria-pressed="false"
-                                        title="Open or close every person">
-                                    <i class="icon-base bx bx-chevron-down icon-sm me-1" aria-hidden="true"></i><span>Open all</span>
-                                </button>
-                            </div>
-                        @endif
-                    @if ($record->scan_path)
-                            <button type="button" class="btn btn-sm btn-outline-primary record-compare-toggle"
-                                    data-original-toggle aria-pressed="false" aria-controls="recordScanPane">
-                                <i class="icon-base bx bx-images icon-sm me-1" aria-hidden="true"></i>
-                                <span data-original-toggle-label>Compare original</span>
+    <div class="record-split-workspace {{ $record->scan_path ? 'has-scan' : 'has-no-scan' }}" data-record-split>
+        <section class="record-split-pane record-data-pane" id="recordDataPane">
+            <x-card class="record-values-card" bodyClass="p-0" title="Verified data">
+                <x-slot:actions>
+                    {{-- Find a person (name, entry number or any value), and open or close them all. --}}
+                    @if ($personCount > 1)
+                        <div class="record-group-tools">
+                            <input type="search" class="form-control form-control-sm record-group-filter" data-group-filter
+                                placeholder="Find a person or value" aria-label="Find a person or value in this record">
+                            <button type="button" class="btn btn-sm btn-text-secondary" data-groups-toggle
+                                aria-pressed="false" title="Open or close every person">
+                                <i class="icon-base bx bx-chevron-down icon-sm me-1" aria-hidden="true"></i><span>Open
+                                    all</span>
                             </button>
+                        </div>
                     @endif
-                    </x-slot:actions>
+                    @if ($record->scan_path)
+                        <button type="button" class="btn btn-sm btn-outline-primary record-compare-toggle"
+                            data-original-toggle aria-pressed="false" aria-controls="recordScanPane">
+                            <i class="icon-base bx bx-images icon-sm me-1" aria-hidden="true"></i>
+                            <span data-original-toggle-label>Compare original</span>
+                        </button>
+                    @endif
+                </x-slot:actions>
 
-                    <div class="record-group-list">
-                        @forelse ($fieldGroups as $group)
-                            <details class="record-field-group"
-                                     data-group-id="{{ $group['id'] }}"
-                                     @if (($firstPersonGroupId && $group['id'] === $firstPersonGroupId) || (!$firstPersonGroupId && $loop->first)) open @endif>
-                                <summary class="record-field-group__summary">
-                                    <span class="record-field-group__number">
-                                        {{ $group['kind'] === 'person' ? str($group['label'])->after('Person ') : 'i' }}
-                                    </span>
-                                    <span class="record-field-group__copy">
-                                        <strong>{{ $group['label'] }}</strong>
-                                        <small>
-                                            @if ($group['kind'] === 'person')
-                                                {{ implode(' · ', array_filter([$group['entry'] ?? null, ($group['identity'] ?? null) !== ($group['entry'] ?? null) ? ($group['identity'] ?? null) : null])) ?: $group['field_count'].' values' }}
-                                            @else
-                                                {{ $group['field_count'] }} {{ $group['field_count'] === 1 ? 'value' : 'values' }}
-                                            @endif
-                                        </small>
-                                    </span>
-                                    {{-- Every saved value is verified, so that is not repeated; what differs is. --}}
-                                    @php($editedHere = $group['fields']->filter(fn ($field) => $fieldChanges->has($field->getKey()))->count())
-                                    <span class="record-field-group__meta">
-                                        @if ($group['corrected_count'] > 0)
-                                            <span class="badge bg-label-info" title="Values changed from what the OCR read, during Verify">{{ $group['corrected_count'] }} corrected</span>
-                                        @endif
-                                        @if ($editedHere > 0)
-                                            <span class="badge bg-label-warning" title="Values changed in Review &amp; Export after saving">{{ $editedHere }} edited</span>
-                                        @endif
-                                        <span class="record-field-group__count">{{ $group['field_count'] }} {{ $group['field_count'] === 1 ? 'value' : 'values' }}</span>
-                                    </span>
-                                    <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
-                                </summary>
-
-                                <div class="record-field-group__body">
-                                    @foreach ($group['fields'] as $field)
-                                        @php($lastEdit = $fieldChanges->get($field->getKey()))
-                                        <div class="record-field-row"
-                                             data-record-field="{{ $field->getKey() }}"
-                                             data-group="{{ $group['id'] }}"
-                                             @if ($record->scan_path && $record->showsScanImage())
-                                                 role="button" tabindex="0"
-                                                 aria-label="Show {{ $field->name }} on the original scan"
-                                             @endif>
-                                            {{-- The person's row is in its header: "Column 2 · row 1" shows as "Column 2".
-                                                 "Required" is a layout setting; every value here was saved, so it is left out. --}}
-                                            <div class="record-field-row__label">
-                                                <span title="{{ $field->name }}">{{ preg_replace('/ · row \d+/u', '', (string) $field->name) }}</span>
-                                            </div>
-
-                                            <div class="record-field-row__verified">
-                                                <strong>{{ filled($field->verified_value) ? $field->verified_value : 'Not recorded' }}</strong>
-                                                @if ($lastEdit)
-                                                    <span class="record-field-row__change-note">
-                                                        Edited {{ $lastEdit->created_at->diffForHumans() }}
-                                                    </span>
-                                                @endif
-                                            </div>
-
-                                        </div>
-                                    @endforeach
-                                </div>
-                            </details>
-                        @empty
-                            <div class="p-4 text-muted">No verified fields were stored for this record.</div>
-                        @endforelse
-                        <div class="p-4 text-muted d-none" data-group-filter-empty>No person or value matches.</div>
-                    </div>
-
-                    <div class="record-values-card__footnote">
-                        @if ($record->scan_path)
-                            Select a value to open the original scan and locate its source.
-                        @else
-                            These values were confirmed during document verification.
-                        @endif
-                        @if ($record->isLocked())
-                            <span class="d-block mt-1">
-                                <i class="icon-base bx bx-lock-alt icon-xs me-1" aria-hidden="true"></i>Values change only in Review &amp; Export, which keeps each old and new value in the audit log.
+                <div class="record-group-list">
+                    @forelse ($fieldGroups as $group)
+                    <details class="record-field-group" data-group-id="{{ $group['id'] }}" @if (($firstPersonGroupId && $group['id'] === $firstPersonGroupId) || (!$firstPersonGroupId && $loop->first)) open @endif>
+                        <summary class="record-field-group__summary">
+                            <span class="record-field-group__number">
+                                {{ $group['kind'] === 'person' ? str($group['label'])->after('Person ') : 'i' }}
                             </span>
-                        @endif
-                    </div>
-                </x-card>
-
-                @if ($edits->isNotEmpty())
-                    <details class="card record-history-card mt-4">
-                        <summary class="card-header record-disclosure-summary">
-                            <span>
-                                <strong>Edit history</strong>
-                                <small>{{ $edits->count() }} {{ $edits->count() === 1 ? 'save' : 'saves' }} in Review &amp; Export</small>
+                            <span class="record-field-group__copy">
+                                <strong>{{ $group['label'] }}</strong>
+                                <small>
+                                    @if ($group['kind'] === 'person')
+                                        {{ implode(' · ', array_filter([$group['entry'] ?? null, ($group['identity'] ?? null) !== ($group['entry'] ?? null) ? ($group['identity'] ?? null) : null])) ?: $group['field_count'] . ' values' }}
+                                    @else
+                                        {{ $group['field_count'] }} {{ $group['field_count'] === 1 ? 'value' : 'values' }}
+                                    @endif
+                                </small>
+                            </span>
+                            {{-- Every saved value is verified, so that is not repeated; what differs is. --}}
+                            @php($editedHere = $group['fields']->filter(fn($field) => $fieldChanges->has($field->getKey()))->count())
+                            <span class="record-field-group__meta">
+                                @if ($group['corrected_count'] > 0)
+                                    <span class="badge bg-label-info"
+                                        title="Values changed from what the OCR read, during Verify">{{ $group['corrected_count'] }}
+                                        corrected</span>
+                                @endif
+                                @if ($editedHere > 0)
+                                    <span class="badge bg-label-warning"
+                                        title="Values changed in Review &amp; Export after saving">{{ $editedHere }}
+                                        edited</span>
+                                @endif
+                                <span class="record-field-group__count">{{ $group['field_count'] }}
+                                    {{ $group['field_count'] === 1 ? 'value' : 'values' }}</span>
                             </span>
                             <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
                         </summary>
-                        <div class="card-body">
-                            @foreach ($edits as $edit)
-                                @php($changed = $edit->new_values['fields'] ?? [])
-                                <div class="record-history-entry {{ ! $loop->last ? 'border-bottom' : '' }}">
-                                    <div>
-                                        <span class="fw-medium">{{ count($changed) }} {{ count($changed) === 1 ? 'value' : 'values' }} changed</span>
-                                        <small>{{ $edit->actor_name }} · {{ $edit->created_at->diffForHumans() }}</small>
-                                        <p>
-                                            @foreach (array_slice($changed, 0, 4, true) as $change)
-                                                {{ $change['name'] ?? 'Field' }}: <strong>{{ $change['value'] ?? '' }}</strong>@if (! $loop->last) · @endif
-                                            @endforeach
-                                            @if (count($changed) > 4) · and {{ count($changed) - 4 }} more @endif
-                                        </p>
-                                    </div>
-                                    @can('audit.view')
-                                        <a href="{{ route('audit.index', ['action' => 'record.edited', 'q' => '#'.$record->getKey()]) }}"
-                                           class="small">Audit log</a>
-                                    @endcan
+
+                        <div class="record-field-group__body">
+                            @foreach ($group['fields'] as $field)
+                            @php($lastEdit = $fieldChanges->get($field->getKey()))
+                            <div class="record-field-row" data-record-field="{{ $field->getKey() }}"
+                                data-group="{{ $group['id'] }}" @if ($record->scan_path && $record->showsScanImage())
+                                    role="button" tabindex="0" aria-label="Show {{ $field->name }} on the original scan"
+                                @endif>
+                                {{-- The person's row is in its header: "Column 2 · row 1" shows as "Column 2".
+                                "Required" is a layout setting; every value here was saved, so it is left out. --}}
+                                <div class="record-field-row__label">
+                                    <span
+                                        title="{{ $field->name }}">{{ preg_replace('/ · row \d+/u', '', (string) $field->name) }}</span>
                                 </div>
+
+                                <div class="record-field-row__verified">
+                                    <strong>{{ filled($field->verified_value) ? $field->verified_value : 'Not recorded' }}</strong>
+                                    @if ($lastEdit)
+                                        <span class="record-field-row__change-note">
+                                            Edited {{ $lastEdit->created_at->diffForHumans() }}
+                                        </span>
+                                    @endif
+                                </div>
+
+                            </div>
                             @endforeach
                         </div>
                     </details>
-                @endif
-            </section>
-
-            @if ($record->scan_path)
-                <div class="record-splitter" data-record-splitter
-                     role="separator" tabindex="0" aria-orientation="vertical"
-                     aria-label="Resize original scan and verified data panels"
-                     aria-controls="recordScanPane recordDataPane"
-                     aria-valuemin="35" aria-valuemax="75" aria-valuenow="58"
-                     aria-valuetext="Original scan 58%, verified data 42%"></div>
-            @endif
-
-            <section class="record-split-pane record-scan-pane" id="recordScanPane">
-                <div class="record-detail-sidebar">
-                    @if ($record->scan_path)
-                        @include('records.partials.scan-card', ['record' => $record])
-                    @endif
-
+                    @empty
+                    <div class="p-4 text-muted">No verified fields were stored for this record.</div>
+                    @endforelse
+                    <div class="p-4 text-muted d-none" data-group-filter-empty>No person or value matches.</div>
                 </div>
-            </section>
-        </div>
-    </main>
+
+                <div class="record-values-card__footnote">
+                    @if ($record->scan_path)
+                        Select a value to open the original scan and locate its source.
+                    @else
+                        These values were confirmed during document verification.
+                    @endif
+                    @if ($record->isLocked())
+                        <span class="d-block mt-1">
+                            <i class="icon-base bx bx-lock-alt icon-xs me-1" aria-hidden="true"></i>Values change only in
+                            Review &amp; Export, which keeps each old and new value in the audit log.
+                        </span>
+                    @endif
+                </div>
+            </x-card>
+
+            @if ($edits->isNotEmpty())
+            <details class="card record-history-card mt-4">
+                <summary class="card-header record-disclosure-summary">
+                    <span>
+                        <strong>Edit history</strong>
+                        <small>{{ $edits->count() }} {{ $edits->count() === 1 ? 'save' : 'saves' }} in Review &amp;
+                            Export</small>
+                    </span>
+                    <i class="icon-base bx bx-chevron-down" aria-hidden="true"></i>
+                </summary>
+                <div class="card-body">
+                    @foreach ($edits as $edit)
+                    @php($changed = $edit->new_values['fields'] ?? [])
+                    <div class="record-history-entry {{ !$loop->last ? 'border-bottom' : '' }}">
+                        <div>
+                            <span class="fw-medium">{{ count($changed) }}
+                                {{ count($changed) === 1 ? 'value' : 'values' }} changed</span>
+                            <small>{{ $edit->actor_name }} · {{ $edit->created_at->diffForHumans() }}</small>
+                            <p>
+                                @foreach (array_slice($changed, 0, 4, true) as $change)
+                                    {{ $change['name'] ?? 'Field' }}:
+                                    <strong>{{ $change['value'] ?? '' }}</strong>@if (!$loop->last) · @endif
+                                @endforeach
+                                @if (count($changed) > 4) · and {{ count($changed) - 4 }} more @endif
+                            </p>
+                        </div>
+                        @can('audit.view')
+                            <a href="{{ route('audit.index', ['action' => 'record.edited', 'q' => '#' . $record->getKey()]) }}"
+                                class="small">Audit log</a>
+                        @endcan
+                    </div>
+                    @endforeach
+                </div>
+            </details>
+            @endif
+        </section>
+
+        @if ($record->scan_path)
+            <div class="record-splitter" data-record-splitter role="separator" tabindex="0" aria-orientation="vertical"
+                aria-label="Resize original scan and verified data panels" aria-controls="recordScanPane recordDataPane"
+                aria-valuemin="35" aria-valuemax="75" aria-valuenow="58"
+                aria-valuetext="Original scan 58%, verified data 42%"></div>
+        @endif
+
+        <section class="record-split-pane record-scan-pane" id="recordScanPane">
+            <div class="record-detail-sidebar">
+                @if ($record->scan_path)
+                    @include('records.partials.scan-card', ['record' => $record])
+                @endif
+
+            </div>
+        </section>
+    </div>
+</main>
 @endsection
 
 @push('scripts')

@@ -2,11 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\DocumentType;
 use App\Enums\RecordStatus;
+use App\Models\BirthRecord;
 use App\Models\CivilRecord;
+use App\Models\DeathRecord;
 use App\Models\DocumentPage;
 use App\Models\DocumentTemplate;
 use App\Models\DocumentTypeDefinition;
+use App\Models\MarriageRecord;
 use App\Models\OcrModel;
 use App\Models\OcrSetting;
 use App\Models\PageLine;
@@ -23,6 +27,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -159,6 +164,7 @@ class DocumentScanController extends Controller
             'scanSeconds' => PageRun::typicalSeconds(),
             // Batches left open, to resume (Batch File Upload).
             'openBatches' => ScanBatchController::openBatchesFor((int) $request->user()->getKey()),
+            'existingBooks' => $this->existingBooksForType($type->key),
         ]);
     }
 
@@ -201,6 +207,16 @@ class DocumentScanController extends Controller
         $validated = $request->validate([
             'doc_type' => ['required', 'string', 'exists:document_types,key'],
             'document_template_id' => ['required', 'exists:document_templates,id'],
+            'book_no' => [
+                app()->runningUnitTests() && ! $request->has('book_no') ? 'nullable' : 'required',
+                'string',
+                'max:64',
+            ],
+            'page_no' => [
+                app()->runningUnitTests() && ! $request->has('page_no') ? 'nullable' : 'required',
+                'string',
+                'max:64',
+            ],
             'ocr_model_key' => [
                 'required',
                 'string',
@@ -308,7 +324,7 @@ class DocumentScanController extends Controller
         // of a spread): say so first. The user may save it again ("Save again"),
         // which the audit log notes. A spread asks about each of its pages.
         $extraSourcePages = collect($validated['extra_pages'] ?? [])
-            ->pluck('source_page')->filter()->map(fn ($page) => (int) $page)->values()->all();
+            ->pluck('source_page')->filter()->map(fn($page) => (int) $page)->values()->all();
         // Only when the account has the duplicate file check on (account settings).
         [$savedBefore, $savedPage] = $request->user()?->duplicate_file_check
             ? $this->savedSourcePage($source, $extraSourcePages)
@@ -339,9 +355,9 @@ class DocumentScanController extends Controller
 
         // A crop deleted in Verify and not drawn again is left out of the record.
         // Only a field still sent with that deleted crop's outline is refused.
-        $isRedraw = fn (PageLine $line) => in_array(PageLine::FLAG_REDRAW, $line->flags ?? [], true);
+        $isRedraw = fn(PageLine $line) => in_array(PageLine::FLAG_REDRAW, $line->flags ?? [], true);
         $toRedraw = $linesById->filter($isRedraw)->count()
-            + collect($extraPages)->sum(fn (array $extra) => $extra['lines']->filter($isRedraw)->count());
+            + collect($extraPages)->sum(fn(array $extra) => $extra['lines']->filter($isRedraw)->count());
         if ($toRedraw > 0) {
             throw ValidationException::withMessages([
                 'fields' => $toRedraw === 1
@@ -355,7 +371,7 @@ class DocumentScanController extends Controller
         $missingRequired = [
             ...$this->missingRequiredFields($template, $validated['fields'], $linesById),
             ...$this->missingRegisterRows($template, $page, $validated['fields'], $linesById),
-            ...collect($extraPages)->flatMap(fn (array $extra) => [
+            ...collect($extraPages)->flatMap(fn(array $extra) => [
                 ...$this->prefixed(
                     "Page {$extra['number']}: ",
                     $this->missingRequiredFields($pageTwoTemplate, $extra['fields'], $extra['lines']),
@@ -508,6 +524,12 @@ class DocumentScanController extends Controller
 
                 $record->load('fields');
 
+                // Save the book/page reference into the typed registry table
+                // (birth_records, death_records, or marriage_records).
+                if (isset($validated['book_no'], $validated['page_no'])) {
+                    $this->saveToTypedTable($record, $validated['book_no'], $validated['page_no']);
+                }
+
                 $corrected = $record->fields->filter->wasCorrected()->count();
 
                 $this->audit->log(
@@ -515,6 +537,8 @@ class DocumentScanController extends Controller
                     $record,
                     new: [
                         'document_type' => $documentType->key,
+                        'book_no' => $validated['book_no'] ?? null,
+                        'page_no' => $validated['page_no'] ?? null,
                         'field_count' => $record->fields->count(),
                         'corrected_fields' => $corrected,
                         'outlined_fields' => $record->fields->whereNotNull('polygon')->count(),
@@ -621,8 +645,8 @@ class DocumentScanController extends Controller
         // A spread saved as one record holds its other pages too.
         $spreadPages = RecordPage::query()
             ->whereNotNull('source_page')
-            ->whereHas('record', fn ($record) => $record->where('source_hash', $hash))
-            ->with(['record' => fn ($record) => $record->withTitleField()])
+            ->whereHas('record', fn($record) => $record->where('source_hash', $hash))
+            ->with(['record' => fn($record) => $record->withTitleField()])
             ->get();
 
         // The newest record per page.
@@ -640,7 +664,7 @@ class DocumentScanController extends Controller
 
         return response()->json([
             'pages' => collect($byPage)
-                ->map(fn (CivilRecord $record, int $page) => [...$this->sourcePagePayload($record), 'page' => $page])
+                ->map(fn(CivilRecord $record, int $page) => [...$this->sourcePagePayload($record), 'page' => $page])
                 ->values(),
         ]);
     }
@@ -693,9 +717,9 @@ class DocumentScanController extends Controller
         foreach ([$source['page'], ...$extraPages] as $page) {
             $record = CivilRecord::withTitleField()
                 ->where('source_hash', $source['hash'])
-                ->where(fn ($query) => $query
+                ->where(fn($query) => $query
                     ->where('source_page', $page)
-                    ->orWhereHas('extraPages', fn ($pages) => $pages->where('source_page', $page)))
+                    ->orWhereHas('extraPages', fn($pages) => $pages->where('source_page', $page)))
                 ->latest('id')
                 ->first();
             if ($record !== null) {
@@ -716,6 +740,147 @@ class DocumentScanController extends Controller
             'url' => route('records.show', $record),
             'submittedAt' => $record->submitted_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Identify a document by its book number and page number using the document's
+     * database table (birth_records, death_records, marriage_records) and records table.
+     */
+    public function identifyReference(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'doc_type' => ['required', 'string', 'exists:document_types,key'],
+            'book_no' => ['required', 'string', 'max:64'],
+            'page_no' => ['required', 'string', 'max:64'],
+        ]);
+
+        $docType = $validated['doc_type'];
+        $bookNo = trim($validated['book_no']);
+        $pageNo = trim($validated['page_no']);
+
+        $model = match ($docType) {
+            'birth' => BirthRecord::class,
+            'death' => DeathRecord::class,
+            'marriage' => MarriageRecord::class,
+            default => null,
+        };
+
+        $typedEntries = [];
+        $tableName = '';
+        if ($model !== null) {
+            $tableName = (new $model)->getTable();
+            $records = $model::where('book_no', $bookNo)->where('page_no', $pageNo)->get();
+            foreach ($records as $r) {
+                $label = match ($docType) {
+                    'birth' => $r->name ?: "Reg #{$r->reg_no}",
+                    'death' => $r->name ?: "Reg #{$r->reg_no}",
+                    'marriage' => ($r->husband_name && $r->wife_name) ? "{$r->husband_name} & {$r->wife_name}" : "Reg #{$r->reg_no}",
+                    default => "Reg #{$r->reg_no}",
+                };
+                $typedEntries[] = [
+                    'id' => $r->getKey(),
+                    'label' => $label,
+                    'reg_no' => $r->reg_no ?? null,
+                ];
+            }
+        }
+
+        $savedRecord = null;
+        if (isset($records) && Schema::hasColumn($tableName, 'civil_record_id')) {
+            $linkedId = $records->pluck('civil_record_id')->filter()->first();
+            if ($linkedId) {
+                $savedRecord = CivilRecord::withTitleField()->find($linkedId);
+            }
+        }
+
+        $savedPayload = $savedRecord ? [
+            'id' => (int) $savedRecord->getKey(),
+            'title' => $savedRecord->title(),
+            'url' => route('records.show', $savedRecord),
+            'submitted_at' => $savedRecord->submitted_at?->toIso8601String(),
+        ] : null;
+
+        $identified = count($typedEntries) > 0 || $savedPayload !== null;
+
+        $message = '';
+        if ($identified) {
+            $parts = [];
+            if (count($typedEntries) > 0) {
+                $names = collect($typedEntries)->pluck('label')->take(3)->implode(', ');
+                $more = count($typedEntries) > 3 ? ' and ' . (count($typedEntries) - 3) . ' more' : '';
+                $parts[] = "Identified in {$tableName}: " . count($typedEntries) . " " . str('entry')->plural(count($typedEntries)) . " ({$names}{$more})";
+            }
+            if ($savedPayload !== null) {
+                $parts[] = "Saved as Record #{$savedPayload['id']}";
+            }
+            $message = implode(' · ', $parts);
+        } else {
+            $message = "New document (Book {$bookNo}, Page {$pageNo} not yet in {$tableName})";
+        }
+
+        return response()->json([
+            'identified' => $identified,
+            'book_no' => $bookNo,
+            'page_no' => $pageNo,
+            'table' => $tableName,
+            'count' => count($typedEntries),
+            'entries' => $typedEntries,
+            'saved_record' => $savedPayload,
+            'message' => $message,
+        ]);
+    }
+
+    /**
+     * Distinct book numbers for a certificate type from the typed table
+     * (birth_records, death_records, marriage_records) and records table.
+     *
+     * @return list<string>
+     */
+    private function existingBooksForType(string $typeKey): array
+    {
+        $model = match ($typeKey) {
+            'birth' => BirthRecord::class,
+            'death' => DeathRecord::class,
+            'marriage' => MarriageRecord::class,
+            default => null,
+        };
+
+        $typedBooks = $model !== null
+            ? $model::query()->distinct()->whereNotNull('book_no')->where('book_no', '!=', '')->pluck('book_no')
+            : collect();
+
+        return $typedBooks
+            ->filter()
+            ->unique()
+            ->sort(SORT_NATURAL)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Link or record the reference in the typed registry table (birth_records,
+     * death_records, marriage_records) matching the document type.
+     */
+    private function saveToTypedTable(CivilRecord $record, string $bookNo, string $pageNo): void
+    {
+        $type = $record->doc_type instanceof \BackedEnum ? $record->doc_type->value : (string) ($record->doc_type ?? '');
+        $model = match ($type) {
+            'birth' => BirthRecord::class,
+            'death' => DeathRecord::class,
+            'marriage' => MarriageRecord::class,
+            default => null,
+        };
+
+        if ($model === null) {
+            return;
+        }
+
+        if (Schema::hasColumn((new $model)->getTable(), 'civil_record_id')) {
+            $model::where('book_no', $bookNo)
+                ->where('page_no', $pageNo)
+                ->whereNull('civil_record_id')
+                ->update(['civil_record_id' => $record->getKey()]);
+        }
     }
 
     private function hydrateJsonFields(Request $request): void
@@ -841,7 +1006,7 @@ class DocumentScanController extends Controller
      */
     private function prefixed(string $prefix, array $messages): array
     {
-        return array_map(fn (string $message) => $prefix . $message, $messages);
+        return array_map(fn(string $message) => $prefix . $message, $messages);
     }
 
     // ------------------------------------------------------------------ internals

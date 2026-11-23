@@ -94,6 +94,8 @@ Route::middleware('auth')->group(function () {
         Route::get('documents/sources/{hash}/pages', [DocumentScanController::class, 'sourcePages'])
             ->where('hash', '[0-9a-f]{64}')
             ->name('documents.sources.pages');
+        Route::get('documents/identify-reference', [DocumentScanController::class, 'identifyReference'])
+            ->name('documents.identify-reference');
 
         // Finishing Align uploads the page and starts line detection in the
         // background; Verify polls for the outlines and readings, shows the crop
