@@ -162,6 +162,9 @@ Route::middleware('auth')->group(function () {
      */
     Route::middleware('can:records.view')->group(function () {
         Route::get('records', [RecordController::class, 'index'])->name('records.index');
+        // One register book as one UTF-8 CSV: type + book number picked from dropdowns.
+        Route::get('records/books/download', [RecordController::class, 'downloadBook'])
+            ->name('records.books.download');
         // Several records' typed tables at once (Download selected / all matching, a batch's Download all).
         Route::get('records/export', [RecordController::class, 'export'])->name('records.export');
         Route::get('records/{record}', [RecordController::class, 'show'])->name('records.show');

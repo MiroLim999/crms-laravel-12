@@ -4,8 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Enums\RecordStatus;
 use App\Models\AuditLog;
+use App\Models\BirthRecord;
 use App\Models\CivilRecord;
+use App\Models\DeathRecord;
 use App\Models\DocumentTypeDefinition;
+use App\Models\MarriageRecord;
 use App\Models\RecordField;
 use App\Models\RecordPage;
 use App\Models\ScanBatch;
@@ -125,6 +128,12 @@ class RecordController extends Controller
             'filters' => $filters,
             'documentTypes' => DocumentTypeDefinition::ordered(),
             'statuses' => RecordStatus::cases(),
+            // Distinct book numbers per certificate type, for the "Download one book as CSV" dropdowns.
+            'booksByType' => [
+                'birth' => BirthRecord::query()->distinct()->pluck('book_no')->sort()->values()->all(),
+                'death' => DeathRecord::query()->distinct()->pluck('book_no')->sort()->values()->all(),
+                'marriage' => MarriageRecord::query()->distinct()->pluck('book_no')->sort()->values()->all(),
+            ],
         ]);
     }
 
@@ -349,6 +358,77 @@ class RecordController extends Controller
             'Content-Type' => 'text/csv; charset=UTF-8',
             'Cache-Control' => 'no-store, no-cache',
         ]);
+    }
+
+    /**
+     * Download one book's entries as one UTF-8 CSV. The type and book number
+     * are picked from dropdowns on the archive page. One row per register
+     * entry, with the certificate's typed columns as headers.
+     */
+    public function downloadBook(Request $request): StreamedResponse
+    {
+        $validated = $request->validate([
+            'type' => ['required', 'string', 'in:birth,death,marriage'],
+            'book_no' => ['required', 'string', 'max:32'],
+        ]);
+
+        $model = match ($validated['type']) {
+            'birth' => BirthRecord::class,
+            'death' => DeathRecord::class,
+            'marriage' => MarriageRecord::class,
+        };
+
+        $records = $model::where('book_no', $validated['book_no'])
+            ->orderBy('page_no')
+            ->orderBy('reg_no')
+            ->get();
+
+        $columns = (new $model)->getFillable();
+
+        app(AuditLogger::class)->log(
+            'record.exported',
+            new: [
+                'type' => $validated['type'],
+                'book_no' => $validated['book_no'],
+                'rows' => $records->count(),
+            ],
+            description: "Downloaded book {$validated['book_no']} ({$validated['type']}) as CSV.",
+            actor: $request->user(),
+        );
+
+        return response()->streamDownload(function () use ($records, $columns) {
+            $handle = fopen('php://output', 'w');
+            fwrite($handle, "\xEF\xBB\xBF"); // UTF-8 BOM: Excel shows ñ and accents correctly
+            fputcsv($handle, $columns);
+            foreach ($records as $record) {
+                $row = [];
+                foreach ($columns as $column) {
+                    $row[] = $this->bookCsvCell($record->getAttribute($column));
+                }
+                fputcsv($handle, $row);
+            }
+            fclose($handle);
+        }, "{$validated['type']}-book-{$validated['book_no']}.csv", [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'no-store, no-cache',
+        ]);
+    }
+
+    /**
+     * One CSV cell's text: dates as Y-m-d, booleans as 1/0, null as empty.
+     */
+    private function bookCsvCell(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if ($value instanceof \Illuminate\Support\Carbon) {
+            return $value->format('Y-m-d');
+        }
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+        return (string) $value;
     }
 
     /**
