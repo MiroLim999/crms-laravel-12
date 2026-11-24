@@ -939,6 +939,7 @@
                         </div>
                         <div class="review-pane__tools">
                             @include('records.partials.review-shortcuts')
+                            @include('records.partials.review-add-column')
                             <div class="dropdown">
                                 <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="reviewDownloadBtn"
                                         data-bs-toggle="dropdown" aria-expanded="false">
@@ -1584,6 +1585,7 @@
         import { RowLineLayer, rowKey } from '{{ Vite::asset('resources/js/row-lines.js') }}';
         import { valueProblem } from '{{ Vite::asset('resources/js/value-types.js') }}';
         import {
+            attachAddColumn,
             attachSplit,
             buildReviewModel,
             combineTables,
@@ -14027,6 +14029,7 @@
                 });
                 // Ctrl+Z / Ctrl+Y after a click on the scan or elsewhere on this step.
                 reviewTable.listenForUndoKeys(() => reviewing);
+                attachAddColumn(reviewTable, el('reviewPane'));
             }
 
             showStep('review');

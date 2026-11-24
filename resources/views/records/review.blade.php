@@ -69,6 +69,7 @@
                     </div>
                     <div class="review-pane__tools">
                         @include('records.partials.review-shortcuts', ['savedRecord' => true])
+                        @include('records.partials.review-add-column')
                         <div class="dropdown">
                             <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="reviewDownloadBtn"
                                     data-bs-toggle="dropdown" aria-expanded="false">

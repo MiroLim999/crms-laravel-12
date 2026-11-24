@@ -209,6 +209,55 @@ export function exportFileName(...parts) {
     return slug || 'records';
 }
 
+/**
+ * Wire the "Add column" dropdown (records.partials.review-add-column) found in
+ * `root` to `table`: the form adds a column, the list under it removes one.
+ */
+export function attachAddColumn(table, root = document) {
+    const wrap = root.querySelector('[data-review-add-column]');
+    const form = wrap?.querySelector('[data-add-column-form]');
+    const input = form?.querySelector('input');
+    const list = wrap?.querySelector('[data-added-columns]');
+    if (!wrap || !form || !input || !list) return;
+
+    const paint = () => {
+        list.replaceChildren(...table.customColumns().map((column) => {
+            const item = document.createElement('li');
+            item.className = 'd-flex align-items-center justify-content-between gap-2';
+            const label = document.createElement('span');
+            label.className = 'text-truncate';
+            label.textContent = column.header;
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'btn btn-sm btn-link text-danger p-0';
+            remove.textContent = 'Remove';
+            remove.setAttribute('aria-label', `Remove column ${column.header}`);
+            remove.addEventListener('click', () => {
+                table.removeColumn(column.key);
+                paint();
+            });
+            item.append(label, remove);
+            return item;
+        }));
+    };
+
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        table.commit();
+        if (!table.addColumn(input.value)) {
+            input.focus();
+            return;
+        }
+        input.value = '';
+        paint();
+        // Close the menu so the new column's first cell can be typed in.
+        wrap.querySelector('[data-bs-toggle="dropdown"]')?.click();
+    });
+    // A new document empties the table's added columns: show what is there when opened.
+    wrap.addEventListener('show.bs.dropdown', paint);
+    paint();
+}
+
 /** Hand the browser a file to save. */
 export function saveBlob(blob, fileName) {
     const url = URL.createObjectURL(blob);
@@ -548,8 +597,24 @@ export class ReviewTable {
         this.onRange = onRange;
         this.onCleared = onCleared;
         this.container = container;
-        this.valueOf = valueOf;
-        this.onChange = onChange;
+        // Columns the reviewer added (empty, typed into) live here, not in the page:
+        // their values never reach `valueOf` / `onChange`, and are not saved with the record.
+        this.addedColumns = [];
+        this.addedValues = new Map();
+        this.addedCount = 0;
+        this.valueOf = (cell) => (cell?.column?.custom
+            ? this.addedValues.get(`${cell.row.id}|${cell.column.key}`) ?? ''
+            : valueOf(cell));
+        this.onChange = (cell, value) => {
+            if (!cell.column.custom) {
+                onChange(cell, value);
+                return;
+            }
+            const key = `${cell.row.id}|${cell.column.key}`;
+            const text = String(value).trim();
+            if (text === '') this.addedValues.delete(key);
+            else this.addedValues.set(key, text);
+        };
         this.snapshotOf = snapshotOf;
         this.restore = restore;
         this.onLocate = onLocate;
@@ -672,8 +737,67 @@ export class ReviewTable {
         this.cleared.clear();
         this.widths.clear();
         this.columnOrder = [];
+        this.addedColumns = [];
+        this.addedValues.clear();
         this.range = null;
         this.onCleared([]);
+    }
+
+    /** The model with the added columns after the others, each cell empty of fields. */
+    _withAdded(model) {
+        if (this.addedColumns.length === 0) return model;
+        const empty = Object.fromEntries(this.addedColumns.map((column) => [column.key, { refs: [] }]));
+        return {
+            columns: [...model.columns, ...this.addedColumns],
+            rows: model.rows.map((row) => ({ ...row, cells: { ...row.cells, ...empty } })),
+        };
+    }
+
+    /**
+     * Add an empty column at the end, named `name` (a name already in the table
+     * gets " (2)"), and pick its first cell. Returns the column, or null for no name.
+     */
+    addColumn(name) {
+        const text = String(name ?? '').trim().slice(0, 120);
+        if (text === '' || !this.sourceModel) return null;
+        this._closeEditor(true);
+        const taken = new Set(this.model.columns.map((column) => nameKey(this.headerOf(column))));
+        let header = text;
+        for (let copy = 2; taken.has(nameKey(header)); copy += 1) header = `${text} (${copy})`;
+        this.addedCount += 1;
+        const column = {
+            key: `custom|${this.addedCount}`,
+            side: 0,
+            name: header,
+            header,
+            type: columnType(header),
+            detail: false,
+            custom: true,
+        };
+        this.addedColumns.push(column);
+        this.render(this.sourceModel);
+        const at = this.model.columns.findIndex((candidate) => candidate.key === column.key);
+        if (at !== -1) this.select(0, at, { locate: false });
+        return column;
+    }
+
+    /** Take an added column away, with what was typed in it. */
+    removeColumn(key) {
+        if (!this.addedColumns.some((column) => column.key === key)) return;
+        this._closeEditor(true);
+        this.addedColumns = this.addedColumns.filter((column) => column.key !== key);
+        [...this.addedValues.keys()].filter((id) => id.endsWith(`|${key}`)).forEach((id) => this.addedValues.delete(id));
+        this.headerNames.delete(key);
+        this.widths.delete(key);
+        this.columnOrder = this.columnOrder.filter((candidate) => candidate !== key);
+        this.history = [];
+        this.redoList = [];
+        this.render(this.sourceModel);
+    }
+
+    /** The added columns as shown now: [{ key, header }]. */
+    customColumns() {
+        return this.addedColumns.map((column) => ({ key: column.key, header: this.headerOf(column) }));
     }
 
     /** The model with its columns in the order the reviewer dragged them to. */
@@ -796,7 +920,7 @@ export class ReviewTable {
         const keep = this.active;
         this._closeEditor(false);
         this.sourceModel = model;
-        model = this._ordered(model);
+        model = this._ordered(this._withAdded(model));
         this.model = model;
         this.cellNodes = [];
         this.range = null;
@@ -823,6 +947,7 @@ export class ReviewTable {
             th.dataset.column = String(columnIndex);
             th.dataset.sizeKey = column.key;
             th.draggable = true;
+            if (column.custom) th.classList.add('is-custom');
             if (column.type.input === 'select') th.dataset.choices = column.type.options.join(' / ');
             const label = document.createElement('span');
             label.className = 'review-table__label';
@@ -902,7 +1027,8 @@ export class ReviewTable {
         const cell = this.cell(rowIndex, columnIndex);
         if (!td || !cell) return null;
         const value = String(this.valueOf(cell) ?? '');
-        const problem = cellProblem(value, cell.column.type);
+        // An added column is the reviewer's own: an empty cell in it is not an issue.
+        const problem = cell.column.custom ? null : cellProblem(value, cell.column.type);
         // A cell being typed in keeps its box; it is drawn again once closed.
         if (td.classList.contains('is-editing')) return problem;
         td.textContent = value;
@@ -1099,7 +1225,7 @@ export class ReviewTable {
             const row = Math.floor(index / columns);
             const column = index % columns;
             const cell = this.cell(row, column);
-            if (cellProblem(this.valueOf(cell), cell.column.type)) {
+            if (!cell.column.custom && cellProblem(this.valueOf(cell), cell.column.type)) {
                 this.select(row, column);
                 return true;
             }

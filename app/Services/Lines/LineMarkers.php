@@ -204,11 +204,23 @@ class LineMarkers
             }
         }
 
+        $systemRoot = getenv('SystemRoot') ?: (getenv('SYSTEMROOT') ?: 'C:\\Windows');
+        $windir = getenv('WINDIR') ?: $systemRoot;
+        $path = getenv('PATH') ?: '';
+        $temp = getenv('TEMP') ?: (getenv('TMP') ?: sys_get_temp_dir());
+
         $pending = Process::timeout((int) config('services.line_markers.timeout', 600))
             ->path(base_path())
             ->env([
                 'PYTHONIOENCODING' => 'utf-8',
                 'PYTHONWARNINGS' => 'ignore',
+                'PYTHONHASHSEED' => '0',
+                'SystemRoot' => $systemRoot,
+                'SYSTEMROOT' => $systemRoot,
+                'WINDIR' => $windir,
+                'PATH' => $path,
+                'TEMP' => $temp,
+                'TMP' => $temp,
                 'LINE_MARKERS_DEVICE' => (string) config('services.line_markers.device', 'auto'),
                 'LINE_MARKERS_WORKERS' => (string) config('services.line_markers.workers', 4),
             ]);

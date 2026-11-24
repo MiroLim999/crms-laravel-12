@@ -6,6 +6,7 @@
  */
 import { initRecordDetail } from './record-detail.js';
 import {
+    attachAddColumn,
     attachSplit,
     buildReviewModel,
     downloadCsv,
@@ -71,6 +72,7 @@ if (root instanceof HTMLElement && source) {
     });
     // Ctrl+Z / Ctrl+Y after a click on the scan or elsewhere on the page.
     table.listenForUndoKeys();
+    attachAddColumn(table, element('reviewPane'));
     table.render(model);
     if (model.rows.length > 0 && model.columns.length > 0) table.select(0, 0, { locate: false });
     showState();
