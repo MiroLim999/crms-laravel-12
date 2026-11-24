@@ -7924,7 +7924,7 @@
             resetDiscardAll(total);
         }
 
-        /** "Birth Certificate · 2", with "this page" on the type open here. */
+        /** "Book of Birth · 2", with "this page" on the type open here. */
         function resumeGroupTitle(label, count, here) {
             const li = document.createElement('li');
             li.className = 'batch-resume__group';

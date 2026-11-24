@@ -16,9 +16,9 @@ enum DocumentType: string
     public function label(): string
     {
         return match ($this) {
-            self::Birth => 'Birth Certificate',
-            self::Death => 'Death Certificate',
-            self::Marriage => 'Marriage Certificate',
+            self::Birth => 'Book of Birth',
+            self::Death => 'Book of Death',
+            self::Marriage => 'Book of Marriage',
             self::Custom => 'Custom Document',
         };
     }

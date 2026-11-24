@@ -32,8 +32,8 @@ class RecordCsvExportTest extends TestCase
 
         $this->assertSame(['Record ID', 'Document type', 'Row', 'Page No.', 'Name', 'Sex'], $header);
         $this->assertSame([
-            [(string) $record->getKey(), 'Birth Certificate', '1', '12', 'Ana Cruz', 'F'],
-            [(string) $record->getKey(), 'Birth Certificate', '2', '12', 'Ben Reyes', 'M'],
+            [(string) $record->getKey(), 'Book of Birth', '1', '12', 'Ana Cruz', 'F'],
+            [(string) $record->getKey(), 'Book of Birth', '2', '12', 'Ben Reyes', 'M'],
         ], $rows);
     }
 
@@ -109,7 +109,7 @@ class RecordCsvExportTest extends TestCase
         [$header, $rows] = $this->csv($this->download($record));
 
         $this->assertSame(['Record ID', 'Document type', 'Row', 'Child Full Name', 'Date of Birth'], $header);
-        $this->assertSame([[(string) $record->getKey(), 'Birth Certificate', '1', 'Ana Cruz', '1 Jan 2001']], $rows);
+        $this->assertSame([[(string) $record->getKey(), 'Book of Birth', '1', 'Ana Cruz', '1 Jan 2001']], $rows);
     }
 
     public function test_the_download_is_in_the_audit_log(): void

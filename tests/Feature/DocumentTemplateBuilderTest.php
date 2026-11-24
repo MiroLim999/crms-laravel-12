@@ -361,13 +361,13 @@ class DocumentTemplateBuilderTest extends TestCase
         $samplePath = $template->sample_path;
 
         $this->assertNotNull($samplePath);
-        $this->assertStringContainsString('template-samples/001-birth-certificate/', $samplePath);
+        $this->assertStringContainsString('template-samples/001-book-of-birth/', $samplePath);
         $this->assertStringContainsString(
             sprintf('/%05d-birth-registry-2026/', $template->getKey()),
             $samplePath,
         );
         $this->assertStringEndsWith(
-            '/birth-certificate--birth-registry-2026--sample.jpg',
+            '/book-of-birth--birth-registry-2026--sample.jpg',
             $samplePath,
         );
         $this->assertSame('Municipal Birth Form.jpg', $template->sample_original_name);
@@ -689,7 +689,7 @@ class DocumentTemplateBuilderTest extends TestCase
         Storage::fake('local');
         $superAdmin = User::factory()->superAdmin()->create();
         $template = $this->template($superAdmin, DocumentType::Birth, 'Published layout', active: true);
-        $samplePath = 'template-samples/001-birth-certificate/published-layout/sample.jpg';
+        $samplePath = 'template-samples/001-book-of-birth/published-layout/sample.jpg';
         Storage::disk('local')->put($samplePath, 'sample');
         $template->forceFill([
             'sample_path' => $samplePath,
