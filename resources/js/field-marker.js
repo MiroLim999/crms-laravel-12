@@ -14,6 +14,7 @@
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
+import { openPdfFile } from './pdf-source.js';
 import { markerPersonMetadata } from './person-grouping.js';
 import {
     canVerifyValue,
@@ -406,8 +407,8 @@ export class FieldMarker {
         if (this.pdfOpening?.file === file) return this.pdfOpening.promise;
 
         this._closePdf();
-        const promise = file.arrayBuffer()
-            .then((buffer) => pdfjsLib.getDocument({ data: buffer }).promise)
+        // A large PDF (up to 1 GB) is read from disk a piece at a time (pdf-source.js).
+        const promise = openPdfFile(file)
             .then((doc) => {
                 if (this.pdfOpening?.promise === promise) this.pdfDoc = doc;
                 return doc;

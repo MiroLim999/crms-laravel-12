@@ -18,4 +18,14 @@ final class Limits
      * person from 0 to MAX_FIELDS - 1.
      */
     public const MAX_FIELDS = 450;
+
+    /**
+     * A document's scan, in KB (Laravel's file "max"): 200 MB. A large PDF is
+     * read one page at a time and usually only that page is sent, but a
+     * one-page PDF (or one whose page cannot be cut out) goes whole.
+     */
+    public const MAX_SCAN_KB = 204800;
+
+    /** A page image drawn from the scan (PNG), in KB: a large page drawn sharp. */
+    public const MAX_PAGE_IMAGE_KB = 102400;
 }

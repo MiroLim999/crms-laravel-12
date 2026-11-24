@@ -101,7 +101,7 @@ class DocumentTemplateController extends Controller
     public function detectGrid(Request $request, LineMarkers $markers): JsonResponse
     {
         $request->validate([
-            'image' => ['required', 'file', 'mimes:png', 'max:40960'],
+            'image' => ['required', 'file', 'mimes:png', 'max:'.\App\Support\Limits::MAX_PAGE_IMAGE_KB],
         ]);
 
         $path = $request->file('image')->store('template-grid', 'local');

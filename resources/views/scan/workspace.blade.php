@@ -1637,6 +1637,7 @@
             matchFilesToBatch,
             MAX_PDF_BYTES,
             MAX_SCAN_BYTES,
+            MAX_SENT_PDF_BYTES,
             nextUnsavedPage,
             pageCanAlign,
             pageDone,
@@ -4318,7 +4319,7 @@
             // Of a PDF only the page being read is sent, so it may be large.
             const pdf = isPdfFile(file);
             if (file.size > (pdf ? MAX_PDF_BYTES : MAX_SCAN_BYTES)) {
-                alert(pdf ? 'Choose a PDF smaller than 200 MB.' : 'Choose an image smaller than 20 MB.');
+                alert(pdf ? 'Choose a PDF smaller than 1 GB.' : 'Choose an image smaller than 20 MB.');
                 scanFileInput.value = '';
                 return;
             }
@@ -4335,9 +4336,6 @@
                 verifyDoc = null;
                 // It opens at its first page not saved yet.
                 const [pageCount] = await Promise.all([pdf ? marker.pdfPageCount(file) : 1, lookUpSavedPages(file)]);
-                if (pageCount <= 1 && file.size > MAX_SCAN_BYTES) {
-                    throw new Error('Choose a document smaller than 20 MB. A PDF of many pages may be larger: only the page being read is sent.');
-                }
                 scanPageCount = pageCount;
                 scanPageNumber = firstUnsavedPage(pageCount, savedPages);
                 useLayoutForPage(scanPageNumber);
@@ -6317,12 +6315,14 @@
          * knows its page.
          */
         async function queuedScanFile(item) {
-            if (!(item.pageTotal > 1)) return item.file;
+            // A one-page PDF goes whole, unless it is too large to send: then as an image of its page.
+            if (!(item.pageTotal > 1) && !(isPdfFile(item.file) && item.file.size > MAX_SENT_PDF_BYTES)) return item.file;
             try {
                 return await pdfPageFile(item.file, item.pageNo);
             } catch (error) {
                 console.warn(`Page ${item.pageNo} could not be cut out of ${item.sourceName}:`, error);
-                if (item.file.size <= MAX_SCAN_BYTES) return item.file;
+                // The whole PDF goes instead, when the server can take it.
+                if (item.file.size <= MAX_SENT_PDF_BYTES) return item.file;
                 throw new Error(`Page ${item.pageNo} could not be taken out of ${item.sourceName}. Save that page as its own file and add it to a batch.`);
             }
         }
@@ -6497,7 +6497,7 @@
                     // A PDF may be large (only one page of it is ever sent); an image may not.
                     const limit = isPdfFile(file) ? MAX_PDF_BYTES : MAX_SCAN_BYTES;
                     if (file.size > limit) {
-                        notes.tooLarge.push(`${file.name} (over ${limit / 1024 / 1024} MB)`);
+                        notes.tooLarge.push(`${file.name} (over ${limit >= 1024 ** 3 ? `${limit / 1024 ** 3} GB` : `${limit / 1024 / 1024} MB`})`);
                         return false;
                     }
                     return true;
@@ -13610,7 +13610,7 @@
 
         function submissionErrorMessage(response, payload) {
             if (response.status === 419) return 'Your session expired. Refresh the page and scan the document again.';
-            if (response.status === 413) return 'The uploaded document is too large. The maximum size is 20 MB.';
+            if (response.status === 413) return 'The uploaded document is too large. A PDF may be up to 1 GB (one page of it is sent), an image up to 20 MB.';
             if (response.status === 422) {
                 const messages = payload?.errors ? Object.values(payload.errors).flat() : [];
                 return messages[0] || payload?.message || 'Review the highlighted fields and try again.';
@@ -14687,12 +14687,14 @@
          * when it is small enough, and the record still knows its page.
          */
         async function scanForRecord(pageNumber = scanPageNumber) {
-            if (!multiPage() || !isPdfFile(scanFile)) return scanFile;
+            if (!isPdfFile(scanFile)) return scanFile;
+            // A one-page PDF goes whole, unless it is too large to send: then as an image of its page.
+            if (!multiPage() && scanFile.size <= MAX_SENT_PDF_BYTES) return scanFile;
             try {
                 return await pdfPageFile(scanFile, pageNumber);
             } catch (error) {
                 console.warn('The page could not be cut out of the PDF:', error);
-                if (scanFile.size <= MAX_SCAN_BYTES) return scanFile;
+                if (scanFile.size <= MAX_SENT_PDF_BYTES) return scanFile;
                 throw new Error(`Page ${pageNumber} could not be taken out of this PDF. Save that page as its own file and upload it.`);
             }
         }

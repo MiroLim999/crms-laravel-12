@@ -235,7 +235,7 @@ class DocumentScanController extends Controller
                 'max:255',
                 Rule::exists(OcrModel::class, 'key')->whereNull('disk_deleted_at'),
             ],
-            'scan' => ['required_without:workspace_scan_path', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'scan' => ['required_without:workspace_scan_path', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:'.\App\Support\Limits::MAX_SCAN_KB],
             'workspace_scan_path' => ['required_without:scan', 'nullable', 'string', 'max:500'],
             'fields' => ['required', 'array', 'min:1', 'max:' . Limits::MAX_FIELDS],
             'fields.*.verified' => ['required', 'accepted'],
@@ -274,7 +274,7 @@ class DocumentScanController extends Controller
             // (a batch), or the file itself, sent as extra_scans[n] beside it.
             'extra_pages.*.workspace_scan_path' => ['nullable', 'string', 'max:500'],
             'extra_scans' => ['sometimes', 'array', 'max:' . self::MAX_EXTRA_PAGES],
-            'extra_scans.*' => ['file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'extra_scans.*' => ['file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:'.\App\Support\Limits::MAX_SCAN_KB],
             'extra_pages.*.source_page' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_SOURCE_PAGES],
             'extra_pages.*.fields' => ['required', 'array', 'min:1', 'max:' . Limits::MAX_FIELDS],
             'extra_pages.*.fields.*.verified' => ['required', 'accepted'],

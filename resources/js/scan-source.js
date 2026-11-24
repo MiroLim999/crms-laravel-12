@@ -12,11 +12,18 @@
  * The batch upload builds on the same helpers: one queue item per page.
  */
 
-/** The largest PDF the workspace opens. Only one page of it is ever uploaded. */
-export const MAX_PDF_BYTES = 200 * 1024 * 1024;
+/** The largest PDF the workspace opens: 1 GB. Only one page of it is ever uploaded. */
+export const MAX_PDF_BYTES = 1024 * 1024 * 1024;
 
-/** The largest file the server keeps as a record's scan (an image, or one PDF page). */
+/** The largest image the workspace opens. */
 export const MAX_SCAN_BYTES = 20 * 1024 * 1024;
+
+/**
+ * The largest file the server takes as a scan (App\Support\Limits::MAX_SCAN_KB):
+ * a PDF up to this size may be sent whole, or a page cut out of it; past it a
+ * page goes as an image of that page (pdfPageFile).
+ */
+export const MAX_SENT_PDF_BYTES = 200 * 1024 * 1024;
 
 export function isPdfFile(file) {
     return file?.type === 'application/pdf' || /\.pdf$/i.test(String(file?.name ?? ''));
@@ -32,7 +39,8 @@ export function isPdfFile(file) {
  */
 export async function fileFingerprint(file) {
     const subtle = globalThis.crypto?.subtle;
-    if (subtle && globalThis.isSecureContext !== false) {
+    // A large file (up to 1 GB) is read a piece at a time, never all at once.
+    if (subtle && globalThis.isSecureContext !== false && file.size <= 256 * 1024 * 1024) {
         try {
             return toHex(new Uint8Array(await subtle.digest('SHA-256', await file.arrayBuffer())));
         } catch {
@@ -165,6 +173,12 @@ const readPdfs = new WeakMap();
  * as one record's scan. pdf-lib is loaded the first time this is needed.
  */
 export async function pdfPageFile(file, pageNumber) {
+    // Too large to cut a page out of (that reads the whole PDF into memory) or to
+    // send: the page goes as an image of it, drawn reading only what it needs.
+    if (file.size > MAX_SENT_PDF_BYTES) {
+        const { pdfPageImageFile } = await import('./pdf-source.js');
+        return pdfPageImageFile(file, pageNumber, pageFileName(file.name, pageNumber).replace(/\.pdf$/i, '.jpg'));
+    }
     const { PDFDocument } = await import('pdf-lib');
 
     let reading = readPdfs.get(file);

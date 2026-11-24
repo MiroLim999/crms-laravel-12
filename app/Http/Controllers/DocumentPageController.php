@@ -59,8 +59,8 @@ class DocumentPageController extends Controller
             'document_template_id' => ['required', 'integer', 'exists:document_templates,id'],
             // The rendered page exactly as it was aligned, so outlines and markers
             // share one pixel grid.
-            'page' => ['required', 'file', 'mimes:png', 'max:40960'],
-            'scan' => ['sometimes', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'page' => ['required', 'file', 'mimes:png', 'max:'.\App\Support\Limits::MAX_PAGE_IMAGE_KB],
+            'scan' => ['sometimes', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:'.\App\Support\Limits::MAX_SCAN_KB],
             // Re-align without the file at hand: the original kept for the page this one replaces.
             'scan_from_page' => ['sometimes', 'integer'],
             'batch_key' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
@@ -140,7 +140,7 @@ class DocumentPageController extends Controller
         $this->authorizePage($request, $page);
 
         $validated = $request->validate([
-            'scan' => ['required_without:scan_from_page', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:20480'],
+            'scan' => ['required_without:scan_from_page', 'file', 'mimes:pdf,png,jpg,jpeg,webp,bmp', 'max:'.\App\Support\Limits::MAX_SCAN_KB],
             'scan_from_page' => ['sometimes', 'integer'],
             'batch_key' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
             'read' => ['sometimes', 'boolean'],
@@ -260,7 +260,7 @@ class DocumentPageController extends Controller
         GeometryInput::hydrate($request);
 
         $validated = $request->validate([
-            'page' => ['required', 'file', 'mimes:png', 'max:40960'],
+            'page' => ['required', 'file', 'mimes:png', 'max:'.\App\Support\Limits::MAX_PAGE_IMAGE_KB],
             ...GeometryInput::rules(),
         ]);
 
