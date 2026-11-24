@@ -10033,18 +10033,15 @@ $dashboard-reveal-step: 40ms;
 
 .template-builder-focused {
 
-  #layout-navbar,
+  // The top bar stays, as on every other page; only the footer goes.
   .content-footer {
     display: none !important;
   }
 
+  // Side margins as on every page, so the builder lines up with the top bar.
   .container-xxl.container-p-y {
     max-inline-size: none;
-    padding: .75rem !important;
-  }
-
-  .content-wrapper {
-    min-block-size: 100vh;
+    padding-block: .75rem !important;
   }
 }
 
@@ -10743,9 +10740,6 @@ $dashboard-reveal-step: 40ms;
   justify-content: space-between;
   gap: 1rem;
   margin-block-end: .75rem;
-  // The sidebar control straddles the menu boundary at every breakpoint.
-  // Clear it here without narrowing the editing canvas underneath.
-  padding-inline-start: 1.25rem;
 }
 
 .template-builder-page__heading {
@@ -11592,12 +11586,6 @@ $dashboard-reveal-step: 40ms;
   text-decoration: underline dotted;
 }
 
-// The builder hides the navbar, so Sneat's frosted strip under it has nothing
-// to cover: it only blurred the page title.
-.template-builder-focused .layout-page::before {
-  display: none !important;
-}
-
 // One toolbar row: the file chip is capped, and Delete sample and Shortcuts
 // show only their icons (their names stay in the title and aria-label).
 .template-builder-canvas-card {
@@ -11672,9 +11660,18 @@ $dashboard-reveal-step: 40ms;
   }
 
   .template-builder-focused {
-    .content-wrapper {
+    // The window, split into the top bar and the builder under it.
+    .layout-page {
+      display: flex;
+      flex-direction: column;
       block-size: 100vh;
       block-size: 100dvh;
+      min-block-size: 0;
+    }
+
+    .content-wrapper {
+      flex: 1 1 0;
+      block-size: auto;
       min-block-size: 0;
     }
 
@@ -11741,7 +11738,7 @@ $dashboard-reveal-step: 40ms;
 
 @media (max-width: 991.98px) {
   .template-builder-focused .container-xxl.container-p-y {
-    padding: .65rem !important;
+    padding-block: .65rem !important;
   }
 
   .template-builder-canvas-card .doc-viewport {
