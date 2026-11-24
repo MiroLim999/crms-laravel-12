@@ -963,6 +963,15 @@
                                         </p>
                                         <div class="review-field-map__rows" id="reviewFieldMapRows"></div>
                                         <p class="small text-muted mt-2 mb-0" id="reviewFieldMapManual"></p>
+                                        {{-- How the register writes its dates: all are saved as YYYY-MM-DD. --}}
+                                        <div class="review-field-map__row mt-3 pt-3 border-top">
+                                            <label for="reviewDateOrder" class="form-label small mb-0">Dates are written</label>
+                                            <select class="form-select form-select-sm" id="reviewDateOrder">
+                                                <option value="auto">Automatic (by what the column holds)</option>
+                                                <option value="month">Month first: 3-11-57 is 1957-03-11</option>
+                                                <option value="day">Day first: 3-11-57 is 1957-11-03</option>
+                                            </select>
+                                        </div>
                                     </div>
                                 </div>
                             @endif
@@ -1325,7 +1334,7 @@
                     <ul class="batch-delete-notes" id="batchDocumentNotes"></ul>
 
                     <div class="leave-scan-modal__actions batch-delete-actions" id="batchDocumentActions">
-                        <button type="button" class="btn btn-outline-secondary text-nowrap" id="batchDocCancelBtn" data-bs-dismiss="modal">
+                        <button type="button" class="btn btn-label-secondary text-nowrap" id="batchDocCancelBtn" data-bs-dismiss="modal">
                             Keep it
                         </button>
                         {{-- Only one page of the file: the other pages stay queued. --}}
@@ -14364,6 +14373,22 @@
                 // Ctrl+Z / Ctrl+Y after a click on the scan or elsewhere on this step.
                 reviewTable.listenForUndoKeys(() => reviewing);
                 attachAddColumn(reviewTable, el('reviewPane'));
+                // How this type's register writes its dates, as last chosen on this computer.
+                const dateOrderKey = `crms.dateOrder.${config.registry?.type ?? config.typeLabel ?? 'any'}`;
+                const dateOrderSelect = el('reviewDateOrder');
+                const chosenOrder = (() => {
+                    try { return window.localStorage.getItem(dateOrderKey) || 'auto'; } catch { return 'auto'; }
+                })();
+                reviewTable.dateOrder = chosenOrder;
+                if (dateOrderSelect) {
+                    dateOrderSelect.value = chosenOrder;
+                    dateOrderSelect.addEventListener('change', () => {
+                        reviewTable.commit();
+                        reviewTable.setDateOrder(dateOrderSelect.value);
+                        try { window.localStorage.setItem(dateOrderKey, dateOrderSelect.value); } catch { /* private mode */ }
+                        updateVerificationSummary();
+                    });
+                }
             }
 
             showStep('review');

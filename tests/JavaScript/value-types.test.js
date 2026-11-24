@@ -47,3 +47,46 @@ test('only values that do not fit their field get a problem', () => {
     assert.equal(valueProblem('m', { type: 'choice', options: ['M', 'F'] }), null);
     assert.equal(valueProblem('anything', { type: 'choice', options: [] }), null);
 });
+
+test('register dates become YYYY-MM-DD; a half date is not a date', async () => {
+    const { toIsoDate } = await import('../../resources/js/value-types.js');
+    const today = new Date('2026-11-25');
+    [
+        ['5-14-79', '1979-05-14'], ['3-11-57', '1957-03-11'], ['12-11-1956', '1956-12-11'], ['9-21-1904', '1904-09-21'],
+        ['Jan, 07,1978', '1978-01-07'], ['Jan. 03, 1978', '1978-01-03'], ['3 January 1978', '1978-01-03'],
+        ['21st March 1950', '1950-03-21'], ['1978-01-03', '1978-01-03'], ['14-5-79', '1979-05-14'],
+        ['Sept. 21, 1950', '1950-09-21'], ['12-5-24', '2024-12-05'],
+    ].forEach(([value, iso]) => assert.equal(toIsoDate(value, today), iso, value));
+    ['02/30/1990', '3-1957', '33-15', '3-45', 'Maasin', ''].forEach((value) => assert.equal(toIsoDate(value, today), null, value));
+});
+
+test('a register that writes the day first: one date that can only be day first decides the column', async () => {
+    const { toIsoDate, dateOrderOf } = await import('../../resources/js/value-types.js');
+    const today = new Date('2026-11-25');
+    assert.equal(toIsoDate('3-11-57', today), '1957-03-11');
+    assert.equal(toIsoDate('3-11-57', today, { dayFirst: true }), '1957-11-03');
+    // A number that cannot be a month decides anyway.
+    assert.equal(toIsoDate('3-25-57', today, { dayFirst: true }), '1957-03-25');
+    assert.equal(dateOrderOf(['3-11-57', '25-3-57', '']), 'day');
+    assert.equal(dateOrderOf(['3-11-57', '3-25-57']), 'month');
+    assert.equal(dateOrderOf(['3-11-57', 'Jan. 3, 1957']), null);
+});
+
+test('a date misread by one stray digit is repaired from its column, and only when one answer fits', async () => {
+    const { toIsoDate, usualMonthOf, repairedDate } = await import('../../resources/js/value-types.js');
+    const today = new Date('2026-11-25');
+    const column = ['2-11-57', '22-22-57', '22-16-57', '2-24-57', '21-18-57', '2-18-57', '27-19-57', '3-27-143', '33-37', '14-22-33'];
+    const usual = usualMonthOf(column.map((value) => toIsoDate(value, today)));
+    assert.deepEqual(usual, { year: 1957, month: 2 });
+    const repaired = (value) => repairedDate(value, usual, { today });
+    assert.equal(repaired('22-22-57'), '1957-02-22');
+    assert.equal(repaired('22-16-57'), '1957-02-16');
+    assert.equal(repaired('21-18-57'), '1957-02-18');
+    assert.equal(repaired('27-19-57'), '1957-02-19');
+    // Too garbled, or outside the column's month: left for the reviewer.
+    ['3-27-143', '33-37', '14-22-33', 'Maasin'].forEach((value) => assert.equal(repaired(value), null, value));
+    // A whole date is never "repaired"; without a usual month, nothing is.
+    assert.equal(repaired('2-11-57'), null);
+    assert.equal(repairedDate('22-22-57', null, { today }), null);
+    assert.equal(usualMonthOf(['1957-02-11']), null);
+});

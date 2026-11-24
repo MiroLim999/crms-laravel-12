@@ -12196,6 +12196,13 @@ $dashboard-reveal-step: 40ms;
     background: rgba(var(--bs-danger-rgb), .13);
   }
 
+  // A misread date repaired from its column (one stray digit): amber, to check.
+  &.is-guessed {
+    color: var(--bs-warning-text-emphasis);
+    background: rgba(var(--bs-warning-rgb), .2);
+    box-shadow: inset 3px 0 0 rgba(var(--bs-warning-rgb), .9);
+  }
+
   // Not ticked Verified: shown, but not saved or downloaded (greyed, in italics).
   &.is-unverified {
     color: rgba(var(--bs-secondary-rgb), .75);

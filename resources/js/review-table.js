@@ -9,7 +9,7 @@
  *
  * The parts above ReviewTable are pure, so they are unit-tested without a browser.
  */
-import { matchingChoice } from './value-types.js';
+import { dateOrderOf, matchingChoice, repairedDate, toIsoDate, usualMonthOf } from './value-types.js';
 
 // ------------------------------------------------------------- column types
 
@@ -59,6 +59,8 @@ export function cellProblem(value, type = null) {
         return { kind: 'empty', message: type?.required ? 'Required: every row needs a value' : 'Empty' };
     }
     if (type?.integer && !/^\d+$/.test(text)) return { kind: 'invalid', message: 'Plain digits only, e.g. 27' };
+    if (type?.date && !toIsoDate(text, undefined, { dayFirst: Boolean(type.dayFirst) })
+        && !repairedDate(text, type.usualMonth, { dayFirst: Boolean(type.dayFirst) })) return { kind: 'invalid', message: 'Not a whole date: write it as YYYY-MM-DD, e.g. 1957-03-11' };
     if (type?.strict && Array.isArray(type.options) && !type.options.includes(text)) {
         return { kind: 'invalid', message: `One of: ${type.options.join(', ')}` };
     }
@@ -250,6 +252,8 @@ export function registryColumnType(field) {
         required: Boolean(field.required),
         optional: !field.required,
         integer: field.kind === 'integer',
+        // Shown, saved and downloaded as YYYY-MM-DD.
+        date: field.kind === 'date',
     };
 }
 
@@ -870,6 +874,8 @@ export class ReviewTable {
         this.addedValues = new Map();
         // Read columns deleted from the table (keys): left out of it and its downloads.
         this.hiddenColumns = new Set();
+        // How dates are written: 'auto', 'month' (5-14-79) or 'day' (14-5-79). See setDateOrder.
+        this.dateOrder = 'auto';
         this.addedCount = 0;
         this.valueOf = (cell) => (cell?.column?.custom
             ? this.addedValues.get(`${cell.row.id}|${cell.column.key}`) ?? ''
@@ -1271,6 +1277,7 @@ export class ReviewTable {
         this.sourceModel = model;
         model = this._ordered(this._withAdded(model));
         this.model = model;
+        this._applyDateOrder();
         this.cellNodes = [];
         this.range = null;
         this.copied = null;
@@ -1380,7 +1387,12 @@ export class ReviewTable {
         const problem = cell.column.custom ? null : cellProblem(value, cell.column.type);
         // A cell being typed in keeps its box; it is drawn again once closed.
         if (td.classList.contains('is-editing')) return problem;
-        td.textContent = value;
+        // A register date shows as it is saved: YYYY-MM-DD.
+        td.textContent = cell.column.type?.date ? (this._isoDate(cell.column, value, rowIndex) ?? value) : value;
+        // A misread date repaired from its column: amber, saying what was read.
+        const repaired = Boolean(cell.column.type?.date) && !problem && value.trim() !== ''
+            && !toIsoDate(value, this._rowToday(rowIndex), { dayFirst: Boolean(cell.column.type.dayFirst) });
+        td.classList.toggle('is-guessed', repaired);
         td.classList.toggle('is-empty', problem?.kind === 'empty');
         td.classList.toggle('is-cleared', problem?.kind === 'empty' && this.cleared.has(`${cell.row.id}|${cell.column.key}`));
         td.classList.toggle('is-invalid', problem?.kind === 'invalid');
@@ -1388,6 +1400,7 @@ export class ReviewTable {
         const unverified = value.trim() !== '' && Boolean(this.isUnverified(cell));
         td.classList.toggle('is-unverified', unverified);
         td.title = problem?.message
+            ?? (repaired ? `Read as "${value.trim()}": taken as ${td.textContent} from the other dates in this column. Check it on the scan.` : null)
             ?? (unverified ? 'Not verified: this value is not saved or downloaded. Edit it, or tick it in Verify, to keep it.' : '');
         td.setAttribute('aria-invalid', String(Boolean(problem)));
         return problem;
@@ -2361,6 +2374,7 @@ export class ReviewTable {
      * renamed labels). A value not verified is left out, as it is not saved.
      */
     exportTable() {
+        this._applyDateOrder();
         // A register's table (its columns are register fields) downloads as the
         // register does: its field names as headers, no Row column, and without
         // the scanned columns no field is filled from (noExport).
@@ -2383,7 +2397,62 @@ export class ReviewTable {
 
     /** A cell's value as it is saved and downloaded: a value not verified is left out. */
     _exported(cell) {
-        return this.isUnverified(cell) ? '' : String(this.valueOf(cell) ?? '').trim();
+        if (this.isUnverified(cell)) return '';
+        const value = String(this.valueOf(cell) ?? '').trim();
+        // A register date is saved and downloaded as YYYY-MM-DD.
+        return cell.column.type?.date ? (this._isoDate(cell.column, value, this.model.rows.indexOf(cell.row)) ?? value) : value;
+    }
+
+    /** A date of `column` as YYYY-MM-DD (null: not a whole date), read as the column is written. */
+    _isoDate(column, value, rowIndex = -1) {
+        const dayFirst = Boolean(column.type?.dayFirst);
+        const today = this._rowToday(rowIndex);
+        return toIsoDate(value, today, { dayFirst }) ?? repairedDate(value, column.type?.usualMonth, { dayFirst, today });
+    }
+
+    /**
+     * The latest a row's two-digit years can be: the end of the year it was
+     * registered (its date_of_reg), as nothing in an entry is later than that
+     * ("7-15-25" on a 1957 entry is 1925); without one, today.
+     */
+    _rowToday(rowIndex) {
+        const now = new Date();
+        const regAt = this.model?.columns.findIndex((column) => column.field === 'date_of_reg' && column.type?.date) ?? -1;
+        if (rowIndex < 0 || regAt < 0 || !this.model.rows[rowIndex]) return now;
+        const iso = toIsoDate(String(this.valueOf(this.cell(rowIndex, regAt)) ?? ''), now, { dayFirst: Boolean(this.model.columns[regAt].type?.dayFirst) });
+        // Not readable on this row: the year the page was registered (the column's usual month).
+        const year = iso ? Number(iso.slice(0, 4)) : this.model.columns[regAt].type?.usualMonth?.year;
+        return year ? new Date(Date.UTC(year, 11, 31)) : now;
+    }
+
+    /**
+     * How the dates are written: 'auto' (each date column by what it holds: one
+     * date that can only be day first, "25-3-57", makes the whole column day
+     * first), 'month' or 'day'. The table is drawn again.
+     */
+    setDateOrder(order) {
+        this.dateOrder = ['month', 'day'].includes(order) ? order : 'auto';
+        if (this.sourceModel) this.render(this.sourceModel);
+    }
+
+    /** Each date column's order worked out again (on its type: dayFirst). */
+    _applyDateOrder() {
+        if (!this.model) return;
+        this.model.columns.forEach((column, index) => {
+            if (!column.type?.date) return;
+            let dayFirst = this.dateOrder === 'day';
+            if (this.dateOrder !== 'month' && this.dateOrder !== 'day') {
+                const values = this.model.rows.map((_, row) => String(this.valueOf(this.cell(row, index)) ?? ''));
+                dayFirst = dateOrderOf(values) === 'day';
+            }
+            // The column's usual month, for a date misread by one digit (repairedDate).
+            const read = this.model.rows.map((_, row) => toIsoDate(String(this.valueOf(this.cell(row, index)) ?? ''), this._rowToday(row), { dayFirst }));
+            const usualMonth = usualMonthOf(read);
+            const same = (a, b) => (a?.year === b?.year && a?.month === b?.month);
+            if (Boolean(column.type.dayFirst) !== dayFirst || !same(column.type.usualMonth, usualMonth)) {
+                column.type = { ...column.type, dayFirst, usualMonth };
+            }
+        });
     }
 
     /**
@@ -2391,6 +2460,7 @@ export class ReviewTable {
      * from the columns that are register fields (column.field).
      */
     fieldRows() {
+        this._applyDateOrder();
         const fields = this.model.columns
             .map((column, index) => ({ column, index }))
             .filter(({ column }) => column.field && !column.noExport);
@@ -2405,6 +2475,7 @@ export class ReviewTable {
      * or null. A required value shown but not verified counts as missing.
      */
     firstFieldIssue() {
+        this._applyDateOrder();
         for (let row = 0; row < this.model.rows.length; row += 1) {
             for (let column = 0; column < this.model.columns.length; column += 1) {
                 const cell = this.cell(row, column);

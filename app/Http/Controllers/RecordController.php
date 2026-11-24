@@ -405,7 +405,7 @@ class RecordController extends Controller
             foreach ($records as $record) {
                 $row = [];
                 foreach ($columns as $column) {
-                    $row[] = $this->bookCsvCell($record->getAttribute($column));
+                    $row[] = RegistryFields::exportCell($column, $record->getAttribute($column));
                 }
                 fputcsv($handle, $row);
             }

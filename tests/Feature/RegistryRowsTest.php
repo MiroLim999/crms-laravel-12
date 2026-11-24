@@ -57,8 +57,8 @@ class RegistryRowsTest extends TestCase
 
         $josefina = BirthRecord::where('reg_no', '6')->sole();
         $this->assertTrue($josefina->late_registration);
-        // Dates are kept as written.
-        $this->assertSame('Jan, 07,1978', $josefina->date_of_reg);
+        // Dates are kept as YYYY-MM-DD, however they were written.
+        $this->assertSame('1978-01-07', $josefina->date_of_reg);
     }
 
     public function test_a_row_that_breaks_a_rule_saves_nothing_and_says_which_row(): void
@@ -79,6 +79,28 @@ class RegistryRowsTest extends TestCase
         $this->assertStringContainsString('Row 07: attendant must be one of', $messages);
         $this->assertDatabaseCount('records', 0);
         $this->assertDatabaseCount('birth_records', 0);
+    }
+
+    public function test_dates_are_saved_as_year_month_day_and_a_half_date_is_refused(): void
+    {
+        $user = User::factory()->superAdmin()->create();
+
+        $response = $this->actingAs($user)
+            ->postJson(route('documents.store'), $this->payload(DocumentType::Birth, [
+                $this->birthRow('4', 'Half Date', ['date_of_reg' => '3-1957']),
+            ]))
+            ->assertUnprocessable();
+        $this->assertStringContainsString('Row 04: date_of_reg is not a whole date (write it as YYYY-MM-DD)', implode(' ', $response->json('errors.registry_rows')));
+
+        $this->actingAs($user)
+            ->postJson(route('documents.store'), $this->payload(DocumentType::Birth, [
+                $this->birthRow('4', 'Whole Dates', ['date_of_reg' => '3-11-57', 'date_of_birth' => 'Sept. 21, 1950', 'parents_marriage_date' => '1949-6-2']),
+            ]))
+            ->assertCreated();
+        $row = BirthRecord::sole();
+        $this->assertSame('1957-03-11', $row->date_of_reg);
+        $this->assertSame('1950-09-21', $row->date_of_birth);
+        $this->assertSame('1949-06-02', $row->parents_marriage_date);
     }
 
     public function test_two_rows_with_one_register_number_save_nothing(): void

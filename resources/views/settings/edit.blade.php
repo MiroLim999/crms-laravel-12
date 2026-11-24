@@ -22,13 +22,6 @@
             text-align: center; font-family: var(--bs-font-monospace); font-size: 1.125rem; letter-spacing: .08em;
             background: var(--bs-tertiary-bg, transparent);
         }
-        /* Print: only the new codes. */
-        @media print {
-            body * { visibility: hidden; }
-            #recoveryCodePrint, #recoveryCodePrint * { visibility: visible; }
-            #recoveryCodePrint { position: absolute; inset: 0 auto auto 0; width: 100%; }
-            #recoveryCodePrint .d-print-none { display: none !important; }
-        }
     </style>
 @endpush
 
@@ -208,7 +201,8 @@
             <div id="recoveryCodePrint" class="mb-4">
                 <div class="alert alert-warning d-flex align-items-start gap-2 small d-print-none" role="alert">
                     <i class="icon-base bx bx-error mt-1" aria-hidden="true"></i>
-                    <span><strong>Write these down or print them now.</strong> They will not be shown again.</span>
+                    <span><strong>Write these down or print them now.</strong> They will not be shown again.
+                        A copy was downloaded to this computer (<em>CRMS recovery codes</em>): keep it somewhere safe.</span>
                 </div>
                 <h6 class="d-none d-print-block mb-3">CRMS recovery codes · {{ $user->email }} · {{ now()->format('M j, Y') }}</h6>
                 <ol class="recovery-codes list-unstyled mb-3" id="recoveryCodeList">
@@ -217,9 +211,16 @@
                         <li><span class="me-2">{{ substr($code, 0, 3) }}</span>{{ substr($code, 3) }}</li>
                     @endforeach
                 </ol>
-                <button type="button" class="btn btn-outline-secondary btn-sm d-print-none" onclick="window.print()">
-                    <i class="icon-base bx bx-printer me-1" aria-hidden="true"></i>Print codes
-                </button>
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm d-print-none" id="printRecoveryCodes"
+                            data-email="{{ $user->email }}" data-date="{{ now()->format('F j, Y') }}">
+                        <i class="icon-base bx bx-printer me-1" aria-hidden="true"></i>Print codes
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm d-print-none" id="downloadRecoveryCodes"
+                            data-auto="1" data-day="{{ now()->format('Y-m-d') }}">
+                        <i class="icon-base bx bx-download me-1" aria-hidden="true"></i>Download codes
+                    </button>
+                </div>
             </div>
         @endif
 
@@ -258,3 +259,84 @@
         </div>
     </x-card>
 @endsection
+
+@push('scripts')
+    <script>
+        // The new codes as a text file: downloaded by itself as soon as they are shown
+        // (they are shown once), and again with Download codes.
+        (() => {
+            const button = document.getElementById('downloadRecoveryCodes');
+            if (!button) return;
+            const print = document.getElementById('printRecoveryCodes');
+            const download = () => {
+                const codes = [...document.querySelectorAll('#recoveryCodeList li')].map((li) => li.textContent.replace(/\s+/g, ' ').trim());
+                if (codes.length === 0) return;
+                const text = [
+                    'CRMS recovery codes',
+                    `${print?.dataset.email ?? ''} - made ${print?.dataset.date ?? ''}`,
+                    '',
+                    ...codes.map((code, index) => `${String(index + 1).padStart(2, ' ')}.  ${code}`),
+                    '',
+                    'Forgot your password? On the sign-in page press "Forgot password?", enter your email',
+                    'and one of these codes, then choose a new password. Each code works once.',
+                    'Making a new set in Account Settings stops these from working. Keep this file safe.',
+                    '',
+                ].join('\r\n');
+                const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `CRMS recovery codes - ${button.dataset.day}.txt`;
+                document.body.append(link);
+                link.click();
+                link.remove();
+                window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+            };
+            button.addEventListener('click', download);
+            if (button.dataset.auto === '1') window.setTimeout(download, 300);
+        })();
+
+        // Print the codes alone, on one page: a small page of their own in a hidden
+        // frame (printing this page would carry every card along, over several pages).
+        document.getElementById('printRecoveryCodes')?.addEventListener('click', (event) => {
+            const button = event.currentTarget;
+            const codes = [...document.querySelectorAll('#recoveryCodeList li')].map((li) => li.textContent.replace(/\s+/g, ' ').trim());
+            if (codes.length === 0) return;
+            const escape = (text) => String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            const frame = document.createElement('iframe');
+            frame.setAttribute('aria-hidden', 'true');
+            frame.style.cssText = 'position:fixed;inline-size:0;block-size:0;border:0;inset:0 auto auto 0;visibility:hidden';
+            document.body.append(frame);
+            const doc = frame.contentDocument;
+            doc.open();
+            doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>CRMS recovery codes</title><style>
+                @page { size: A4 portrait; margin: 18mm; }
+                * { box-sizing: border-box; }
+                body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #222; }
+                h1 { margin: 0 0 4px; font-size: 20px; }
+                .meta { margin: 0 0 18px; font-size: 12px; color: #555; }
+                ol { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 16px; margin: 0 0 18px; padding: 0; list-style: none; counter-reset: code; }
+                li { counter-increment: code; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px dashed #999; border-radius: 6px;
+                     font: 600 20px/1.2 ui-monospace, Consolas, "Courier New", monospace; letter-spacing: .12em; break-inside: avoid; }
+                li::before { content: counter(code) "."; min-inline-size: 2ch; font: 400 12px system-ui, sans-serif; color: #777; letter-spacing: 0; }
+                .note { font-size: 12px; line-height: 1.5; color: #444; border-top: 1px solid #ddd; padding-top: 10px; }
+                .page { break-after: avoid; page-break-after: avoid; }
+            </style></head><body><div class="page">
+                <h1>CRMS recovery codes</h1>
+                <p class="meta">${escape(button.dataset.email)} &middot; made ${escape(button.dataset.date)}</p>
+                <ol>${codes.map((code) => `<li>${escape(code)}</li>`).join('')}</ol>
+                <p class="note">Forgot your password? On the sign-in page press <strong>Forgot password?</strong>, enter your email and one of
+                these codes, then choose a new password. Each code works once. Making a new set in Account Settings stops these from working.
+                Keep this page somewhere safe.</p>
+            </div></body></html>`);
+            doc.close();
+            const done = () => window.setTimeout(() => frame.remove(), 1000);
+            frame.contentWindow.addEventListener('afterprint', done);
+            window.setTimeout(() => {
+                frame.contentWindow.focus();
+                frame.contentWindow.print();
+                // Some browsers send no afterprint: the frame goes anyway after a while.
+                window.setTimeout(done, 60000);
+            }, 50);
+        });
+    </script>
+@endpush

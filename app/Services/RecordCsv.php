@@ -35,7 +35,7 @@ class RecordCsv
             return [
                 'header' => $keys,
                 'rows' => $register->map(fn ($row) => array_map(
-                    fn (string $key) => CsvCell::safe(RegistryFields::cell($row->getAttribute($key))),
+                    fn (string $key) => CsvCell::safe(RegistryFields::exportCell($key, $row->getAttribute($key))),
                     $keys,
                 ))->values()->all(),
             ];
