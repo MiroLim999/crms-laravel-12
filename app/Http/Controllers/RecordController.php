@@ -14,6 +14,7 @@ use App\Models\RecordPage;
 use App\Models\ScanBatch;
 use App\Models\ScanBatchPage;
 use App\Services\AuditLogger;
+use App\Support\RegistryFields;
 use App\Services\RecordCsv;
 use App\Services\RecordFieldGrouper;
 use App\Support\LocalTime;
@@ -383,7 +384,8 @@ class RecordController extends Controller
             ->orderBy('reg_no')
             ->get();
 
-        $columns = (new $model)->getFillable();
+        // The register's own columns, in the order its downloads always use.
+        $columns = RegistryFields::keys($validated['type']);
 
         app(AuditLogger::class)->log(
             'record.exported',
@@ -415,20 +417,12 @@ class RecordController extends Controller
     }
 
     /**
-     * One CSV cell's text: dates as Y-m-d, booleans as 1/0, null as empty.
+     * One CSV cell's text: true / false, plain digits, blank for none (as
+     * step 4's downloads write it).
      */
-    private function bookCsvCell(mixed $value): ?string
+    private function bookCsvCell(mixed $value): string
     {
-        if ($value === null) {
-            return null;
-        }
-        if ($value instanceof \Illuminate\Support\Carbon) {
-            return $value->format('Y-m-d');
-        }
-        if (is_bool($value)) {
-            return $value ? '1' : '0';
-        }
-        return (string) $value;
+        return RegistryFields::cell($value);
     }
 
     /**

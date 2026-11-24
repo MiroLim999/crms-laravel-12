@@ -20,7 +20,7 @@ class MarriageRecord extends Model
     protected $table = 'marriage_records';
 
     protected $fillable = [
-        'book_no', 'page_no', 'reg_no',
+        'civil_record_id', 'book_no', 'page_no', 'reg_no',
         'husband_name', 'wife_name', 'date_of_marriage',
         'husband_age', 'wife_age',
         'husb_nationality', 'wife_nationality',
@@ -33,7 +33,6 @@ class MarriageRecord extends Model
     protected function casts(): array
     {
         return [
-            'date_of_reg' => 'date',
             'husband_age' => 'integer',
             'wife_age' => 'integer',
             'late_registration' => 'boolean',

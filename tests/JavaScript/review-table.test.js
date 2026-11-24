@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    NOT_A_FIELD,
+    applyRegistry,
     buildReviewModel,
     cellProblem,
     clampSplit,
@@ -9,9 +11,12 @@ import {
     columnType,
     csvSafe,
     exportFileName,
+    fieldKeyOf,
     joinTables,
+    matchField,
     nextCellPosition,
     parseClipboard,
+    registryColumnType,
     ReviewTable,
     rowSpan,
     selectStart,
@@ -206,4 +211,121 @@ test('a value not ticked Verified is shown but left out of the download, as it i
     assert.deepEqual(table.exportTable(), [['Row', 'Name', 'Sex'], ['01', 'Ana Cruz', '']]);
     ticked.add(1);
     assert.deepEqual(table.exportTable(), [['Row', 'Name', 'Sex'], ['01', 'Ana Cruz', 'F']]);
+});
+
+// ------------------------------------------------- a register's own columns
+
+const BIRTH = [
+    { key: 'name', kind: 'text', required: true, manual: false },
+    { key: 'sex', kind: 'text', required: false, manual: false },
+    { key: 'reg_no', kind: 'text', required: true, manual: false },
+    { key: 'mother_age', kind: 'integer', required: false, manual: false },
+    { key: 'attendant', kind: 'choice', required: false, manual: true, options: ['PHYSICIAN', 'MIDWIFE'] },
+    { key: 'late_registration', kind: 'boolean', required: false, manual: true, options: ['true', 'false'], default: 'false' },
+];
+
+const scanned = () => buildReviewModel({
+    pages: [{ number: 1, columns: [{ name: 'Column 1' }, { name: 'Name' }, { name: 'Column 3' }] }],
+    people: [{ id: 'person-1', label: '01', fields: [
+        { side: 0, column: 'Column 1', ref: 0 }, { side: 0, column: 'Name', ref: 1 }, { side: 0, column: 'Column 3', ref: 2 },
+    ] }],
+});
+
+test('the table is laid out as the register: its fields in order, a column named like one fills it', () => {
+    const model = applyRegistry(scanned(), BIRTH);
+    assert.deepEqual(model.columns.map((column) => column.header), [
+        'name', 'sex', 'reg_no', 'mother_age', 'attendant', 'late_registration',
+        'Column 1 · not saved', 'Column 3 · not saved',
+    ]);
+    // "Name" fills name and keeps its key, so what was typed in it stays.
+    assert.equal(model.columns[0].key, '0|name');
+    assert.deepEqual(model.rows[0].cells['0|name'].refs, [1]);
+    // A field no column fills is typed in.
+    assert.equal(model.columns[1].key, 'm|sex');
+    assert.deepEqual(model.rows[0].cells['m|sex'].refs, []);
+    assert.ok(model.columns.slice(6).every((column) => column.noExport));
+});
+
+test('a saved choice of columns is used as it is, and a manual field is never filled from the scan', () => {
+    const map = { 'column 1': 'reg_no', 'column 3': 'attendant', name: 'name' };
+    const model = applyRegistry(scanned(), BIRTH, () => map);
+    const byField = Object.fromEntries(model.columns.filter((column) => column.field).map((column) => [column.field, column.key]));
+    assert.equal(byField.reg_no, '0|column 1');
+    assert.equal(byField.name, '0|name');
+    assert.equal(byField.attendant, 'm|attendant');
+    assert.equal(fieldKeyOf('  Name of Mother '), 'name_of_mother');
+});
+
+test('a register field checks its value: required, digits, fixed values; a blank optional is fine', () => {
+    const [name, sex, , age, attendant] = BIRTH.map(registryColumnType);
+    assert.equal(cellProblem('', name).kind, 'empty');
+    assert.equal(cellProblem('', sex), null);
+    assert.equal(cellProblem('27', age), null);
+    assert.equal(cellProblem('27 yrs', age).kind, 'invalid');
+    assert.equal(cellProblem('MIDWIFE', attendant), null);
+    assert.equal(cellProblem('Doctor', attendant).kind, 'invalid');
+    assert.equal(selectStart('phy', attendant.options), 'PHYSICIAN');
+});
+
+test('a register downloads with its field names and no Row column, and saves each row by field', () => {
+    const values = ['5', 'Ariel Villanujan', 'x'];
+    const typed = new Map([['person-1|m|attendant', 'MIDWIFE']]);
+    const defaults = { late_registration: 'false' };
+    const table = new ReviewTable({
+        container: { addEventListener() {} },
+        valueOf: (cell) => (cell.refs.length > 0
+            ? cell.refs.map((index) => values[index]).join(' ')
+            : typed.get(`${cell.row.id}|${cell.column.key}`) ?? defaults[cell.column.field] ?? ''),
+        onChange: () => {},
+    });
+    table.model = applyRegistry(scanned(), BIRTH, () => ({ 'column 1': 'reg_no', name: 'name' }));
+    assert.deepEqual(table.exportTable(), [
+        ['name', 'sex', 'reg_no', 'mother_age', 'attendant', 'late_registration'],
+        ['Ariel Villanujan', '', '5', '', 'MIDWIFE', 'false'],
+    ]);
+    assert.deepEqual(table.fieldRows(), [{ row: '01', values: {
+        name: 'Ariel Villanujan', sex: '', reg_no: '5', mother_age: '', attendant: 'MIDWIFE', late_registration: 'false',
+    } }]);
+    assert.equal(table.firstFieldIssue(), null);
+
+    values[0] = '';
+    assert.match(table.firstFieldIssue().message, /^Row 01, reg_no: Required/);
+});
+
+test('a column named like a field fills it, whatever the order, spelling or case of its words', () => {
+    const fields = [
+        { key: 'name_of_mother' }, { key: 'husb_nationality' }, { key: 'reg_no' }, { key: 'date_of_birth' }, { key: 'name' },
+    ];
+    assert.equal(matchField('Name of Mother', fields), 'name_of_mother');
+    assert.equal(matchField("Mother's Name", fields), 'name_of_mother');
+    assert.equal(matchField('name_of_mother', fields), 'name_of_mother');
+    assert.equal(matchField('HUSBAND NATIONALITY', fields), 'husb_nationality');
+    assert.equal(matchField('Registration Number', fields), 'reg_no');
+    assert.equal(matchField('Date of Birth', fields), 'date_of_birth');
+    assert.equal(matchField('Name', fields), 'name');
+    assert.equal(matchField('Column 1', fields), null);
+    assert.equal(matchField('Mother', fields), null);
+});
+
+test('names still match once some columns were chosen; a choice wins, and "Type by hand" stays', () => {
+    const model = buildReviewModel({
+        pages: [{ number: 1, columns: [{ name: 'Column 1' }, { name: 'Name' }, { name: 'Sex' }] }],
+        people: [{ id: 'person-1', label: '01', fields: [] }],
+    });
+    const byField = (map) => Object.fromEntries(applyRegistry(model, BIRTH, () => map).columns
+        .filter((column) => column.field).map((column) => [column.field, column.key]));
+
+    // Column 1 chosen for reg_no: Name and Sex still fill name and sex by their names.
+    let fields = byField({ 'column 1': 'reg_no' });
+    assert.equal(fields.reg_no, '0|column 1');
+    assert.equal(fields.name, '0|name');
+    assert.equal(fields.sex, '0|sex');
+
+    // Column 1 chosen for name: it wins over the column named Name.
+    fields = byField({ 'column 1': 'name' });
+    assert.equal(fields.name, '0|column 1');
+
+    // "Type by hand" for sex keeps the column named Sex apart.
+    fields = byField({ sex: NOT_A_FIELD });
+    assert.equal(fields.sex, 'm|sex');
 });

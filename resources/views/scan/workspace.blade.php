@@ -292,9 +292,9 @@
                     <div class="card-body p-3">
                         <div class="d-flex align-items-center justify-content-between mb-2">
                             <span class="small fw-semibold text-uppercase text-body-secondary d-flex align-items-center gap-1" style="font-size: 0.75rem; letter-spacing: 0.04em;">
-                                <i class="icon-base bx bx-book-bookmark text-primary"></i> Document Reference
+                                <i class="icon-base bx bx-book-open text-primary" aria-hidden="true"></i> Document Reference
                             </span>
-                            <span class="badge bg-label-success d-none" id="docReferenceIdentifiedBadge" style="font-size: 0.7rem;">Identified</span>
+                            <span class="badge bg-label-danger d-none" id="docReferenceIdentifiedBadge" style="font-size: 0.7rem;">Already saved</span>
                         </div>
                         <div class="row g-2">
                             <div class="col-6">
@@ -305,6 +305,9 @@
                                        class="form-control form-control-sm"
                                        id="bookNumberInput"
                                        name="book_no_input"
+                                       inputmode="numeric"
+                                       pattern="[0-9]*"
+                                       maxlength="9"
                                        placeholder="e.g. 7"
                                        list="existingBooksList"
                                        autocomplete="off"
@@ -323,7 +326,11 @@
                                 <input type="text"
                                        class="form-control form-control-sm"
                                        id="pageNumberInput"
+                                       aria-describedby="pageNumberError documentIdentifyText"
                                        name="page_no_input"
+                                       inputmode="numeric"
+                                       pattern="[0-9]*"
+                                       maxlength="9"
                                        placeholder="e.g. 83"
                                        autocomplete="off"
                                        required>
@@ -939,6 +946,25 @@
                         </div>
                         <div class="review-pane__tools">
                             @include('records.partials.review-shortcuts')
+                            @if ($registry)
+                                {{-- Which scanned column fills each register field (kept for the layout). --}}
+                                <div class="dropdown" id="reviewFieldMap">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="reviewFieldMapBtn"
+                                            data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                                        <i class="icon-base bx bx-list-check icon-sm me-1" aria-hidden="true"></i>Columns → fields
+                                    </button>
+                                    <div class="dropdown-menu dropdown-menu-end p-3 review-field-map" aria-labelledby="reviewFieldMapBtn">
+                                        <p class="small text-muted mb-2">
+                                            Which scanned column fills each field of <strong>{{ $registry['type'] }}_records</strong>.
+                                            Kept for this layout: the next document starts the same way.
+                                            A column named like a field fills it by itself ("Name of Mother",
+                                            "Mother's Name" → name_of_mother): name the columns in Template Builder.
+                                        </p>
+                                        <div class="review-field-map__rows" id="reviewFieldMapRows"></div>
+                                        <p class="small text-muted mt-2 mb-0" id="reviewFieldMapManual"></p>
+                                    </div>
+                                </div>
+                            @endif
                             @include('records.partials.review-add-column')
                             <div class="dropdown">
                                 <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="reviewDownloadBtn"
@@ -1585,6 +1611,8 @@
         import { RowLineLayer, rowKey } from '{{ Vite::asset('resources/js/row-lines.js') }}';
         import { valueProblem } from '{{ Vite::asset('resources/js/value-types.js') }}';
         import {
+            NOT_A_FIELD,
+            applyRegistry,
             attachAddColumn,
             attachSplit,
             buildReviewModel,
@@ -1637,6 +1665,12 @@
             templateId: @json($template->getKey()),
             // A spread's page 2 laid out differently: its own template, boxes and row lines (or null).
             pageTwo: @json($pageTwo ?? null),
+            // Step 4: the register's columns (birth_records, …; null for a type without
+            // one), which layout column fills which field (by layout id), and where a
+            // changed choice is saved.
+            registry: @json($registry ?? null),
+            fieldMaps: @json((object) ($fieldMaps ?? [])),
+            fieldMapUrl: @json(route('documents.field-map', ['template' => '__TEMPLATE__'])),
             groupingMode: @json(
                 $template->grouping_mode instanceof \BackedEnum
                 ? $template->grouping_mode->value
@@ -1776,6 +1810,35 @@
         })();
         const pageReferences = new Map();
         let identifyDebounceTimer = null;
+        // The book and page last looked up, and what was found: { book, page, taken, message }.
+        // A page saved already (or used by another record of this batch) cannot be saved again.
+        let referenceLookup = null;
+
+        /** Digits only: a book or page number is a whole number. */
+        const digitsOnly = (value) => String(value ?? '').replace(/\D+/g, '').slice(0, 9);
+
+        /** Another record of this batch with the same book and page, or null. */
+        function batchRecordWithReference(bookNo, pageNo) {
+            if (!batchState.active || !bookNo || !pageNo) return null;
+            const current = batchState.items[batchState.currentIndex];
+            const mine = current ? recordOf(current).members : [];
+            return batchState.items.find((item) => !mine.includes(item)
+                && item.status !== 'rejected'
+                && String(item.bookNo ?? '') === bookNo
+                && String(item.pageNoRef ?? '') === pageNo) ?? null;
+        }
+
+        /** Why this book and page cannot be saved, or '' (the last lookup, and this batch's other records). */
+        function referenceTakenMessage(bookNo = getBookNumber(), pageNo = getPageNumber()) {
+            const other = batchRecordWithReference(bookNo, pageNo);
+            if (other) {
+                return `Book ${bookNo}, page ${pageNo} is already used by ${other.sourceName ?? other.name ?? 'another record'} in this batch. Enter another page number.`;
+            }
+            if (referenceLookup?.taken && referenceLookup.book === bookNo && referenceLookup.page === pageNo) {
+                return referenceLookup.message;
+            }
+            return '';
+        }
 
         const getBookNumber = () => el('bookNumberInput')?.value?.trim() || '';
         const getPageNumber = () => el('pageNumberInput')?.value?.trim() || '';
@@ -1824,6 +1887,23 @@
                     ? 'Book number and page number are required before saving.'
                     : (!bookVal ? 'Book number is required before saving.' : 'Page number is required before saving.');
                 showOcrError(msg);
+                return valid;
+            }
+
+            // The same register page is never saved twice.
+            const taken = referenceTakenMessage(bookVal, pageVal);
+            if (taken) {
+                if (pageInput) {
+                    pageInput.classList.add('is-invalid');
+                    pageInput.focus();
+                }
+                if (pageError) {
+                    pageError.textContent = 'This page is already saved.';
+                    pageError.style.display = 'block';
+                }
+                showOcrError(taken);
+                if (reviewing) showValidationSubmitError(taken);
+                return false;
             }
             return valid;
         }
@@ -1839,8 +1919,15 @@
             if (!noticeEl || !textEl) return;
 
             if (!bookNo || !pageNo) {
+                referenceLookup = null;
                 noticeEl.classList.add('d-none');
                 badgeEl?.classList.add('d-none');
+                return;
+            }
+
+            // Used by another record of this batch: said at once, without asking the server.
+            if (batchRecordWithReference(bookNo, pageNo)) {
+                showReferenceNotice('taken', referenceTakenMessage(bookNo, pageNo));
                 return;
             }
 
@@ -1860,30 +1947,49 @@
                     });
                     if (!res.ok) return;
                     const data = await res.json();
+                    // Typed on meanwhile: this answer is about another page.
+                    if (getBookNumber() !== bookNo || getPageNumber() !== pageNo) return;
 
-                    noticeEl.classList.remove('d-none');
-                    textEl.textContent = data.message;
                     if (data.identified) {
-                        badgeEl?.classList.remove('d-none');
-                        badgeEl?.classList.remove('bg-label-info');
-                        badgeEl?.classList.add('bg-label-success');
-                        if (iconEl) {
-                            iconEl.className = 'icon-base bx bx-check-circle text-success mt-1';
-                        }
-                        noticeEl.style.backgroundColor = 'rgba(113, 221, 55, 0.08)';
-                        noticeEl.style.borderColor = 'rgba(113, 221, 55, 0.3)';
+                        const record = data.saved_record ? ` (Record #${data.saved_record.id})` : '';
+                        const names = (data.entries ?? []).slice(0, 2).map((entry) => entry.label).join(', ');
+                        const more = (data.count ?? 0) > 2 ? ` and ${data.count - 2} more` : '';
+                        const message = `Book ${bookNo}, page ${pageNo} is already saved${record}`
+                            + (names ? `: ${names}${more}` : '') + '. Enter another page number.';
+                        referenceLookup = { book: bookNo, page: pageNo, taken: true, message };
+                        showReferenceNotice('taken', message);
                     } else {
-                        badgeEl?.classList.add('d-none');
-                        if (iconEl) {
-                            iconEl.className = 'icon-base bx bx-info-circle text-muted mt-1';
-                        }
-                        noticeEl.style.backgroundColor = 'var(--bs-light, #f8f9fa)';
-                        noticeEl.style.borderColor = 'var(--bs-border-color, #e9ecef)';
+                        referenceLookup = { book: bookNo, page: pageNo, taken: false, message: '' };
+                        showReferenceNotice('new', data.message);
                     }
                 } catch {
                     // Ignore network error
                 }
             }, 300);
+        }
+
+        /** The notice under Book / Page: 'taken' (red: the page is saved already) or 'new'. */
+        function showReferenceNotice(kind, message) {
+            const noticeEl = el('documentIdentifyNotice');
+            const textEl = el('documentIdentifyText');
+            const iconEl = el('documentIdentifyIcon');
+            const badgeEl = el('docReferenceIdentifiedBadge');
+            const pageInput = el('pageNumberInput');
+            if (!noticeEl || !textEl) return;
+            const taken = kind === 'taken';
+            noticeEl.classList.remove('d-none');
+            noticeEl.setAttribute('role', taken ? 'alert' : 'status');
+            textEl.textContent = message;
+            badgeEl?.classList.toggle('d-none', !taken);
+            pageInput?.classList.toggle('is-invalid', taken);
+            if (iconEl) {
+                iconEl.className = taken
+                    ? 'icon-base bx bx-error-circle text-danger mt-1'
+                    : 'icon-base bx bx-info-circle text-muted mt-1';
+            }
+            noticeEl.style.backgroundColor = taken ? 'rgba(var(--bs-danger-rgb), .08)' : 'var(--bs-light, #f8f9fa)';
+            noticeEl.style.borderColor = taken ? 'rgba(var(--bs-danger-rgb), .35)' : 'var(--bs-border-color, #e9ecef)';
+            noticeEl.style.color = taken ? 'var(--bs-danger-text-emphasis)' : '';
         }
 
         function syncReferenceInputsForCurrentPage() {
@@ -1963,14 +2069,30 @@
         }
 
         el('bookNumberInput')?.addEventListener('input', () => {
-            el('bookNumberInput').classList.remove('is-invalid');
+            const input = el('bookNumberInput');
+            // Digits only (typed or pasted): anything else is dropped as it comes.
+            const digits = digitsOnly(input.value);
+            if (digits !== input.value) {
+                const at = Math.max(0, (input.selectionStart ?? digits.length) - (input.value.length - digits.length));
+                input.value = digits;
+                input.setSelectionRange(at, at);
+            }
+            input.classList.remove('is-invalid');
             if (el('bookNumberError')) el('bookNumberError').style.display = 'none';
             saveReferenceInputsForCurrentPage();
             checkDocumentIdentification();
         });
 
         el('pageNumberInput')?.addEventListener('input', () => {
-            el('pageNumberInput').classList.remove('is-invalid');
+            const input = el('pageNumberInput');
+            // Digits only (typed or pasted): anything else is dropped as it comes.
+            const digits = digitsOnly(input.value);
+            if (digits !== input.value) {
+                const at = Math.max(0, (input.selectionStart ?? digits.length) - (input.value.length - digits.length));
+                input.value = digits;
+                input.setSelectionRange(at, at);
+            }
+            input.classList.remove('is-invalid');
             if (el('pageNumberError')) el('pageNumberError').style.display = 'none';
             saveReferenceInputsForCurrentPage();
             checkDocumentIdentification();
@@ -13818,10 +13940,142 @@
             return { pages, people, details };
         }
 
-        /** A cell's value: its Verify fields' values (two written lines join), or what was typed in an empty cell. */
+        /**
+         * A cell's value: its Verify fields' values (two written lines join), or what was
+         * typed in an empty cell, or (nothing typed) a register field's starting value.
+         */
         function reviewValue(cell) {
-            if (cell.refs.length === 0) return cell.column.detail ? '' : reviewExtras.get(extraKey(cell)) ?? '';
+            if (cell.refs.length === 0) {
+                if (cell.column.detail) return '';
+                return reviewExtras.get(extraKey(cell)) ?? registryDefault(cell.column);
+            }
             return cell.refs.map(verifyValueOf).filter((value) => value.trim() !== '').join(' ');
+        }
+
+        // ------------------------------------------------ step 4: the register's columns
+        // For a type with a register table (birth_records, …), step 4 shows the
+        // register's own columns in its order (see applyRegistry). A scanned
+        // column fills a field as chosen in "Columns → fields" (kept per layout);
+        // any other field is typed in. Save sends each row for that table.
+        const registry = config.registry;
+        const fieldMaps = { ...(config.fieldMaps ?? {}) };
+        // The table as read (scanned columns), before it is laid out as the register's.
+        let reviewBaseModel = null;
+
+        /** The layout a column is on (page 2 of a spread may have its own). */
+        const templateOfSide = (side) => docEntries()[side]?.layout?.templateId ?? config.templateId;
+
+        /** That layout's saved { column name: field }, or null when it has none yet. */
+        function savedFieldMap(column) {
+            const map = fieldMaps[templateOfSide(column.side)];
+            return map && Object.keys(map).length > 0 ? map : null;
+        }
+
+        /** The scanned table laid out as the register's (or as it is, for a type with none). */
+        function reviewModelFrom(base) {
+            return registry ? applyRegistry(base, registry.fields, savedFieldMap) : base;
+        }
+
+        /**
+         * What a register field's cell holds until something is typed in it: the
+         * book and page entered in step 1, or the field's default (late_registration: false).
+         */
+        function registryDefault(column) {
+            if (!registry || !column.field) return '';
+            const item = batchState.active ? batchState.items[batchState.currentIndex] : null;
+            if (column.field === 'book_no') return String(item?.bookNo || getBookNumber() || '');
+            if (column.field === 'page_no') return String(item?.pageNoRef || getPageNumber() || '');
+            return registry.fields.find((field) => field.key === column.field)?.default ?? '';
+        }
+
+        /** "Columns → fields": which scanned column fills each field (manual fields are listed apart). */
+        function paintFieldMap() {
+            const rows = el('reviewFieldMapRows');
+            if (!rows || !registry || !reviewBaseModel) return;
+            const scanned = reviewBaseModel.columns;
+            rows.replaceChildren(...registry.fields.filter((field) => !field.manual).map((field) => {
+                const current = reviewModel?.columns.find((column) => column.field === field.key && !column.manual);
+                const id = `reviewFieldMap-${field.key}`;
+                const row = document.createElement('div');
+                row.className = 'review-field-map__row';
+                const label = document.createElement('label');
+                label.className = 'form-label small mb-0 text-truncate';
+                label.htmlFor = id;
+                label.textContent = field.key;
+                if (field.required) {
+                    const star = document.createElement('span');
+                    star.className = 'text-danger ms-1';
+                    star.textContent = '*';
+                    star.title = 'Required in every row';
+                    label.append(star);
+                }
+                const select = document.createElement('select');
+                select.className = 'form-select form-select-sm';
+                select.id = id;
+                select.append(new Option('Type by hand', ''));
+                scanned.forEach((column) => select.append(new Option(column.header, column.key, false, column.key === current?.key)));
+                select.addEventListener('change', () => setFieldSource(field.key, select.value));
+                row.append(label, select);
+                return row;
+            }));
+            const manual = registry.fields.filter((field) => field.manual).map((field) => field.key);
+            el('reviewFieldMapManual').textContent = manual.length > 0 ? `Always typed by hand: ${manual.join(', ')}.` : '';
+        }
+
+        /**
+         * `field` is now filled from the scanned column `columnKey` ('' : typed by hand).
+         * Kept for each layout involved (the next document read with it starts so),
+         * and the table is drawn again.
+         */
+        async function setFieldSource(field, columnKey) {
+            if (!registry || !reviewBaseModel || !reviewTable) return;
+            reviewTable.commit();
+            // Each layout's saved choices (a column named like a field fills it without one),
+            // changed for this field: the chosen column fills it; "Type by hand" keeps the
+            // column that filled it apart, so its name does not fill the field again.
+            const sides = new Set(reviewBaseModel.columns.map((column) => column.side));
+            const maps = new Map([...sides].map((side) => [templateOfSide(side), { ...(fieldMaps[templateOfSide(side)] ?? {}) }]));
+            const before = reviewModel.columns.find((column) => column.field === field && !column.manual);
+            maps.forEach((map) => Object.keys(map).forEach((name) => {
+                if (map[name] === field) delete map[name];
+            }));
+            const source = reviewBaseModel.columns.find((column) => column.key === columnKey);
+            if (source) {
+                maps.get(templateOfSide(source.side))[nameKey(source.name)] = field;
+            } else if (before) {
+                maps.get(templateOfSide(before.side))[nameKey(before.name)] = NOT_A_FIELD;
+            }
+            maps.forEach((map, templateId) => { fieldMaps[templateId] = map; });
+
+            reviewModel = reviewModelFrom(reviewBaseModel);
+            reviewTable.render(reviewModel);
+            paintFieldMap();
+            updateVerificationSummary();
+
+            try {
+                await Promise.all([...maps].map(async ([templateId, map]) => {
+                    const response = await fetch(config.fieldMapUrl.replace('__TEMPLATE__', String(templateId)), {
+                        method: 'PUT',
+                        credentials: 'same-origin',
+                        headers: {
+                            Accept: 'application/json',
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': config.csrf,
+                            'X-Requested-With': 'XMLHttpRequest',
+                        },
+                        body: JSON.stringify({ map }),
+                    });
+                    if (!response.ok) throw new Error(`The server answered ${response.status}.`);
+                }));
+            } catch (error) {
+                console.error('Saving the column choices failed:', error);
+                showValidationSubmitError('The column choice is used for this document, but could not be kept for the next one. '
+                    + 'Check your connection and choose it again.');
+            }
+        }
+
+        if (registry) {
+            el('reviewFieldMap')?.addEventListener('show.bs.dropdown', () => paintFieldMap());
         }
 
         /** Put a value in a Verify field and tick it (an empty value is left unticked). */
@@ -13855,7 +14109,8 @@
         function reviewChange(cell, value) {
             const text = value.trim();
             if (cell.refs.length === 0) {
-                if (text === '') reviewExtras.delete(extraKey(cell));
+                // A field with a starting value (book, page, false) emptied on purpose stays empty.
+                if (text === '' && registryDefault(cell.column) === '') reviewExtras.delete(extraKey(cell));
                 else reviewExtras.set(extraKey(cell), text);
             } else {
                 // Two written lines in one cell: the whole value goes in the first.
@@ -13908,8 +14163,10 @@
             }).length, 0);
             // Rows left out: nothing on them ticked Verified (see reviewInput).
             const hiddenRows = validationGroups.filter((group) => group.kind === 'person').length - people;
+            // A register's table: its own columns (scanned columns no field takes are not saved).
+            const savedColumns = reviewModel.columns.filter((column) => !column.noExport).length;
             el('reviewPaneSummary').textContent = `${people} ${people === 1 ? 'person' : 'people'} · `
-                + `${reviewModel.columns.length} column${reviewModel.columns.length === 1 ? '' : 's'}`
+                + `${savedColumns} column${savedColumns === 1 ? '' : 's'}`
                 + (pages > 1 ? ` · ${pages} pages` : '')
                 + (hiddenRows > 0 ? ` · ${hiddenRows} row${hiddenRows === 1 ? '' : 's'} not verified (left out)` : '')
                 + (unverified > 0 ? ` · ${unverified} not verified (greyed, not saved)` : '');
@@ -13998,7 +14255,8 @@
             // Drawing a deleted field again, unsaved: left as it is (out of the record).
             stopRedrawField();
 
-            reviewModel = buildReviewModel(reviewInput());
+            reviewBaseModel = buildReviewModel(reviewInput());
+            reviewModel = reviewModelFrom(reviewBaseModel);
             // A cell typed into before that has a field now (Add missed field): the field wins.
             reviewModel.rows.forEach((row) => reviewModel.columns.forEach((column) => {
                 if ((row.cells[column.key]?.refs.length ?? 0) > 0) reviewExtras.delete(`${row.id}|${column.key}`);
@@ -14384,6 +14642,18 @@
             lastSubmitChoices = { allowMissing, allowDuplicate, finalBatchSave };
 
             clearValidationSubmitError();
+
+            // A register's table: every row must be one its table can take (register
+            // number, book, page and names filled; digits; one of the fixed values).
+            if (registry && reviewing && reviewTable) {
+                reviewTable.commit();
+                const issue = reviewTable.firstFieldIssue();
+                if (issue) {
+                    showValidationSubmitError(issue.message);
+                    reviewTable.select(issue.row, issue.column, { locate: false });
+                    return false;
+                }
+            }
             const rows = [...el('verifyRows').querySelectorAll('.validation-field')];
             rows.forEach((row) => clearValidationFieldError(Number(row.dataset.fieldIndex)));
 
@@ -14482,6 +14752,10 @@
             const pageNoToSend = (currentBatchItem && currentBatchItem.pageNoRef) ? currentBatchItem.pageNoRef : getPageNumber();
             data.set('book_no', bookNoToSend);
             data.set('page_no', pageNoToSend);
+            // Each row of the table, saved as one row of the register's table (birth_records, …).
+            if (registry && reviewing && reviewTable) {
+                data.set('registry_rows_json', JSON.stringify(reviewTable.fieldRows()));
+            }
 
             const personGroups = validationGroups.filter((candidate) => candidate.kind === 'person');
             const submittedFields = verifiedIndexes.map((sourceIndex) => {

@@ -21,6 +21,7 @@ use App\Services\AuditLogger;
 use App\Services\Ocr\OcrClient;
 use App\Services\Ocr\ScanModelChoice;
 use App\Support\Limits;
+use App\Support\RegistryFields;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -165,6 +166,13 @@ class DocumentScanController extends Controller
             // Batches left open, to resume (Batch File Upload).
             'openBatches' => ScanBatchController::openBatchesFor((int) $request->user()->getKey()),
             'existingBooks' => $this->existingBooksForType($type->key),
+            // Step 4: the register's columns (null: a type with no register table), and
+            // which layout column fills which of them, by layout id.
+            'registry' => RegistryFields::forWorkspace($type->key),
+            'fieldMaps' => DocumentTemplate::whereKey(array_filter([$template->getKey(), $template->page_two_template_id]))
+                ->pluck('field_map', 'id')
+                ->map(fn ($map) => is_array($map) ? $map : (object) [])
+                ->all(),
         ]);
     }
 
@@ -210,12 +218,16 @@ class DocumentScanController extends Controller
             'book_no' => [
                 app()->runningUnitTests() && ! $request->has('book_no') ? 'nullable' : 'required',
                 'string',
-                'max:64',
+                'max:9',
+                // A book or page number is a whole number.
+                'regex:/^\d+$/',
             ],
             'page_no' => [
                 app()->runningUnitTests() && ! $request->has('page_no') ? 'nullable' : 'required',
                 'string',
-                'max:64',
+                'max:9',
+                // A book or page number is a whole number.
+                'regex:/^\d+$/',
             ],
             'ocr_model_key' => [
                 'required',
@@ -280,12 +292,19 @@ class DocumentScanController extends Controller
         ], [
             'scan.mimes' => 'The scan must be a PDF, PNG, JPG, WEBP or BMP file.',
             'source_hash.regex' => 'The file fingerprint is not valid. Open the file again.',
+            'book_no.regex' => 'The book number must be a whole number (digits only).',
+            'page_no.regex' => 'The page number must be a whole number (digits only).',
         ]);
 
         $source = $this->sourceOf($request, $validated);
 
         $templateId = (int) $validated['document_template_id'];
         $documentType = DocumentTypeDefinition::where('key', (string) $validated['doc_type'])->firstOrFail();
+        // Step 4's rows for the register table (birth_records, …), checked before anything is saved.
+        $registryRows = $this->registryRows($request, $documentType->key);
+        if ($registryRows !== null) {
+            $this->refuseSavedPages($documentType->key, $registryRows);
+        }
         $template = DocumentTemplate::with(['documentTypeDefinition', 'fields'])->find($templateId);
 
         // Archiving only stops new scans from starting (create/workspace). A scan
@@ -420,7 +439,7 @@ class DocumentScanController extends Controller
         $gridChanges = $this->gridChanges($template, $page);
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $savedBefore, $extraPages, $pageTwoTemplate, &$copiedFiles) {
+            $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $savedBefore, $extraPages, $pageTwoTemplate, $registryRows, &$copiedFiles) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -524,9 +543,12 @@ class DocumentScanController extends Controller
 
                 $record->load('fields');
 
-                // Save the book/page reference into the typed registry table
-                // (birth_records, death_records, or marriage_records).
-                if (isset($validated['book_no'], $validated['page_no'])) {
+                // Step 4's rows, each one row of the register table (birth_records,
+                // death_records or marriage_records). Without them (saved from
+                // Verify), the book/page reference is only linked as before.
+                if ($registryRows !== null) {
+                    $this->saveRegistryRows($record, $documentType->key, $registryRows);
+                } elseif (isset($validated['book_no'], $validated['page_no'])) {
                     $this->saveToTypedTable($record, $validated['book_no'], $validated['page_no']);
                 }
 
@@ -881,6 +903,122 @@ class DocumentScanController extends Controller
                 ->whereNull('civil_record_id')
                 ->update(['civil_record_id' => $record->getKey()]);
         }
+    }
+
+    /**
+     * Step 4's rows (`registry_rows_json`: [{row: "06", values: {field: value}}])
+     * for a type with a register table, checked field by field; null when none
+     * were sent. A row that breaks a rule stops the save with "Row 06: …".
+     *
+     * @return list<array<string, mixed>>|null
+     */
+    private function registryRows(Request $request, string $type): ?array
+    {
+        if (! $request->filled('registry_rows_json') || RegistryFields::model($type) === null) {
+            return null;
+        }
+
+        try {
+            $rows = json_decode((string) $request->input('registry_rows_json'), true, 64, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw ValidationException::withMessages(['registry_rows' => 'The table could not be read. Open Review & Export again and save.']);
+        }
+        if (! is_array($rows) || ! array_is_list($rows) || count($rows) > Limits::MAX_FIELDS) {
+            throw ValidationException::withMessages(['registry_rows' => 'The table is not a list of rows.']);
+        }
+
+        $messages = [];
+        $clean = [];
+        foreach ($rows as $index => $row) {
+            $label = is_array($row) && is_scalar($row['row'] ?? null) ? (string) $row['row'] : (string) ($index + 1);
+            $values = is_array($row['values'] ?? null) ? $row['values'] : [];
+            $values = array_map(fn ($value) => is_scalar($value) ? (string) $value : '', $values);
+            foreach (RegistryFields::problems($type, $values) as $field => $problem) {
+                $messages[] = "Row {$label}: {$field} {$problem}.";
+            }
+            $clean[] = RegistryFields::attributes($type, $values);
+        }
+        if ($messages !== []) {
+            throw ValidationException::withMessages(['registry_rows' => $messages]);
+        }
+
+        return $clean;
+    }
+
+    /**
+     * A register page is saved once: a book and page that already have rows in
+     * the type's register table stops the save, saying which record has them.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function refuseSavedPages(string $type, array $rows): void
+    {
+        $model = RegistryFields::model($type);
+        $pages = collect($rows)
+            ->map(fn (array $row) => ['book_no' => (string) $row['book_no'], 'page_no' => (string) $row['page_no']])
+            ->unique(fn (array $page) => $page['book_no'] . '|' . $page['page_no']);
+
+        foreach ($pages as $page) {
+            $saved = $model::where('book_no', $page['book_no'])->where('page_no', $page['page_no'])->first();
+            if ($saved === null) {
+                continue;
+            }
+            $record = $saved->civil_record_id ? " (Record #{$saved->civil_record_id})" : '';
+            throw ValidationException::withMessages([
+                'page_no' => "Book {$page['book_no']}, page {$page['page_no']} is already saved{$record}. Enter another page number.",
+            ]);
+        }
+    }
+
+    /**
+     * Each row into the type's register table, linked to the saved record. A
+     * row whose book, page and register number are there already (the page
+     * saved again) is replaced, so a register entry is never there twice.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function saveRegistryRows(CivilRecord $record, string $type, array $rows): void
+    {
+        $model = RegistryFields::model($type);
+        foreach ($rows as $attributes) {
+            $model::updateOrCreate(
+                [
+                    'book_no' => $attributes['book_no'],
+                    'page_no' => $attributes['page_no'],
+                    'reg_no' => $attributes['reg_no'],
+                ],
+                [...$attributes, 'civil_record_id' => $record->getKey()],
+            );
+        }
+    }
+
+    /**
+     * Step 4: remember which layout column fills which register field, for the
+     * next document read with that layout. `map`: { "column name": "field" or
+     * "-" (fills none) }. A column not in it fills the field named like it.
+     */
+    public function saveFieldMap(Request $request, DocumentTemplate $template): JsonResponse
+    {
+        $type = $template->documentTypeDefinition?->key ?? '';
+        $fields = RegistryFields::keys($type);
+        abort_if($fields === [], 422, 'This document type has no register table.');
+
+        $validated = $request->validate([
+            'map' => ['present', 'array', 'max:' . Limits::MAX_FIELDS],
+            // A field, or "-": the column fills no field (its name is not matched either).
+            'map.*' => ['nullable', 'string', Rule::in([...$fields, '-'])],
+        ]);
+
+        $map = [];
+        foreach ($validated['map'] as $column => $field) {
+            $name = mb_strtolower(trim((string) $column));
+            if ($name !== '' && $field !== null && $field !== '') {
+                $map[mb_substr($name, 0, 500)] = $field;
+            }
+        }
+        $template->forceFill(['field_map' => $map])->save();
+
+        return response()->json(['map' => $map]);
     }
 
     private function hydrateJsonFields(Request $request): void

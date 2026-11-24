@@ -46,9 +46,23 @@ export function columnType(name, settings = null, rules = COLUMN_RULES) {
     return { input: 'text', settings: settings ?? {} };
 }
 
-/** What is wrong with a cell, or null: only an empty cell is flagged. */
-export function cellProblem(value) {
-    return String(value ?? '').trim() === '' ? { kind: 'empty', message: 'Empty' } : null;
+/**
+ * What is wrong with a cell, or null. An empty cell is flagged, except in a
+ * column that may be left blank (`type.optional`; `type.required` says so in
+ * its message). A register field's column also checks its value:
+ * `type.integer` takes plain digits only, `type.strict` one of `type.options`.
+ */
+export function cellProblem(value, type = null) {
+    const text = String(value ?? '').trim();
+    if (text === '') {
+        if (type?.optional) return null;
+        return { kind: 'empty', message: type?.required ? 'Required: every row needs a value' : 'Empty' };
+    }
+    if (type?.integer && !/^\d+$/.test(text)) return { kind: 'invalid', message: 'Plain digits only, e.g. 27' };
+    if (type?.strict && Array.isArray(type.options) && !type.options.includes(text)) {
+        return { kind: 'invalid', message: `One of: ${type.options.join(', ')}` };
+    }
+    return null;
 }
 
 /** The option a select starts on: the value, or the option it stands for ("male" -> M). */
@@ -130,6 +144,117 @@ export function buildReviewModel({ pages = [], people = [], details = [] }) {
     });
 
     return { columns, rows };
+}
+
+// --------------------------------------------------------- register fields
+
+/** A column name as a field key: "Name of Mother" -> "name_of_mother". */
+export function fieldKeyOf(name) {
+    return String(name ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/** A layout column kept apart from every field ("Type by hand" chosen for the field it matched). */
+export const NOT_A_FIELD = '-';
+
+// Words a column name and a field may differ by without meaning something else.
+const FIELD_WORD = { husb: 'husband', number: 'no', num: 'no', nr: 'no', registration: 'reg', registry: 'reg', register: 'reg' };
+const FIELD_FILLER = new Set(['of', 'the', 'a', 's']);
+
+/** A name's words, the same whichever order or spelling: "Mother's Name" -> "mother name". */
+function fieldWords(name) {
+    return String(name ?? '').toLowerCase().replace(/['’]s\b/g, '')
+        .split(/[^a-z0-9]+/)
+        .filter((word) => word !== '' && !FIELD_FILLER.has(word))
+        .map((word) => FIELD_WORD[word] ?? word)
+        .sort()
+        .join(' ');
+}
+
+/**
+ * The field a column's name stands for, or null: the same words in any order
+ * ("Name of Mother", "Mother's Name" and "name_of_mother" are name_of_mother;
+ * "Husband Nationality" is husb_nationality).
+ */
+export function matchField(name, fields) {
+    const words = fieldWords(name);
+    if (words === '') return null;
+    return fields.find((field) => fieldWords(field.key) === words)?.key ?? null;
+}
+
+/**
+ * A register field's column check (see App\Support\RegistryFields): a field
+ * that may be blank is not flagged when empty; integers take digits; a field
+ * with fixed values takes one of them (typing "phy" gives PHYSICIAN).
+ */
+export function registryColumnType(field) {
+    const options = Array.isArray(field.options) ? field.options : null;
+    return {
+        input: options ? 'select' : 'text',
+        ...(options ? { options, strict: true } : {}),
+        settings: {},
+        required: Boolean(field.required),
+        optional: !field.required,
+        integer: field.kind === 'integer',
+    };
+}
+
+/**
+ * The table as a register's: one column per field, in the register's order.
+ *
+ *   model    from buildReviewModel (the scanned columns)
+ *   fields   the register's fields ([{ key, kind, required, manual, options?, default? }])
+ *   mapOf(column)  the saved { "column name": field } of the layout the column
+ *            is on, or null when that layout has none yet: then a column
+ *            named like a field ("Name of Mother") fills it
+ *
+ * A field a scanned column fills is that column (its key, so what was typed in
+ * it stays), with the field's name and check; any other field is a column to
+ * type into (key "m|<field>"). A manual field is never filled from the scan.
+ * Scanned columns no field takes come last, marked noExport ("not saved").
+ * Each column has `field` (its field) and `sourceHeader` (the scanned name).
+ */
+export function applyRegistry(model, fields, mapOf = () => null) {
+    const fillable = fields.filter((field) => !field.manual);
+    const keys = new Set(fillable.map((field) => field.key));
+    // What was chosen for a column: a field, NOT_A_FIELD ("Type by hand"), or undefined (nothing).
+    const chosen = (column) => (mapOf(column) ?? {})[nameKey(column.name)];
+
+    // First what was chosen; then a column named like a field it fills, unless the
+    // field or the column is taken already, or the column was set apart on purpose.
+    const taken = new Map();
+    const placed = new Set();
+    model.columns.forEach((column) => {
+        const field = chosen(column);
+        if (field === NOT_A_FIELD) placed.add(column.key);
+        if (!keys.has(field) || taken.has(field)) return;
+        taken.set(field, column);
+        placed.add(column.key);
+    });
+    model.columns.forEach((column) => {
+        if (placed.has(column.key) || chosen(column) !== undefined) return;
+        const field = matchField(column.name, fillable);
+        if (!field || taken.has(field)) return;
+        taken.set(field, column);
+        placed.add(column.key);
+    });
+    const used = new Set([...taken.values()].map((column) => column.key));
+
+    const columns = fields.map((field) => {
+        const type = registryColumnType(field);
+        const source = taken.get(field.key);
+        if (source) return { ...source, header: field.key, type, field: field.key, sourceHeader: source.header };
+        return { key: `m|${field.key}`, side: 0, name: field.key, header: field.key, type, detail: false, field: field.key, manual: true };
+    });
+    const leftover = model.columns
+        .filter((column) => !used.has(column.key))
+        .map((column) => ({ ...column, header: `${column.header} · not saved`, noExport: true, sourceHeader: column.header }));
+
+    const typed = columns.filter((column) => column.manual);
+    const rows = model.rows.map((row) => ({
+        ...row,
+        cells: { ...row.cells, ...Object.fromEntries(typed.map((column) => [column.key, { refs: [] }])) },
+    }));
+    return { columns: [...columns, ...leftover], rows };
 }
 
 // ------------------------------------------------------------------ export
@@ -1794,6 +1919,8 @@ export class ReviewTable {
         if (th.closest('thead')) {
             if (th.dataset.column === undefined) return;
             const column = this.model.columns[Number(th.dataset.column)];
+            // A register field keeps its name: the downloads and the database use it.
+            if (column?.field) return;
             if (column) this._renameLabel(th, this.headerOf(column), (name) => {
                 this._rename(this.headerNames, 'header', column.key, name === '' || name === column.header ? null : name);
             });
@@ -1957,12 +2084,63 @@ export class ReviewTable {
      * renamed labels). A value not verified is left out, as it is not saved.
      */
     exportTable() {
-        const header = ['Row', ...this.model.columns.map((column) => this.headerOf(column))];
-        const exported = (cell) => (this.isUnverified(cell) ? '' : String(this.valueOf(cell) ?? ''));
+        // A register's table (its columns are register fields) downloads as the
+        // register does: its field names as headers, no Row column, and without
+        // the scanned columns no field is filled from (noExport).
+        const register = this.model.columns.some((column) => column.field);
+        const shown = this.model.columns
+            .map((column, index) => ({ column, index }))
+            .filter(({ column }) => !column.noExport);
+        const header = [...(register ? [] : ['Row']), ...shown.map(({ column }) => this.headerOf(column))];
         const rows = this.model.rows.map((row, rowIndex) => [
-            this.rowLabelOf(row),
-            ...this.model.columns.map((_, columnIndex) => exported(this.cell(rowIndex, columnIndex))),
+            ...(register ? [] : [this.rowLabelOf(row)]),
+            ...shown.map(({ index }) => this._exported(this.cell(rowIndex, index))),
         ]);
         return [header, ...rows];
+    }
+
+    /** A cell's value as it is saved and downloaded: a value not verified is left out. */
+    _exported(cell) {
+        return this.isUnverified(cell) ? '' : String(this.valueOf(cell) ?? '').trim();
+    }
+
+    /**
+     * Each row as the register's table saves it: { row: "06", values: { field: value } },
+     * from the columns that are register fields (column.field).
+     */
+    fieldRows() {
+        const fields = this.model.columns
+            .map((column, index) => ({ column, index }))
+            .filter(({ column }) => column.field && !column.noExport);
+        return this.model.rows.map((row, rowIndex) => ({
+            row: this.rowLabelOf(row),
+            values: Object.fromEntries(fields.map(({ column, index }) => [column.field, this._exported(this.cell(rowIndex, index))])),
+        }));
+    }
+
+    /**
+     * The first cell a register's row cannot be saved with: { row, column, message },
+     * or null. A required value shown but not verified counts as missing.
+     */
+    firstFieldIssue() {
+        for (let row = 0; row < this.model.rows.length; row += 1) {
+            for (let column = 0; column < this.model.columns.length; column += 1) {
+                const cell = this.cell(row, column);
+                if (!cell.column.field || cell.column.noExport) continue;
+                const value = this._exported(cell);
+                const problem = cellProblem(value, cell.column.type);
+                if (!problem) continue;
+                const where = `Row ${this.rowLabelOf(cell.row)}, ${cell.column.field}`;
+                const unverified = value === '' && String(this.valueOf(cell) ?? '').trim() !== '';
+                return {
+                    row,
+                    column,
+                    message: unverified
+                        ? `${where}: the value is not verified. Edit it here or tick it in Verify.`
+                        : `${where}: ${problem.message}.`,
+                };
+            }
+        }
+        return null;
     }
 }

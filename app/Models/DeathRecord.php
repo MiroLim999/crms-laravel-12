@@ -20,7 +20,7 @@ class DeathRecord extends Model
     protected $table = 'death_records';
 
     protected $fillable = [
-        'book_no', 'page_no', 'reg_no',
+        'civil_record_id', 'book_no', 'page_no', 'reg_no',
         'name', 'date_of_death', 'sex', 'date_of_reg',
         'age_years', 'age_months', 'age_days', 'age_hours', 'age_mins',
         'civil_status', 'nationality', 'place_of_death', 'cause_of_death',
@@ -31,8 +31,6 @@ class DeathRecord extends Model
     protected function casts(): array
     {
         return [
-            'date_of_reg' => 'date',
-            'date_of_birth' => 'date',
             'age_years' => 'integer',
             'age_months' => 'integer',
             'age_days' => 'integer',

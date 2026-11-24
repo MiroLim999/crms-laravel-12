@@ -12226,6 +12226,25 @@ body.is-resizing-column {
   box-shadow: inset 0 0 0 2px var(--review-pick);
 }
 
+// Step 4 "Columns → fields": a register field and the scanned column that fills it, per line.
+.review-field-map {
+  inline-size: min(26rem, calc(100vw - 16px));
+  max-block-size: min(70vh, 34rem);
+  overflow-y: auto;
+}
+
+.review-field-map__rows {
+  display: grid;
+  gap: .4rem;
+}
+
+.review-field-map__row {
+  display: grid;
+  grid-template-columns: minmax(0, 9.5rem) minmax(0, 1fr);
+  gap: .5rem;
+  align-items: center;
+}
+
 // "Delete column …?" under an added column's ×: Cancel / Delete (ReviewTable._confirmRemove).
 .review-table__confirm {
   position: fixed;

@@ -20,7 +20,7 @@ class BirthRecord extends Model
     protected $table = 'birth_records';
 
     protected $fillable = [
-        'book_no', 'page_no', 'reg_no',
+        'civil_record_id', 'book_no', 'page_no', 'reg_no',
         'name', 'date_of_birth', 'sex', 'date_of_reg', 'place_of_birth',
         'name_of_mother', 'nationality_mother', 'name_of_father', 'nationality_father',
         'parents_marriage_date', 'parents_marriage_place',
@@ -31,8 +31,6 @@ class BirthRecord extends Model
     protected function casts(): array
     {
         return [
-            'date_of_reg' => 'date',
-            'parents_marriage_date' => 'date',
             'mother_age' => 'integer',
             'father_age' => 'integer',
             'late_registration' => 'boolean',

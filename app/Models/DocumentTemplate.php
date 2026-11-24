@@ -48,7 +48,7 @@ class DocumentTemplate extends Model
         'name', 'doc_type', 'document_type_id', 'page_ratio', 'description',
         'grouping_mode', 'columns', 'ruled_ys',
         'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
-        'is_active', 'created_by', 'parent_id', 'page_two_template_id',
+        'is_active', 'created_by', 'parent_id', 'page_two_template_id', 'field_map',
     ];
 
     protected function casts(): array
@@ -58,6 +58,7 @@ class DocumentTemplate extends Model
             'page_ratio' => 'float',
             'grouping_mode' => 'string',
             'columns' => 'array',
+            'field_map' => 'array',
             'ruled_ys' => 'array',
             'is_active' => 'boolean',
             'is_page_two' => 'boolean',
