@@ -4,6 +4,7 @@ use App\Http\Controllers\AccountSettingsController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordChangeController;
+use App\Http\Controllers\Auth\PasswordRecoveryController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentPageController;
 use App\Http\Controllers\DocumentScanController;
@@ -24,13 +25,21 @@ use Illuminate\Support\Facades\Route;
 |
 | Sign-in only. CRMS has one account, the Super Admin, made by the seeder.
 | There is deliberately no registration route. A forgotten password is reset
-| with `php artisan crms:reset-password`.
+| with one of the account's one-time recovery codes (made in Account
+| Settings), or with `php artisan crms:reset-password`.
 |
 */
 
 Route::middleware('guest')->group(function () {
     Route::get('login', [LoginController::class, 'create'])->name('login');
     Route::post('login', [LoginController::class, 'store'])->name('login.store');
+    Route::get('forgot-password', [PasswordRecoveryController::class, 'create'])->name('password.recover');
+    Route::post('forgot-password', [PasswordRecoveryController::class, 'store'])
+        ->middleware('throttle:20,1')
+        ->name('password.recover.store');
+    Route::post('forgot-password/new-password', [PasswordRecoveryController::class, 'reset'])
+        ->middleware('throttle:20,1')
+        ->name('password.recover.reset');
 });
 
 Route::post('logout', [LoginController::class, 'destroy'])
@@ -67,10 +76,11 @@ Route::middleware('auth')->group(function () {
     Route::get('settings', [AccountSettingsController::class, 'edit'])->name('settings.edit');
     Route::put('settings/profile', [AccountSettingsController::class, 'updateProfile'])
         ->name('settings.profile.update');
-    Route::put('settings/uploads', [AccountSettingsController::class, 'updateUploads'])
-        ->name('settings.uploads.update');
     Route::put('settings/password', [AccountSettingsController::class, 'updatePassword'])
         ->name('settings.password.update');
+    // A new set of one-time recovery codes for "Forgot password?".
+    Route::post('settings/recovery-codes', [AccountSettingsController::class, 'generateRecoveryCodes'])
+        ->name('settings.recovery-codes.generate');
 
     // Digitisation: scanning, Align and Verify.
     Route::middleware('can:documents.process')->group(function () {

@@ -20,7 +20,10 @@
 
         {{-- form-password-toggle is what helpers.js binds the eye icon to. --}}
         <div class="mb-6 form-password-toggle">
-            <label class="form-label" for="password">Password</label>
+            <div class="d-flex justify-content-between align-items-baseline">
+                <label class="form-label" for="password">Password</label>
+                <a href="{{ route('password.recover') }}" class="small">Forgot password?</a>
+            </div>
             <div class="input-group input-group-merge @error('password') is-invalid @enderror">
                 <input type="password" id="password" name="password" class="form-control"
                     placeholder="&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;"
