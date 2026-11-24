@@ -33,8 +33,8 @@ class RecordsExportTest extends TestCase
         $records = $response->json('records');
         $this->assertSame([$first->getKey(), $second->getKey()], array_column($records, 'id'));
         $this->assertSame(['Record ID', 'Document type', 'Row', 'Name'], $records[0]['header']);
-        $this->assertSame([$first->getKey(), 'Book of Birth', 1, 'Ana Cruz'], $records[0]['rows'][0]);
-        $this->assertSame('Ben Reyes', $records[1]['rows'][0][3]);
+        $this->assertSame([$first->getKey(), 'BOOK OF BIRTH', 1, 'ANA CRUZ'], $records[0]['rows'][0]);
+        $this->assertSame('BEN REYES', $records[1]['rows'][0][3]);
         $this->assertSame('no-cache, no-store, private', $response->headers->get('Cache-Control'));
     }
 

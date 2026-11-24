@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    LINE_TWO,
     NOT_A_FIELD,
     applyRegistry,
     buildReviewModel,
@@ -120,10 +121,12 @@ test('the Excel sheet keeps every value as text with a bold header', () => {
     assert.equal(sheet[1][1].fontWeight, undefined);
 });
 
-test('file names are plain and dated', () => {
-    assert.equal(exportFileName('Births', '2splitpages.pdf', 'pages 1 2', '2026-11-15'), 'births-2splitpages-pages-1-2-2026-11-15');
-    assert.equal(exportFileName('Defunciónes'), 'defunciones');
-    assert.equal(exportFileName('', null), 'records');
+test('file names are readable and dated', () => {
+    assert.equal(exportFileName('Book of Birth', 'Book 12 Page 23', '2026-11-25'), 'Book of Birth - Book 12 Page 23 - 2026-11-25');
+    assert.equal(exportFileName('Births', 'birth_book_12.pdf', 'pages 1 2', '2026-11-15'), 'Births - birth book 12 - pages 1 2 - 2026-11-15');
+    // Characters a file name cannot have become spaces; empty parts are skipped.
+    assert.equal(exportFileName('Defunciónes', 'a/b:c?', '', null), 'Defunciónes - a b c');
+    assert.equal(exportFileName('', null), 'Records');
 });
 
 test('Enter goes down, Tab goes right and wraps, Shift goes back, edges hold', () => {
@@ -165,11 +168,16 @@ test('a batch downloads as one table: each row says its record and document', ()
 
     assert.deepEqual(table, [
         ['Record ID', 'Document', 'Row', 'Name', 'Sex', 'Father'],
-        ['7', 'BIRTHS.pdf · pages 1–2', '01', 'Ana', 'F', ''],
-        ['7', 'BIRTHS.pdf · pages 1–2', '02', 'Ben', 'M', ''],
-        ['8', 'BIRTHS.pdf · page 3', '01', 'Cara', '', 'Jose'],
+        ['7', 'BIRTHS.PDF · PAGES 1–2', '01', 'ANA', 'F', ''],
+        ['7', 'BIRTHS.PDF · PAGES 1–2', '02', 'BEN', 'M', ''],
+        ['8', 'BIRTHS.PDF · PAGE 3', '01', 'CARA', '', 'JOSE'],
     ]);
     assert.deepEqual(combineTables([]), [['Record ID', 'Document']]);
+    // A register's records: its own columns only.
+    assert.deepEqual(combineTables([
+        { recordId: 7, label: 'x', table: [['name', 'sex'], ['Ana', 'f']] },
+        { recordId: 8, label: 'y', table: [['name', 'sex'], ['Ben', 'm']] },
+    ], { plain: true }), [['name', 'sex'], ['ANA', 'F'], ['BEN', 'M']]);
 });
 
 test('several records join into one table by column name, blanks where a record has no such column', () => {
@@ -180,9 +188,9 @@ test('several records join into one table by column name, blanks where a record 
 
     assert.deepEqual(table, [
         ['Record ID', 'Document type', 'Row', 'Name', 'Sex', 'Remarks'],
-        ['12', 'Birth Certificate', '1', 'Ana Cruz', 'F', ''],
-        ['13', 'Birth Certificate', '1', 'Ben Reyes', '', 'late'],
-        ['13', 'Birth Certificate', '2', 'Cora Lim', '', ''],
+        ['12', 'BIRTH CERTIFICATE', '1', 'ANA CRUZ', 'F', ''],
+        ['13', 'BIRTH CERTIFICATE', '1', 'BEN REYES', '', 'LATE'],
+        ['13', 'BIRTH CERTIFICATE', '2', 'CORA LIM', '', ''],
     ]);
 });
 
@@ -208,9 +216,9 @@ test('a value not ticked Verified is shown but left out of the download, as it i
         columns: [{ key: 'name', header: 'Name' }, { key: 'sex', header: 'Sex' }],
         rows: [{ id: 'person-1', label: '01', cells: { name: { refs: [0] }, sex: { refs: [1] } } }],
     };
-    assert.deepEqual(table.exportTable(), [['Row', 'Name', 'Sex'], ['01', 'Ana Cruz', '']]);
+    assert.deepEqual(table.exportTable(), [['Row', 'Name', 'Sex'], ['01', 'ANA CRUZ', '']]);
     ticked.add(1);
-    assert.deepEqual(table.exportTable(), [['Row', 'Name', 'Sex'], ['01', 'Ana Cruz', 'F']]);
+    assert.deepEqual(table.exportTable(), [['Row', 'Name', 'Sex'], ['01', 'ANA CRUZ', 'F']]);
 });
 
 // ------------------------------------------------- a register's own columns
@@ -281,7 +289,7 @@ test('a register downloads with its field names and no Row column, and saves eac
     table.model = applyRegistry(scanned(), BIRTH, () => ({ 'column 1': 'reg_no', name: 'name' }));
     assert.deepEqual(table.exportTable(), [
         ['name', 'sex', 'reg_no', 'mother_age', 'attendant', 'late_registration'],
-        ['Ariel Villanujan', '', '5', '', 'MIDWIFE', 'false'],
+        ['ARIEL VILLANUJAN', '', '5', '', 'MIDWIFE', 'FALSE'],
     ]);
     assert.deepEqual(table.fieldRows(), [{ row: '01', values: {
         name: 'Ariel Villanujan', sex: '', reg_no: '5', mother_age: '', attendant: 'MIDWIFE', late_registration: 'false',
@@ -328,4 +336,141 @@ test('names still match once some columns were chosen; a choice wins, and "Type 
     // "Type by hand" for sex keeps the column named Sex apart.
     fields = byField({ sex: NOT_A_FIELD });
     assert.equal(fields.sex, 'm|sex');
+});
+
+// ------------------------------------------------- two-line entries (marriage)
+
+const MARRIAGE = ['husband_name', 'wife_name', 'reg_no', 'husband_age', 'wife_age', 'date_of_reg']
+    .map((key) => ({ key, kind: key.endsWith('age') ? 'integer' : 'text', required: false, manual: false }));
+const PAIRS = [['husband_name', 'wife_name'], ['husband_age', 'wife_age']];
+
+function marriageScan() {
+    // Register rows 1-4: husband, wife, husband, wife. Reg no and date written once, on the first line.
+    const field = (side, column, ref) => ({ side, column, ref });
+    return buildReviewModel({
+        pages: [{ number: 1, columns: ['Date of Registration', 'Register Number', 'Names', 'Years'].map((name) => ({ name, settings: null })) }],
+        people: [1, 2, 3, 4].map((n) => ({
+            id: `person-${n}`,
+            label: String(n).padStart(2, '0'),
+            fields: [
+                ...(n % 2 === 1 ? [field(0, 'Date of Registration', n * 10), field(0, 'Register Number', n * 10 + 1)] : []),
+                field(0, 'Names', n * 10 + 2),
+                field(0, 'Years', n * 10 + 3),
+            ],
+        })),
+    });
+}
+
+test('a marriage entry is two lines: husband, then the wife under him', () => {
+    const map = { names: 'husband_name', years: 'husband_age', 'register number': 'reg_no', 'date of registration': 'date_of_reg' };
+    const model = applyRegistry(marriageScan(), MARRIAGE, () => map, PAIRS);
+
+    assert.deepEqual(model.columns.map((column) => column.header), MARRIAGE.map((field) => field.key).concat([]));
+    const wife = model.columns.find((column) => column.field === 'wife_name');
+    assert.equal(wife.key, `0|names${LINE_TWO}`);
+    assert.equal(wife.line, 2);
+    assert.equal(wife.sourceHeader, 'Names · line 2');
+
+    assert.equal(model.rows.length, 2);
+    const [first, second] = model.rows;
+    assert.deepEqual([first.id, first.label, first.lines], ['person-1', '01', ['person-1', 'person-2']]);
+    assert.deepEqual(first.cells['0|names'].refs, [12]);
+    assert.deepEqual(first.cells[`0|names${LINE_TWO}`].refs, [22]);
+    assert.deepEqual(first.cells['0|years'].refs, [13]);
+    assert.deepEqual(first.cells[`0|years${LINE_TWO}`].refs, [23]);
+    // Written once: whatever is on either line.
+    assert.deepEqual(first.cells['0|register number'].refs, [11]);
+    assert.deepEqual(second.cells['0|names'].refs, [32]);
+    assert.deepEqual(second.cells[`0|names${LINE_TWO}`].refs, [42]);
+    assert.equal(second.label, '02');
+});
+
+test('a wife column of its own, or line 2 turned off, keeps one row per line', () => {
+    const own = applyRegistry(marriageScan(), MARRIAGE, () => ({ names: 'husband_name', years: 'wife_age' }), PAIRS);
+    // Names still pairs (wife_name has no column); the ages do not.
+    assert.equal(own.columns.find((column) => column.field === 'wife_age').key, '0|years');
+    assert.equal(own.columns.find((column) => column.field === 'wife_name').line, 2);
+
+    const off = applyRegistry(marriageScan(), MARRIAGE, () => ({ names: 'husband_name', [`names${LINE_TWO}`]: NOT_A_FIELD }), PAIRS);
+    assert.equal(off.rows.length, 4);
+    assert.equal(off.columns.find((column) => column.field === 'wife_name').manual, true);
+
+    // No pairs (birth, death): unchanged.
+    assert.equal(applyRegistry(marriageScan(), MARRIAGE, () => ({ names: 'husband_name' })).rows.length, 4);
+});
+
+test('a slip of the pen still names its field', () => {
+    const fields = ['place_of_marriage', 'date_of_marriage', 'type_of_birth', 'date_of_birth', 'date_of_death']
+        .map((key) => ({ key }));
+    assert.equal(matchField('Place of Mirriage', fields), 'place_of_marriage');
+    assert.equal(matchField('date of mirriage', fields), 'date_of_marriage');
+    // Different words are not slips.
+    assert.equal(matchField('Date of Death', fields), 'date_of_death');
+    // Short words must be spelled right ("date" is not "data").
+    assert.equal(matchField('Typoe of Birth', fields), null);
+    assert.equal(matchField('Date of Bath', fields), null);
+});
+
+test('a marriage column that does not say whose fills the husband, then the wife', () => {
+    const fields = ['husband_name', 'wife_name', 'husband_age', 'wife_age', 'husb_nationality', 'wife_nationality',
+        'husb_father', 'wife_father', 'husb_mother', 'wife_mother']
+        .map((key) => ({ key, kind: 'text', required: false, manual: false }));
+    const pairs = [['husband_name', 'wife_name'], ['husband_age', 'wife_age'], ['husb_nationality', 'wife_nationality'],
+        ['husb_father', 'wife_father'], ['husb_mother', 'wife_mother']];
+    const names = ['Names of the Contracting Parties', 'Age', 'Husband Wife Nationality', 'Father', 'Mother', 'Father Nationality'];
+    const scan = buildReviewModel({
+        pages: [{ number: 1, columns: names.map((name) => ({ name, settings: null })) }],
+        people: [1, 2].map((n) => ({ id: `person-${n}`, label: `0${n}`, fields: names.map((column, i) => ({ side: 0, column, ref: n * 10 + i })) })),
+    });
+    const model = applyRegistry(scan, fields, () => null, pairs);
+    const source = (field) => model.columns.find((column) => column.field === field)?.sourceHeader;
+
+    assert.equal(source('husband_name'), 'Names of the Contracting Parties');
+    assert.equal(source('wife_name'), 'Names of the Contracting Parties · line 2');
+    assert.equal(source('husband_age'), 'Age');
+    assert.equal(source('wife_nationality'), 'Husband Wife Nationality · line 2');
+    assert.equal(source('husb_father'), 'Father');
+    assert.equal(source('wife_mother'), 'Mother · line 2');
+    // "Father Nationality" is no field here: not saved.
+    assert.ok(model.columns.find((column) => column.sourceHeader === 'Father Nationality').noExport);
+    assert.equal(model.rows.length, 1);
+});
+
+test('a read column can be deleted from the table and its download, a register field cannot', () => {
+    const table = new ReviewTable({ container: { addEventListener() {} }, valueOf: () => 'x', onChange: () => {} });
+    const model = {
+        columns: [
+            { key: 'name', header: 'name', field: 'name' },
+            { key: '0|column 5', header: 'Column 5 · not saved', noExport: true },
+            { key: '0|notes', header: 'Notes' },
+        ],
+        rows: [{ id: 'person-1', label: '01', cells: { name: { refs: [0] }, '0|column 5': { refs: [1] }, '0|notes': { refs: [2] } } }],
+    };
+    assert.equal(table.canRemoveColumn(model.columns[0]), false);
+    assert.equal(table.canRemoveColumn(model.columns[1]), true);
+    assert.equal(table.canRemoveColumn({ key: 'custom|1', custom: true, field: undefined }), true);
+
+    table.hiddenColumns.add('0|notes');
+    table.model = table._withAdded(model);
+    assert.deepEqual(table.model.columns.map((column) => column.key), ['name', '0|column 5']);
+    assert.deepEqual(table.exportTable(), [['name'], ['X']]);
+});
+
+test('a register downloads its fields in its own order, whatever the columns were dragged to, in capitals', () => {
+    const values = ['5', 'Ana Cruz', 'female', 'extra'];
+    const table = new ReviewTable({
+        container: { addEventListener() {} },
+        valueOf: (cell) => cell.refs.map((index) => values[index]).join(' '),
+        onChange: () => {},
+    });
+    const source = {
+        columns: [
+            { key: 'n', field: 'name' }, { key: 's', field: 'sex' }, { key: 'r', field: 'reg_no' },
+        ],
+        rows: [{ id: 'person-1', label: '01', cells: { n: { refs: [1] }, s: { refs: [2] }, r: { refs: [0] }, c: { refs: [3] } } }],
+    };
+    table.sourceModel = source;
+    // Dragged: reg_no first; an added column at the end.
+    table.model = { ...source, columns: [source.columns[2], source.columns[0], { key: 'c', header: 'Notes', custom: true }, source.columns[1]] };
+    assert.deepEqual(table.exportTable(), [['name', 'sex', 'reg_no'], ['ANA CRUZ', 'FEMALE', '5']]);
 });

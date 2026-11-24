@@ -206,8 +206,8 @@ class TwoPageRecordTest extends TestCase
         );
 
         $this->assertSame(['Record ID', 'Document type', 'Row', 'Name', 'Father'], $rows[0]);
-        $this->assertSame(['1', 'Ana Cruz', 'Pedro Cruz'], array_slice($rows[1], 2));
-        $this->assertSame(['2', 'Ben Reyes', 'Jose Reyes'], array_slice($rows[2], 2));
+        $this->assertSame(['1', 'ANA CRUZ', 'PEDRO CRUZ'], array_slice($rows[1], 2));
+        $this->assertSame(['2', 'BEN REYES', 'JOSE REYES'], array_slice($rows[2], 2));
         $this->assertCount(3, $rows);
     }
 

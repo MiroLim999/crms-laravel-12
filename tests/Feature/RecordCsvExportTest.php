@@ -32,8 +32,8 @@ class RecordCsvExportTest extends TestCase
 
         $this->assertSame(['Record ID', 'Document type', 'Row', 'Page No.', 'Name', 'Sex'], $header);
         $this->assertSame([
-            [(string) $record->getKey(), 'Book of Birth', '1', '12', 'Ana Cruz', 'F'],
-            [(string) $record->getKey(), 'Book of Birth', '2', '12', 'Ben Reyes', 'M'],
+            [(string) $record->getKey(), 'BOOK OF BIRTH', '1', '12', 'ANA CRUZ', 'F'],
+            [(string) $record->getKey(), 'BOOK OF BIRTH', '2', '12', 'BEN REYES', 'M'],
         ], $rows);
     }
 
@@ -55,8 +55,8 @@ class RecordCsvExportTest extends TestCase
 
         $this->assertSame(['Record ID', 'Document type', 'Row', 'Name', 'Remarks', 'Father', 'Remarks (page 2)'], $header);
         $this->assertCount(2, $rows);
-        $this->assertSame(['1', 'Ana Cruz', 'p1 note 1', 'Pedro Cruz', 'p2 note 1'], array_slice($rows[0], 2));
-        $this->assertSame(['2', 'Ben Reyes', 'p1 note 2', 'Jose Reyes', 'p2 note 2'], array_slice($rows[1], 2));
+        $this->assertSame(['1', 'ANA CRUZ', 'P1 NOTE 1', 'PEDRO CRUZ', 'P2 NOTE 1'], array_slice($rows[0], 2));
+        $this->assertSame(['2', 'BEN REYES', 'P1 NOTE 2', 'JOSE REYES', 'P2 NOTE 2'], array_slice($rows[1], 2));
     }
 
     public function test_accented_names_survive_and_excel_gets_a_byte_order_mark(): void
@@ -68,9 +68,9 @@ class RecordCsvExportTest extends TestCase
         $body = $response->streamedContent();
 
         $this->assertStringStartsWith("\u{FEFF}", $body);
-        $this->assertStringContainsString('Santo Niño Peñaflor', $body);
+        $this->assertStringContainsString('SANTO NIÑO PEÑAFLOR', $body);
         $this->assertStringContainsString('charset=UTF-8', $response->headers->get('Content-Type'));
-        $this->assertStringContainsString('birth-record-'.$record->getKey().'.csv', $response->headers->get('Content-Disposition'));
+        $this->assertStringContainsString('Book of Birth - Record '.$record->getKey().'.csv', $response->headers->get('Content-Disposition'));
     }
 
     public function test_a_value_that_looks_like_a_formula_is_kept_as_text(): void
@@ -81,7 +81,7 @@ class RecordCsvExportTest extends TestCase
 
         [, $rows] = $this->csv($this->download($record));
 
-        $this->assertSame("'=HYPERLINK(\"http://x\",\"click\")", $rows[0][3]);
+        $this->assertSame("'=HYPERLINK(\"HTTP://X\",\"CLICK\")", $rows[0][3]);
         $this->assertSame("'-5", $rows[0][4]);
     }
 
@@ -97,7 +97,7 @@ class RecordCsvExportTest extends TestCase
 
         [, $rows] = $this->csv($this->download($record->fresh(), $user));
 
-        $this->assertSame('Maria Santos', $rows[0][3]);
+        $this->assertSame('MARIA SANTOS', $rows[0][3]);
     }
 
     public function test_a_certificate_without_people_is_one_row(): void
@@ -109,7 +109,7 @@ class RecordCsvExportTest extends TestCase
         [$header, $rows] = $this->csv($this->download($record));
 
         $this->assertSame(['Record ID', 'Document type', 'Row', 'Child Full Name', 'Date of Birth'], $header);
-        $this->assertSame([[(string) $record->getKey(), 'Book of Birth', '1', 'Ana Cruz', '1 Jan 2001']], $rows);
+        $this->assertSame([[(string) $record->getKey(), 'BOOK OF BIRTH', '1', 'ANA CRUZ', '1 JAN 2001']], $rows);
     }
 
     public function test_the_download_is_in_the_audit_log(): void
@@ -132,6 +132,28 @@ class RecordCsvExportTest extends TestCase
         $record = $this->record();
 
         $this->get(route('records.csv', $record))->assertRedirect(route('login'));
+    }
+
+    public function test_a_register_record_downloads_its_register_columns_in_capitals_with_a_readable_name(): void
+    {
+        $record = $this->record();
+        \App\Models\BirthRecord::create([
+            'civil_record_id' => $record->getKey(), 'book_no' => '12', 'page_no' => '23', 'reg_no' => '5',
+            'name' => 'Ana Cruz', 'sex' => 'Female', 'late_registration' => false,
+        ]);
+
+        $response = $this->download($record);
+        [$header, $rows] = $this->csv($response);
+
+        $this->assertSame(\App\Support\RegistryFields::keys('birth'), $header);
+        $row = array_combine($header, $rows[0]);
+        $this->assertSame('ANA CRUZ', $row['name']);
+        $this->assertSame('FEMALE', $row['sex']);
+        $this->assertSame('FALSE', $row['late_registration']);
+        $this->assertStringContainsString(
+            'Book of Birth - Book 12 Page 23 - Record '.$record->getKey().'.csv',
+            $response->headers->get('Content-Disposition'),
+        );
     }
 
     private function record(?User $user = null): CivilRecord

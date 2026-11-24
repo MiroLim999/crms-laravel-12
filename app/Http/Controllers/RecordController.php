@@ -410,7 +410,11 @@ class RecordController extends Controller
                 fputcsv($handle, $row);
             }
             fclose($handle);
-        }, "{$validated['type']}-book-{$validated['book_no']}.csv", [
+        }, RegistryFields::fileName(
+            \App\Models\DocumentTypeDefinition::where('key', $validated['type'])->first()?->label() ?? ucfirst($validated['type']),
+            "Book {$validated['book_no']}",
+            now()->toDateString(),
+        ).'.csv', [
             'Content-Type' => 'text/csv; charset=UTF-8',
             'Cache-Control' => 'no-store, no-cache',
         ]);

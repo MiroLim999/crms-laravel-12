@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\CivilRecord;
 use App\Models\RecordField;
 use App\Support\CsvCell;
+use App\Support\RegistryFields;
 use Illuminate\Support\Collection;
 
 /**
@@ -26,6 +27,20 @@ class RecordCsv
      */
     public function table(CivilRecord $record): array
     {
+        // A register type (birth, death, marriage): its own columns, in its order.
+        $register = $this->registerRows($record);
+        if ($register !== null) {
+            $keys = RegistryFields::keys($this->typeKey($record));
+
+            return [
+                'header' => $keys,
+                'rows' => $register->map(fn ($row) => array_map(
+                    fn (string $key) => CsvCell::safe(RegistryFields::cell($row->getAttribute($key))),
+                    $keys,
+                ))->values()->all(),
+            ];
+        }
+
         $fields = $record->fields
             ->sortBy([['page_no', 'asc'], ['sort_order', 'asc'], ['id', 'asc']])
             ->values();
@@ -72,7 +87,8 @@ class RecordCsv
             foreach (array_keys($columns) as $key) {
                 $cells[] = $values[$key] ?? $details[$key] ?? null;
             }
-            $rows[] = array_map(CsvCell::safe(...), $cells);
+            // Downloads are all capitals.
+            $rows[] = array_map(fn ($cell) => CsvCell::safe(is_string($cell) ? mb_strtoupper($cell) : $cell), $cells);
         }
 
         return ['header' => array_map(CsvCell::safe(...), $header), 'rows' => $rows];
@@ -80,9 +96,42 @@ class RecordCsv
 
     public function filename(CivilRecord $record): string
     {
-        $type = str($record->typeShortLabel())->slug()->toString() ?: 'document';
+        return $this->baseName($record).'.csv';
+    }
 
-        return "{$type}-record-{$record->getKey()}.csv";
+    /**
+     * A download's name without its extension: the type, the register's book
+     * and page when it has them, and the record ("Book of Birth - Book 12 Page 23 - Record 7").
+     */
+    public function baseName(CivilRecord $record): string
+    {
+        $first = $this->registerRows($record)?->first();
+        $where = $first ? trim("Book {$first->book_no} Page {$first->page_no}") : '';
+
+        return RegistryFields::fileName($record->typeLabel(), $where, "Record {$record->getKey()}");
+    }
+
+    /** The register type's key (birth, death, marriage, or another type's). */
+    private function typeKey(CivilRecord $record): string
+    {
+        return (string) ($record->documentTypeDefinition?->key ?? $record->doc_type?->value ?? '');
+    }
+
+    /**
+     * The record's rows in its type's register table, in the order they were
+     * saved (the table's order); null for a type with none, or none saved.
+     *
+     * @return Collection<int, \Illuminate\Database\Eloquent\Model>|null
+     */
+    private function registerRows(CivilRecord $record): ?Collection
+    {
+        $model = RegistryFields::model($this->typeKey($record));
+        if ($model === null) {
+            return null;
+        }
+        $rows = $model::where('civil_record_id', $record->getKey())->orderBy('id')->get();
+
+        return $rows->isEmpty() ? null : $rows;
     }
 
     /**

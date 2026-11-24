@@ -950,7 +950,8 @@
                                 {{-- Which scanned column fills each register field (kept for the layout). --}}
                                 <div class="dropdown" id="reviewFieldMap">
                                     <button type="button" class="btn btn-sm btn-outline-primary" id="reviewFieldMapBtn"
-                                            data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                                            data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                                            data-bs-popper-config='{"strategy":"fixed"}'>
                                         <i class="icon-base bx bx-list-check icon-sm me-1" aria-hidden="true"></i>Columns → fields
                                     </button>
                                     <div class="dropdown-menu dropdown-menu-end p-3 review-field-map" aria-labelledby="reviewFieldMapBtn">
@@ -1611,6 +1612,7 @@
         import { RowLineLayer, rowKey } from '{{ Vite::asset('resources/js/row-lines.js') }}';
         import { valueProblem } from '{{ Vite::asset('resources/js/value-types.js') }}';
         import {
+            LINE_TWO,
             NOT_A_FIELD,
             applyRegistry,
             attachAddColumn,
@@ -1848,6 +1850,15 @@
             const bookError = el('bookNumberError');
             const pageError = el('pageNumberError');
 
+            // Step 1's boxes empty but the book and page typed in step 4's table:
+            // those are the record's book and page.
+            if (reviewing && registry && reviewTable) {
+                const rows = reviewTable.fieldRows();
+                const typedIn = (key) => rows.map((row) => String(row.values[key] ?? '').trim()).find((value) => value !== '') ?? '';
+                if (bookInput && !bookInput.value.trim()) bookInput.value = typedIn('book_no');
+                if (pageInput && !pageInput.value.trim()) pageInput.value = typedIn('page_no');
+            }
+
             let valid = true;
             const bookVal = bookInput ? bookInput.value.trim() : '';
             const pageVal = pageInput ? pageInput.value.trim() : '';
@@ -1886,6 +1897,12 @@
                     ? 'Book number and page number are required before saving.'
                     : (!bookVal ? 'Book number is required before saving.' : 'Page number is required before saving.');
                 showOcrError(msg);
+                // In Verify or Review & Export step 1's boxes are not on screen: say it where the save was pressed.
+                if (activeStep === 'verify' || activeStep === 'review') {
+                    showValidationSubmitError(reviewing && registry
+                        ? `${msg} Type them in the book_no and page_no columns, or go back to step 1 (Document).`
+                        : `${msg} Go back to step 1 (Document) to enter them.`);
+                }
                 return valid;
             }
 
@@ -1901,7 +1918,7 @@
                     pageError.style.display = 'block';
                 }
                 showOcrError(taken);
-                if (reviewing) showValidationSubmitError(taken);
+                if (activeStep === 'verify' || activeStep === 'review') showValidationSubmitError(taken);
                 return false;
             }
             return valid;
@@ -6977,6 +6994,22 @@
             const item = batchState.items[batchState.currentIndex];
             if (!item) return;
 
+            // A page with nothing marked (page 2 of a book whose fields are all on
+            // page 1) has nothing to read: it is left out, and the batch goes on.
+            if (marker.toJSON().length === 0) {
+                if (await askInApp({
+                    title: `Page ${item.pageNo ?? ''} has no markers`.replace('  ', ' '),
+                    text: 'Nothing on it is read, so it is left out of the batch. The other pages are read as usual.',
+                    confirm: 'Leave it out',
+                    cancel: 'Go back',
+                }) !== 'confirm') {
+                    return;
+                }
+                clearOcrError();
+                await removeBatchPages([item]);
+                return;
+            }
+
             // Re-align with fields moved: say which are scanned again first.
             if (!(await confirmRealignChanges())) return;
 
@@ -8867,13 +8900,14 @@
         // record, and offer every saved record's table as one download (taken
         // as Review & Export showed it when that record was saved).
         function batchExportTable() {
+            // A register's records join as its own columns only (no Record ID or Document).
             return combineTables(batchRecords()
                 .filter((record) => record.members[0].exportTable)
                 .map((record) => ({
                     recordId: record.members[0].recordId,
                     label: recordLabel(record),
                     table: record.members[0].exportTable,
-                })));
+                })), { plain: Boolean(registry) });
         }
 
         /**
@@ -9071,7 +9105,7 @@
             el('batchSummaryRestartBtn').focus({ preventScroll: true });
         }
 
-        const batchFileName = () => exportFileName(config.typeLabel, 'batch', new Date().toISOString().slice(0, 10));
+        const batchFileName = () => exportFileName(config.typeLabel, 'Batch', new Date().toISOString().slice(0, 10));
 
         /** The records this batch saved, in queue order. */
         function batchSavedRecordIds() {
@@ -13990,7 +14024,7 @@
 
         /** The scanned table laid out as the register's (or as it is, for a type with none). */
         function reviewModelFrom(base) {
-            return registry ? applyRegistry(base, registry.fields, savedFieldMap) : base;
+            return registry ? applyRegistry(base, registry.fields, savedFieldMap, registry.pairs ?? []) : base;
         }
 
         /**
@@ -14036,6 +14070,13 @@
                 const automatic = { book_no: 'Automatic (from step 1)', page_no: 'Automatic (from step 1)' }[field.key];
                 select.append(new Option(automatic ?? 'Type by hand', ''));
                 scanned.forEach((column) => select.append(new Option(column.header, column.key, false, column.key === current?.key)));
+                // The second field of a pair (wife_name): the second line of the first one's column.
+                const first = (registry.pairs ?? []).find(([, second]) => second === field.key)?.[0];
+                const firstSource = first ? reviewModel?.columns.find((column) => column.field === first && !column.manual) : null;
+                if (firstSource && firstSource.line !== 2) {
+                    const key = firstSource.key + LINE_TWO;
+                    select.append(new Option(`${firstSource.sourceHeader} · line 2`, key, false, key === current?.key));
+                }
                 select.addEventListener('change', () => setFieldSource(field.key, select.value));
                 row.append(label, select);
                 return row;
@@ -14062,10 +14103,18 @@
                 if (map[name] === field) delete map[name];
             }));
             const source = reviewBaseModel.columns.find((column) => column.key === columnKey);
-            if (source) {
-                maps.get(templateOfSide(source.side))[nameKey(source.name)] = field;
-            } else if (before) {
-                maps.get(templateOfSide(before.side))[nameKey(before.name)] = NOT_A_FIELD;
+            const lineTwoOf = reviewBaseModel.columns.find((column) => column.key + LINE_TWO === columnKey);
+            if (lineTwoOf) {
+                // Back to the second line of the pair's column: nothing turns it off.
+                delete maps.get(templateOfSide(lineTwoOf.side))[nameKey(lineTwoOf.name) + LINE_TWO];
+            } else {
+                // Away from a second line: that line no longer fills the field.
+                if (before?.line === 2) maps.get(templateOfSide(before.side))[nameKey(before.name) + LINE_TWO] = NOT_A_FIELD;
+                if (source) {
+                    maps.get(templateOfSide(source.side))[nameKey(source.name)] = field;
+                } else if (before && before.line !== 2) {
+                    maps.get(templateOfSide(before.side))[nameKey(before.name)] = NOT_A_FIELD;
+                }
             }
             maps.forEach((map, templateId) => { fieldMaps[templateId] = map; });
 
@@ -14404,6 +14453,13 @@
 
         /** "births-2splitpages-pages-1-2-2026-11-15" */
         function reviewFileName() {
+            const today = new Date().toISOString().slice(0, 10);
+            // A register's page: "Book of Birth - Book 12 Page 23 - 2026-11-25".
+            const book = getBookNumber();
+            const page = getPageNumber();
+            if (registry && (book || page)) {
+                return exportFileName(config.typeLabel, [book && `Book ${book}`, page && `Page ${page}`].filter(Boolean).join(' '), today);
+            }
             const pages = verifyDoc
                 ? `pages ${verifyDoc.pages.map((entry) => entry.number).join(' ')}`
                 : (multiPage() ? `page ${scanPageNumber}` : '');
@@ -14445,15 +14501,17 @@
         function reviewExtraFields(personGroups) {
             if (!reviewModel) return [];
             const fields = [];
+            const order = new Map();
             reviewModel.rows.forEach((row) => {
-                const group = personGroups.find((candidate) => candidate.id === row.id);
-                if (!group) return;
-                let order = group.indexes.length;
-                const tableRow = Number(String(row.id).match(/^person-(\d+)$/)?.[1] ?? 0) || personGroups.indexOf(group) + 1;
                 reviewModel.columns.forEach((column) => {
                     if (column.detail || (row.cells[column.key]?.refs.length ?? 0) > 0) return;
                     const value = String(reviewExtras.get(`${row.id}|${column.key}`) ?? '').trim();
                     if (value === '') return;
+                    // A two-line entry: the value goes on its own line's row.
+                    const group = personGroups.find((candidate) => candidate.id === reviewLineId(row, column));
+                    if (!group) return;
+                    if (!order.has(group)) order.set(group, group.indexes.length);
+                    const tableRow = Number(String(group.id).match(/^person-(\d+)$/)?.[1] ?? 0) || personGroups.indexOf(group) + 1;
                     const box = unreadCellBox(column, tableRow);
                     fields.push({
                         side: column.side,
@@ -14464,7 +14522,7 @@
                             ocr_confidence: null,
                             verified_value: value,
                             person_group: personGroups.indexOf(group) + 1,
-                            person_field_order: order,
+                            person_field_order: order.get(group),
                             x: box.x.toFixed(5),
                             y: box.y.toFixed(5),
                             width: box.w.toFixed(5),
@@ -14472,10 +14530,16 @@
                             line_id: null,
                         },
                     });
-                    order += 1;
+                    order.set(group, order.get(group) + 1);
                 });
             });
             return fields;
+        }
+
+        /** The register row (person group id) a cell is on: a two-line entry's own line, else the row's. */
+        function reviewLineId(row, column) {
+            if (!row.lines) return row.id;
+            return (column.line === 2 ? row.lines[1] : row.lines[0]) ?? row.lines.find(Boolean) ?? row.id;
         }
 
         /** The cells typed in Review & Export where nothing was read: person id -> [{side, name}]. */
@@ -14486,8 +14550,9 @@
                 reviewModel.columns.forEach((column) => {
                     if (column.detail || (row.cells[column.key]?.refs.length ?? 0) > 0) return;
                     if (String(reviewExtras.get(`${row.id}|${column.key}`) ?? '').trim() === '') return;
-                    if (!typed.has(row.id)) typed.set(row.id, []);
-                    typed.get(row.id).push({ side: column.side, name: nameKey(column.name) });
+                    const id = reviewLineId(row, column);
+                    if (!typed.has(id)) typed.set(id, []);
+                    typed.get(id).push({ side: column.side, name: nameKey(column.name) });
                 });
             });
             return typed;

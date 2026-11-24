@@ -196,9 +196,9 @@ class RegistryRowsTest extends TestCase
         $lines = array_map('str_getcsv', preg_split('/\R/', trim(ltrim($csv, "\xEF\xBB\xBF"))));
         $this->assertSame(RegistryFields::keys('birth'), $lines[0]);
         $row = array_combine($lines[0], $lines[1]);
-        $this->assertSame('Ariel P. Villanujan', $row['name']);
+        $this->assertSame('ARIEL P. VILLANUJAN', $row['name']);
         $this->assertSame('27', $row['mother_age']);
-        $this->assertSame('true', $row['late_registration']);
+        $this->assertSame('TRUE', $row['late_registration']);
         $this->assertSame('', $row['father_age']);
         $this->assertSame('', $row['place_of_birth']);
     }

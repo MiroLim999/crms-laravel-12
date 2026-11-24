@@ -96,8 +96,9 @@ final class RegistryFields
         if (in_array($key, ['book_no', 'page_no', 'mother_age', 'father_age', 'husband_age', 'wife_age'], true)) {
             $field['kind'] = 'integer';
         }
+        // The death register has a column for each (Age: Years, Months, …), read like any other.
         if (in_array($key, ['age_years', 'age_months', 'age_days', 'age_hours', 'age_mins'], true)) {
-            $field = [...$field, 'kind' => 'integer', 'manual' => true];
+            $field['kind'] = 'integer';
         }
         if ($key === 'late_registration') {
             $field = [...$field, 'kind' => 'boolean', 'manual' => true, 'options' => self::BOOLEAN, 'default' => 'false'];
@@ -178,11 +179,27 @@ final class RegistryFields
     /** A value as the downloads write it: true / false, plain digits, blank for none. */
     public static function cell(mixed $value): string
     {
-        return match (true) {
+        // Downloads are all capitals, as the registers are kept (TRUE / FALSE too).
+        return mb_strtoupper(match (true) {
             $value === null => '',
             is_bool($value) => $value ? 'true' : 'false',
             default => (string) $value,
-        };
+        });
+    }
+
+    /**
+     * A download's file name, readable and safe on any computer: the parts that
+     * are not empty, joined by " - " ("Book of Birth - Book 12 Page 23 - 2026-11-25").
+     */
+    public static function fileName(string ...$parts): string
+    {
+        $parts = array_map(
+            fn (string $part) => trim((string) preg_replace('/\s+/u', ' ', (string) preg_replace('~[\\/:*?"<>|[:cntrl:]]+~u', ' ', $part))),
+            $parts,
+        );
+        $name = implode(' - ', array_filter($parts, fn (string $part) => $part !== ''));
+
+        return mb_substr($name, 0, 150) ?: 'Records';
     }
 
     /** The longest value a field's column holds. */
@@ -203,6 +220,29 @@ final class RegistryFields
     {
         $fields = self::for($type);
 
-        return $fields === [] ? null : ['type' => $type, 'fields' => $fields];
+        return $fields === [] ? null : ['type' => $type, 'fields' => $fields, 'pairs' => self::pairs($type)];
+    }
+
+    /**
+     * Fields written on two lines of one register entry: [first line, second line].
+     * In the marriage book the husband is on the first line and the wife under
+     * him, so a column read for husband_name gives wife_name from its second line
+     * (step 4 joins each two lines into one row).
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    public static function pairs(string $type): array
+    {
+        return match ($type) {
+            'marriage' => [
+                ['husband_name', 'wife_name'],
+                ['husband_age', 'wife_age'],
+                ['husb_nationality', 'wife_nationality'],
+                ['husb_civil_status', 'wife_civil_status'],
+                ['husb_mother', 'wife_mother'],
+                ['husb_father', 'wife_father'],
+            ],
+            default => [],
+        };
     }
 }

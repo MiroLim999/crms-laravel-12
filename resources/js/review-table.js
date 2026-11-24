@@ -178,7 +178,62 @@ function fieldWords(name) {
 export function matchField(name, fields) {
     const words = fieldWords(name);
     if (words === '') return null;
-    return fields.find((field) => fieldWords(field.key) === words)?.key ?? null;
+    return fields.find((field) => fieldWords(field.key) === words)?.key
+        // Else a slip of the pen: "Place of Mirriage" is place_of_marriage.
+        ?? fields.find((field) => sameWords(words, fieldWords(field.key)))?.key
+        ?? null;
+}
+
+/** Two word lists alike but for one letter in a long word each ("mirriage", "marriage"). */
+function sameWords(a, b) {
+    const left = a.split(' ');
+    const right = b.split(' ');
+    if (left.length !== right.length) return false;
+    const free = [...right];
+    return left.every((word) => {
+        const at = free.findIndex((other) => other === word || (Math.min(word.length, other.length) >= 5 && oneEditApart(word, other)));
+        if (at < 0) return false;
+        free.splice(at, 1);
+        return true;
+    });
+}
+
+function oneEditApart(a, b) {
+    if (Math.abs(a.length - b.length) > 1) return false;
+    let i = 0;
+    let j = 0;
+    let edits = 0;
+    while (i < a.length && j < b.length) {
+        if (a[i] === b[j]) { i += 1; j += 1; continue; }
+        edits += 1;
+        if (edits > 1) return false;
+        if (a.length > b.length) i += 1;
+        else if (b.length > a.length) j += 1;
+        else { i += 1; j += 1; }
+    }
+    return edits + (a.length - i) + (b.length - j) <= 1;
+}
+
+// The words that only say whose line it is, in a two-line entry's column name.
+const PAIR_WORDS = new Set(['husband', 'wife', 'groom', 'bride', 'contracting', 'party', 'parties']);
+
+/**
+ * For a two-line entry: the first field of the pair a column's name stands for
+ * without saying whose ("Name", "Age", "Father", "Husband / Wife Nationality"),
+ * or null.
+ */
+function matchPair(name, pairs) {
+    // "Names of the Contracting Parties" is "name": whose words go, and a plural is one.
+    const shared = (text) => fieldWords(text).split(' ')
+        .filter((word) => !PAIR_WORDS.has(word))
+        .map((word) => (word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word))
+        .join(' ');
+    const words = shared(name);
+    if (words === '') return null;
+    return pairs.find(([first]) => {
+        const base = shared(first);
+        return base !== '' && (base === words || sameWords(words, base));
+    })?.[0] ?? null;
 }
 
 /**
@@ -213,7 +268,7 @@ export function registryColumnType(field) {
  * Scanned columns no field takes come last, marked noExport ("not saved").
  * Each column has `field` (its field) and `sourceHeader` (the scanned name).
  */
-export function applyRegistry(model, fields, mapOf = () => null) {
+export function applyRegistry(model, fields, mapOf = () => null, pairs = []) {
     const fillable = fields.filter((field) => !field.manual);
     const keys = new Set(fillable.map((field) => field.key));
     // What was chosen for a column: a field, NOT_A_FIELD ("Type by hand"), or undefined (nothing).
@@ -232,17 +287,42 @@ export function applyRegistry(model, fields, mapOf = () => null) {
     });
     model.columns.forEach((column) => {
         if (placed.has(column.key) || chosen(column) !== undefined) return;
-        const field = matchField(column.name, fillable);
+        const field = matchField(column.name, fillable) ?? matchPair(column.name, pairs);
         if (!field || taken.has(field)) return;
         taken.set(field, column);
         placed.add(column.key);
     });
     const used = new Set([...taken.values()].map((column) => column.key));
 
+    // Two-line entries (the marriage book: husband, then wife under him): a column
+    // read for the first field of a pair gives the second from its second line,
+    // unless the second has a column of its own or that was turned off ("-").
+    const fillableKeys = new Set(fillable.map((field) => field.key));
+    const lineTwo = new Map();
+    pairs.forEach(([first, second]) => {
+        const source = taken.get(first);
+        if (!source || taken.has(second) || !fillableKeys.has(second)) return;
+        if ((mapOf(source) ?? {})[nameKey(source.name) + LINE_TWO] === NOT_A_FIELD) return;
+        lineTwo.set(second, source);
+    });
+    const firstOfPair = new Set([...lineTwo.values()].map((column) => column.key));
+
     const columns = fields.map((field) => {
         const type = registryColumnType(field);
         const source = taken.get(field.key);
-        if (source) return { ...source, header: field.key, type, field: field.key, sourceHeader: source.header };
+        if (source) {
+            return {
+                ...source, header: field.key, type, field: field.key, sourceHeader: source.header,
+                ...(firstOfPair.has(source.key) ? { line: 1 } : {}),
+            };
+        }
+        const pairedWith = lineTwo.get(field.key);
+        if (pairedWith) {
+            return {
+                ...pairedWith, key: pairedWith.key + LINE_TWO, header: field.key, type, field: field.key,
+                sourceHeader: `${pairedWith.header} · line 2`, line: 2,
+            };
+        }
         return { key: `m|${field.key}`, side: 0, name: field.key, header: field.key, type, detail: false, field: field.key, manual: true };
     });
     const leftover = model.columns
@@ -250,11 +330,54 @@ export function applyRegistry(model, fields, mapOf = () => null) {
         .map((column) => ({ ...column, header: `${column.header} · not saved`, noExport: true, sourceHeader: column.header }));
 
     const typed = columns.filter((column) => column.manual);
-    const rows = model.rows.map((row) => ({
-        ...row,
-        cells: { ...row.cells, ...Object.fromEntries(typed.map((column) => [column.key, { refs: [] }])) },
-    }));
-    return { columns: [...columns, ...leftover], rows };
+    const withTyped = (cells) => ({ ...cells, ...Object.fromEntries(typed.map((column) => [column.key, { refs: [] }])) });
+    if (lineTwo.size === 0) {
+        return { columns: [...columns, ...leftover], rows: model.rows.map((row) => ({ ...row, cells: withTyped(row.cells) })) };
+    }
+    return { columns: [...columns, ...leftover], rows: pairRows(model, columns, firstOfPair) };
+}
+
+/** The key suffix of a column's second line (and of its "Columns → fields" choice). */
+export const LINE_TWO = '#2';
+
+/**
+ * Each two ruled lines (register rows 1+2, 3+4, …) as one entry. A column of a
+ * pair keeps its first line, and its "#2" column takes the second; any other
+ * read column holds what is on either line (a date or number written once).
+ * `lines` are the two rows' ids (null where a line was not read).
+ */
+function pairRows(model, columns, firstOfPair) {
+    const entries = new Map();
+    model.rows.forEach((row, index) => {
+        const number = Number(String(row.id).match(/^person-(\d+)$/)?.[1]) || index + 1;
+        const entry = Math.floor((number - 1) / 2);
+        if (!entries.has(entry)) entries.set(entry, [null, null]);
+        entries.get(entry)[(number - 1) % 2] = row;
+    });
+
+    const scanned = model.columns;
+    return [...entries.entries()].sort(([a], [b]) => a - b).map(([entry, [first, second]]) => {
+        const lead = first ?? second;
+        const cellOf = (row, key) => row?.cells[key] ?? { refs: [] };
+        const cells = {};
+        scanned.forEach((column) => {
+            if (column.detail) {
+                cells[column.key] = cellOf(lead, column.key);
+            } else if (firstOfPair.has(column.key)) {
+                cells[column.key] = cellOf(first, column.key);
+                cells[column.key + LINE_TWO] = cellOf(second, column.key);
+            } else {
+                cells[column.key] = { refs: [...cellOf(first, column.key).refs, ...cellOf(second, column.key).refs] };
+            }
+        });
+        columns.filter((column) => column.manual).forEach((column) => { cells[column.key] = { refs: [] }; });
+        return {
+            id: lead.id,
+            label: String(entry + 1).padStart(2, '0'),
+            lines: [first?.id ?? null, second?.id ?? null],
+            cells,
+        };
+    });
 }
 
 // ------------------------------------------------------------------ export
@@ -297,7 +420,7 @@ export function toSheetData(table) {
  *
  * @param {{ recordId?: number|string|null, label?: string, table: string[][] }[]} parts
  */
-export function combineTables(parts) {
+export function combineTables(parts, { plain = false } = {}) {
     const headers = [];
     const seen = new Set();
     parts.forEach(({ table }) => (table?.[0] ?? []).forEach((header) => {
@@ -310,29 +433,42 @@ export function combineTables(parts) {
     const rows = parts.flatMap(({ recordId = null, label = '', table }) => {
         const [header = [], ...body] = table ?? [];
         const position = new Map(header.map((name, index) => [String(name), index]));
+        const cells = (row) => headers.map((name) => (position.has(name) ? exportCase(row[position.get(name)]) : ''));
+        // A register's tables (plain): its own columns only, as each record downloads.
+        if (plain) return body.map(cells);
         return body.map((row) => [
             recordId === null ? '' : String(recordId),
-            String(label ?? ''),
-            ...headers.map((name) => (position.has(name) ? String(row[position.get(name)] ?? '') : '')),
+            exportCase(label),
+            ...cells(row),
         ]);
     });
 
+    if (plain) return [headers, ...rows];
     return [['Record ID', 'Document', ...headers], ...rows];
 }
 
-/** "births-2splitpages-2026-11-15", safe for a file name. */
+/**
+ * A download's file name, readable and safe on any computer: the parts that are
+ * not empty (a file's extension dropped), joined by " - ":
+ * "Book of Birth - Book 12 Page 23 - 2026-11-25" (as App\Support\RegistryFields::fileName).
+ */
 export function exportFileName(...parts) {
-    const slug = parts
-        .filter((part) => String(part ?? '').trim() !== '')
-        .map((part) => String(part).replace(/\.[a-z0-9]{2,4}$/i, ''))
-        .join('-')
-        .normalize('NFKD')
-        .replace(/[̀-ͯ]/g, '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-    return slug || 'records';
+    const name = parts
+        .map((part) => String(part ?? '')
+            .replace(/\.(pdf|png|jpe?g|webp|bmp|csv|xlsx)$/i, '')
+            .replace(/[_]+/g, ' ')
+            .replace(/[\/:*?"<>|\p{Cc}]+/gu, ' ')
+            .replace(/\s+/g, ' ')
+            .trim())
+        .filter((part) => part !== '')
+        .join(' - ')
+        .slice(0, 150)
+        .trim();
+    return name || 'Records';
 }
+
+/** A downloaded value: all capitals, as the registers are kept. */
+const exportCase = (value) => String(value ?? '').toLocaleUpperCase('en-US');
 
 /**
  * Wire the "Add column" dropdown (records.partials.review-add-column) found in
@@ -449,7 +585,7 @@ export function joinTables(records) {
 
     const rows = records.flatMap(({ header = [], rows: body = [] }) => {
         const position = new Map(header.map((name, index) => [String(name), index]));
-        return body.map((row) => headers.map((name) => (position.has(name) ? String(row[position.get(name)] ?? '') : '')));
+        return body.map((row) => headers.map((name) => (position.has(name) ? exportCase(row[position.get(name)]) : '')));
     });
 
     return [headers, ...rows];
@@ -732,6 +868,8 @@ export class ReviewTable {
         // their values never reach `valueOf` / `onChange`, and are not saved with the record.
         this.addedColumns = [];
         this.addedValues = new Map();
+        // Read columns deleted from the table (keys): left out of it and its downloads.
+        this.hiddenColumns = new Set();
         this.addedCount = 0;
         this.valueOf = (cell) => (cell?.column?.custom
             ? this.addedValues.get(`${cell.row.id}|${cell.column.key}`) ?? ''
@@ -878,18 +1016,28 @@ export class ReviewTable {
         this.columnOrder = [];
         this.addedColumns = [];
         this.addedValues.clear();
+        this.hiddenColumns.clear();
         this.range = null;
         this.onCleared([]);
     }
 
     /** The model with the added columns after the others, each cell empty of fields. */
     _withAdded(model) {
-        if (this.addedColumns.length === 0) return model;
+        const shown = (columns) => (this.hiddenColumns.size === 0 ? columns : columns.filter((column) => !this.hiddenColumns.has(column.key)));
+        if (this.addedColumns.length === 0) return { ...model, columns: shown(model.columns) };
         const empty = Object.fromEntries(this.addedColumns.map((column) => [column.key, { refs: [] }]));
         return {
-            columns: [...model.columns, ...this.addedColumns],
+            columns: shown([...model.columns, ...this.addedColumns]),
             rows: model.rows.map((row) => ({ ...row, cells: { ...row.cells, ...empty } })),
         };
+    }
+
+    /**
+     * Whether a column can be deleted: any but a register field (the register's
+     * columns are the download's format; a read column no field takes can go).
+     */
+    canRemoveColumn(column) {
+        return Boolean(column) && (column.custom || !column.field);
     }
 
     /**
@@ -924,7 +1072,16 @@ export class ReviewTable {
 
     /** Take an added column away, with what was typed in it (Ctrl+Z brings it back). */
     removeColumn(key) {
-        if (!this.addedColumns.some((column) => column.key === key)) return;
+        if (!this.addedColumns.some((column) => column.key === key)) {
+            // A read column: left out of the table (and its downloads); Ctrl+Z shows it again.
+            const column = this.model?.columns.find((candidate) => candidate.key === key);
+            if (!this.canRemoveColumn(column) || this.hiddenColumns.has(key)) return;
+            this._closeEditor(true);
+            this.hiddenColumns.add(key);
+            this.render(this.sourceModel);
+            this._remember({ columnChange: 'hide', key, snapshot: null });
+            return;
+        }
         // A value still being typed is kept first, so the snapshot holds it.
         this._closeEditor(true);
         const snapshot = this._takeColumn(key);
@@ -1272,9 +1429,9 @@ export class ReviewTable {
         return label;
     }
 
-    /** What a header has besides its name: an added column's delete button. */
+    /** What a header has besides its name: a delete button, on a column that can go. */
     _headerExtras(column) {
-        if (!column?.custom) return [];
+        if (!this.canRemoveColumn(column)) return [];
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'review-table__remove';
@@ -1292,7 +1449,8 @@ export class ReviewTable {
      * and Delete. Esc, Cancel or a click elsewhere keeps the column.
      */
     _confirmRemove(key, anchor) {
-        const column = this.addedColumns.find((candidate) => candidate.key === key);
+        const column = this.addedColumns.find((candidate) => candidate.key === key)
+            ?? this.model?.columns.find((candidate) => candidate.key === key && this.canRemoveColumn(candidate));
         if (!column) return;
         this._closeConfirm();
         this._closeEditor(true);
@@ -1310,9 +1468,11 @@ export class ReviewTable {
         box.setAttribute('aria-labelledby', title.id);
         const text = document.createElement('p');
         text.className = 'small text-muted mb-3';
-        text.textContent = (typed > 0
-            ? `${typed} typed ${typed === 1 ? 'value' : 'values'} in it will be removed too.`
-            : 'Nothing has been typed in it yet.')
+        text.textContent = (!column.custom
+            ? 'It is left out of this table and its downloads.'
+            : typed > 0
+                ? `${typed} typed ${typed === 1 ? 'value' : 'values'} in it will be removed too.`
+                : 'Nothing has been typed in it yet.')
             + ' Ctrl+Z brings it back.';
         const actions = document.createElement('div');
         actions.className = 'd-flex justify-content-end gap-2';
@@ -1867,6 +2027,14 @@ export class ReviewTable {
             this._reorder([...(forward ? change.after : change.before)], false);
             return;
         }
+        if (change.columnChange === 'hide') {
+            if (forward) this.hiddenColumns.add(change.key);
+            else this.hiddenColumns.delete(change.key);
+            this._closeEditor(true);
+            this.render(this.sourceModel);
+            this.onColumnsChange();
+            return;
+        }
         if (change.columnChange) {
             // Added forward / removed backward: the column comes back; else it goes again.
             const bringBack = (change.columnChange === 'add') === forward;
@@ -2196,14 +2364,19 @@ export class ReviewTable {
         // A register's table (its columns are register fields) downloads as the
         // register does: its field names as headers, no Row column, and without
         // the scanned columns no field is filled from (noExport).
+        // A register's download is its fields only, in the register's order
+        // (whatever order the columns were dragged to; added columns are not saved).
         const register = this.model.columns.some((column) => column.field);
+        const placeOf = new Map((this.sourceModel?.columns ?? this.model.columns).map((column, index) => [column.key, index]));
         const shown = this.model.columns
             .map((column, index) => ({ column, index }))
-            .filter(({ column }) => !column.noExport);
-        const header = [...(register ? [] : ['Row']), ...shown.map(({ column }) => this.headerOf(column))];
+            .filter(({ column }) => !column.noExport && (!register || column.field))
+            .sort((a, b) => (register ? (placeOf.get(a.column.key) ?? a.index) - (placeOf.get(b.column.key) ?? b.index) : 0));
+        const header = [...(register ? [] : ['Row']), ...shown.map(({ column }) => (register ? column.field : this.headerOf(column)))];
+        // Every value in capitals.
         const rows = this.model.rows.map((row, rowIndex) => [
             ...(register ? [] : [this.rowLabelOf(row)]),
-            ...shown.map(({ index }) => this._exported(this.cell(rowIndex, index))),
+            ...shown.map(({ index }) => exportCase(this._exported(this.cell(rowIndex, index)))),
         ]);
         return [header, ...rows];
     }

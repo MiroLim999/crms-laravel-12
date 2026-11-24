@@ -216,11 +216,8 @@ class RecordReviewController extends Controller
                 ->map(fn (RecordField $field) => $field->getKey())
                 ->values(),
             'updateUrl' => route('records.review.update', $record),
-            'fileName' => implode('-', array_filter([
-                $record->typeShortLabel(),
-                'record',
-                (string) $record->getKey(),
-            ])),
+            // Readable: "Book of Birth - Book 12 Page 23 - Record 7" (the date is added on download).
+            'fileName' => app(\App\Services\RecordCsv::class)->baseName($record),
         ];
     }
 

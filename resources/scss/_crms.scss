@@ -1466,6 +1466,36 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   inline-size: 13rem;
 }
 
+// A narrow pane: the title keeps its line and the tools go under it, the search
+// taking what is left of the row (it used to squeeze "Verified data" letter by letter).
+@container record-values (max-width: 40rem) {
+  .record-values-card>.card-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+
+    >div:last-child:not(:first-child) {
+      grid-column: 1;
+      grid-row: 3;
+      flex-wrap: wrap;
+      inline-size: 100%;
+    }
+  }
+
+  .record-group-tools {
+    flex: 1 1 14rem;
+    min-inline-size: 0;
+  }
+
+  .record-group-filter {
+    flex: 1 1 auto;
+    inline-size: auto;
+    min-inline-size: 0;
+  }
+
+  .record-group-tools .btn {
+    white-space: nowrap;
+  }
+}
+
 .record-field-group__count {
   color: var(--bs-secondary-color);
   font-size: .8125rem;
@@ -8826,9 +8856,11 @@ img.validation-field__crop {
 
 // The scanning workspace (steps 1-4) and a saved record's Review & Export
 // page have no cap: the scan and the table take all the room there is, and
-// collapsing the sidebar gives them more (as the Template Builder editor).
+// collapsing the sidebar gives them more. The Template Builder too: its top
+// bar spans the same width as the editor under it.
 .document-workspace-focused,
-.record-review-focused {
+.record-review-focused,
+.template-builder-focused {
   .layout-page>.content-wrapper>.container-xxl,
   .layout-page>#layout-navbar.navbar-detached.container-xxl {
     max-inline-size: none;
@@ -10202,6 +10234,12 @@ $dashboard-reveal-step: 40ms;
 
 .record-values-card {
   overflow: hidden;
+  // Its header lays out by the pane's width, not the window's (the split moves).
+  container: record-values / inline-size;
+
+  .card-title {
+    white-space: nowrap;
+  }
 
   >.card-header {
     display: grid !important;
@@ -12224,15 +12262,20 @@ body.is-resizing-column {
 }
 
 // Step 4 "Columns → fields": a register field and the scanned column that fills it, per line.
+// Every field at once: two columns side by side where there is room (a
+// marriage register has 20), placed against the window so no card clips it.
 .review-field-map {
-  inline-size: min(26rem, calc(100vw - 16px));
-  max-block-size: min(70vh, 34rem);
+  inline-size: min(50rem, calc(100vw - 16px));
+  max-block-size: calc(100vh - 2rem);
+  max-block-size: calc(100dvh - 2rem);
   overflow-y: auto;
+  z-index: 1080;
 }
 
 .review-field-map__rows {
   display: grid;
-  gap: .4rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr));
+  gap: .4rem 1.25rem;
 }
 
 .review-field-map__row {
