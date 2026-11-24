@@ -1684,6 +1684,100 @@ export class ReviewTable {
         input.focus({ preventScroll: true });
         const end = input.value.length;
         input.setSelectionRange(end, end);
+        if (Array.isArray(type.options) && type.options.length > 0) this._openSuggestions(input, type.options, typed !== undefined && typed !== null && typed !== '');
+    }
+
+    /**
+     * A choice column's list under the box: the choices that start with what is typed
+     * (PHY → PHYSICIAN). Up / Down mark one, Enter or a click puts it in the cell.
+     */
+    _openSuggestions(input, options, initial = false) {
+        const list = document.createElement('ul');
+        list.className = 'review-table__suggestions list-group shadow-sm';
+        list.setAttribute('role', 'listbox');
+        // Solid, above the table: the cells under it must not show through.
+        Object.assign(list.style, {
+            position: 'fixed', zIndex: '2000', maxHeight: '14rem', overflowY: 'auto', margin: '0', padding: '0',
+            background: 'var(--bs-paper-bg, var(--bs-body-bg, #fff))', border: '1px solid var(--bs-border-color, #d9dee3)',
+            borderRadius: '.375rem', boxShadow: '0 .25rem 1rem rgba(0, 0, 0, .15)',
+        });
+        // Opened by a click, the list holds every choice (the cell's own marked); it narrows once typing starts.
+        const state = { list, items: [], marked: -1, filtering: initial };
+        const paint = () => {
+            const typed = input.value.trim().toLowerCase();
+            const shown = options.map(String).filter((option) => !state.filtering || option.toLowerCase().startsWith(typed));
+            state.items = shown;
+            state.marked = state.filtering
+                ? (shown.length > 0 && typed !== '' ? 0 : -1)
+                : shown.findIndex((option) => option.toLowerCase() === typed);
+            list.replaceChildren(...shown.map((option, position) => {
+                const item = document.createElement('li');
+                item.className = 'list-group-item list-group-item-action py-1 px-2 small';
+                item.setAttribute('role', 'option');
+                item.textContent = option;
+                item.style.cursor = 'pointer';
+                item.style.border = '0';
+                item.style.background = position === state.marked ? '' : 'transparent';
+                item.addEventListener('mousedown', (event) => {
+                    // Keep the focus in the box, so the click is not a blur.
+                    event.preventDefault();
+                    input.value = shown[position];
+                    this.editor?.input === input && this.commitChoice();
+                });
+                return item;
+            }));
+            mark();
+            const box = input.getBoundingClientRect();
+            list.style.left = `${box.left}px`;
+            list.style.top = `${box.bottom + 2}px`;
+            list.style.minWidth = `${Math.max(box.width, 160)}px`;
+            list.hidden = shown.length === 0;
+        };
+        const mark = () => [...list.children].forEach((item, position) => {
+            item.classList.toggle('active', position === state.marked);
+            item.style.background = position === state.marked ? '' : 'transparent';
+        });
+        state.move = (step) => {
+            if (state.items.length === 0) return false;
+            state.marked = (state.marked + step + state.items.length) % state.items.length;
+            mark();
+            list.children[state.marked]?.scrollIntoView({ block: 'nearest' });
+            return true;
+        };
+        state.pick = () => {
+            if (state.marked < 0 || !state.items[state.marked]) return;
+            input.value = state.items[state.marked];
+        };
+        // The whole word shows in the box as it is typed: "phy" reads PHYSICIAN, the rest
+        // marked (the next key replaces it; Backspace takes it off).
+        const complete = () => {
+            const typed = input.value;
+            const full = state.items[state.marked];
+            if (!full || typed === '') return;
+            if (full.length > typed.length && full.toLowerCase().startsWith(typed.toLowerCase())) {
+                input.value = full;
+                input.setSelectionRange(typed.length, full.length);
+            }
+        };
+        input.addEventListener('input', (event) => {
+            state.filtering = true;
+            paint();
+            // Not while deleting.
+            if (String(event.inputType ?? '').startsWith('insert')) complete();
+        });
+        document.body.append(list);
+        paint();
+        // A cell opened by typing a letter (no input event for that first key) completes too.
+        if (initial) complete();
+        this.suggestions = state;
+    }
+
+    /** A choice clicked in the list: it is kept, and the cursor stays on the cell. */
+    commitChoice() {
+        const at = this.editor;
+        if (!at) return;
+        this._closeEditor(true);
+        this.cellNodes[at.row]?.[at.column]?.focus({ preventScroll: true });
     }
 
     /** Keep what is being typed (before a save, an export or leaving the table). */
@@ -1696,6 +1790,8 @@ export class ReviewTable {
         const editor = this.editor;
         if (!editor) return;
         this.editor = null;
+        this.suggestions?.list.remove();
+        this.suggestions = null;
         const td = this.cellNodes[editor.row]?.[editor.column];
         td?.classList.remove('is-editing');
         ['inline-size', 'min-inline-size', 'max-inline-size', 'block-size'].forEach((name) => td?.style.removeProperty(name));
@@ -1873,6 +1969,10 @@ export class ReviewTable {
             document.removeEventListener('pointercancel', end);
             if (this.drag === drag) this.drag = null;
             if (openOnClick && !drag.moved && this.active?.row === row && this.active?.column === column) this.edit();
+            // Several cells of a choice column dragged over: its list opens at once, and the
+            // choice clicked (or Enter) goes in every picked cell.
+            const options = this.model.columns[column]?.type?.options;
+            if (drag.moved && !this.editor && Array.isArray(options) && options.length > 0 && this.selectedRows().length > 1) this.edit();
         };
         document.addEventListener('pointermove', move);
         document.addEventListener('pointerup', end);
@@ -2013,9 +2113,18 @@ export class ReviewTable {
                 this.cellNodes[at.row][at.column].focus({ preventScroll: true });
                 return;
             }
+            if (this.suggestions && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                if (this.suggestions.move(event.key === 'ArrowDown' ? 1 : -1)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                return;
+            }
             if (event.key === 'Enter' || event.key === 'Tab') {
                 event.preventDefault();
                 event.stopPropagation();
+                // The marked choice of the list goes in first.
+                this.suggestions?.pick();
                 const several = this.editor.rows.length > 1;
                 this._closeEditor(true);
                 // Several cells changed with Enter stay picked, to see them.

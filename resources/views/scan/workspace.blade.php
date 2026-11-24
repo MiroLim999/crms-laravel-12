@@ -1798,7 +1798,6 @@
         let reviewTable = null;
         let reviewModel = null;
         const reviewExtras = new Map();
-
         // ------------------------------------------------ Document Reference (Book No & Page No)
         const docRefStorageKey = 'crms_last_book_no_' + config.docType;
         let lastEnteredBookNo = (function () {
@@ -2059,6 +2058,8 @@
                     if (mate && bVal && !mate.bookNo) {
                         mate.bookNo = bVal;
                     }
+                    // Kept on the server with the batch, so a resume has them.
+                    scheduleBatchSync();
                 }
             } else {
                 pageReferences.set(scanPageNumber, { bookNo: bVal, pageNo: pVal });
@@ -7633,6 +7634,9 @@
                     scanKind: item.scanKind ?? 'full',
                     recordId: item.recordId ?? null,
                     recordUrl: item.recordUrl ?? null,
+                    // Step 1's book and page, kept so a resumed batch has them.
+                    bookNo: item.bookNo ? String(item.bookNo) : null,
+                    pageNoRef: item.pageNoRef ? String(item.pageNoRef) : null,
                 },
                 error: item.error ? String(item.error).slice(0, 2000) : null,
             };
@@ -7716,12 +7720,14 @@
         /** A record's draft as the server keeps it: what was typed and ticked, or once saved its table. */
         function draftOf(item) {
             if (pageDone(item)) return item.exportTable ? { exportTable: item.exportTable } : null;
-            if (!item.verifyDraft && !(item.reviewExtras?.size > 0)) return null;
+            if (!item.verifyDraft && !(item.reviewExtras?.size > 0) && !item.inReview) return null;
             return {
                 verify: item.verifyDraft
                     ? [...item.verifyDraft].map(([line, entry]) => ({ line, value: entry.value, verified: entry.verified }))
                     : [],
                 review: item.reviewExtras ? [...item.reviewExtras] : [],
+                // Left on Review & Export: a resume opens it there.
+                step: item.inReview ? 'review' : 'verify',
             };
         }
 
@@ -8238,6 +8244,9 @@
             }
             // Its files were just asked for: not again (the upload step offers them).
             await continueBatch(null, { askForFiles: false });
+            // The record was left on Review & Export: it opens there again.
+            const lead = currentVerifyItem();
+            if (lead?.inReview && !reviewing && activeStep === 'verify') openReview({ switching: true });
         }
 
         /**
@@ -11129,6 +11138,8 @@
             });
             item.verifyDraft = draft;
             item.reviewExtras = new Map(reviewExtras);
+            // The step it was left on (a resume opens it there again).
+            item.inReview = reviewing;
             syncBatchDraft(item);
         }
 
@@ -13869,6 +13880,12 @@
         function setReviewMode(on) {
             if (reviewing === on) return;
             reviewing = on;
+            // Kept with the batch at once: a resume opens the record on this step.
+            const lead = batchState.active ? currentVerifyItem() : null;
+            if (lead) {
+                lead.inReview = on;
+                syncBatchDraft(lead);
+            }
             const pane = document.querySelector('.validation-document-pane');
             const notices = [el('validationExistingBanner'), el('validationSubmitError')];
             if (on) {
@@ -13983,8 +14000,12 @@
         function registryDefault(column) {
             if (!registry || !column.field) return '';
             const item = batchState.active ? batchState.items[batchState.currentIndex] : null;
-            if (column.field === 'book_no') return String(item?.bookNo || getBookNumber() || '');
-            if (column.field === 'page_no') return String(item?.pageNoRef || getPageNumber() || '');
+            // The record's pages share one book and page: what was entered on either of them
+            // (a re-aligned page keeps its own), else what the step 1 boxes hold now.
+            const members = item ? recordOf(item).members : [];
+            const enteredOn = (key) => [item, ...members].map((member) => member?.[key]).find((value) => String(value ?? '').trim() !== '');
+            if (column.field === 'book_no') return String(enteredOn('bookNo') || getBookNumber() || '');
+            if (column.field === 'page_no') return String(enteredOn('pageNoRef') || getPageNumber() || '');
             return registry.fields.find((field) => field.key === column.field)?.default ?? '';
         }
 
@@ -14012,7 +14033,8 @@
                 const select = document.createElement('select');
                 select.className = 'form-select form-select-sm';
                 select.id = id;
-                select.append(new Option('Type by hand', ''));
+                const automatic = { book_no: 'Automatic (from step 1)', page_no: 'Automatic (from step 1)' }[field.key];
+                select.append(new Option(automatic ?? 'Type by hand', ''));
                 scanned.forEach((column) => select.append(new Option(column.header, column.key, false, column.key === current?.key)));
                 select.addEventListener('change', () => setFieldSource(field.key, select.value));
                 row.append(label, select);

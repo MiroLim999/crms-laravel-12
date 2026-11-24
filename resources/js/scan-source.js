@@ -461,6 +461,9 @@ export function rebuildBatchState(serverBatch, { layoutChanged = false } = {}) {
             // Sent back by Re-align without its file: drawn from the server's copy.
             serverCopy: Boolean(flags.serverCopy) && status === 'pending',
             addedAnyway: Boolean(flags.addedAnyway),
+            // Step 1's book and page, as they were entered.
+            ...(flags.bookNo ? { bookNo: String(flags.bookNo) } : {}),
+            ...(flags.pageNoRef ? { pageNoRef: String(flags.pageNoRef) } : {}),
             // Save & next pressed on it (Done): saved with the rest by Save & finish
             // batch, with the answers given then ({ allowMissing, allowDuplicate }).
             approved: ['ready', 'verifying'].includes(status) && flags.approved && typeof flags.approved === 'object'
@@ -488,6 +491,8 @@ export function rebuildBatchState(serverBatch, { layoutChanged = false } = {}) {
             lead.verifyDraft = new Map(draft.verify.map((entry) => [entry.line, { value: String(entry.value ?? ''), verified: Boolean(entry.verified) }]));
         }
         if (Array.isArray(draft.review)) lead.reviewExtras = new Map(draft.review);
+        // Left on Review & Export: the workspace opens it there again.
+        lead.inReview = draft.step === 'review';
         if (Array.isArray(draft.exportTable)) lead.exportTable = draft.exportTable;
     });
 
