@@ -1325,7 +1325,7 @@
                     <ul class="batch-delete-notes" id="batchDocumentNotes"></ul>
 
                     <div class="leave-scan-modal__actions batch-delete-actions" id="batchDocumentActions">
-                        <button type="button" class="btn btn-label-secondary text-nowrap" id="batchDocCancelBtn" data-bs-dismiss="modal">
+                        <button type="button" class="btn btn-outline-secondary text-nowrap" id="batchDocCancelBtn" data-bs-dismiss="modal">
                             Keep it
                         </button>
                         {{-- Only one page of the file: the other pages stay queued. --}}
@@ -5992,6 +5992,8 @@
          * file the user may remove alone (null: only the whole file is offered).
          */
         function openBatchDocumentModal(index, { pageIndex = null } = {}) {
+            // The queue list closes first: it would show through above the dialog.
+            setQueuePanelOpen(false);
             const item = batchState.items[index];
             if (!item) return;
             const filePages = removableGroupPages(item);
@@ -14218,6 +14220,9 @@
                 activateValidationField(index, 'row', { alignTo: el('reviewTable').querySelector('td.is-active') });
                 return;
             }
+            // A field typed by hand (attendant, late_registration, an added column) is
+            // not on the scan: the scan stays where it is while it is filled in.
+            if (cell.column.manual || cell.column.custom) return;
             if (!cell.column.detail) activateValidationGroup(cell.row.id, 'group');
         }
 

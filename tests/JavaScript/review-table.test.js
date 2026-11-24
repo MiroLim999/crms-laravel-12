@@ -474,3 +474,24 @@ test('a register downloads its fields in its own order, whatever the columns wer
     table.model = { ...source, columns: [source.columns[2], source.columns[0], { key: 'c', header: 'Notes', custom: true }, source.columns[1]] };
     assert.deepEqual(table.exportTable(), [['name', 'sex', 'reg_no'], ['ANA CRUZ', 'FEMALE', '5']]);
 });
+
+test('two rows of one page with the same register number cannot be saved', () => {
+    const regs = ['1', '2', '2'];
+    const table = new ReviewTable({
+        container: { addEventListener() {} },
+        valueOf: (cell) => (cell.column.field === 'reg_no' ? regs[Number(cell.row.label) - 1] : (cell.column.field === 'name' ? 'Ana' : '7')),
+        onChange: () => {},
+    });
+    const fields = ['name', 'book_no', 'page_no', 'reg_no'];
+    table.model = {
+        columns: fields.map((field) => ({ key: `m|${field}`, field, header: field, type: null })),
+        rows: ['1', '2', '3'].map((n) => ({ id: `person-${n}`, label: n, cells: Object.fromEntries(fields.map((f) => [`m|${f}`, { refs: [] }])) })),
+    };
+    const issue = table.firstFieldIssue();
+    assert.equal(issue.row, 2);
+    assert.equal(issue.column, 3);
+    assert.match(issue.message, /^Row 3, reg_no: 2 is Row 2's register number too\./);
+
+    regs[2] = '3';
+    assert.equal(table.firstFieldIssue(), null);
+});

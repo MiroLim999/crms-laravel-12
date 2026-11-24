@@ -929,6 +929,7 @@ class DocumentScanController extends Controller
 
         $messages = [];
         $clean = [];
+        $firstRow = [];
         foreach ($rows as $index => $row) {
             $label = is_array($row) && is_scalar($row['row'] ?? null) ? (string) $row['row'] : (string) ($index + 1);
             $values = is_array($row['values'] ?? null) ? $row['values'] : [];
@@ -936,7 +937,14 @@ class DocumentScanController extends Controller
             foreach (RegistryFields::problems($type, $values) as $field => $problem) {
                 $messages[] = "Row {$label}: {$field} {$problem}.";
             }
-            $clean[] = RegistryFields::attributes($type, $values);
+            $attributes = RegistryFields::attributes($type, $values);
+            // One entry per register number on a page: a repeat would replace the first row.
+            $entry = mb_strtolower("{$attributes['book_no']}|{$attributes['page_no']}|{$attributes['reg_no']}");
+            if (($attributes['reg_no'] ?? '') !== '' && isset($firstRow[$entry])) {
+                $messages[] = "Row {$label}: reg_no {$attributes['reg_no']} is row {$firstRow[$entry]}'s register number too. Each entry of a page has its own number.";
+            }
+            $firstRow[$entry] ??= $label;
+            $clean[] = $attributes;
         }
         if ($messages !== []) {
             throw ValidationException::withMessages(['registry_rows' => $messages]);

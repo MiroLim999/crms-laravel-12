@@ -4230,13 +4230,39 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 .batch-delete-notes {
   margin: 0 0 1.5rem;
-  padding-inline-start: 1.1rem;
-  color: var(--bs-secondary-color);
-  font-size: .8rem;
+  padding: .7rem .9rem .7rem 1.9rem;
+  color: var(--bs-body-color);
+  font-size: .8125rem;
+  line-height: 1.45;
   text-align: start;
+  background: var(--bs-tertiary-bg, rgba(var(--crms-ink-rgb), .03));
+  border-radius: var(--bs-border-radius);
+
+  &:empty {
+    display: none;
+  }
+
+  li::marker {
+    color: var(--bs-secondary-color);
+  }
 
   li+li {
-    margin-block-start: .25rem;
+    margin-block-start: .3rem;
+  }
+}
+
+// Two choices: Keep it as wide as its word, the removal taking the rest.
+.batch-delete-actions:not(.is-three) {
+  display: flex;
+
+  #batchDocCancelBtn {
+    flex: 0 0 auto;
+    min-inline-size: 6.5rem;
+  }
+
+  #confirmDeleteBatchDocBtn {
+    flex: 1 1 auto;
+    min-inline-size: 0;
   }
 }
 

@@ -2423,6 +2423,37 @@ export class ReviewTable {
                 };
             }
         }
+        return this._repeatedRegNo();
+    }
+
+    /**
+     * Two rows of one book and page with the same register number: the register
+     * keeps one entry per number, so the second would replace the first. The
+     * second is picked, naming the first ("Row 03, reg_no: 2 is Row 02's too").
+     */
+    _repeatedRegNo() {
+        const at = (field) => this.model.columns.findIndex((column) => column.field === field && !column.noExport);
+        const regColumn = at('reg_no');
+        if (regColumn === -1) return null;
+        const bookColumn = at('book_no');
+        const pageColumn = at('page_no');
+        const valueAt = (row, column) => (column === -1 ? '' : this._exported(this.cell(row, column)).toLowerCase());
+        const seen = new Map();
+        for (let row = 0; row < this.model.rows.length; row += 1) {
+            const reg = valueAt(row, regColumn);
+            if (reg === '') continue;
+            const key = `${valueAt(row, bookColumn)}|${valueAt(row, pageColumn)}|${reg}`;
+            if (seen.has(key)) {
+                const first = this.rowLabelOf(this.model.rows[seen.get(key)]);
+                return {
+                    row,
+                    column: regColumn,
+                    message: `Row ${this.rowLabelOf(this.model.rows[row])}, reg_no: ${this._exported(this.cell(row, regColumn))} is Row ${first}'s register number too. `
+                        + 'Each entry of a page has its own number: check it on the scan and correct one of them.',
+                };
+            }
+            seen.set(key, row);
+        }
         return null;
     }
 }
