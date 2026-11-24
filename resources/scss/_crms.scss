@@ -12007,6 +12007,37 @@ $dashboard-reveal-step: 40ms;
     text-overflow: ellipsis;
   }
 
+  // A column the reviewer added: an × at its header's end deletes it.
+  thead th.is-custom .review-table__label {
+    padding-inline-end: 1.1rem;
+  }
+
+  .review-table__remove {
+    position: absolute;
+    inset-block-start: 50%;
+    inset-inline-end: 8px;
+    z-index: 5;
+    display: grid;
+    place-items: center;
+    inline-size: 1.1rem;
+    block-size: 1.1rem;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--bs-secondary-color);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    transform: translateY(-50%);
+
+    &:hover,
+    &:focus-visible {
+      background: rgba(var(--bs-danger-rgb), .12);
+      color: var(--bs-danger);
+    }
+  }
+
   // Headers can be dragged to swap places; the bar shows where one lands.
   thead th[draggable="true"] {
     cursor: grab;

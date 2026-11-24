@@ -255,6 +255,12 @@ export function attachAddColumn(table, root = document) {
     });
     // A new document empties the table's added columns: show what is there when opened.
     wrap.addEventListener('show.bs.dropdown', paint);
+    // A column deleted from its header's × leaves the list as well.
+    const before = table.onColumnsChange;
+    table.onColumnsChange = () => {
+        before();
+        paint();
+    };
     paint();
 }
 
@@ -591,8 +597,10 @@ export class ReviewTable {
     constructor({
         container, valueOf, onChange, onLocate = () => {}, onIssues = () => {},
         snapshotOf = () => null, restore = () => {}, onRange = () => {}, onCleared = () => {},
-        isUnverified = () => false,
+        isUnverified = () => false, onColumnsChange = () => {},
     }) {
+        // An added column was deleted from its header (the Add column menu lists them).
+        this.onColumnsChange = onColumnsChange;
         this.isUnverified = isUnverified;
         this.onRange = onRange;
         this.onCleared = onCleared;
@@ -650,6 +658,14 @@ export class ReviewTable {
         container.addEventListener('drop', (event) => this._drop(event));
         container.addEventListener('keydown', (event) => this._keyDown(event));
         container.addEventListener('dblclick', (event) => this._doubleClick(event));
+        // An added column's × in its header deletes it.
+        container.addEventListener('click', (event) => {
+            const remove = event.target instanceof Element ? event.target.closest('.review-table__remove') : null;
+            if (!remove) return;
+            event.preventDefault();
+            event.stopPropagation();
+            this._confirmRemove(remove.dataset.key);
+        });
         container.addEventListener('copy', (event) => this._copy(event, false));
         container.addEventListener('cut', (event) => this._copy(event, true));
         container.addEventListener('paste', (event) => this._paste(event));
@@ -776,23 +792,63 @@ export class ReviewTable {
         };
         this.addedColumns.push(column);
         this.render(this.sourceModel);
+        // Ctrl+Z takes the new column away again (its snapshot is taken then, for Ctrl+Y).
+        this._remember({ columnChange: 'add', key: column.key, snapshot: null });
         const at = this.model.columns.findIndex((candidate) => candidate.key === column.key);
         if (at !== -1) this.select(0, at, { locate: false });
         return column;
     }
 
-    /** Take an added column away, with what was typed in it. */
+    /** Take an added column away, with what was typed in it (Ctrl+Z brings it back). */
     removeColumn(key) {
         if (!this.addedColumns.some((column) => column.key === key)) return;
+        // A value still being typed is kept first, so the snapshot holds it.
         this._closeEditor(true);
-        this.addedColumns = this.addedColumns.filter((column) => column.key !== key);
-        [...this.addedValues.keys()].filter((id) => id.endsWith(`|${key}`)).forEach((id) => this.addedValues.delete(id));
+        const snapshot = this._takeColumn(key);
+        if (snapshot) this._remember({ columnChange: 'remove', key, snapshot });
+    }
+
+    /**
+     * Take an added column out of the table and return all it had: the column,
+     * its place, its values, its new name, width and dragged position.
+     */
+    _takeColumn(key) {
+        const index = this.addedColumns.findIndex((column) => column.key === key);
+        if (index === -1) return null;
+        this._closeEditor(true);
+        const snapshot = {
+            column: this.addedColumns[index],
+            index,
+            values: [...this.addedValues].filter(([id]) => id.endsWith(`|${key}`)),
+            name: this.headerNames.get(key) ?? null,
+            width: this.widths.get(key) ?? null,
+            order: this.columnOrder.indexOf(key),
+        };
+        this.addedColumns.splice(index, 1);
+        snapshot.values.forEach(([id]) => this.addedValues.delete(id));
         this.headerNames.delete(key);
         this.widths.delete(key);
         this.columnOrder = this.columnOrder.filter((candidate) => candidate !== key);
-        this.history = [];
-        this.redoList = [];
         this.render(this.sourceModel);
+        return snapshot;
+    }
+
+    /** Put a column taken out (see _takeColumn) back as it was, and pick it. */
+    _putColumn(snapshot) {
+        this._closeEditor(true);
+        const { column, index, values, name, width, order } = snapshot;
+        this.addedColumns.splice(Math.min(index, this.addedColumns.length), 0, column);
+        values.forEach(([id, value]) => this.addedValues.set(id, value));
+        if (name !== null) this.headerNames.set(column.key, name);
+        if (width !== null) this.widths.set(column.key, width);
+        if (order !== -1 && this.columnOrder.length > 0) {
+            this.columnOrder.splice(Math.min(order, this.columnOrder.length), 0, column.key);
+        }
+        this.render(this.sourceModel);
+        const at = this.model.columns.findIndex((candidate) => candidate.key === column.key);
+        if (at !== -1 && this.model.rows.length > 0) {
+            this.select(Math.min(this.active?.row ?? 0, this.model.rows.length - 1), at, { locate: false });
+        }
     }
 
     /** The added columns as shown now: [{ key, header }]. */
@@ -860,10 +916,14 @@ export class ReviewTable {
         this._reorder(keys);
     }
 
-    /** Draw the columns again in `keys` order; the picked cell stays on its column. */
-    _reorder(keys) {
+    /**
+     * Draw the columns again in `keys` order; the picked cell stays on its column.
+     * A move by the reviewer (`remember`) is one change Ctrl+Z can take back.
+     */
+    _reorder(keys, remember = true) {
         this._closeEditor(true);
         const activeKey = this.active ? this.model.columns[this.active.column]?.key : null;
+        if (remember) this._remember({ order: true, before: [...this.columnOrder], after: [...keys] });
         this.columnOrder = keys;
         this.render(this.sourceModel);
         if (activeKey != null) {
@@ -892,17 +952,24 @@ export class ReviewTable {
 
     /** Ctrl+Z: undo; Ctrl+Y or Ctrl+Shift+Z: redo (Cmd on a Mac). True when the key was one of them. */
     _undoKey(event) {
-        if (!(event.ctrlKey || event.metaKey) || event.altKey) return false;
-        const key = event.key.toLowerCase();
-        const z = key === 'z' || event.code === 'KeyZ';
-        const y = key === 'y' || event.code === 'KeyY';
-        if (!z && !y) return false;
+        const kind = this._undoKind(event);
+        if (!kind) return false;
         event.preventDefault();
         event.stopPropagation();
         this._closeEditor(true);
-        if (z && !event.shiftKey) this.undo();
+        if (kind === 'undo') this.undo();
         else this.redo();
         return true;
+    }
+
+    /** 'undo' (Ctrl+Z), 'redo' (Ctrl+Y, Ctrl+Shift+Z; Cmd on a Mac) or null. */
+    _undoKind(event) {
+        if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
+        const key = String(event.key ?? '').toLowerCase();
+        const z = key === 'z' || event.code === 'KeyZ';
+        const y = key === 'y' || event.code === 'KeyY';
+        if (z && !event.shiftKey) return 'undo';
+        return z || y ? 'redo' : null;
     }
 
     /** A column's header as shown and downloaded (renamed or not). */
@@ -951,7 +1018,7 @@ export class ReviewTable {
             if (column.type.input === 'select') th.dataset.choices = column.type.options.join(' / ');
             const label = document.createElement('span');
             label.className = 'review-table__label';
-            th.append(label, this._resizer());
+            th.append(label, ...this._headerExtras(column), this._resizer());
             head.appendChild(th);
             return th;
         });
@@ -1075,9 +1142,34 @@ export class ReviewTable {
         if (!label) {
             label = document.createElement('span');
             label.className = 'review-table__label';
-            th.replaceChildren(label, this._resizer());
+            th.replaceChildren(label, ...this._headerExtras(this.model.columns[Number(th.dataset.column)]), this._resizer());
         }
         return label;
+    }
+
+    /** What a header has besides its name: an added column's delete button. */
+    _headerExtras(column) {
+        if (!column?.custom) return [];
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'review-table__remove';
+        remove.dataset.key = column.key;
+        remove.draggable = false;
+        remove.tabIndex = -1;
+        remove.textContent = '×';
+        remove.title = 'Delete this column';
+        remove.setAttribute('aria-label', `Delete column ${this.headerOf(column)}`);
+        return [remove];
+    }
+
+    /** Delete an added column, asking first when something was typed in it. */
+    _confirmRemove(key) {
+        const column = this.addedColumns.find((candidate) => candidate.key === key);
+        if (!column) return;
+        const typed = [...this.addedValues.keys()].some((id) => id.endsWith(`|${key}`));
+        if (typed && !window.confirm(`Delete the column "${this.headerOf(column)}" and what was typed in it?`)) return;
+        this.removeColumn(key);
+        this.onColumnsChange();
     }
 
     /** The grip on a header's right edge: drag to resize, double-click to fit. */
@@ -1130,7 +1222,8 @@ export class ReviewTable {
             const columnIndex = Number(th.dataset.column);
             const column = this.model.columns[columnIndex];
             widest = Math.max(
-                widthOf(column ? this.headerOf(column) : th.textContent, th) + 8,
+                // An added column's header also holds its × (about 18px).
+                widthOf(column ? this.headerOf(column) : th.textContent, th) + 8 + (column?.custom ? 18 : 0),
                 ...this.model.rows.map((_, rowIndex) => widthOf(this.valueOf(this.cell(rowIndex, columnIndex)), probe)),
             );
         }
@@ -1177,9 +1270,13 @@ export class ReviewTable {
         this._closeEditor(true);
         const startX = event.clientX;
         const startWidth = th.getBoundingClientRect().width;
+        const before = this.widths.get(key) ?? null;
         document.body.classList.add('is-resizing-column');
         const move = (moveEvent) => this._setWidth(key, startWidth + moveEvent.clientX - startX);
         const end = () => {
+            // The whole drag is one change for Ctrl+Z (a press without a move is none).
+            const after = this.widths.get(key) ?? null;
+            if (after !== before) this._remember({ width: true, key, before, after });
             document.body.classList.remove('is-resizing-column');
             document.removeEventListener('pointermove', move);
             document.removeEventListener('pointerup', end);
@@ -1195,8 +1292,21 @@ export class ReviewTable {
         const th = grip.closest('th');
         const key = th?.dataset.sizeKey;
         if (key === undefined) return;
+        const before = this.widths.get(key) ?? null;
         // Even a long value: a double-click shows all of it (the limit is for the automatic width).
         this._setWidth(key, this._contentWidth(th, true));
+        const after = this.widths.get(key) ?? null;
+        if (after !== before) this._remember({ width: true, key, before, after });
+    }
+
+    /** A column's width as a change left it (null: as wide as its longest value again). */
+    _restoreWidth(key, width) {
+        if (width === null) {
+            this.widths.delete(key);
+            this._autoSizeColumns();
+        } else {
+            this._setWidth(key, width);
+        }
     }
 
     /** Pick the cell holding `ref` (a field picked on the scan); no locate, no edit. */
@@ -1433,6 +1543,26 @@ export class ReviewTable {
 
     /** Put a change's cells or label back as they were (`forward` false), or as it made them. */
     _replay(change, forward) {
+        if (change.width) {
+            this._closeEditor(true);
+            this._restoreWidth(change.key, forward ? change.after : change.before);
+            return;
+        }
+        if (change.order) {
+            this._reorder([...(forward ? change.after : change.before)], false);
+            return;
+        }
+        if (change.columnChange) {
+            // Added forward / removed backward: the column comes back; else it goes again.
+            const bringBack = (change.columnChange === 'add') === forward;
+            if (bringBack) {
+                if (change.snapshot) this._putColumn(change.snapshot);
+            } else {
+                change.snapshot = this._takeColumn(change.key) ?? change.snapshot;
+            }
+            this.onColumnsChange();
+            return;
+        }
         if (change.label) {
             const names = change.label === 'header' ? this.headerNames : this.rowNames;
             const name = forward ? change.after : change.before;
@@ -1474,9 +1604,15 @@ export class ReviewTable {
     _pointerDown(event) {
         if (event.button !== 0) return;
         const grip = event.target instanceof Element ? event.target.closest('.review-table__resizer') : null;
-        // Pressing a header's resize grip must not start a column drag.
+        const remove = event.target instanceof Element ? event.target.closest('.review-table__remove') : null;
+        // Pressing a header's resize grip or delete button must not start a column drag.
         const pressed = event.target instanceof Element ? event.target.closest('thead th[data-column]') : null;
-        if (pressed) pressed.dataset.noDrag = grip ? '1' : '0';
+        if (pressed) pressed.dataset.noDrag = grip || remove ? '1' : '0';
+        // The delete button acts on its click (see the constructor).
+        if (remove) {
+            event.preventDefault();
+            return;
+        }
         if (grip) {
             this._resizeStart(event, grip);
             return;
@@ -1630,6 +1766,24 @@ export class ReviewTable {
         const columns = this.model.columns.length;
 
         if (this.editor) {
+            // A click opens the cell's box, so the cursor is nearly always in one. While what
+            // was typed there is not yet undone, Ctrl+Z is the box's own; once the box holds the
+            // cell's value again (or nothing was typed), Ctrl+Z / Ctrl+Y undo and redo the
+            // table: a cell deleted by accident comes back.
+            if (this.editor.input.value === this.editor.original && this._undoKey(event)) return;
+            if (this._undoKind(event) === 'undo') {
+                // The box's own undo goes first. When it has nothing left to take back (the
+                // first key typed on a picked cell is put in by the table, not the box), the
+                // cell's value comes back instead, and the next Ctrl+Z is the table's.
+                const { input } = this.editor;
+                const shown = input.value;
+                window.setTimeout(() => {
+                    if (this.editor?.input !== input || input.value !== shown) return;
+                    input.value = this.editor.original;
+                    input.dispatchEvent(new Event('input'));
+                }, 0);
+                return;
+            }
             if (event.key === 'Escape') {
                 event.preventDefault();
                 event.stopPropagation();
