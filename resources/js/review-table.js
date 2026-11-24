@@ -232,10 +232,8 @@ export function attachAddColumn(table, root = document) {
             remove.className = 'btn btn-sm btn-link text-danger p-0';
             remove.textContent = 'Remove';
             remove.setAttribute('aria-label', `Remove column ${column.header}`);
-            remove.addEventListener('click', () => {
-                table.removeColumn(column.key);
-                paint();
-            });
+            // The same question as the × on the column's header (the list repaints on Delete).
+            remove.addEventListener('click', () => table.confirmRemoveColumn(column.key, remove));
             item.append(label, remove);
             return item;
         }));
@@ -664,7 +662,7 @@ export class ReviewTable {
             if (!remove) return;
             event.preventDefault();
             event.stopPropagation();
-            this._confirmRemove(remove.dataset.key);
+            this._confirmRemove(remove.dataset.key, remove);
         });
         container.addEventListener('copy', (event) => this._copy(event, false));
         container.addEventListener('cut', (event) => this._copy(event, true));
@@ -985,6 +983,8 @@ export class ReviewTable {
     /** Draw the table for `model` (see buildReviewModel); keeps the picked cell where it can. */
     render(model) {
         const keep = this.active;
+        // The table drawn again: a delete question about its old headers goes.
+        this._closeConfirm();
         this._closeEditor(false);
         this.sourceModel = model;
         model = this._ordered(this._withAdded(model));
@@ -1162,14 +1162,108 @@ export class ReviewTable {
         return [remove];
     }
 
-    /** Delete an added column, asking first when something was typed in it. */
-    _confirmRemove(key) {
+    /**
+     * Ask before deleting an added column: a small box under its × with Cancel
+     * and Delete. Esc, Cancel or a click elsewhere keeps the column.
+     */
+    _confirmRemove(key, anchor) {
         const column = this.addedColumns.find((candidate) => candidate.key === key);
         if (!column) return;
-        const typed = [...this.addedValues.keys()].some((id) => id.endsWith(`|${key}`));
-        if (typed && !window.confirm(`Delete the column "${this.headerOf(column)}" and what was typed in it?`)) return;
-        this.removeColumn(key);
-        this.onColumnsChange();
+        this._closeConfirm();
+        this._closeEditor(true);
+        const header = this.headerOf(column);
+        const typed = [...this.addedValues.keys()].filter((id) => id.endsWith(`|${key}`)).length;
+
+        const box = document.createElement('div');
+        box.className = 'review-table__confirm card shadow';
+        box.setAttribute('role', 'alertdialog');
+        box.setAttribute('aria-modal', 'false');
+        const title = document.createElement('div');
+        title.className = 'review-table__confirm-title';
+        title.id = `reviewConfirm-${key.replace(/\W/g, '-')}`;
+        title.textContent = `Delete column "${header}"?`;
+        box.setAttribute('aria-labelledby', title.id);
+        const text = document.createElement('p');
+        text.className = 'small text-muted mb-3';
+        text.textContent = (typed > 0
+            ? `${typed} typed ${typed === 1 ? 'value' : 'values'} in it will be removed too.`
+            : 'Nothing has been typed in it yet.')
+            + ' Ctrl+Z brings it back.';
+        const actions = document.createElement('div');
+        actions.className = 'd-flex justify-content-end gap-2';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'btn btn-sm btn-outline-secondary';
+        cancel.textContent = 'Cancel';
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'btn btn-sm btn-danger';
+        remove.textContent = 'Delete';
+        actions.append(cancel, remove);
+        box.append(title, text, actions);
+        document.body.append(box);
+
+        // Under the ×, kept on screen.
+        const place = () => {
+            const at = (anchor?.isConnected ? anchor : this.container).getBoundingClientRect();
+            const width = box.offsetWidth;
+            box.style.top = `${Math.min(at.bottom + 6, window.innerHeight - box.offsetHeight - 8)}px`;
+            box.style.left = `${Math.max(8, Math.min(at.right - width, window.innerWidth - width - 8))}px`;
+        };
+        place();
+
+        const backToTable = () => {
+            if (this.active) this.cellNodes[this.active.row]?.[this.active.column]?.focus({ preventScroll: true });
+        };
+        const outside = (event) => {
+            if (!box.contains(event.target)) this._closeConfirm();
+        };
+        const onKey = (event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            this._closeConfirm();
+            backToTable();
+        };
+        cancel.addEventListener('click', () => {
+            this._closeConfirm();
+            backToTable();
+        });
+        remove.addEventListener('click', () => {
+            this._closeConfirm();
+            this.removeColumn(key);
+            this.onColumnsChange();
+            backToTable();
+        });
+        box.addEventListener('keydown', onKey);
+        // The table scrolling or the window changing size moves the × away: the box closes.
+        const close = () => this._closeConfirm();
+        document.addEventListener('pointerdown', outside, true);
+        this.container.addEventListener('scroll', close, { passive: true });
+        window.addEventListener('resize', close);
+        this._confirm = {
+            box,
+            cleanup: () => {
+                document.removeEventListener('pointerdown', outside, true);
+                this.container.removeEventListener('scroll', close);
+                window.removeEventListener('resize', close);
+            },
+        };
+        cancel.focus({ preventScroll: true });
+    }
+
+    /** Ask, then delete an added column (`anchor`: what was clicked; the question opens under it). */
+    confirmRemoveColumn(key, anchor = null) {
+        this._confirmRemove(key, anchor);
+    }
+
+    /** Close the delete question, if it is open (the column stays). */
+    _closeConfirm() {
+        const confirm = this._confirm;
+        if (!confirm) return;
+        this._confirm = null;
+        confirm.cleanup();
+        confirm.box.remove();
     }
 
     /** The grip on a header's right edge: drag to resize, double-click to fit. */
