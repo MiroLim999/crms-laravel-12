@@ -583,8 +583,15 @@ export function fieldsOverLedger(boxes, ys) {
  *
  * @returns {Array<{message: string, blocking: boolean}>}
  */
-export function ledgerGridProblems(columns, ys, { minGap = MIN_ROW_GAP } = {}) {
+export function ledgerGridProblems(columns, ys, { minGap = MIN_ROW_GAP, aspect = 1 } = {}) {
     if (columns.length === 0) return [];
+    // A tilted table is checked as if it were level (turned back about the same
+    // middle tiltColumns turns it about): its outer columns' tops and bottoms
+    // then line up again, as the row lines (held at the page's middle) do.
+    const tilt = gridTilt(columns);
+    if (Math.abs(tilt) >= 0.05) {
+        columns = tiltColumns(columns.map((column) => ({ ...column, kind: 'column' })), -tilt, aspect);
+    }
     if (ys.length < 2) {
         return [{ message: 'Add the printed row lines: a ledger needs at least two.', blocking: true }];
     }

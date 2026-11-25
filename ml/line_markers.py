@@ -860,7 +860,7 @@ def _rule_pixels(gray, length=60):
     return horizontal, vertical
 
 
-def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near=0.0):
+def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near=0.0, bends=False):
     """Straight printed rules along one axis.
 
     Returns (rules, pixels). Rules are {"a", "b", "lo", "hi", "covered",
@@ -888,6 +888,12 @@ def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near
     rule and is erased. Writing resting on a rule is thicker than the print
     (on every stored page, 4 px joins 7 px above 2 px rules, "Legitimate",
     "Salustiana"), and erasing it cut "Legitimate" to "Ley t to".
+
+    With `bends`, pieces that do not lie on one straight line are joined too,
+    end to end, when one starts close to where the other ends (see
+    _link_bent_rules): an old page's rule that waves, steps up or down part
+    way across, or a column rule that leans and bends, comes back as one rule
+    with its "path" (where it really runs) instead of as several short ones.
     """
     from scipy import ndimage
 
@@ -940,6 +946,9 @@ def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near
                 continue
         merged.append(dict(fragment, members=[fragment]))
 
+    if bends:
+        merged = _link_bent_rules(merged)
+
     rules = []
     thicknesses = []
     loose = []
@@ -948,6 +957,8 @@ def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near
         if covered >= min_span:
             rules.append({"a": rule["a"], "b": rule["b"], "lo": rule["lo"], "hi": rule["hi"],
                           "covered": int(covered), "thickness": len(rule["u"]) / covered})
+            if bends:
+                rules[-1]["path"] = _rule_path(rule["u"], rule["v"])
             thicknesses.append(float(np.median([member["thickness"] for member in rule["members"]])))
             for member in rule["members"]:
                 pixels[member["window"]] |= member["mask"]
@@ -967,6 +978,175 @@ def _find_rules(evidence, axis, min_span, max_thickness=None, writing=None, near
                 continue  # the body of a written word, not print
         pixels[fragment["window"]] |= fragment["mask"]
     return rules, pixels
+
+
+# Bend linking (_link_bent_rules): two pieces of one wavy or stepped rule may
+# start this share of the rows' spacing apart (a step), at most BEND_STEP_MAX
+# px, and lie this many rows apart end to end at most (a stretch the rule lost).
+BEND_STEP = 0.35
+BEND_STEP_MIN, BEND_STEP_MAX = 6.0, 30.0
+BEND_GAP_ROWS = 1.5
+BEND_GAP_MIN = 60.0
+# Pieces may overlap this much end to end (a step drawn with a little overlap).
+BEND_OVERLAP = 20.0
+# How far in from a piece's end its height there is measured (pixels).
+BEND_END_REACH = 25.0
+
+
+def _rule_spacing(rules):
+    """The typical distance between neighbouring rules (pixels), from long pieces side by side; None if unclear."""
+    long_ones = [r for r in rules if r["hi"] - r["lo"] >= 150]
+    distances = []
+    for rule in long_ones:
+        mid_u = (rule["lo"] + rule["hi"]) / 2
+        mine = rule["a"] + rule["b"] * mid_u
+        nearest = None
+        for other in long_ones:
+            if other is rule or not (other["lo"] <= mid_u <= other["hi"]):
+                continue
+            gap = abs(other["a"] + other["b"] * mid_u - mine)
+            if gap > 8 and (nearest is None or gap < nearest):
+                nearest = gap
+        if nearest is not None:
+            distances.append(nearest)
+    return float(np.median(distances)) if len(distances) >= 3 else None
+
+
+def _end_v(rule, side, reach=BEND_END_REACH):
+    """A piece's height (v) at its low or high end, from its points within `reach` of it."""
+    u, v = rule["u"], rule["v"]
+    picked = u >= rule["hi"] - reach if side == "hi" else u <= rule["lo"] + reach
+    return float(np.median(v[picked]))
+
+
+def _link_bent_rules(merged):
+    """Rules joined where they bend or step (see _find_rules' `bends`).
+
+    Starting from the longest, a rule takes in every piece that runs on from
+    it: one whose end lies no more than a step (BEND_STEP of the rules'
+    spacing) above or below the rule's nearest point beyond that end, at most
+    BEND_GAP_ROWS rows along; or one lying in a stretch the rule skips (two
+    pieces of a wave joined on a straight line pass over its crest), where it
+    meets the rule's points on either side. Neighbouring rules are a whole
+    row apart, so a piece never joins the rule above or below its own.
+    """
+    if len(merged) < 2:
+        return merged
+    spacing = _rule_spacing(merged)
+    if spacing is None:
+        return merged
+    step = min(BEND_STEP_MAX, max(BEND_STEP_MIN, BEND_STEP * spacing))
+    reach = max(BEND_GAP_MIN, BEND_GAP_ROWS * spacing)
+
+    def runs_on(us, vs, piece):
+        """Whether `piece` continues the rule whose points (sorted by u) are us, vs."""
+        lo, hi = piece["lo"], piece["hi"]
+        # The rule's own points under the piece: they must be the same line there.
+        under = (us >= lo) & (us <= hi)
+        if np.count_nonzero(under) >= 5:
+            mine = np.interp(us[under], piece["path"][0], piece["path"][1])
+            if float(np.median(np.abs(vs[under] - mine))) > step:
+                return False
+        # The rule's nearest end beyond each end of the piece, carried on
+        # along its own slope there to where the piece starts.
+        near = []
+        before = (us < lo) & (us >= lo - reach)
+        if np.any(before):
+            k = np.flatnonzero(before)[-1]
+            near.append(abs(_carried(us, vs, k, -1, lo) - _end_v(piece, "lo")))
+        after = (us > hi) & (us <= hi + reach)
+        if np.any(after):
+            k = np.flatnonzero(after)[0]
+            near.append(abs(_carried(us, vs, k, 1, hi) - _end_v(piece, "hi")))
+        if not near:
+            # Overlapping only: joined when the overlap agrees (checked above).
+            return np.count_nonzero(under) >= 5
+        return min(near) <= step
+
+    pieces = sorted(merged, key=lambda r: -(r["hi"] - r["lo"]))
+    for piece in pieces:
+        piece["path"] = _rule_path(piece["u"], piece["v"])
+    used = [False] * len(pieces)
+    linked = []
+    for start, piece in enumerate(pieces):
+        if used[start]:
+            continue
+        used[start] = True
+        group = [piece]
+        us, vs = piece["path"]
+        while True:
+            joined = False
+            for k, other in enumerate(pieces):
+                if used[k] or other["lo"] > us[-1] + reach or other["hi"] < us[0] - reach:
+                    continue
+                if runs_on(us, vs, other):
+                    used[k] = True
+                    group.append(other)
+                    u = np.concatenate([g["u"] for g in group])
+                    v = np.concatenate([g["v"] for g in group])
+                    us, vs = _rule_path(u, v)
+                    joined = True
+            if not joined:
+                break
+        if len(group) == 1:
+            linked.append(piece)
+            continue
+        u = np.concatenate([g["u"] for g in group])
+        v = np.concatenate([g["v"] for g in group])
+        b, a = np.polyfit(u.astype(float), v.astype(float), 1)
+        linked.append(dict(piece, u=u, v=v, a=float(a), b=float(b), lo=int(u.min()), hi=int(u.max()),
+                           members=[m for g in group for m in g["members"]]))
+    return linked
+
+
+def _carried(us, vs, k, direction, u):
+    """A path's height at `u`, carried on from its point k along its slope over
+    the last few points behind it (`direction` -1: the points before k)."""
+    lo, hi = (max(0, k - 4), k + 1) if direction < 0 else (k, min(len(us), k + 5))
+    if hi - lo >= 2 and us[hi - 1] > us[lo]:
+        slope = float(np.polyfit(us[lo:hi], vs[lo:hi], 1)[0])
+    else:
+        slope = 0.0
+    slope = max(-0.5, min(0.5, slope))
+    return float(vs[k] + slope * (u - us[k]))
+
+
+def _rule_path(u, v, step=10):
+    """Where a rule really runs: its median height (v) every `step` px along it, as (us, vs)."""
+    u = np.asarray(u, dtype=float)
+    v = np.asarray(v, dtype=float)
+    bins = np.floor((u - u.min()) / step).astype(int)
+    # Per bin at once: sorted by bin, then height; the middle one of each bin.
+    order = np.lexsort((v, bins))
+    bins, u, v = bins[order], u[order], v[order]
+    starts = np.flatnonzero(np.r_[True, bins[1:] != bins[:-1]])
+    counts = np.diff(np.r_[starts, len(bins)])
+    vs = v[starts + (counts - 1) // 2]
+    us = np.add.reduceat(u, starts) / counts
+    return us, vs
+
+
+def _along_gap(upper, lower, samples=25):
+    """How far below `upper` the rule `lower` runs, the median over where both
+    run (pixels); None when they share less than 100 px."""
+    lo, hi = max(upper["lo"], lower["lo"]), min(upper["hi"], lower["hi"])
+    if hi - lo < 100:
+        return None
+    return float(np.median([_rule_at(lower, u) - _rule_at(upper, u) for u in np.linspace(lo, hi, samples)]))
+
+
+def _rule_at(rule, u):
+    """A rule's height (v) at `u` along it: on its path where it has one, beyond
+    its ends carried on at its overall slope; a straight rule's fitted line."""
+    path = rule.get("path")
+    if path is None or len(path[0]) == 0:
+        return rule["a"] + rule["b"] * u
+    us, vs = path
+    if u < us[0]:
+        return float(vs[0] + rule["b"] * (u - us[0]))
+    if u > us[-1]:
+        return float(vs[-1] + rule["b"] * (u - us[-1]))
+    return float(np.interp(u, us, vs))
 
 
 def _rule_band(h_pixels, v_pixels):
@@ -2537,6 +2717,14 @@ def _rules_tilt(h_rules):
     return float(math.degrees(math.atan(slope)))
 
 
+# A row rule covering at least this share of what the table's rules usually
+# cover is never taken for a stray line (_drop_stray_rules).
+STRAY_MAX_COVER = 0.6
+
+# The ruled body of a table (detect_grid): neighbouring row rules this share of
+# the typical row apart, at least and at most.
+ROW_RUN_LOW, ROW_RUN_HIGH = 0.65, 1.4
+
 # A gap in a table's row rules this many rows tall at most is taken for rules
 # the page lost (faint, creased, worn away), not for the end of the table.
 MAX_BRIDGED_ROWS = 4
@@ -2638,7 +2826,7 @@ def _without_writing(rules):
             if rule["thickness"] < limit or rule["covered"] >= PRINT_COVERAGE * (rule["hi"] - rule["lo"] + 1)]
 
 
-def _drop_stray_rules(rules, ys):
+def _drop_stray_rules(rules, ys, partial_only=False):
     """Row rules without the lines that lie off the table's rhythm.
 
     A fold, a tear or a rule seen only at one end of the page (and so
@@ -2650,8 +2838,14 @@ def _drop_stray_rules(rules, ys):
     below. (A printed rule with one tall row beside it stays.)
 
     `rules` and `ys` go together (sorted by y, in pixels). Returns both.
+
+    With `partial_only` (the look for bending rules), only a partial line can
+    be stray (STRAY_MAX_COVER of what the table's rules cover): a printed rule
+    running the whole table is a row's, however unevenly an old page's rows
+    were ruled around it.
     """
     rules, ys = list(rules), list(ys)
+    full = float(np.median([float(rule["covered"]) for rule in rules])) if partial_only and rules else 0.0
 
     def whole_rows(gap, row, tolerance):
         k = int(round(gap / row))
@@ -2670,6 +2864,8 @@ def _drop_stray_rules(rules, ys):
             # The rows around the line, without the two gaps it makes itself.
             near = [gaps[j] for j in range(max(0, i - 5), min(len(gaps), i + 5)) if normal[j] and j not in (i - 1, i)]
             row = float(np.median(near))
+            if partial_only and float(rules[i]["covered"]) >= STRAY_MAX_COVER * full:
+                continue
             if whole_rows(ys[i + 1] - ys[i - 1], row, 0.12) \
                     and not whole_rows(gaps[i - 1], row, 0.15) and not whole_rows(gaps[i], row, 0.15):
                 stray = i
@@ -2698,7 +2894,147 @@ def _table_extent(v_rules, h_rules, width, height):
             reach)
 
 
+def _rule_grey(image):
+    """The page in grey for finding printed rules.
+
+    Luminance, except that a pixel is as dark as its green channel when that
+    is darker: a red or orange rule (low green) on yellowed paper (high green)
+    stands out more, while black rules, blue-black writing and the paper keep
+    the grey they had.
+    """
+    if image.mode not in ("RGB", "RGBA"):
+        return np.asarray(image.convert("L"), dtype=np.uint8)
+    luminance = np.asarray(image.convert("L"), dtype=np.uint8)
+    green = np.asarray(image.getchannel("G"), dtype=np.uint8)
+    return np.minimum(luminance, green)
+
+
+def _grid_score(found):
+    """How much of a table detect_grid found: its rows and its columns."""
+    suggestion = found["suggestion"]
+    return max(0, len(suggestion.get("ruled_ys") or []) - 1), len(suggestion.get("columns") or [])
+
+
+# Below this many rows or with no column, a page's table counts as not found,
+# and detect_grid looks again on the page straightened.
+MIN_GRID_ROWS = 3
+# A page turned less than this (degrees) is not straightened to look again.
+RETRY_SKEW = 0.3
+# A table found on a page turned this much (degrees) or more is looked for on
+# the page straightened as well, and the look finding more of it is kept: thin
+# rules that far turned are found only in part.
+RETRY_TILT = 2.0
+
+
 def detect_grid(page):
+    """Printed rules on a page: a template sample, or a document being scanned.
+
+    See _detect_grid_level. A thin printed rule on a page turned more than a
+    few degrees is lost there: the rule test looks along level pixel rows, and
+    a tilted hairline leaves its row every few dozen pixels (a 1 px rule at
+    5°, a faint one at 3°, found nothing at all). So when the first look finds
+    no table, the page is straightened (estimate_skew) and looked at again,
+    and what is found there is put back on the page as it is (see
+    _grid_on_page), with the page's tilt. Each look also follows rules that
+    bend, where that finds more of the table (see _detect_grid_both).
+    """
+    image = Image.open(page) if isinstance(page, str) else page
+    found = _detect_grid_both(image)
+    rows, columns = _grid_score(found)
+    # Found, and on a page level enough for its rules to be followed as it is.
+    if rows >= MIN_GRID_ROWS and columns > 0 and abs(float(found.get("tilt") or 0.0)) < RETRY_TILT:
+        return found
+    skew = estimate_skew(image)
+    if abs(skew) < RETRY_SKEW:
+        return found
+    level = straighten_page(image, skew)
+    again = _detect_grid_both(level)
+    # Only a table found there counts: on a page with none (a form, a
+    # certificate), a few evenly spaced lines found straightened are no rows.
+    again_rows, again_columns = _grid_score(again)
+    if again_rows < MIN_GRID_ROWS or again_columns == 0 or again_rows + again_columns <= rows + columns:
+        return found
+    return _grid_on_page(again, skew, image.size, level.size)
+
+
+def _grid_on_page(found, skew, size, level_size):
+    """detect_grid's answer for a page, from what was found on it straightened by `skew`.
+
+    Measured as _detect_grid_level measures a page: each row rule where it
+    crosses the middle of the page's width, each column rule where it crosses
+    the middle of the table (the middle of the page's height for "vertical"),
+    and the page's tilt; so the builder and Snap to table turn the grid onto
+    the page as they do any tilted page's.
+    """
+    (width, height), (level_width, level_height) = size, level_size
+    tilt = float(skew) + float(found.get("tilt") or 0.0)
+    tan = math.tan(math.radians(tilt))
+    cos, sin = math.cos(math.radians(skew)), math.sin(math.radians(skew))
+
+    def back(x, y):
+        """A point of the straightened page on the page as it is (the inverse of _straightened_point)."""
+        dx, dy = x - level_width / 2, y - level_height / 2
+        return width / 2 + dx * cos - dy * sin, height / 2 + dx * sin + dy * cos
+
+    def row_y(y_level):
+        """A level row rule's height where it crosses the middle of the page (pixels)."""
+        px, py = back(level_width / 2, y_level * level_height)
+        return py + (width / 2 - px) * tan
+
+    def column_x(x_level, at_level_y, at_y):
+        """A level column rule's place where it crosses height `at_y` of the page (pixels)."""
+        px, py = back(x_level * level_width, at_level_y)
+        return px - (at_y - py) * tan
+
+    suggestion = dict(found["suggestion"])
+    ruled = [row_y(y) for y in suggestion.get("ruled_ys") or []]
+    suggestion["ruled_ys"] = [round(y / height, 5) for y in ruled]
+    if suggestion.get("bridged_ys"):
+        suggestion["bridged_ys"] = [round(row_y(y) / height, 5) for y in suggestion["bridged_ys"]]
+    if "frame_bottom" in suggestion:
+        suggestion["frame_bottom"] = round(row_y(suggestion["frame_bottom"]) / height, 5)
+    if suggestion.get("columns") and ruled:
+        top, bottom = ruled[0], ruled[-1]
+        middle = (top + bottom) / 2
+        columns = []
+        for column in suggestion["columns"]:
+            left, level_top, span_w, span_h = [float(v) for v in column["box"]]
+            level_middle = (level_top + span_h / 2) * level_height
+            x0 = column_x(left, level_middle, middle)
+            x1 = column_x(left + span_w, level_middle, middle)
+            columns.append({**column, "box": [round(x0 / width, 5), round(top / height, 5),
+                                              round((x1 - x0) / width, 5), round((bottom - top) / height, 5)]})
+        suggestion["columns"] = columns
+    return {
+        "size": [width, height],
+        "horizontal": [round(row_y(y) / height, 5) for y in found.get("horizontal") or []],
+        "vertical": [round(column_x(x, level_height / 2, height / 2) / width, 5) for x in found.get("vertical") or []],
+        "tilt": round(tilt, 3),
+        "suggestion": suggestion,
+        "straightened": round(float(skew), 3),
+    }
+
+
+def _detect_grid_both(image):
+    """_detect_grid_level both ways: printed rules taken as straight lines (as
+    always), and followed where they wave, step or lean (an old or hand-ruled
+    page, see _find_rules' `bends`). The bending look is used only where it
+    finds a table and more of it than the straight one (no fewer rows, no
+    fewer columns, and more of one): a printed register comes out as before.
+    """
+    gray = _rule_grey(image)
+    evidence = _rule_pixels(gray)
+    straight = _detect_grid_level(image, evidence=evidence)
+    bent = _detect_grid_level(image, bends=True, evidence=evidence)
+    rows, columns = _grid_score(straight)
+    bent_rows, bent_columns = _grid_score(bent)
+    if bent_rows >= MIN_GRID_ROWS and bent_columns > 0 and bent_rows >= rows and bent_columns >= columns \
+            and bent_rows + bent_columns > rows + columns:
+        return dict(bent, bends=True)
+    return straight
+
+
+def _detect_grid_level(page, bends=False, evidence=None):
     """Printed rules on a page: a template sample, or a document being scanned.
 
     Suggests ruled_ys (the longest run of evenly spaced row rules, with rules
@@ -2713,13 +3049,14 @@ def detect_grid(page):
     they cross the middle of the page's width, column rules where they cross
     the middle of its height.
     """
-    image = (Image.open(page) if isinstance(page, str) else page).convert("L")
+    image = Image.open(page) if isinstance(page, str) else page
     width, height = image.size
-    gray = np.asarray(image, dtype=np.uint8)
-    h_evidence, v_evidence = _rule_pixels(gray)
-    h_rules, _ = _find_rules(h_evidence, "h", 0.2 * width)
+    # `evidence`: _rule_pixels of this page, when the caller has it already.
+    h_evidence, v_evidence = evidence if evidence is not None else _rule_pixels(_rule_grey(image))
+    # With `bends`, rules that wave, step or lean (an old page) are followed where they run.
+    h_rules, _ = _find_rules(h_evidence, "h", 0.2 * width, bends=bends)
     h_rules = _without_writing(h_rules)
-    v_rules, _ = _find_rules(v_evidence, "v", 0.15 * height)
+    v_rules, _ = _find_rules(v_evidence, "v", 0.15 * height, bends=bends)
 
     suggestion = {"ruled_ys": [], "columns": [], "estimated_ys": 0}
     centre = width / 2
@@ -2734,10 +3071,10 @@ def detect_grid(page):
     # find, the two lines of its "City/Municipality" box and the header's rule
     # passed for three evenly spaced rows 62 px apart (the rows are 39 px), and
     # Snap to table stretched the grid to them.
-    rows = sorted((r for r in h_rules if 0.004 * height < r["a"] + r["b"] * centre < 0.996 * height
-                   and (table is None or table[0] - table[2] <= r["a"] + r["b"] * centre <= table[1] + table[2])),
-                  key=lambda r: r["a"] + r["b"] * centre)
-    ys = [r["a"] + r["b"] * centre for r in rows]
+    rows = sorted((r for r in h_rules if 0.004 * height < _rule_at(r, centre) < 0.996 * height
+                   and (table is None or table[0] - table[2] <= _rule_at(r, centre) <= table[1] + table[2])),
+                  key=lambda r: _rule_at(r, centre))
+    ys = [_rule_at(r, centre) for r in rows]
     if len(ys) >= 3:
         # A rule on warped paper, or printed twice, can come back as two
         # near-parallel rules a few pixels apart; that short gap would break
@@ -2752,19 +3089,29 @@ def detect_grid(page):
             kept.append((rule, y))
         rows = [rule for rule, _ in kept]
         ys = [y for _, y in kept]
-        rows, ys = _drop_stray_rules(rows, ys)
+        rows, ys = _drop_stray_rules(rows, ys, partial_only=bends)
         rows, ys = _bridge_missing_rules(rows, ys)
     # A line put back by _bridge_missing_rules borrows the rule above it: the
     # same rule twice in a row marks it. The builder shows those lines amber.
     bridged = {i for i in range(1, len(rows)) if rows[i] is rows[i - 1]}
     if len(ys) >= 3:
         gaps = np.diff(ys)
+        if bends:
+            # Wavy rules come closer and part again across the page: how far
+            # apart two of them are is measured along their whole length,
+            # not only where they cross the page's middle.
+            gaps = np.array([_along_gap(rows[k], rows[k + 1]) if k + 1 not in bridged else None
+                             for k in range(len(rows) - 1)], dtype=object)
+            gaps = np.array([float(g) if g is not None else float(ys[k + 1] - ys[k]) for k, g in enumerate(gaps)])
         typical = float(np.median(gaps))
         # The ruled body of the table is the longest run of evenly spaced rules;
-        # the title, header row and bottom margin break the rhythm.
+        # the title, header row and bottom margin break the rhythm. "Evenly"
+        # allows an old page's rows: ruled by hand or warped, they differ by
+        # a quarter of a row and more (ROW_RUN_LOW .. ROW_RUN_HIGH).
+        run_low, run_high = (ROW_RUN_LOW, ROW_RUN_HIGH) if bends else (0.75, 1.25)
         best, start = (0, 0), 0
         for k, gap in enumerate(gaps):
-            if not (0.75 * typical <= gap <= 1.25 * typical):
+            if not (run_low * typical <= gap <= run_high * typical):
                 start = k + 1
                 continue
             if k + 1 - start > best[1] - best[0]:
@@ -2772,8 +3119,11 @@ def detect_grid(page):
         first, last = best
         # A header band a little taller than a row can pass for one; the
         # rows inside the run keep a steadier spacing than that.
-        while last - first >= 3 and abs(gaps[first] - float(np.median(gaps[first:last]))) \
-                > 0.15 * float(np.median(gaps[first:last])):
+        # (On an old page a first row a little shorter is a row: only a much shorter one is not.)
+        def header_like(gap, steady):
+            return not (0.7 * steady <= gap <= 1.15 * steady) if bends else abs(gap - steady) > 0.15 * steady
+
+        while last - first >= 3 and header_like(gaps[first], float(np.median(gaps[first:last]))):
             first += 1
         run = ys[first:last + 1]
         run_rules = rows[first:last + 1]
@@ -2804,7 +3154,7 @@ def detect_grid(page):
             hi_x = max(r["hi"] for r in run_rules)
             middle = (top + bottom) / 2
             crossing = [
-                (r["a"] + r["b"] * middle, r) for r in v_rules
+                (_rule_at(r, middle), r) for r in v_rules
                 if r["lo"] <= top + 0.5 * span and r["hi"] >= top + 0.5 * span
                 and r["hi"] - r["lo"] >= 0.5 * span
             ]
@@ -2843,8 +3193,8 @@ def detect_grid(page):
 
     return {
         "size": [width, height],
-        "horizontal": [round((r["a"] + r["b"] * centre) / height, 5) for r in h_rules],
-        "vertical": [round((r["a"] + r["b"] * height / 2) / width, 5) for r in v_rules],
+        "horizontal": [round(_rule_at(r, centre) / height, 5) for r in h_rules],
+        "vertical": [round(_rule_at(r, height / 2) / width, 5) for r in v_rules],
         "tilt": round(_rules_tilt(h_rules), 3),
         "suggestion": suggestion,
     }

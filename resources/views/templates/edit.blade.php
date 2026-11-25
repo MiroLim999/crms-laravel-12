@@ -209,7 +209,7 @@
                                         <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + drag a dot</span><small>Place the line freely (no snap)</small></div>
                                         <div class="marker-shortcuts-menu__title">Table grid</div>
                                         <div><span>Type a row count, <kbd>Enter</kbd></span><small>Space that many rows evenly</small></div>
-                                        <div><span>Tilt <kbd>↺</kbd> <kbd>↻</kbd></span><small>Turn the table 0.1° (<kbd>Shift</kbd>: 1°)</small></div>
+                                        <div><span>Tilt <kbd>↺</kbd> <kbd>↻</kbd></span><small>Turn the selected fields, or the table when none is selected, 0.1° (<kbd>Shift</kbd>: 1°); or type the degrees</small></div>
                                         <div><span>Field name, <kbd>Enter</kbd></span><small>Next name (<kbd>Shift</kbd>: previous)</small></div>
                                         <div><span>Add field box, <kbd>Enter</kbd></span><small>Add a field</small></div>
                                     </div>

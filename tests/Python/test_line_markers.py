@@ -10,6 +10,7 @@ scipy, scikit-image and shapely, which ml/.venv-kraken has:
 
 import importlib.util
 import json
+import math
 import os
 import sys
 import tempfile
@@ -1106,6 +1107,162 @@ class OutlineWorkersTest(unittest.TestCase):
 
         self.assertGreaterEqual(len(kraken_own), 3)
         self.assertEqual(kraken_own, ours)
+
+
+@unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
+class TiltedAndColouredGridTest(unittest.TestCase):
+    """Detect from sample and Snap to table on a register tilted a few degrees,
+    or printed with red rules: a thin rule tilted past ~3° used to be lost."""
+
+    SIZE = (1700, 1150)
+    COLUMNS = [120, 380, 560, 800, 1000, 1260, 1580]  # 6 columns
+    TOP, PITCH, ROWS = 260, 40, 20
+    PAPER = (232, 214, 172)
+
+    def page(self, colour=(60, 60, 60), thickness=1, tilt=0.0, table=True):
+        from PIL import ImageFilter
+
+        image = Image.new("RGB", self.SIZE, self.PAPER)
+        draw = ImageDraw.Draw(image)
+        bottom = self.TOP + self.PITCH * self.ROWS
+        if table:
+            for y in [150, 200] + [self.TOP + self.PITCH * k for k in range(self.ROWS + 1)]:
+                draw.line([(self.COLUMNS[0], y), (self.COLUMNS[-1], y)], fill=colour, width=thickness)
+            for x in self.COLUMNS:
+                draw.line([(x, 150), (x, bottom)], fill=colour, width=thickness)
+        else:
+            # A certificate: a few printed lines to write on, no table.
+            for y in (300, 420, 540, 660, 780):
+                draw.line([(200, y), (900, y)], fill=colour, width=thickness)
+        image = image.filter(ImageFilter.GaussianBlur(0.6))
+        return image.rotate(-tilt, resample=Image.BICUBIC, fillcolor=self.PAPER) if tilt else image
+
+    def geometry(self):
+        width, height = self.SIZE
+        bottom = self.TOP + self.PITCH * self.ROWS
+        return {
+            "columns": [{"name": f"C{i}", "box": [self.COLUMNS[i] / width, self.TOP / height,
+                                                   (self.COLUMNS[i + 1] - self.COLUMNS[i]) / width,
+                                                   (bottom - self.TOP) / height]}
+                        for i in range(len(self.COLUMNS) - 1)],
+            "ruled_ys": [(self.TOP + self.PITCH * k) / height for k in range(self.ROWS + 1)],
+            "fields": [],
+        }
+
+    def assert_whole_table(self, found, tilt):
+        rows, columns = lm._grid_score(found)
+        self.assertEqual(rows, self.ROWS)
+        self.assertEqual(columns, len(self.COLUMNS) - 1)
+        self.assertAlmostEqual(found["tilt"], tilt, delta=0.1)
+        # The first row rule where it crosses the middle of the page, as on a level page.
+        width, height = self.SIZE
+        theta = math.radians(tilt)
+        dx, dy = 0.0, self.TOP - height / 2
+        x0 = width / 2 + dx * math.cos(theta) - dy * math.sin(theta)
+        y0 = height / 2 + dx * math.sin(theta) + dy * math.cos(theta)
+        first = y0 + (width / 2 - x0) * math.tan(theta)
+        self.assertAlmostEqual(found["suggestion"]["ruled_ys"][0] * height, first, delta=1.5)
+
+    def test_thin_rules_on_a_page_turned_five_and_seven_degrees_are_found(self):
+        for tilt in (5, 7):
+            with self.subTest(tilt=tilt):
+                found = lm.detect_grid(self.page(tilt=tilt))
+                self.assert_whole_table(found, tilt)
+                self.assertIn("straightened", found)
+
+    def test_a_level_page_is_not_straightened(self):
+        found = lm.detect_grid(self.page(tilt=1))
+        self.assert_whole_table(found, 1)
+        self.assertNotIn("straightened", found)
+
+    def test_red_rules_are_found_level_and_tilted(self):
+        for colour, tilt in (((185, 55, 50), 0), ((185, 55, 50), 5), ((215, 135, 115), 3)):
+            with self.subTest(colour=colour, tilt=tilt):
+                self.assert_whole_table(lm.detect_grid(self.page(colour=colour, thickness=1 if tilt else 2, tilt=tilt)), tilt)
+
+    def test_a_page_without_a_table_gets_no_rows_after_straightening(self):
+        found = lm.detect_grid(self.page(tilt=4, table=False))
+        self.assertEqual(found["suggestion"]["columns"], [])
+        self.assertNotIn("straightened", found)
+
+    def test_snap_to_table_fits_a_page_turned_six_degrees(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "page.png")
+            self.page(tilt=6).save(path)
+            snapped = lm.snap_page(path, self.geometry())
+        self.assertTrue(snapped["fit"]["fitted"])
+        self.assertAlmostEqual(snapped["fit"]["tilt"], 6.0, delta=0.1)
+        self.assertEqual(len(snapped["geometry"]["ruled_ys"]), self.ROWS + 1)
+
+
+@unittest.skipUnless(HAS_TABLE_STACK, "needs scipy, scikit-image and shapely (ml/.venv-kraken)")
+class BendingGridTest(unittest.TestCase):
+    """An old or hand-ruled register: row rules that wave and step up or down
+    part way across, column rules that lean. Taken as straight lines they came
+    back in pieces, doubled, and the table was found only in part."""
+
+    SIZE = (1600, 1100)
+    LEFT, RIGHT = 110, 1500
+    PAPER = (232, 214, 172)
+
+    def page(self):
+        from PIL import ImageFilter
+
+        width, height = self.SIZE
+        image = Image.new("RGB", self.SIZE, self.PAPER)
+        draw = ImageDraw.Draw(image)
+        xs = np.linspace(self.LEFT, self.RIGHT, 300)
+        gaps = [78, 84, 72, 88, 80, 76, 86, 74, 82, 80]  # uneven rows
+        ys = [230.0]
+        for gap in gaps:
+            ys.append(ys[-1] + gap)
+        paths = []
+        for k, y in enumerate(ys):
+            path = y + 7 * np.sin(xs / (380 + 40 * k) * 6.28 + k)
+            if k % 3 == 1:
+                path = path + np.where(xs > 520 + 60 * k, 11.0, 0.0)  # a step part way across
+            if k % 4 == 2:
+                path = path + np.where(xs > 1100, -9.0, 0.0)
+            paths.append(path)
+            draw.line(list(zip(xs, path)), fill=(60, 60, 60), width=2)
+        for y in (20, 120):  # a header band, taller than a row
+            draw.line([(self.LEFT, y), (self.RIGHT, y)], fill=(60, 60, 60), width=2)
+        ts = np.linspace(20, ys[-1], 200)
+        columns = [self.LEFT, 400, 640, 900, 1180, self.RIGHT]
+        for k, x in enumerate(columns):
+            lean = (0.03, -0.02, 0.025, -0.03, 0.02, -0.01)[k]
+            draw.line(list(zip(x + lean * (ts - ts[0]), ts)), fill=(60, 60, 60), width=2)
+        image = image.filter(ImageFilter.GaussianBlur(0.6))
+        centre = width / 2
+        return image, [float(np.interp(centre, xs, path)) for path in paths], len(columns) - 1
+
+    def test_a_wavy_stepped_table_is_found_whole_where_its_rules_run(self):
+        image, true_rows, columns = self.page()
+        found = lm.detect_grid(image)
+        rows, found_columns = lm._grid_score(found)
+        self.assertEqual(rows, len(true_rows) - 1)
+        self.assertEqual(found_columns, columns)
+        height = self.SIZE[1]
+        for y, true in zip(found["suggestion"]["ruled_ys"], true_rows):
+            self.assertAlmostEqual(y * height, true, delta=3.0)
+
+    def test_the_straight_look_finds_less_of_it(self):
+        image, true_rows, columns = self.page()
+        straight = lm._detect_grid_level(image)
+        self.assertLess(sum(lm._grid_score(straight)), len(true_rows) - 1 + columns)
+
+    def test_a_printed_register_keeps_its_straight_look(self):
+        found = lm.detect_grid(TiltedAndColouredGridTest().page(thickness=2))
+        self.assertNotIn("bends", found)
+        self.assertEqual(lm._grid_score(found), (TiltedAndColouredGridTest.ROWS, len(TiltedAndColouredGridTest.COLUMNS) - 1))
+
+    def test_a_rule_path_is_its_median_height_every_ten_pixels(self):
+        us, vs = lm._rule_path([0, 1, 2, 10, 11, 12], [5, 7, 6, 20, 22, 21])
+        self.assertEqual(list(vs), [6.0, 21.0])
+        rule = {"a": 0.0, "b": 0.5, "path": (us, vs)}
+        self.assertAlmostEqual(lm._rule_at(rule, 6.0), float(np.interp(6.0, us, vs)))
+        # Beyond its ends, carried on at its overall slope.
+        self.assertAlmostEqual(lm._rule_at(rule, us[-1] + 10), vs[-1] + 5.0)
 
 
 if __name__ == "__main__":

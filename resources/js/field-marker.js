@@ -226,6 +226,9 @@ export class FieldMarker {
      * @param {HTMLElement|null} [options.fitViewport] Element the page is fitted to; the viewport by default.
      *        A page shown beside another in one scroll container fits to that container without owning it.
      * @param {number} [options.fitShare] Share of the fit width one page takes at 100% (0.5: two pages side by side).
+     * @param {number|null} [options.rotatePixelsPerDegree] How far the tilt handle is dragged (screen pixels)
+     *        for one degree; null: the marker follows the pointer round its centre. A thin marker's handle sits
+     *        close to its centre, so following the pointer turns it far too fast for the small tilts pages need.
      */
     constructor({
         canvas,
@@ -239,6 +242,7 @@ export class FieldMarker {
         onZoomChange = null,
         onDrag = null,
         fieldSettings = false,
+        rotatePixelsPerDegree = null,
     }) {
         this.canvas = canvas;
         this.overlay = overlay;
@@ -253,6 +257,7 @@ export class FieldMarker {
         this.onZoomChange = onZoomChange;
         this.onDrag = onDrag;
         this.fieldSettings = fieldSettings;
+        this.rotatePixelsPerDegree = rotatePixelsPerDegree;
 
         /** @type {Array<{name: string, x: number, y: number, w: number, h: number, personGroup?: number, personFieldOrder?: number, el: HTMLElement|null}>} */
         this.boxes = [];
@@ -1281,8 +1286,17 @@ export class FieldMarker {
             const dy = (event.clientY - startY) / height;
 
             if (mode === 'rotate') {
-                const current = Math.atan2(event.clientY - pivot.y, event.clientX - pivot.x);
-                let degrees = (current - startAngle) * 180 / Math.PI;
+                let degrees;
+                if (this.rotatePixelsPerDegree) {
+                    // Gentle: the drag along the handle's way round the centre, so many
+                    // pixels make one degree (dragging the bottom handle right turns it
+                    // anticlockwise, as following the pointer would).
+                    const along = -Math.sin(startAngle) * (event.clientX - startX) + Math.cos(startAngle) * (event.clientY - startY);
+                    degrees = along / this.rotatePixelsPerDegree;
+                } else {
+                    const current = Math.atan2(event.clientY - pivot.y, event.clientX - pivot.x);
+                    degrees = (current - startAngle) * 180 / Math.PI;
+                }
                 if (event.shiftKey) {
                     // Snap the grabbed marker itself; the rest keep their offsets.
                     const grabbed = origins.find((origin) => origin.box === box);

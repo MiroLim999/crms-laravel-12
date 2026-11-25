@@ -246,6 +246,8 @@ const marker = new FieldMarker({
     onZoomChange: updateZoomUI,
     onDrag: (boxes) => previewTableFollow(boxes),
     fieldSettings: true,
+    // The handle under a field turns it a degree for every 8 pixels dragged.
+    rotatePixelsPerDegree: 8,
 });
 attachMarqueeSelection({
     marker,
@@ -831,6 +833,7 @@ function updateSelectionUI(indexes, context = {}) {
 
     const count = indexes.length;
     const total = marker.toJSON().length;
+    renderTiltControl();
     const summary = element('selectionSummary');
     const summaryText = summary.querySelector('span');
     if (summaryText) summaryText.textContent = `${count} selected`;
@@ -1771,11 +1774,74 @@ function renderLedgerGrid() {
 
     renderRowMatch();
 
+    renderTiltControl(columns);
+}
+
+/**
+ * The tilt box beside Rows: with fields picked (not table columns), their
+ * tilt; else the table's, as before (off while there is no table).
+ */
+function renderTiltControl(columns = ledgerColumns()) {
+    const picked = pickedFieldIndexes();
+    const forFields = picked.length > 0;
+    const angle = forFields ? normaliseAngle(marker.toJSON()[picked[0]]?.angle) : gridTilt(columns);
+    const what = forFields ? (picked.length === 1 ? 'the selected field' : `the ${picked.length} selected fields`) : 'the table';
+    const off = !forFields && columns.length === 0;
+
     const tiltInput = element('gridTiltValue', HTMLInputElement);
-    if (document.activeElement !== tiltInput) tiltInput.value = formatTilt(gridTilt(columns));
-    tiltInput.disabled = columns.length === 0;
-    element('tiltLeftBtn', HTMLButtonElement).disabled = columns.length === 0;
-    element('tiltRightBtn', HTMLButtonElement).disabled = columns.length === 0;
+    if (document.activeElement !== tiltInput) tiltInput.value = formatTilt(angle);
+    tiltInput.disabled = off;
+    tiltInput.title = `Tilt: how far ${what} ${picked.length > 1 ? 'are' : 'is'} turned (type a number of degrees)`;
+    tiltInput.setAttribute('aria-label', `How far ${what} ${picked.length > 1 ? 'are' : 'is'} turned, in degrees`);
+    const left = element('tiltLeftBtn', HTMLButtonElement);
+    const right = element('tiltRightBtn', HTMLButtonElement);
+    left.disabled = off;
+    right.disabled = off;
+    left.title = `Turn ${what} anticlockwise by 0.1° (Shift: 1°)`;
+    right.title = `Turn ${what} clockwise by 0.1° (Shift: 1°)`;
+    left.setAttribute('aria-label', `Turn ${what} anticlockwise`);
+    right.setAttribute('aria-label', `Turn ${what} clockwise`);
+    element('gridTiltGroup').classList.toggle('is-field-tilt', forFields);
+}
+
+/** The picked fields that are not table columns (a column turns with its table). */
+function pickedFieldIndexes() {
+    const boxes = marker.toJSON();
+    return marker.selectedIndexes().filter((index) => boxes[index] && !isColumn(boxes[index]));
+}
+
+/** The largest tilt the box gives a field (the [ and ] keys and the handle turn further). */
+const MAX_FIELD_TILT = 45;
+
+/**
+ * Tilt the picked fields, as one undoable change: by `step` degrees each, or
+ * all to `to` degrees. Each turns about its own centre.
+ */
+function tiltPickedFields({ step = null, to = null }) {
+    const picked = new Set(pickedFieldIndexes());
+    if (picked.size === 0) return;
+    const boxes = marker.toJSON();
+    let changed = false;
+    const turned = boxes.map((box, index) => {
+        if (!picked.has(index)) return box;
+        const target = to !== null ? Number(to) : normaliseAngle(box.angle) + Number(step);
+        const angle = normaliseAngle(Math.min(MAX_FIELD_TILT, Math.max(-MAX_FIELD_TILT, target)));
+        if (angle === normaliseAngle(box.angle)) return box;
+        changed = true;
+        const { angle: _old, ...rest } = box;
+        return angle === 0 ? rest : { ...rest, angle };
+    });
+    if (!changed) {
+        renderTiltControl();
+        return;
+    }
+    replaceBoxes(turned, { keepSelection: true });
+}
+
+/** The tilt box's buttons and typed value: the picked fields, else the table. */
+function tiltBy(step) {
+    if (pickedFieldIndexes().length > 0) tiltPickedFields({ step });
+    else setTableTilt(gridTilt(ledgerColumns()) + step);
 }
 
 // ---------------------------------------------------------------- table tilt
@@ -1815,7 +1881,7 @@ function updateLedgerChecks(boxes = marker.toJSON()) {
     coveredFieldIndexes = fieldsOverLedger(boxes, ruledYs);
     renderMergeNotice(boxes);
 
-    const problems = ledgerGridProblems(ledgerColumns(boxes), ruledYs);
+    const problems = ledgerGridProblems(ledgerColumns(boxes), ruledYs, { aspect: pageAspect() });
     element('ledgerProblemList').replaceChildren(...problems.map((problem) => {
         const item = document.createElement('li');
         item.textContent = problem.message;
@@ -2143,17 +2209,16 @@ element('evenRowsInput', HTMLInputElement).addEventListener('keydown', (event) =
     spaceRowsEvenly();
 });
 
-element('tiltLeftBtn', HTMLButtonElement).addEventListener('click', (event) => (
-    setTableTilt(gridTilt(ledgerColumns()) - (event.shiftKey ? 1 : 0.1))
-));
-element('tiltRightBtn', HTMLButtonElement).addEventListener('click', (event) => (
-    setTableTilt(gridTilt(ledgerColumns()) + (event.shiftKey ? 1 : 0.1))
-));
+element('tiltLeftBtn', HTMLButtonElement).addEventListener('click', (event) => tiltBy(event.shiftKey ? -1 : -0.1));
+element('tiltRightBtn', HTMLButtonElement).addEventListener('click', (event) => tiltBy(event.shiftKey ? 1 : 0.1));
 element('gridTiltValue', HTMLInputElement).addEventListener('change', (event) => {
     const value = parseTilt(event.currentTarget.value);
     if (value === null) renderLedgerGrid();
+    else if (pickedFieldIndexes().length > 0) tiltPickedFields({ to: value });
     else setTableTilt(value);
 });
+// Left: the box shows the tilt in its usual form again ("−2.5°").
+element('gridTiltValue', HTMLInputElement).addEventListener('blur', () => renderTiltControl());
 element('gridTiltValue', HTMLInputElement).addEventListener('keydown', (event) => {
     event.stopPropagation();
     if (event.key === 'Enter') event.currentTarget.blur();

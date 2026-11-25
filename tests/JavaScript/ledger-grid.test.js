@@ -217,6 +217,19 @@ test('a column that spans other rows than the rest is a warning', () => {
     assert.deepEqual(problems, [{ message: 'Column “C” does not span the same rows as the other columns.', blocking: false }]);
 });
 
+test('a level table turned a few degrees (Detect on a tilted page) has no row warnings', () => {
+    const level = [0.05, 0.25, 0.45, 0.65, 0.85].map((x, index) => column(String.fromCharCode(65 + index), x, 0.2, 0.6, 0.1));
+    const aspect = 1700 / 1150;
+    const turned = tiltColumns(level, 5, aspect);
+    // The outer columns' tops are well apart on the page itself...
+    assert.ok(Math.abs(turned[0].y - turned[4].y) > 0.05);
+    // ...but the table is the same one, so no column is "off".
+    assert.deepEqual(ledgerGridProblems(turned, [0.2, 0.4, 0.6, 0.8], { aspect }), []);
+    // A column really moved down still is.
+    const moved = turned.map((box, index) => (index === 2 ? { ...box, y: box.y + 0.15 } : box));
+    assert.equal(ledgerGridProblems(moved, [0.2, 0.4, 0.6, 0.8], { aspect }).length, 1);
+});
+
 test('a consistent ledger has no problems, and a layout without columns is not a ledger', () => {
     assert.deepEqual(ledgerGridProblems([column('A', 0.1), column('B', 0.2)], [0.2, 0.4, 0.6, 0.8]), []);
     assert.deepEqual(ledgerGridProblems([], [0.2]), []);
