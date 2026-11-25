@@ -6,75 +6,12 @@
     // Every record has one status (Submitted), so there is no status filter or
     // column here.
     $hasFilters = collect($filters)->filter(fn ($value) => $value !== null && $value !== '')->isNotEmpty();
+    // A book picked (birth, death or marriage): Download gives that whole book, in page order.
+    $book = $books !== [] && in_array((string) ($filters['book'] ?? ''), $books, true) ? (string) $filters['book'] : null;
 @endphp
 
 @section('content')
     <x-page-header title="Saved Records" />
-
-    {{-- Download one register book as one UTF-8 CSV: type + book number from dropdowns. --}}
-    <x-card title="Download one book as CSV" subtitle="One row per register entry. UTF-8 with byte-order mark.">
-        <form id="bookDownload" method="GET" action="{{ route('records.books.download') }}"
-              class="row g-3 align-items-end">
-            <div class="col-sm-6 col-lg-3">
-                <label for="bookType" class="form-label">Document type</label>
-                <select id="bookType" name="type" class="form-select">
-                    @php($bookLabels = ['birth' => 'Birth', 'death' => 'Death', 'marriage' => 'Marriage'])
-                    @foreach ($bookLabels as $key => $label)
-                        <option value="{{ $key }}">{{ $label }}</option>
-                    @endforeach
-                </select>
-            </div>
-            <div class="col-sm-6 col-lg-3">
-                <label for="bookNo" class="form-label">Book number</label>
-                <select id="bookNo" name="book_no" class="form-select">
-                    <option value="" disabled selected>Select a type first</option>
-                </select>
-            </div>
-            <div class="col-sm-6 col-lg-3 d-grid">
-                <button type="submit" class="btn btn-primary">
-                    <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i> Download CSV
-                </button>
-            </div>
-        </form>
-    </x-card>
-
-    <script>
-        // Fill the book-number dropdown for the chosen certificate type.
-        const booksByType = @js($booksByType ?? []);
-        const typeSelect = document.getElementById('bookType');
-        const bookSelect = document.getElementById('bookNo');
-
-        function fillBooks() {
-            const books = booksByType[typeSelect.value] ?? [];
-            const hadSelection = bookSelect.value;
-            bookSelect.innerHTML = '';
-            if (books.length === 0) {
-                const empty = document.createElement('option');
-                empty.value = '';
-                empty.textContent = 'No books for this type';
-                empty.disabled = true;
-                empty.selected = true;
-                bookSelect.appendChild(empty);
-            } else {
-                const first = document.createElement('option');
-                first.value = '';
-                first.textContent = 'Select a book number';
-                first.disabled = true;
-                first.selected = true;
-                bookSelect.appendChild(first);
-                books.forEach((book) => {
-                    const option = document.createElement('option');
-                    option.value = book;
-                    option.textContent = book;
-                    if (book === hadSelection) option.selected = true;
-                    bookSelect.appendChild(option);
-                });
-            }
-        }
-
-        typeSelect.addEventListener('change', fillBooks);
-        fillBooks();
-    </script>
 
     <div id="recordsFilterCard">
     <x-card>
@@ -97,7 +34,7 @@
                 </div>
                 @error('q')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
             </div>
-            <div class="col-sm-6 col-lg-3 col-xl-2">
+            <div class="col-sm-6 col-lg-3 col-xl">
                 <label for="type" class="form-label">Type</label>
                 <select id="type" name="type" class="form-select @error('type') is-invalid @enderror">
                     <option value="">All</option>
@@ -109,8 +46,21 @@
                 </select>
                 @error('type')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
+            {{-- A register type's books (Birth, Death, Marriage): one book's records, downloaded as that book. --}}
+            @if ($books !== [])
+                <div class="col-sm-6 col-lg-3 col-xl">
+                    <label for="book" class="form-label">Book</label>
+                    <select id="book" name="book" class="form-select @error('book') is-invalid @enderror">
+                        <option value="">All</option>
+                        @foreach ($books as $number)
+                            <option value="{{ $number }}" @selected($book === $number)>Book {{ $number }}</option>
+                        @endforeach
+                    </select>
+                    @error('book')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                </div>
+            @endif
             {{-- The records one batch saved (Save & finish batch), newest batch first. --}}
-            <div class="col-sm-6 col-lg-3 col-xl-2">
+            <div class="col-sm-6 col-lg-3 col-xl">
                 <label for="batch" class="form-label">Batch</label>
                 <select id="batch" name="batch" class="form-select @error('batch') is-invalid @enderror">
                     <option value="">All</option>
@@ -121,13 +71,13 @@
                 </select>
                 @error('batch')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
-            <div class="col-sm-6 col-lg-3 col-xl-2">
+            <div class="col-sm-6 col-lg-3 col-xl">
                 <label for="from" class="form-label">From</label>
                 <input type="date" id="from" name="from" value="{{ $filters['from'] ?? '' }}"
                        class="form-control @error('from') is-invalid @enderror">
                 @error('from')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
-            <div class="col-sm-6 col-lg-3 col-xl-2">
+            <div class="col-sm-6 col-lg-3 col-xl">
                 <label for="to" class="form-label">To</label>
                 <input type="date" id="to" name="to" value="{{ $filters['to'] ?? '' }}"
                        class="form-control @error('to') is-invalid @enderror">
@@ -166,7 +116,7 @@
                                 <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)</button></li>
                         </ul>
                     </div>
-                    @if ($overLimit)
+                    @if ($overLimit && $book === null)
                         {{-- Said in plain text: a tooltip on a switched-off button often never shows. --}}
                         <span class="records-export__limit small text-muted align-self-center">
                             At most {{ number_format($exportLimit) }} per download: narrow the search or dates
@@ -175,15 +125,23 @@
                     <div class="dropdown">
                         {{-- Main (solid) button while nothing is ticked; outline once something is. --}}
                         <button type="button" class="btn btn-sm btn-primary dropdown-toggle" id="recordsDownloadAll"
-                                data-bs-toggle="dropdown" aria-expanded="false" @disabled($overLimit)>
+                                data-bs-toggle="dropdown" aria-expanded="false" @disabled($overLimit && $book === null)>
                             <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
-                            <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>{{ $hasFilters ? 'Download these' : 'Download all' }} {{ number_format($records->total()) }}
+                            <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>{{ $book !== null ? "Download Book {$book}" : ($hasFilters ? 'Download these' : 'Download all').' '.number_format($records->total()) }}
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="recordsDownloadAll">
-                            <li><button type="button" class="dropdown-item" data-export="all" data-format="csv">
-                                <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)</button></li>
-                            <li><button type="button" class="dropdown-item" data-export="all" data-format="xlsx">
-                                <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)</button></li>
+                            @if ($book !== null)
+                                {{-- The whole book: one row per entry, in page order. --}}
+                                @foreach (['csv' => ['bx-file', 'CSV (.csv)'], 'xlsx' => ['bx-spreadsheet', 'Excel (.xlsx)']] as $format => [$icon, $text])
+                                    <li><a class="dropdown-item" href="{{ route('records.books.download', ['type' => $filters['type'], 'book_no' => $book, 'format' => $format]) }}">
+                                        <i class="icon-base bx {{ $icon }} icon-sm me-2" aria-hidden="true"></i>{{ $text }}</a></li>
+                                @endforeach
+                            @else
+                                <li><button type="button" class="dropdown-item" data-export="all" data-format="csv">
+                                    <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)</button></li>
+                                <li><button type="button" class="dropdown-item" data-export="all" data-format="xlsx">
+                                    <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)</button></li>
+                            @endif
                         </ul>
                     </div>
                 </div>
@@ -357,6 +315,11 @@
         };
         filterCard.addEventListener('change', (event) => {
             const field = event.target;
+            // Another type: a book of the old one does not carry over (the new type's books load).
+            if (field.matches('#type')) {
+                const book = document.getElementById('book');
+                if (book) book.value = '';
+            }
             if (field.matches('select')) submitFilters();
             if (field.matches('input[type="date"]')
                 && (field.value === '' || (/^\d{4}-/.test(field.value) && Number(field.value.slice(0, 4)) >= 1800))) submitFilters();

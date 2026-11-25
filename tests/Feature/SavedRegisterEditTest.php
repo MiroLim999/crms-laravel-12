@@ -138,15 +138,40 @@ class SavedRegisterEditTest extends TestCase
         $this->assertStringStartsWith('"PAGE TEN"', $lines[2]);
     }
 
-    public function test_the_book_list_is_in_number_order(): void
+    public function test_the_book_filter_lists_a_types_books_in_number_order(): void
     {
         foreach (['10', '9', '2'] as $book) {
             BirthRecord::create(['book_no' => $book, 'page_no' => '1', 'reg_no' => '1', 'name' => 'Someone']);
         }
 
-        $books = $this->actingAs($this->user)->get(route('records.index'))->assertOk()->viewData('booksByType');
+        // No type picked: no Book filter.
+        $this->actingAs($this->user)->get(route('records.index'))->assertOk()
+            ->assertViewHas('books', [])
+            ->assertDontSee('id="book"', false);
 
-        $this->assertSame(['2', '9', '10'], $books['birth']);
+        $this->actingAs($this->user)->get(route('records.index', ['type' => 'birth']))->assertOk()
+            ->assertViewHas('books', ['2', '9', '10'])
+            ->assertSee('id="book"', false);
+    }
+
+    public function test_a_picked_book_lists_its_records_and_downloads_as_that_book(): void
+    {
+        $record = $this->savedRecord();
+        $other = CivilRecord::factory()->create(['doc_type' => DocumentType::Birth->value, 'document_type_id' => $record->document_type_id]);
+        BirthRecord::create(['civil_record_id' => $other->getKey(), 'book_no' => '8', 'page_no' => '1', 'reg_no' => '1', 'name' => 'Book eight']);
+
+        $response = $this->actingAs($this->user)
+            ->get(route('records.index', ['type' => 'birth', 'book' => '7']))
+            ->assertOk();
+
+        $this->assertSame([$record->getKey()], $response->viewData('records')->pluck('id')->all());
+        $response->assertSee('Download Book 7')
+            ->assertSee(route('records.books.download', ['type' => 'birth', 'book_no' => '7', 'format' => 'xlsx']));
+
+        // Without a book: every birth record, and the usual Download.
+        $this->actingAs($this->user)->get(route('records.index', ['type' => 'birth']))->assertOk()
+            ->assertSee('Download these 2')
+            ->assertDontSee('Download Book');
     }
 
     /** A birth record saved through step 4 with two register rows (book 7, page 83). */

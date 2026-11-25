@@ -64,6 +64,8 @@ class RecordController extends Controller
             'status' => ['nullable', 'string', 'in:'.implode(',', array_column(RecordStatus::cases(), 'value'))],
             // A batch's id, or "single": records saved one file at a time.
             'batch' => ['nullable', 'string', 'regex:/^(single|[1-9][0-9]{0,9})$/'],
+            // A register book of the chosen type (birth, death, marriage): its records.
+            'book' => ['nullable', 'string', 'max:32'],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
         ];
@@ -90,8 +92,31 @@ class RecordController extends Controller
                 ? $q->whereNotIn('id', ScanBatchPage::query()->select('record_id')->whereNotNull('record_id'))
                     ->where('submitted_at', '>=', $this->batchesKeptSince() ?? now()->addYear())
                 : $q->whereIn('id', ScanBatchPage::query()->select('record_id')->where('scan_batch_id', (int) $batch)->whereNotNull('record_id')))
+            // A book of a register type: the records with entries in it.
+            ->when(
+                ($filters['book'] ?? null) !== null && RegistryFields::model((string) ($filters['type'] ?? '')) !== null,
+                fn ($q) => $q->whereIn('id', RegistryFields::model((string) $filters['type'])::query()
+                    ->select('civil_record_id')
+                    ->where('book_no', (string) $filters['book'])
+                    ->whereNotNull('civil_record_id')),
+            )
             ->when($filters['from'] ?? null, fn ($q, $from) => $q->where('submitted_at', '>=', LocalTime::dayStart($from)))
             ->when($filters['to'] ?? null, fn ($q, $to) => $q->where('submitted_at', '<=', LocalTime::dayEnd($to)));
+    }
+
+    /**
+     * The book numbers saved for a register type (birth, death, marriage), in
+     * number order; [] for any other type or none.
+     *
+     * @return list<string>
+     */
+    private function booksOf(?string $type): array
+    {
+        $model = RegistryFields::model((string) $type);
+
+        return $model === null
+            ? []
+            : $model::query()->distinct()->pluck('book_no')->filter()->sort(SORT_NATURAL)->values()->all();
     }
 
     public function index(Request $request): View
@@ -130,13 +155,8 @@ class RecordController extends Controller
             'batches' => $this->savedBatches(isset($filters['batch']) && $filters['batch'] !== 'single' ? (int) $filters['batch'] : null),
             'filters' => $filters,
             'documentTypes' => DocumentTypeDefinition::ordered(),
-            'statuses' => RecordStatus::cases(),
-            // Distinct book numbers per certificate type, for the "Download one book as CSV" dropdowns.
-            'booksByType' => [
-                'birth' => BirthRecord::query()->distinct()->pluck('book_no')->sort(SORT_NATURAL)->values()->all(),
-                'death' => DeathRecord::query()->distinct()->pluck('book_no')->sort(SORT_NATURAL)->values()->all(),
-                'marriage' => MarriageRecord::query()->distinct()->pluck('book_no')->sort(SORT_NATURAL)->values()->all(),
-            ],
+            // The Book filter, shown once a register type (birth, death, marriage) is picked.
+            'books' => $this->booksOf($filters['type'] ?? null),
         ]);
     }
 
