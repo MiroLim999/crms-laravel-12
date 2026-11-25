@@ -1468,8 +1468,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
 
 // A narrow pane: the title keeps its line and the tools go under it, the search
 // taking what is left of the row (it used to squeeze "Verified data" letter by letter).
+// (The doubled class lets this beat the base header rule further down this file.)
 @container record-values (max-width: 40rem) {
-  .record-values-card>.card-header {
+  .record-values-card.record-values-card>.card-header {
     grid-template-columns: minmax(0, 1fr) !important;
 
     >div:last-child:not(:first-child) {
@@ -12196,11 +12197,16 @@ $dashboard-reveal-step: 40ms;
     background: rgba(var(--bs-danger-rgb), .13);
   }
 
-  // A misread date repaired from its column (one stray digit): amber, to check.
+  // A misread date repaired from its column (one stray digit): red, as any date
+  // that is not as written on the scan, with a bar on its edge, to check.
   &.is-guessed {
-    color: var(--bs-warning-text-emphasis);
-    background: rgba(var(--bs-warning-rgb), .2);
-    box-shadow: inset 3px 0 0 rgba(var(--bs-warning-rgb), .9);
+    color: var(--bs-danger-text-emphasis);
+    background: rgba(var(--bs-danger-rgb), .13);
+    box-shadow: inset 3px 0 0 rgba(var(--bs-danger-rgb), .9);
+  }
+
+  tr.is-active > &.is-guessed {
+    background-color: rgba(var(--bs-danger-rgb), .16);
   }
 
   // Not ticked Verified: shown, but not saved or downloaded (greyed, in italics).

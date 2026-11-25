@@ -118,6 +118,8 @@
                         </summary>
 
                         <div class="record-field-group__body">
+                            {{-- Dates read as YYYY-MM-DD, as in the register table; the saved transcription is unchanged. --}}
+                            @php($shownDates = \App\Support\RegistryFields::shownDates($group['fields']))
                             @foreach ($group['fields'] as $field)
                             @php($lastEdit = $fieldChanges->get($field->getKey()))
                             <div class="record-field-row" data-record-field="{{ $field->getKey() }}"
@@ -132,7 +134,7 @@
                                 </div>
 
                                 <div class="record-field-row__verified">
-                                    <strong>{{ filled($field->verified_value) ? $field->verified_value : 'Not recorded' }}</strong>
+                                    <strong>{{ $shownDates[$field->getKey()] ?? (filled($field->verified_value) ? $field->verified_value : 'Not recorded') }}</strong>
                                     @if ($lastEdit)
                                         <span class="record-field-row__change-note">
                                             Edited {{ $lastEdit->created_at->diffForHumans() }}

@@ -355,6 +355,49 @@ final class RegistryFields
         return $changes;
     }
 
+    /**
+     * One person's date fields as YYYY-MM-DD, for showing what was saved: the
+     * transcription itself ("2-11-57") is left as typed. A field is a date when
+     * its column is named "date ..."; its value must read as a whole date, else
+     * it is not listed. Two-digit years are read against the person's
+     * registration year, as normalizedDates() does.
+     *
+     * @param  iterable<object>  $fields  RecordField rows (id, name, line_column, verified_value)
+     * @return array<int, string> field id => YYYY-MM-DD
+     */
+    public static function shownDates(iterable $fields): array
+    {
+        $dated = [];
+        $registered = null;
+        foreach ($fields as $field) {
+            $column = mb_strtolower(trim((string) ($field->line_column ?: preg_replace('/ · row \d+/u', '', (string) $field->name))));
+            $value = trim((string) $field->verified_value);
+            if ($value === '' || ! preg_match('/\bdate\b/u', $column)) {
+                continue;
+            }
+            $isRegistration = str_contains($column, 'regist');
+            $dated[] = [$field->getKey(), $value, $isRegistration];
+            if ($isRegistration && $registered === null && ($iso = self::isoDate($value)) !== null) {
+                $registered = (int) substr($iso, 0, 4);
+            }
+        }
+
+        $shown = [];
+        foreach ($dated as [$id, $value, $isRegistration]) {
+            $iso = self::isoDate($value, $registered);
+            if ($iso === null) {
+                continue;
+            }
+            // Nothing in an entry is later than its registration (a "25" is 1925, not 2025).
+            if (! $isRegistration && $registered !== null && (int) substr($iso, 0, 4) > $registered) {
+                $iso = sprintf('%04d', (int) substr($iso, 0, 4) - 100).substr($iso, 4);
+            }
+            $shown[$id] = $iso;
+        }
+
+        return $shown;
+    }
+
     /** A value as a download writes it: a date field as YYYY-MM-DD where it can be, all capitals. */
     public static function exportCell(string $key, mixed $value): string
     {

@@ -15,6 +15,7 @@ use App\Models\ScanBatch;
 use App\Models\ScanBatchPage;
 use App\Services\AuditLogger;
 use App\Support\RegistryFields;
+use App\Support\SimpleXlsx;
 use App\Services\RecordCsv;
 use App\Services\RecordFieldGrouper;
 use App\Support\LocalTime;
@@ -347,6 +348,16 @@ class RecordController extends Controller
             actor: $request->user(),
         );
 
+        // Excel: every cell is text, so a date stays 1957-02-11 (a CSV is re-read by Excel as a date).
+        if ($request->query('format') === 'xlsx') {
+            return response()->streamDownload(function () use ($table) {
+                echo SimpleXlsx::build($table['header'], $table['rows']);
+            }, $csv->baseName($record).'.xlsx', [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Cache-Control' => 'no-store, no-cache',
+            ]);
+        }
+
         return response()->streamDownload(function () use ($table) {
             $handle = fopen('php://output', 'w');
             fwrite($handle, "\u{FEFF}");
@@ -371,6 +382,7 @@ class RecordController extends Controller
         $validated = $request->validate([
             'type' => ['required', 'string', 'in:birth,death,marriage'],
             'book_no' => ['required', 'string', 'max:32'],
+            'format' => ['sometimes', 'in:csv,xlsx'],
         ]);
 
         $model = match ($validated['type']) {
@@ -394,9 +406,27 @@ class RecordController extends Controller
                 'book_no' => $validated['book_no'],
                 'rows' => $records->count(),
             ],
-            description: "Downloaded book {$validated['book_no']} ({$validated['type']}) as CSV.",
+            description: "Downloaded book {$validated['book_no']} ({$validated['type']}) as ".(($validated['format'] ?? 'csv') === 'xlsx' ? 'Excel.' : 'CSV.'),
             actor: $request->user(),
         );
+
+        $fileName = RegistryFields::fileName(
+            \App\Models\DocumentTypeDefinition::where('key', $validated['type'])->first()?->label() ?? ucfirst($validated['type']),
+            "Book {$validated['book_no']}",
+            now()->toDateString(),
+        );
+
+        // Excel: every cell is text, so a date stays 1957-02-11 (a CSV is re-read by Excel as a date).
+        if (($validated['format'] ?? 'csv') === 'xlsx') {
+            return response()->streamDownload(function () use ($records, $columns) {
+                echo SimpleXlsx::build($columns, $records->map(
+                    fn ($record) => array_map(fn (string $column) => RegistryFields::exportCell($column, $record->getAttribute($column)), $columns),
+                )->all(), 'Book');
+            }, $fileName.'.xlsx', [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Cache-Control' => 'no-store, no-cache',
+            ]);
+        }
 
         return response()->streamDownload(function () use ($records, $columns) {
             $handle = fopen('php://output', 'w');
@@ -410,11 +440,7 @@ class RecordController extends Controller
                 fputcsv($handle, $row);
             }
             fclose($handle);
-        }, RegistryFields::fileName(
-            \App\Models\DocumentTypeDefinition::where('key', $validated['type'])->first()?->label() ?? ucfirst($validated['type']),
-            "Book {$validated['book_no']}",
-            now()->toDateString(),
-        ).'.csv', [
+        }, $fileName.'.csv', [
             'Content-Type' => 'text/csv; charset=UTF-8',
             'Cache-Control' => 'no-store, no-cache',
         ]);

@@ -1389,7 +1389,7 @@ export class ReviewTable {
         if (td.classList.contains('is-editing')) return problem;
         // A register date shows as it is saved: YYYY-MM-DD.
         td.textContent = cell.column.type?.date ? (this._isoDate(cell.column, value, rowIndex) ?? value) : value;
-        // A misread date repaired from its column: amber, saying what was read.
+        // A misread date repaired from its column: red, saying what was read.
         const repaired = Boolean(cell.column.type?.date) && !problem && value.trim() !== ''
             && !toIsoDate(value, this._rowToday(rowIndex), { dayFirst: Boolean(cell.column.type.dayFirst) });
         td.classList.toggle('is-guessed', repaired);

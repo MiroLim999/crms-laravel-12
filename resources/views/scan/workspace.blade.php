@@ -578,7 +578,9 @@
                 </div>
 
                 <div class="d-grid gap-2 field-marker-actions">
-                    <button class="btn btn-outline-primary" type="button" id="detectBtn"
+                    {{-- Smoke test scan is not offered. The button stays (hidden) because the page script reads and
+                         toggles it by id; the script's d-none toggling cannot show a `hidden` element. --}}
+                    <button class="btn btn-outline-primary" type="button" id="detectBtn" hidden aria-hidden="true" tabindex="-1"
                         title="Straighten this page, find its table, and outline every handwritten line before reading">
                         <i class="icon-base bx bx-radar icon-sm me-1" aria-hidden="true"></i> Smoke test scan
                     </button>

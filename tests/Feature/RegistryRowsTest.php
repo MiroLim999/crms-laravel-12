@@ -222,6 +222,37 @@ class RegistryRowsTest extends TestCase
                 && array_column($registry['fields'], 'key') === RegistryFields::keys('birth'));
     }
 
+    public function test_a_book_downloads_as_excel_with_dates_kept_as_text(): void
+    {
+        $user = User::factory()->superAdmin()->create();
+        BirthRecord::create([
+            'book_no' => '7', 'page_no' => '83', 'reg_no' => '5', 'name' => 'Ariel P. Villanujan',
+            'date_of_birth' => '1957-02-11', 'date_of_reg' => '1957-03-01',
+        ]);
+
+        $response = $this->actingAs($user)
+            ->get(route('records.books.download', ['type' => 'birth', 'book_no' => '7', 'format' => 'xlsx']))
+            ->assertOk()
+            ->assertDownload();
+        $this->assertStringContainsString('.xlsx', (string) $response->headers->get('content-disposition'));
+
+        $path = tempnam(sys_get_temp_dir(), 'xlsx');
+        file_put_contents($path, $response->streamedContent());
+        $zip = new \ZipArchive;
+        $this->assertTrue($zip->open($path));
+        $sheet = $zip->getFromName('xl/worksheets/sheet1.xml');
+        $zip->close();
+        unlink($path);
+
+        // The sheet is well-formed XML, and a date is a text cell, not a date serial.
+        $xml = simplexml_load_string($sheet);
+        $this->assertNotFalse($xml);
+        $this->assertStringContainsString('<t xml:space="preserve">1957-02-11</t>', $sheet);
+        $this->assertStringContainsString('<t xml:space="preserve">1957-03-01</t>', $sheet);
+        $this->assertStringContainsString('<t xml:space="preserve">ARIEL P. VILLANUJAN</t>', $sheet);
+        $this->assertCount(2, $xml->sheetData->row); // the header and one entry
+    }
+
     public function test_a_book_downloads_with_the_register_headers_in_order(): void
     {
         $user = User::factory()->superAdmin()->create();
