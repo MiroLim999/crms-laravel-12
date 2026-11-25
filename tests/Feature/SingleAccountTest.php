@@ -36,17 +36,36 @@ class SingleAccountTest extends TestCase
             ->assertDontSee('>Role<', false);
     }
 
-    public function test_settings_no_longer_offer_the_duplicate_file_check(): void
+    public function test_the_duplicate_file_check_is_off_until_it_is_turned_on_in_settings(): void
     {
         $user = User::factory()->create();
         $this->assertFalse($user->fresh()->duplicate_file_check);
 
         $this->actingAs($user)->get(route('settings.edit'))
             ->assertOk()
-            ->assertDontSee('Check uploads for duplicate files')
-            ->assertDontSee('name="duplicate_file_check"', false);
+            ->assertSee('Check uploads for duplicate files')
+            ->assertDontSee('name="duplicate_file_check" value="1" @checked', false);
 
-        $this->assertFalse(\Route::has('settings.uploads.update'));
+        $this->actingAs($user)->from(route('settings.edit'))
+            ->put(route('settings.uploads.update'), ['duplicate_file_check' => '1'])
+            ->assertRedirect(route('settings.edit'))
+            ->assertSessionHas('success');
+        $this->assertTrue($user->fresh()->duplicate_file_check);
+        $this->actingAs($user)->get(route('settings.edit'))->assertSee('checked', false);
+
+        $entry = AuditLog::where('action', 'user.updated')->latest('id')->firstOrFail();
+        $this->assertSame('Duplicate file check turned on from account settings.', $entry->description);
+
+        // Saving the same choice again changes nothing and says so.
+        $this->actingAs($user)->from(route('settings.edit'))
+            ->put(route('settings.uploads.update'), ['duplicate_file_check' => '1'])
+            ->assertSessionHas('info');
+
+        // The unchecked box sends only the hidden 0.
+        $this->actingAs($user)->from(route('settings.edit'))
+            ->put(route('settings.uploads.update'), ['duplicate_file_check' => '0'])
+            ->assertSessionHas('success');
+        $this->assertFalse($user->fresh()->duplicate_file_check);
     }
 
     public function test_you_can_change_your_name_and_email(): void

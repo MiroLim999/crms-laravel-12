@@ -76,6 +76,8 @@ Route::middleware('auth')->group(function () {
     Route::get('settings', [AccountSettingsController::class, 'edit'])->name('settings.edit');
     Route::put('settings/profile', [AccountSettingsController::class, 'updateProfile'])
         ->name('settings.profile.update');
+    Route::put('settings/uploads', [AccountSettingsController::class, 'updateUploads'])
+        ->name('settings.uploads.update');
     Route::put('settings/password', [AccountSettingsController::class, 'updatePassword'])
         ->name('settings.password.update');
     // A new set of one-time recovery codes for "Forgot password?".
