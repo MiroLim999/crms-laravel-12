@@ -59,7 +59,7 @@ Revision of 2026-11-18 (second review):
 | 10 | One word per step ("Verify", not "Validate") | Yes |
 | 11 | "Add more files" (button missing) | Fix, with tests |
 | 12 | Scan all | Kept: the "at the end" choice, and **Scan remaining** in background mode. |
-| 13 | DEV Review & Export shortcut | Known. Remove before release (outside this plan). |
+| 13 | DEV Review & Export shortcut | Removed (2026-11-25). |
 | 14 | Smoke test scan | Retain as it is. |
 
 ---

@@ -1105,7 +1105,6 @@ Measured during development (not a formal benchmark):
 | No encryption at rest | The database and scan files are plain on disk | Turn on disk encryption (BitLocker on Windows, FileVault on Mac) |
 | Audit log protected by the application only | Someone with direct database access could still change rows; there is no hash chain | Restrict database access; optionally chain entry hashes |
 | A saved record's values are edited directly, with no second person approving | With one account there is no separation of duties; a wrong edit is caught only by reading the audit log | Review `record.edited` entries regularly (the dashboard's **Edits after saving** links to them) |
-| The dev-only Review & Export shortcut (`DEV_REVIEW_SHORTCUT`) is still in the code | It opens step 4 on a saved test scan; it is on only with `APP_ENV=local` and the setting turned on | Remove it before release (the files are listed in `config/dev_review_shortcut.php`) |
 | Backups are manual | A disk failure could lose records | Schedule the backup in [DOCKER-SETUP.md](DOCKER-SETUP.md#backup-and-restore) (database dump plus the `docker-data` folder) |
 | `php artisan serve` is a development web server | Fine for one local computer, not for a shared office server | Use Nginx or Apache with PHP-FPM if CRMS is ever shared on a network |
 
@@ -1216,7 +1215,7 @@ Daily use: `docker compose up -d` to start, `docker compose down` to stop. **Nev
 ### 11.3 Risks and gaps found in this review
 
 1. **5 failing tests** ([9.1](#91-automated-tests)). Probably out-of-date tests, but the register-row check should be confirmed in the browser.
-2. **Security items in [8.6](#86-known-security-gaps)**: public default Super Admin password, outdated PHP and MySQL, no encryption at rest, record edits with no second approver, the dev-only Review & Export shortcut, manual backups.
+2. **Security items in [8.6](#86-known-security-gaps)**: public default Super Admin password, outdated PHP and MySQL, no encryption at rest, record edits with no second approver, manual backups.
 3. **Documentation drift.** The README and DEVELOPER-GUIDE still name `TrOcr-50k-broken-samples` as the model to install and quote its older scores, and still say "477 tests". The active model is now `100k-finetuned-dataset-model`.
 4. **Technical debt** (does not affect users today):
    - The document type is stored twice (`document_type_id` and an older `doc_type` column with a fixed list).
@@ -1230,7 +1229,7 @@ In order of value for the defense and for real use:
 1. **Measure accuracy on real lines.** Scan and verify a sample of real pages, run `php artisan crms:export-training --test-set=real-lines`, then score the base and active models with `ml/test_finetuned.py`. This is the most important missing evidence. Report it per document type, as Part 3 of the evaluation kit asks.
 2. **Run the user evaluation** in `docs/System-Evaluation.pdf` (functional checklist, timing against manual encoding, questionnaire and SUS) with real registry staff.
 3. **Fix or update the 5 failing tests** so the full suite passes.
-4. **Close the quick security gaps**: force the Super Admin password change, update PHP, bind MySQL to 127.0.0.1, remove the dev-only Review & Export shortcut, turn on disk encryption, schedule backups.
+4. **Close the quick security gaps**: force the Super Admin password change, update PHP, bind MySQL to 127.0.0.1, turn on disk encryption, schedule backups.
 5. **Update the README and DEVELOPER-GUIDE** to the current model and test numbers.
 6. Later: network access for several staff computers (with HTTPS), full-text search, splitting the largest files.
 
@@ -1251,7 +1250,6 @@ In order of value for the defense and for real use:
 | Reading service | `ml/api/main.py`, `ml/trocr_common.py`, `app/Services/Ocr/OcrClient.php` |
 | Saved Records | `app/Http/Controllers/RecordController.php`, `app/Services/RecordFieldGrouper.php`, `resources/views/records/` |
 | Review & Export of a saved record | `app/Http/Controllers/RecordReviewController.php`, `resources/views/records/review.blade.php`, `resources/js/record-review.js`, `review-table.js` |
-| Dev-only Review & Export shortcut (temporary) | `config/dev_review_shortcut.php`, `routes/dev-review-shortcut.php`, `app/Http/Controllers/Dev/ReviewShortcutController.php` |
 | User accounts | `app/Http/Controllers/UserController.php`, `app/Services/UserProvisioner.php` |
 | Audit log | `app/Services/AuditLogger.php`, `app/Models/AuditLog.php`, `app/Http/Controllers/AuditLogController.php` |
 | Template Builder | `app/Http/Controllers/DocumentTemplateController.php`, `DocumentTypeDefinitionController.php`, `resources/js/template-builder.js` |
@@ -1385,7 +1383,6 @@ Set in the `.env` file. Defaults from `.env.example`.
 | `CRMS_CONFIDENCE_THRESHOLD` | `80` | Readings below this confidence are flagged |
 | `CRMS_REPORTING_TIMEZONE` | `Asia/Manila` | Time zone for screens, filters and the CSV |
 | `CRMS_SUPER_ADMIN_EMAIL`, `CRMS_SUPER_ADMIN_PASSWORD` | `superadmin@admin.com` | The first Super Admin, used only at installation |
-| `DEV_REVIEW_SHORTCUT` | `false` | Development only: with `APP_ENV=local`, a button that opens step 4 on a saved test scan |
 
 ## Appendix D. OCR service endpoints
 

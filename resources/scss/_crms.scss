@@ -12018,10 +12018,60 @@ $dashboard-reveal-step: 40ms;
 }
 
 .review-table-scroll {
+  position: relative;
   flex: 1 1 auto;
   min-block-size: 0;
   overflow: auto;
   background: var(--bs-paper-bg);
+
+  // A column being moved: the grab hand everywhere over the table.
+  &.is-moving-column,
+  &.is-moving-column * {
+    cursor: grabbing !important;
+  }
+}
+
+// Where a moved column will land: a line down the whole table.
+.review-table__drop-line {
+  position: absolute;
+  inset-block-start: 0;
+  z-index: 4;
+  inline-size: 3px;
+  border-radius: 2px;
+  background: var(--bs-primary);
+  box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), .18);
+  pointer-events: none;
+  opacity: 0;
+  transition: left 90ms ease-out, opacity 120ms ease;
+
+  &.is-shown {
+    opacity: 1;
+  }
+}
+
+// The moved column's name, riding under the pointer.
+.review-table__drag-ghost {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  z-index: 2000;
+  max-inline-size: 16rem;
+  padding: .3rem .65rem;
+  overflow: hidden;
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-primary);
+  box-shadow: 0 .5rem 1.25rem rgba(0, 0, 0, .18);
+  color: #fff;
+  font-size: .8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+// No text gets picked while a column is moved.
+body.review-table-dragging {
+  user-select: none;
 }
 
 .review-table {
@@ -12071,14 +12121,34 @@ $dashboard-reveal-step: 40ms;
 
   // A column the reviewer added: an × at its header's end deletes it.
   thead th.is-custom .review-table__label {
-    padding-inline-end: 1.1rem;
+    padding-inline-end: 1.4rem;
   }
 
-  .review-table__remove {
+  // × at a header's right end: shown when it is pointed at (an added column's always).
+  .review-table__header-tools {
     position: absolute;
     inset-block-start: 50%;
-    inset-inline-end: 8px;
+    inset-inline-end: 6px;
     z-index: 5;
+    display: flex;
+    gap: 2px;
+    padding-inline-start: .35rem;
+    background: linear-gradient(90deg, transparent, var(--bs-paper-bg) .35rem);
+    opacity: 0;
+    transform: translateY(-50%);
+    transition: opacity 120ms ease;
+    pointer-events: none;
+  }
+
+  thead th:hover .review-table__header-tools,
+  thead th:focus-within .review-table__header-tools,
+  thead th.is-custom .review-table__header-tools {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+
+  .review-table__remove {
     display: grid;
     place-items: center;
     inline-size: 1.1rem;
@@ -12091,7 +12161,6 @@ $dashboard-reveal-step: 40ms;
     font-size: 1rem;
     line-height: 1;
     cursor: pointer;
-    transform: translateY(-50%);
 
     &:hover,
     &:focus-visible {
@@ -12101,16 +12170,23 @@ $dashboard-reveal-step: 40ms;
   }
 
   // Headers can be dragged to swap places; the bar shows where one lands.
-  thead th[draggable="true"] {
+  // A header is grabbed to move its column (its grip resizes, its × deletes).
+  thead th[data-column] {
     cursor: grab;
+    user-select: none;
+  }
 
-    &.is-drop-before {
-      box-shadow: inset 3px 0 0 var(--bs-primary, #696cff);
-    }
+  thead th[data-column].is-renaming {
+    cursor: text;
+    user-select: text;
+  }
 
-    &.is-drop-after {
-      box-shadow: inset -3px 0 0 var(--bs-primary, #696cff);
-    }
+  // The column being moved fades where it was.
+  th.is-moving,
+  td.is-moving {
+    background-color: rgba(var(--bs-primary-rgb), .07) !important;
+    color: var(--bs-secondary-color);
+    opacity: .55;
   }
 
   // The grip on a header's right edge, as in a spreadsheet.

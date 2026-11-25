@@ -14437,6 +14437,8 @@
                     // A cell typed into where nothing was read is saved, so it counts.
                     isUnverified: (cell) => cell.refs.length > 0
                         && cell.refs.every((index) => !verifyTickOf(index)?.checked),
+                    // A register field every row does not need can be removed from its header.
+                    removableFields: true,
                 });
                 // Ctrl+Z / Ctrl+Y after a click on the scan or elsewhere on this step.
                 reviewTable.listenForUndoKeys(() => reviewing);
@@ -15138,7 +15140,5 @@
 
         syncReferenceInputsForCurrentPage();
 
-        {{-- DEV ONLY: Review & Export shortcut (temporary). Delete this line to remove it; see config/dev_review_shortcut.php. --}}
-        @includeWhen(config('dev_review_shortcut.enabled'), 'scan.partials.dev-review-shortcut')
     </script>
 @endpush

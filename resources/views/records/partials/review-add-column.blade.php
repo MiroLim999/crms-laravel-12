@@ -14,5 +14,10 @@
             An empty column to type into. It is in the downloads, not saved with the record.
         </p>
         <ul class="list-unstyled small mb-0 mt-2 d-grid gap-1" data-added-columns></ul>
+        {{-- Columns removed from their header's ×: shown again from here. --}}
+        <div class="d-none mt-3 pt-2 border-top" data-hidden-columns-wrap>
+            <div class="small fw-semibold mb-1">Removed columns</div>
+            <ul class="list-unstyled small mb-0 d-grid gap-1" data-hidden-columns></ul>
+        </div>
     </div>
 </div>

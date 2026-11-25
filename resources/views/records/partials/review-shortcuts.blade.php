@@ -33,8 +33,14 @@
         <div><span><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>Z</kbd></span><small>Undo the last change (or rename)</small></div>
         <div><span><kbd>Ctrl</kbd> + <kbd>Y</kbd> / <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></span><small>Redo</small></div>
 
+        <div class="marker-shortcuts-menu__title">Move a column</div>
+        <div><span>Drag its header</span><small>Let go where the blue line shows (the table scrolls at its edges)</small></div>
+        <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + <kbd>Shift</kbd> + <kbd>←</kbd> <kbd>→</kbd></span><small>Move the picked cell's column one place</small></div>
+        <div><span><kbd>Esc</kbd> while dragging</span><small>Put it back</small></div>
+
         <div class="marker-shortcuts-menu__title">Tips</div>
         <div><span>Double-click a header or row number</span><small>Rename it in the download</small></div>
+        <div><span>Point at a header: ×</span><small>Remove the column (asks first; Add column lists removed ones)</small></div>
         <div><span>Red / yellow cell</span><small>Invalid / empty (the button above goes to the next)</small></div>
         @if (!empty($savedRecord))
             <div><span>Save changes</span><small>Each old and new value goes to the audit log</small></div>

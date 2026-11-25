@@ -173,7 +173,7 @@ crms-laravel-12/
 │   ├── Console/Commands/               # crms:export-training, documents:prune-pages
 │   ├── Enums/                          # RoleSlug, DocumentType, RecordStatus, etc.
 │   ├── Http/
-│   │   ├── Controllers/                # Gated web controllers (Scan, Record, RecordReview, etc.); Dev/ holds the dev-only Review & Export shortcut
+│   │   ├── Controllers/                # Gated web controllers (Scan, Record, RecordReview, etc.)
 │   │   ├── Middleware/                 # EnsureAccountIsActive, EnsurePasswordIsChanged
 │   │   └── Requests/                   # Form validation request classes
 │   ├── Jobs/                           # ProcessDocumentPage (Detect / outline / read)
@@ -939,7 +939,6 @@ vendor\bin\pint --test                   # Verify PHP code style
 | `CRMS_SUPER_ADMIN_NAME` | `"Super Admin"` | Initial name for the bootstrap Super Admin seeder. |
 | `CRMS_SUPER_ADMIN_EMAIL` | `superadmin@admin.com` | Initial email for the bootstrap Super Admin seeder. |
 | `CRMS_SUPER_ADMIN_PASSWORD` | `superadmin@admin.com` | Initial password for the bootstrap Super Admin seeder. |
-| `DEV_REVIEW_SHORTCUT` | `false` | **Development only, temporary.** With `APP_ENV=local`, shows a button on the scan screen that skips Document, Align and Verify and opens step 4 (Review & Export) on a scan saved once, for working on that page. In Batch mode it uses every PDF in the `pdf-files` folder: scan them once in a real batch and Shift+click the button in Verify to save their reading; after that a click makes a batch of those files, read and ticked, which the workspace resumes as usual (`ReviewShortcutController::batch`). Ignored in any other environment. To remove the feature, see `config/dev_review_shortcut.php`. |
 
 ---
 

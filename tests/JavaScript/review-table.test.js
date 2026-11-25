@@ -456,6 +456,30 @@ test('a read column can be deleted from the table and its download, a register f
     assert.deepEqual(table.exportTable(), [['name'], ['X']]);
 });
 
+test('in step 4 a register field can be removed unless every row needs it, and a renamed one keeps its name in the download', () => {
+    const table = new ReviewTable({ container: { addEventListener() {} }, valueOf: () => 'x', onChange: () => {}, removableFields: true });
+    const required = { key: 'name', header: 'name', field: 'name', type: { required: true } };
+    const optional = { key: 'm|sex', header: 'sex', field: 'sex', type: { required: false } };
+    assert.equal(table.canRemoveColumn(required), false);
+    assert.equal(table.canRemoveColumn(optional), true);
+
+    const model = {
+        columns: [required, optional],
+        rows: [{ id: 'person-1', label: '01', cells: { name: { refs: [0] }, 'm|sex': { refs: [] } } }],
+    };
+    table.sourceModel = model;
+    table.hiddenColumns.add('m|sex');
+    table.model = table._withAdded(model);
+    // Removed: out of the table, its download and the rows saved; listed to show again.
+    assert.deepEqual(table.model.columns.map((column) => column.key), ['name']);
+    assert.deepEqual(table.fieldRows().map((row) => Object.keys(row.values)), [['name']]);
+    assert.deepEqual(table.hiddenColumnList(), [{ key: 'm|sex', header: 'sex' }]);
+
+    // Renamed: the new name heads the download made here.
+    table.headerNames.set('name', 'Child name');
+    assert.deepEqual(table.exportTable()[0], ['Child name']);
+});
+
 test('a register downloads its fields in its own order, whatever the columns were dragged to, in capitals', () => {
     const values = ['5', 'Ana Cruz', 'female', 'extra'];
     const table = new ReviewTable({

@@ -484,6 +484,33 @@ export function attachAddColumn(table, root = document) {
     const input = form?.querySelector('input');
     const list = wrap?.querySelector('[data-added-columns]');
     if (!wrap || !form || !input || !list) return;
+    const hiddenWrap = wrap.querySelector('[data-hidden-columns-wrap]');
+    const hiddenList = wrap.querySelector('[data-hidden-columns]');
+
+    // Read columns removed from their headers: each can be shown again.
+    const paintHidden = () => {
+        if (!hiddenWrap || !hiddenList) return;
+        const hidden = table.hiddenColumnList();
+        hiddenWrap.classList.toggle('d-none', hidden.length === 0);
+        hiddenList.replaceChildren(...hidden.map((column) => {
+            const item = document.createElement('li');
+            item.className = 'd-flex align-items-center justify-content-between gap-2';
+            const label = document.createElement('span');
+            label.className = 'text-truncate';
+            label.textContent = column.header;
+            const show = document.createElement('button');
+            show.type = 'button';
+            show.className = 'btn btn-sm btn-link p-0';
+            show.textContent = 'Show again';
+            show.setAttribute('aria-label', `Show column ${column.header} again`);
+            show.addEventListener('click', () => {
+                table.showColumn(column.key);
+                paintHidden();
+            });
+            item.append(label, show);
+            return item;
+        }));
+    };
 
     const paint = () => {
         list.replaceChildren(...table.customColumns().map((column) => {
@@ -502,6 +529,7 @@ export function attachAddColumn(table, root = document) {
             item.append(label, remove);
             return item;
         }));
+        paintHidden();
     };
 
     form.addEventListener('submit', (event) => {
@@ -860,10 +888,13 @@ export class ReviewTable {
     constructor({
         container, valueOf, onChange, onLocate = () => {}, onIssues = () => {},
         snapshotOf = () => null, restore = () => {}, onRange = () => {}, onCleared = () => {},
-        isUnverified = () => false, onColumnsChange = () => {},
+        isUnverified = () => false, onColumnsChange = () => {}, removableFields = false,
     }) {
         // An added column was deleted from its header (the Add column menu lists them).
         this.onColumnsChange = onColumnsChange;
+        // A register field that is not required may be removed too (its values then
+        // stay blank in the register). Step 4 only: a saved record keeps its fields.
+        this.removableFields = removableFields;
         this.isUnverified = isUnverified;
         this.onRange = onRange;
         this.onCleared = onCleared;
@@ -918,20 +949,15 @@ export class ReviewTable {
         this.sourceModel = null;
 
         container.addEventListener('pointerdown', (event) => this._pointerDown(event));
-        container.addEventListener('dragstart', (event) => this._dragStart(event));
-        container.addEventListener('dragover', (event) => this._dragOver(event));
-        container.addEventListener('dragleave', () => this._clearDropMark());
-        container.addEventListener('dragend', () => this._clearDropMark());
-        container.addEventListener('drop', (event) => this._drop(event));
         container.addEventListener('keydown', (event) => this._keyDown(event));
         container.addEventListener('dblclick', (event) => this._doubleClick(event));
         // An added column's × in its header deletes it.
         container.addEventListener('click', (event) => {
-            const remove = event.target instanceof Element ? event.target.closest('.review-table__remove') : null;
-            if (!remove) return;
+            const button = event.target instanceof Element ? event.target.closest('.review-table__remove') : null;
+            if (!button) return;
             event.preventDefault();
             event.stopPropagation();
-            this._confirmRemove(remove.dataset.key, remove);
+            this._confirmRemove(button.dataset.key, button);
         });
         container.addEventListener('copy', (event) => this._copy(event, false));
         container.addEventListener('cut', (event) => this._copy(event, true));
@@ -1043,7 +1069,29 @@ export class ReviewTable {
      * columns are the download's format; a read column no field takes can go).
      */
     canRemoveColumn(column) {
-        return Boolean(column) && (column.custom || !column.field);
+        if (!column) return false;
+        if (column.custom || !column.field) return true;
+        // A register field: when allowed, and not one every row needs.
+        return this.removableFields && !column.type?.required;
+    }
+
+    /** The removed read columns, to show again (the Add column menu lists them): [{ key, header }]. */
+    hiddenColumnList() {
+        const all = this.sourceModel?.columns ?? [];
+        return [...this.hiddenColumns]
+            .map((key) => all.find((column) => column.key === key))
+            .filter(Boolean)
+            .map((column) => ({ key: column.key, header: this.headerOf(column) }));
+    }
+
+    /** A removed read column back in the table (Ctrl+Z removes it again). */
+    showColumn(key) {
+        if (!this.hiddenColumns.has(key)) return;
+        this._closeEditor(true);
+        this.hiddenColumns.delete(key);
+        this.render(this.sourceModel);
+        this._remember({ columnChange: 'show', key, snapshot: null });
+        this.onColumnsChange();
     }
 
     /**
@@ -1156,59 +1204,156 @@ export class ReviewTable {
         return { ...model, columns };
     }
 
-    _dragStart(event) {
-        const th = event.target instanceof Element ? event.target.closest('thead th[data-column]') : null;
-        if (!th || th.classList.contains('is-renaming') || th.dataset.noDrag === '1') {
-            event.preventDefault();
-            return;
-        }
-        this.dragKey = th.dataset.sizeKey;
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', this.dragKey);
+    /**
+     * A header pressed: once the pointer moves a little, the column follows it.
+     * Its header and cells fade, a label with its name rides under the pointer,
+     * and a line shows where it will land; it can be let go anywhere over the
+     * table (header or cells), and near the left or right edge the table
+     * scrolls by itself. Esc puts it back. A press without a move does nothing
+     * (a double-click still renames).
+     */
+    _columnDrag(event, th) {
+        const from = Number(th.dataset.column);
+        const key = th.dataset.sizeKey;
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const scroller = this.container;
+        let drag = null;
+        let pointer = { x: startX, y: startY };
+
+        const columnNodes = (index) => [this.headerNodes[index], ...this.cellNodes.map((cells) => cells[index])].filter(Boolean);
+
+        // Where the column would land: the gap before header `gap` (headers.length: after the last).
+        const gapAt = (x) => {
+            const gap = this.headerNodes.findIndex((header) => {
+                const box = header.getBoundingClientRect();
+                return x < box.left + box.width / 2;
+            });
+            return gap === -1 ? this.headerNodes.length : gap;
+        };
+
+        const showGap = () => {
+            drag.gap = gapAt(pointer.x);
+            // Its own place (just before or after itself): no line, nothing would move.
+            const moves = drag.gap !== from && drag.gap !== from + 1;
+            drag.line.classList.toggle('is-shown', moves);
+            if (!moves) return;
+            const edge = drag.gap < this.headerNodes.length
+                ? this.headerNodes[drag.gap].getBoundingClientRect().left
+                : this.headerNodes[this.headerNodes.length - 1].getBoundingClientRect().right;
+            const box = scroller.getBoundingClientRect();
+            drag.line.style.left = `${edge - box.left + scroller.scrollLeft - 1.5}px`;
+            drag.line.style.height = `${scroller.querySelector('table')?.offsetHeight ?? scroller.scrollHeight}px`;
+        };
+
+        // Near the left or right edge, the table scrolls toward it, faster the closer:
+        // up to 1.2 px a millisecond, by the time passed (so a slow computer scrolls as fast).
+        const EDGE = 48;
+        let last = null;
+        const scroll = (now) => {
+            if (!drag) return;
+            const elapsed = last === null ? 16 : Math.min(100, now - last);
+            last = now;
+            const box = scroller.getBoundingClientRect();
+            const left = Math.min(EDGE, box.left + EDGE - pointer.x);
+            const right = Math.min(EDGE, pointer.x - (box.right - EDGE));
+            const speed = (closeness) => Math.ceil((closeness / EDGE) * 1.2 * elapsed);
+            const step = left > 0 ? -speed(left) : (right > 0 ? speed(right) : 0);
+            if (step !== 0) {
+                const before = scroller.scrollLeft;
+                scroller.scrollLeft += step;
+                if (scroller.scrollLeft !== before) showGap();
+            }
+            drag.frame = window.requestAnimationFrame(scroll);
+        };
+
+        const begin = () => {
+            this._closeEditor(true);
+            const ghost = document.createElement('div');
+            ghost.className = 'review-table__drag-ghost';
+            ghost.textContent = th.querySelector('.review-table__label')?.textContent || key;
+            document.body.appendChild(ghost);
+            const line = document.createElement('div');
+            line.className = 'review-table__drop-line';
+            line.setAttribute('aria-hidden', 'true');
+            scroller.appendChild(line);
+            columnNodes(from).forEach((node) => node.classList.add('is-moving'));
+            scroller.classList.add('is-moving-column');
+            document.body.classList.add('review-table-dragging');
+            drag = { ghost, line, gap: null, frame: window.requestAnimationFrame(scroll) };
+        };
+
+        const place = () => {
+            drag.ghost.style.transform = `translate(${pointer.x + 12}px, ${pointer.y + 14}px)`;
+            showGap();
+        };
+
+        const finish = (drop) => {
+            document.removeEventListener('pointermove', move, true);
+            document.removeEventListener('pointerup', up, true);
+            document.removeEventListener('pointercancel', cancel, true);
+            document.removeEventListener('keydown', escape, true);
+            if (!drag) return;
+            window.cancelAnimationFrame(drag.frame);
+            drag.ghost.remove();
+            drag.line.remove();
+            columnNodes(from).forEach((node) => node.classList.remove('is-moving'));
+            scroller.classList.remove('is-moving-column');
+            document.body.classList.remove('review-table-dragging');
+            const { gap } = drag;
+            drag = null;
+            if (!drop || gap === null || gap === from || gap === from + 1) return;
+            const keys = this.model.columns.map((column) => column.key);
+            keys.splice(from, 1);
+            keys.splice(gap > from ? gap - 1 : gap, 0, key);
+            this._reorder(keys);
+        };
+
+        const move = (moveEvent) => {
+            pointer = { x: moveEvent.clientX, y: moveEvent.clientY };
+            if (!drag) {
+                if (Math.abs(pointer.x - startX) < 5 && Math.abs(pointer.y - startY) < 5) return;
+                begin();
+            }
+            moveEvent.preventDefault();
+            place();
+        };
+        const up = () => finish(true);
+        const cancel = () => finish(false);
+        const escape = (keyEvent) => {
+            if (keyEvent.key !== 'Escape' || !drag) return;
+            keyEvent.preventDefault();
+            keyEvent.stopPropagation();
+            finish(false);
+        };
+
+        document.addEventListener('pointermove', move, true);
+        document.addEventListener('pointerup', up, true);
+        document.addEventListener('pointercancel', cancel, true);
+        document.addEventListener('keydown', escape, true);
     }
 
-    _dropTarget(event) {
-        if (this.dragKey == null) return null;
-        const th = event.target instanceof Element ? event.target.closest('thead th[data-column]') : null;
-        if (!th || th.dataset.sizeKey === this.dragKey) return null;
-        const box = th.getBoundingClientRect();
-        return { th, after: event.clientX > box.left + box.width / 2 };
-    }
-
-    _dragOver(event) {
-        const target = this._dropTarget(event);
-        if (!target) return;
-        event.preventDefault();
-        this._clearDropMark();
-        target.th.classList.add(target.after ? 'is-drop-after' : 'is-drop-before');
-    }
-
-    _clearDropMark() {
-        this.container.querySelectorAll('.is-drop-before, .is-drop-after')
-            .forEach((node) => node.classList.remove('is-drop-before', 'is-drop-after'));
-    }
-
-    _drop(event) {
-        const target = this._dropTarget(event);
-        const moving = this.dragKey;
-        this.dragKey = null;
-        this._clearDropMark();
-        if (!target) return;
-        event.preventDefault();
+    /** The picked cell's column one place left (-1) or right (+1): Alt+Shift+← / →. */
+    _moveActiveColumn(step) {
+        if (!this.active) return false;
         const keys = this.model.columns.map((column) => column.key);
-        keys.splice(keys.indexOf(moving), 1);
-        const at = keys.indexOf(target.th.dataset.sizeKey) + (target.after ? 1 : 0);
-        keys.splice(at, 0, moving);
+        const from = this.active.column;
+        const to = from + step;
+        if (to < 0 || to >= keys.length) return true;
+        [keys[from], keys[to]] = [keys[to], keys[from]];
         this._reorder(keys);
+        return true;
     }
 
     /**
      * Draw the columns again in `keys` order; the picked cell stays on its column.
      * A move by the reviewer (`remember`) is one change Ctrl+Z can take back.
+     * The columns that moved slide to their new places.
      */
     _reorder(keys, remember = true) {
         this._closeEditor(true);
         const activeKey = this.active ? this.model.columns[this.active.column]?.key : null;
+        const before = new Map((this.headerNodes ?? []).map((th) => [th.dataset.sizeKey, th.getBoundingClientRect().left]));
         if (remember) this._remember({ order: true, before: [...this.columnOrder], after: [...keys] });
         this.columnOrder = keys;
         this.render(this.sourceModel);
@@ -1216,6 +1361,33 @@ export class ReviewTable {
             const column = this.model.columns.findIndex((candidate) => candidate.key === activeKey);
             if (column !== -1 && this.active) this.select(this.active.row, column, { locate: false });
         }
+        this._slideColumns(before);
+    }
+
+    /** Each column that moved slides from where it was (`before`: key -> left edge) to where it is. */
+    _slideColumns(before) {
+        if (before.size === 0 || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+        const moved = [];
+        this.headerNodes.forEach((th, index) => {
+            const was = before.get(th.dataset.sizeKey);
+            if (was === undefined) return;
+            const shift = was - th.getBoundingClientRect().left;
+            if (Math.abs(shift) < 1) return;
+            [th, ...this.cellNodes.map((cells) => cells[index])].filter(Boolean).forEach((node) => {
+                node.style.transition = 'none';
+                node.style.transform = `translateX(${shift}px)`;
+                moved.push(node);
+            });
+        });
+        if (moved.length === 0) return;
+        // One frame at the old places, then the slide to the new ones.
+        window.requestAnimationFrame(() => {
+            moved.forEach((node) => {
+                node.style.transition = 'transform 180ms cubic-bezier(.2, .8, .2, 1)';
+                node.style.transform = '';
+            });
+            window.setTimeout(() => moved.forEach((node) => { node.style.transition = ''; }), 220);
+        });
     }
 
     /**
@@ -1271,8 +1443,6 @@ export class ReviewTable {
     /** Draw the table for `model` (see buildReviewModel); keeps the picked cell where it can. */
     render(model) {
         const keep = this.active;
-        // The table drawn again: a delete question about its old headers goes.
-        this._closeConfirm();
         this._closeEditor(false);
         this.sourceModel = model;
         model = this._ordered(this._withAdded(model));
@@ -1302,7 +1472,6 @@ export class ReviewTable {
             th.scope = 'col';
             th.dataset.column = String(columnIndex);
             th.dataset.sizeKey = column.key;
-            th.draggable = true;
             if (column.custom) th.classList.add('is-custom');
             if (column.type.input === 'select') th.dataset.choices = column.type.options.join(' / ');
             const label = document.createElement('span');
@@ -1415,8 +1584,8 @@ export class ReviewTable {
             this._labelOf(th).textContent = shown;
             th.classList.toggle('is-renamed', renamed);
             th.title = renamed
-                ? `${shown} (was ${column.header}). Double-click to rename it in the downloads.`
-                : `${shown}. Double-click to rename it in the downloads.`;
+                ? `${shown} (was ${column.header}). Drag to move it · double-click to rename it.`
+                : `${shown}. Drag to move it · double-click to rename it.`;
         });
         this.model.rows.forEach((row, rowIndex) => {
             const th = this.rowHeadNodes[rowIndex];
@@ -1442,126 +1611,184 @@ export class ReviewTable {
         return label;
     }
 
-    /** What a header has besides its name: a delete button, on a column that can go. */
+    /**
+     * What a header has besides its name: × to remove it, when it can go (a
+     * register field every row needs cannot). Shown when the header is pointed
+     * at (an added column's always). A double-click on the header renames it.
+     */
     _headerExtras(column) {
         if (!this.canRemoveColumn(column)) return [];
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'review-table__remove';
-        remove.dataset.key = column.key;
-        remove.draggable = false;
-        remove.tabIndex = -1;
-        remove.textContent = '×';
-        remove.title = 'Delete this column';
-        remove.setAttribute('aria-label', `Delete column ${this.headerOf(column)}`);
-        return [remove];
+        const tools = document.createElement('span');
+        tools.className = 'review-table__header-tools';
+        const header = this.headerOf(column);
+        const button = (className, text, title, label) => {
+            const node = document.createElement('button');
+            node.type = 'button';
+            node.className = className;
+            node.dataset.key = column.key;
+            node.tabIndex = -1;
+            node.title = title;
+            node.setAttribute('aria-label', label);
+            node.innerHTML = text;
+            return node;
+        };
+        tools.append(button('review-table__remove', '×', 'Remove this column', `Remove column ${header}`));
+        return [tools];
     }
 
     /**
-     * Ask before deleting an added column: a small box under its × with Cancel
-     * and Delete. Esc, Cancel or a click elsewhere keeps the column.
+     * A question in a window over the page: `title`, `message`, an optional
+     * `warning` (shown in amber), an optional text box (`input`: its starting
+     * value), and Cancel / `confirm`. Resolves with true (or the typed text),
+     * or null when cancelled.
      */
-    _confirmRemove(key, anchor) {
+    _ask({ title, message, warning = null, input = null, confirm, danger = false }) {
+        this._closeConfirm();
+        this._closeEditor(true);
+        const Modal = window.bootstrap?.Modal;
+        if (!Modal) {
+            // No Bootstrap (tests): the browser's own questions.
+            if (input !== null) return Promise.resolve(window.prompt(`${title}\n${message}`, input));
+            return Promise.resolve(window.confirm(`${title}\n${message}`) ? true : null);
+        }
+
+        const element = document.createElement('div');
+        element.className = 'modal fade review-table-modal';
+        element.tabIndex = -1;
+        element.setAttribute('aria-hidden', 'true');
+        element.innerHTML = `
+            <div class="modal-dialog modal-dialog-centered">
+                <form class="modal-content" novalidate>
+                    <div class="modal-header">
+                        <h5 class="modal-title"></h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="mb-3" data-message></p>
+                        <div class="alert alert-warning d-flex gap-2 small mb-3" role="alert" data-warning>
+                            <i class="icon-base bx bx-error mt-1" aria-hidden="true"></i><span></span>
+                        </div>
+                        <input type="text" class="form-control" maxlength="120" autocomplete="off" spellcheck="false" data-input>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn" data-confirm></button>
+                    </div>
+                </form>
+            </div>`;
+        element.querySelector('.modal-title').textContent = title;
+        element.querySelector('[data-message]').textContent = message;
+        const warningBox = element.querySelector('[data-warning]');
+        if (warning) warningBox.querySelector('span').textContent = warning;
+        else warningBox.remove();
+        const box = element.querySelector('[data-input]');
+        if (input === null) box.remove();
+        else {
+            box.value = input;
+            box.setAttribute('aria-label', title);
+        }
+        const confirmButton = element.querySelector('[data-confirm]');
+        confirmButton.textContent = confirm;
+        confirmButton.classList.add(danger ? 'btn-danger' : 'btn-primary');
+        if (input === null) element.querySelector('[data-message]').classList.toggle('mb-0', !warning);
+        document.body.appendChild(element);
+
+        const modal = new Modal(element);
+        let answer = null;
+        return new Promise((resolve) => {
+            element.querySelector('form').addEventListener('submit', (event) => {
+                event.preventDefault();
+                answer = input === null ? true : box.value.trim();
+                modal.hide();
+            });
+            element.addEventListener('shown.bs.modal', () => {
+                if (input === null) confirmButton.focus();
+                else {
+                    box.focus();
+                    box.select();
+                }
+            });
+            element.addEventListener('hidden.bs.modal', () => {
+                modal.dispose();
+                element.remove();
+                if (this._confirm?.element === element) this._confirm = null;
+                // Back to the table, on the picked cell.
+                if (this.active) this.cellNodes[this.active.row]?.[this.active.column]?.focus({ preventScroll: true });
+                resolve(answer);
+            });
+            this._confirm = { element, modal };
+            modal.show();
+        });
+    }
+
+    /**
+     * Rename a column, in a window: its new name is used in this table and in
+     * the downloads made here. A register field keeps its name in the register
+     * (the database and Saved Records' downloads), which the window says. An
+     * empty name, or the old one, puts the original back. Ctrl+Z undoes it.
+     */
+    async renameColumn(key) {
+        const column = this.model?.columns.find((candidate) => candidate.key === key);
+        if (!column) return;
+        const current = this.headerOf(column);
+        const name = await this._ask({
+            title: `Rename column "${current}"`,
+            message: 'The new name shows in this table and in the downloads you make here. Leave it empty to go back to '
+                + `"${column.header}".`,
+            warning: column.field
+                ? `"${column.field}" is a field of the register. The database keeps that name, so Saved Records `
+                    + `and book downloads still say "${column.field}".`
+                : null,
+            input: current,
+            confirm: 'Rename',
+        });
+        if (name === null) return;
+        const text = String(name).trim().slice(0, 120);
+        this._rename(this.headerNames, 'header', column.key, text === '' || text === column.header ? null : text);
+        this._paintLabels();
+    }
+
+    /**
+     * Ask, in a window, before removing a column: an added one goes with what was
+     * typed in it; a read one leaves the table and its downloads; a register field
+     * is not saved for this document (left blank). Ctrl+Z, or Add column's list,
+     * brings it back.
+     */
+    async _confirmRemove(key) {
         const column = this.addedColumns.find((candidate) => candidate.key === key)
             ?? this.model?.columns.find((candidate) => candidate.key === key && this.canRemoveColumn(candidate));
         if (!column) return;
-        this._closeConfirm();
-        this._closeEditor(true);
         const header = this.headerOf(column);
         const typed = [...this.addedValues.keys()].filter((id) => id.endsWith(`|${key}`)).length;
-
-        const box = document.createElement('div');
-        box.className = 'review-table__confirm card shadow';
-        box.setAttribute('role', 'alertdialog');
-        box.setAttribute('aria-modal', 'false');
-        const title = document.createElement('div');
-        title.className = 'review-table__confirm-title';
-        title.id = `reviewConfirm-${key.replace(/\W/g, '-')}`;
-        title.textContent = `Delete column "${header}"?`;
-        box.setAttribute('aria-labelledby', title.id);
-        const text = document.createElement('p');
-        text.className = 'small text-muted mb-3';
-        text.textContent = (!column.custom
-            ? 'It is left out of this table and its downloads.'
-            : typed > 0
-                ? `${typed} typed ${typed === 1 ? 'value' : 'values'} in it will be removed too.`
-                : 'Nothing has been typed in it yet.')
-            + ' Ctrl+Z brings it back.';
-        const actions = document.createElement('div');
-        actions.className = 'd-flex justify-content-end gap-2';
-        const cancel = document.createElement('button');
-        cancel.type = 'button';
-        cancel.className = 'btn btn-sm btn-outline-secondary';
-        cancel.textContent = 'Cancel';
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'btn btn-sm btn-danger';
-        remove.textContent = 'Delete';
-        actions.append(cancel, remove);
-        box.append(title, text, actions);
-        document.body.append(box);
-
-        // Under the ×, kept on screen.
-        const place = () => {
-            const at = (anchor?.isConnected ? anchor : this.container).getBoundingClientRect();
-            const width = box.offsetWidth;
-            box.style.top = `${Math.min(at.bottom + 6, window.innerHeight - box.offsetHeight - 8)}px`;
-            box.style.left = `${Math.max(8, Math.min(at.right - width, window.innerWidth - width - 8))}px`;
-        };
-        place();
-
-        const backToTable = () => {
-            if (this.active) this.cellNodes[this.active.row]?.[this.active.column]?.focus({ preventScroll: true });
-        };
-        const outside = (event) => {
-            if (!box.contains(event.target)) this._closeConfirm();
-        };
-        const onKey = (event) => {
-            if (event.key !== 'Escape') return;
-            event.preventDefault();
-            event.stopPropagation();
-            this._closeConfirm();
-            backToTable();
-        };
-        cancel.addEventListener('click', () => {
-            this._closeConfirm();
-            backToTable();
+        const back = column.custom ? 'Ctrl+Z brings it back.' : 'Ctrl+Z, or Add column → Removed columns, brings it back.';
+        const message = column.custom
+            ? `${typed > 0 ? `${typed} typed ${typed === 1 ? 'value' : 'values'} in it will be removed too.` : 'Nothing has been typed in it yet.'} ${back}`
+            : `It leaves this table and its downloads. ${back}`;
+        const ok = await this._ask({
+            title: `Remove column "${header}"?`,
+            message,
+            warning: column.field
+                ? `"${column.field}" will not be saved for this document: it stays blank in the register.`
+                : null,
+            confirm: 'Remove column',
+            danger: true,
         });
-        remove.addEventListener('click', () => {
-            this._closeConfirm();
-            this.removeColumn(key);
-            this.onColumnsChange();
-            backToTable();
-        });
-        box.addEventListener('keydown', onKey);
-        // The table scrolling or the window changing size moves the × away: the box closes.
-        const close = () => this._closeConfirm();
-        document.addEventListener('pointerdown', outside, true);
-        this.container.addEventListener('scroll', close, { passive: true });
-        window.addEventListener('resize', close);
-        this._confirm = {
-            box,
-            cleanup: () => {
-                document.removeEventListener('pointerdown', outside, true);
-                this.container.removeEventListener('scroll', close);
-                window.removeEventListener('resize', close);
-            },
-        };
-        cancel.focus({ preventScroll: true });
+        if (!ok) return;
+        this.removeColumn(key);
+        this.onColumnsChange();
     }
 
-    /** Ask, then delete an added column (`anchor`: what was clicked; the question opens under it). */
-    confirmRemoveColumn(key, anchor = null) {
-        this._confirmRemove(key, anchor);
+    /** Ask, then remove a column (`anchor` is no longer used: the question is a window). */
+    confirmRemoveColumn(key) {
+        this._confirmRemove(key);
     }
 
-    /** Close the delete question, if it is open (the column stays). */
+    /** Close the question window, if one is open (nothing changes). */
     _closeConfirm() {
         const confirm = this._confirm;
         if (!confirm) return;
         this._confirm = null;
-        confirm.cleanup();
-        confirm.box.remove();
+        confirm.modal?.hide();
     }
 
     /** The grip on a header's right edge: drag to resize, double-click to fit. */
@@ -2040,8 +2267,8 @@ export class ReviewTable {
             this._reorder([...(forward ? change.after : change.before)], false);
             return;
         }
-        if (change.columnChange === 'hide') {
-            if (forward) this.hiddenColumns.add(change.key);
+        if (change.columnChange === 'hide' || change.columnChange === 'show') {
+            if ((change.columnChange === 'hide') === forward) this.hiddenColumns.add(change.key);
             else this.hiddenColumns.delete(change.key);
             this._closeEditor(true);
             this.render(this.sourceModel);
@@ -2101,7 +2328,7 @@ export class ReviewTable {
         if (event.button !== 0) return;
         const grip = event.target instanceof Element ? event.target.closest('.review-table__resizer') : null;
         const remove = event.target instanceof Element ? event.target.closest('.review-table__remove') : null;
-        // Pressing a header's resize grip or delete button must not start a column drag.
+        // Pressing a header's resize grip or its × must not start a column drag.
         const pressed = event.target instanceof Element ? event.target.closest('thead th[data-column]') : null;
         if (pressed) pressed.dataset.noDrag = grip || remove ? '1' : '0';
         // The delete button acts on its click (see the constructor).
@@ -2111,6 +2338,10 @@ export class ReviewTable {
         }
         if (grip) {
             this._resizeStart(event, grip);
+            return;
+        }
+        if (pressed && !pressed.classList.contains('is-renaming')) {
+            this._columnDrag(event, pressed);
             return;
         }
         const td = event.target instanceof Element ? event.target.closest('.review-table__cell') : null;
@@ -2200,11 +2431,7 @@ export class ReviewTable {
         if (th.closest('thead')) {
             if (th.dataset.column === undefined) return;
             const column = this.model.columns[Number(th.dataset.column)];
-            // A register field keeps its name: the downloads and the database use it.
-            if (column?.field) return;
-            if (column) this._renameLabel(th, this.headerOf(column), (name) => {
-                this._rename(this.headerNames, 'header', column.key, name === '' || name === column.header ? null : name);
-            });
+            if (column) this.renameColumn(column.key);
             return;
         }
         const tr = th.closest('tr');
@@ -2322,6 +2549,14 @@ export class ReviewTable {
 
         // Here, Ctrl+Z and Ctrl+Y belong to the table (not to the page's other tools).
         if (this._undoKey(event)) return;
+        // Alt+Shift+← / → (Option on a Mac): the picked cell's column one place over.
+        if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey
+            && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+            event.preventDefault();
+            event.stopPropagation();
+            this._moveActiveColumn(event.key === 'ArrowLeft' ? -1 : 1);
+            return;
+        }
         if (event.ctrlKey || event.metaKey || event.altKey) return;
         if (event.key === 'Delete' || event.key === 'Backspace') {
             event.preventDefault();
@@ -2386,7 +2621,7 @@ export class ReviewTable {
             .map((column, index) => ({ column, index }))
             .filter(({ column }) => !column.noExport && (!register || column.field))
             .sort((a, b) => (register ? (placeOf.get(a.column.key) ?? a.index) - (placeOf.get(b.column.key) ?? b.index) : 0));
-        const header = [...(register ? [] : ['Row']), ...shown.map(({ column }) => (register ? column.field : this.headerOf(column)))];
+        const header = [...(register ? [] : ['Row']), ...shown.map(({ column }) => (register ? (this.headerNames.get(column.key) ?? column.field) : this.headerOf(column)))];
         // Every value in capitals.
         const rows = this.model.rows.map((row, rowIndex) => [
             ...(register ? [] : [this.rowLabelOf(row)]),
