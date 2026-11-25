@@ -96,6 +96,41 @@ class LedgerTemplateAndExportTest extends TestCase
         ])->assertSessionHasErrors('fields.0.angle');
     }
 
+    public function test_each_row_line_keeps_its_own_tilt_and_the_builder_and_scan_are_given_it(): void
+    {
+        $admin = User::factory()->superAdmin()->create();
+        $this->actingAs($admin)->post(route('templates.store'), [
+            'name' => 'Wavy register',
+            'doc_type' => DocumentType::Birth->value,
+            'page_ratio' => 11 / 8.5,
+            'grouping_mode' => 'auto',
+            'fields_json' => json_encode([], JSON_THROW_ON_ERROR),
+            'columns_json' => json_encode(self::COLUMNS, JSON_THROW_ON_ERROR),
+            'ruled_ys_json' => json_encode([0.2, 0.35, 0.5, 0.65, 0.8], JSON_THROW_ON_ERROR),
+            // Only three given: the rest are 0. Tenths of a degree.
+            'ruled_tilts_json' => json_encode([0.0, 1.24, -0.8], JSON_THROW_ON_ERROR),
+            'publish' => 1,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $template = DocumentTemplate::where('name', 'Wavy register')->firstOrFail();
+        $this->assertSame([0.0, 1.2, -0.8, 0.0, 0.0], array_map('floatval', $template->ruled_tilts));
+
+        $this->actingAs($admin)->get(route('templates.edit', $template))
+            ->assertOk()
+            ->assertSee('initialRuledTilts', false);
+
+        $this->actingAs($admin)->post(route('templates.store'), [
+            'name' => 'Over-tilted line',
+            'doc_type' => DocumentType::Birth->value,
+            'page_ratio' => 11 / 8.5,
+            'grouping_mode' => 'auto',
+            'fields_json' => json_encode([], JSON_THROW_ON_ERROR),
+            'columns_json' => json_encode(self::COLUMNS, JSON_THROW_ON_ERROR),
+            'ruled_ys_json' => json_encode([0.2, 0.5, 0.8], JSON_THROW_ON_ERROR),
+            'ruled_tilts_json' => json_encode([0, 90, 0], JSON_THROW_ON_ERROR),
+        ])->assertSessionHasErrors('ruled_tilts.1');
+    }
+
     public function test_columns_need_ruled_lines_running_top_to_bottom(): void
     {
         $admin = User::factory()->superAdmin()->create();

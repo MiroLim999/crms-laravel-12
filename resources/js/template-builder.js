@@ -6,19 +6,23 @@ import {
     normaliseAngle,
 } from './field-marker';
 import {
+    clampRowAngle,
     clampRuledY,
     columnBand,
     columnsAtPageTilt,
     distributeRuledYs,
     fieldsOverLedger,
     fitColumnsToPrinted,
+    fitTilts,
     followFirstAndLastLine,
     gridTilt,
     insertRuledY,
+    insertTilt,
     isColumn,
     ledgerGridProblems,
     mergeFieldsIntoTable,
     remapRuledYs,
+    respaceTilts,
     rowsWithinFrame,
     sameBand,
     tiltColumns,
@@ -175,6 +179,10 @@ const initialBoxes = [
 const baselineRuledYs = normaliseRuledYs(config.baselineRuledYs);
 // Printed row lines of a ruled register, page fractions, top to bottom.
 let ruledYs = normaliseRuledYs(config.initialRuledYs);
+// How far each row line is turned beyond the table's own tilt (degrees, one per
+// row line). Kept in step with `ruledYs`.
+const baselineRowTilts = fitTilts(config.baselineRuledTilts, baselineRuledYs.length);
+let rowTilts = fitTilts(config.initialRuledTilts, ruledYs.length);
 groupingModeInput.value = initialGroupingMode;
 
 // Markers, person-row mode and row lines, undone together (Ctrl+Z).
@@ -263,15 +271,16 @@ const pageTwoBaseline = {
         ? [...normaliseBoxes(savedPageTwo.fields), ...normaliseColumns(savedPageTwo.columns)]
         : [],
     ruledYs: savedPageTwo ? normaliseRuledYs(savedPageTwo.ruled_ys) : [],
+    rowTilts: savedPageTwo ? fitTilts(savedPageTwo.ruled_tilts, normaliseRuledYs(savedPageTwo.ruled_ys).length) : [],
     grouping: savedPageTwo?.grouping_mode === 'custom' ? 'custom' : 'auto',
 };
 const pageBaselines = {
-    1: { boxes: baselineBoxes, ruledYs: baselineRuledYs, grouping: baselineGroupingMode },
+    1: { boxes: baselineBoxes, ruledYs: baselineRuledYs, rowTilts: baselineRowTilts, grouping: baselineGroupingMode },
     2: pageTwoBaseline,
 };
 const pageLayouts = {
     1: null,
-    2: { boxes: cloneBoxes(pageTwoBaseline.boxes), ruledYs: [...pageTwoBaseline.ruledYs], grouping: pageTwoBaseline.grouping },
+    2: { boxes: cloneBoxes(pageTwoBaseline.boxes), ruledYs: [...pageTwoBaseline.ruledYs], rowTilts: [...pageTwoBaseline.rowTilts], grouping: pageTwoBaseline.grouping },
 };
 // A saved page 2 opens as two pages; a picked sample then decides (see setTwoPage).
 let twoPage = savedPageTwo !== null;
@@ -281,6 +290,7 @@ function layoutMatchesBaseline() {
     const baseline = pageBaselines[activePage];
     return snapshot(marker.toJSON()) === snapshot(baseline.boxes)
         && JSON.stringify(ruledYs) === JSON.stringify(baseline.ruledYs)
+        && JSON.stringify(fitTilts(rowTilts, ruledYs.length)) === JSON.stringify(fitTilts(baseline.rowTilts, baseline.ruledYs.length))
         && groupingModeInput.value === baseline.grouping;
 }
 
@@ -295,6 +305,7 @@ function layoutState(boxes = marker.toJSON()) {
         boxes: cloneBoxes(boxes),
         groupingMode: groupingModeInput.value === 'custom' ? 'custom' : 'auto',
         ruledYs: [...ruledYs],
+        rowTilts: fitTilts(rowTilts, ruledYs.length),
     };
 }
 
@@ -305,6 +316,7 @@ let previousMarkerCount = 0;
 function handleMarkerChange(boxes) {
     if (!restoringHistory && previousMarkerCount > 0 && boxes.length === 0 && ruledYs.length > 0) {
         ruledYs = [];
+        rowTilts = [];
         selectedRule = null;
         estimatedYs = new Set();
     }
@@ -935,6 +947,7 @@ function undoLayoutChange() {
     groupingModeInput.value = previous.groupingMode;
     // Row lines first: restoring the markers redraws the grid from them.
     ruledYs = normaliseRuledYs(previous.ruledYs);
+    rowTilts = fitTilts(previous.rowTilts, ruledYs.length);
     selectedRule = null;
     marker.setBoxes(cloneBoxes(previous.boxes));
     restoringHistory = false;
@@ -1085,7 +1098,7 @@ function validateFields() {
 }
 
 /** A layout's markers and row lines as the server takes them. */
-function layoutPayload(boxes, ruled, grouping) {
+function layoutPayload(boxes, ruled, grouping, tilts = []) {
     const fields = boxes.filter((box) => !isColumn(box)).map((box) => ({
             name: box.name.trim(),
             x: box.x.toFixed(5),
@@ -1111,6 +1124,7 @@ function layoutPayload(boxes, ruled, grouping) {
         fields,
         columns,
         ruled_ys: columns.length > 0 ? ruled.map((y) => Number(y.toFixed(5))) : [],
+        ruled_tilts: columns.length > 0 ? fitTilts(tilts, ruled.length).map((t) => Math.round(t * 10) / 10) : [],
         grouping_mode: grouping === 'custom' ? 'custom' : 'auto',
     };
 }
@@ -1123,20 +1137,21 @@ function serialiseFields() {
     if (twoPage) storeActivePage();
     const first = twoPage
         ? pageLayouts[1]
-        : { boxes: marker.toJSON(), ruledYs, grouping: groupingModeInput.value };
+        : { boxes: marker.toJSON(), ruledYs, rowTilts, grouping: groupingModeInput.value };
     groupingModeInput.value = first.grouping === 'custom' ? 'custom' : 'auto';
-    const { fields, columns, ruled_ys: ruledList } = layoutPayload(first.boxes, first.ruledYs, first.grouping);
+    const { fields, columns, ruled_ys: ruledList, ruled_tilts: tiltList } = layoutPayload(first.boxes, first.ruledYs, first.grouping, first.rowTilts);
 
     // One JSON input each avoids PHP's max_input_vars truncating large layouts.
     [
         ['fields_json', fields],
         ['columns_json', columns],
         ['ruled_ys_json', ruledList],
+        ['ruled_tilts_json', tiltList],
         // Page 2 of a two-page layout; an empty one removes a page 2 saved before.
         ...(twoPage || savedPageTwo
             ? [['page_two_json', twoPage
-                ? layoutPayload(pageLayouts[2].boxes, pageLayouts[2].ruledYs, pageLayouts[2].grouping)
-                : { fields: [], columns: [], ruled_ys: [], grouping_mode: 'auto' }]]
+                ? layoutPayload(pageLayouts[2].boxes, pageLayouts[2].ruledYs, pageLayouts[2].grouping, pageLayouts[2].rowTilts)
+                : { fields: [], columns: [], ruled_ys: [], ruled_tilts: [], grouping_mode: 'auto' }]]
             : []),
     ].forEach(([name, value]) => {
         const input = document.createElement('input');
@@ -1375,6 +1390,7 @@ function restoreBaseline() {
     invalidFieldIndexes.clear();
     groupingModeInput.value = baseline.grouping;
     ruledYs = [...baseline.ruledYs];
+    rowTilts = fitTilts(baseline.rowTilts, ruledYs.length);
     selectedRule = null;
     estimatedYs = new Set();
     replaceBoxes(baseline.boxes);
@@ -1747,6 +1763,7 @@ function drawRules(ys = ruledYs, columns = ledgerColumns()) {
         estimated: estimatedYs,
         // On a page scanned a little turned, the lines turn with the columns.
         tilt: gridTilt(columns),
+        tilts: rowTilts,
         aspect: pageAspect(),
     });
 }
@@ -1757,6 +1774,7 @@ function pageAspect() {
 }
 
 function renderLedgerGrid() {
+    if (rowTilts.length !== ruledYs.length) rowTilts = fitTilts(rowTilts, ruledYs.length);
     const columns = ledgerColumns();
     drawRules(ruledYs, columns);
 
@@ -1784,8 +1802,14 @@ function renderLedgerGrid() {
 function renderTiltControl(columns = ledgerColumns()) {
     const picked = pickedFieldIndexes();
     const forFields = picked.length > 0;
-    const angle = forFields ? normaliseAngle(marker.toJSON()[picked[0]]?.angle) : gridTilt(columns);
-    const what = forFields ? (picked.length === 1 ? 'the selected field' : `the ${picked.length} selected fields`) : 'the table';
+    const forRow = !forFields && selectedRule !== null && selectedRule < ruledYs.length && columns.length > 0;
+    const table = gridTilt(columns);
+    const angle = forFields
+        ? normaliseAngle(marker.toJSON()[picked[0]]?.angle)
+        : (forRow ? table + (rowTilts[selectedRule] ?? 0) : table);
+    const what = forFields
+        ? (picked.length === 1 ? 'the selected field' : `the ${picked.length} selected fields`)
+        : (forRow ? `row line ${selectedRule + 1}` : 'the table');
     const off = !forFields && columns.length === 0;
 
     const tiltInput = element('gridTiltValue', HTMLInputElement);
@@ -1838,10 +1862,43 @@ function tiltPickedFields({ step = null, to = null }) {
     replaceBoxes(turned, { keepSelection: true });
 }
 
-/** The tilt box's buttons and typed value: the picked fields, else the table. */
+/** The tilt box's buttons and typed value: the picked fields, else the selected row line, else the table. */
 function tiltBy(step) {
     if (pickedFieldIndexes().length > 0) tiltPickedFields({ step });
+    else if (selectedRule !== null && ledgerColumns().length > 0) setRowTilt(selectedRule, gridTilt(ledgerColumns()) + (rowTilts[selectedRule] ?? 0) + step);
     else setTableTilt(gridTilt(ledgerColumns()) + step);
+}
+
+/**
+ * Turn one row line to `degrees` clockwise, as one undoable change, and leave
+ * it selected. The others stay as they are. A line stops short of touching
+ * its neighbours.
+ */
+function setRowTilt(index, degrees) {
+    if (!Number.isInteger(index) || index < 0 || index >= ruledYs.length) return;
+    const columns = ledgerColumns();
+    if (columns.length === 0) return;
+
+    const table = gridTilt(columns);
+    const wanted = Math.round(Math.min(MAX_TILT, Math.max(-MAX_TILT, Number(degrees) || 0)) * 10) / 10;
+    const allowed = clampRowAngle(ruledYs, fitTilts(rowTilts, ruledYs.length).map((own) => table + own), index, wanted, {
+        left: Math.min(...columns.map((c) => c.x)),
+        right: Math.max(...columns.map((c) => c.x + c.w)),
+        aspect: pageAspect(),
+    });
+    if (allowed !== wanted) showBuilderError('This row line cannot turn any further: it would touch the next one.');
+    else clearBuilderError();
+
+    const own = Math.round((allowed - table) * 10) / 10;
+    if (own === (rowTilts[index] ?? 0)) {
+        renderLedgerGrid();
+        return;
+    }
+    rowTilts = fitTilts(rowTilts, ruledYs.length).map((value, i) => (i === index ? own : value));
+    history.record(layoutState());
+    renderLedgerGrid();
+    updateLedgerChecks();
+    updateResetUI();
 }
 
 // ---------------------------------------------------------------- table tilt
@@ -1941,10 +1998,19 @@ function replaceBoxes(boxes, { keepSelection = false } = {}) {
  * New row lines, as one undoable change. Columns sitting on the first or the
  * last line follow it, so the table's top and bottom stay on its lines.
  */
-function applyGrid(nextYs, boxes = marker.toJSON()) {
-    const next = normaliseRuledYs(nextYs).filter((y, index, all) => index === 0 || y - all[index - 1] > 0.0005);
+function applyGrid(nextYs, boxes = marker.toJSON(), tilts = rowTilts) {
+    // Each line keeps its own extra turn through the sort and the clean-up.
+    const list = Array.isArray(nextYs) ? nextYs : [];
+    const given = fitTilts(tilts, list.length);
+    const pairs = list
+        .map((value, index) => ({ y: finiteNumber(value, NaN), tilt: given[index] }))
+        .filter((pair) => pair.y >= 0 && pair.y <= 1)
+        .sort((a, b) => a.y - b.y)
+        .filter((pair, index, all) => index === 0 || pair.y - all[index - 1].y > 0.0005);
+    const next = pairs.map((pair) => pair.y);
     const followed = followFirstAndLastLine(boxes, ruledYs, next);
     ruledYs = next;
+    rowTilts = pairs.map((pair) => pair.tilt);
     if (selectedRule !== null && selectedRule >= ruledYs.length) selectedRule = null;
 
     if (followed !== boxes) {
@@ -1971,7 +2037,8 @@ function selectRule(index) {
 function removeRule(index) {
     if (!Number.isInteger(index) || index < 0 || index >= ruledYs.length) return;
     selectedRule = null;
-    applyGrid(ruledYs.filter((_, candidate) => candidate !== index));
+    applyGrid(ruledYs.filter((_, candidate) => candidate !== index), marker.toJSON(),
+        fitTilts(rowTilts, ruledYs.length).filter((_, candidate) => candidate !== index));
 }
 
 /** Move the selected row line by some screen pixels (arrow keys). */
@@ -2160,6 +2227,8 @@ async function detectLedgerGrid() {
         estimatedYs = result.estimated;
         selectedRule = null;
         ruledYs = result.ruledYs;
+        // A fresh Detect: the lines follow the table again.
+        rowTilts = result.ruledYs.map(() => 0);
         replaceBoxes(result.boxes);
 
     } catch (error) {
@@ -2179,7 +2248,7 @@ element('addRuledLineBtn', HTMLButtonElement).addEventListener('click', () => {
         return;
     }
     clearBuilderError();
-    applyGrid(inserted.ys);
+    applyGrid(inserted.ys, marker.toJSON(), insertTilt(fitTilts(rowTilts, ruledYs.length), inserted.index));
     selectRule(inserted.index);
 });
 
@@ -2200,7 +2269,7 @@ function spaceRowsEvenly() {
     // Placed by the admin now, not estimated.
     estimatedYs = new Set();
     selectedRule = null;
-    applyGrid(spaced);
+    applyGrid(spaced, marker.toJSON(), respaceTilts(fitTilts(rowTilts, ruledYs.length), spaced.length));
 }
 
 element('evenRowsInput', HTMLInputElement).addEventListener('keydown', (event) => {
@@ -2215,6 +2284,7 @@ element('gridTiltValue', HTMLInputElement).addEventListener('change', (event) =>
     const value = parseTilt(event.currentTarget.value);
     if (value === null) renderLedgerGrid();
     else if (pickedFieldIndexes().length > 0) tiltPickedFields({ to: value });
+    else if (selectedRule !== null && ledgerColumns().length > 0) setRowTilt(selectedRule, value);
     else setTableTilt(value);
 });
 // Left: the box shows the tilt in its usual form again ("−2.5°").
@@ -2305,6 +2375,7 @@ function renderCompanionRows(layout) {
         locked: true,
         estimated: new Set((layout.estimated ?? []).map(ruleKey)),
         tilt: gridTilt(columns),
+        tilts: fitTilts(layout.rowTilts, ys.length),
         aspect: width > 0 && height > 0 ? width / height : 1,
     });
 }
@@ -2314,6 +2385,7 @@ function storeActivePage() {
     pageLayouts[activePage] = {
         boxes: cloneBoxes(marker.toJSON()),
         ruledYs: [...ruledYs],
+        rowTilts: fitTilts(rowTilts, ruledYs.length),
         grouping: groupingModeInput.value === 'custom' ? 'custom' : 'auto',
         // Row lines still shown amber (guessed, not checked): they stay amber on return.
         estimated: [...estimatedYs],
@@ -2455,6 +2527,7 @@ async function switchPage(page, { focus = false } = {}) {
     invalidFieldIndexes.clear();
     groupingModeInput.value = layout.grouping;
     ruledYs = [...layout.ruledYs];
+    rowTilts = fitTilts(layout.rowTilts, ruledYs.length);
     selectedRule = null;
     estimatedYs = new Set(layout.estimated ?? []);
     previousMarkerCount = 0;
@@ -2483,7 +2556,7 @@ async function setTwoPage(on) {
         twoPage = true;
         // A page 2 with nothing on it starts from page 1's markers: the pages are often alike.
         if (pageLayouts[2].boxes.length === 0 && pageLayouts[1] === null) {
-            pageLayouts[2] = { boxes: cloneBoxes(marker.toJSON()), ruledYs: [...ruledYs], grouping: groupingModeInput.value === 'custom' ? 'custom' : 'auto' };
+            pageLayouts[2] = { boxes: cloneBoxes(marker.toJSON()), ruledYs: [...ruledYs], rowTilts: fitTilts(rowTilts, ruledYs.length), grouping: groupingModeInput.value === 'custom' ? 'custom' : 'auto' };
         }
         pageLayouts[1] = null;
         await updateSpread();

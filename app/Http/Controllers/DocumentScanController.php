@@ -157,6 +157,7 @@ class DocumentScanController extends Controller
             // Rectangle fields, then ledger columns. Both are aligned the same way.
             'boxes' => $template->markerBoxes(),
             'ruledYs' => $template->isLedger() ? array_values($template->ruled_ys) : [],
+            'ruledTilts' => $template->isLedger() ? array_values($template->ruled_tilts ?? []) : [],
             // A spread's page 2 laid out differently: its own layout, or null.
             'pageTwo' => $this->pageTwoLayout($template),
             'activeModel' => OcrModel::active(),
@@ -198,6 +199,7 @@ class DocumentScanController extends Controller
             'name' => $pageTwo->name,
             'boxes' => $pageTwo->markerBoxes(),
             'ruledYs' => $pageTwo->isLedger() ? array_values($pageTwo->ruled_ys) : [],
+            'ruledTilts' => $pageTwo->isLedger() ? array_values($pageTwo->ruled_tilts ?? []) : [],
             'groupingMode' => $pageTwo->grouping_mode instanceof \BackedEnum
                 ? $pageTwo->grouping_mode->value
                 : ($pageTwo->grouping_mode ?? 'auto'),

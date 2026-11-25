@@ -88,6 +88,7 @@ class DocumentTemplateController extends Controller
             'fields' => [],
             'columns' => [],
             'ruledYs' => [],
+            'ruledTilts' => [],
         ]);
     }
 
@@ -190,6 +191,7 @@ class DocumentTemplateController extends Controller
             'parent' => $template->parent()->first(['id', 'name']),
             'columns' => array_values($template->columns ?? []),
             'ruledYs' => array_values($template->ruled_ys ?? []),
+            'ruledTilts' => array_values($template->ruled_tilts ?? []),
             'pageTwo' => $this->pageTwoForBuilder($template),
             // What still stops this layout from being published (none: it can be).
             'publishProblems' => $this->publishProblems($template),
@@ -249,6 +251,7 @@ class DocumentTemplateController extends Controller
             ])->all(),
             'columns' => array_values($linked->columns ?? []),
             'ruled_ys' => array_values($linked->ruled_ys ?? []),
+            'ruled_tilts' => array_values($linked->ruled_tilts ?? []),
         ];
     }
 
@@ -291,6 +294,7 @@ class DocumentTemplateController extends Controller
             'fields_json' => json_encode($layout['fields'] ?? []),
             'columns_json' => json_encode($layout['columns'] ?? []),
             'ruled_ys_json' => json_encode($layout['ruled_ys'] ?? []),
+            'ruled_tilts_json' => json_encode($layout['ruled_tilts'] ?? []),
         ]);
         $sub->setUserResolver($request->getUserResolver());
 
@@ -364,6 +368,7 @@ class DocumentTemplateController extends Controller
                         'name' => $this->pageTwoName($main),
                         'columns' => $pageTwo['columns'],
                         'ruled_ys' => $pageTwo['ruled_ys'],
+                        'ruled_tilts' => $pageTwo['ruled_tilts'],
                         'grouping_mode' => $pageTwo['grouping_mode'],
                     ]);
                     $own->forceFill(['revision' => $own->revision + 1])->save();
@@ -475,6 +480,7 @@ class DocumentTemplateController extends Controller
                 'grouping_mode' => $validated['grouping_mode'],
                 'columns' => $validated['columns'],
                 'ruled_ys' => $validated['ruled_ys'],
+                'ruled_tilts' => $validated['ruled_tilts'],
             ]);
             $template->forceFill(['revision' => $template->revision + 1]);
 
@@ -902,6 +908,9 @@ class DocumentTemplateController extends Controller
             'columns.*.angle' => ['nullable', 'numeric', 'min:-180', 'max:180'],
             'ruled_ys' => ['nullable', 'array', 'max:400'],
             'ruled_ys.*' => ['required', 'numeric', 'min:0', 'max:1'],
+            // Degrees each row line is turned beyond the table's own tilt.
+            'ruled_tilts' => ['nullable', 'array', 'max:400'],
+            'ruled_tilts.*' => ['nullable', 'numeric', 'min:-25', 'max:25'],
             'fields.*.name' => ['required', 'string', 'max:120', 'distinct:ignore_case'],
             // Fractions of the page. Bounds keep a box on the paper.
             'fields.*.x' => ['required', 'numeric', 'min:0', 'max:1'],
@@ -949,6 +958,15 @@ class DocumentTemplateController extends Controller
             $validated['fields'],
             $ratio,
         );
+
+        // One tilt per row line, in tenths of a degree; none without a table.
+        $tilts = array_values($validated['ruled_tilts'] ?? []);
+        $validated['ruled_tilts'] = $validated['columns'] === null
+            ? []
+            : array_map(
+                fn (int $i) => round((float) ($tilts[$i] ?? 0), 1),
+                array_keys(array_values($validated['ruled_ys'] ?? [])),
+            );
 
         $fieldErrors = [];
         foreach ($validated['fields'] as $index => $field) {
@@ -1024,7 +1042,7 @@ class DocumentTemplateController extends Controller
 
     private function hydrateLedgerGrid(Request $request): void
     {
-        foreach (['columns_json' => 'columns', 'ruled_ys_json' => 'ruled_ys'] as $input => $key) {
+        foreach (['columns_json' => 'columns', 'ruled_ys_json' => 'ruled_ys', 'ruled_tilts_json' => 'ruled_tilts'] as $input => $key) {
             if (! $request->filled($input)) {
                 continue;
             }
@@ -1430,6 +1448,7 @@ class DocumentTemplateController extends Controller
             'grouping_mode' => $validated['grouping_mode'],
             'columns' => $validated['columns'],
             'ruled_ys' => $validated['ruled_ys'],
+            'ruled_tilts' => $validated['ruled_tilts'],
             'is_active' => false,
             'created_by' => $request->user()->getKey(),
             'parent_id' => $parent?->getKey(),
@@ -1556,7 +1575,10 @@ class DocumentTemplateController extends Controller
             ])->all(),
         );
 
-        return $saved !== $this->layoutSignature(
+        $tiltsChanged = array_map('floatval', array_values($template->ruled_tilts ?? []))
+            !== array_map('floatval', array_values($validated['ruled_tilts'] ?? []));
+
+        return $tiltsChanged || $saved !== $this->layoutSignature(
             $validated['grouping_mode'],
             $validated['columns'] ?? [],
             $validated['ruled_ys'] ?? [],

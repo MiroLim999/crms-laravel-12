@@ -1682,6 +1682,8 @@
             typeLabel: @json($docType->label()),
             boxes: @json($boxes),
             ruledYs: @json($ruledYs),
+            // How far each row line is turned beyond the table (degrees), from the layout.
+            ruledTilts: @json($ruledTilts ?? []),
             templateId: @json($template->getKey()),
             // A spread's page 2 laid out differently: its own template, boxes and row lines (or null).
             pageTwo: @json($pageTwo ?? null),
@@ -2452,6 +2454,8 @@
         let isLedger = config.ruledYs.length >= 2;
         let templateRows = config.ruledYs.map(Number);
         let gridRows = [...templateRows];
+        // Each row line's own extra turn in the layout (degrees, one per line).
+        let templateTilts = fitTilts(config.ruledTilts, templateRows.length);
 
         // A spread whose pages are laid out differently: page 1 uses the layout
         // the workspace opened with, page 2 (and every even page) its own.
@@ -2459,6 +2463,7 @@
             templateId: config.templateId,
             boxes: config.boxes,
             ruledYs: config.ruledYs,
+            ruledTilts: config.ruledTilts,
             groupingMode: config.groupingMode,
         };
         const layoutFor = (pageNumber) => (pageNumber % 2 === 0 && config.pageTwo ? config.pageTwo : mainLayout);
@@ -2469,6 +2474,7 @@
             config.templateId = layout.templateId;
             config.boxes = layout.boxes;
             config.ruledYs = layout.ruledYs;
+            config.ruledTilts = layout.ruledTilts;
             config.groupingMode = layout.groupingMode;
             templateBoxes = boxesOfLayout(config.boxes);
             templateColumns = templateBoxes.filter((box) => box.kind === 'column');
@@ -2476,12 +2482,13 @@
             templateFieldNames = new Set(config.boxes.filter((box) => box.kind !== 'column').map((box) => nameKey(box.name)));
             isLedger = config.ruledYs.length >= 2;
             templateRows = config.ruledYs.map(Number);
+            templateTilts = fitTilts(config.ruledTilts, templateRows.length);
         }
         // How many degrees each row line is turned beyond the table's own tilt
         // (one per line, in step with gridRows): paper is curved, and no two
         // printed rules run quite alike. One is set by selecting its line and
         // using Tilt; Snap to table, Detect and Reset start every line at 0.
-        let rowTilts = templateRows.map(() => 0);
+        let rowTilts = [...templateTilts];
         // Row lines with no printed line under them (rowKey), drawn amber.
         let estimatedRows = new Set();
         // A row line was moved, added or removed by hand: Detect keeps those.
@@ -2516,14 +2523,14 @@
 
         /** What Reset goes back to: the markers the page was read with (re-align), or the layout's template. */
         const resetTarget = () => (realignBase
-            ? { boxes: realignBase.boxes, rows: realignBase.rows }
-            : { boxes: templateBoxes, rows: templateRows });
+            ? { boxes: realignBase.boxes, rows: realignBase.rows, tilts: null }
+            : { boxes: templateBoxes, rows: templateRows, tilts: templateTilts });
 
         function fieldsMatchTemplate() {
             const target = resetTarget();
             return JSON.stringify(marker.toJSON()) === JSON.stringify(target.boxes)
                 && JSON.stringify(gridRows) === JSON.stringify(target.rows)
-                && rowTilts.every((tilt) => tilt === 0);
+                && JSON.stringify(fitTilts(rowTilts, gridRows.length)) === JSON.stringify(fitTilts(target.tilts, gridRows.length));
         }
 
         /** Markers and row lines, as one undoable state. */
@@ -4362,7 +4369,7 @@
                 guardBackButton();
                 resetFieldHistory();
                 rowsSource = null;
-                setGrid(templateBoxes, templateRows, { remember: true });
+                setGrid(templateBoxes, templateRows, { remember: true, tilts: templateTilts });
                 fetchSnapLines();
                 resetSpread();
 
@@ -4413,7 +4420,7 @@
         /** A layout's own markers and row lines, as a page opened on it starts. */
         function layoutStart(page) {
             const layout = layoutFor(page);
-            return { boxes: boxesOfLayout(layout.boxes), rows: layout.ruledYs.map(Number), tilts: null };
+            return { boxes: boxesOfLayout(layout.boxes), rows: layout.ruledYs.map(Number), tilts: layout.ruledTilts ?? null };
         }
 
         /**
@@ -4734,7 +4741,7 @@
                 const start = sameLayout ? pageLayouts.get(copyFrom)?.grid : null;
                 rowsSource = null;
                 if (start) setGrid(start.boxes, start.rows, { tilts: start.tilts, remember: true });
-                else setGrid(templateBoxes, templateRows, { remember: true });
+                else setGrid(templateBoxes, templateRows, { remember: true, tilts: templateTilts });
                 return;
             }
             setGrid(saved.grid.boxes, saved.grid.rows, {
@@ -6777,7 +6784,7 @@
                 } else {
                     // A new page starts on its layout's template grid. Snap to table is
                     // pressed by hand, on each page.
-                    setGrid(templateBoxes, templateRows, { remember: true });
+                    setGrid(templateBoxes, templateRows, { remember: true, tilts: templateTilts });
                 }
                 if (tested) await applyDetection(tested, { imageShown: true, keepView: swap });
                 clearOcrError();
@@ -9688,7 +9695,7 @@
         function restoreTemplateFields() {
             rowsSource = null;
             const target = resetTarget();
-            setGrid(cloneBoxes(target.boxes), [...target.rows], { remember: true });
+            setGrid(cloneBoxes(target.boxes), [...target.rows], { remember: true, tilts: target.tilts });
             marker.resetZoom();
             el('docViewport').scrollTo({ top: 0, left: 0 });
             clearOcrError();
