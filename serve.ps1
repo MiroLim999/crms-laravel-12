@@ -48,17 +48,37 @@ function Test-Port([int]$Port) {
     $null -ne (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 }
 
+# True when a matching process other than this script is running. A bare php
+# process (queue:listen, schedule:work) only counts while its parent is still
+# alive: closing the terminal that started it can leave it behind, idle and
+# unable to do its work, and it must not stop a real one from starting. The
+# serve.ps1 loops that keep them running count on their own.
+function Test-ServiceRunning([string[]]$PhpPatterns, [string]$LoopPattern) {
+    $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $alive = @{}
+    foreach ($p in $all) { $alive[[int]$p.ProcessId] = $true }
+    $null -ne ($all | Where-Object {
+        $cmd = $_.CommandLine
+        if ($_.ProcessId -eq $PID -or -not $cmd) { return $false }
+        if ($_.Name -in @('powershell.exe', 'pwsh.exe')) { return $cmd -like $LoopPattern }
+        if ($_.Name -eq 'php.exe') {
+            foreach ($pattern in $PhpPatterns) {
+                if ($cmd -like $pattern) { return $alive.ContainsKey([int]$_.ParentProcessId) }
+            }
+        }
+        $false
+    })
+}
+
 # A queue worker, or the loop that keeps one running (in its 5 s pause there is
 # no php process), other than this script itself.
 function Test-QueueWorker {
-    $null -ne (Get-CimInstance Win32_Process -Filter "Name='php.exe' OR Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -like '*artisan queue:work*' -or $_.CommandLine -like '*artisan queue:listen*' -or $_.CommandLine -like '*serve.ps1*-Only worker*') })
+    Test-ServiceRunning @('*artisan queue:work*', '*artisan queue:listen*') '*serve.ps1*-Only worker*'
 }
 
 # The scheduler, or the loop that keeps it running, other than this script itself.
 function Test-Scheduler {
-    $null -ne (Get-CimInstance Win32_Process -Filter "Name='php.exe' OR Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -like '*artisan schedule:work*' -or $_.CommandLine -like '*serve.ps1*-Only scheduler*') })
+    Test-ServiceRunning @('*artisan schedule:work*') '*serve.ps1*-Only scheduler*'
 }
 
 # --- One service in this terminal ----------------------------------------
