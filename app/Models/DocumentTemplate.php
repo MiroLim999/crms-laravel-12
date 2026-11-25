@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property list<array{name: string, box: list<float>}>|null $columns
  * @property list<float>|null $ruled_ys
  * @property list<float>|null $ruled_tilts
+ * @property list<list<float>|null>|null $ruled_spans
  * @property int|null $parent_id
  * @property int|null $page_two_template_id
  * @property \Illuminate\Support\Carbon|null $published_at
@@ -47,7 +48,7 @@ class DocumentTemplate extends Model
 
     protected $fillable = [
         'name', 'doc_type', 'document_type_id', 'page_ratio', 'description',
-        'grouping_mode', 'columns', 'ruled_ys', 'ruled_tilts',
+        'grouping_mode', 'columns', 'ruled_ys', 'ruled_tilts', 'ruled_spans',
         'sample_path', 'sample_original_name', 'sample_mime', 'sample_size',
         'is_active', 'created_by', 'parent_id', 'page_two_template_id', 'field_map',
     ];
@@ -62,6 +63,7 @@ class DocumentTemplate extends Model
             'field_map' => 'array',
             'ruled_ys' => 'array',
             'ruled_tilts' => 'array',
+            'ruled_spans' => 'array',
             'is_active' => 'boolean',
             'is_page_two' => 'boolean',
             'is_version' => 'boolean',

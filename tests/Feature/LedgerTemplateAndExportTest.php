@@ -109,11 +109,14 @@ class LedgerTemplateAndExportTest extends TestCase
             'ruled_ys_json' => json_encode([0.2, 0.35, 0.5, 0.65, 0.8], JSON_THROW_ON_ERROR),
             // Only three given: the rest are 0. Tenths of a degree.
             'ruled_tilts_json' => json_encode([0.0, 1.24, -0.8], JSON_THROW_ON_ERROR),
+            // Line 2 stretched, line 3 too short to count, the rest the table's width.
+            'ruled_spans_json' => json_encode([null, null, [0.05, 0.9], null, [0.4, 0.42]], JSON_THROW_ON_ERROR),
             'publish' => 1,
         ])->assertRedirect()->assertSessionHasNoErrors();
 
         $template = DocumentTemplate::where('name', 'Wavy register')->firstOrFail();
         $this->assertSame([0.0, 1.2, -0.8, 0.0, 0.0], array_map('floatval', $template->ruled_tilts));
+        $this->assertSame([null, null, [0.05, 0.9], null, null], $template->ruled_spans);
 
         $this->actingAs($admin)->get(route('templates.edit', $template))
             ->assertOk()
