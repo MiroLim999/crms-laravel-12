@@ -14,6 +14,7 @@ use App\Models\RecordPage;
 use App\Models\ScanBatch;
 use App\Models\ScanBatchPage;
 use App\Services\AuditLogger;
+use App\Support\CsvCell;
 use App\Support\RegistryFields;
 use App\Support\SimpleXlsx;
 use App\Services\RecordCsv;
@@ -132,9 +133,9 @@ class RecordController extends Controller
             'statuses' => RecordStatus::cases(),
             // Distinct book numbers per certificate type, for the "Download one book as CSV" dropdowns.
             'booksByType' => [
-                'birth' => BirthRecord::query()->distinct()->pluck('book_no')->sort()->values()->all(),
-                'death' => DeathRecord::query()->distinct()->pluck('book_no')->sort()->values()->all(),
-                'marriage' => MarriageRecord::query()->distinct()->pluck('book_no')->sort()->values()->all(),
+                'birth' => BirthRecord::query()->distinct()->pluck('book_no')->sort(SORT_NATURAL)->values()->all(),
+                'death' => DeathRecord::query()->distinct()->pluck('book_no')->sort(SORT_NATURAL)->values()->all(),
+                'marriage' => MarriageRecord::query()->distinct()->pluck('book_no')->sort(SORT_NATURAL)->values()->all(),
             ],
         ]);
     }
@@ -392,9 +393,13 @@ class RecordController extends Controller
         };
 
         $records = $model::where('book_no', $validated['book_no'])
-            ->orderBy('page_no')
-            ->orderBy('reg_no')
-            ->get();
+            ->get()
+            // The page and register numbers are text columns: sorted as numbers
+            // here, so page 2 comes before page 10.
+            ->sort(fn ($a, $b) => strnatcmp((string) $a->page_no, (string) $b->page_no)
+                ?: strnatcmp((string) $a->reg_no, (string) $b->reg_no)
+                ?: $a->getKey() <=> $b->getKey())
+            ->values();
 
         // The register's own columns, in the order its downloads always use.
         $columns = RegistryFields::keys($validated['type']);
@@ -435,7 +440,8 @@ class RecordController extends Controller
             foreach ($records as $record) {
                 $row = [];
                 foreach ($columns as $column) {
-                    $row[] = RegistryFields::exportCell($column, $record->getAttribute($column));
+                    // A value starting with = + - @ is not run as a formula by Excel.
+                    $row[] = CsvCell::safe(RegistryFields::exportCell($column, $record->getAttribute($column)));
                 }
                 fputcsv($handle, $row);
             }
@@ -444,15 +450,6 @@ class RecordController extends Controller
             'Content-Type' => 'text/csv; charset=UTF-8',
             'Cache-Control' => 'no-store, no-cache',
         ]);
-    }
-
-    /**
-     * One CSV cell's text: true / false, plain digits, blank for none (as
-     * step 4's downloads write it).
-     */
-    private function bookCsvCell(mixed $value): string
-    {
-        return RegistryFields::cell($value);
     }
 
     /**

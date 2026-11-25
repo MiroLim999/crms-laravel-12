@@ -104,6 +104,24 @@ class TemplatePublishFlowTest extends TestCase
         $this->assertSame(['Informant'], $this->pageTwoColumns($original));
     }
 
+    public function test_a_new_version_keeps_the_column_choices_of_both_pages(): void
+    {
+        $published = $this->layout(['page_two_json' => $this->pageTwo(), 'publish' => 1]);
+        // Chosen in step 4's "Columns → fields" for each page.
+        $published->forceFill(['field_map' => ['child name' => 'name']])->save();
+        $published->pageTwoTemplate->forceFill(['field_map' => ['informant' => '-']])->save();
+
+        $this->actingAs($this->admin)->put(route('templates.update', $published), $this->payload([
+            'page_two_json' => $this->pageTwo('Mother'),
+            'revision' => $published->revision,
+        ]))->assertSessionHasNoErrors();
+
+        $version = DocumentTemplate::listed()->latest('id')->firstOrFail();
+        $this->assertSame($published->getKey(), $version->parent_id);
+        $this->assertSame(['child name' => 'name'], $version->field_map);
+        $this->assertSame(['informant' => '-'], $version->pageTwoTemplate->field_map);
+    }
+
     public function test_a_new_version_gets_its_own_page_two_and_the_old_one_keeps_its(): void
     {
         $published = $this->layout(['page_two_json' => $this->pageTwo(), 'publish' => 1]);

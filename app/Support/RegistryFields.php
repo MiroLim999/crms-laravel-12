@@ -3,9 +3,12 @@
 namespace App\Support;
 
 use App\Models\BirthRecord;
+use App\Models\CivilRecord;
 use App\Models\DeathRecord;
 use App\Models\MarriageRecord;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The register's own columns for each certificate type (birth_records,
@@ -158,6 +161,115 @@ final class RegistryFields
         }
 
         return $problems;
+    }
+
+    /**
+     * A register table's rows as sent from Review & Export ([{row: "06",
+     * values: {field: value}}]), checked field by field and turned into what
+     * the table stores. Anything wrong stops it with "Row 06: …" messages
+     * (ValidationException on `registry_rows`). Used by step 4 and by a saved
+     * record's Review & Export, so both follow one set of rules.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function checkedRows(string $type, mixed $rows): array
+    {
+        if (! is_array($rows) || ! array_is_list($rows) || count($rows) > Limits::MAX_FIELDS) {
+            throw ValidationException::withMessages(['registry_rows' => 'The table is not a list of rows.']);
+        }
+
+        $messages = [];
+        $clean = [];
+        $firstRow = [];
+        foreach ($rows as $index => $row) {
+            $label = is_array($row) && is_scalar($row['row'] ?? null) ? (string) $row['row'] : (string) ($index + 1);
+            $values = is_array($row) && is_array($row['values'] ?? null) ? $row['values'] : [];
+            $values = array_map(fn ($value) => is_scalar($value) ? (string) $value : '', $values);
+            foreach (self::problems($type, $values) as $field => $problem) {
+                $messages[] = "Row {$label}: {$field} {$problem}.";
+            }
+            $attributes = self::attributes($type, $values);
+            // One entry per register number on a page: a repeat would replace the first row.
+            $entry = mb_strtolower("{$attributes['book_no']}|{$attributes['page_no']}|{$attributes['reg_no']}");
+            if (($attributes['reg_no'] ?? '') !== '' && isset($firstRow[$entry])) {
+                $messages[] = "Row {$label}: reg_no {$attributes['reg_no']} is row {$firstRow[$entry]}'s register number too. Each entry of a page has its own number.";
+            }
+            $firstRow[$entry] ??= $label;
+            $clean[] = $attributes;
+        }
+        if ($messages !== []) {
+            throw ValidationException::withMessages(['registry_rows' => $messages]);
+        }
+
+        return $clean;
+    }
+
+    /**
+     * A layout's "Columns → fields" choices as kept: { "column name" (lower
+     * case): field or "-" (fills none) }. A choice left empty is dropped;
+     * anything that is not one of the type's fields stops it.
+     *
+     * @return array<string, string>
+     */
+    public static function cleanFieldMap(string $type, mixed $map): array
+    {
+        $fields = self::keys($type);
+        if ($fields === [] || ! is_array($map) || count($map) > Limits::MAX_FIELDS) {
+            throw ValidationException::withMessages(['field_maps' => 'The column choices could not be read.']);
+        }
+
+        $clean = [];
+        foreach ($map as $column => $field) {
+            if ($field === null || $field === '') {
+                continue;
+            }
+            if (! is_string($field) || ! in_array($field, [...$fields, '-'], true)) {
+                throw ValidationException::withMessages(['field_maps' => "\"{$column}\" is set to a field this register does not have."]);
+            }
+            $name = mb_strtolower(trim((string) $column));
+            if ($name !== '') {
+                $clean[mb_substr($name, 0, 500)] = $field;
+            }
+        }
+        ksort($clean);
+
+        return $clean;
+    }
+
+    /**
+     * A saved record's rows in its type's register table, oldest first (the
+     * order step 4 saved them in); empty for a type with none.
+     *
+     * @return Collection<int, Model>
+     */
+    public static function rowsOf(CivilRecord $record, string $type): Collection
+    {
+        $model = self::model($type);
+
+        return $model === null
+            ? new Collection
+            : $model::where('civil_record_id', $record->getKey())->orderBy('id')->get();
+    }
+
+    /**
+     * A stored row's values as Review & Export shows them: text for every
+     * field (true / false, digits, YYYY-MM-DD), '' for none.
+     *
+     * @return array<string, string>
+     */
+    public static function shownValues(string $type, Model $row): array
+    {
+        $values = [];
+        foreach (self::keys($type) as $key) {
+            $value = $row->getAttribute($key);
+            $values[$key] = match (true) {
+                $value === null => '',
+                is_bool($value) => $value ? 'true' : 'false',
+                default => (string) $value,
+            };
+        }
+
+        return $values;
     }
 
     /**

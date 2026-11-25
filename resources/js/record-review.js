@@ -6,6 +6,7 @@
  */
 import { initRecordDetail } from './record-detail.js';
 import {
+    applyRegistry,
     attachAddColumn,
     attachSplit,
     buildReviewModel,
@@ -28,18 +29,48 @@ if (root instanceof HTMLElement && source) {
     const element = (id) => document.getElementById(id);
     let table = null;
 
-    const model = buildReviewModel(data);
+    // A record saved with rows in its register table (birth_records, …): the table
+    // shows the register's columns, as step 4 did, holding the rows as stored:
+    // what the downloads hold. Save writes them back (see RecordReviewController).
+    const stored = data.registerRows ?? [];
+    const base = buildReviewModel(data);
+    const laidOut = data.registry
+        ? applyRegistry(base, data.registry.fields, (column) => data.fieldMaps?.[column.side] ?? null, data.registry.pairs ?? [])
+        : null;
+    // Only when its rows are the stored rows, one for one (as step 4 saved them):
+    // otherwise the table stays as read, so no value shows on another row.
+    const registry = laidOut && laidOut.rows.length === stored.length ? data.registry : null;
+    if (laidOut && !registry) {
+        console.warn(`Review & Export: ${laidOut.rows.length} rows here, ${stored.length} in the register table; showing the table as read.`);
+    }
+    const model = registry ? laidOut : base;
     const extraKey = (cell) => `${cell.row.id}|${cell.column.key}`;
+    const rowIndex = new Map(model.rows.map((row, index) => [row.id, index]));
+    // Register values changed here: "person-5|reg_no" -> "123".
+    const registerEdits = new Map();
+    const isRegister = (cell) => Boolean(registry && cell.column.field && !cell.column.noExport);
+    const registerKey = (cell) => `${cell.row.id}|${cell.column.field}`;
+    const storedValue = (cell) => stored[rowIndex.get(cell.row.id)]?.[cell.column.field];
 
-    const valueOf = (cell) => (cell.refs.length === 0
+    const recordValue = (cell) => (cell.refs.length === 0
         ? (cell.column.detail ? '' : additions.get(extraKey(cell)) ?? '')
         : cell.refs.map((ref) => current.get(Number(ref)) ?? '').filter((value) => value.trim() !== '').join(' '));
 
+    const valueOf = (cell) => {
+        if (isRegister(cell)) {
+            if (registerEdits.has(registerKey(cell))) return registerEdits.get(registerKey(cell));
+            const saved = storedValue(cell);
+            if (saved !== undefined) return saved;
+        }
+        return recordValue(cell);
+    };
+
     const changedIds = () => [...current].filter(([id, value]) => value.trim() !== (original.get(id) ?? '').trim()).map(([id]) => id);
-    const dirty = () => changedIds().length > 0 || additions.size > 0;
+    const dirty = () => changedIds().length > 0 || additions.size > 0 || registerEdits.size > 0;
 
     function showState() {
-        const changes = changedIds().length + additions.size;
+        // A register cell read from the scan changes its field too: counted once.
+        const changes = Math.max(changedIds().length, registerEdits.size) + additions.size;
         element('reviewSaveBtn').disabled = changes === 0;
         element('reviewChangeCount').textContent = changes === 0
             ? 'No changes yet'
@@ -56,6 +87,19 @@ if (root instanceof HTMLElement && source) {
         valueOf,
         onChange: (cell, value) => {
             const text = value.trim();
+            if (isRegister(cell)) {
+                if (text === String(storedValue(cell) ?? '').trim()) {
+                    // Back as saved: so is the scanned field it was read from.
+                    registerEdits.delete(registerKey(cell));
+                    cell.refs.forEach((ref) => current.set(Number(ref), original.get(Number(ref)) ?? ''));
+                } else {
+                    registerEdits.set(registerKey(cell), text);
+                    // The scanned field it was read from follows (the record page shows it).
+                    cell.refs.forEach((ref, position) => current.set(Number(ref), position === 0 ? text : ''));
+                }
+                showState();
+                return;
+            }
             if (cell.refs.length === 0) {
                 if (text === '') additions.delete(extraKey(cell));
                 else additions.set(extraKey(cell), text);
@@ -110,6 +154,13 @@ if (root instanceof HTMLElement && source) {
     element('reviewSaveBtn').addEventListener('click', async () => {
         table.commit();
         if (saving || !dirty()) return;
+        // A register row is checked as step 4 checks it before it is sent.
+        const issue = registry ? table.firstFieldIssue() : null;
+        if (issue) {
+            showError(issue.message);
+            table.select(issue.row, issue.column, { locate: false });
+            return;
+        }
         saving = true;
         const button = element('reviewSaveBtn');
         const idle = button.innerHTML;
@@ -132,6 +183,8 @@ if (root instanceof HTMLElement && source) {
                     value,
                 };
             }),
+            // Every register row as the table now shows it (what the downloads hold).
+            ...(registry ? { registry_rows: table.fieldRows() } : {}),
         };
 
         try {

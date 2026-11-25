@@ -104,9 +104,6 @@ Route::middleware('auth')->group(function () {
         Route::get('documents/sources/{hash}/pages', [DocumentScanController::class, 'sourcePages'])
             ->where('hash', '[0-9a-f]{64}')
             ->name('documents.sources.pages');
-        // Step 4: which layout column fills which register field (birth_records, …).
-        Route::put('documents/templates/{template}/field-map', [DocumentScanController::class, 'saveFieldMap'])
-            ->name('documents.field-map');
         Route::get('documents/identify-reference', [DocumentScanController::class, 'identifyReference'])
             ->name('documents.identify-reference');
 

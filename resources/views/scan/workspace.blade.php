@@ -959,10 +959,16 @@
                                     <div class="dropdown-menu dropdown-menu-end p-3 review-field-map" aria-labelledby="reviewFieldMapBtn">
                                         <p class="small text-muted mb-2">
                                             Which scanned column fills each field of <strong>{{ $registry['type'] }}_records</strong>.
-                                            Kept for this layout: the next document starts the same way.
+                                            Kept for this layout when you save this document: the next one starts the same way.
                                             A column named like a field fills it by itself ("Name of Mother",
                                             "Mother's Name" → name_of_mother): name the columns in Template Builder.
                                         </p>
+                                        {{-- What the last choice did (a column moved, typed values hidden), with Undo. --}}
+                                        <div class="review-field-map__notice d-none" id="reviewFieldMapNotice" role="status" aria-live="polite">
+                                            <i class="icon-base bx bx-info-circle" aria-hidden="true"></i>
+                                            <span id="reviewFieldMapNoticeText"></span>
+                                            <button type="button" class="btn btn-sm btn-link p-0 ms-auto" id="reviewFieldMapUndo">Undo</button>
+                                        </div>
                                         <div class="review-field-map__rows" id="reviewFieldMapRows"></div>
                                         <p class="small text-muted mt-2 mb-0" id="reviewFieldMapManual"></p>
                                         {{-- How the register writes its dates: all are saved as YYYY-MM-DD. --}}
@@ -1680,11 +1686,10 @@
             // A spread's page 2 laid out differently: its own template, boxes and row lines (or null).
             pageTwo: @json($pageTwo ?? null),
             // Step 4: the register's columns (birth_records, …; null for a type without
-            // one), which layout column fills which field (by layout id), and where a
-            // changed choice is saved.
+            // one), and which layout column fills which field (by layout id; a changed
+            // choice is kept on the layout when the record is saved).
             registry: @json($registry ?? null),
             fieldMaps: @json((object) ($fieldMaps ?? [])),
-            fieldMapUrl: @json(route('documents.field-map', ['template' => '__TEMPLATE__'])),
             groupingMode: @json(
                 $template->grouping_mode instanceof \BackedEnum
                 ? $template->grouping_mode->value
@@ -14023,6 +14028,10 @@
         // any other field is typed in. Save sends each row for that table.
         const registry = config.registry;
         const fieldMaps = { ...(config.fieldMaps ?? {}) };
+        // What each layout keeps now: a choice made here is kept with the record (fieldMapsToSend).
+        const keptFieldMaps = JSON.parse(JSON.stringify(config.fieldMaps ?? {}));
+        // The choices before the last change, for its Undo (null: nothing to undo).
+        let fieldMapUndo = null;
         // The table as read (scanned columns), before it is laid out as the register's.
         let reviewBaseModel = null;
 
@@ -14082,7 +14091,12 @@
                 select.id = id;
                 const automatic = { book_no: 'Automatic (from step 1)', page_no: 'Automatic (from step 1)' }[field.key];
                 select.append(new Option(automatic ?? 'Type by hand', ''));
-                scanned.forEach((column) => select.append(new Option(column.header, column.key, false, column.key === current?.key)));
+                scanned.forEach((column) => {
+                    // A column fills one field: say which one has it, as choosing it here takes it away.
+                    const usedBy = reviewModel?.columns.find((other) => other.key === column.key && other.field && !other.manual)?.field;
+                    const text = usedBy && usedBy !== field.key ? `${column.header} · now in ${usedBy}` : column.header;
+                    select.append(new Option(text, column.key, false, column.key === current?.key));
+                });
                 // The second field of a pair (wife_name): the second line of the first one's column.
                 const first = (registry.pairs ?? []).find(([, second]) => second === field.key)?.[0];
                 const firstSource = first ? reviewModel?.columns.find((column) => column.field === first && !column.manual) : null;
@@ -14099,13 +14113,21 @@
         }
 
         /**
-         * `field` is now filled from the scanned column `columnKey` ('' : typed by hand).
-         * Kept for each layout involved (the next document read with it starts so),
-         * and the table is drawn again.
+         * `field` is now filled from the scanned column `columnKey` ('' : typed by hand),
+         * for each layout involved, and the table is drawn again. Kept on the layout
+         * when the record is saved (fieldMapsToSend). Says what else changed with it
+         * (a column taken from another field, typed values hidden), with Undo.
          */
-        async function setFieldSource(field, columnKey) {
+        function setFieldSource(field, columnKey) {
             if (!registry || !reviewBaseModel || !reviewTable) return;
             reviewTable.commit();
+            const snapshot = JSON.parse(JSON.stringify(fieldMaps));
+            // The field the chosen column fills now, if another one.
+            const takenFrom = columnKey
+                ? reviewModel.columns.find((column) => column.key === columnKey && column.field && column.field !== field && !column.manual)?.field ?? null
+                : null;
+            const wasTyped = reviewModel.columns.some((column) => column.field === field && column.manual);
+            const typed = wasTyped && columnKey ? typedValuesOf(`m|${field}`) : 0;
             // Each layout's saved choices (a column named like a field fills it without one),
             // changed for this field: the chosen column fills it; "Type by hand" keeps the
             // column that filled it apart, so its name does not fill the field again.
@@ -14136,30 +14158,74 @@
             paintFieldMap();
             updateVerificationSummary();
 
-            try {
-                await Promise.all([...maps].map(async ([templateId, map]) => {
-                    const response = await fetch(config.fieldMapUrl.replace('__TEMPLATE__', String(templateId)), {
-                        method: 'PUT',
-                        credentials: 'same-origin',
-                        headers: {
-                            Accept: 'application/json',
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': config.csrf,
-                            'X-Requested-With': 'XMLHttpRequest',
-                        },
-                        body: JSON.stringify({ map }),
-                    });
-                    if (!response.ok) throw new Error(`The server answered ${response.status}.`);
-                }));
-            } catch (error) {
-                console.error('Saving the column choices failed:', error);
-                showValidationSubmitError('The column choice is used for this document, but could not be kept for the next one. '
-                    + 'Check your connection and choose it again.');
-            }
+            const header = reviewModel.columns.find((column) => column.field === field && !column.manual)?.sourceHeader;
+            const lost = takenFrom && !reviewModel.columns.some((column) => column.field === takenFrom && !column.manual);
+            const parts = [header ? `${field} now reads from “${header}”.` : `${field} is now typed by hand.`];
+            if (lost) parts.push(`${takenFrom} lost that column and is typed by hand now.`);
+            if (typed > 0) parts.push(`${typed} ${typed === 1 ? 'value' : 'values'} you typed in ${field} ${typed === 1 ? 'is' : 'are'} hidden (Undo brings ${typed === 1 ? 'it' : 'them'} back).`);
+            showFieldMapNotice(parts.join(' '), snapshot, Boolean(lost || typed > 0));
+        }
+
+        /** How many cells of the typed-in column `columnKey` ("m|place_of_birth") hold something. */
+        function typedValuesOf(columnKey) {
+            return [...reviewExtras].filter(([key, value]) => key.endsWith(`|${columnKey}`) && String(value ?? '').trim() !== '').length;
+        }
+
+        /** What the last choice did, with Undo back to `snapshot` (`warn`: something else changed too). */
+        function showFieldMapNotice(text, snapshot, warn) {
+            fieldMapUndo = snapshot;
+            const notice = el('reviewFieldMapNotice');
+            if (!notice) return;
+            el('reviewFieldMapNoticeText').textContent = text;
+            notice.classList.toggle('is-warning', warn);
+            notice.classList.remove('d-none');
+        }
+
+        function hideFieldMapNotice() {
+            fieldMapUndo = null;
+            el('reviewFieldMapNotice')?.classList.add('d-none');
+        }
+
+        /** Undo: the choices as they were before the last change. */
+        function undoFieldSource() {
+            if (!fieldMapUndo || !reviewBaseModel || !reviewTable) return;
+            reviewTable.commit();
+            Object.keys(fieldMaps).forEach((id) => { delete fieldMaps[id]; });
+            Object.assign(fieldMaps, fieldMapUndo);
+            hideFieldMapNotice();
+            reviewModel = reviewModelFrom(reviewBaseModel);
+            reviewTable.render(reviewModel);
+            paintFieldMap();
+            updateVerificationSummary();
+        }
+
+        /**
+         * The choices to keep with the record being saved: those of the layouts it
+         * was read with that changed here, { template id: map }, or null for none.
+         */
+        function fieldMapsToSend() {
+            if (!registry || !reviewBaseModel) return null;
+            const same = (a = {}, b = {}) => {
+                const keys = Object.keys(a);
+                return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+            };
+            const ids = new Set([config.templateId, ...reviewBaseModel.columns.map((column) => templateOfSide(column.side))].map(String));
+            const changed = Object.fromEntries([...ids]
+                .filter((id) => fieldMaps[id] && !same(fieldMaps[id], keptFieldMaps[id] ?? {}))
+                .map((id) => [id, fieldMaps[id]]));
+            return Object.keys(changed).length > 0 ? changed : null;
+        }
+
+        /** The record was saved with `sent` (fieldMapsToSend): the layouts keep those now. */
+        function fieldMapsKept(sent) {
+            if (!sent) return;
+            Object.entries(sent).forEach(([id, map]) => { keptFieldMaps[id] = { ...map }; });
+            hideFieldMapNotice();
         }
 
         if (registry) {
             el('reviewFieldMap')?.addEventListener('show.bs.dropdown', () => paintFieldMap());
+            el('reviewFieldMapUndo')?.addEventListener('click', () => undoFieldSource());
         }
 
         /** Put a value in a Verify field and tick it (an empty value is left unticked). */
@@ -14877,6 +14943,9 @@
             if (registry && reviewing && reviewTable) {
                 data.set('registry_rows_json', JSON.stringify(reviewTable.fieldRows()));
             }
+            // "Columns → fields" choices changed here: kept on the layout with this record.
+            const sentFieldMaps = registry && reviewing ? fieldMapsToSend() : null;
+            if (sentFieldMaps) data.set('field_maps_json', JSON.stringify(sentFieldMaps));
 
             const personGroups = validationGroups.filter((candidate) => candidate.kind === 'person');
             const submittedFields = verifiedIndexes.map((sourceIndex) => {
@@ -15004,6 +15073,8 @@
                     throw new Error(submissionErrorMessage(response, payload));
                 }
 
+                // Saved: the layouts keep the column choices sent with it.
+                fieldMapsKept(sentFieldMaps);
                 if (!payload?.redirect) {
                     throw new Error('The record was saved, but its page was not returned. Open Saved Records to confirm it.');
                 }

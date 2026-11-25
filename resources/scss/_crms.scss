@@ -12317,6 +12317,27 @@ body.is-resizing-column {
   gap: .4rem 1.25rem;
 }
 
+// What the last choice did, with Undo; amber when another field or typed values were touched.
+.review-field-map__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  margin-block-end: .75rem;
+  padding: .5rem .75rem;
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-info-bg-subtle);
+  color: var(--bs-info-text-emphasis);
+  font-size: .8125rem;
+
+  &.is-warning {
+    background: var(--bs-warning-bg-subtle);
+    color: var(--bs-warning-text-emphasis);
+  }
+
+  .bx { margin-block-start: .15rem; }
+  .btn-link { font-size: inherit; white-space: nowrap; }
+}
+
 .review-field-map__row {
   display: grid;
   grid-template-columns: minmax(0, 9.5rem) minmax(0, 1fr);

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\DocumentType;
+use App\Models\AuditLog;
 use App\Models\BirthRecord;
 use App\Models\CivilRecord;
 use App\Models\DocumentTemplate;
@@ -198,21 +199,41 @@ class RegistryRowsTest extends TestCase
         $this->assertDatabaseCount('birth_records', 0);
     }
 
-    public function test_the_column_choices_are_kept_on_the_layout(): void
+    public function test_the_column_choices_are_kept_on_the_layout_when_the_record_is_saved(): void
     {
         $user = User::factory()->superAdmin()->create();
         $template = DocumentTemplate::activeFor(DocumentType::Birth);
+        $rows = [$this->birthRow('5', 'Ariel P. Villanujan')];
+
+        // A choice that is not one of the register's fields: nothing is saved.
+        $this->actingAs($user)
+            ->postJson(route('documents.store'), $this->payload(DocumentType::Birth, $rows, [
+                'field_maps_json' => json_encode([$template->getKey() => ['Column 3' => 'husband_name']]),
+            ]))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('field_maps');
+        $this->assertNull($template->fresh()->field_map);
+        $this->assertSame(0, CivilRecord::count());
+
+        // Choices for a layout the record was not read with: refused too.
+        $this->actingAs($user)
+            ->postJson(route('documents.store'), $this->payload(DocumentType::Birth, $rows, [
+                'field_maps_json' => json_encode([DocumentTemplate::activeFor(DocumentType::Death)->getKey() => ['Column 3' => 'name']]),
+            ]))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('field_maps');
 
         $this->actingAs($user)
-            ->putJson(route('documents.field-map', $template), ['map' => ['Column 3' => 'name', 'Column 1' => 'reg_no', 'Column 9' => null]])
-            ->assertOk();
+            ->postJson(route('documents.store'), $this->payload(DocumentType::Birth, $rows, [
+                'field_maps_json' => json_encode([$template->getKey() => ['Column 3' => 'name', 'Column 1' => 'reg_no', 'Column 9' => null]]),
+            ]))
+            ->assertCreated();
 
         // Lower-cased names; a column left to be typed by hand (null) is not kept.
         $this->assertEquals(['column 1' => 'reg_no', 'column 3' => 'name'], $template->fresh()->field_map);
-
-        $this->actingAs($user)
-            ->putJson(route('documents.field-map', $template), ['map' => ['Column 3' => 'husband_name']])
-            ->assertUnprocessable();
+        $log = AuditLog::where('action', 'template.field_map_changed')->sole();
+        $this->assertSame([], $log->old_values['field_map']);
+        $this->assertSame('name', $log->new_values['field_map']['column 3']);
 
         $this->actingAs($user)
             ->get(route('documents.workspace', ['type' => 'birth']))

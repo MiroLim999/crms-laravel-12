@@ -8,6 +8,9 @@ use App\Models\RecordField;
 use App\Services\AuditLogger;
 use App\Services\RecordFieldGrouper;
 use App\Support\Limits;
+use App\Support\RegistryFields;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -53,6 +56,9 @@ class RecordReviewController extends Controller
             'additions.*.person_group' => ['required', 'integer', 'min:1', 'max:'.Limits::MAX_FIELDS * 2],
             'additions.*.column' => ['required', 'string', 'max:480'],
             'additions.*.value' => ['required', 'string', 'max:2000'],
+            // A record with rows in its register table (birth_records, …): every row as
+            // the table now shows it, [{row, values: {field: value}}] (see RegistryFields).
+            'registry_rows' => ['sometimes', 'array', 'max:'.Limits::MAX_FIELDS],
         ]);
 
         $record->load(['fields', 'extraPages', 'template.pageTwoTemplate']);
@@ -74,9 +80,28 @@ class RecordReviewController extends Controller
             throw ValidationException::withMessages($errors);
         }
 
+        [$stored, $registerRows, $registerOld, $registerNew] = array_key_exists('registry_rows', $data)
+            ? $this->registerChanges($record, $data['registry_rows'])
+            : [null, [], [], []];
+
         $old = [];
         $new = [];
-        DB::transaction(function () use ($data, $record, $fields, &$old, &$new) {
+        DB::transaction(function () use ($data, $record, $fields, $stored, $registerRows, $registerOld, &$old, &$new) {
+            // The register rows (what the downloads hold), saved again in their order
+            // when a value in them changed. Deleted first, then written, so two rows
+            // that swap register numbers never meet the one-entry-per-number rule.
+            if ($stored !== null && $registerOld !== []) {
+                $model = $stored->first()::class;
+                $model::whereKey($stored->modelKeys())->delete();
+                foreach ($registerRows as $index => $attributes) {
+                    (new $model)->forceFill([
+                        ...$attributes,
+                        'civil_record_id' => $record->getKey(),
+                        'created_at' => $stored[$index]->created_at,
+                    ])->save();
+                }
+            }
+
             foreach ($data['changes'] ?? [] as $change) {
                 /** @var RecordField $field */
                 $field = $fields->get((int) $change['id']);
@@ -130,13 +155,13 @@ class RecordReviewController extends Controller
             }
         });
 
-        $count = count($new);
+        $count = count($new) + array_sum(array_map('count', $registerNew));
         if ($count > 0) {
             $audit->log(
                 'record.edited',
                 $record,
-                old: ['fields' => $old],
-                new: ['fields' => $new],
+                old: ['fields' => $old, ...($registerOld === [] ? [] : ['register' => $registerOld])],
+                new: ['fields' => $new, ...($registerNew === [] ? [] : ['register' => $registerNew])],
                 description: sprintf(
                     'Edited %d %s of record #%d in Review & Export.',
                     $count,
@@ -152,6 +177,70 @@ class RecordReviewController extends Controller
             'saved' => $count,
             'redirect' => route('records.show', $record),
         ]);
+    }
+
+    /**
+     * The register rows sent from the page, checked as step 4 checks them,
+     * against the rows the record has: [the stored rows, the rows to store,
+     * old values, new values] (the last two by row label: [field => value],
+     * only what changed).
+     *
+     * @param  array<mixed>  $rows
+     * @return array{0: Collection<int, Model>, 1: list<array<string, mixed>>, 2: array<string, array<string, string>>, 3: array<string, array<string, string>>}
+     */
+    private function registerChanges(CivilRecord $record, array $rows): array
+    {
+        $type = $this->typeKey($record);
+        $stored = RegistryFields::rowsOf($record, $type);
+        if ($stored->isEmpty()) {
+            throw ValidationException::withMessages(['registry_rows' => 'This record has no register rows to change. Reload the page.']);
+        }
+
+        $clean = RegistryFields::checkedRows($type, $rows);
+        if (count($clean) !== $stored->count()) {
+            throw ValidationException::withMessages([
+                'registry_rows' => 'The table has '.count($clean)." rows but the record has {$stored->count()}. Reload the page and try again.",
+            ]);
+        }
+
+        // A book and page belongs to one record (as when it was first saved).
+        $model = RegistryFields::model($type);
+        $pages = collect($clean)->map(fn (array $row) => [(string) $row['book_no'], (string) $row['page_no']])
+            ->unique(fn (array $page) => implode('|', $page));
+        foreach ($pages as [$book, $page]) {
+            $other = $model::where('book_no', $book)->where('page_no', $page)
+                ->where(fn ($query) => $query->whereNull('civil_record_id')->orWhere('civil_record_id', '!=', $record->getKey()))
+                ->first();
+            if ($other !== null) {
+                $owner = $other->civil_record_id ? " (Record #{$other->civil_record_id})" : '';
+                throw ValidationException::withMessages([
+                    'registry_rows' => "Book {$book}, page {$page} is already saved{$owner}. Enter another page number.",
+                ]);
+            }
+        }
+
+        $old = [];
+        $new = [];
+        foreach ($clean as $index => $attributes) {
+            $before = RegistryFields::shownValues($type, $stored[$index]);
+            $after = RegistryFields::shownValues($type, (new $model)->forceFill($attributes));
+            $label = is_array($rows[$index] ?? null) && is_scalar($rows[$index]['row'] ?? null)
+                ? (string) $rows[$index]['row']
+                : (string) ($index + 1);
+            foreach ($after as $key => $value) {
+                if ($value !== $before[$key]) {
+                    $old[$label][$key] = $before[$key];
+                    $new[$label][$key] = $value;
+                }
+            }
+        }
+
+        return [$stored, $clean, $old, $new];
+    }
+
+    private function typeKey(CivilRecord $record): string
+    {
+        return (string) ($record->documentTypeDefinition?->key ?? $record->doc_type?->value ?? '');
     }
 
     /**
@@ -216,8 +305,40 @@ class RecordReviewController extends Controller
                 ->map(fn (RecordField $field) => $field->getKey())
                 ->values(),
             'updateUrl' => route('records.review.update', $record),
+            ...$this->registerTable($record),
             // Readable: "Book of Birth - Book 12 Page 23 - Record 7" (the date is added on download).
             'fileName' => app(\App\Services\RecordCsv::class)->baseName($record),
+        ];
+    }
+
+    /**
+     * For a record saved with rows in its register table (birth_records, …):
+     * the register's fields, each page's saved "Columns → fields" choices, and
+     * the rows as stored. The page then shows the register's columns, as step 4
+     * did, with these values: what the downloads hold. [] for any other record.
+     *
+     * @return array<string, mixed>
+     */
+    private function registerTable(CivilRecord $record): array
+    {
+        $type = $this->typeKey($record);
+        $rows = RegistryFields::rowsOf($record, $type);
+        if ($rows->isEmpty()) {
+            return [];
+        }
+
+        $pageNumbers = [1, ...$record->extraPages->pluck('page_no')->map(fn ($page) => (int) $page)->all()];
+
+        return [
+            'registry' => RegistryFields::forWorkspace($type),
+            // By page side, as `pages`: { column name: field } or null (none chosen yet).
+            'fieldMaps' => array_map(function (int $number) use ($record) {
+                $template = $number > 1 ? ($record->template?->pageTwoTemplate ?? $record->template) : $record->template;
+                $map = $template?->field_map;
+
+                return is_array($map) && $map !== [] ? $map : null;
+            }, $pageNumbers),
+            'registerRows' => $rows->map(fn (Model $row) => RegistryFields::shownValues($type, $row))->values()->all(),
         ];
     }
 

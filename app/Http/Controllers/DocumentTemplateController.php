@@ -1393,6 +1393,26 @@ class DocumentTemplateController extends Controller
      *
      * @param  array<string, mixed>  $validated
      */
+    /**
+     * A new version starts with the "Columns → fields" choices of the layout it
+     * came from (step 4), its page 2 with that page's: a column still named the
+     * same fills the same field.
+     */
+    private function keepColumnChoices(DocumentTemplate $from, DocumentTemplate $to): void
+    {
+        $from->loadMissing('pageTwoTemplate');
+        $to->refresh()->loadMissing('pageTwoTemplate');
+        if ($from->field_map !== null) {
+            $to->forceFill(['field_map' => $from->field_map])->save();
+        }
+        $fromPageTwo = $from->pageTwoTemplate;
+        $toPageTwo = $to->pageTwoTemplate;
+        if ($fromPageTwo !== null && $toPageTwo !== null && $toPageTwo->isNot($fromPageTwo)
+            && $fromPageTwo->field_map !== null && $toPageTwo->field_map === null) {
+            $toPageTwo->forceFill(['field_map' => $fromPageTwo->field_map])->save();
+        }
+    }
+
     private function createLayout(
         Request $request,
         array $validated,
@@ -1470,6 +1490,7 @@ class DocumentTemplateController extends Controller
             $copy = $this->createLayout($request, $validated, $documentType, $template);
             // The duplicate gets its own page 2 (a copy): the original keeps its own.
             $this->savePageTwo($request, $copy, $pageTwo, $documentType, $validated['page_two_template_id'], fresh: true);
+            $this->keepColumnChoices($template, $copy);
 
             if ($publish) {
                 $problems = $this->publishIfReady($copy, (bool) ($validated['publish_anyway'] ?? false));

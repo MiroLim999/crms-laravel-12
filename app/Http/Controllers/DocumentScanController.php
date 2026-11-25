@@ -437,9 +437,15 @@ class DocumentScanController extends Controller
 
         $copiedFiles = [];
         $gridChanges = $this->gridChanges($template, $page);
+        // Step 4's "Columns → fields" choices, kept on the layout(s) with the record.
+        $fieldMaps = $this->fieldMapsToKeep($request, $documentType->key, array_values(array_unique(array_filter([
+            $template?->getKey(),
+            $template?->page_two_template_id,
+            $pageTwoTemplate?->getKey(),
+        ]))));
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $savedBefore, $extraPages, $pageTwoTemplate, $registryRows, &$copiedFiles) {
+            $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $savedBefore, $extraPages, $pageTwoTemplate, $registryRows, $fieldMaps, &$copiedFiles) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -551,6 +557,7 @@ class DocumentScanController extends Controller
                 } elseif (isset($validated['book_no'], $validated['page_no'])) {
                     $this->saveToTypedTable($record, $validated['book_no'], $validated['page_no']);
                 }
+                $this->keepFieldMaps($fieldMaps);
 
                 $corrected = $record->fields->filter->wasCorrected()->count();
 
@@ -923,34 +930,7 @@ class DocumentScanController extends Controller
         } catch (\JsonException) {
             throw ValidationException::withMessages(['registry_rows' => 'The table could not be read. Open Review & Export again and save.']);
         }
-        if (! is_array($rows) || ! array_is_list($rows) || count($rows) > Limits::MAX_FIELDS) {
-            throw ValidationException::withMessages(['registry_rows' => 'The table is not a list of rows.']);
-        }
-
-        $messages = [];
-        $clean = [];
-        $firstRow = [];
-        foreach ($rows as $index => $row) {
-            $label = is_array($row) && is_scalar($row['row'] ?? null) ? (string) $row['row'] : (string) ($index + 1);
-            $values = is_array($row['values'] ?? null) ? $row['values'] : [];
-            $values = array_map(fn ($value) => is_scalar($value) ? (string) $value : '', $values);
-            foreach (RegistryFields::problems($type, $values) as $field => $problem) {
-                $messages[] = "Row {$label}: {$field} {$problem}.";
-            }
-            $attributes = RegistryFields::attributes($type, $values);
-            // One entry per register number on a page: a repeat would replace the first row.
-            $entry = mb_strtolower("{$attributes['book_no']}|{$attributes['page_no']}|{$attributes['reg_no']}");
-            if (($attributes['reg_no'] ?? '') !== '' && isset($firstRow[$entry])) {
-                $messages[] = "Row {$label}: reg_no {$attributes['reg_no']} is row {$firstRow[$entry]}'s register number too. Each entry of a page has its own number.";
-            }
-            $firstRow[$entry] ??= $label;
-            $clean[] = $attributes;
-        }
-        if ($messages !== []) {
-            throw ValidationException::withMessages(['registry_rows' => $messages]);
-        }
-
-        return $clean;
+        return RegistryFields::checkedRows($type, $rows);
     }
 
     /**
@@ -1001,32 +981,66 @@ class DocumentScanController extends Controller
     }
 
     /**
-     * Step 4: remember which layout column fills which register field, for the
-     * next document read with that layout. `map`: { "column name": "field" or
-     * "-" (fills none) }. A column not in it fills the field named like it.
+     * Step 4's "Columns → fields" choices to keep with the layout(s) this
+     * record was read with (`field_maps_json`: { template id: { "column name":
+     * field or "-" } }), only those that differ from what the layout has.
+     * Kept when the record is saved, so a document left unsaved changes nothing.
+     *
+     * @param  list<int>  $templateIds  the layouts the record was read with
+     * @return array<int, array<string, string>> template id => map
      */
-    public function saveFieldMap(Request $request, DocumentTemplate $template): JsonResponse
+    private function fieldMapsToKeep(Request $request, string $type, array $templateIds): array
     {
-        $type = $template->documentTypeDefinition?->key ?? '';
-        $fields = RegistryFields::keys($type);
-        abort_if($fields === [], 422, 'This document type has no register table.');
+        if (! $request->filled('field_maps_json') || RegistryFields::model($type) === null) {
+            return [];
+        }
+        try {
+            $maps = json_decode((string) $request->input('field_maps_json'), true, 16, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            $maps = null;
+        }
+        if (! is_array($maps) || count($maps) > 4) {
+            throw ValidationException::withMessages(['field_maps' => 'The column choices could not be read. Open Columns → fields again and save.']);
+        }
 
-        $validated = $request->validate([
-            'map' => ['present', 'array', 'max:' . Limits::MAX_FIELDS],
-            // A field, or "-": the column fills no field (its name is not matched either).
-            'map.*' => ['nullable', 'string', Rule::in([...$fields, '-'])],
-        ]);
-
-        $map = [];
-        foreach ($validated['map'] as $column => $field) {
-            $name = mb_strtolower(trim((string) $column));
-            if ($name !== '' && $field !== null && $field !== '') {
-                $map[mb_substr($name, 0, 500)] = $field;
+        $keep = [];
+        foreach ($maps as $templateId => $map) {
+            if (! in_array((int) $templateId, $templateIds, true)) {
+                throw ValidationException::withMessages(['field_maps' => 'The column choices are for another layout. Reload the page.']);
+            }
+            $clean = RegistryFields::cleanFieldMap($type, $map);
+            $template = DocumentTemplate::find((int) $templateId);
+            if ($template !== null && ($template->field_map ?? []) != $clean) {
+                $keep[$template->getKey()] = $clean;
             }
         }
-        $template->forceFill(['field_map' => $map])->save();
 
-        return response()->json(['map' => $map]);
+        return $keep;
+    }
+
+    /**
+     * Keep the choices on their layouts (the next document read with them
+     * starts so), each change in the audit log.
+     *
+     * @param  array<int, array<string, string>>  $maps
+     */
+    private function keepFieldMaps(array $maps): void
+    {
+        foreach ($maps as $templateId => $map) {
+            $template = DocumentTemplate::find($templateId);
+            if ($template === null) {
+                continue;
+            }
+            $old = $template->field_map ?? [];
+            $template->forceFill(['field_map' => $map])->save();
+            $this->audit->log(
+                'template.field_map_changed',
+                $template,
+                old: ['field_map' => $old],
+                new: ['field_map' => $map],
+                description: "Column choices (Columns → fields) changed for layout \"{$template->name}\" in Review & Export.",
+            );
+        }
     }
 
     private function hydrateJsonFields(Request $request): void
