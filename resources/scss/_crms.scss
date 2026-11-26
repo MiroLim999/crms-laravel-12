@@ -12343,6 +12343,13 @@ body.review-table-dragging {
     font-style: italic;
   }
 
+  // Shown, not typed into (step 4's book_no and page_no come from step 1): a soft grey.
+  &.is-readonly {
+    color: var(--bs-secondary-color);
+    background-color: rgba(var(--crms-ink-rgb), .035);
+    cursor: default;
+  }
+
   // The rest of the picked cell's row: orange.
   tr.is-active > & {
     background-color: rgba(var(--bs-warning-rgb), .16);

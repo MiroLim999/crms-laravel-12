@@ -855,7 +855,11 @@ export class ReviewTable {
         container, valueOf, onChange, onLocate = () => {}, onIssues = () => {},
         snapshotOf = () => null, restore = () => {}, onRange = () => {}, onCleared = () => {},
         isUnverified = () => false, onColumnsChange = () => {}, removableFields = false,
+        isReadOnly = () => null,
     }) {
+        // A cell that cannot be changed here (step 4's book_no and page_no come from step 1):
+        // answers why, as its tooltip, or null when it can be typed into.
+        this.isReadOnly = isReadOnly;
         // A column was removed from its header, or shown again (the Removed columns menu lists them).
         this.onColumnsChange = onColumnsChange;
         // A register field that is not required may be removed too (its values then
@@ -1540,6 +1544,10 @@ export class ReviewTable {
             ?? (repaired ? `Read as "${value.trim()}": taken as ${td.textContent} from the other dates in this column. Check it on the scan.` : null)
             ?? (unverified ? 'Not verified: this value is not saved or downloaded. Edit it, or tick it in Verify, to keep it.' : '');
         td.setAttribute('aria-invalid', String(Boolean(problem)));
+        const readOnly = this.isReadOnly(cell);
+        td.classList.toggle('is-readonly', Boolean(readOnly));
+        td.setAttribute('aria-readonly', String(Boolean(readOnly)));
+        if (readOnly && !problem) td.title = String(readOnly);
         return problem;
     }
 
@@ -2009,6 +2017,8 @@ export class ReviewTable {
         const { column } = this.active;
         const td = this.cellNodes[row][column];
         const cell = this.cell(row, column);
+        // Shown, not typed into: it says where it is changed.
+        if (this.isReadOnly(cell)) return;
         const original = String(this.valueOf(cell) ?? '');
         const type = cell.column.type;
         // Every column is typed into, choices too (Sex): a typed value that
@@ -2178,7 +2188,8 @@ export class ReviewTable {
         const cells = [];
         changes.forEach(({ row, column, value }) => {
             const cell = this.cell(row, column);
-            if (!cell) return;
+            // Deleted, pasted over or cut: a read-only cell keeps its value.
+            if (!cell || this.isReadOnly(cell)) return;
             const before = String(this.valueOf(cell) ?? '');
             if (before === value) return;
             cells.push({ rowId: cell.row.id, columnKey: cell.column.key, before, after: value, snapshot: this.snapshotOf(cell) });

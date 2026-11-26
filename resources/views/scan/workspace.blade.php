@@ -971,15 +971,6 @@
                                         </div>
                                         <div class="review-field-map__rows" id="reviewFieldMapRows"></div>
                                         <p class="small text-muted mt-2 mb-0" id="reviewFieldMapManual"></p>
-                                        {{-- How the register writes its dates: all are saved as YYYY-MM-DD. --}}
-                                        <div class="review-field-map__row mt-3 pt-3 border-top">
-                                            <label for="reviewDateOrder" class="form-label small mb-0">Dates are written</label>
-                                            <select class="form-select form-select-sm" id="reviewDateOrder">
-                                                <option value="auto">Automatic (by what the column holds)</option>
-                                                <option value="month">Month first: 3-11-57 is 1957-03-11</option>
-                                                <option value="day">Day first: 3-11-57 is 1957-11-03</option>
-                                            </select>
-                                        </div>
                                     </div>
                                 </div>
                             @endif
@@ -1869,15 +1860,6 @@
             const bookError = el('bookNumberError');
             const pageError = el('pageNumberError');
 
-            // Step 1's boxes empty but the book and page typed in step 4's table:
-            // those are the record's book and page.
-            if (reviewing && registry && reviewTable) {
-                const rows = reviewTable.fieldRows();
-                const typedIn = (key) => rows.map((row) => String(row.values[key] ?? '').trim()).find((value) => value !== '') ?? '';
-                if (bookInput && !bookInput.value.trim()) bookInput.value = typedIn('book_no');
-                if (pageInput && !pageInput.value.trim()) pageInput.value = typedIn('page_no');
-            }
-
             let valid = true;
             const bookVal = bookInput ? bookInput.value.trim() : '';
             const pageVal = pageInput ? pageInput.value.trim() : '';
@@ -1918,9 +1900,8 @@
                 showOcrError(msg);
                 // In Verify or Review & Export step 1's boxes are not on screen: say it where the save was pressed.
                 if (activeStep === 'verify' || activeStep === 'review') {
-                    showValidationSubmitError(reviewing && registry
-                        ? `${msg} Type them in the book_no and page_no columns, or go back to step 1 (Document).`
-                        : `${msg} Go back to step 1 (Document) to enter them.`);
+                    // Step 4's book_no and page_no columns only show them: they are entered in step 1.
+                    showValidationSubmitError(`${msg} Go back to step 1 (Document) to enter them.`);
                 }
                 return valid;
             }
@@ -14331,10 +14312,11 @@
                 const automatic = { book_no: 'Automatic (from step 1)', page_no: 'Automatic (from step 1)' }[field.key];
                 select.append(new Option(automatic ?? 'Type by hand', ''));
                 scanned.forEach((column) => {
-                    // A column fills one field: say which one has it, as choosing it here takes it away.
+                    // A column fills one field: one another field uses is not offered here
+                    // (set that field to Type by hand first to free it).
                     const usedBy = reviewModel?.columns.find((other) => other.key === column.key && other.field && !other.manual)?.field;
-                    const text = usedBy && usedBy !== field.key ? `${column.header} · now in ${usedBy}` : column.header;
-                    select.append(new Option(text, column.key, false, column.key === current?.key));
+                    if (usedBy && usedBy !== field.key) return;
+                    select.append(new Option(column.header, column.key, false, column.key === current?.key));
                 });
                 // The second field of a pair (wife_name): the second line of the first one's column.
                 const first = (registry.pairs ?? []).find(([, second]) => second === field.key)?.[0];
@@ -14678,26 +14660,17 @@
                         && cell.refs.every((index) => !verifyTickOf(index)?.checked),
                     // A register field every row does not need can be removed from its header.
                     removableFields: true,
+                    // The book and page are entered in step 1 (Document), for the whole record:
+                    // shown here, not changed here.
+                    isReadOnly: (cell) => (['book_no', 'page_no'].includes(cell.column.field)
+                        ? 'From step 1 (Document). Go back to step 1 to change it.'
+                        : null),
                 });
                 // Ctrl+Z / Ctrl+Y after a click on the scan or elsewhere on this step.
                 reviewTable.listenForUndoKeys(() => reviewing);
                 attachAddColumn(reviewTable, el('reviewPane'));
-                // How this type's register writes its dates, as last chosen on this computer.
-                const dateOrderKey = `crms.dateOrder.${config.registry?.type ?? config.typeLabel ?? 'any'}`;
-                const dateOrderSelect = el('reviewDateOrder');
-                const chosenOrder = (() => {
-                    try { return window.localStorage.getItem(dateOrderKey) || 'auto'; } catch { return 'auto'; }
-                })();
-                reviewTable.dateOrder = chosenOrder;
-                if (dateOrderSelect) {
-                    dateOrderSelect.value = chosenOrder;
-                    dateOrderSelect.addEventListener('change', () => {
-                        reviewTable.commit();
-                        reviewTable.setDateOrder(dateOrderSelect.value);
-                        try { window.localStorage.setItem(dateOrderKey, dateOrderSelect.value); } catch { /* private mode */ }
-                        updateVerificationSummary();
-                    });
-                }
+                // Dates are read by what each column holds (month or day first is worked out from it).
+                reviewTable.dateOrder = 'auto';
             }
 
             showStep('review');
