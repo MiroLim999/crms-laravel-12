@@ -1784,8 +1784,8 @@ form.addEventListener('formdata', (event) => {
 
 // The row lines, drawn and dragged as in the Align step: a grip on each
 // end of the table selects and drags its line (Shift: every line), a
-// double-click on a grip removes it, and a line snaps onto the sample's
-// printed rules (Alt: place freely). Only the grips take the pointer, so the
+// double-click on a grip removes it, and a line stays where it is let go
+// (Alt: snap onto the sample's printed rules). Only the grips take the pointer, so the
 // columns under the lines can still be dragged.
 const rowLines = new RowLineLayer({
     overlay,

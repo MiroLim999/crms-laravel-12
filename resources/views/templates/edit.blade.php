@@ -212,7 +212,7 @@
                                         <div><span>Click a dot, then <kbd>↑</kbd> or <kbd>↓</kbd></span><small>Nudge it (<kbd>Shift</kbd>: 10 px)</small></div>
                                         <div><span><kbd>Del</kbd> / <kbd>⌫</kbd> or double-click a dot</span><small>Remove that line</small></div>
                                         <div><span><kbd>Esc</kbd></span><small>Let go of the line</small></div>
-                                        <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + drag a dot</span><small>Place the line freely (no snap)</small></div>
+                                        <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + drag a dot</span><small>Snap the line onto a printed line (it moves freely without)</small></div>
                                         <div class="marker-shortcuts-menu__title">Table grid</div>
                                         <div><span>Type a row count, <kbd>Enter</kbd></span><small>Space that many rows evenly</small></div>
                                         <div><span>Tilt <kbd>↺</kbd> <kbd>↻</kbd></span><small>Turn the selected fields, or the table when none is selected, 0.1° (<kbd>Shift</kbd>: 1°); or type the degrees</small></div>
@@ -321,7 +321,7 @@
                                         <strong>Tips</strong>
                                         <ul>
                                             <li>Detect, above the page, finds the columns and row lines of the page being edited from its printed rules.</li>
-                                            <li>Drag a row line by its grip (<kbd>Shift</kbd>: every line). Hold <kbd>Alt</kbd> to place it freely.</li>
+                                            <li>Drag a row line by its grip (<kbd>Shift</kbd>: every line). It stays where you let go; hold <kbd>Alt</kbd> to snap it onto a printed line.</li>
                                             <li>Tilt turns the table for a page scanned a little turned.</li>
                                         </ul>
                                     </div>

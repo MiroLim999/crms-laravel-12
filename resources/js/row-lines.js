@@ -3,8 +3,9 @@
  *
  * Each line runs across the table's columns with a grip on the table's left
  * and right edges. A grip selects its line and drags it (Shift: every line
- * together); double-clicking a grip removes the line. While dragged, a line
- * snaps onto the page's printed lines (Alt: place freely). Only the grips take
+ * together); double-clicking a grip removes the line. A dragged line moves
+ * freely and stays where it is let go; held with Alt, it snaps onto the page's
+ * printed lines. Only the grips take
  * the pointer, so the columns under the lines can still be dragged.
  *
  * On a page scanned a little turned the lines turn with the table (`tilt`,
@@ -29,7 +30,7 @@ const MIN_SPAN = 0.05;
 /** The most a line may be turned (degrees). */
 const MAX_LINE_TILT = 25;
 
-/** A line dragged within this many screen pixels of a printed one snaps onto it. */
+/** With Alt held, a line dragged within this many screen pixels of a printed one snaps onto it. */
 const SNAP_PIXELS = 8;
 
 /** How a row line is told apart from its neighbours once moved: its position. */
@@ -177,7 +178,8 @@ export class RowLineLayer {
 
             if (mode === 'move') {
                 const { y, height } = pageY(moveEvent.clientY);
-                const printed = moveEvent.altKey ? null : this.printedLines()?.horizontal;
+                // Free by default: the line stays exactly where it is let go. Alt: snap onto a printed line.
+                const printed = moveEvent.altKey ? this.printedLines()?.horizontal : null;
                 const snap = (value) => (printed ? nearestLine(value, printed, SNAP_PIXELS / height) ?? value : value);
 
                 current = together
