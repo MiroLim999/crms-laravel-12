@@ -9261,14 +9261,15 @@
             const group = `single-${Date.now().toString(36)}`;
             const sourceName = scanFile?.name ?? 'scan';
             const pageTotal = Math.max(1, scanPageCount);
-            // Read and open in Verify (one page, or both of a register): kept as read.
-            const read = activeStep === 'verify' && processedPage
+            // Read and open in Verify or Review & Export (one page, or both of a register): kept as read.
+            const read = ['verify', 'review'].includes(activeStep) && processedPage
                 ? new Map(docEntries().filter((entry) => entry.page?.id).map((entry) => [entry.number, entry.page]))
                 : new Map();
             const items = [];
             for (let pageNo = 1; pageNo <= pageTotal; pageNo += 1) {
-                if (savedPages.has(pageNo) && !read.has(pageNo)) continue;
                 const current = pageNo === scanPageNumber;
+                // A page saved before is left out, unless it is the one being worked on now.
+                if (savedPages.has(pageNo) && !read.has(pageNo) && !current) continue;
                 const layout = current ? null : pageLayouts.get(pageNo);
                 const grid = current ? gridState() : layout?.grid ?? null;
                 const page = read.get(pageNo) ?? null;
@@ -9320,7 +9321,10 @@
                 }
             }
             const items = singleScanItems();
-            if (items.length === 0) return false;
+            if (items.length === 0) {
+                tellInApp('Nothing to keep for later', 'Every page of this file is saved already.');
+                return false;
+            }
 
             batchState.active = true;
             batchState.key = 'batch_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
