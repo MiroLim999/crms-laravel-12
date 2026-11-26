@@ -7922,13 +7922,9 @@
             uploadLocked = locked;
             zone.classList.toggle('is-disabled', locked);
             zone.classList.toggle('is-locked', locked);
-            if (locked) {
-                zone.setAttribute('aria-disabled', 'true');
-                zone.title = 'Resume or discard the unfinished batch first';
-            } else {
-                zone.removeAttribute('aria-disabled');
-                zone.removeAttribute('title');
-            }
+            // The title in the drop area says why (no hover tooltip repeating it).
+            if (locked) zone.setAttribute('aria-disabled', 'true');
+            else zone.removeAttribute('aria-disabled');
             // A disabled input is not opened by its label.
             scanFileInput.disabled = locked;
             if (scanFolderInput instanceof HTMLInputElement) scanFolderInput.disabled = locked;

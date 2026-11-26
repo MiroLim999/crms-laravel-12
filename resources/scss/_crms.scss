@@ -1837,6 +1837,29 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   pointer-events: auto;
 }
 
+// Choose files and Upload folder: one height, one width, centred on one line.
+.document-dropzone__actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 10rem;
+  white-space: nowrap;
+}
+
+// Phones: the buttons stack, each as wide as the other.
+@media (max-width: 575.98px) {
+  .document-dropzone__actions {
+    flex-direction: column;
+    align-items: stretch;
+    inline-size: min(100%, 16rem);
+  }
+
+  .document-dropzone__title {
+    font-size: 1.05rem;
+    text-align: center;
+  }
+}
+
 // Short windows (a 1366x768 laptop leaves about 560px inside the browser): a
 // smaller icon and tighter spacing let the whole upload step fit without
 // scrolling. Phones keep their own rules further down. 780px, not 700px: a
@@ -1858,8 +1881,9 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     }
   }
 
-  .document-dropzone__button {
-    margin-block: 1rem 0;
+  // The two buttons share a row: the space goes above the row, not above one button.
+  .document-dropzone__actions {
+    margin-block-start: 1rem;
   }
 }
 
@@ -4010,6 +4034,14 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   .document-dropzone__button,
   .document-dropzone__folder-btn {
     pointer-events: none;
+  }
+
+  // Both buttons grayed alike: neither can be used until the batch is resumed or discarded.
+  .document-dropzone__folder-btn {
+    color: var(--bs-secondary-color);
+    background: var(--bs-gray-200, #e9ecef);
+    border-color: transparent;
+    box-shadow: none;
   }
 }
 

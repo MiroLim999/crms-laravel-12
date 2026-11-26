@@ -272,7 +272,7 @@
                 </div>
             @endif
 
-            <p class="document-upload-note">PDF up to 1 GB, read one page at a time · Images up to 20 MB</p>
+            <p class="document-upload-note">PDF up to 1 GB, read one page at a time</p>
         </div>
     </div>
 </section>
