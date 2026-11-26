@@ -243,6 +243,41 @@ class RegistryRowsTest extends TestCase
                 && array_column($registry['fields'], 'key') === RegistryFields::keys('birth'));
     }
 
+    public function test_the_column_choices_are_kept_on_the_layout_as_soon_as_they_are_made(): void
+    {
+        $user = User::factory()->superAdmin()->create();
+        $template = DocumentTemplate::activeFor(DocumentType::Birth);
+
+        $this->actingAs($user)
+            ->putJson(route('documents.field-maps'), [
+                'doc_type' => 'birth',
+                'field_maps_json' => json_encode([$template->getKey() => ['Age of Father' => 'father_age']]),
+            ])
+            ->assertOk()
+            ->assertJson(['kept' => [$template->getKey()]]);
+        $this->assertEquals(['age of father' => 'father_age'], $template->fresh()->field_map);
+        $this->assertSame(1, AuditLog::where('action', 'template.field_map_changed')->count());
+
+        // The same choices again: nothing changes, nothing is logged.
+        $this->actingAs($user)
+            ->putJson(route('documents.field-maps'), [
+                'doc_type' => 'birth',
+                'field_maps_json' => json_encode([$template->getKey() => ['Age of Father' => 'father_age']]),
+            ])
+            ->assertOk()
+            ->assertJson(['kept' => []]);
+        $this->assertSame(1, AuditLog::where('action', 'template.field_map_changed')->count());
+
+        // A layout of another document type is refused.
+        $this->actingAs($user)
+            ->putJson(route('documents.field-maps'), [
+                'doc_type' => 'birth',
+                'field_maps_json' => json_encode([DocumentTemplate::activeFor(DocumentType::Death)->getKey() => ['Column 3' => 'name']]),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('field_maps');
+    }
+
     public function test_a_book_downloads_as_excel_with_dates_kept_as_text(): void
     {
         $user = User::factory()->superAdmin()->create();

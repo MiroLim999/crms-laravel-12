@@ -90,6 +90,8 @@ Route::middleware('auth')->group(function () {
         Route::get('documents/workspace', [DocumentScanController::class, 'workspace'])
             ->name('documents.workspace');
         Route::post('documents', [DocumentScanController::class, 'store'])->name('documents.store');
+        // Step 4's Columns → fields choices, kept on the layout as soon as they are made.
+        Route::put('documents/field-maps', [DocumentScanController::class, 'saveFieldMaps'])->name('documents.field-maps');
         // Batch File Upload, kept on the server while it is worked on, so it can be
         // resumed after a reload or a crash. Each change carries the batch's
         // version: one from an older copy (another tab) is refused with 409.
@@ -288,4 +290,3 @@ Route::middleware('auth')->group(function () {
         Route::delete('models/{key}', [OcrModelController::class, 'destroy'])->name('destroy');
     });
 });
-

@@ -12475,9 +12475,44 @@ body.is-resizing-column {
 
 .review-field-map__row {
   display: grid;
-  grid-template-columns: minmax(0, 9.5rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 10.5rem) minmax(0, 1fr);
   gap: .5rem;
   align-items: center;
+
+  // A long field name (parents_marriage_place) wraps instead of being cut off.
+  .form-label {
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+}
+
+// Tablets: one field per line, the list as wide as the window allows.
+@media (max-width: 767.98px) {
+  .review-field-map {
+    inline-size: calc(100vw - 16px);
+    padding: .875rem !important;
+  }
+
+  .review-field-map__rows {
+    grid-template-columns: 1fr;
+  }
+}
+
+// Phones: each field's name above its list.
+@media (max-width: 479.98px) {
+  .review-field-map__row {
+    grid-template-columns: 1fr;
+    gap: .2rem;
+    padding-block: .2rem;
+  }
+
+  .review-field-map__notice {
+    flex-wrap: wrap;
+
+    .btn-link { margin-inline-start: 0 !important; }
+  }
 }
 
 // "Delete column …?" under an added column's ×: Cancel / Delete (ReviewTable._confirmRemove).

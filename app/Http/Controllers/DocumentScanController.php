@@ -1021,6 +1021,34 @@ class DocumentScanController extends Controller
     }
 
     /**
+     * Step 4's "Columns → fields" choices, kept on the layout(s) as soon as they
+     * are made: the next page (and a resumed batch) starts with them, without
+     * waiting for a record to be saved. Only layouts of this document type.
+     */
+    public function saveFieldMaps(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'doc_type' => ['required', 'string', 'exists:document_types,key'],
+            'field_maps_json' => ['required', 'string', 'max:20000'],
+        ]);
+        $documentType = DocumentTypeDefinition::where('key', $validated['doc_type'])->firstOrFail();
+        $templates = DocumentTemplate::query()
+            ->where('document_type_id', $documentType->getKey())
+            ->get(['id', 'page_two_template_id']);
+        $allowed = $templates->pluck('id')
+            ->merge($templates->pluck('page_two_template_id')->filter())
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $maps = $this->fieldMapsToKeep($request, $documentType->key, $allowed);
+        $this->keepFieldMaps($maps);
+
+        return response()->json(['kept' => array_keys($maps)]);
+    }
+
+    /**
      * Keep the choices on their layouts (the next document read with them
      * starts so), each change in the audit log.
      *

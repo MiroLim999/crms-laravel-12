@@ -959,7 +959,7 @@
                                     <div class="dropdown-menu dropdown-menu-end p-3 review-field-map" aria-labelledby="reviewFieldMapBtn">
                                         <p class="small text-muted mb-2">
                                             Which scanned column fills each field of <strong>{{ $registry['type'] }}_records</strong>.
-                                            Kept for this layout when you save this document: the next one starts the same way.
+                                            Kept for this layout as soon as you choose: the next page starts the same way.
                                             A column named like a field fills it by itself ("Name of Mother",
                                             "Mother's Name" → name_of_mother): name the columns in Template Builder.
                                         </p>
@@ -975,25 +975,6 @@
                                 </div>
                             @endif
                             @include('records.partials.review-add-column')
-                            <div class="dropdown">
-                                <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="reviewDownloadBtn"
-                                        data-bs-toggle="dropdown" aria-expanded="false">
-                                    <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
-                                    <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>Download
-                                </button>
-                                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="reviewDownloadBtn">
-                                    <li>
-                                        <button type="button" class="dropdown-item" id="reviewExportCsv">
-                                            <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)
-                                        </button>
-                                    </li>
-                                    <li>
-                                        <button type="button" class="dropdown-item" id="reviewExportXlsx">
-                                            <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)
-                                        </button>
-                                    </li>
-                                </ul>
-                            </div>
                         </div>
                     </header>
 
@@ -1694,6 +1675,7 @@
             maxFields: @json(App\Support\Limits::MAX_FIELDS),
             maxFieldNameLength: 500,
             pagesUrl: @json(route('documents.pages.store')),
+            fieldMapsUrl: @json(route('documents.field-maps')),
             pageGeometryUrl: @json(route('documents.pages.reoutline', ['page' => '__PAGE__'])),
             ocrStatusUrl: @json(route('documents.ocr-status')),
             snapUrl: @json(route('documents.pages.snap')),
@@ -14385,6 +14367,38 @@
             if (lost) parts.push(`${takenFrom} lost that column and is typed by hand now.`);
             if (typed > 0) parts.push(`${typed} ${typed === 1 ? 'value' : 'values'} you typed in ${field} ${typed === 1 ? 'is' : 'are'} hidden (Undo brings ${typed === 1 ? 'it' : 'them'} back).`);
             showFieldMapNotice(parts.join(' '), snapshot, Boolean(lost || typed > 0));
+            keepFieldMapsNow();
+        }
+
+        // A choice is kept on the layout at once (not only when a record is saved), so
+        // the next page, a reload or a resumed batch starts with it and asks nothing again.
+        let fieldMapSaveTimer = 0;
+        function keepFieldMapsNow() {
+            if (!config.fieldMapsUrl) return;
+            window.clearTimeout(fieldMapSaveTimer);
+            fieldMapSaveTimer = window.setTimeout(async () => {
+                const sent = fieldMapsToSend();
+                if (!sent) return;
+                try {
+                    const response = await fetch(config.fieldMapsUrl, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': config.csrf,
+                            'X-Requested-With': 'XMLHttpRequest',
+                            Accept: 'application/json',
+                        },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ doc_type: config.docType, field_maps_json: JSON.stringify(sent) }),
+                    });
+                    if (!response.ok) throw new Error(`The server answered ${response.status}.`);
+                    // The layouts keep these now (the notice and its Undo stay).
+                    Object.entries(sent).forEach(([id, map]) => { keptFieldMaps[id] = { ...map }; });
+                } catch (error) {
+                    // Still sent with the record when it is saved.
+                    console.warn('The column choices could not be kept yet:', error);
+                }
+            }, 500);
         }
 
         /** How many cells of the typed-in column `columnKey` ("m|place_of_birth") hold something. */
@@ -14418,6 +14432,7 @@
             reviewTable.render(reviewModel);
             paintFieldMap();
             updateVerificationSummary();
+            keepFieldMapsNow();
         }
 
         /**
@@ -14762,47 +14777,6 @@
         // A window crossing 1200px, or a second page, moves a width the user did not set.
         window.addEventListener('resize', () => alignSplit.refresh());
         window.addEventListener('crms:verify-layout', () => verifySplit.refresh());
-
-        /** "births-2splitpages-pages-1-2-2026-11-15" */
-        function reviewFileName() {
-            const today = new Date().toISOString().slice(0, 10);
-            // A register's page: "Book of Birth - Book 12 Page 23 - 2026-11-25".
-            const book = getBookNumber();
-            const page = getPageNumber();
-            if (registry && (book || page)) {
-                return exportFileName(config.typeLabel, [book && `Book ${book}`, page && `Page ${page}`].filter(Boolean).join(' '), today);
-            }
-            const pages = verifyDoc
-                ? `pages ${verifyDoc.pages.map((entry) => entry.number).join(' ')}`
-                : (multiPage() ? `page ${scanPageNumber}` : '');
-            // A queued page's file is cut from its PDF ("… (page 3).pdf"): name the PDF itself.
-            const name = batchState.active ? (batchState.items[batchState.currentIndex]?.sourceName ?? scanFile?.name) : scanFile?.name;
-            return exportFileName(config.typeLabel, name, pages, new Date().toISOString().slice(0, 10));
-        }
-
-        el('reviewExportCsv').addEventListener('click', () => {
-            if (!reviewTable) return;
-            reviewTable.commit();
-            downloadCsv(reviewTable.exportTable(), reviewFileName());
-        });
-        el('reviewExportXlsx').addEventListener('click', async () => {
-            if (!reviewTable) return;
-            reviewTable.commit();
-            // The spinner shows on the Download button (the menu closes on the click).
-            const button = el('reviewDownloadBtn');
-            const spinner = button.querySelector('.spinner-border');
-            button.disabled = true;
-            spinner?.classList.remove('d-none');
-            try {
-                await downloadXlsx(reviewTable.exportTable(), reviewFileName());
-            } catch (error) {
-                console.error('Excel export failed:', error);
-                showValidationSubmitError('The Excel file could not be made. Try CSV instead.');
-            } finally {
-                button.disabled = false;
-                spinner?.classList.add('d-none');
-            }
-        });
 
         /**
          * Values typed into cells where nothing was read, as fields of the
