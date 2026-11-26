@@ -4894,6 +4894,9 @@
 
         // ---------------------------------------------------------------- Upload Mode & Batch Queue System
         let uploadMode = 'single';
+        // An unfinished batch of this type waits (setUploadLock): nothing new is uploaded
+        // until it is resumed (and so finished here) or discarded.
+        let uploadLocked = false;
         // Set once the batch is done (showBatchSummary): step 4 shows the summary card
         // in place of the scan and the table, and the batch's bar (its queue) is put away.
         let batchSummaryShown = false;
@@ -4929,7 +4932,11 @@
         /** The drop area's words for the mode (also put back after files are prepared). */
         function showUploadModeText() {
             const batch = uploadMode === 'batch';
-            if (dropzoneTitleEl) dropzoneTitleEl.textContent = batch ? 'Drop scans or a folder here' : 'Drop the scan here';
+            if (dropzoneTitleEl) {
+                dropzoneTitleEl.textContent = uploadLocked
+                    ? 'Resume or discard the unfinished batch first'
+                    : batch ? 'Drop scans or a folder here' : 'Drop the scan here';
+            }
             if (dropzoneButtonEl) dropzoneButtonEl.textContent = batch ? 'Choose files' : 'Choose file';
             if (uploadModeHintEl) {
                 uploadModeHintEl.textContent = batch
@@ -4972,6 +4979,10 @@
         dropzoneFolderBtnEl?.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
+            if (uploadLocked) {
+                explainUploadLock();
+                return;
+            }
             if (scanFolderInput instanceof HTMLInputElement) {
                 scanFolderInput.value = '';
                 scanFolderInput.click();
@@ -7900,9 +7911,41 @@
         // back. Pages queued already need nothing; the files of pages not queued
         // yet are picked again, matched by fingerprint (names may differ).
 
+        function setUploadLock(locked) {
+            const zone = document.getElementById('documentDropzone');
+            // No type chosen yet: the drop area is a placeholder, gray on its own.
+            if (!zone || zone.hasAttribute('data-requires-type')) return;
+            uploadLocked = locked;
+            zone.classList.toggle('is-disabled', locked);
+            zone.classList.toggle('is-locked', locked);
+            if (locked) {
+                zone.setAttribute('aria-disabled', 'true');
+                zone.title = 'Resume or discard the unfinished batch first';
+            } else {
+                zone.removeAttribute('aria-disabled');
+                zone.removeAttribute('title');
+            }
+            // A disabled input is not opened by its label.
+            scanFileInput.disabled = locked;
+            if (scanFolderInput instanceof HTMLInputElement) scanFolderInput.disabled = locked;
+            showUploadModeText();
+        }
+
+        /** Tried to upload while locked: say why, and point at the banner. */
+        function explainUploadLock() {
+            const banner = el('batchResume');
+            banner.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            banner.classList.remove('is-nudged');
+            void banner.offsetWidth;
+            banner.classList.add('is-nudged');
+            tellInApp('Finish the unfinished batch first',
+                'Press Resume to carry on with it, or Discard to throw it away. Then you can upload another file.');
+        }
+
         function showResumeOffer() {
             // A resumed batch whose pages all wait for their files: pick them here.
             if (batchState.active && activeStep === 'upload' && batchState.items.some(pageNeedsFile)) {
+                setUploadLock(false);
                 const waiting = batchState.items.filter(pageNeedsFile).length;
                 el('batchResume').classList.remove('d-none');
                 el('batchResume').dataset.mode = 'files';
@@ -7922,6 +7965,7 @@
             const others = open.filter((batch) => batch.docType !== config.docType).sort(byNewest);
             const total = sameType.length + others.length;
             el('batchResume').classList.toggle('d-none', total === 0 || batchState.active);
+            setUploadLock(sameType.length > 0 && !batchState.active);
             renderResumeList(sameType, others);
             if (total === 0) {
                 window.bootstrap.Modal.getInstance(el('batchResumeModal'))?.hide();
@@ -9184,6 +9228,11 @@
 
         scanFileInput.addEventListener('change', (event) => {
             if (!(event.currentTarget instanceof HTMLInputElement)) return;
+            if (uploadLocked) {
+                event.currentTarget.value = '';
+                explainUploadLock();
+                return;
+            }
             if (uploadMode === 'batch' || batchState.active) {
                 startBatchQueue(event.currentTarget.files);
             } else {
@@ -9199,6 +9248,119 @@
         const workInProgress = () => scanFile !== null && !recordSubmitting && !leaving;
         // A batch kept on the server is not lost by leaving, but Cancel asks: keep it, or discard it.
         const batchToKeep = () => batchOpenOnServer() && !leaving && batchSummaryPhase(batchState.items) !== 'done';
+
+        // A single scan can be kept too: Keep for later turns its file into a batch kept on
+        // the server (its pages not saved yet, with the markers placed and anything read and
+        // typed), so it waits under Unfinished batches and Resume carries on in Batch mode.
+        const singleToKeep = () => !batchState.active && scanFile !== null && !recordSubmitting && !leaving
+            && !scanInProgress && Boolean(config.batchUrls);
+
+        /** The open single scan as batch pages: each page of its file not saved yet. */
+        function singleScanItems() {
+            const pairs = Boolean(config.pageTwo);
+            const group = `single-${Date.now().toString(36)}`;
+            const sourceName = scanFile?.name ?? 'scan';
+            const pageTotal = Math.max(1, scanPageCount);
+            // Read and open in Verify (one page, or both of a register): kept as read.
+            const read = activeStep === 'verify' && processedPage
+                ? new Map(docEntries().filter((entry) => entry.page?.id).map((entry) => [entry.number, entry.page]))
+                : new Map();
+            const items = [];
+            for (let pageNo = 1; pageNo <= pageTotal; pageNo += 1) {
+                if (savedPages.has(pageNo) && !read.has(pageNo)) continue;
+                const current = pageNo === scanPageNumber;
+                const layout = current ? null : pageLayouts.get(pageNo);
+                const grid = current ? gridState() : layout?.grid ?? null;
+                const page = read.get(pageNo) ?? null;
+                const ref = pageReferences.get(pageNo);
+                items.push({
+                    key: randomKey(),
+                    file: scanFile,
+                    name: pageTotal > 1 ? pageFileName(sourceName, pageNo) : sourceName,
+                    group,
+                    record: `${group}#${recordLeadPage(pageNo, pageTotal, pairs)}`,
+                    pageNo,
+                    pageTotal,
+                    sourceName,
+                    sourceHash: scanFingerprint,
+                    status: page ? 'ready' : 'pending',
+                    pageId: page?.id ?? null,
+                    page,
+                    workspaceScanPath: null,
+                    scanKind: 'full',
+                    geometry: page?.geometry ?? null,
+                    recordUrl: null,
+                    recordId: null,
+                    error: null,
+                    boxes: grid ? cloneBoxes(grid.boxes) : null,
+                    rows: grid ? [...grid.rows] : null,
+                    tilts: grid?.tilts ? [...grid.tilts] : null,
+                    autoFields: current ? new Map(autoFields) : layout?.autoFields ? new Map(layout.autoFields) : null,
+                    rowsByHand: Boolean(grid?.byHand),
+                    existingAccepted: Boolean(page) && existingRecordAccepted,
+                    addedAnyway: savedPages.has(pageNo),
+                    ...(ref?.bookNo ? { bookNo: String(ref.bookNo) } : {}),
+                    ...(ref?.pageNo ? { pageNoRef: String(ref.pageNo) } : {}),
+                });
+            }
+            return items;
+        }
+
+        /**
+         * Keep for later, from a single scan: its file becomes a batch kept on the server.
+         * Answers whether it was kept (if not, nothing changed and the scan stays open).
+         */
+        async function keepSingleScanForLater() {
+            saveReferenceInputsForCurrentPage();
+            if (!scanFingerprint && scanFile) {
+                try {
+                    scanFingerprint = await fileFingerprint(scanFile);
+                } catch (error) {
+                    console.warn('The file could not be fingerprinted (it is picked again on resume):', error);
+                }
+            }
+            const items = singleScanItems();
+            if (items.length === 0) return false;
+
+            batchState.active = true;
+            batchState.key = 'batch_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+            batchState.readingAll = false;
+            batchState.items = items;
+            batchState.currentIndex = Math.max(0, items.findIndex((item) => item.pageNo === scanPageNumber));
+            try {
+                await startServerBatch();
+                if (!batchOpenOnServer()) throw new Error('The server could not keep this scan.');
+                window.clearTimeout(batchServer.syncTimer);
+                await batchWrite(syncBatchPages);
+                // What was typed and ticked in Verify, on the record's first page.
+                const lead = items.find((item) => item.status === 'ready');
+                if (lead) {
+                    keepVerifyDraft(lead);
+                    await batchServer.chain;
+                }
+                // The file stays in this browser, so Resume needs no re-pick.
+                if (scanFingerprint) await rememberBatchFile(scanFingerprint, scanFile);
+                return true;
+            } catch (error) {
+                console.warn('This scan could not be kept for later:', error);
+                const id = batchServer.id;
+                if (id !== null) {
+                    // Half kept: not left behind as an empty batch.
+                    fetch(config.batchUrls.abandon.replace('__BATCH__', String(id)), {
+                        method: 'POST',
+                        headers: { 'X-CSRF-TOKEN': config.csrf, 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' },
+                        credentials: 'same-origin',
+                    }).catch(() => {});
+                }
+                resetServerBatch();
+                batchState.active = false;
+                batchState.key = null;
+                batchState.items = [];
+                batchState.currentIndex = 0;
+                tellInApp('This scan could not be kept for later', 'Check your connection and try again, or stay and finish it now.');
+                return false;
+            }
+        }
 
         // A link in the page (Cancel, the menu) asks with the page's own dialog.
         document.addEventListener('click', (event) => {
@@ -9255,15 +9417,38 @@
         let discardAsked = false;
 
         /** The window's two faces: Keep for later / Stay / Discard, and "Discard this batch?". */
+        /** Where a single scan stands, as it would be kept: the file, what is read, what is still to align. */
+        function singleLeaveSummary() {
+            const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+            const items = singleScanItems();
+            const read = items.filter((it) => it.status === 'ready').length;
+            const toAlign = items.length - read;
+            return {
+                lines: [
+                    `${scanFile?.name ?? 'This file'}${scanPageCount > 1 ? ` · ${plural(scanPageCount, 'page')}` : ''}`,
+                    ...(read > 0 ? [`${plural(read, 'page')} read, not saved yet`] : []),
+                    ...(toAlign > 0 ? [`${plural(toAlign, 'page')} still to align`] : []),
+                ],
+                unsaved: items.length,
+            };
+        }
+
         function showLeaveChoice({ discard = false } = {}) {
             discardAsked = discard;
-            const keep = batchToKeep();
-            const summary = keep ? batchLeaveSummary() : null;
+            const single = !batchToKeep() && singleToKeep();
+            const keep = batchToKeep() || single;
+            const summary = keep ? (single ? singleLeaveSummary() : batchLeaveSummary()) : null;
             const icon = discard ? 'bx-trash' : keep ? 'bx-time-five' : 'bx-error';
             el('leaveScanIcon').className = `leave-scan-modal__icon ${discard ? 'bg-label-danger' : keep ? 'bg-label-primary' : 'bg-label-warning'}`;
             el('leaveScanIconGlyph').className = `icon-base bx ${icon}`;
 
-            if (discard) {
+            if (single && discard) {
+                el('leaveScanModalTitle').textContent = 'Discard this scan?';
+                el('leaveScanModalDescription').textContent = 'Your markers, and anything read and typed on it, will be thrown away. Records already saved stay saved.';
+            } else if (single) {
+                el('leaveScanModalTitle').textContent = 'Leave this scan?';
+                el('leaveScanModalDescription').textContent = `Keep for later saves your markers and checked values. Open this document type's workspace within ${config.batchKeepDays} days and press Resume to carry on.`;
+            } else if (discard) {
                 el('leaveScanModalTitle').textContent = 'Discard this batch?';
                 el('leaveScanModalDescription').textContent = summary.unsaved > 0
                     ? `${summary.unsaved} page${summary.unsaved === 1 ? '' : 's'} not saved yet, and anything typed on ${summary.unsaved === 1 ? 'it' : 'them'}, will be thrown away. Records already saved stay saved.`
@@ -9290,7 +9475,8 @@
             el('confirmLeaveScanBtn').classList.toggle('btn-danger', !keep);
             el('confirmLeaveScanBtn').classList.toggle('btn-primary', keep);
             el('confirmLeaveScanBtn').classList.toggle('d-none', discard);
-            el('discardBatchLeaveBtn').textContent = discard ? 'Yes, discard batch' : 'Discard batch';
+            const what = single ? 'scan' : 'batch';
+            el('discardBatchLeaveBtn').textContent = discard ? `Yes, discard ${what}` : `Discard ${what}`;
             el('discardBatchLeaveBtn').classList.toggle('d-none', !keep);
             el('discardBatchLeaveBtn').classList.toggle('btn-outline-danger', !discard);
             el('discardBatchLeaveBtn').classList.toggle('btn-danger', discard);
@@ -9326,6 +9512,16 @@
             if (batchToKeep()) {
                 el('confirmLeaveScanBtn').disabled = true;
                 await flushServerBatch();
+            } else if (singleToKeep()) {
+                // A single scan becomes a kept batch; if it cannot be kept, the scan stays open.
+                el('confirmLeaveScanBtn').disabled = true;
+                el('discardBatchLeaveBtn').disabled = true;
+                if (!await keepSingleScanForLater()) {
+                    el('confirmLeaveScanBtn').disabled = false;
+                    el('discardBatchLeaveBtn').disabled = false;
+                    window.bootstrap.Modal.getInstance(el('leaveScanModal'))?.hide();
+                    return;
+                }
             }
             leaving = true;
             if (leaveTo !== BACK) {
@@ -9358,6 +9554,7 @@
                 return;
             }
             el('discardBatchLeaveBtn').disabled = true;
+            // A single scan has no batch on the server (no id): it is just left.
             await discardServerBatch();
             el('confirmLeaveScanBtn').disabled = false;
             // It was kept until now: leaving after a discard has nothing left to flush.
@@ -9392,6 +9589,10 @@
             });
         });
         dropzone.addEventListener('drop', async (event) => {
+            if (uploadLocked) {
+                explainUploadLock();
+                return;
+            }
             const transfer = event.dataTransfer;
             // Read while the drop event lasts: its items are gone after it.
             const folder = dropHasFolder(transfer);
@@ -9441,9 +9642,17 @@
         dropzone.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                scanFileInput.click();
+                if (uploadLocked) explainUploadLock();
+                else scanFileInput.click();
             }
         });
+        // Locked: a click on the drop area (a label for the input) explains instead of opening the picker.
+        dropzone.addEventListener('click', (event) => {
+            if (!uploadLocked) return;
+            event.preventDefault();
+            event.stopPropagation();
+            explainUploadLock();
+        }, true);
 
         // ---------------------------------------------------------------- step 2
         /**

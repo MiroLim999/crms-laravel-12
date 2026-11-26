@@ -3993,6 +3993,26 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   background: rgba(var(--bs-primary-rgb), .06);
 }
 
+// Tried to upload while an unfinished batch waits: the banner pulses once.
+.batch-resume.is-nudged {
+  animation: batch-resume-nudge .9s ease-out;
+}
+
+@keyframes batch-resume-nudge {
+  0% { box-shadow: 0 0 0 0 rgba(var(--bs-primary-rgb), .45); }
+  100% { box-shadow: 0 0 0 .6rem rgba(var(--bs-primary-rgb), 0); }
+}
+
+// Locked until the unfinished batch is resumed or discarded.
+.document-dropzone.is-locked {
+  cursor: not-allowed;
+
+  .document-dropzone__button,
+  .document-dropzone__folder-btn {
+    pointer-events: none;
+  }
+}
+
 .batch-resume__icon {
   display: inline-grid;
   flex: 0 0 auto;
