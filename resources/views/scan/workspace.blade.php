@@ -6742,6 +6742,8 @@
             const swap = activeStep === 'mark' && batchPartner()?.index === index && companionMarker.canvas.width > 0
                 && companionFile === (tested?.imageUrl ?? batchPageSource(item));
             batchState.currentIndex = index;
+            // Which page is open is kept too (Resume opens it again).
+            scheduleBatchSync();
             syncReferenceInputsForCurrentPage();
             renderBatchQueueBanner();
 
@@ -7700,6 +7702,8 @@
                     addedAnyway: Boolean(item.addedAnyway),
                     serverCopy: Boolean(item.serverCopy),
                     approved: item.approved ?? null,
+                    // The page open when the batch was left: Resume opens it again, at its step.
+                    lastOpen: batchState.items[batchState.currentIndex] === item,
                     scanKind: item.scanKind ?? 'full',
                     recordId: item.recordId ?? null,
                     recordUrl: item.recordUrl ?? null,
@@ -8020,7 +8024,11 @@
                 rows.push(resumeGroupTitle(batches[0].typeLabel ?? docType, batches.length, here));
                 batches.forEach((batch, index) => rows.push(resumeRow({
                     text: batchProgressText(batch),
-                    when: [batch.realigning > 0 ? `${batch.realigning} to re-align` : '', batch.updatedAt ? friendlyTime(batch.updatedAt) : ''].filter(Boolean).join(' · '),
+                    when: [
+                        batch.realigning > 0 ? `${batch.realigning} to re-align` : '',
+                        batch.leftOn ? `left on ${batch.leftOn}` : '',
+                        batch.updatedAt ? friendlyTime(batch.updatedAt) : '',
+                    ].filter(Boolean).join(' · '),
                     latest: index === 0 && batches.length > 1,
                     primary: index === 0,
                     resume: here ? () => resumeFromList(batch.id) : null,
@@ -8075,6 +8083,8 @@
             return [
                 batchProgressText(batch),
                 ...(batch.realigning > 0 ? [`${batch.realigning} to re-align`] : []),
+                // Where Resume opens it again.
+                ...(batch.leftOn ? [`left on ${batch.leftOn}`] : []),
                 ...(batch.updatedAt ? [friendlyTime(batch.updatedAt)] : []),
             ].filter(Boolean).join(' · ');
         }
@@ -8339,6 +8349,18 @@
 
         /** Back where the batch was: a page still to align, else the records to verify. */
         async function resumeWhereLeft() {
+            // The page open when it was left comes back first, at the step it was on.
+            const last = batchState.items.find((item) => item.lastOpen && !pageDone(item));
+            if (last && pageAlignable(last)) {
+                await openBatchQueueItem(batchState.items.indexOf(last));
+                return;
+            }
+            if (last && recordState(recordOf(last).members) === 'ready') {
+                await continueBatch(null, { askForFiles: false, prefer: last });
+                const lead = currentVerifyItem();
+                if (lead?.inReview && !reviewing && activeStep === 'verify') openReview({ switching: true });
+                return;
+            }
             const align = batchState.items.findIndex((item) => item.status === 'pending' && pageAlignable(item));
             if (align !== -1) {
                 await openBatchQueueItem(align);
@@ -8625,6 +8647,7 @@
             }
 
             batchState.currentIndex = batchState.items.indexOf(lead);
+            scheduleBatchSync();
             useLayoutForPage(lead.pageNo ?? 1);
             members.forEach((it) => {
                 if (it.status !== 'imported') it.status = 'verifying';

@@ -258,7 +258,7 @@ class ScanBatchController extends Controller
         $batches = ScanBatch::query()
             ->where('user_id', $userId)
             ->where('status', ScanBatch::STATUS_OPEN)
-            ->with('pages:id,scan_batch_id,record_key,status,flags')
+            ->with(['pages:id,scan_batch_id,record_key,status,flags', 'drafts:id,scan_batch_id,record_key,draft'])
             ->latest('updated_at')
             ->get();
         $labels = DocumentTypeDefinition::query()
@@ -279,12 +279,35 @@ class ScanBatchController extends Controller
                     'pages' => $batch->pages->count(),
                     // Pages sent back by Re-align and not queued again yet.
                     'realigning' => $batch->pages->filter(fn ($page) => $page->status === 'pending' && ! empty($page->flags['realign']))->count(),
+                    'leftOn' => self::leftOn($batch),
                     'updatedAt' => $batch->updated_at?->toIso8601String(),
                     'workspaceUrl' => route('documents.workspace', ['type' => $batch->doc_type]),
                 ];
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * The step the batch was left on (the page open then, which Resume opens
+     * again): Align, Verify or Review & Export. Null when not known.
+     */
+    private static function leftOn(ScanBatch $batch): ?string
+    {
+        $page = $batch->pages->first(fn ($page) => ! empty($page->flags['lastOpen'])
+            && ! in_array($page->status, ['imported', 'rejected'], true));
+        if ($page === null) {
+            return null;
+        }
+        if (in_array($page->status, ['pending', 'saved', 'failed'], true)) {
+            return 'Align';
+        }
+        if ($page->status !== 'ready') {
+            return null;
+        }
+        $draft = $batch->drafts->firstWhere('record_key', $page->record_key)?->draft;
+
+        return ($draft['step'] ?? null) === 'review' ? 'Review & Export' : 'Verify';
     }
 
     /**

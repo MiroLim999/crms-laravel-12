@@ -475,6 +475,8 @@ export function rebuildBatchState(serverBatch, { layoutChanged = false } = {}) {
             // Sent back by Re-align without its file: drawn from the server's copy.
             serverCopy: Boolean(flags.serverCopy) && status === 'pending',
             addedAnyway: Boolean(flags.addedAnyway),
+            // The page open when the batch was left (Resume opens it again).
+            lastOpen: Boolean(flags.lastOpen),
             // Step 1's book and page, as they were entered.
             ...(flags.bookNo ? { bookNo: String(flags.bookNo) } : {}),
             ...(flags.pageNoRef ? { pageNoRef: String(flags.pageNoRef) } : {}),

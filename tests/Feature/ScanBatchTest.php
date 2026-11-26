@@ -190,6 +190,47 @@ class ScanBatchTest extends TestCase
         $this->assertSame(4, $offer['pages']);
     }
 
+    public function test_the_resume_offer_says_which_step_the_batch_was_left_on(): void
+    {
+        $batch = $this->createBatch();
+        $read = $this->documentPage($this->owner);
+        $this->actingAs($this->owner)
+            ->putJson(route('documents.batches.pages', $batch), [
+                'version' => 0,
+                'tab' => 'tab-a',
+                'pages' => [
+                    $this->page('p1', 1, ['status' => 'ready', 'document_page_id' => $read->getKey(), 'flags' => ['lastOpen' => true]]),
+                    $this->page('p2', 2),
+                ],
+            ])
+            ->assertOk();
+        $this->assertSame('Verify', ScanBatchController::openBatchesFor($this->owner->getKey())[0]['leftOn']);
+
+        // Left on Review & Export: its record's draft says so.
+        $this->actingAs($this->owner)
+            ->putJson(route('documents.batches.draft', $batch), [
+                'version' => 1,
+                'tab' => 'tab-a',
+                'record_key' => 'g1#1',
+                'draft' => ['verify' => [], 'review' => [], 'step' => 'review'],
+            ])
+            ->assertOk();
+        $this->assertSame('Review & Export', ScanBatchController::openBatchesFor($this->owner->getKey())[0]['leftOn']);
+
+        // Left on a page still to align.
+        $this->actingAs($this->owner)
+            ->putJson(route('documents.batches.pages', $batch), [
+                'version' => 2,
+                'tab' => 'tab-a',
+                'pages' => [
+                    $this->page('p1', 1, ['status' => 'ready', 'document_page_id' => $read->getKey()]),
+                    $this->page('p2', 2, ['flags' => ['lastOpen' => true]]),
+                ],
+            ])
+            ->assertOk();
+        $this->assertSame('Align', ScanBatchController::openBatchesFor($this->owner->getKey())[0]['leftOn']);
+    }
+
     public function test_a_batch_is_its_owners_alone(): void
     {
         $batch = $this->createBatch();
