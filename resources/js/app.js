@@ -15,6 +15,7 @@ import './sneat/main';
 import './theme';
 import './record-search';
 import './dropdown-motion';
+import './dialog'; // window.crmsDialog, in place of confirm() and alert()
 
 // Bootstrap drops body.modal-open whenever a modal closes, even while another
 // modal is still open (e.g. the scan progress window closing under "Already

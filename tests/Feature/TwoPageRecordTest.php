@@ -48,8 +48,7 @@ class TwoPageRecordTest extends TestCase
 
         $this->template = DocumentTemplate::firstOrFail();
         $this->assertTrue($this->template->is_active);
-        // The duplicate file check is off unless an account turns it on.
-        $this->account = User::factory()->superAdmin()->create(['duplicate_file_check' => true]);
+        $this->account = User::factory()->superAdmin()->create();
     }
 
     /**
@@ -266,53 +265,6 @@ class TwoPageRecordTest extends TestCase
             ->assertStatus(422)
             ->assertJsonValidationErrors('extra_pages.0.workspace_scan_path');
         $this->assertSame(0, CivilRecord::count());
-    }
-
-    public function test_both_pages_of_a_saved_spread_count_as_saved(): void
-    {
-        $this->postSpread()->assertCreated();
-        $record = CivilRecord::firstOrFail();
-
-        $pages = $this->actingAs($this->account)
-            ->getJson(route('documents.sources.pages', str_repeat('ab', 32)))
-            ->assertOk()
-            ->json('pages');
-
-        $this->assertSame([1, 2], array_column($pages, 'page'));
-        $this->assertSame([$record->getKey(), $record->getKey()], array_column($pages, 'recordId'));
-    }
-
-    public function test_a_page_saved_in_a_spread_is_not_saved_again_without_asking(): void
-    {
-        $this->postSpread()->assertCreated();
-        $record = CivilRecord::firstOrFail();
-
-        // Page 2 alone.
-        [$page, $line] = $this->readPage('again-2');
-        $this->actingAs($this->account)->withHeader('Accept', 'application/json')
-            ->post(route('documents.store'), [
-                'doc_type' => DocumentType::Death->value,
-                'document_template_id' => $this->template->getKey(),
-                'ocr_model_key' => 'test-model',
-                'scan' => UploadedFile::fake()->create('book (page 2).pdf', 12, 'application/pdf'),
-                'allow_missing' => true,
-                'document_page_id' => $page->getKey(),
-                'source_name' => 'book.pdf',
-                'source_page' => 2,
-                'source_page_count' => 4,
-                'source_hash' => str_repeat('ab', 32),
-                'fields' => [$this->field('Deceased', 'Juan Cruz', $line)],
-            ])
-            ->assertStatus(409)
-            ->assertJsonPath('duplicate_page', true)
-            ->assertJsonPath('record.page', 2)
-            ->assertJsonPath('record.recordId', $record->getKey())
-            ->assertJsonPath('message', "Page 2 of this file is already saved as record #{$record->getKey()}.");
-
-        // The same spread again: asked about, and saved once the user says so.
-        $this->postSpread()->assertStatus(409)->assertJsonPath('record.page', 1);
-        $this->postSpread(['allow_duplicate' => true])->assertCreated();
-        $this->assertSame(2, CivilRecord::count());
     }
 
     public function test_a_single_page_record_has_no_extra_pages(): void

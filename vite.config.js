@@ -29,6 +29,8 @@ export default defineConfig({
                 'resources/js/field-marker.js',
                 // Shared Windows-style drag selection used by both marker editors.
                 'resources/js/marquee-selection.js',
+                // CRMS's own confirm and message windows (in place of the browser's).
+                'resources/js/dialog.js',
                 // Line outlines in the Verify step: the geometry helpers and the
                 // SVG overlay, imported by the scanning workspace's inline module.
                 'resources/js/line-geometry.js',

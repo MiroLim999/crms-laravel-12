@@ -1,3 +1,4 @@
+import { alertDialog } from './dialog';
 import ApexCharts from 'apexcharts';
 
 /**
@@ -710,7 +711,7 @@ function initRescanForm() {
 
             window.location.reload();
         } catch (err) {
-            alert(`Failed to rescan models: ${err.message}`);
+            alertDialog({ title: 'Models could not be rescanned', message: err.message, tone: 'danger', icon: 'bx-error-circle' });
             setButtonBusy(btn, false);
         }
     });

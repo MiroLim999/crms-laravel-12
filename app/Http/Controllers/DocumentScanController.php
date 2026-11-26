@@ -268,7 +268,6 @@ class DocumentScanController extends Controller
             'source_page_count' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_SOURCE_PAGES],
             'source_hash' => ['nullable', 'string', 'regex:/^[0-9a-f]{64}$/'],
             // The user chose "Save again" when told this page is already saved.
-            'allow_duplicate' => ['sometimes', 'boolean'],
             // A batch kept on the server: the pages of it this record is saved from.
             'scan_batch_id' => ['nullable', 'integer'],
             'scan_batch_pages' => ['nullable', 'array', 'max:' . (self::MAX_EXTRA_PAGES + 1)],
@@ -346,31 +345,6 @@ class DocumentScanController extends Controller
             throw ValidationException::withMessages($coordinateErrors);
         }
 
-        // This page of this exact file is saved already (on its own, or as a page
-        // of a spread): say so first. The user may save it again ("Save again"),
-        // which the audit log notes. A spread asks about each of its pages.
-        $extraSourcePages = collect($validated['extra_pages'] ?? [])
-            ->pluck('source_page')->filter()->map(fn($page) => (int) $page)->values()->all();
-        // Only when the account has the duplicate file check on (account settings).
-        [$savedBefore, $savedPage] = $request->user()?->duplicate_file_check
-            ? $this->savedSourcePage($source, $extraSourcePages)
-            : [null, null];
-        if ($savedBefore !== null && !$request->boolean('allow_duplicate')) {
-            $message = ($source['page_count'] ?? 1) > 1
-                ? "Page {$savedPage} of this file is already saved as record #{$savedBefore->getKey()}."
-                : "This file is already saved as record #{$savedBefore->getKey()}.";
-
-            if ($request->expectsJson()) {
-                return response()->json([
-                    'duplicate_page' => true,
-                    'message' => $message,
-                    'record' => [...$this->sourcePagePayload($savedBefore), 'page' => $savedPage],
-                ], 409);
-            }
-
-            throw ValidationException::withMessages(['scan' => $message]);
-        }
-
         [$page, $linesById] = $this->pageLinesFor($request, $validated, $templateId);
 
         // The pages after the first, when a spread is saved as one record.
@@ -414,9 +388,9 @@ class DocumentScanController extends Controller
         }
 
         // Flowchart step "Is it existing?" is asked when the page is read (the
-        // page's existingRecord, with Continue anyway in Verify) and, for the same
-        // page of the same file, by savedSourcePage() above. Values alone are not
-        // refused here: two pages, or two people, may well read the same.
+        // page's existingRecord, with Continue anyway in Verify). A page of a file
+        // saved before is not refused (the duplicate file check was taken out), and
+        // values alone are not either: two pages, or two people, may well read the same.
 
         $disk = Storage::disk('local');
         $scan = $request->file('scan');
@@ -452,7 +426,7 @@ class DocumentScanController extends Controller
         ]))));
 
         try {
-            $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $savedBefore, $extraPages, $pageTwoTemplate, $registryRows, $fieldMaps, &$copiedFiles) {
+            $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $extraPages, $pageTwoTemplate, $registryRows, $fieldMaps, &$copiedFiles) {
 
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
@@ -589,8 +563,6 @@ class DocumentScanController extends Controller
                             'source_page' => $source['page'],
                             'source_page_count' => $source['page_count'],
                         ] : []),
-                        // Saved although this page was saved before ("Save again").
-                        ...($savedBefore !== null ? ['saved_again_after_record' => $savedBefore->getKey()] : []),
                     ],
                     description: "Submitted and locked a {$record->typeShortLabel()} record.",
                 );
@@ -666,46 +638,6 @@ class DocumentScanController extends Controller
     }
 
     /**
-     * The pages of one scanned file that are already saved, by the file's
-     * SHA-256: the workspace ticks them, opens the file at the first page not
-     * saved yet, and warns on a page saved before. The newest record per page.
-     */
-    public function sourcePages(string $hash): JsonResponse
-    {
-        $records = CivilRecord::withTitleField()
-            ->where('source_hash', $hash)
-            ->whereNotNull('source_page')
-            ->orderByDesc('id')
-            ->get();
-
-        // A spread saved as one record holds its other pages too.
-        $spreadPages = RecordPage::query()
-            ->whereNotNull('source_page')
-            ->whereHas('record', fn($record) => $record->where('source_hash', $hash))
-            ->with(['record' => fn($record) => $record->withTitleField()])
-            ->get();
-
-        // The newest record per page.
-        $byPage = [];
-        foreach ($records as $record) {
-            $byPage[$record->source_page] ??= $record;
-        }
-        foreach ($spreadPages as $spreadPage) {
-            $current = $byPage[$spreadPage->source_page] ?? null;
-            if ($current === null || $spreadPage->record->getKey() > $current->getKey()) {
-                $byPage[$spreadPage->source_page] = $spreadPage->record;
-            }
-        }
-        ksort($byPage);
-
-        return response()->json([
-            'pages' => collect($byPage)
-                ->map(fn(CivilRecord $record, int $page) => [...$this->sourcePagePayload($record), 'page' => $page])
-                ->values(),
-        ]);
-    }
-
-    /**
      * The file this scan came from, as the workspace sent it. An older
      * workspace sends none of it: the uploaded file's own name is kept then.
      *
@@ -734,36 +666,6 @@ class DocumentScanController extends Controller
             'page_count' => $pageCount ?? ($page !== null ? max($page, 1) : null),
             'hash' => $validated['source_hash'] ?? null,
         ];
-    }
-
-    /**
-     * The newest record already holding one of these pages of the file (as its
-     * own page, or as a page of a spread), and which page that is.
-     *
-     * @param  array{name: ?string, page: ?int, page_count: ?int, hash: ?string}  $source
-     * @param  list<int>  $extraPages  The source pages of a spread's other pages.
-     * @return array{0: ?CivilRecord, 1: ?int}
-     */
-    private function savedSourcePage(array $source, array $extraPages = []): array
-    {
-        if ($source['hash'] === null || $source['page'] === null) {
-            return [null, null];
-        }
-
-        foreach ([$source['page'], ...$extraPages] as $page) {
-            $record = CivilRecord::withTitleField()
-                ->where('source_hash', $source['hash'])
-                ->where(fn($query) => $query
-                    ->where('source_page', $page)
-                    ->orWhereHas('extraPages', fn($pages) => $pages->where('source_page', $page)))
-                ->latest('id')
-                ->first();
-            if ($record !== null) {
-                return [$record, $page];
-            }
-        }
-
-        return [null, null];
     }
 
     /** @return array{page: ?int, recordId: int, title: string, url: string, submittedAt: ?string} */

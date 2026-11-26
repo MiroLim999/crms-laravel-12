@@ -22,11 +22,25 @@
             text-align: center; font-family: var(--bs-font-monospace); font-size: 1.125rem; letter-spacing: .08em;
             background: var(--bs-tertiary-bg, transparent);
         }
+        .lock-details-dialog { max-inline-size: 26rem; }
+        .lock-details-icon {
+            display: inline-flex; align-items: center; justify-content: center;
+            inline-size: 3.5rem; block-size: 3.5rem; border-radius: 50%;
+            background: var(--bs-warning-bg-subtle, rgba(255, 171, 0, .16)); color: var(--bs-warning);
+            font-size: 1.75rem;
+        }
+        .lock-details-preview {
+            display: grid; grid-template-columns: auto 1fr; gap: .35rem 1rem;
+            padding: .75rem 1rem; border-radius: .5rem; background: var(--bs-tertiary-bg, rgba(0, 0, 0, .04));
+            font-size: .875rem;
+        }
+        .lock-details-preview dt { font-weight: 500; color: var(--bs-secondary-color); }
+        .lock-details-preview dd { margin: 0; min-inline-size: 0; overflow-wrap: anywhere; }
     </style>
 @endpush
 
 @section('content')
-    <x-page-header title="Account Settings" subtitle="Your name, email, password, recovery codes and upload checks." />
+    <x-page-header title="Account Settings" subtitle="Your name, email, password and recovery codes." />
 
     {{-- Who is signed in, at a glance. --}}
     <div class="card settings-summary mb-4">
@@ -66,9 +80,7 @@
 
                 {{-- Name and email can be changed once: the first save that changes them locks both. --}}
                 <form method="POST" action="{{ route('settings.profile.update') }}" class="d-flex flex-column h-100"
-                      @unless ($detailsLocked)
-                          onsubmit="return confirm('Your name and email can be changed only once. After saving, they cannot be edited again. Save now?')"
-                      @endunless>
+                      id="detailsForm">
                     @csrf
                     @method('PUT')
 
@@ -259,37 +271,57 @@
         </div>
     </x-card>
 
-    <x-card title="Uploads" subtitle="Whether a file you add is checked against what was saved or queued before." class="mt-4">
-        <form method="POST" action="{{ route('settings.uploads.update') }}">
-            @csrf
-            @method('PUT')
-
-            {{-- An unchecked box sends nothing: the hidden 0 says "off". --}}
-            <input type="hidden" name="duplicate_file_check" value="0">
-            <div class="form-check form-switch mb-2">
-                <input class="form-check-input"
-                       type="checkbox"
-                       role="switch"
-                       id="duplicate_file_check"
-                       name="duplicate_file_check"
-                       value="1"
-                       @checked(old('duplicate_file_check', $user->duplicate_file_check))>
-                <label class="form-check-label fw-semibold" for="duplicate_file_check">Check uploads for duplicate files</label>
+    @unless ($detailsLocked)
+        {{-- Asked before the one allowed change of name and email is saved. --}}
+        <div class="modal fade" id="lockDetailsModal" tabindex="-1"
+             aria-labelledby="lockDetailsModalTitle" aria-describedby="lockDetailsModalText" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered lock-details-dialog">
+                <div class="modal-content text-center">
+                    <div class="modal-body px-4 pt-5 pb-4">
+                        <span class="lock-details-icon mb-3" aria-hidden="true">
+                            <i class="icon-base bx bx-lock-alt"></i>
+                        </span>
+                        <h2 class="h5 mb-2" id="lockDetailsModalTitle">Save and lock your details?</h2>
+                        <p class="text-muted mb-3" id="lockDetailsModalText">
+                            Your name and email can be changed only once. After saving, they cannot be edited again.
+                        </p>
+                        <dl class="lock-details-preview text-start mb-0">
+                            <dt>Name</dt><dd id="lockDetailsName"></dd>
+                            <dt>Email</dt><dd id="lockDetailsEmail"></dd>
+                        </dl>
+                    </div>
+                    <div class="modal-footer justify-content-center gap-2 pt-0 pb-4">
+                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="confirmLockDetails">Save and lock</button>
+                    </div>
+                </div>
             </div>
-            <p class="form-text mb-4">
-                When on, a file that is a copy of one already in the batch, or a page already saved as a record,
-                is left out of a batch (you can add it anyway), a saved page of a PDF is ticked, and saving a page
-                twice asks first. When off, none of this is checked and every file is queued as it is. The file's
-                fingerprint is still kept with each record, so turning this on later checks against them too.
-            </p>
-
-            <button type="submit" class="btn btn-primary">Save</button>
-        </form>
-    </x-card>
+        </div>
+    @endunless
 @endsection
 
 @push('scripts')
     <script>
+        // Saving name and email locks them: asked in a modal first (not the browser's own box).
+        (() => {
+            const form = document.getElementById('detailsForm');
+            const modalEl = document.getElementById('lockDetailsModal');
+            if (!form || !modalEl) return;
+            let confirmed = false;
+            form.addEventListener('submit', (event) => {
+                if (confirmed) return;
+                event.preventDefault();
+                document.getElementById('lockDetailsName').textContent = form.elements.name.value.trim();
+                document.getElementById('lockDetailsEmail').textContent = form.elements.email.value.trim().toLowerCase();
+                window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+            });
+            document.getElementById('confirmLockDetails').addEventListener('click', (event) => {
+                event.currentTarget.disabled = true;
+                confirmed = true;
+                form.requestSubmit();
+            });
+        })();
+
         // The new codes as a text file: downloaded by itself as soon as they are shown
         // (they are shown once), and again with Download codes.
         (() => {

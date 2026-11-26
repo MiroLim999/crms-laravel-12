@@ -43,6 +43,7 @@ import {
 import { LayoutHistory } from './template-history';
 import { guessedRowCount, namesOnBothPages, publishProblems, rowMismatch } from './layout-publish-checks';
 import { setDisclosureExpanded } from './disclosure-motion';
+import { confirmDialog } from './dialog';
 
 const configNode = document.getElementById('templateBuilderConfig');
 
@@ -1650,12 +1651,22 @@ form.addEventListener('submit', (event) => {
     }
 
     // Asked once: not again when the save check sends the form on.
-    if (!saveChecked && coveredFieldIndexes.length > 0 && !window.confirm(
-        `${coveredFieldIndexes.length === 1 ? '1 field covers' : `${coveredFieldIndexes.length} fields cover`} ledger cells. `
-        + 'Scans would read the handwriting under them as those fields, and those rows would lose their cells.\n\n'
-        + 'OK: save anyway.\nCancel: go back and move or remove them.',
-    )) {
+    const coveredOk = coveredAccepted;
+    coveredAccepted = false;
+    if (!saveChecked && !coveredOk && coveredFieldIndexes.length > 0) {
         event.preventDefault();
+        const count = coveredFieldIndexes.length;
+        confirmDialog({
+            title: `${count === 1 ? '1 field covers' : `${count} fields cover`} ledger cells`,
+            message: 'Scans would read the handwriting under them as those fields, and those rows would lose their cells.',
+            confirmText: 'Save anyway',
+            cancelText: 'Go back',
+            tone: 'warning',
+        }).then((ok) => {
+            if (!ok) return;
+            coveredAccepted = true;
+            form.requestSubmit();
+        });
         return;
     }
 
@@ -1686,6 +1697,8 @@ form.addEventListener('submit', (event) => {
 
 /** Set once the admin answered the save check, for the submit it starts. */
 let saveChecked = false;
+// "Save anyway" over fields that cover ledger cells: the next submit goes on.
+let coveredAccepted = false;
 
 function saveCheck() {
     if (twoPage) storeActivePage();

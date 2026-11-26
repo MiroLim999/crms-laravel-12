@@ -52,8 +52,7 @@ class MultiPageSourceTest extends TestCase
         ])->assertSessionHasNoErrors();
 
         $this->template = DocumentTemplate::firstOrFail();
-        // The duplicate file check is off unless an account turns it on.
-        $this->account = User::factory()->superAdmin()->create(['duplicate_file_check' => true]);
+        $this->account = User::factory()->superAdmin()->create();
     }
 
     /** @param  array<string, mixed>  $source */
@@ -106,91 +105,6 @@ class MultiPageSourceTest extends TestCase
         $this->actingAs($this->account)->get(route('records.show', $record))
             ->assertOk()
             ->assertSee('Page 3 of 12 · BIRTHS-1995.pdf');
-    }
-
-    public function test_the_same_page_of_the_same_file_is_not_saved_twice_without_asking(): void
-    {
-        $this->submitPage($this->page(3))->assertCreated();
-        $first = CivilRecord::sole();
-
-        $this->submitPage($this->page(3), 'Pedro Reyes')
-            ->assertStatus(409)
-            ->assertJsonPath('duplicate_page', true)
-            ->assertJsonPath('message', "Page 3 of this file is already saved as record #{$first->getKey()}.")
-            ->assertJsonPath('record.recordId', $first->getKey())
-            ->assertJsonPath('record.url', route('records.show', $first));
-        $this->assertDatabaseCount('records', 1);
-
-        // Other pages of the book, and the same page of another file, are fine.
-        $this->submitPage($this->page(4))->assertCreated();
-        $this->submitPage($this->page(3, hash: self::OTHER_BOOK))->assertCreated();
-        $this->assertDatabaseCount('records', 3);
-
-        // The user chose "Save again": saved, and the audit log says so.
-        $this->submitPage([...$this->page(3), 'allow_duplicate' => '1'], 'Pedro Reyes')->assertCreated();
-        $this->assertDatabaseCount('records', 4);
-        $audit = AuditLog::where('action', 'record.submitted')->latest('id')->first();
-        $this->assertSame($first->getKey(), $audit->new_values['saved_again_after_record']);
-    }
-
-    public function test_with_the_duplicate_file_check_off_a_page_is_saved_again_without_asking(): void
-    {
-        // Off is the default: the same page of the same file is saved as asked, and no "saved again" note is made.
-        $this->account->forceFill(['duplicate_file_check' => false])->save();
-
-        $this->submitPage($this->page(3))->assertCreated();
-        $second = $this->submitPage($this->page(3), 'Pedro Reyes')->assertCreated();
-
-        $this->assertSame(2, CivilRecord::where('source_hash', self::BOOK)->where('source_page', 3)->count());
-        $entry = AuditLog::where('auditable_id', $second->json('record.recordId'))->where('action', 'record.submitted')->firstOrFail();
-        $this->assertArrayNotHasKey('saved_again_after_record', $entry->new_values);
-
-        // The fingerprint is still kept, so turning the check on later finds these records.
-        $this->assertSame(self::BOOK, CivilRecord::findOrFail($second->json('record.recordId'))->source_hash);
-        $this->account->forceFill(['duplicate_file_check' => true])->save();
-        $this->submitPage($this->page(3))->assertStatus(409)->assertJsonPath('duplicate_page', true);
-    }
-
-    public function test_a_file_of_one_page_saved_twice_is_called_this_file(): void
-    {
-        $this->submitPage($this->page(1, 1))->assertCreated();
-        $saved = CivilRecord::sole();
-
-        $this->submitPage($this->page(1, 1))
-            ->assertStatus(409)
-            ->assertJsonPath('message', "This file is already saved as record #{$saved->getKey()}.");
-    }
-
-    public function test_the_user_is_told_which_pages_of_a_file_are_saved(): void
-    {
-        $this->submitPage($this->page(1))->assertCreated();
-        $this->submitPage($this->page(3))->assertCreated();
-        $this->submitPage([...$this->page(3), 'allow_duplicate' => '1'], 'Pedro Reyes')->assertCreated();
-        $this->submitPage($this->page(2, hash: self::OTHER_BOOK))->assertCreated();
-        $newest = CivilRecord::where('source_page', 3)->latest('id')->first();
-
-        $pages = $this->actingAs($this->account)
-            ->getJson(route('documents.sources.pages', ['hash' => self::BOOK]))
-            ->assertOk()
-            ->json('pages');
-
-        // One entry per page, the newest record for it; the other book is left out.
-        $this->assertSame([1, 3], array_column($pages, 'page'));
-        $this->assertSame($newest->getKey(), $pages[1]['recordId']);
-        $this->assertSame('Pedro Reyes', $pages[1]['title']);
-
-        $this->actingAs($this->account)
-            ->getJson(route('documents.sources.pages', ['hash' => str_repeat('b', 64)]))
-            ->assertOk()
-            ->assertExactJson(['pages' => []]);
-
-        // Not a fingerprint at all.
-        $this->actingAs($this->account)->getJson('/documents/sources/not-a-hash/pages')->assertNotFound();
-
-        // Not signed in: refused.
-        $this->app['auth']->forgetGuards();
-        $this->getJson(route('documents.sources.pages', ['hash' => self::BOOK]))
-            ->assertUnauthorized();
     }
 
     public function test_the_page_details_are_checked(): void

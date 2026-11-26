@@ -41,7 +41,6 @@ class User extends Authenticatable
             // Name and email changed once from settings: locked since then (null: still editable).
             'details_locked_at' => 'datetime',
             'must_change_password' => 'boolean',
-            'duplicate_file_check' => 'boolean',
             'password_changed_at' => 'datetime',
             'last_login_at' => 'datetime',
         ];

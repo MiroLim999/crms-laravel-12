@@ -1574,6 +1574,7 @@
             verificationGroupState,
         } from '{{ Vite::asset('resources/js/field-marker.js') }}';
         import { attachMarqueeSelection } from '{{ Vite::asset('resources/js/marquee-selection.js') }}';
+        import { confirmDialog, alertDialog } from '{{ Vite::asset('resources/js/dialog.js') }}';
         import { setDisclosureExpanded } from '{{ Vite::asset('resources/js/disclosure-motion.js') }}';
         import {
             alignedGeometry,
@@ -1707,9 +1708,7 @@
             recordsExportUrl: @json(route('records.export')),
             restartUrl: @json(route('documents.workspace', ['type' => $docType->value])),
             // The pages of one file already saved; 64 zeros stand in for its fingerprint.
-            sourcePagesUrl: @json(route('documents.sources.pages', ['hash' => str_repeat('0', 64)])),
             // Account settings > Uploads: check files for copies and saved pages (off unless turned on).
-            duplicateFileCheck: @json((bool) auth()->user()?->duplicate_file_check),
             identifyReferenceUrl: @json(route('documents.identify-reference')),
             // Batch File Upload kept on the server (resume after a reload or a crash).
             docType: @json($docType->value),
@@ -4008,12 +4007,18 @@
             const move = first.payload?.move;
             if (first.response.status !== 409 || !move) return first;
 
-            const confirmed = window.confirm(
-                `This outline covers writing in ${move.to.column}, row ${move.to.row}.\n`
-                + `The field you are adjusting is ${move.from.column}, row ${move.from.row}.\n\n`
-                + `OK: move this field to ${move.to.column}, row ${move.to.row}.\n`
-                + 'Cancel: keep it where it is (nothing is saved).',
-            );
+            const confirmed = await confirmDialog({
+                title: 'Move this field?',
+                message: `This outline covers writing in ${move.to.column}, row ${move.to.row}. `
+                    + `The field you are adjusting is ${move.from.column}, row ${move.from.row}.`,
+                details: [
+                    `Move field: it becomes ${move.to.column}, row ${move.to.row}.`,
+                    'Keep it: it stays where it is and nothing is saved.',
+                ],
+                confirmText: 'Move field',
+                cancelText: 'Keep it',
+                tone: 'warning',
+            });
             if (!confirmed) {
                 throw new Error(`Not saved: the outline is over ${move.to.column}, row ${move.to.row}. `
                     + `Draw it over ${move.from.column}, row ${move.from.row}, or pick the right field first.`);
@@ -4454,21 +4459,11 @@
             try {
                 const fingerprint = await fileFingerprint(file);
                 if (scanFile !== file) return;
-                // Always kept with the record; only asking which pages are saved is up to the account setting.
+                // Kept with the record (where it came from). Files are not checked for
+                // pages saved before: the duplicate file check was taken out.
                 scanFingerprint = fingerprint;
-                if (!config.duplicateFileCheck) return;
-
-                const response = await fetch(config.sourcePagesUrl.replace('0'.repeat(64), fingerprint), {
-                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    credentials: 'same-origin',
-                    signal: AbortSignal.timeout?.(10000),
-                });
-                if (!response.ok) throw new Error(`The server answered ${response.status}.`);
-                const payload = await response.json();
-                if (scanFile !== file) return;
-                savedPages = new Map((payload.pages ?? []).map((entry) => [Number(entry.page), entry]));
             } catch (error) {
-                console.warn('The saved pages of this file could not be looked up:', error);
+                console.warn('This file could not be fingerprinted:', error);
             }
         }
 
@@ -4478,7 +4473,11 @@
             // Of a PDF only the page being read is sent, so it may be large.
             const pdf = isPdfFile(file);
             if (file.size > (pdf ? MAX_PDF_BYTES : MAX_SCAN_BYTES)) {
-                alert(pdf ? 'Choose a PDF smaller than 1 GB.' : 'Choose an image smaller than 20 MB.');
+                alertDialog({
+                    title: 'This file is too large',
+                    message: pdf ? 'Choose a PDF smaller than 1 GB.' : 'Choose an image smaller than 20 MB.',
+                    icon: 'bx-file',
+                });
                 scanFileInput.value = '';
                 return;
             }
@@ -4515,7 +4514,12 @@
             } catch (error) {
                 scanFile = null;
                 scanFileInput.value = '';
-                alert(error.message || 'That document could not be opened.');
+                alertDialog({
+                    title: 'This document could not be opened',
+                    message: error.message || 'That document could not be opened.',
+                    tone: 'danger',
+                    icon: 'bx-error-circle',
+                });
             } finally {
                 dropzone.classList.remove('is-loading');
                 dropzone.removeAttribute('aria-busy');
@@ -6451,27 +6455,6 @@
             return collected.length > 0 ? collected : Array.from(dataTransfer.files || []);
         }
 
-        /**
-         * Which pages of a file are saved already, by its fingerprint. A lookup
-         * that fails says none: the server still asks before a page is saved twice.
-         */
-        async function savedPagesOfFile(fingerprint) {
-            if (!fingerprint) return new Set();
-            try {
-                const response = await fetch(config.sourcePagesUrl.replace('0'.repeat(64), fingerprint), {
-                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    credentials: 'same-origin',
-                    signal: AbortSignal.timeout?.(10000),
-                });
-                if (!response.ok) throw new Error(`The server answered ${response.status}.`);
-                const payload = await response.json();
-                return new Set((payload.pages ?? []).map((entry) => Number(entry.page)));
-            } catch (error) {
-                console.warn('The saved pages of this file could not be looked up:', error);
-                return new Set();
-            }
-        }
-
         /** Let the server drop a queued page no longer wanted (best effort). */
         function cancelPageOnServer(pageId) {
             if (!pageId) return;
@@ -6701,10 +6684,7 @@
                     if (item.sourceHash && !keptBy.has(item.sourceHash)) keptBy.set(item.sourceHash, item.sourceName ?? item.name);
                 });
             }
-            // Which pages of a file are saved, asked once per file (its copies share the answer).
-            const savedLookups = new Map();
-            // Account settings > Uploads: with the check off, no file is left out as saved or as a copy.
-            const checkDuplicates = Boolean(config.duplicateFileCheck);
+            // No file is left out as saved before or as a copy (the duplicate file check was taken out).
             // Added to a batch under way (Add files): the page being worked on stays open.
             const adding = batchState.active && batchState.items.length > 0;
 
@@ -6722,7 +6702,7 @@
                     if (adding && picked.length > 1) setBatchAddBusy(`Preparing ${position + 1} of ${picked.length}…`);
                     const group = `${groupStamp}-${groupSeq += 1}`;
 
-                    // Its fingerprint and saved pages are looked up while its pages are counted.
+                    // Its fingerprint is worked out while its pages are counted.
                     const source = (async () => {
                         let fingerprint = null;
                         try {
@@ -6730,8 +6710,7 @@
                         } catch (error) {
                             console.warn(`${file.name} could not be fingerprinted:`, error);
                         }
-                        if (fingerprint && checkDuplicates && !savedLookups.has(fingerprint)) savedLookups.set(fingerprint, savedPagesOfFile(fingerprint));
-                        return { fingerprint, saved: fingerprint && checkDuplicates ? await savedLookups.get(fingerprint) : new Set() };
+                        return { fingerprint };
                     })();
                     const counting = isPdfFile(file)
                         ? marker.pdfPageCount(file).then((count) => Math.max(1, count), (error) => {
@@ -6739,37 +6718,21 @@
                             return 0;
                         })
                         : Promise.resolve(1);
-                    const [{ fingerprint, saved }, pageCount] = await Promise.all([source, counting]);
+                    const [{ fingerprint }, pageCount] = await Promise.all([source, counting]);
                     if (pageCount === 0) {
                         notes.unreadable.push(file.name);
                         continue;
                     }
 
-                    // A page saved before, or one this batch has already (a copy of a
-                    // file added twice), is left out, unless asked for below.
-                    const savedHere = [];
-                    const inBatchHere = [];
+                    // Every page is queued, a copy of a file or a page saved before too.
                     for (let page = 1; page <= pageCount; page += 1) {
                         const key = fingerprint !== null ? `${fingerprint}#${page}` : null;
-                        const entry = {
+                        if (key !== null) inQueue.add(key);
+                        if (fingerprint && !keptBy.has(fingerprint)) keptBy.set(fingerprint, file.name);
+                        queued.push({
                             file,
                             info: { order: position, group, pageNo: page, pageTotal: pageCount, sourceName: file.name, sourceHash: fingerprint },
-                        };
-                        if (saved.has(page)) {
-                            savedHere.push(page);
-                            leftOutPages.push(entry);
-                        } else if (checkDuplicates && key !== null && inQueue.has(key)) {
-                            inBatchHere.push(page);
-                            leftOutPages.push(entry);
-                        } else {
-                            if (key !== null) inQueue.add(key);
-                            if (fingerprint && !keptBy.has(fingerprint)) keptBy.set(fingerprint, file.name);
-                            queued.push(entry);
-                        }
-                    }
-                    if (savedHere.length > 0) notes.saved.push({ name: file.name, pages: savedHere, pageCount });
-                    if (inBatchHere.length > 0) {
-                        notes.inBatch.push({ name: file.name, pages: inBatchHere, pageCount, of: keptBy.get(fingerprint) ?? null });
+                        });
                     }
                 }
             } finally {
@@ -6834,7 +6797,7 @@
                 tilts: null,
                 addedAnyway: Boolean(info.addedAnyway),
             }));
-            batchState.items = appendToQueue(batchState.items, added, { allowCopies: !checkDuplicates });
+            batchState.items = appendToQueue(batchState.items, added, { allowCopies: true });
             // Kept on the server from the first files, to resume after a reload or a crash.
             if (!adding) startServerBatch();
             // The files stay in this browser (not uploaded), so a resume needs no re-pick.
@@ -9799,7 +9762,7 @@
                 .filter((file) => SUPPORTED_SCAN_EXT.test(file.name) && !SYSTEM_FILE.test(file.name))
                 .sort((a, b) => compareQueuePaths(queuePath(a), queuePath(b), naturalOrder))[0];
             if (first) openDocument(first);
-            else alert('No PDF or image file was found in what was dropped.');
+            else alertDialog({ title: 'Nothing to open', message: 'No PDF or image file was found in what was dropped.', icon: 'bx-file' });
         });
 
         // A file dropped beside the drop area (or while files are being prepared,
@@ -10858,9 +10821,15 @@
             const unsavedLines = detectionIsCurrent() ? unsavedLineCount() : 0;
             if (unsavedLines > 0) {
                 const plural = unsavedLines === 1 ? 'line has an outline change' : 'lines have outline changes';
-                if (!window.confirm(`${unsavedLines} ${plural} that ${unsavedLines === 1 ? 'is' : 'are'} not saved.\n\nOK: save and scan.\nCancel: go back without scanning.`)) {
-                    return;
-                }
+                const saveFirst = await confirmDialog({
+                    title: 'Save the outline changes?',
+                    message: `${unsavedLines} ${plural} that ${unsavedLines === 1 ? 'is' : 'are'} not saved. `
+                        + 'They are saved first, then the page is scanned.',
+                    confirmText: 'Save and scan',
+                    cancelText: 'Go back',
+                    icon: 'bx-save',
+                });
+                if (!saveFirst) return;
                 await saveAllUnsavedLines();
                 if (unsavedLineCount() > 0) {
                     showOcrError('Some outline changes could not be saved. Check the lines marked not saved and try again.');
@@ -10873,12 +10842,15 @@
             if (canReoutline()) {
                 const adjusted = detection.page.lines.filter((line) => line.adjusted || isLineUnsaved(line)).length;
                 const plural = adjusted === 1 ? 'adjustment' : 'adjustments';
-                if (adjusted > 0 && !window.confirm(
-                    `You moved a marker after Detect, so every line is worked out again `
-                    + `and your ${adjusted} outline ${plural} will be lost.\n\n`
-                    + `OK: scan from the markers as they are.\n`
-                    + `Cancel: go back (Ctrl+Z brings the Detect result back).`,
-                )) {
+                if (adjusted > 0 && !(await confirmDialog({
+                    title: 'Lose your outline changes?',
+                    message: 'You moved a marker after Detect, so every line is worked out again '
+                        + `and your ${adjusted} outline ${plural} will be lost.`,
+                    details: ['Go back, and Ctrl+Z brings the Detect result back.'],
+                    confirmText: 'Scan anyway',
+                    cancelText: 'Go back',
+                    tone: 'warning',
+                }))) {
                     return;
                 }
             }

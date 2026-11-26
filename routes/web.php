@@ -76,8 +76,6 @@ Route::middleware('auth')->group(function () {
     Route::get('settings', [AccountSettingsController::class, 'edit'])->name('settings.edit');
     Route::put('settings/profile', [AccountSettingsController::class, 'updateProfile'])
         ->name('settings.profile.update');
-    Route::put('settings/uploads', [AccountSettingsController::class, 'updateUploads'])
-        ->name('settings.uploads.update');
     Route::put('settings/password', [AccountSettingsController::class, 'updatePassword'])
         ->name('settings.password.update');
     // A new set of one-time recovery codes for "Forgot password?".
@@ -104,10 +102,6 @@ Route::middleware('auth')->group(function () {
         Route::put('documents/batches/{batch}/draft', [ScanBatchController::class, 'saveDraft'])->name('documents.batches.draft');
         Route::post('documents/batches/{batch}/done', [ScanBatchController::class, 'done'])->name('documents.batches.done');
         Route::post('documents/batches/{batch}/abandon', [ScanBatchController::class, 'abandon'])->name('documents.batches.abandon');
-        // Which pages of one scanned file (by its SHA-256) are already saved.
-        Route::get('documents/sources/{hash}/pages', [DocumentScanController::class, 'sourcePages'])
-            ->where('hash', '[0-9a-f]{64}')
-            ->name('documents.sources.pages');
         Route::get('documents/identify-reference', [DocumentScanController::class, 'identifyReference'])
             ->name('documents.identify-reference');
 

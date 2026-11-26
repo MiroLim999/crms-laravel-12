@@ -11,7 +11,7 @@ use Illuminate\View\View;
 
 /**
  * Account settings: the account's own name, email and password, its
- * recovery codes, and how its uploads are checked.
+ * recovery codes.
  */
 class AccountSettingsController extends Controller
 {
@@ -53,26 +53,6 @@ class AccountSettingsController extends Controller
         $user->forceFill(['details_locked_at' => now()])->save();
 
         return back()->with('success', 'Your details have been saved. Your name and email are now locked.');
-    }
-
-    /** Whether uploaded files are checked for copies of what was saved or queued before. */
-    public function updateUploads(Request $request): RedirectResponse
-    {
-        $user = $request->user();
-        $user->forceFill(['duplicate_file_check' => $request->boolean('duplicate_file_check')]);
-
-        if (! $user->isDirty('duplicate_file_check')) {
-            return back()->with('info', 'Nothing to save: it was already '.($user->duplicate_file_check ? 'on' : 'off').'.');
-        }
-
-        $on = $user->duplicate_file_check;
-        $this->audit->saveAndLog(
-            'user.updated',
-            $user,
-            'Duplicate file check turned '.($on ? 'on' : 'off').' from account settings.',
-        );
-
-        return back()->with('success', 'Duplicate file check is now '.($on ? 'on' : 'off').'.');
     }
 
     public function updatePassword(Request $request): RedirectResponse
