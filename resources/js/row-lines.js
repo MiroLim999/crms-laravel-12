@@ -19,6 +19,11 @@
  * dragging a grip sideways moves that end only, and Alt+drag pulls that end
  * anywhere (up or down too, which turns the line about its other end).
  *
+ * With `bendable`, every column has a small handle on each line, just right of
+ * the column's left edge: dragging it moves that column's part of the line up
+ * or down (`bends[i][c]`, page fractions; the line is then drawn one piece per
+ * column). A bend is what is seen and lined up against only.
+ *
  * The layer keeps no rows of its own: the page renders the rows it holds and
  * is told about every change, so undo and the server see one set of rows.
  */
@@ -46,16 +51,23 @@ export class RowLineLayer {
      * @param {(index: number) => void} [options.onRemove]
      * @param {boolean} [options.stretchable]  Grips can stretch their line.
      * @param {(index: number, change: {span: {l: number, r: number}, y: number, tilt: number}) => void} [options.onStretch]
+     * @param {boolean} [options.bendable]  Each column's part of a line can be moved up or down.
+     * @param {(index: number, column: number, dy: number) => void} [options.onBend]
      */
-    constructor({ overlay, printedLines = () => null, onSelect = () => {}, onMove = () => {}, onRemove = () => {}, stretchable = false, onStretch = () => {} }) {
+    constructor({
+        overlay, printedLines = () => null, onSelect = () => {}, onMove = () => {}, onRemove = () => {},
+        stretchable = false, onStretch = () => {}, bendable = false, onBend = () => {},
+    }) {
         this.stretchable = stretchable;
         this.onStretch = onStretch;
+        this.bendable = bendable;
+        this.onBend = onBend;
         this.overlay = overlay;
         this.printedLines = printedLines;
         this.onSelect = onSelect;
         this.onMove = onMove;
         this.onRemove = onRemove;
-        this.state = { rows: [], left: 0, right: 1, selected: null, estimated: new Set(), locked: false, tilt: 0, tilts: [], spans: [], aspect: 1 };
+        this.state = { rows: [], left: 0, right: 1, selected: null, estimated: new Set(), locked: false, tilt: 0, tilts: [], spans: [], columns: [], bends: [], aspect: 1 };
 
         this.layer = document.createElement('div');
         this.layer.className = 'row-line-layer';
@@ -70,6 +82,14 @@ export class RowLineLayer {
             event.stopPropagation();
             this.onRemove(Number(grip.dataset.index));
         });
+
+        // Each column's piece of each line, with its handle (bendable only). A layer of
+        // its own: the row layer's children are its lines, one each.
+        this.pieces = document.createElement('div');
+        this.pieces.className = 'row-line-layer row-line-layer--pieces';
+        this.pieces.setAttribute('aria-hidden', 'true');
+        overlay.appendChild(this.pieces);
+        this.pieces.addEventListener('pointerdown', (event) => this.bend(event));
     }
 
     /**
@@ -102,6 +122,8 @@ export class RowLineLayer {
             row.classList.toggle('is-selected', selected === 'all' || index === selected);
             row.classList.toggle('is-estimated', isEstimated);
             row.classList.toggle('is-dragging', Boolean(dragging?.has(index)));
+            // Bent: drawn one piece per column (renderPieces), not as one rule.
+            row.classList.toggle('is-bent', this.isBent(index));
             const angle = this.angleOf(index);
             // Turned about its left end, a line reaches the table's right edge
             // when it is that much longer.
@@ -119,6 +141,101 @@ export class RowLineLayer {
                         : `Row line ${index + 1}: drag to move (Shift: every line), double-click to remove`);
             });
         });
+        this.renderPieces(dragging);
+    }
+
+    /** Column `column`'s own shift of line `index` (page fraction), 0 when not bent there. */
+    bendOf(index, column) {
+        return Number(this.state.bends?.[index]?.[column]) || 0;
+    }
+
+    isBent(index) {
+        return this.bendable && (this.state.columns?.length ?? 0) > 0
+            && (this.state.bends?.[index] ?? []).some((dy) => Math.abs(Number(dy) || 0) > 1e-9);
+    }
+
+    /** Each column's piece of each line, at its own height, with its handle. */
+    renderPieces(dragging = null) {
+        const { rows, columns, aspect, selected, estimated, locked } = this.state;
+        this.pieces.classList.toggle('is-locked', Boolean(locked));
+        const pieces = [];
+        if (this.bendable && columns?.length) {
+            rows.forEach((y, index) => {
+                const { l, r } = this.spanOf(index);
+                const angle = this.angleOf(index);
+                columns.forEach((column, c) => {
+                    const xl = Math.max(column.l, l);
+                    const xr = Math.min(column.r, r);
+                    if (xr - xl <= 0.002) return;
+                    pieces.push({ index, c, xl, xr, angle, y: y + this.bendOf(index, c) });
+                });
+            });
+        }
+        while (this.pieces.children.length > pieces.length) this.pieces.lastElementChild.remove();
+        while (this.pieces.children.length < pieces.length) this.pieces.appendChild(createPiece());
+
+        pieces.forEach((piece, k) => {
+            const node = this.pieces.children[k];
+            node.style.top = `${rowLineY(piece.y, piece.xl, piece.angle, aspect) * 100}%`;
+            node.style.left = `${piece.xl * 100}%`;
+            node.style.width = `${((piece.xr - piece.xl) / Math.cos(piece.angle * Math.PI / 180)) * 100}%`;
+            node.style.transform = piece.angle ? `rotate(${piece.angle}deg)` : '';
+            node.classList.toggle('is-bent', this.isBent(piece.index));
+            node.classList.toggle('is-selected', selected === 'all' || piece.index === selected);
+            node.classList.toggle('is-estimated', estimated.has(rowKey(rows[piece.index])));
+            node.classList.toggle('is-dragging', Boolean(dragging?.has(piece.index)));
+            const handle = node.querySelector('.row-line__bend');
+            handle.dataset.index = String(piece.index);
+            handle.dataset.column = String(piece.c);
+            handle.title = `Row line ${piece.index + 1}, column ${piece.c + 1}: drag up or down to move this column's part of the line`;
+        });
+    }
+
+    /** A column's handle dragged: that column's part of its line moves up or down, between its neighbours. */
+    bend(event) {
+        const handle = event.target instanceof Element ? event.target.closest('.row-line__bend') : null;
+        if (!handle || event.button !== 0 || this.state.locked) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        const index = Number(handle.dataset.index);
+        const column = Number(handle.dataset.column);
+        const { rows } = this.state;
+        const y = rows[index];
+        const origin = this.bendOf(index, column);
+        const originalBends = this.state.bends;
+        const gap = 0.004;
+        // It stays between the lines above and below.
+        const low = (index > 0 ? rows[index - 1] + gap : 0) - y;
+        const high = (index < rows.length - 1 ? rows[index + 1] - gap : 1) - y;
+        const pageY = (clientY) => {
+            const box = this.pieces.getBoundingClientRect();
+            return (clientY - box.top) / Math.max(1, box.height);
+        };
+        const startY = pageY(event.clientY);
+        const count = this.state.columns.length;
+        const withBend = (dy) => rows.map((_, line) => {
+            const own = Array.from({ length: count }, (_, c) => this.bendOf(line, c));
+            if (line === index) own[column] = dy;
+            return own;
+        });
+        let current = origin;
+        this.onSelect(index);
+
+        const move = (moveEvent) => {
+            current = Math.min(high, Math.max(low, origin + pageY(moveEvent.clientY) - startY));
+            this.render({ bends: withBend(current) }, new Set([index]));
+        };
+        const end = () => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', end);
+            window.removeEventListener('pointercancel', end);
+            if (Math.abs(current - origin) > 1e-9) this.onBend(index, column, current);
+            else this.render({ bends: originalBends });
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', end);
+        window.addEventListener('pointercancel', end);
     }
 
     /** Line `index`'s left and right ends (page fractions): its own stretch, else the table's edges. */
@@ -245,6 +362,17 @@ function gripOf(event) {
 }
 
 /** One row line: the dashed rule and a grip at each end of the table. */
+function createPiece() {
+    const piece = document.createElement('div');
+    piece.className = 'row-line row-line__piece';
+    const rule = document.createElement('span');
+    rule.className = 'row-line__rule';
+    const handle = document.createElement('span');
+    handle.className = 'row-line__bend';
+    piece.append(rule, handle);
+    return piece;
+}
+
 function createRow() {
     const row = document.createElement('div');
     row.className = 'row-line';
