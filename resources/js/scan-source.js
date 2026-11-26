@@ -468,6 +468,7 @@ export function rebuildBatchState(serverBatch, { layoutChanged = false } = {}) {
             rows: keepAlignment ? (alignment.rows ?? []) : null,
             tilts: keepAlignment ? (alignment.tilts ?? null) : null,
             spans: keepAlignment ? (alignment.spans ?? null) : null,
+            bends: keepAlignment ? (alignment.bends ?? null) : null,
             autoFields: keepAlignment && Array.isArray(alignment.autoFields) ? new Map(alignment.autoFields) : null,
             detected: null,
             skipped: Boolean(flags.skipped),

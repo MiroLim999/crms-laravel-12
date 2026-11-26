@@ -2464,6 +2464,30 @@
         // {l, r} page fractions, or null for the table's edges. What is seen and lined up
         // against; the page is read by its row heights and tilts as before.
         let rowSpans = [];
+        // Each row line's own height in each column, as moved by that column's handle:
+        // per line, one shift per column (left to right, page fractions), or null for
+        // a straight line. Seen and lined up against only: the page is read by one
+        // height per line, as before.
+        let rowBends = [];
+
+        /**
+         * `count` lines' bends for `columns` columns: per line, each column's [left end,
+         * right end] shifts, or null (straight). A lone number (an older bend) is a left end.
+         */
+        function fitBends(list, count, columns) {
+            const fit = (dy) => Math.max(-0.2, Math.min(0.2, Math.round((Number(dy) || 0) * 100000) / 100000));
+            return Array.from({ length: count }, (_, index) => {
+                const raw = Array.isArray(list) ? list[index] : null;
+                if (!Array.isArray(raw) || raw.length !== columns) return null;
+                const shifts = raw.map((ends) => (Array.isArray(ends) ? [fit(ends[0]), fit(ends[1])] : [fit(ends), 0]));
+                return shifts.some(([l, r]) => l !== 0 || r !== 0) ? shifts : null;
+            });
+        }
+
+        /** The ledger's columns, left to right, as {l, r} page fractions (where each line's pieces go). */
+        function bendColumns(boxes = marker.toJSON()) {
+            return ledgerColumns(boxes).map((column) => ({ l: column.x, r: column.x + column.w })).sort((a, b) => a.l - b.l);
+        }
 
         /** `count` spans from `list` ({l, r}, [l, r] or null), each sane or null. */
         function fitSpans(list, count) {
@@ -2500,6 +2524,9 @@
             // (shorter or longer), Alt+drag pulls the end anywhere (the line turns about its other end).
             stretchable: true,
             onStretch: (index, stretched) => stretchRow(index, stretched),
+            // A handle in each column: that column's part of the line moves up or down (on screen only).
+            bendable: true,
+            onBend: (index, column, dy, side) => bendRow(index, column, dy, side),
         });
 
         const ledgerColumns = (boxes) => boxes.filter((box) => box.kind === 'column');
@@ -2523,7 +2550,8 @@
             return JSON.stringify(marker.toJSON()) === JSON.stringify(target.boxes)
                 && JSON.stringify(gridRows) === JSON.stringify(target.rows)
                 && JSON.stringify(fitTilts(rowTilts, gridRows.length)) === JSON.stringify(fitTilts(target.tilts, gridRows.length))
-                && fitSpans(rowSpans, gridRows.length).every((span) => span === null);
+                && fitSpans(rowSpans, gridRows.length).every((span) => span === null)
+                && fitBends(rowBends, gridRows.length, bendColumns().length).every((bend) => bend === null);
         }
 
         /** Markers and row lines, as one undoable state. */
@@ -2533,6 +2561,7 @@
                 rows: [...gridRows],
                 tilts: [...rowTilts],
                 spans: fitSpans(rowSpans, gridRows.length),
+                bends: fitBends(rowBends, gridRows.length, bendColumns().length),
                 estimated: [...estimatedRows],
                 byHand: rowsByHand,
             };
@@ -2565,6 +2594,7 @@
                 if (gridRows.length !== lineCount) {
                     rowTilts = gridRows.map(() => 0);
                     rowSpans = [];
+                    rowBends = [];
                 }
                 estimatedRows = new Set([...estimatedRows].map((key) => rowKey(remapRuledYs([Number(key)], from, band)[0])));
             }
@@ -2607,6 +2637,8 @@
                 tilt: gridTilt(columns),
                 tilts: rowTilts,
                 spans: fitSpans(rowSpans, rows.length),
+                columns: bendColumns(boxes),
+                bends: fitBends(rowBends, rows.length, columns.length),
                 aspect: pageAspect(),
             });
             onGridRendered();
@@ -2642,7 +2674,7 @@
                 .map((box) => nameKey(box.name)));
         }
 
-        function setGrid(boxes, rows, { estimated = [], byHand = false, tilts = null, spans = null, selected = null, remember = false } = {}) {
+        function setGrid(boxes, rows, { estimated = [], byHand = false, tilts = null, spans = null, bends = null, selected = null, remember = false } = {}) {
             if (remember) {
                 autoFields = new Map();
                 rememberAutoFields(boxes);
@@ -2651,6 +2683,7 @@
             rowTilts = tilts ? fitTilts(tilts, gridRows.length) : gridRows.map(() => 0);
             // Stretched ends come back only with a grid that kept them (undo, another page, a batch page).
             rowSpans = fitSpans(spans, gridRows.length);
+            rowBends = fitBends(bends, gridRows.length, bendColumns(boxes).length);
             estimatedRows = new Set(estimated);
             rowsByHand = byHand;
             // The row line that stays selected, if any (the table's tilt keeps it).
@@ -2689,19 +2722,22 @@
          * Row lines changed by hand, as one undoable change. Columns on the first or
          * last line follow it, so the table's top and bottom stay on its lines.
          */
-        function applyRows(next, { estimated = estimatedRows, tilts = rowTilts, spans = null } = {}) {
+        function applyRows(next, { estimated = estimatedRows, tilts = rowTilts, spans = null, bends = null } = {}) {
             // A line almost on top of the one above it is dropped, with its tilt.
             const kept = next.map((y, index, all) => index === 0 || y - all[index - 1] > 0.0005);
             const rows = next.filter((_, index) => kept[index]);
             const nextTilts = fitTilts(tilts, next.length).filter((_, index) => kept[index]);
             // Lines moved keep their stretched ends; one added or removed passes its own list.
             const nextSpans = fitSpans(spans ?? rowSpans, next.length).filter((_, index) => kept[index]);
+            // Bends go with their lines too.
+            const nextBends = fitBends(bends ?? rowBends, next.length, bendColumns().length).filter((_, index) => kept[index]);
             const boxes = marker.toJSON();
             const halfRow = rows.length >= 2 ? (rows[rows.length - 1] - rows[0]) / (rows.length - 1) / 2 : 0.01;
             const followed = followFirstAndLastLine(boxes, gridRows, rows, halfRow);
             gridRows = rows;
             rowTilts = nextTilts;
             rowSpans = nextSpans;
+            rowBends = nextBends;
             estimatedRows = new Set([...estimated].filter((key) => rows.some((y) => rowKey(y) === key)));
             rowsByHand = true;
             if (selectedRow !== null && selectedRow >= rows.length) selectedRow = null;
@@ -2774,6 +2810,19 @@
             rowsChanged();
         }
 
+        /** One end (`side` 'l' or 'r') of column `column`'s part of row line `index` moved by `dy`, one undo step. */
+        function bendRow(index, column, dy, side = 'l') {
+            const count = bendColumns().length;
+            if (index < 0 || index >= gridRows.length || column < 0 || column >= count) return;
+            rowBends = fitBends(rowBends, gridRows.length, count).map((bend, line) => {
+                if (line !== index) return bend;
+                const shifts = bend ? bend.map((ends) => [...ends]) : Array.from({ length: count }, () => [0, 0]);
+                shifts[column][side === 'r' ? 1 : 0] = dy;
+                return shifts;
+            });
+            rowsChanged();
+        }
+
         /** Remove a row line: the selected one, else the last. A ledger keeps at least two. */
         function removeRow(index = selectedRow ?? gridRows.length - 1) {
             if (!isLedger || gridRows.length <= 2 || !Number.isInteger(index) || index < 0 || index >= gridRows.length) return;
@@ -2782,6 +2831,7 @@
                 {
                     tilts: rowTilts.filter((_, candidate) => candidate !== index),
                     spans: fitSpans(rowSpans, gridRows.length).filter((_, candidate) => candidate !== index),
+                    bends: fitBends(rowBends, gridRows.length, bendColumns().length).filter((_, candidate) => candidate !== index),
                 });
         }
 
@@ -2817,6 +2867,11 @@
                 tilts: insertTilt(rowTilts, inserted.index),
                 // The new line runs the table's width.
                 spans: [...spans.slice(0, inserted.index), null, ...spans.slice(inserted.index)],
+                // ... and straight.
+                bends: (() => {
+                    const bends = fitBends(rowBends, gridRows.length, bendColumns().length);
+                    return [...bends.slice(0, inserted.index), null, ...bends.slice(inserted.index)];
+                })(),
             });
             selectRow(inserted.index);
         }
@@ -2861,7 +2916,7 @@
             const selected = marker.selectedIndexes();
             // Every line turns with the table, keeping its own extra turn; the selected one stays selected.
             setGrid(turned, gridRows, {
-                estimated: [...estimatedRows], byHand: rowsByHand, tilts: rowTilts, spans: rowSpans, selected: selectedRow,
+                estimated: [...estimatedRows], byHand: rowsByHand, tilts: rowTilts, spans: rowSpans, bends: rowBends, selected: selectedRow,
             });
             marker.selectIndexes(selected);
         }
@@ -4109,6 +4164,7 @@
                     byHand: previous.byHand,
                     tilts: previous.tilts,
                     spans: previous.spans,
+                    bends: previous.bends,
                 });
             } finally {
                 restoringFieldHistory = false;
@@ -4831,6 +4887,7 @@
                 byHand: saved.grid.byHand,
                 tilts: saved.grid.tilts,
                 spans: saved.grid.spans,
+                bends: saved.grid.bends,
             });
             autoFields = new Map(saved.autoFields);
             rowsSource = saved.rowsSource;
@@ -5256,6 +5313,7 @@
             current.rows = [...gridRows];
             current.tilts = [...rowTilts];
             current.spans = fitSpans(rowSpans, gridRows.length);
+            current.bends = fitBends(rowBends, gridRows.length, bendColumns().length);
             current.autoFields = new Map(autoFields);
             current.rowsByHand = rowsByHand;
         }
@@ -6876,7 +6934,7 @@
                 realignBase = realignBaseline(item);
                 if (item.boxes && item.rows) {
                     // A page opened before keeps its own markers, and which of them were placed by hand.
-                    setGrid(item.boxes, item.rows, { tilts: item.tilts, spans: item.spans, remember: !item.autoFields });
+                    setGrid(item.boxes, item.rows, { tilts: item.tilts, spans: item.spans, bends: item.bends, remember: !item.autoFields });
                     if (item.autoFields) autoFields = new Map(item.autoFields);
                 } else {
                     // A new page starts on its layout's template grid. Snap to table is
@@ -7194,6 +7252,7 @@
                 item.rows = [...gridRows];
                 item.tilts = [...rowTilts];
                 item.spans = fitSpans(rowSpans, gridRows.length);
+                item.bends = fitBends(rowBends, gridRows.length, bendColumns().length);
                 item.autoFields = new Map(autoFields);
                 item.rowsByHand = rowsByHand;
                 item.geometry = currentGeometry();
@@ -7777,6 +7836,7 @@
                         rows: item.rows ?? [],
                         tilts: item.tilts ?? null,
                         spans: item.spans ?? null,
+                        bends: item.bends ?? null,
                         geometry: item.geometry ?? null,
                         autoFields: item.autoFields ? [...item.autoFields] : null,
                     }
@@ -9402,6 +9462,7 @@
                     rows: grid ? [...grid.rows] : null,
                     tilts: grid?.tilts ? [...grid.tilts] : null,
                     spans: grid?.spans ? [...grid.spans] : null,
+                    bends: grid?.bends ? [...grid.bends] : null,
                     autoFields: current ? new Map(autoFields) : layout?.autoFields ? new Map(layout.autoFields) : null,
                     rowsByHand: Boolean(grid?.byHand),
                     existingAccepted: Boolean(page) && existingRecordAccepted,
