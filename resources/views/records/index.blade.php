@@ -13,6 +13,61 @@
 @section('content')
     <x-page-header title="Saved Records" />
 
+    {{-- Download one register book as one UTF-8 CSV: type + book number from dropdowns.
+         Its columns are the register's, in its fixed order (RegistryFields::keys). --}}
+    <x-card title="Download one book as CSV" subtitle="One CSV per book, one row per register entry. UTF-8.">
+        <form id="bookDownload" method="GET" action="{{ route('records.books.download') }}"
+              class="row g-3 align-items-end">
+            <input type="hidden" name="format" value="csv">
+            <div class="col-sm-6 col-lg-3">
+                <label for="bookType" class="form-label">Document type</label>
+                <select id="bookType" name="type" class="form-select">
+                    @foreach (['birth' => 'Birth', 'death' => 'Death', 'marriage' => 'Marriage'] as $key => $label)
+                        <option value="{{ $key }}" @selected(($filters['type'] ?? null) === $key)>{{ $label }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-sm-6 col-lg-3">
+                <label for="bookNo" class="form-label">Book number</label>
+                <select id="bookNo" name="book_no" class="form-select" required>
+                    <option value="" disabled selected>Select a type first</option>
+                </select>
+            </div>
+            <div class="col-sm-12 col-lg-3 d-grid">
+                <button type="submit" class="btn btn-primary" id="bookDownloadBtn">
+                    <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i> Download CSV
+                </button>
+            </div>
+        </form>
+    </x-card>
+
+    <script>
+        // Fill the book-number dropdown for the chosen type; nothing to download without a book.
+        (() => {
+            const booksByType = @js($booksByType ?? []);
+            const typeSelect = document.getElementById('bookType');
+            const bookSelect = document.getElementById('bookNo');
+            const button = document.getElementById('bookDownloadBtn');
+
+            function fillBooks() {
+                const books = booksByType[typeSelect.value] ?? [];
+                const option = (value, text, disabled = false) => {
+                    const item = new Option(text, value, disabled, disabled);
+                    item.disabled = disabled;
+                    return item;
+                };
+                bookSelect.replaceChildren(
+                    books.length === 0 ? option('', 'No books for this type', true) : option('', 'Select a book number', true),
+                    ...books.map((book) => option(book, `Book ${book}`)),
+                );
+                button.disabled = books.length === 0;
+            }
+
+            typeSelect.addEventListener('change', fillBooks);
+            fillBooks();
+        })();
+    </script>
+
     <div id="recordsFilterCard">
     <x-card>
         {{-- Type, Batch and the dates filter as soon as they change; the search words on Search or Enter. --}}
@@ -73,15 +128,41 @@
             </div>
             <div class="col-sm-6 col-lg-3 col-xl">
                 <label for="from" class="form-label">From</label>
-                <input type="date" id="from" name="from" value="{{ $filters['from'] ?? '' }}"
-                       class="form-control @error('from') is-invalid @enderror">
-                @error('from')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                {{-- Typed or picked as yyyy-mm-dd (a browser's own date box shows its region's order, mm/dd/yyyy). --}}
+                <div class="records-date">
+                    <div class="input-group @error('from') has-validation @enderror">
+                        <input type="text" id="from" name="from" value="{{ $filters['from'] ?? '' }}"
+                               class="form-control @error('from') is-invalid @enderror" placeholder="yyyy-mm-dd"
+                               maxlength="10" inputmode="numeric" autocomplete="off" pattern="\d{4}-\d{2}-\d{2}"
+                               data-date-text>
+                        <button type="button" class="btn btn-outline-secondary" data-date-pick="from"
+                                aria-label="Pick the From date on a calendar" title="Pick on a calendar">
+                            <i class="icon-base bx bx-calendar" aria-hidden="true"></i>
+                        </button>
+                        @error('from')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                    </div>
+                    {{-- Only opens the calendar (kept outside the group's rounded corners): what is picked goes in the box. --}}
+                    <input type="date" class="records-date__picker" data-date-for="from" tabindex="-1" aria-hidden="true">
+                </div>
             </div>
             <div class="col-sm-6 col-lg-3 col-xl">
                 <label for="to" class="form-label">To</label>
-                <input type="date" id="to" name="to" value="{{ $filters['to'] ?? '' }}"
-                       class="form-control @error('to') is-invalid @enderror">
-                @error('to')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                {{-- Typed or picked as yyyy-mm-dd (a browser's own date box shows its region's order, mm/dd/yyyy). --}}
+                <div class="records-date">
+                    <div class="input-group @error('to') has-validation @enderror">
+                        <input type="text" id="to" name="to" value="{{ $filters['to'] ?? '' }}"
+                               class="form-control @error('to') is-invalid @enderror" placeholder="yyyy-mm-dd"
+                               maxlength="10" inputmode="numeric" autocomplete="off" pattern="\d{4}-\d{2}-\d{2}"
+                               data-date-text>
+                        <button type="button" class="btn btn-outline-secondary" data-date-pick="to"
+                                aria-label="Pick the To date on a calendar" title="Pick on a calendar">
+                            <i class="icon-base bx bx-calendar" aria-hidden="true"></i>
+                        </button>
+                        @error('to')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                    </div>
+                    {{-- Only opens the calendar (kept outside the group's rounded corners): what is picked goes in the box. --}}
+                    <input type="date" class="records-date__picker" data-date-for="to" tabindex="-1" aria-hidden="true">
+                </div>
             </div>
         </form>
     </x-card>
@@ -94,68 +175,10 @@
             <x-empty-state icon="bx-folder-open" title="No records match"
                            message="Adjust the search, or digitise a new certificate." />
         @else
-            {{-- Several records' typed tables as one download: those ticked (kept across pages), or all that match. --}}
-            @php($exportLimit = \App\Http\Controllers\RecordController::EXPORT_LIMIT)
-            <div class="records-export" id="recordsExport" data-export-url="{{ route('records.export') }}"
-                 data-filters="{{ http_build_query(array_filter($filters, fn ($value) => $value !== null && $value !== '')) }}">
-                @php($overLimit = $records->total() > $exportLimit)
-                <span class="records-export__count" id="recordsSelectedCount" aria-live="polite">Tick records to download only some</span>
-                <button type="button" class="btn btn-sm btn-link d-none" id="recordsClearSelection">Clear</button>
-                <div class="records-export__actions">
-                    {{-- Shown only once something is ticked; then it is the main button. --}}
-                    <div class="dropdown d-none" id="recordsDownloadSelectedWrap">
-                        <button type="button" class="btn btn-sm btn-primary dropdown-toggle" id="recordsDownloadSelected"
-                                data-bs-toggle="dropdown" aria-expanded="false" disabled>
-                            <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
-                            <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i><span id="recordsDownloadSelectedLabel">Download ticked</span>
-                        </button>
-                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="recordsDownloadSelected">
-                            <li><button type="button" class="dropdown-item" data-export="selected" data-format="csv">
-                                <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)</button></li>
-                            <li><button type="button" class="dropdown-item" data-export="selected" data-format="xlsx">
-                                <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)</button></li>
-                        </ul>
-                    </div>
-                    @if ($overLimit && $book === null)
-                        {{-- Said in plain text: a tooltip on a switched-off button often never shows. --}}
-                        <span class="records-export__limit small text-muted align-self-center">
-                            At most {{ number_format($exportLimit) }} per download: narrow the search or dates
-                        </span>
-                    @endif
-                    <div class="dropdown">
-                        {{-- Main (solid) button while nothing is ticked; outline once something is. --}}
-                        <button type="button" class="btn btn-sm btn-primary dropdown-toggle" id="recordsDownloadAll"
-                                data-bs-toggle="dropdown" aria-expanded="false" @disabled($overLimit && $book === null)>
-                            <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
-                            <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>{{ $book !== null ? "Download Book {$book}" : ($hasFilters ? 'Download these' : 'Download all').' '.number_format($records->total()) }}
-                        </button>
-                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="recordsDownloadAll">
-                            @if ($book !== null)
-                                {{-- The whole book: one row per entry, in page order. --}}
-                                @foreach (['csv' => ['bx-file', 'CSV (.csv)'], 'xlsx' => ['bx-spreadsheet', 'Excel (.xlsx)']] as $format => [$icon, $text])
-                                    <li><a class="dropdown-item" href="{{ route('records.books.download', ['type' => $filters['type'], 'book_no' => $book, 'format' => $format]) }}">
-                                        <i class="icon-base bx {{ $icon }} icon-sm me-2" aria-hidden="true"></i>{{ $text }}</a></li>
-                                @endforeach
-                            @else
-                                <li><button type="button" class="dropdown-item" data-export="all" data-format="csv">
-                                    <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)</button></li>
-                                <li><button type="button" class="dropdown-item" data-export="all" data-format="xlsx">
-                                    <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)</button></li>
-                            @endif
-                        </ul>
-                    </div>
-                </div>
-                <div class="records-export__error text-danger small d-none" id="recordsExportError" role="alert"></div>
-            </div>
-
             <div class="table-responsive">
                 <table class="table table-hover align-middle">
                     <thead>
                         <tr>
-                            <th class="records-export__check">
-                                <input type="checkbox" class="form-check-input" id="recordsSelectPage"
-                                       aria-label="Tick every record on this page">
-                            </th>
                             <th>Record</th>
                             <th>Type</th>
                             <th>Source</th>
@@ -165,10 +188,6 @@
                     <tbody>
                         @foreach ($records as $record)
                             <tr>
-                                <td class="records-export__check">
-                                    <input type="checkbox" class="form-check-input" data-record-id="{{ $record->getKey() }}"
-                                           aria-label="Tick record #{{ $record->getKey() }} to download it">
-                                </td>
                                 @php($detail = $details[$record->getKey()] ?? ['title' => $record->title(), 'people' => 0, 'range' => null, 'file' => null, 'source' => 'unknown', 'batch' => null])
                                 <td class="records-list__record">
                                     <a href="{{ route('records.show', $record) }}" class="fw-medium records-list__title">{{ $detail['title'] }}</a>
@@ -240,8 +259,6 @@
 
 @push('scripts')
     <script type="module">
-        import { downloadRecordTables, exportFileName, fetchRecordTables } from '{{ Vite::asset('resources/js/review-table.js') }}';
-
         // ---------------------------------------------------------------- in place
         // A filter, a search, a page of results or a Batch link loads the results
         // into this page (no whole-page reload): the page is fetched, its filters
@@ -321,8 +338,43 @@
                 if (book) book.value = '';
             }
             if (field.matches('select')) submitFilters();
-            if (field.matches('input[type="date"]')
-                && (field.value === '' || (/^\d{4}-/.test(field.value) && Number(field.value.slice(0, 4)) >= 1800))) submitFilters();
+            // A date picked on the calendar: written as yyyy-mm-dd into its box, then filtered.
+            if (field.matches('[data-date-for]')) {
+                const box = document.getElementById(field.dataset.dateFor);
+                if (box && field.value) {
+                    box.value = field.value;
+                    box.classList.remove('is-invalid');
+                    submitFilters();
+                }
+            }
+        });
+        // A date typed by hand: digits become yyyy-mm-dd as they are typed (19570211 -> 1957-02-11),
+        // and it filters once it is a whole date (a 4-digit year from 1800), or emptied.
+        filterCard.addEventListener('input', (event) => {
+            const box = event.target;
+            if (!box.matches('[data-date-text]')) return;
+            const digits = box.value.replace(/\D/g, '').slice(0, 8);
+            const shaped = [digits.slice(0, 4), digits.slice(4, 6), digits.slice(6, 8)].filter(Boolean).join('-');
+            if (shaped !== box.value && event.inputType !== 'deleteContentBackward') box.value = shaped;
+            const whole = /^\d{4}-\d{2}-\d{2}$/.test(box.value) && Number(box.value.slice(0, 4)) >= 1800
+                && !Number.isNaN(Date.parse(`${box.value}T00:00:00`));
+            box.classList.toggle('is-invalid', box.value.length === 10 && !whole);
+            if (box.value === '' || whole) submitFilters();
+        });
+        // The calendar button opens the browser's calendar, starting at the date in the box.
+        filterCard.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-date-pick]');
+            if (!button) return;
+            const picker = filterCard.querySelector(`[data-date-for="${button.dataset.datePick}"]`);
+            const box = document.getElementById(button.dataset.datePick);
+            if (!picker) return;
+            picker.value = /^\d{4}-\d{2}-\d{2}$/.test(box?.value ?? '') ? box.value : '';
+            try {
+                picker.showPicker();
+            } catch {
+                // An older browser without showPicker: the date is typed instead.
+                box?.focus();
+            }
         });
         filterCard.addEventListener('submit', (event) => {
             if (!event.target.matches('#recordsFilters')) return;
@@ -340,104 +392,8 @@
         window.addEventListener('popstate', () => loadRecords(window.location.href, { push: false }));
         window.history.replaceState({ records: true }, '', window.location.href);
 
-        // ---------------------------------------------------------------- ticks and downloads
-        // What is ticked stays ticked from page to page (in this tab), until Clear.
-        const KEY = 'crms-records-selected';
-        const selected = (() => {
-            try {
-                return new Set(JSON.parse(sessionStorage.getItem(KEY) || '[]').map(Number).filter(Boolean));
-            } catch {
-                return new Set();
-            }
-        })();
-        const save = () => {
-            try {
-                sessionStorage.setItem(KEY, JSON.stringify([...selected]));
-            } catch {
-                // Not kept between pages, then: the download still works on this one.
-            }
-        };
-        const boxes = () => [...results.querySelectorAll('input[data-record-id]')];
-
-        function render() {
-            const bar = document.getElementById('recordsExport');
-            if (!bar) return;
-            const shown = boxes();
-            shown.forEach((box) => { box.checked = selected.has(Number(box.dataset.recordId)); });
-            const onPage = shown.filter((box) => box.checked).length;
-            const pageBox = document.getElementById('recordsSelectPage');
-            pageBox.checked = onPage > 0 && onPage === shown.length;
-            pageBox.indeterminate = onPage > 0 && onPage < shown.length;
-            const count = selected.size;
-            // Ticks stay from page to page: say how many are on this one.
-            const where = onPage === count ? '' : (onPage === 0 ? ' (none on this page)' : ` (${onPage} on this page)`);
-            document.getElementById('recordsSelectedCount').textContent = count === 0
-                ? 'Tick records to download only some'
-                : `${count.toLocaleString()} record${count === 1 ? '' : 's'} ticked${where}`;
-            document.getElementById('recordsClearSelection').classList.toggle('d-none', count === 0);
-            // Nothing ticked: only "Download all" shows, as the main button. Something
-            // ticked: "Download N ticked" appears as the main one, "Download all" goes outline.
-            document.getElementById('recordsDownloadSelectedWrap').classList.toggle('d-none', count === 0);
-            document.getElementById('recordsDownloadSelected').disabled = count === 0;
-            document.getElementById('recordsDownloadSelectedLabel').textContent = `Download ${count.toLocaleString()} ticked`;
-            const all = document.getElementById('recordsDownloadAll');
-            all.classList.toggle('btn-primary', count === 0);
-            all.classList.toggle('btn-outline-primary', count > 0);
-        }
-        const setUpResults = render;
-
-        results.addEventListener('change', (event) => {
-            const box = event.target;
-            if (box.matches('input[data-record-id]')) {
-                const id = Number(box.dataset.recordId);
-                if (box.checked) selected.add(id);
-                else selected.delete(id);
-            } else if (box.matches('#recordsSelectPage')) {
-                boxes().forEach((one) => {
-                    const id = Number(one.dataset.recordId);
-                    if (box.checked) selected.add(id);
-                    else selected.delete(id);
-                });
-            } else {
-                return;
-            }
-            save();
-            render();
-        });
-        results.addEventListener('click', async (event) => {
-            if (event.target.closest('#recordsClearSelection')) {
-                selected.clear();
-                save();
-                render();
-                return;
-            }
-            const item = event.target.closest('[data-export]');
-            const bar = document.getElementById('recordsExport');
-            if (!item || !bar) return;
-            const which = item.dataset.export;
-            const toggle = document.getElementById(which === 'all' ? 'recordsDownloadAll' : 'recordsDownloadSelected');
-            const spinner = toggle.querySelector('.spinner-border');
-            const errorLine = document.getElementById('recordsExportError');
-            const params = new URLSearchParams(which === 'all' ? bar.dataset.filters : '');
-            if (which === 'all') params.set('all', '1');
-            else [...selected].sort((a, b) => a - b).forEach((id) => params.append('ids[]', String(id)));
-
-            errorLine.classList.add('d-none');
-            toggle.disabled = true;
-            spinner?.classList.remove('d-none');
-            try {
-                const records = await fetchRecordTables(bar.dataset.exportUrl, params);
-                if (records.length === 0) throw new Error('none of those records could be found.');
-                await downloadRecordTables(records, exportFileName('records', new Date().toISOString().slice(0, 10)), item.dataset.format);
-            } catch (error) {
-                errorLine.textContent = `The download could not be made: ${error.message || 'try again.'}`;
-                errorLine.classList.remove('d-none');
-            } finally {
-                spinner?.classList.add('d-none');
-                render();
-                toggle.disabled = which === 'all' ? false : selected.size === 0;
-            }
-        });
+        // Results swapped in: nothing more to set up on them.
+        function setUpResults() {}
 
         setUpResults();
     </script>

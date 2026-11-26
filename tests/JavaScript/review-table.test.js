@@ -111,6 +111,8 @@ test('CSV is UTF-8 with a byte-order mark, quoted where needed, formulas made te
     assert.equal(csv, '﻿Row,Name\r\n01,"Peña, José"\r\n02,"\'=HYPERLINK(""x"")"\r\n03,"Line ""one"""\r\n');
     assert.equal(csvSafe('-5'), "'-5");
     assert.equal(csvSafe('Ñino'), 'Ñino');
+    // A date stays YYYY-MM-DD in Excel: ="1957-02-11", quoted for the CSV.
+    assert.equal(toCsv([['date_of_birth'], ['1957-02-11']]), '﻿date_of_birth\r\n"=""1957-02-11"""\r\n');
 });
 
 test('the Excel sheet keeps every value as text with a bold header', () => {
@@ -289,7 +291,7 @@ test('a register downloads with its field names and no Row column, and saves eac
     table.model = applyRegistry(scanned(), BIRTH, () => ({ 'column 1': 'reg_no', name: 'name' }));
     assert.deepEqual(table.exportTable(), [
         ['name', 'sex', 'reg_no', 'mother_age', 'attendant', 'late_registration'],
-        ['ARIEL VILLANUJAN', '', '5', '', 'MIDWIFE', 'FALSE'],
+        ['ARIEL VILLANUJAN', '', '5', '', 'MIDWIFE', '0'],
     ]);
     assert.deepEqual(table.fieldRows(), [{ row: '01', values: {
         name: 'Ariel Villanujan', sex: '', reg_no: '5', mother_age: '', attendant: 'MIDWIFE', late_registration: 'false',

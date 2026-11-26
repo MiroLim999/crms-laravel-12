@@ -23,7 +23,7 @@ class RecordArchiveFilterTest extends TestCase
         $response = $this->actingAs($account)
             ->get(route('records.index', ['from' => 'abc']))
             ->assertOk()
-            ->assertSee('The from date field must be a valid date.')
+            ->assertSee('The from date must be written yyyy-mm-dd, for example 1957-02-11.')
             ->assertViewHas('errors', fn ($errors) => $errors->has('from'));
 
         // The bad filter is left out, so the list still shows every record.

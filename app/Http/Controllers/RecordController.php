@@ -66,8 +66,8 @@ class RecordController extends Controller
             'batch' => ['nullable', 'string', 'regex:/^(single|[1-9][0-9]{0,9})$/'],
             // A register book of the chosen type (birth, death, marriage): its records.
             'book' => ['nullable', 'string', 'max:32'],
-            'from' => ['nullable', 'date'],
-            'to' => ['nullable', 'date', 'after_or_equal:from'],
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
         ];
     }
 
@@ -121,7 +121,9 @@ class RecordController extends Controller
 
     public function index(Request $request): View
     {
-        $validator = Validator::make($request->all(), $this->filterRules(), [], ['q' => 'search', 'from' => 'from date', 'to' => 'to date']);
+        $validator = Validator::make($request->all(), $this->filterRules(), [
+            'date_format' => 'The :attribute must be written yyyy-mm-dd, for example 1957-02-11.',
+        ], ['q' => 'search', 'from' => 'from date', 'to' => 'to date']);
 
         // The filters come from the query string, so an edited URL can carry a
         // bad one. Its message is shown on this page and the filter left out,
@@ -157,6 +159,10 @@ class RecordController extends Controller
             'documentTypes' => DocumentTypeDefinition::ordered(),
             // The Book filter, shown once a register type (birth, death, marriage) is picked.
             'books' => $this->booksOf($filters['type'] ?? null),
+            // "Download one book as CSV": each register type's book numbers.
+            'booksByType' => collect(['birth', 'death', 'marriage'])
+                ->mapWithKeys(fn (string $type) => [$type => $this->booksOf($type)])
+                ->all(),
         ]);
     }
 
@@ -384,7 +390,7 @@ class RecordController extends Controller
             fwrite($handle, "\u{FEFF}");
             fputcsv($handle, $table['header']);
             foreach ($table['rows'] as $row) {
-                fputcsv($handle, $row);
+                fputcsv($handle, array_map([CsvCell::class, 'forCsv'], $row));
             }
             fclose($handle);
         }, $csv->filename($record), [
@@ -461,7 +467,7 @@ class RecordController extends Controller
                 $row = [];
                 foreach ($columns as $column) {
                     // A value starting with = + - @ is not run as a formula by Excel.
-                    $row[] = CsvCell::safe(RegistryFields::exportCell($column, $record->getAttribute($column)));
+                    $row[] = CsvCell::forCsv(CsvCell::safe(RegistryFields::exportCell($column, $record->getAttribute($column))));
                 }
                 fputcsv($handle, $row);
             }

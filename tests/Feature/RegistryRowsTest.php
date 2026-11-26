@@ -314,7 +314,7 @@ class RegistryRowsTest extends TestCase
         $user = User::factory()->superAdmin()->create();
         BirthRecord::create([
             'book_no' => '7', 'page_no' => '83', 'reg_no' => '5', 'name' => 'Ariel P. Villanujan',
-            'mother_age' => 27, 'late_registration' => true,
+            'mother_age' => 27, 'late_registration' => true, 'date_of_birth' => '1957-02-11',
         ]);
 
         $csv = $this->actingAs($user)
@@ -327,9 +327,43 @@ class RegistryRowsTest extends TestCase
         $row = array_combine($lines[0], $lines[1]);
         $this->assertSame('ARIEL P. VILLANUJAN', $row['name']);
         $this->assertSame('27', $row['mother_age']);
-        $this->assertSame('TRUE', $row['late_registration']);
+        $this->assertSame('1', $row['late_registration']);
+        // A date stays YYYY-MM-DD when Excel opens the file (="..." keeps it as text).
+        $this->assertSame('="1957-02-11"', $row['date_of_birth']);
         $this->assertSame('', $row['father_age']);
         $this->assertSame('', $row['place_of_birth']);
+    }
+
+    public function test_each_registers_book_csv_has_the_agreed_column_order(): void
+    {
+        $this->assertSame([
+            'name', 'date_of_birth', 'sex', 'book_no', 'page_no', 'reg_no', 'date_of_reg', 'place_of_birth',
+            'name_of_mother', 'nationality_mother', 'name_of_father', 'nationality_father', 'parents_marriage_date',
+            'parents_marriage_place', 'attendant', 'type_of_birth', 'mother_age', 'father_age', 'late_registration',
+        ], RegistryFields::keys('birth'));
+        $this->assertSame([
+            'name', 'date_of_death', 'sex', 'book_no', 'page_no', 'reg_no', 'date_of_reg', 'age_years', 'age_months',
+            'age_days', 'age_hours', 'age_mins', 'civil_status', 'nationality', 'place_of_death', 'cause_of_death',
+            'corpse_disposal', 'attendant', 'residence', 'date_of_birth', 'late_registration',
+        ], RegistryFields::keys('death'));
+        $this->assertSame([
+            'husband_name', 'wife_name', 'date_of_marriage', 'book_no', 'page_no', 'reg_no', 'husband_age', 'wife_age',
+            'husb_nationality', 'wife_nationality', 'husb_civil_status', 'wife_civil_status', 'husb_mother', 'wife_mother',
+            'husb_father', 'wife_father', 'date_of_reg', 'place_of_marriage', 'ceremony_type', 'late_registration',
+        ], RegistryFields::keys('marriage'));
+    }
+
+    public function test_saved_records_offers_one_book_as_csv_by_type_and_book_number(): void
+    {
+        $user = User::factory()->superAdmin()->create();
+        BirthRecord::create(['book_no' => '7', 'page_no' => '83', 'reg_no' => '5', 'name' => 'Ariel P. Villanujan']);
+
+        $this->actingAs($user)
+            ->get(route('records.index'))
+            ->assertOk()
+            ->assertSee('Download one book as CSV')
+            ->assertSee('id="bookDownload"', false)
+            ->assertViewHas('booksByType', fn ($books) => $books['birth'] === ['7'] && $books['death'] === [] && $books['marriage'] === []);
     }
 
     /** A birth row as step 4 sends it. */

@@ -163,33 +163,22 @@ textarea,
   vertical-align: middle;
 }
 
-.records-export {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .5rem .75rem;
-  margin-block-end: .75rem;
-  padding: .55rem .75rem;
-  border: 1px solid var(--bs-border-color);
-  border-radius: .5rem;
-  background: var(--bs-tertiary-bg);
+// Saved Records' From / To: a yyyy-mm-dd text box with a calendar button. The browser's
+// own date box only opens the calendar: unseen, at the button, so the calendar opens there.
+.records-date {
+  position: relative;
 }
 
-.records-export__count {
-  color: var(--bs-secondary-color);
-  font-size: .85rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.records-export__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .5rem;
-  margin-inline-start: auto;
-}
-
-.records-export__error {
-  flex-basis: 100%;
+.records-date__picker {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  inline-size: 2.5rem;
+  block-size: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 // The pager under every list (resources/views/vendor/pagination/crms.blade.php):
@@ -219,17 +208,6 @@ textarea,
   strong {
     color: var(--bs-heading-color);
     font-weight: 600;
-  }
-}
-
-// The tick column: just wide enough for its box.
-.records-export__check {
-  inline-size: 2.5rem;
-  padding-inline-end: 0 !important;
-
-  .form-check-input {
-    margin: 0;
-    cursor: pointer;
   }
 }
 

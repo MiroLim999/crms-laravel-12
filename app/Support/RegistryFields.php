@@ -301,10 +301,11 @@ final class RegistryFields
     /** A value as the downloads write it: true / false, plain digits, blank for none. */
     public static function cell(mixed $value): string
     {
-        // Downloads are all capitals, as the registers are kept (TRUE / FALSE too).
+        // Downloads are all capitals, as the registers are kept; a yes / no
+        // (late_registration) is 1 or 0, as the database keeps it.
         return mb_strtoupper(match (true) {
             $value === null => '',
-            is_bool($value) => $value ? 'true' : 'false',
+            is_bool($value) => $value ? '1' : '0',
             default => (string) $value,
         });
     }

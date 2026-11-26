@@ -81,21 +81,18 @@ class RecordsExportTest extends TestCase
         $this->getJson(route('records.export', ['ids' => [$record->getKey()]]))->assertUnauthorized();
     }
 
-    public function test_the_archive_offers_the_downloads(): void
+    public function test_the_archive_offers_one_book_and_no_tick_and_download_bar(): void
     {
         $user = User::factory()->create();
         $record = $this->record($user, 'Ana Cruz');
 
+        // Downloads are by book (Download one book as CSV): no tick boxes or Download all.
         $this->actingAs($user)->get(route('records.index'))
             ->assertOk()
-            ->assertSee('id="recordsDownloadSelected"', false)
-            ->assertSee('Download all 1')
-            ->assertSee('data-record-id="'.$record->getKey().'"', false);
-
-        // With a search on, the button says it follows the search.
-        $this->actingAs($user)->get(route('records.index', ['q' => 'Ana']))
-            ->assertOk()
-            ->assertSee('Download these 1')
+            ->assertSee('id="bookDownload"', false)
+            ->assertSee(route('records.show', $record), false)
+            ->assertDontSee('id="recordsExport"', false)
+            ->assertDontSee('data-record-id=', false)
             ->assertDontSee('Download all 1');
     }
 

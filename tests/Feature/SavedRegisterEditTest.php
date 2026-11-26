@@ -154,7 +154,7 @@ class SavedRegisterEditTest extends TestCase
             ->assertSee('id="book"', false);
     }
 
-    public function test_a_picked_book_lists_its_records_and_downloads_as_that_book(): void
+    public function test_a_picked_book_lists_only_its_records(): void
     {
         $record = $this->savedRecord();
         $other = CivilRecord::factory()->create(['doc_type' => DocumentType::Birth->value, 'document_type_id' => $record->document_type_id]);
@@ -165,13 +165,12 @@ class SavedRegisterEditTest extends TestCase
             ->assertOk();
 
         $this->assertSame([$record->getKey()], $response->viewData('records')->pluck('id')->all());
-        $response->assertSee('Download Book 7')
-            ->assertSee(route('records.books.download', ['type' => 'birth', 'book_no' => '7', 'format' => 'xlsx']));
+        // The book is downloaded from "Download one book as CSV", not from the list.
+        $response->assertSee('id="bookDownload"', false)->assertDontSee('Download Book 7');
 
-        // Without a book: every birth record, and the usual Download.
-        $this->actingAs($this->user)->get(route('records.index', ['type' => 'birth']))->assertOk()
-            ->assertSee('Download these 2')
-            ->assertDontSee('Download Book');
+        // Without a book: every birth record.
+        $all = $this->actingAs($this->user)->get(route('records.index', ['type' => 'birth']))->assertOk();
+        $this->assertCount(2, $all->viewData('records'));
     }
 
     /** A birth record saved through step 4 with two register rows (book 7, page 83). */

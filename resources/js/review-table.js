@@ -394,6 +394,9 @@ export function csvSafe(value) {
 
 /** One CSV cell, quoted when it has to be. */
 function csvCell(value) {
+    // A date (1957-02-11) is written as ="1957-02-11", so Excel keeps it as text
+    // and does not show it as 2/11/1957. Only an exact date gets it: nothing typed becomes a formula.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ''))) return `"=""${value}"""`;
     const text = csvSafe(value);
     return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
@@ -470,6 +473,13 @@ export function exportFileName(...parts) {
         .trim();
     return name || 'Records';
 }
+
+/** late_registration downloads as 1 or 0, as the database keeps it (not TRUE / FALSE). */
+const downloadedFlag = (column, value) => {
+    if (column?.field !== 'late_registration') return value;
+    const flag = String(value ?? '').trim().toLowerCase();
+    return flag === 'true' ? '1' : flag === 'false' ? '0' : value;
+};
 
 /** A downloaded value: all capitals, as the registers are kept. */
 const exportCase = (value) => String(value ?? '').toLocaleUpperCase('en-US');
@@ -2604,7 +2614,7 @@ export class ReviewTable {
         // Every value in capitals.
         const rows = this.model.rows.map((row, rowIndex) => [
             ...(register ? [] : [this.rowLabelOf(row)]),
-            ...shown.map(({ index }) => exportCase(this._exported(this.cell(rowIndex, index)))),
+            ...shown.map(({ index }) => exportCase(downloadedFlag(this.model.columns[index], this._exported(this.cell(rowIndex, index))))),
         ]);
         return [header, ...rows];
     }

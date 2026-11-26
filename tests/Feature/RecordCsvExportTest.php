@@ -149,7 +149,7 @@ class RecordCsvExportTest extends TestCase
         $row = array_combine($header, $rows[0]);
         $this->assertSame('ANA CRUZ', $row['name']);
         $this->assertSame('FEMALE', $row['sex']);
-        $this->assertSame('FALSE', $row['late_registration']);
+        $this->assertSame('0', $row['late_registration']);
         $this->assertStringContainsString(
             'Book of Birth - Book 12 Page 23 - Record '.$record->getKey().'.csv',
             $response->headers->get('Content-Disposition'),

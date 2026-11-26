@@ -57,7 +57,7 @@ class RecordsArchiveListTest extends TestCase
 
         $this->actingAs($user)->get(route('records.index', ['q' => 'copy (2)']))
             ->assertOk()
-            ->assertSee('data-record-id="'.$wanted->getKey().'"', false)
+            ->assertSee(route('records.show', $wanted), false)
             ->assertSee('1 matching record')
             ->assertDontSee('another-book.pdf');
     }
@@ -92,8 +92,8 @@ class RecordsArchiveListTest extends TestCase
             ->assertOk()
             // Offered in the Batch list, counting records (not pages).
             ->assertSee('· 1 record</option>', false)
-            ->assertSee('data-record-id="'.$inBatch->getKey().'"', false)
-            ->assertDontSee('data-record-id="'.$other->getKey().'"', false);
+            ->assertSee(route('records.show', $inBatch), false)
+            ->assertDontSee(route('records.show', $other), false);
     }
 
     public function test_each_record_says_whether_a_batch_or_a_single_file_saved_it(): void
@@ -115,9 +115,9 @@ class RecordsArchiveListTest extends TestCase
         // Single files only: the one saved alone since batches are kept.
         $this->actingAs($user)->get(route('records.index', ['batch' => 'single']))
             ->assertOk()
-            ->assertSee('data-record-id="'.$single->getKey().'"', false)
-            ->assertDontSee('data-record-id="'.$fromBatch->getKey().'"', false)
-            ->assertDontSee('data-record-id="'.$old->getKey().'"', false);
+            ->assertSee(route('records.show', $single), false)
+            ->assertDontSee(route('records.show', $fromBatch), false)
+            ->assertDontSee(route('records.show', $old), false);
     }
 
     public function test_the_results_page_is_not_mistaken_for_a_filter(): void
