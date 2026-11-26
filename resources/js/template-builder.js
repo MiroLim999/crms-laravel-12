@@ -12,6 +12,7 @@ import {
     columnsAtPageTilt,
     distributeRuledYs,
     fieldsOverLedger,
+    fitBends,
     fitColumnsToPrinted,
     fitTilts,
     followFirstAndLastLine,
@@ -201,6 +202,17 @@ let rowTilts = fitTilts(config.initialRuledTilts, ruledYs.length);
 // Row lines stretched shorter or longer than the table: {l, r} or null, one per line.
 const baselineRowSpans = fitSpans(config.baselineRuledSpans, baselineRuledYs.length);
 let rowSpans = fitSpans(config.initialRuledSpans, ruledYs.length);
+// Each row line's column bends, as the Align step has them (fitBends): per line, each
+// column's [left end, right end] moved up or down, or null. Saved with the layout
+// (ruled_bends), and the Align step starts from them. Seen and lined up against only.
+// Kept as sent until the columns are known (see bendCount).
+let rowBends = Array.isArray(config.initialRuledBends) ? config.initialRuledBends : [];
+const baselineRowBendsRaw = Array.isArray(config.baselineRuledBends) ? config.baselineRuledBends : [];
+
+/** The table's columns, left to right, as {l, r} page fractions: where each line's pieces and squares go. */
+function bendColumns(boxes = marker.toJSON()) {
+    return boxes.filter(isColumn).map((column) => ({ l: column.x, r: column.x + column.w })).sort((a, b) => a.l - b.l);
+}
 groupingModeInput.value = initialGroupingMode;
 
 // Markers, person-row mode and row lines, undone together (Ctrl+Z).
@@ -293,15 +305,16 @@ const pageTwoBaseline = {
     ruledYs: savedPageTwo ? normaliseRuledYs(savedPageTwo.ruled_ys) : [],
     rowTilts: savedPageTwo ? fitTilts(savedPageTwo.ruled_tilts, normaliseRuledYs(savedPageTwo.ruled_ys).length) : [],
     rowSpans: savedPageTwo ? fitSpans(savedPageTwo.ruled_spans, normaliseRuledYs(savedPageTwo.ruled_ys).length) : [],
+    rowBends: savedPageTwo && Array.isArray(savedPageTwo.ruled_bends) ? savedPageTwo.ruled_bends : [],
     grouping: savedPageTwo?.grouping_mode === 'custom' ? 'custom' : 'auto',
 };
 const pageBaselines = {
-    1: { boxes: baselineBoxes, ruledYs: baselineRuledYs, rowTilts: baselineRowTilts, rowSpans: baselineRowSpans, grouping: baselineGroupingMode },
+    1: { boxes: baselineBoxes, ruledYs: baselineRuledYs, rowTilts: baselineRowTilts, rowSpans: baselineRowSpans, rowBends: baselineRowBendsRaw, grouping: baselineGroupingMode },
     2: pageTwoBaseline,
 };
 const pageLayouts = {
     1: null,
-    2: { boxes: cloneBoxes(pageTwoBaseline.boxes), ruledYs: [...pageTwoBaseline.ruledYs], rowTilts: [...pageTwoBaseline.rowTilts], rowSpans: [...pageTwoBaseline.rowSpans], grouping: pageTwoBaseline.grouping },
+    2: { boxes: cloneBoxes(pageTwoBaseline.boxes), ruledYs: [...pageTwoBaseline.ruledYs], rowTilts: [...pageTwoBaseline.rowTilts], rowSpans: [...pageTwoBaseline.rowSpans], rowBends: [...pageTwoBaseline.rowBends], grouping: pageTwoBaseline.grouping },
 };
 // A saved page 2 opens as two pages; a picked sample then decides (see setTwoPage).
 let twoPage = savedPageTwo !== null;
@@ -313,6 +326,8 @@ function layoutMatchesBaseline() {
         && JSON.stringify(ruledYs) === JSON.stringify(baseline.ruledYs)
         && JSON.stringify(fitTilts(rowTilts, ruledYs.length)) === JSON.stringify(fitTilts(baseline.rowTilts, baseline.ruledYs.length))
         && JSON.stringify(fitSpans(rowSpans, ruledYs.length)) === JSON.stringify(fitSpans(baseline.rowSpans, baseline.ruledYs.length))
+        && JSON.stringify(fitBends(rowBends, ruledYs.length, bendColumns().length))
+            === JSON.stringify(fitBends(baseline.rowBends, baseline.ruledYs.length, bendColumns(baseline.boxes).length))
         && groupingModeInput.value === baseline.grouping;
 }
 
@@ -329,6 +344,7 @@ function layoutState(boxes = marker.toJSON()) {
         ruledYs: [...ruledYs],
         rowTilts: fitTilts(rowTilts, ruledYs.length),
         rowSpans: fitSpans(rowSpans, ruledYs.length),
+        rowBends: fitBends(rowBends, ruledYs.length, bendColumns(boxes).length),
     };
 }
 
@@ -341,6 +357,7 @@ function handleMarkerChange(boxes) {
         ruledYs = [];
         rowTilts = [];
         rowSpans = [];
+        rowBends = [];
         selectedRule = null;
         estimatedYs = new Set();
     }
@@ -973,6 +990,7 @@ function undoLayoutChange() {
     ruledYs = normaliseRuledYs(previous.ruledYs);
     rowTilts = fitTilts(previous.rowTilts, ruledYs.length);
     rowSpans = fitSpans(previous.rowSpans, ruledYs.length);
+    rowBends = fitBends(previous.rowBends, ruledYs.length, bendColumns(previous.boxes).length);
     selectedRule = null;
     marker.setBoxes(cloneBoxes(previous.boxes));
     restoringHistory = false;
@@ -993,6 +1011,7 @@ function pasteRowLine() {
         marker.toJSON(),
         insertTilt(fitTilts(rowTilts, ruledYs.length), inserted.index).map((value, i) => (i === inserted.index ? copiedRowLine.tilt : value)),
         insertSpan(fitSpans(rowSpans, ruledYs.length), inserted.index, copiedRowLine.span),
+        insertSpan(fitBends(rowBends, ruledYs.length, bendColumns().length), inserted.index, copiedRowLine.bend ?? null),
     );
     selectRule(inserted.index);
 }
@@ -1145,7 +1164,7 @@ function validateFields() {
 }
 
 /** A layout's markers and row lines as the server takes them. */
-function layoutPayload(boxes, ruled, grouping, tilts = [], spans = []) {
+function layoutPayload(boxes, ruled, grouping, tilts = [], spans = [], bends = []) {
     const fields = boxes.filter((box) => !isColumn(box)).map((box) => ({
             name: box.name.trim(),
             x: box.x.toFixed(5),
@@ -1173,6 +1192,7 @@ function layoutPayload(boxes, ruled, grouping, tilts = [], spans = []) {
         ruled_ys: columns.length > 0 ? ruled.map((y) => Number(y.toFixed(5))) : [],
         ruled_tilts: columns.length > 0 ? fitTilts(tilts, ruled.length).map((t) => Math.round(t * 10) / 10) : [],
         ruled_spans: columns.length > 0 ? fitSpans(spans, ruled.length).map((span) => (span ? [span.l, span.r] : null)) : [],
+        ruled_bends: columns.length > 0 ? fitBends(bends, ruled.length, columns.length) : [],
         grouping_mode: grouping === 'custom' ? 'custom' : 'auto',
     };
 }
@@ -1185,9 +1205,9 @@ function serialiseFields() {
     if (twoPage) storeActivePage();
     const first = twoPage
         ? pageLayouts[1]
-        : { boxes: marker.toJSON(), ruledYs, rowTilts, rowSpans, grouping: groupingModeInput.value };
+        : { boxes: marker.toJSON(), ruledYs, rowTilts, rowSpans, rowBends, grouping: groupingModeInput.value };
     groupingModeInput.value = first.grouping === 'custom' ? 'custom' : 'auto';
-    const { fields, columns, ruled_ys: ruledList, ruled_tilts: tiltList, ruled_spans: spanList } = layoutPayload(first.boxes, first.ruledYs, first.grouping, first.rowTilts, first.rowSpans);
+    const { fields, columns, ruled_ys: ruledList, ruled_tilts: tiltList, ruled_spans: spanList, ruled_bends: bendList } = layoutPayload(first.boxes, first.ruledYs, first.grouping, first.rowTilts, first.rowSpans, first.rowBends);
 
     // One JSON input each avoids PHP's max_input_vars truncating large layouts.
     [
@@ -1196,11 +1216,12 @@ function serialiseFields() {
         ['ruled_ys_json', ruledList],
         ['ruled_tilts_json', tiltList],
         ['ruled_spans_json', spanList],
+        ['ruled_bends_json', bendList],
         // Page 2 of a two-page layout; an empty one removes a page 2 saved before.
         ...(twoPage || savedPageTwo
             ? [['page_two_json', twoPage
-                ? layoutPayload(pageLayouts[2].boxes, pageLayouts[2].ruledYs, pageLayouts[2].grouping, pageLayouts[2].rowTilts, pageLayouts[2].rowSpans)
-                : { fields: [], columns: [], ruled_ys: [], ruled_tilts: [], ruled_spans: [], grouping_mode: 'auto' }]]
+                ? layoutPayload(pageLayouts[2].boxes, pageLayouts[2].ruledYs, pageLayouts[2].grouping, pageLayouts[2].rowTilts, pageLayouts[2].rowSpans, pageLayouts[2].rowBends)
+                : { fields: [], columns: [], ruled_ys: [], ruled_tilts: [], ruled_spans: [], ruled_bends: [], grouping_mode: 'auto' }]]
             : []),
     ].forEach(([name, value]) => {
         const input = document.createElement('input');
@@ -1441,6 +1462,7 @@ function restoreBaseline() {
     ruledYs = [...baseline.ruledYs];
     rowTilts = fitTilts(baseline.rowTilts, ruledYs.length);
     rowSpans = fitSpans(baseline.rowSpans, ruledYs.length);
+    rowBends = fitBends(baseline.rowBends, ruledYs.length, bendColumns(baseline.boxes).length);
     selectedRule = null;
     estimatedYs = new Set();
     replaceBoxes(baseline.boxes);
@@ -1505,7 +1527,11 @@ document.addEventListener('keydown', (event) => {
 
     if (commandPressed && !event.shiftKey && key === 'c' && selectedRule !== null && marker.selectedIndexes().length === 0) {
         event.preventDefault();
-        copiedRowLine = { tilt: rowTilts[selectedRule] ?? 0, span: fitSpans(rowSpans, ruledYs.length)[selectedRule] };
+        copiedRowLine = {
+            tilt: rowTilts[selectedRule] ?? 0,
+            span: fitSpans(rowSpans, ruledYs.length)[selectedRule],
+            bend: fitBends(rowBends, ruledYs.length, bendColumns().length)[selectedRule],
+        };
         return;
     }
 
@@ -1824,6 +1850,19 @@ const rowLines = new RowLineLayer({
             fitSpans(rowSpans, ruledYs.length).map((value, i) => (i === index ? own : value)),
         );
     },
+    // As in the Align step: a square at each end of each column's part of a line,
+    // dragged up or down, moves that end only (seen and lined up against only).
+    bendable: true,
+    onBend: (index, column, dy, side) => {
+        const count = bendColumns().length;
+        if (index < 0 || index >= ruledYs.length || column < 0 || column >= count) return;
+        applyGrid(ruledYs, marker.toJSON(), rowTilts, rowSpans, fitBends(rowBends, ruledYs.length, count).map((bend, line) => {
+            if (line !== index) return bend;
+            const shifts = bend ? bend.map((ends) => [...ends]) : Array.from({ length: count }, () => [0, 0]);
+            shifts[column][side === 'r' ? 1 : 0] = dy;
+            return shifts;
+        }));
+    },
 });
 
 const ruleKey = rowKey;
@@ -1844,6 +1883,8 @@ function drawRules(ys = ruledYs, columns = ledgerColumns()) {
         tilt: gridTilt(columns),
         tilts: rowTilts,
         spans: rowSpans,
+        columns: bendColumns(),
+        bends: fitBends(rowBends, ys.length, bendColumns().length),
         aspect: pageAspect(),
     });
 }
@@ -2079,13 +2120,14 @@ function replaceBoxes(boxes, { keepSelection = false } = {}) {
  * New row lines, as one undoable change. Columns sitting on the first or the
  * last line follow it, so the table's top and bottom stay on its lines.
  */
-function applyGrid(nextYs, boxes = marker.toJSON(), tilts = rowTilts, spans = rowSpans) {
+function applyGrid(nextYs, boxes = marker.toJSON(), tilts = rowTilts, spans = rowSpans, bends = rowBends) {
     // Each line keeps its own extra turn through the sort and the clean-up.
     const list = Array.isArray(nextYs) ? nextYs : [];
     const given = fitTilts(tilts, list.length);
     const givenSpans = fitSpans(spans, list.length);
+    const givenBends = fitBends(bends, list.length, bendColumns(boxes).length);
     const pairs = list
-        .map((value, index) => ({ y: finiteNumber(value, NaN), tilt: given[index], span: givenSpans[index] }))
+        .map((value, index) => ({ y: finiteNumber(value, NaN), tilt: given[index], span: givenSpans[index], bend: givenBends[index] }))
         .filter((pair) => pair.y >= 0 && pair.y <= 1)
         .sort((a, b) => a.y - b.y)
         .filter((pair, index, all) => index === 0 || pair.y - all[index - 1].y > 0.0005);
@@ -2094,6 +2136,7 @@ function applyGrid(nextYs, boxes = marker.toJSON(), tilts = rowTilts, spans = ro
     ruledYs = next;
     rowTilts = pairs.map((pair) => pair.tilt);
     rowSpans = pairs.map((pair) => pair.span);
+    rowBends = pairs.map((pair) => pair.bend);
     if (selectedRule !== null && selectedRule >= ruledYs.length) selectedRule = null;
 
     if (followed !== boxes) {
@@ -2122,7 +2165,8 @@ function removeRule(index) {
     selectedRule = null;
     applyGrid(ruledYs.filter((_, candidate) => candidate !== index), marker.toJSON(),
         fitTilts(rowTilts, ruledYs.length).filter((_, candidate) => candidate !== index),
-        fitSpans(rowSpans, ruledYs.length).filter((_, candidate) => candidate !== index));
+        fitSpans(rowSpans, ruledYs.length).filter((_, candidate) => candidate !== index),
+        fitBends(rowBends, ruledYs.length, bendColumns().length).filter((_, candidate) => candidate !== index));
 }
 
 /** Move the selected row line by some screen pixels (arrow keys). */
@@ -2314,6 +2358,7 @@ async function detectLedgerGrid() {
         // A fresh Detect: the lines follow the table again.
         rowTilts = result.ruledYs.map(() => 0);
         rowSpans = result.ruledYs.map(() => null);
+        rowBends = [];
         replaceBoxes(result.boxes);
 
     } catch (error) {
@@ -2334,7 +2379,8 @@ element('addRuledLineBtn', HTMLButtonElement).addEventListener('click', () => {
     }
     clearBuilderError();
     applyGrid(inserted.ys, marker.toJSON(), insertTilt(fitTilts(rowTilts, ruledYs.length), inserted.index),
-        insertSpan(fitSpans(rowSpans, ruledYs.length), inserted.index, null));
+        insertSpan(fitSpans(rowSpans, ruledYs.length), inserted.index, null),
+        insertSpan(fitBends(rowBends, ruledYs.length, bendColumns().length), inserted.index, null));
     selectRule(inserted.index);
 });
 
@@ -2474,6 +2520,7 @@ function storeActivePage() {
         ruledYs: [...ruledYs],
         rowTilts: fitTilts(rowTilts, ruledYs.length),
         rowSpans: fitSpans(rowSpans, ruledYs.length),
+        rowBends: fitBends(rowBends, ruledYs.length, bendColumns().length),
         grouping: groupingModeInput.value === 'custom' ? 'custom' : 'auto',
         // Row lines still shown amber (guessed, not checked): they stay amber on return.
         estimated: [...estimatedYs],
@@ -2617,6 +2664,7 @@ async function switchPage(page, { focus = false } = {}) {
     ruledYs = [...layout.ruledYs];
     rowTilts = fitTilts(layout.rowTilts, ruledYs.length);
     rowSpans = fitSpans(layout.rowSpans, ruledYs.length);
+    rowBends = fitBends(layout.rowBends, ruledYs.length, bendColumns(layout.boxes).length);
     selectedRule = null;
     estimatedYs = new Set(layout.estimated ?? []);
     previousMarkerCount = 0;
@@ -2645,7 +2693,7 @@ async function setTwoPage(on) {
         twoPage = true;
         // A page 2 with nothing on it starts from page 1's markers: the pages are often alike.
         if (pageLayouts[2].boxes.length === 0 && pageLayouts[1] === null) {
-            pageLayouts[2] = { boxes: cloneBoxes(marker.toJSON()), ruledYs: [...ruledYs], rowTilts: fitTilts(rowTilts, ruledYs.length), rowSpans: fitSpans(rowSpans, ruledYs.length), grouping: groupingModeInput.value === 'custom' ? 'custom' : 'auto' };
+            pageLayouts[2] = { boxes: cloneBoxes(marker.toJSON()), ruledYs: [...ruledYs], rowTilts: fitTilts(rowTilts, ruledYs.length), rowSpans: fitSpans(rowSpans, ruledYs.length), rowBends: fitBends(rowBends, ruledYs.length, bendColumns().length), grouping: groupingModeInput.value === 'custom' ? 'custom' : 'auto' };
         }
         pageLayouts[1] = null;
         await updateSpread();

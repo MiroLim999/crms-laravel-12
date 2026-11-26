@@ -1594,6 +1594,7 @@
             clampRuledY,
             columnBand,
             fieldsToColumns,
+            fitBends,
             fitTilts,
             followFirstAndLastLine,
             gridTilt,
@@ -1664,6 +1665,9 @@
             ruledYs: @json($ruledYs),
             // How far each row line is turned beyond the table (degrees), from the layout.
             ruledTilts: @json($ruledTilts ?? []),
+            // The row lines' lengths and column bends as drawn in the Template Builder.
+            ruledSpans: @json($ruledSpans ?? []),
+            ruledBends: @json($ruledBends ?? []),
             templateId: @json($template->getKey()),
             // A spread's page 2 laid out differently: its own template, boxes and row lines (or null).
             pageTwo: @json($pageTwo ?? null),
@@ -2427,6 +2431,9 @@
         let gridRows = [...templateRows];
         // Each row line's own extra turn in the layout (degrees, one per line).
         let templateTilts = fitTilts(config.ruledTilts, templateRows.length);
+        // Its lines' lengths and column bends, as drawn in the Template Builder (on screen only).
+        let templateSpans = config.ruledSpans ?? [];
+        let templateBends = config.ruledBends ?? [];
 
         // A spread whose pages are laid out differently: page 1 uses the layout
         // the workspace opened with, page 2 (and every even page) its own.
@@ -2435,6 +2442,8 @@
             boxes: config.boxes,
             ruledYs: config.ruledYs,
             ruledTilts: config.ruledTilts,
+            ruledSpans: config.ruledSpans,
+            ruledBends: config.ruledBends,
             groupingMode: config.groupingMode,
         };
         const layoutFor = (pageNumber) => (pageNumber % 2 === 0 && config.pageTwo ? config.pageTwo : mainLayout);
@@ -2454,6 +2463,8 @@
             isLedger = config.ruledYs.length >= 2;
             templateRows = config.ruledYs.map(Number);
             templateTilts = fitTilts(config.ruledTilts, templateRows.length);
+            templateSpans = layout.ruledSpans ?? [];
+            templateBends = layout.ruledBends ?? [];
         }
         // How many degrees each row line is turned beyond the table's own tilt
         // (one per line, in step with gridRows): paper is curved, and no two
@@ -2469,20 +2480,6 @@
         // a straight line. Seen and lined up against only: the page is read by one
         // height per line, as before.
         let rowBends = [];
-
-        /**
-         * `count` lines' bends for `columns` columns: per line, each column's [left end,
-         * right end] shifts, or null (straight). A lone number (an older bend) is a left end.
-         */
-        function fitBends(list, count, columns) {
-            const fit = (dy) => Math.max(-0.2, Math.min(0.2, Math.round((Number(dy) || 0) * 100000) / 100000));
-            return Array.from({ length: count }, (_, index) => {
-                const raw = Array.isArray(list) ? list[index] : null;
-                if (!Array.isArray(raw) || raw.length !== columns) return null;
-                const shifts = raw.map((ends) => (Array.isArray(ends) ? [fit(ends[0]), fit(ends[1])] : [fit(ends), 0]));
-                return shifts.some(([l, r]) => l !== 0 || r !== 0) ? shifts : null;
-            });
-        }
 
         /** The ledger's columns, left to right, as {l, r} page fractions (where each line's pieces go). */
         function bendColumns(boxes = marker.toJSON()) {
@@ -2542,16 +2539,17 @@
 
         /** What Reset goes back to: the markers the page was read with (re-align), or the layout's template. */
         const resetTarget = () => (realignBase
-            ? { boxes: realignBase.boxes, rows: realignBase.rows, tilts: null }
-            : { boxes: templateBoxes, rows: templateRows, tilts: templateTilts });
+            ? { boxes: realignBase.boxes, rows: realignBase.rows, tilts: null, spans: null, bends: null }
+            : { boxes: templateBoxes, rows: templateRows, tilts: templateTilts, spans: templateSpans, bends: templateBends });
 
         function fieldsMatchTemplate() {
             const target = resetTarget();
             return JSON.stringify(marker.toJSON()) === JSON.stringify(target.boxes)
                 && JSON.stringify(gridRows) === JSON.stringify(target.rows)
                 && JSON.stringify(fitTilts(rowTilts, gridRows.length)) === JSON.stringify(fitTilts(target.tilts, gridRows.length))
-                && fitSpans(rowSpans, gridRows.length).every((span) => span === null)
-                && fitBends(rowBends, gridRows.length, bendColumns().length).every((bend) => bend === null);
+                && JSON.stringify(fitSpans(rowSpans, gridRows.length)) === JSON.stringify(fitSpans(target.spans, gridRows.length))
+                && JSON.stringify(fitBends(rowBends, gridRows.length, bendColumns().length))
+                    === JSON.stringify(fitBends(target.bends, gridRows.length, bendColumns().length));
         }
 
         /** Markers and row lines, as one undoable state. */
@@ -4507,7 +4505,7 @@
                 guardBackButton();
                 resetFieldHistory();
                 rowsSource = null;
-                setGrid(templateBoxes, templateRows, { remember: true, tilts: templateTilts });
+                setGrid(templateBoxes, templateRows, { remember: true, tilts: templateTilts, spans: templateSpans, bends: templateBends });
                 fetchSnapLines();
                 resetSpread();
 
@@ -4558,7 +4556,10 @@
         /** A layout's own markers and row lines, as a page opened on it starts. */
         function layoutStart(page) {
             const layout = layoutFor(page);
-            return { boxes: boxesOfLayout(layout.boxes), rows: layout.ruledYs.map(Number), tilts: layout.ruledTilts ?? null };
+            return {
+                boxes: boxesOfLayout(layout.boxes), rows: layout.ruledYs.map(Number), tilts: layout.ruledTilts ?? null,
+                spans: layout.ruledSpans ?? null, bends: layout.ruledBends ?? null,
+            };
         }
 
         /**
@@ -4878,8 +4879,8 @@
                 const sameLayout = copyFrom !== null && layoutFor(copyFrom) === layoutFor(page);
                 const start = sameLayout ? pageLayouts.get(copyFrom)?.grid : null;
                 rowsSource = null;
-                if (start) setGrid(start.boxes, start.rows, { tilts: start.tilts, remember: true });
-                else setGrid(templateBoxes, templateRows, { remember: true, tilts: templateTilts });
+                if (start) setGrid(start.boxes, start.rows, { tilts: start.tilts, spans: start.spans, bends: start.bends, remember: true });
+                else setGrid(templateBoxes, templateRows, { remember: true, tilts: templateTilts, spans: templateSpans, bends: templateBends });
                 return;
             }
             setGrid(saved.grid.boxes, saved.grid.rows, {
@@ -6939,7 +6940,7 @@
                 } else {
                     // A new page starts on its layout's template grid. Snap to table is
                     // pressed by hand, on each page.
-                    setGrid(templateBoxes, templateRows, { remember: true, tilts: templateTilts });
+                    setGrid(templateBoxes, templateRows, { remember: true, tilts: templateTilts, spans: templateSpans, bends: templateBends });
                 }
                 if (tested) await applyDetection(tested, { imageShown: true, keepView: swap });
                 clearOcrError();
@@ -10075,7 +10076,7 @@
         function restoreTemplateFields() {
             rowsSource = null;
             const target = resetTarget();
-            setGrid(cloneBoxes(target.boxes), [...target.rows], { remember: true, tilts: target.tilts });
+            setGrid(cloneBoxes(target.boxes), [...target.rows], { remember: true, tilts: target.tilts, spans: target.spans, bends: target.bends });
             marker.resetZoom();
             el('docViewport').scrollTo({ top: 0, left: 0 });
             clearOcrError();

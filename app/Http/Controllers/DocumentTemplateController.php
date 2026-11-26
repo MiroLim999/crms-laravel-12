@@ -90,6 +90,7 @@ class DocumentTemplateController extends Controller
             'ruledYs' => [],
             'ruledTilts' => [],
             'ruledSpans' => [],
+            'ruledBends' => [],
         ]);
     }
 
@@ -194,6 +195,7 @@ class DocumentTemplateController extends Controller
             'ruledYs' => array_values($template->ruled_ys ?? []),
             'ruledTilts' => array_values($template->ruled_tilts ?? []),
             'ruledSpans' => array_values($template->ruled_spans ?? []),
+            'ruledBends' => array_values($template->ruled_bends ?? []),
             'pageTwo' => $this->pageTwoForBuilder($template),
             // What still stops this layout from being published (none: it can be).
             'publishProblems' => $this->publishProblems($template),
@@ -255,6 +257,7 @@ class DocumentTemplateController extends Controller
             'ruled_ys' => array_values($linked->ruled_ys ?? []),
             'ruled_tilts' => array_values($linked->ruled_tilts ?? []),
             'ruled_spans' => array_values($linked->ruled_spans ?? []),
+            'ruled_bends' => array_values($linked->ruled_bends ?? []),
         ];
     }
 
@@ -299,6 +302,7 @@ class DocumentTemplateController extends Controller
             'ruled_ys_json' => json_encode($layout['ruled_ys'] ?? []),
             'ruled_tilts_json' => json_encode($layout['ruled_tilts'] ?? []),
             'ruled_spans_json' => json_encode($layout['ruled_spans'] ?? []),
+            'ruled_bends_json' => json_encode($layout['ruled_bends'] ?? []),
         ]);
         $sub->setUserResolver($request->getUserResolver());
 
@@ -374,6 +378,7 @@ class DocumentTemplateController extends Controller
                         'ruled_ys' => $pageTwo['ruled_ys'],
                         'ruled_tilts' => $pageTwo['ruled_tilts'],
                         'ruled_spans' => $pageTwo['ruled_spans'],
+                        'ruled_bends' => $pageTwo['ruled_bends'],
                         'grouping_mode' => $pageTwo['grouping_mode'],
                     ]);
                     $own->forceFill(['revision' => $own->revision + 1])->save();
@@ -487,6 +492,7 @@ class DocumentTemplateController extends Controller
                 'ruled_ys' => $validated['ruled_ys'],
                 'ruled_tilts' => $validated['ruled_tilts'],
                 'ruled_spans' => $validated['ruled_spans'],
+                'ruled_bends' => $validated['ruled_bends'],
             ]);
             $template->forceFill(['revision' => $template->revision + 1]);
 
@@ -921,6 +927,9 @@ class DocumentTemplateController extends Controller
             'ruled_spans' => ['nullable', 'array', 'max:400'],
             'ruled_spans.*' => ['nullable', 'array', 'size:2'],
             'ruled_spans.*.*' => ['numeric', 'min:0', 'max:1'],
+            // Per row line, each column's [left end, right end] moved up or down (page fractions), or null: seen and lined up against only.
+            'ruled_bends' => ['nullable', 'array', 'max:400'],
+            'ruled_bends.*' => ['nullable', 'array', 'max:60'],
             'fields.*.name' => ['required', 'string', 'max:120', 'distinct:ignore_case'],
             // Fractions of the page. Bounds keep a box on the paper.
             'fields.*.x' => ['required', 'numeric', 'min:0', 'max:1'],
@@ -991,6 +1000,24 @@ class DocumentTemplateController extends Controller
                 [$left, $right] = array_map('floatval', array_values($span));
 
                 return $right - $left >= 0.05 ? [round($left, 5), round($right, 5)] : null;
+            }, array_keys(array_values($validated['ruled_ys'] ?? [])));
+
+        // One bend per row line: per column [left, right] shifts within ±0.2 of the page, or null (straight).
+        // Read from the request itself, as the spans are.
+        $bends = array_values((array) $request->input('ruled_bends', []));
+        $validated['ruled_bends'] = $validated['columns'] === null
+            ? []
+            : array_map(function (int $i) use ($bends) {
+                $bend = $bends[$i] ?? null;
+                if (! is_array($bend) || $bend === [] || count($bend) > 60) {
+                    return null;
+                }
+                $fit = fn ($value) => round(max(-0.2, min(0.2, is_numeric($value) ? (float) $value : 0.0)), 5);
+                $ends = array_map(fn ($pair) => is_array($pair)
+                    ? [$fit(array_values($pair)[0] ?? 0), $fit(array_values($pair)[1] ?? 0)]
+                    : [$fit($pair), 0.0], array_values($bend));
+
+                return collect($ends)->flatten()->contains(fn ($value) => $value != 0) ? $ends : null;
             }, array_keys(array_values($validated['ruled_ys'] ?? [])));
 
         $fieldErrors = [];
@@ -1067,7 +1094,7 @@ class DocumentTemplateController extends Controller
 
     private function hydrateLedgerGrid(Request $request): void
     {
-        foreach (['columns_json' => 'columns', 'ruled_ys_json' => 'ruled_ys', 'ruled_tilts_json' => 'ruled_tilts', 'ruled_spans_json' => 'ruled_spans'] as $input => $key) {
+        foreach (['columns_json' => 'columns', 'ruled_ys_json' => 'ruled_ys', 'ruled_tilts_json' => 'ruled_tilts', 'ruled_spans_json' => 'ruled_spans', 'ruled_bends_json' => 'ruled_bends'] as $input => $key) {
             if (! $request->filled($input)) {
                 continue;
             }
@@ -1475,6 +1502,7 @@ class DocumentTemplateController extends Controller
             'ruled_ys' => $validated['ruled_ys'],
             'ruled_tilts' => $validated['ruled_tilts'],
             'ruled_spans' => $validated['ruled_spans'],
+            'ruled_bends' => $validated['ruled_bends'],
             'is_active' => false,
             'created_by' => $request->user()->getKey(),
             'parent_id' => $parent?->getKey(),
@@ -1605,7 +1633,8 @@ class DocumentTemplateController extends Controller
             !== array_map('floatval', array_values($validated['ruled_tilts'] ?? []));
 
         $tiltsChanged = $tiltsChanged
-            || json_encode(array_values($template->ruled_spans ?? [])) !== json_encode(array_values($validated['ruled_spans'] ?? []));
+            || json_encode(array_values($template->ruled_spans ?? [])) !== json_encode(array_values($validated['ruled_spans'] ?? []))
+            || json_encode(array_values($template->ruled_bends ?? [])) !== json_encode(array_values($validated['ruled_bends'] ?? []));
 
         return $tiltsChanged || $saved !== $this->layoutSignature(
             $validated['grouping_mode'],

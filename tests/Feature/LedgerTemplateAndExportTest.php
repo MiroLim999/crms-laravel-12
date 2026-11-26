@@ -96,6 +96,45 @@ class LedgerTemplateAndExportTest extends TestCase
         ])->assertSessionHasErrors('fields.0.angle');
     }
 
+    public function test_row_line_column_bends_are_kept_with_the_layout_and_the_scan_starts_from_them(): void
+    {
+        $this->seed(DocumentTemplateSeeder::class);
+        $admin = User::factory()->superAdmin()->create();
+        $this->actingAs($admin)->post(route('templates.store'), [
+            'name' => 'Bent register',
+            'doc_type' => DocumentType::Birth->value,
+            'page_ratio' => 11 / 8.5,
+            'grouping_mode' => 'auto',
+            'fields_json' => json_encode([], JSON_THROW_ON_ERROR),
+            'columns_json' => json_encode(self::COLUMNS, JSON_THROW_ON_ERROR),
+            'ruled_ys_json' => json_encode([0.2, 0.5, 0.8], JSON_THROW_ON_ERROR),
+            // Line 1 bent: column 2's left end up, its right end down. An older lone number is a
+            // left end, a shift past ±0.2 is held there, and a line moved nowhere is straight (null).
+            'ruled_bends_json' => json_encode([
+                [[0, 0], [-0.01, 0.02]],
+                [0.5, 0],
+                [[0, 0], [0, 0]],
+            ], JSON_THROW_ON_ERROR),
+            'publish' => 1,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $template = DocumentTemplate::where('name', 'Bent register')->firstOrFail();
+        $this->assertEquals([[[0, 0], [-0.01, 0.02]], [[0.2, 0], [0, 0]], null], $template->ruled_bends);
+
+        $this->actingAs($admin)->get(route('templates.edit', $template))
+            ->assertOk()
+            ->assertSee('initialRuledBends', false);
+
+        // The Align step starts its row lines from them.
+        // As the birth layout in use, the Align step starts its row lines from its bends.
+        DocumentTemplate::whereKeyNot($template->getKey())->update(['is_active' => false]);
+        $template->forceFill(['is_active' => true])->save();
+        $this->assertTrue(DocumentTemplate::activeFor(DocumentType::Birth)->is($template));
+        $this->actingAs($admin)->get(route('documents.workspace', ['type' => 'birth']))
+            ->assertOk()
+            ->assertViewHas('ruledBends', $template->ruled_bends);
+    }
+
     public function test_each_row_line_keeps_its_own_tilt_and_the_builder_and_scan_are_given_it(): void
     {
         $admin = User::factory()->superAdmin()->create();

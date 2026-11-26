@@ -627,3 +627,20 @@ export function ledgerGridProblems(columns, ys, { minGap = MIN_ROW_GAP, aspect =
 
     return problems;
 }
+
+/**
+ * `count` row lines' bends for `columns` columns (the Align step's and the
+ * Template Builder's column squares): per line, each column's [left end, right
+ * end] moved up or down (page fractions, within ±0.2), or null for a straight
+ * line. A lone number (an older bend) is a left end. Seen and lined up against
+ * only: a page is read by one height per row line.
+ */
+export function fitBends(list, count, columns) {
+    const fit = (dy) => Math.max(-0.2, Math.min(0.2, Math.round((Number(dy) || 0) * 100000) / 100000));
+    return Array.from({ length: count }, (_, index) => {
+        const raw = Array.isArray(list) ? list[index] : null;
+        if (!Array.isArray(raw) || raw.length !== columns) return null;
+        const shifts = raw.map((ends) => (Array.isArray(ends) ? [fit(ends[0]), fit(ends[1])] : [fit(ends), 0]));
+        return shifts.some(([l, r]) => l !== 0 || r !== 0) ? shifts : null;
+    });
+}

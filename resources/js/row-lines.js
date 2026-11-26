@@ -192,12 +192,29 @@ export class RowLineLayer {
         if (this.bendable && columns?.length) {
             rows.forEach((y, index) => {
                 const angle = this.angleOf(index);
-                this.piecesOf(index).forEach((piece) => {
+                const own = this.piecesOf(index).map((piece) => ({
+                    ...piece,
+                    index,
                     // Each end where its own handle put it, on the line as it is turned.
-                    const ya = rowLineY(y + piece.dl, piece.xa, angle, aspect);
-                    const yb = rowLineY(y + piece.dr, piece.xb, angle, aspect);
-                    pieces.push({ ...piece, index, ya, yb });
+                    ya: rowLineY(y + piece.dl, piece.xa, angle, aspect),
+                    yb: rowLineY(y + piece.dr, piece.xb, angle, aspect),
+                }));
+                // The line stays one line: where no column covers it (before the first column,
+                // between columns apart, after the last), a plain piece joins the ends either
+                // side of the gap, from the line's own end grips to the columns' squares.
+                const { l, r } = this.spanOf(index);
+                const joint = (xa, ya, xb, yb) => {
+                    if (xb - xa > 0.0005) pieces.push({ index, connector: true, xa, xb, ya, yb, left: false, right: false, column: -1 });
+                };
+                let x = l;
+                let yAt = rowLineY(y, l, angle, aspect);
+                own.forEach((piece) => {
+                    joint(x, yAt, piece.xa, piece.ya);
+                    pieces.push(piece);
+                    x = piece.xb;
+                    yAt = piece.yb;
                 });
+                joint(x, yAt, r, rowLineY(y, r, angle, aspect));
             });
         }
         while (this.pieces.children.length > pieces.length) this.pieces.lastElementChild.remove();

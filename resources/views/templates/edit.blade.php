@@ -21,6 +21,7 @@
         $workingRuledYs = old('ruled_ys_json') ? json_decode(old('ruled_ys_json'), true) : $ruledYs;
         $workingRuledTilts = old('ruled_tilts_json') ? json_decode(old('ruled_tilts_json'), true) : ($ruledTilts ?? []);
         $workingRuledSpans = old('ruled_spans_json') ? json_decode(old('ruled_spans_json'), true) : ($ruledSpans ?? []);
+        $workingRuledBends = old('ruled_bends_json') ? json_decode(old('ruled_bends_json'), true) : ($ruledBends ?? []);
         $builderConfig = [
             'initialFields' => $workingFields,
             'baselineFields' => $fields,
@@ -32,6 +33,8 @@
             'baselineRuledTilts' => $ruledTilts ?? [],
             'initialRuledSpans' => is_array($workingRuledSpans) ? $workingRuledSpans : [],
             'baselineRuledSpans' => $ruledSpans ?? [],
+            'initialRuledBends' => is_array($workingRuledBends) ? $workingRuledBends : [],
+            'baselineRuledBends' => $ruledBends ?? [],
             // The layout of page 2 of a two-page spread, drawn beside page 1 (null: one page).
             'pageTwo' => $pageTwo ?? null,
             // Already published: a save that changes nothing is not a new publish.

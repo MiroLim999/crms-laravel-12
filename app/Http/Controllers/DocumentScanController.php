@@ -158,6 +158,9 @@ class DocumentScanController extends Controller
             'boxes' => $template->markerBoxes(),
             'ruledYs' => $template->isLedger() ? array_values($template->ruled_ys) : [],
             'ruledTilts' => $template->isLedger() ? array_values($template->ruled_tilts ?? []) : [],
+            // The template's row lines as drawn in the Template Builder (on screen only): Align starts from them.
+            'ruledSpans' => $template->isLedger() ? array_values($template->ruled_spans ?? []) : [],
+            'ruledBends' => $template->isLedger() ? array_values($template->ruled_bends ?? []) : [],
             // A spread's page 2 laid out differently: its own layout, or null.
             'pageTwo' => $this->pageTwoLayout($template),
             'activeModel' => OcrModel::active(),
@@ -200,6 +203,8 @@ class DocumentScanController extends Controller
             'boxes' => $pageTwo->markerBoxes(),
             'ruledYs' => $pageTwo->isLedger() ? array_values($pageTwo->ruled_ys) : [],
             'ruledTilts' => $pageTwo->isLedger() ? array_values($pageTwo->ruled_tilts ?? []) : [],
+            'ruledSpans' => $pageTwo->isLedger() ? array_values($pageTwo->ruled_spans ?? []) : [],
+            'ruledBends' => $pageTwo->isLedger() ? array_values($pageTwo->ruled_bends ?? []) : [],
             'groupingMode' => $pageTwo->grouping_mode instanceof \BackedEnum
                 ? $pageTwo->grouping_mode->value
                 : ($pageTwo->grouping_mode ?? 'auto'),
