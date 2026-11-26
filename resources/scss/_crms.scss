@@ -3396,15 +3396,22 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
+  // The Template Builder panel's thin scrollbar.
+  scrollbar-color: rgba(var(--crms-ink-rgb), .28) transparent;
   scrollbar-width: thin;
+
+  // Every card keeps its full height: the panel scrolls, the cards are not squeezed.
+  > * {
+    flex-shrink: 0;
+  }
 }
 
-// The free height of the side panel, at least 18rem (about five rows), so
-// the Detect summary and the buttons below still fit. Only the field list
-// scrolls inside.
+// As in the Template Builder: every card at its full height, and the whole side
+// panel scrolls (Document reference, Fields and every field together), not the
+// field list alone.
 #step-mark .document-fields-card {
   display: flex;
-  flex: 1 0 18rem;
+  flex: 0 0 auto;
   flex-direction: column;
 
   .card-header {
@@ -3426,9 +3433,10 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   // shadows also stop short of the scrollbar's strip, which the covers
   // cannot reach.
   .marker-field-list {
-    min-block-size: 5rem;
+    min-block-size: 0;
     max-block-size: none;
-    flex: 1 1 0;
+    flex: 0 0 auto;
+    overflow: visible;
     margin: 0;
     padding-inline-end: .25rem;
     background:
@@ -7421,9 +7429,10 @@ img.validation-field__crop {
   #step-mark .document-fields-card {
     flex: 0 0 auto;
 
+    // Stacked: the page scrolls, every field shown in full.
     .marker-field-list {
-      max-block-size: 20rem;
-      flex: 0 1 auto;
+      max-block-size: none;
+      flex: 0 0 auto;
     }
   }
 
