@@ -475,23 +475,22 @@ export function exportFileName(...parts) {
 const exportCase = (value) => String(value ?? '').toLocaleUpperCase('en-US');
 
 /**
- * Wire the "Add column" dropdown (records.partials.review-add-column) found in
- * `root` to `table`: the form adds a column, the list under it removes one.
+ * Wire the "Removed columns" dropdown (records.partials.review-add-column) found
+ * in `root` to `table`: read columns removed from their header's × are listed,
+ * each with Show again. The button shows only while one is removed. (Adding an
+ * empty column to type into was taken out.)
  */
 export function attachAddColumn(table, root = document) {
     const wrap = root.querySelector('[data-review-add-column]');
-    const form = wrap?.querySelector('[data-add-column-form]');
-    const input = form?.querySelector('input');
-    const list = wrap?.querySelector('[data-added-columns]');
-    if (!wrap || !form || !input || !list) return;
-    const hiddenWrap = wrap.querySelector('[data-hidden-columns-wrap]');
-    const hiddenList = wrap.querySelector('[data-hidden-columns]');
+    const hiddenList = wrap?.querySelector('[data-hidden-columns]');
+    if (!wrap || !hiddenList) return;
+    const toggle = wrap.querySelector('[data-bs-toggle="dropdown"]');
 
-    // Read columns removed from their headers: each can be shown again.
-    const paintHidden = () => {
-        if (!hiddenWrap || !hiddenList) return;
+    const paint = () => {
         const hidden = table.hiddenColumnList();
-        hiddenWrap.classList.toggle('d-none', hidden.length === 0);
+        // Nothing removed: nothing to show again, so no button.
+        if (hidden.length === 0 && wrap.querySelector('.dropdown-menu.show')) toggle?.click();
+        wrap.classList.toggle('d-none', hidden.length === 0);
         hiddenList.replaceChildren(...hidden.map((column) => {
             const item = document.createElement('li');
             item.className = 'd-flex align-items-center justify-content-between gap-2';
@@ -505,48 +504,15 @@ export function attachAddColumn(table, root = document) {
             show.setAttribute('aria-label', `Show column ${column.header} again`);
             show.addEventListener('click', () => {
                 table.showColumn(column.key);
-                paintHidden();
+                paint();
             });
             item.append(label, show);
             return item;
         }));
     };
 
-    const paint = () => {
-        list.replaceChildren(...table.customColumns().map((column) => {
-            const item = document.createElement('li');
-            item.className = 'd-flex align-items-center justify-content-between gap-2';
-            const label = document.createElement('span');
-            label.className = 'text-truncate';
-            label.textContent = column.header;
-            const remove = document.createElement('button');
-            remove.type = 'button';
-            remove.className = 'btn btn-sm btn-link text-danger p-0';
-            remove.textContent = 'Remove';
-            remove.setAttribute('aria-label', `Remove column ${column.header}`);
-            // The same question as the × on the column's header (the list repaints on Delete).
-            remove.addEventListener('click', () => table.confirmRemoveColumn(column.key, remove));
-            item.append(label, remove);
-            return item;
-        }));
-        paintHidden();
-    };
-
-    form.addEventListener('submit', (event) => {
-        event.preventDefault();
-        table.commit();
-        if (!table.addColumn(input.value)) {
-            input.focus();
-            return;
-        }
-        input.value = '';
-        paint();
-        // Close the menu so the new column's first cell can be typed in.
-        wrap.querySelector('[data-bs-toggle="dropdown"]')?.click();
-    });
-    // A new document empties the table's added columns: show what is there when opened.
     wrap.addEventListener('show.bs.dropdown', paint);
-    // A column deleted from its header's × leaves the list as well.
+    // A column removed from its header's ×, or shown again (Ctrl+Z), repaints the list.
     const before = table.onColumnsChange;
     table.onColumnsChange = () => {
         before();
@@ -890,7 +856,7 @@ export class ReviewTable {
         snapshotOf = () => null, restore = () => {}, onRange = () => {}, onCleared = () => {},
         isUnverified = () => false, onColumnsChange = () => {}, removableFields = false,
     }) {
-        // An added column was deleted from its header (the Add column menu lists them).
+        // A column was removed from its header, or shown again (the Removed columns menu lists them).
         this.onColumnsChange = onColumnsChange;
         // A register field that is not required may be removed too (its values then
         // stay blank in the register). Step 4 only: a saved record keeps its fields.
@@ -1051,6 +1017,8 @@ export class ReviewTable {
         this.hiddenColumns.clear();
         this.range = null;
         this.onCleared([]);
+        // Nothing removed any more: the Removed columns button goes.
+        this.onColumnsChange();
     }
 
     /** The model with the added columns after the others, each cell empty of fields. */
@@ -1075,7 +1043,7 @@ export class ReviewTable {
         return this.removableFields && !column.type?.required;
     }
 
-    /** The removed read columns, to show again (the Add column menu lists them): [{ key, header }]. */
+    /** The removed read columns, to show again (the Removed columns menu lists them): [{ key, header }]. */
     hiddenColumnList() {
         const all = this.sourceModel?.columns ?? [];
         return [...this.hiddenColumns]
@@ -1751,7 +1719,7 @@ export class ReviewTable {
     /**
      * Ask, in a window, before removing a column: an added one goes with what was
      * typed in it; a read one leaves the table and its downloads; a register field
-     * is not saved for this document (left blank). Ctrl+Z, or Add column's list,
+     * is not saved for this document (left blank). Ctrl+Z, or the Removed columns list,
      * brings it back.
      */
     async _confirmRemove(key) {
@@ -1760,7 +1728,7 @@ export class ReviewTable {
         if (!column) return;
         const header = this.headerOf(column);
         const typed = [...this.addedValues.keys()].filter((id) => id.endsWith(`|${key}`)).length;
-        const back = column.custom ? 'Ctrl+Z brings it back.' : 'Ctrl+Z, or Add column → Removed columns, brings it back.';
+        const back = column.custom ? 'Ctrl+Z brings it back.' : 'Ctrl+Z, or Removed columns, brings it back.';
         const message = column.custom
             ? `${typed > 0 ? `${typed} typed ${typed === 1 ? 'value' : 'values'} in it will be removed too.` : 'Nothing has been typed in it yet.'} ${back}`
             : `It leaves this table and its downloads. ${back}`;

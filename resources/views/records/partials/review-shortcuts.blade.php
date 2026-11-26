@@ -40,7 +40,7 @@
 
         <div class="marker-shortcuts-menu__title">Tips</div>
         <div><span>Double-click a header or row number</span><small>Rename it in the download</small></div>
-        <div><span>Point at a header: ×</span><small>Remove the column (asks first; Add column lists removed ones)</small></div>
+        <div><span>Point at a header: ×</span><small>Remove the column (asks first; Removed columns brings it back)</small></div>
         <div><span>Red / yellow cell</span><small>Invalid / empty (the button above goes to the next)</small></div>
         @if (!empty($savedRecord))
             <div><span>Save changes</span><small>Each old and new value goes to the audit log</small></div>
