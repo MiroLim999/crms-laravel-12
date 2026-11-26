@@ -3654,6 +3654,15 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
+// "Already saved": fades out after its 5 seconds (showScanPagesNotice).
+#scanPagesNotice {
+  transition: opacity .3s ease;
+
+  &.is-leaving {
+    opacity: 0;
+  }
+}
+
 // The Align step's notes about the scan: it may be sideways, or only page 1 is read.
 .document-scan-notice {
   display: flex;
@@ -5972,6 +5981,41 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     font-size: .8125rem;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
+  }
+
+  // Rows (− count +) and Gridlines (All lines) as two lines of one grid: the labels
+  // in the same column as Tilt's, the button exactly as wide as the count above it.
+  .document-grid-card__line.document-grid-card__rows {
+    display: grid;
+    grid-template-columns: 3.75rem max-content;
+    align-items: center;
+    gap: .4rem .75rem;
+
+    #selectAllRowsBtn {
+      justify-self: stretch;
+    }
+  }
+
+  #selectAllRowsBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    color: var(--bs-secondary-color);
+
+    &:hover:not(:disabled) {
+      color: var(--bs-primary);
+      border-color: var(--bs-primary);
+      background: rgba(var(--bs-primary-rgb), .08);
+    }
+
+    // Every line selected: the app's blue, like a selected line.
+    &.active {
+      color: var(--bs-primary);
+      border-color: var(--bs-primary);
+      background: rgba(var(--bs-primary-rgb), .16);
+      box-shadow: none;
+    }
   }
 
   // Tilt while a row line is selected: it turns that line alone. The label

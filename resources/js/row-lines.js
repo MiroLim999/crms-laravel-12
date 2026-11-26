@@ -80,7 +80,7 @@ export class RowLineLayer {
      * line is turned beyond it, `aspect` the page's width over its height in
      * pixels.
      *
-     * @param {{rows?: number[], left?: number, right?: number, selected?: number|null, estimated?: Set<string>, locked?: boolean, tilt?: number, tilts?: number[], aspect?: number}} state
+     * @param {{rows?: number[], left?: number, right?: number, selected?: number|'all'|null, estimated?: Set<string>, locked?: boolean, tilt?: number, tilts?: number[], aspect?: number}} state
      * @param {Set<number>|null} [dragging]
      */
     render(state = {}, dragging = null) {
@@ -98,7 +98,8 @@ export class RowLineLayer {
             const { l: lineLeft, r: lineRight } = this.spanOf(index);
             const isEstimated = estimated.has(rowKey(y));
             const row = this.layer.children[index];
-            row.classList.toggle('is-selected', index === selected);
+            // selected 'all': every line is selected (Select all lines), and they move together.
+            row.classList.toggle('is-selected', selected === 'all' || index === selected);
             row.classList.toggle('is-estimated', isEstimated);
             row.classList.toggle('is-dragging', Boolean(dragging?.has(index)));
             const angle = this.angleOf(index);
@@ -140,7 +141,9 @@ export class RowLineLayer {
         event.stopPropagation();
 
         const index = Number(grip.dataset.index);
-        const together = event.shiftKey;
+        // Shift, or every line selected: the lines move together.
+        const allSelected = this.state.selected === 'all';
+        const together = event.shiftKey || allSelected;
         const isEnd = grip.classList.contains('is-end');
         const origin = [...this.state.rows];
         const original = { rows: this.state.rows, spans: this.state.spans, tilts: this.state.tilts };
@@ -163,7 +166,8 @@ export class RowLineLayer {
         let mode = stretchable ? (event.altKey ? 'free' : null) : 'move';
         let current = origin;
         let stretched = null;
-        this.onSelect(index);
+        // With every line selected, they stay selected while dragged.
+        if (!allSelected) this.onSelect(index);
 
         const withSpan = (span) => Array.from({ length: origin.length }, (_, i) => (i === index ? span : this.state.spans?.[i] ?? null));
 

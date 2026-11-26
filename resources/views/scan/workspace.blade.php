@@ -385,7 +385,8 @@
                     <div class="card-body">
                         @if (count($ruledYs) >= 2)
                             <div class="document-grid-card document-rows-control">
-                                <div class="document-grid-card__line">
+                                {{-- Rows and Gridlines share two columns: "All lines" is as wide as the count above it. --}}
+                                <div class="document-grid-card__line document-grid-card__rows">
                                     <span class="document-grid-card__label" id="gridRowsLabel">Rows</span>
                                     <div class="btn-group btn-group-sm" role="group" aria-labelledby="gridRowsLabel">
                                         <button type="button" class="btn btn-outline-secondary" id="removeRowBtn"
@@ -401,6 +402,12 @@
                                             <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
                                         </button>
                                     </div>
+                                    {{-- Every row line at once: dragged or nudged together. --}}
+                                    <span class="document-grid-card__label" id="gridLinesLabel">Gridlines</span>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="selectAllRowsBtn"
+                                        aria-labelledby="gridLinesLabel selectAllRowsBtn" aria-pressed="false" title="Select every row line, to move them all together (Ctrl+A on a line)">
+                                        <i class="icon-base bx bx-select-multiple icon-sm me-1" aria-hidden="true"></i>All lines
+                                    </button>
                                 </div>
                                 {{-- A page scanned a little turned: the columns and row lines turn with it. --}}
                                 <div class="document-grid-card__line" id="gridTiltLine">
@@ -1596,6 +1603,7 @@
             remapRuledYs,
             respaceTilts,
             sameBand,
+            shiftRuledYs,
             tiltColumns,
         } from '{{ Vite::asset('resources/js/ledger-grid.js') }}';
         import { RowLineLayer, rowKey } from '{{ Vite::asset('resources/js/row-lines.js') }}';
@@ -2452,6 +2460,21 @@
         // printed rules run quite alike. One is set by selecting its line and
         // using Tilt; Snap to table, Detect and Reset start every line at 0.
         let rowTilts = [...templateTilts];
+        // Each row line's own ends where it was stretched (as in the Template Builder):
+        // {l, r} page fractions, or null for the table's edges. What is seen and lined up
+        // against; the page is read by its row heights and tilts as before.
+        let rowSpans = [];
+
+        /** `count` spans from `list` ({l, r}, [l, r] or null), each sane or null. */
+        function fitSpans(list, count) {
+            return Array.from({ length: count }, (_, index) => {
+                const raw = Array.isArray(list) ? list[index] : null;
+                const l = Array.isArray(raw) ? Number(raw[0]) : Number(raw?.l);
+                const r = Array.isArray(raw) ? Number(raw[1]) : Number(raw?.r);
+                if (!(l >= 0 && r <= 1 && r - l >= 0.05)) return null;
+                return { l: Math.round(l * 100000) / 100000, r: Math.round(r * 100000) / 100000 };
+            });
+        }
         // Row lines with no printed line under them (rowKey), drawn amber.
         let estimatedRows = new Set();
         // A row line was moved, added or removed by hand: Detect keeps those.
@@ -2459,6 +2482,8 @@
         // What the last Snap to table said about where the rows came from.
         let rowsSource = null;
         let selectedRow = null;
+        // Select all lines (or Ctrl+A on a line): every row line selected, moved together.
+        let allRowsSelected = false;
         // The columns' band and count the rows were last placed in.
         let gridBand = null;
         let gridColumnCount = 0;
@@ -2471,6 +2496,10 @@
             onSelect: (index) => selectRow(index),
             onMove: (rows, change) => moveRows(rows, change),
             onRemove: (index) => removeRow(index),
+            // As in the Template Builder: a grip dragged sideways moves that end of its line
+            // (shorter or longer), Alt+drag pulls the end anywhere (the line turns about its other end).
+            stretchable: true,
+            onStretch: (index, stretched) => stretchRow(index, stretched),
         });
 
         const ledgerColumns = (boxes) => boxes.filter((box) => box.kind === 'column');
@@ -2493,7 +2522,8 @@
             const target = resetTarget();
             return JSON.stringify(marker.toJSON()) === JSON.stringify(target.boxes)
                 && JSON.stringify(gridRows) === JSON.stringify(target.rows)
-                && JSON.stringify(fitTilts(rowTilts, gridRows.length)) === JSON.stringify(fitTilts(target.tilts, gridRows.length));
+                && JSON.stringify(fitTilts(rowTilts, gridRows.length)) === JSON.stringify(fitTilts(target.tilts, gridRows.length))
+                && fitSpans(rowSpans, gridRows.length).every((span) => span === null);
         }
 
         /** Markers and row lines, as one undoable state. */
@@ -2502,6 +2532,7 @@
                 boxes: cloneBoxes(marker.toJSON()),
                 rows: [...gridRows],
                 tilts: [...rowTilts],
+                spans: fitSpans(rowSpans, gridRows.length),
                 estimated: [...estimatedRows],
                 byHand: rowsByHand,
             };
@@ -2509,7 +2540,7 @@
 
         /** The markers and row lines as one string, to tell one grid from another. */
         function gridSnapshot() {
-            return JSON.stringify({ boxes: marker.toJSON(), rows: gridRows, tilts: rowTilts });
+            return JSON.stringify({ boxes: marker.toJSON(), rows: gridRows, tilts: rowTilts, spans: fitSpans(rowSpans, gridRows.length) });
         }
 
         function rememberBand(boxes) {
@@ -2531,7 +2562,10 @@
                 const lineCount = gridRows.length;
                 gridRows = remapRuledYs(gridRows, from, band);
                 // A line squeezed off the page by the move would put the tilts out of step.
-                if (gridRows.length !== lineCount) rowTilts = gridRows.map(() => 0);
+                if (gridRows.length !== lineCount) {
+                    rowTilts = gridRows.map(() => 0);
+                    rowSpans = [];
+                }
                 estimatedRows = new Set([...estimatedRows].map((key) => rowKey(remapRuledYs([Number(key)], from, band)[0])));
             }
             rememberBand(boxes);
@@ -2566,12 +2600,13 @@
                 rows,
                 left: Math.min(...columns.map((column) => column.x)),
                 right: Math.max(...columns.map((column) => column.x + column.w)),
-                selected: selectedRow,
+                selected: allRowsSelected ? 'all' : selectedRow,
                 estimated,
                 locked: lineEditing,
                 // On a page scanned a little turned, the lines turn with the columns.
                 tilt: gridTilt(columns),
                 tilts: rowTilts,
+                spans: fitSpans(rowSpans, rows.length),
                 aspect: pageAspect(),
             });
             onGridRendered();
@@ -2607,17 +2642,21 @@
                 .map((box) => nameKey(box.name)));
         }
 
-        function setGrid(boxes, rows, { estimated = [], byHand = false, tilts = null, selected = null, remember = false } = {}) {
+        function setGrid(boxes, rows, { estimated = [], byHand = false, tilts = null, spans = null, selected = null, remember = false } = {}) {
             if (remember) {
                 autoFields = new Map();
                 rememberAutoFields(boxes);
             }
             gridRows = [...rows];
             rowTilts = tilts ? fitTilts(tilts, gridRows.length) : gridRows.map(() => 0);
+            // Stretched ends come back only with a grid that kept them (undo, another page, a batch page).
+            rowSpans = fitSpans(spans, gridRows.length);
             estimatedRows = new Set(estimated);
             rowsByHand = byHand;
             // The row line that stays selected, if any (the table's tilt keeps it).
             selectedRow = Number.isInteger(selected) && selected >= 0 && selected < gridRows.length ? selected : null;
+            // A grid set afresh (another page, Reset, Undo): no longer every line selected.
+            allRowsSelected = false;
             settingGrid = true;
             try {
                 marker.setBoxes(cloneBoxes(boxes));
@@ -2650,16 +2689,19 @@
          * Row lines changed by hand, as one undoable change. Columns on the first or
          * last line follow it, so the table's top and bottom stay on its lines.
          */
-        function applyRows(next, { estimated = estimatedRows, tilts = rowTilts } = {}) {
+        function applyRows(next, { estimated = estimatedRows, tilts = rowTilts, spans = null } = {}) {
             // A line almost on top of the one above it is dropped, with its tilt.
             const kept = next.map((y, index, all) => index === 0 || y - all[index - 1] > 0.0005);
             const rows = next.filter((_, index) => kept[index]);
             const nextTilts = fitTilts(tilts, next.length).filter((_, index) => kept[index]);
+            // Lines moved keep their stretched ends; one added or removed passes its own list.
+            const nextSpans = fitSpans(spans ?? rowSpans, next.length).filter((_, index) => kept[index]);
             const boxes = marker.toJSON();
             const halfRow = rows.length >= 2 ? (rows[rows.length - 1] - rows[0]) / (rows.length - 1) / 2 : 0.01;
             const followed = followFirstAndLastLine(boxes, gridRows, rows, halfRow);
             gridRows = rows;
             rowTilts = nextTilts;
+            rowSpans = nextSpans;
             estimatedRows = new Set([...estimated].filter((key) => rows.some((y) => rowKey(y) === key)));
             rowsByHand = true;
             if (selectedRow !== null && selectedRow >= rows.length) selectedRow = null;
@@ -2691,10 +2733,45 @@
 
         /** The row line the arrow keys and Delete act on (null: none). Never together with markers. */
         function selectRow(index) {
+            allRowsSelected = false;
             selectedRow = Number.isInteger(index) && index >= 0 && index < gridRows.length ? index : null;
             if (selectedRow !== null) marker.clearSelection();
             renderRows();
             updateGridCard();
+        }
+
+        /** Every row line selected: dragging any grip, or the arrow keys, move them all together. */
+        function selectAllRows() {
+            if (!isLedger || gridRows.length === 0) return;
+            selectedRow = null;
+            allRowsSelected = true;
+            marker.clearSelection();
+            renderRows();
+            updateGridCard();
+        }
+
+        /** Every row line moved up or down by `pixels` screen pixels (kept on the page). */
+        function nudgeAllRows(pixels) {
+            const height = Math.max(1, markerOverlay.getBoundingClientRect().height);
+            const moved = shiftRuledYs(gridRows, pixels / height);
+            if (moved.every((y, i) => Math.abs(y - gridRows[i]) < 1e-9)) return;
+            moveRows(moved, { index: 0, together: true });
+        }
+
+        /** A row line's end dragged (sideways, or anywhere with Alt): its ends, height and own tilt, one undo step. */
+        function stretchRow(index, { span, y, tilt }) {
+            if (index < 0 || index >= gridRows.length) return;
+            const columns = ledgerColumns(marker.toJSON());
+            const left = columns.length ? Math.min(...columns.map((column) => column.x)) : 0;
+            const right = columns.length ? Math.max(...columns.map((column) => column.x + column.w)) : 1;
+            // Back to the table's own width: no stretch to keep.
+            const own = Math.abs(span.l - left) < 0.002 && Math.abs(span.r - right) < 0.002 ? null : span;
+            if (Math.abs(y - gridRows[index]) > 1e-9) estimatedRows.delete(rowKey(gridRows[index]));
+            gridRows = gridRows.map((value, line) => (line === index ? y : value));
+            rowTilts = fitTilts(rowTilts, gridRows.length).map((value, line) => (line === index ? tilt : value));
+            rowSpans = fitSpans(rowSpans, gridRows.length).map((value, line) => (line === index ? own : value));
+            rowsByHand = true;
+            rowsChanged();
         }
 
         /** Remove a row line: the selected one, else the last. A ledger keeps at least two. */
@@ -2702,7 +2779,10 @@
             if (!isLedger || gridRows.length <= 2 || !Number.isInteger(index) || index < 0 || index >= gridRows.length) return;
             selectedRow = null;
             applyRows(gridRows.filter((_, candidate) => candidate !== index),
-                { tilts: rowTilts.filter((_, candidate) => candidate !== index) });
+                {
+                    tilts: rowTilts.filter((_, candidate) => candidate !== index),
+                    spans: fitSpans(rowSpans, gridRows.length).filter((_, candidate) => candidate !== index),
+                });
         }
 
         /**
@@ -2732,7 +2812,12 @@
             }
             showGridMessage(null);
             // The new line is turned like the two it lies between.
-            applyRows(inserted.ys, { tilts: insertTilt(rowTilts, inserted.index) });
+            const spans = fitSpans(rowSpans, gridRows.length);
+            applyRows(inserted.ys, {
+                tilts: insertTilt(rowTilts, inserted.index),
+                // The new line runs the table's width.
+                spans: [...spans.slice(0, inserted.index), null, ...spans.slice(inserted.index)],
+            });
             selectRow(inserted.index);
         }
 
@@ -2776,7 +2861,7 @@
             const selected = marker.selectedIndexes();
             // Every line turns with the table, keeping its own extra turn; the selected one stays selected.
             setGrid(turned, gridRows, {
-                estimated: [...estimatedRows], byHand: rowsByHand, tilts: rowTilts, selected: selectedRow,
+                estimated: [...estimatedRows], byHand: rowsByHand, tilts: rowTilts, spans: rowSpans, selected: selectedRow,
             });
             marker.selectIndexes(selected);
         }
@@ -2959,7 +3044,13 @@
             el('gridSource').classList.toggle('d-none', message === '');
 
             el('addRowBtn').disabled = columns === 0;
-            el('removeRowBtn').disabled = columns === 0 || gridRows.length <= 2;
+            el('removeRowBtn').disabled = columns === 0 || gridRows.length <= 2 || allRowsSelected;
+            el('selectAllRowsBtn').disabled = columns === 0 || gridRows.length === 0;
+            el('selectAllRowsBtn').classList.toggle('active', allRowsSelected);
+            el('selectAllRowsBtn').setAttribute('aria-pressed', String(allRowsSelected));
+            el('selectAllRowsBtn').title = allRowsSelected
+                ? 'Every line is selected: drag any dot or press ↑ ↓ to move them all. Click again (or Esc) to let go.'
+                : 'Select every row line, to move them all together (Ctrl+A on a line)';
             el('removeRowBtn').title = selectedRow !== null
                 ? `Remove row line ${selectedRow + 1} (Delete)`
                 : 'Remove the last row';
@@ -4017,6 +4108,7 @@
                     estimated: previous.estimated,
                     byHand: previous.byHand,
                     tilts: previous.tilts,
+                    spans: previous.spans,
                 });
             } finally {
                 restoringFieldHistory = false;
@@ -4217,9 +4309,36 @@
             if (here) link.href = here.url;
             // Other pages saved is good to know; this one saved is a warning.
             el('scanPagesNotice').classList.toggle('is-info', !here);
-            el('scanPagesNotice').classList.toggle('d-none', message === '');
+            showScanPagesNotice(message);
 
             updatePageBar();
+        }
+
+        // The "already saved" notice goes after 5 seconds. Drawn again with the same
+        // words (a redraw), it stays gone; new words (another page) show it again.
+        let scanPagesShown = '';
+        let scanPagesTimer = 0;
+        function showScanPagesNotice(message) {
+            const notice = el('scanPagesNotice');
+            if (message === '') {
+                window.clearTimeout(scanPagesTimer);
+                scanPagesShown = '';
+                notice.classList.add('d-none');
+                notice.classList.remove('is-leaving');
+                return;
+            }
+            if (message === scanPagesShown) return;
+            scanPagesShown = message;
+            window.clearTimeout(scanPagesTimer);
+            notice.classList.remove('d-none', 'is-leaving');
+            scanPagesTimer = window.setTimeout(() => {
+                // A short fade, then gone.
+                notice.classList.add('is-leaving');
+                scanPagesTimer = window.setTimeout(() => {
+                    notice.classList.add('d-none');
+                    notice.classList.remove('is-leaving');
+                }, 300);
+            }, 5000);
         }
 
         /** ‹ Page 3 of 12 › in the Align toolbar, for a PDF of many pages; ✓: saved already. */
@@ -4711,6 +4830,7 @@
                 estimated: saved.grid.estimated,
                 byHand: saved.grid.byHand,
                 tilts: saved.grid.tilts,
+                spans: saved.grid.spans,
             });
             autoFields = new Map(saved.autoFields);
             rowsSource = saved.rowsSource;
@@ -5135,6 +5255,7 @@
             current.boxes = cloneBoxes(marker.toJSON());
             current.rows = [...gridRows];
             current.tilts = [...rowTilts];
+            current.spans = fitSpans(rowSpans, gridRows.length);
             current.autoFields = new Map(autoFields);
             current.rowsByHand = rowsByHand;
         }
@@ -6755,7 +6876,7 @@
                 realignBase = realignBaseline(item);
                 if (item.boxes && item.rows) {
                     // A page opened before keeps its own markers, and which of them were placed by hand.
-                    setGrid(item.boxes, item.rows, { tilts: item.tilts, remember: !item.autoFields });
+                    setGrid(item.boxes, item.rows, { tilts: item.tilts, spans: item.spans, remember: !item.autoFields });
                     if (item.autoFields) autoFields = new Map(item.autoFields);
                 } else {
                     // A new page starts on its layout's template grid. Snap to table is
@@ -7072,6 +7193,7 @@
                 item.boxes = cloneBoxes(marker.toJSON());
                 item.rows = [...gridRows];
                 item.tilts = [...rowTilts];
+                item.spans = fitSpans(rowSpans, gridRows.length);
                 item.autoFields = new Map(autoFields);
                 item.rowsByHand = rowsByHand;
                 item.geometry = currentGeometry();
@@ -7654,6 +7776,7 @@
                         boxes: item.boxes,
                         rows: item.rows ?? [],
                         tilts: item.tilts ?? null,
+                        spans: item.spans ?? null,
                         geometry: item.geometry ?? null,
                         autoFields: item.autoFields ? [...item.autoFields] : null,
                     }
@@ -9278,6 +9401,7 @@
                     boxes: grid ? cloneBoxes(grid.boxes) : null,
                     rows: grid ? [...grid.rows] : null,
                     tilts: grid?.tilts ? [...grid.tilts] : null,
+                    spans: grid?.spans ? [...grid.spans] : null,
                     autoFields: current ? new Map(autoFields) : layout?.autoFields ? new Map(layout.autoFields) : null,
                     rowsByHand: Boolean(grid?.byHand),
                     existingAccepted: Boolean(page) && existingRecordAccepted,
@@ -9843,7 +9967,7 @@
 
         function updateSelectionUI(indexes, context = {}) {
             // A marker and a row line are never selected together.
-            if (indexes.length > 0 && selectedRow !== null) selectRow(null);
+            if (indexes.length > 0 && (selectedRow !== null || allRowsSelected)) selectRow(null);
             const selected = new Set(indexes);
             document.querySelectorAll('#fieldList .field-list-item').forEach((item) => {
                 item.classList.toggle('is-selected', selected.has(Number(item.dataset.fieldIndex)));
@@ -9954,6 +10078,31 @@
 
             const commandPressed = event.ctrlKey || event.metaKey;
             const key = event.key.toLowerCase();
+
+            // Every row line selected: the arrow keys move them all (Shift: 10 px), Esc lets go.
+            // Delete does nothing (a ledger keeps its lines).
+            if (allRowsSelected && !commandPressed && !event.altKey) {
+                if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    nudgeAllRows((event.key === 'ArrowUp' ? -1 : 1) * (event.shiftKey ? 10 : 1));
+                    return;
+                }
+                if (event.key === 'Escape') {
+                    selectRow(null);
+                    return;
+                }
+                if (event.key === 'Delete' || event.key === 'Backspace') {
+                    event.preventDefault();
+                    return;
+                }
+            }
+
+            // Ctrl+A on a row line (or with every line already selected): every row line.
+            if (commandPressed && !event.shiftKey && key === 'a' && (selectedRow !== null || allRowsSelected)) {
+                event.preventDefault();
+                selectAllRows();
+                return;
+            }
 
             // A selected row line: the arrow keys move it (Shift: 10 px), Delete
             // removes it, Esc lets go of it.
@@ -10083,9 +10232,10 @@
             });
             el('gridTiltValue').addEventListener('blur', () => updateGridCard());
             el('addColumnBtn').addEventListener('click', () => addLedgerColumn());
+            el('selectAllRowsBtn').addEventListener('click', () => (allRowsSelected ? selectRow(null) : selectAllRows()));
             // A click on the page around the markers lets go of the row line.
             markerOverlay.addEventListener('pointerdown', (event) => {
-                if (event.target === markerOverlay && selectedRow !== null) selectRow(null);
+                if (event.target === markerOverlay && (selectedRow !== null || allRowsSelected)) selectRow(null);
             });
         }
 
