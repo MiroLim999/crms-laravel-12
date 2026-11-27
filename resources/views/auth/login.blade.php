@@ -1,7 +1,7 @@
 @extends('layouts.guest')
 
 @section('title', 'Sign In')
-@section('heading', 'Welcome back')
+@section('heading', 'Welcome to CRMS')
 @section('subheading', 'Sign in to continue to the civil registry.')
 
 @section('content')
