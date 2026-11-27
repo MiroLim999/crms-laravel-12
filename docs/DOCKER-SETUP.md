@@ -2,7 +2,7 @@
 
 Extra Docker help for CRMS. **The installation steps are in the [README](../README.md#installation-docker).** This page covers what to prepare first, and running, updating, backing up and fixing CRMS afterwards.
 
-**Contents:** [Prepare the computer](#prepare-the-computer) · [Every day](#every-day) · [Updates](#updates) · [NVIDIA GPU](#nvidia-gpu) · [Backup](#backup-and-restore) · [Troubleshooting](#troubleshooting)
+**Contents:** [Prepare the computer](#prepare-the-computer) · [Every day](#every-day) · [Updates](#updates) · [NVIDIA GPU](#nvidia-gpu) · [Database security](#database-security) · [Backup](#backup-and-restore) · [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -41,9 +41,11 @@ docker compose logs -f worker        # worker messages (Ctrl+C to stop watching)
 | :--- | :--- |
 | `.env` | settings and secret key |
 | `docker-data/storage` | scans, line pictures, logs |
-| `docker-data/backups` | database backups |
+| `docker-data/backups` | encrypted database backups |
+| `docker-data/secrets` | database passwords and the backup passphrase (made by the start script; keep a copy somewhere safe, **not** with the backups) |
 | `ml/models` | models (empty on a new computer: CRMS downloads none by itself; add them from your USB with **OCR Workspace → Add model**) |
-| Docker volume `crms_mysql-data` | the database |
+| Docker volume `crms_mysql-data` | the database (encrypted) |
+| Docker volume `crms_mysql-keyring` | the database's encryption key |
 
 ---
 
@@ -79,14 +81,14 @@ Docker builds whatever is in the project folder, so first make sure the folder h
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\docker-start.ps1
-   docker compose exec web php artisan migrate
+   docker compose run --rm migrate
    ```
 
    Mac / Linux:
 
    ```bash
    sh docker-start.sh
-   docker compose exec web php artisan migrate
+   docker compose run --rm migrate
    ```
 
 Docker Desktop only has to show **Engine running**; the start script builds and starts the containers itself, so there is no need to start them first. Records and models are not touched.
@@ -110,21 +112,49 @@ Nothing to do: the start script uses an NVIDIA card automatically if the compute
 
 ---
 
+## Database security
+
+The start script sets all of this up by itself, and checks it again on every start (`crms-secure-database`). Nothing to do by hand.
+
+| Protection | What it means |
+| :--- | :--- |
+| **Encrypted on disk** | Every table, the redo and undo logs and the binary log are encrypted (AES-256). Someone who copies the `crms_mysql-data` volume, or takes the disk, cannot read the records without the key. |
+| **Key kept apart** | The key is in its own volume, `crms_mysql-keyring`, not with the data. |
+| **No built-in passwords** | The root, owner and app passwords are 64 random characters each, made on first start in `docker-data/secrets`. They are not in `.env`, the images or `docker inspect`. |
+| **Least privilege** | The website, worker and scheduler sign in as `crms_app`: read and write rows, nothing else. They cannot create, change or drop tables, read files, or give rights to anyone. Only `docker compose run --rm migrate` signs in as the owner (`crms`). |
+| **Append-only audit log** | MySQL itself refuses every change or deletion of an Audit Log entry, even through a direct database connection. |
+| **No port** | The database has no port on the computer: only the other containers can reach it. |
+| **Encrypted backups** | See below. |
+
+**Check it:**
+
+```bash
+docker compose exec mysql crms-secure-database
+```
+
+It ends with `done. N crms table(s) encrypted`, or stops with an error if anything is not encrypted.
+
+> **Keep `docker-data/secrets` safe.** Copy it to a password manager or a separate USB stick kept apart from the backups. Without `backup_passphrase` no backup can be opened, by anyone, including you.
+
+---
+
 ## Backup and restore
 
-**Backup:**
+**Backup** (encrypted with the passphrase in `docker-data/secrets/backup_passphrase`):
 
 ```bash
-docker compose exec mysql sh -c 'mysqldump -uroot -p$MYSQL_ROOT_PASSWORD --single-transaction --set-gtid-purged=OFF crms > /backups/crms-backup.sql'
+docker compose exec mysql crms-backup
 ```
 
-Then copy the whole **`docker-data`** folder to a USB drive. (A password warning is normal.)
+This writes `docker-data/backups/crms-<date>_<time>.sql.gz.enc` and a `.sha256` file beside it. Copy **both** to a USB drive. Copy `docker-data/storage` too (the scans). Keep the passphrase (`docker-data/secrets`) somewhere **else**: a USB holding both is as good as no encryption.
 
-**Restore:** copy `docker-data` back into the project folder, start CRMS, then run:
+**Restore:** put the `.sql.gz.enc` and `.sha256` files in `docker-data/backups` and the same `backup_passphrase` in `docker-data/secrets`, start CRMS, then run (with your file's name):
 
 ```bash
-docker compose exec mysql sh -c 'mysql -uroot -p$MYSQL_ROOT_PASSWORD crms < /backups/crms-backup.sql'
+docker compose exec mysql crms-restore crms-2026-11-27_220600.sql.gz.enc
 ```
+
+It refuses a backup that was changed or damaged since it was made. Every table in the backup replaces the one in the database, so back up the current state first.
 
 ---
 
@@ -135,6 +165,9 @@ docker compose exec mysql sh -c 'mysql -uroot -p$MYSQL_ROOT_PASSWORD crms < /bac
 | `port is already allocated` / `address already in use` | Another program uses 8080 or 8081. Close it, or change the port in `docker-compose.yml` (8080 under `web`; 8081 under `ocr` **and** in `OCR_BROWSER_API_URL`). |
 | `fatal: not a git repository` (or `docker compose` says it found no configuration file) | The terminal is not in the project folder. Run `cd` to the project folder (see [Updates](#updates)). |
 | `bind source path does not exist` (mentions `.env`) | `.env` is missing. Create it (step 2), then start again. |
+| `secret ... not found` / `docker-data/secrets/... no such file` | You started with `docker compose up` before the start script ever ran. Run the start script once: it makes the secrets. |
+| `Access denied for user 'crms_app'` | The database was not secured yet. Run `docker compose exec mysql crms-secure-database`. |
+| `CREATE command denied to user 'crms_app'` | A migration was run in the `web` container. Use `docker compose run --rm migrate` instead. |
 | A scan waits forever | Worker is not running. Run `docker compose ps` and `docker compose logs worker`. |
 | **OCR service offline** | Reader is still starting. Wait a minute and reload. Still offline: `docker compose logs ocr`. |
 | Windows: WSL or virtualization missing | Enable virtualization in the BIOS, restart, run `wsl --update`. |

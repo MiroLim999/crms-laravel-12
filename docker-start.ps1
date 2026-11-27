@@ -21,6 +21,28 @@ param([switch]$Cpu)
 
 Set-Location $PSScriptRoot
 
+# The database passwords and the backup passphrase: Docker secrets, made once
+# here (64 random letters and digits each) and kept in docker-data\secrets.
+# Never shown, never in .env. Keep a copy of that folder somewhere safe.
+function New-CrmsSecrets {
+    $dir = Join-Path $PSScriptRoot 'docker-data\secrets'
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    foreach ($name in 'db_root_password', 'db_owner_password', 'db_app_password', 'backup_passphrase') {
+        $file = Join-Path $dir $name
+        if (-not (Test-Path $file) -or (Get-Item $file).Length -eq 0) {
+            $bytes = New-Object byte[] 32
+            [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+            $hex = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+            # No newline and no byte-order mark: MySQL reads the file as it is.
+            [System.IO.File]::WriteAllText($file, $hex, (New-Object System.Text.UTF8Encoding $false))
+            Write-Host "Made a new secret: docker-data\secrets\$name"
+        }
+    }
+    # Only this Windows account (and administrators) may open the folder.
+    $null = & icacls $dir /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" /grant:r 'SYSTEM:(OI)(CI)F' /grant:r 'Administrators:(OI)(CI)F' 2>&1
+}
+New-CrmsSecrets
+
 function Start-Crms([bool]$Gpu) {
     $files = @('-f', 'docker-compose.yml')
     if ($Gpu) { $files += @('-f', 'docker-compose.gpu.yml') }
@@ -52,6 +74,14 @@ if (-not $started -and $gpu) {
 }
 if (-not $started) {
     Write-Host 'Docker could not start CRMS. See the messages above.' -ForegroundColor Red
+    exit 1
+}
+
+# Accounts, grants and encryption; also upgrades a database made before them.
+Write-Host 'Securing the database...'
+& docker compose exec -T mysql crms-secure-database
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'Could not secure the database. See the messages above; CRMS is not safe to use yet.' -ForegroundColor Red
     exit 1
 }
 

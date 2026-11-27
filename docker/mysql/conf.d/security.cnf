@@ -1,0 +1,26 @@
+# CRMS database security settings (read after MySQL's own my.cnf).
+#
+# The key these use is kept by the keyring component (docker/mysql/keyring),
+# in the mysql-keyring volume, apart from the data.
+
+[mysqld]
+# Every new schema and table is encrypted on disk...
+default_table_encryption = ON
+# ...and nobody but an administrator may create one that is not.
+table_encryption_privilege_check = ON
+
+# The logs hold copies of changed rows, so they are encrypted too.
+innodb_redo_log_encrypt = ON
+innodb_undo_log_encrypt = ON
+binlog_encryption = ON
+
+# The audit log's append-only triggers are created by migrations, run as the
+# owner account (not an administrator) while the binary log is on.
+log_bin_trust_function_creators = ON
+
+# Only the classic protocol the app uses: X Protocol (port 33060) off.
+mysqlx = OFF
+
+# No reading files from the server or the client into tables.
+local_infile = OFF
+secure_file_priv = NULL

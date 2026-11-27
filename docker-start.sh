@@ -13,6 +13,26 @@
 
 cd "$(dirname "$0")" || exit 1
 
+# The database passwords and the backup passphrase: Docker secrets, made once
+# here (64 random letters and digits each) and kept in docker-data/secrets.
+# Never shown, never in .env. Keep a copy of that folder somewhere safe.
+make_secrets() {
+    mkdir -p docker-data/secrets
+    chmod 700 docker-data/secrets
+    for name in db_root_password db_owner_password db_app_password backup_passphrase; do
+        file="docker-data/secrets/$name"
+        if [ ! -s "$file" ]; then
+            head -c 32 /dev/urandom | od -An -tx1 | tr -d ' 
+' > "$file"
+            echo "Made a new secret: $file"
+        fi
+        # Readable inside the containers (MySQL runs as its own user); the
+        # folder itself is closed to other users of this computer.
+        chmod 644 "$file"
+    done
+}
+make_secrets
+
 start_crms() {
     if [ "$1" = gpu ]; then
         docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build --force-recreate
@@ -45,6 +65,13 @@ if ! start_crms "$mode"; then
         echo "Docker could not start CRMS. See the messages above."
         exit 1
     fi
+fi
+
+# Accounts, grants and encryption; also upgrades a database made before them.
+echo "Securing the database..."
+if ! docker compose exec -T mysql crms-secure-database; then
+    echo "Could not secure the database. See the messages above; CRMS is not safe to use yet."
+    exit 1
 fi
 
 echo "Waiting for the handwriting reader..."

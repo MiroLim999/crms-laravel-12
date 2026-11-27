@@ -1506,7 +1506,7 @@ Full steps are in the [README](../README.md) and [DOCKER-SETUP.md](DOCKER-SETUP.
 
 1. Get the code and copy `.env.example` to `.env`.
 2. Put a model folder in `ml/models/` (or add it later in the OCR Workspace).
-3. Run `docker-start.ps1` (Windows) or `docker-start.sh` (Mac/Linux), then `php artisan key:generate` and `php artisan migrate --seed` inside the `web` container.
+3. Run `docker-start.ps1` (Windows) or `docker-start.sh` (Mac/Linux), then `docker compose exec web php artisan key:generate` and `docker compose run --rm migrate --seed` (migrations run as the database owner, which the running app never uses).
 4. Open http://localhost:8080, sign in, choose a new password, and activate the model in the OCR Workspace.
 5. In Account Settings, make the **recovery codes** and keep them somewhere safe.
 
