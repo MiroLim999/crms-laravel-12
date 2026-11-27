@@ -424,8 +424,9 @@ class RemovedColumnsTest(unittest.TestCase):
         # A third of the joined line is in the kept column: it used to be dropped.
         self.assert_each_row_reads_its_own_cell(self.remarks_only(joined=(1, 3)))
 
-    def test_writing_into_the_margin_still_belongs_to_its_cell(self):
-        # Past the table's frame there is no column, removed or not: nothing to cut.
+    def test_writing_into_the_margin_is_cut_at_the_drawn_column_edge(self):
+        # What is inside the gridlines is read: writing that runs on past the
+        # column's drawn right edge into the margin is cut at that edge.
         ledger = self.remarks_only()
         line = ledger.detected[self.ROW * ledger.cols + 3]
         x1, base = line["baseline"][-1]
@@ -439,7 +440,11 @@ class RemovedColumnsTest(unittest.TestCase):
         lines, _, right = self.kept(ledger, ledger.run("scan"))
 
         x, _, w, _ = lines[self.ROW + 1]["bbox"]
-        self.assertGreater(x + w, right + 0.8 * (x1 + reach - right))
+        # The crop ends at the edge (its paper margin aside), well short of the run-on.
+        self.assertLessEqual(x + w, right + lm.CROP_PADDING + 2)
+        self.assertLess(right, x1 + reach)
+        # The writing inside the column is still all there.
+        self.assertGreater(w, 0.8 * (right - x))
 
     def test_the_joins_of_a_cursive_word_in_a_lone_narrow_column_are_kept(self):
         # A printed rule must be long against the printed table, not against the one

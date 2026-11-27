@@ -5253,7 +5253,10 @@
         const pageAlignable = (item) => pageCanAlign(item) && (Boolean(item?.file) || Boolean(item?.serverCopy));
 
         /** What a batch page is drawn from in Align: its file, or the server's copy of it (Re-align). */
-        const batchPageSource = (item) => item?.file ?? (item?.serverCopy ? item.page?.imageUrl ?? null : null);
+        // A page sent back by Re-align is drawn as the server has it, even while its file is
+        // still here: its markers were measured on that copy (straightened when the grid was
+        // tilted), and it is that copy that is read again. The file would put them askew.
+        const batchPageSource = (item) => (item?.serverCopy && item.page?.imageUrl ? item.page.imageUrl : item?.file ?? null);
 
         /** The page as the server has it (its image and markers), asked for when only where it is was known. */
         async function ensureServerPage(item) {
@@ -6914,9 +6917,11 @@
                     marker.swapPageWith(companionMarker);
                 } else if (tested) {
                     await marker.loadFromUrl(tested.imageUrl);
-                } else if (!item.file && item.serverCopy) {
-                    // Sent back by Re-align without its file: the page as the server has it,
-                    // the other page of the document with it (drawn beside it).
+                } else if (item.serverCopy) {
+                    // Sent back by Re-align: the page as the server has it, with or without
+                    // its file here. Its markers fit that copy, which the server may have
+                    // straightened (a tilted grid); drawn on the file they would sit askew.
+                    // The other page of the document comes with it (drawn beside it).
                     await Promise.all(recordOf(item).members.filter((it) => it.serverCopy).map(ensureServerPage));
                     await marker.loadFromUrl(item.page.imageUrl);
                 } else {

@@ -367,11 +367,13 @@ class LedgerTest(unittest.TestCase):
         self.assertTrue(polygon_mask(cells[("Name", 2)][0]["polygon"])[page.truth["name"]].all())
         self.assertFalse(polygon_mask(cells[("Name", 2)][0]["polygon"])[page.truth["date"]].any())
 
-    def test_capitals_and_tails_stay_whole_and_neighbours_stay_out(self):
+    def test_each_crop_keeps_inside_its_drawn_cell(self):
+        # What is inside the gridlines is read, and nothing outside them: a
+        # capital reaching up past the row line above and a tail reaching down
+        # past the one below are cut at those lines, and no neighbour's stroke
+        # gets in.
         page = Page()
         page.word("above", 70, 250, base_of(2))
-        # A capital reaching past the rule into the row above (where that
-        # row's tails hang), and a tail reaching past the rule into the row below.
         page.word("middle", 80, 240, base_of(3), capital=36, tail=18)
         page.word("below", 70, 250, base_of(4))
 
@@ -380,11 +382,26 @@ class LedgerTest(unittest.TestCase):
         outlines = {name: polygon_mask(cells[("Name", row)][0]["polygon"])
                     for name, row in (("above", 2), ("middle", 3), ("below", 4))}
 
-        for name, outline in outlines.items():
-            self.assertTrue(outline[page.truth[name]].all(), f"{name} has strokes outside its outline")
+        rows = np.arange(HEIGHT)[:, None]
+        for name, row in (("above", 2), ("middle", 3), ("below", 4)):
+            outline = outlines[name]
+            # Rows are 1-based in the result: row r lies between RULED[r - 1] and RULED[r].
+            top, bottom = RULED[row - 1], RULED[row]
+            inside = (rows >= top) & (rows <= bottom) & (np.arange(WIDTH)[None, :] <= COLUMN_EDGES[1])
+            self.assertFalse((outline & ~inside).any(), f"{name}'s outline leaves its drawn cell")
+            # Its own strokes inside the cell are all kept (but a pixel's edge).
+            own = page.truth[name] & inside
+            own[[top, bottom], :] = False
+            self.assertTrue(outline[own].all(), f"{name} lost strokes inside its cell")
             for other, strokes in page.truth.items():
                 if other != name:
                     self.assertFalse(outline[strokes].any(), f"{name}'s outline holds {other}'s strokes")
+
+        # The middle word's capital and tail reach past its row lines; those parts are cut.
+        middle = page.truth["middle"]
+        self.assertTrue(middle[:RULED[2], :].any() and middle[RULED[3] + 1:, :].any())
+        self.assertFalse(outlines["middle"][:RULED[2], :].any())
+        self.assertFalse(outlines["middle"][RULED[3] + 1:, :].any())
 
     def test_stacked_lines_in_one_cell_are_flagged_shared_cell(self):
         page = Page()

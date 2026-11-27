@@ -1357,6 +1357,68 @@ class Line:
         return float(np.median(self.baseline[:, 1]))
 
 
+# Every crop in the table holds only what lies inside its cell as drawn in Align:
+# between the row lines and column edges the user placed (before they are
+# snapped to the printed rules, which the writing sits on). A capital or tail
+# that crosses a drawn line is cut there, and a neighbour's stroke that reaches
+# in is left out. Which row a line is read for is still decided as before (rows
+# matched to where this page's writing sits), so a grid placed a little off, or a
+# template a few percent off, keeps every line in its own row.
+CLIP_TO_DRAWN_GRID = True
+
+
+def _outline_shape(polygon):
+    from shapely.geometry import Polygon
+
+    if polygon is None or len(polygon) < 3:
+        return None
+    shape = Polygon(polygon)
+    if not shape.is_valid:
+        shape = shape.buffer(0)
+    return None if shape.is_empty else shape
+
+
+def _clip_to_box(shape, left, top, right, bottom):
+    """The outline cut to a rectangle, as a point list, or None when nothing is left."""
+    from shapely.geometry import box
+
+    piece = shape.intersection(box(left, top, right, bottom))
+    if piece.is_empty:
+        return None
+    if piece.geom_type != "Polygon":
+        polygons = [g for g in getattr(piece, "geoms", []) if g.geom_type == "Polygon"]
+        if not polygons:
+            return None
+        piece = max(polygons, key=lambda g: g.area)
+    if piece.area < 1.0:
+        return None
+    return [[round(float(x), 1), round(float(y), 1)] for x, y in piece.exterior.coords[:-1]]
+
+
+def _keep_to_drawn_cells(lines, columns, rows):
+    """Cut every table line's outline to its cell as drawn.
+
+    `columns` maps a column index to its drawn (left, top, right, bottom) and
+    `rows` are the drawn row lines, all in page pixels on the page as read. A
+    line's cell is its column and the row it was given. Lines without a row
+    (flagged no_row), and lines that nothing of would be left of (a grid placed
+    far off the writing), are left as they were: an empty crop reads nothing.
+    """
+    if len(rows) < 2:
+        return
+    for line in lines:
+        if (line.field is not None or line.column not in columns or line.row is None
+                or FLAG_NO_ROW in line.flags or not 0 <= line.row < len(rows) - 1):
+            continue
+        shape = _outline_shape(line.polygon)
+        if shape is None:
+            continue
+        left, _, right, _ = columns[line.column]
+        clipped = _clip_to_box(shape, left, rows[line.row], right, rows[line.row + 1])
+        if clipped is not None:
+            line.polygon = clipped
+
+
 def _clip_polygon(points, lo, hi):
     """Clip a polygon to lo <= x <= hi. Returns the largest piece or None."""
     from shapely.geometry import Polygon, box
@@ -2058,6 +2120,10 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
     image = Image.open(page_path).convert("RGB")
     width, height = image.size
     columns, ruled, fields = _page_geometry(geometry, width, height)
+    # The grid as drawn in Align, before any of it is snapped to the printed
+    # rules: the cells every crop is kept inside (CLIP_TO_DRAWN_GRID).
+    drawn_rows = list(ruled)
+    drawn_columns = {c["index"]: (c["left"], c["top"], c["right"], c["bottom"]) for c in columns}
 
     lines = []
     ignored = []
@@ -2414,6 +2480,10 @@ def process_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
         line.polygon = [[round(x, 1), round(y, 1)] for x, y in field["polygon"]]
         line.field = field
         lines.append(line)
+
+    # Read inside the gridlines: each table crop keeps to its drawn cell.
+    if CLIP_TO_DRAWN_GRID and has_table:
+        _keep_to_drawn_cells(lines, drawn_columns, drawn_rows)
 
     # Order: fields first (each one's lines top to bottom), then the table row
     # by row, then anything flagged without a row.
@@ -3345,7 +3415,10 @@ def outline_page(page_path, geometry, out_dir, detector=kraken_lines, debug=None
     result = process_page(page_path, moved, out_dir, detector=detector, debug=debug,
                           cache_path=cache_path)
     result["deskew"] = round(degrees, 3)
-    result["geometry"] = _snapped_geometry(result, moved)
+    # The grid as drawn, carried onto the straightened page: the cells the crops
+    # were kept inside, so Re-align shows them, and reading again keeps to them.
+    # (Snapped to the printed rules, the row lines would sit on the writing.)
+    result["geometry"] = _drawn_geometry(moved) if CLIP_TO_DRAWN_GRID else _snapped_geometry(result, moved)
     with open(os.path.join(out_dir, "lines.json"), "w", encoding="utf-8") as handle:
         json.dump(result, handle)
     return result
@@ -3567,6 +3640,20 @@ def _within_page(ruled):
     if ruled[-1] > 1.0 and 1.0 - inside[-1] >= 0.5 * pitch:
         inside.append(1.0)
     return inside
+
+
+def _drawn_geometry(moved):
+    """The user's grid as process_page was given it (on the straightened page)."""
+    return {
+        "columns": [
+            {"name": column["name"], "box": [round(float(v), 5) for v in column["box"]]}
+            for column in moved.get("columns") or []
+        ],
+        # Rows turned past the page's edge hold nothing, and are refused when sent back.
+        "ruled_ys": [round(float(y), 5) for y in _within_page(list(moved.get("ruled_ys") or []))],
+        "fields": moved.get("fields") or [],
+        "estimated_rows": [],
+    }
 
 
 def _snapped_geometry(result, fitted):
