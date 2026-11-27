@@ -98,20 +98,18 @@ Updates, backups, the NVIDIA GPU and troubleshooting: **[docs/DOCKER-SETUP.md](d
 
 ## First Login
 
-CRMS has **one account**, the Super Admin. It runs on one offline PC, so there are no other users to add.
+CRMS has **one account**, the Super Admin. There is **no default password**: the first time CRMS is opened, it shows
+**Set up CRMS**, where you type your name, the email you will sign in with, and your own password. This page works
+**once**, and only on the CRMS computer itself, so nobody else on the network can make the account first.
 
-| Account | Email | First password |
-| :--- | :--- | :--- |
-| Super Admin | `superadmin@admin.com` | `superadmin@admin.com` |
-
-At the first sign-in CRMS asks you to **choose your own password**. Then, in **Account Settings** (initials badge at
-the top right → **Account Settings**):
+Then, in **Account Settings** (CRMS opens it right after setup; later: initials badge at the top right →
+**Account Settings**):
 
 - **Recovery codes**: make your 10 one-time codes and keep them somewhere safe. They are shown only once.
 - **Your details**: your name and email. They can be changed **once**; after that they are locked
   (`php artisan crms:unlock-details` on the CRMS computer allows one more change).
 
-Running `php artisan db:seed` again never resets an existing account.
+Running `php artisan db:seed` never makes or changes an account.
 
 ### Forgot the password?
 

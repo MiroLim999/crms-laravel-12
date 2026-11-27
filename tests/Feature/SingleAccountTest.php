@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Console\Commands\ResetPassword;
 use App\Models\AuditLog;
 use App\Models\User;
-use Database\Seeders\SuperAdminSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
@@ -85,42 +84,24 @@ class SingleAccountTest extends TestCase
 
     // ------------------------------------------------------------------ G2
 
-    public function test_the_seeder_makes_the_account_with_a_first_password_to_replace(): void
+    public function test_seeding_makes_no_account(): void
     {
-        $this->seed(SuperAdminSeeder::class);
+        $this->seed();
 
-        $user = User::where('email', config('crms.super_admin.email'))->firstOrFail();
-        $this->assertTrue($user->isSuperAdmin());
-        $this->assertTrue($user->must_change_password);
-        $this->assertTrue(Hash::check(config('crms.super_admin.password'), $user->password));
+        $this->assertSame(0, User::count());
     }
 
-    public function test_running_the_seeder_again_never_resets_the_account(): void
+    public function test_a_temporary_password_must_be_replaced_at_sign_in(): void
     {
-        $this->seed(SuperAdminSeeder::class);
-        $user = User::firstOrFail();
-        $user->forceFill([
-            'name' => 'Rosa Reyes',
-            'password' => 'MyOwnPassword9',
-            'must_change_password' => false,
-        ])->save();
-
-        $this->seed(SuperAdminSeeder::class);
-
-        $user->refresh();
-        $this->assertSame(1, User::count());
-        $this->assertSame('Rosa Reyes', $user->name);
-        $this->assertFalse($user->must_change_password);
-        $this->assertTrue(Hash::check('MyOwnPassword9', $user->password));
-    }
-
-    public function test_the_first_sign_in_asks_you_to_choose_your_own_password(): void
-    {
-        $this->seed(SuperAdminSeeder::class);
+        User::factory()->create([
+            'email' => 'rosa@example.test',
+            'password' => 'Temporary123',
+            'must_change_password' => true,
+        ]);
 
         $this->post(route('login.store'), [
-            'email' => config('crms.super_admin.email'),
-            'password' => config('crms.super_admin.password'),
+            'email' => 'rosa@example.test',
+            'password' => 'Temporary123',
         ])->assertRedirect(route('password.change'));
 
         $this->get(route('dashboard'))->assertRedirect(route('password.change'));
@@ -132,7 +113,7 @@ class SingleAccountTest extends TestCase
             ->assertDontSee('Temporary password');
 
         $this->post(route('password.change.store'), [
-            'current_password' => config('crms.super_admin.password'),
+            'current_password' => 'Temporary123',
             'password' => 'MyOwnPassword9',
             'password_confirmation' => 'MyOwnPassword9',
         ])->assertRedirect(route('dashboard'));
@@ -143,6 +124,8 @@ class SingleAccountTest extends TestCase
 
     public function test_the_sign_in_page_has_no_administrator_line(): void
     {
+        User::factory()->create();
+
         $this->get(route('login'))
             ->assertOk()
             ->assertDontSee('administrator')

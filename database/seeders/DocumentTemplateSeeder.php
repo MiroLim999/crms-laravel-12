@@ -20,7 +20,8 @@ class DocumentTemplateSeeder extends Seeder
 {
     public function run(): void
     {
-        $superAdmin = User::where('email', config('crms.super_admin.email'))->first();
+        // Usually none yet: the account is made later, on the Set up CRMS page.
+        $superAdmin = User::query()->orderBy('id')->first();
 
         foreach (array_filter(DocumentType::cases(), fn (DocumentType $type) => $type !== DocumentType::Custom) as $type) {
             $definition = DocumentTypeDefinition::where('key', $type->value)->firstOrFail();

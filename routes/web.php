@@ -5,6 +5,7 @@ use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordChangeController;
 use App\Http\Controllers\Auth\PasswordRecoveryController;
+use App\Http\Controllers\Auth\SetupController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentPageController;
 use App\Http\Controllers\DocumentScanController;
@@ -23,12 +24,18 @@ use Illuminate\Support\Facades\Route;
 | Authentication
 |--------------------------------------------------------------------------
 |
-| Sign-in only. CRMS has one account, the Super Admin, made by the seeder.
-| There is deliberately no registration route. A forgotten password is reset
-| with one of the account's one-time recovery codes (made in Account
-| Settings), or with `php artisan crms:reset-password`.
+| Sign-in only. CRMS has one account, the Super Admin, made once on the Set up
+| CRMS page (open only while no account exists). There is deliberately no
+| registration route. A forgotten password is reset with one of the account's
+| one-time recovery codes (made in Account Settings), or with
+| `php artisan crms:reset-password`.
 |
 */
+
+Route::get('setup', [SetupController::class, 'create'])->name('setup');
+Route::post('setup', [SetupController::class, 'store'])
+    ->middleware('throttle:20,1')
+    ->name('setup.store');
 
 Route::middleware('guest')->group(function () {
     Route::get('login', [LoginController::class, 'create'])->name('login');

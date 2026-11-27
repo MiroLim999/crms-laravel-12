@@ -43,6 +43,8 @@ class CapabilityMatrixTest extends TestCase
     #[DataProvider('pages')]
     public function test_a_guest_is_sent_to_sign_in(string $route): void
     {
+        User::factory()->create(); // with no account at all, Set up CRMS comes first
+
         $this->get(route($route))->assertRedirect(route('login'));
     }
 

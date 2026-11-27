@@ -8,11 +8,10 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        // Order matters: the Super Admin needs its role to exist first, and the
-        // templates are attributed to that account.
+        // No account is seeded: the Super Admin makes it on the Set up CRMS page
+        // at the first visit, with their own email and password.
         $this->call([
             RoleSeeder::class,
-            SuperAdminSeeder::class,
             DocumentTemplateSeeder::class,
         ]);
     }

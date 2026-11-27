@@ -166,7 +166,7 @@ The client runs CRMS on one offline PC with one account, the Super Admin. The St
 - **Roles**: `app/Enums/RoleSlug.php` has one case, `SuperAdmin`. The `roles` table keeps its one row so the permission checks have one place to ask.
 - **Abilities**: `app/Providers/AuthServiceProvider.php` defines `documents.process`, `records.edit` (Review & Export on a saved record), `records.view`, `audit.view`, `templates.manage` and `ocr.manage`, and each one asks only "is this the Super Admin?". Routes and views keep their `can:` checks, so a new page still needs an ability.
 - **Tests**: `tests/Feature/CapabilityMatrixTest.php` checks that the account opens every page, a guest is sent to sign in, and `/users` and `/analytics` give Not Found.
-- **The account**: `SuperAdminSeeder` makes it only when it is missing (running `db:seed` again never resets it), with the password from `config/crms.php` and "choose a new password" switched on. `php artisan crms:reset-password` gives it a new temporary password, printed once, and asks for a new one at the next sign-in.
+- **The account**: no seeder makes it, so there is no default password. While the `users` table is empty, `EnsureSetupIsDone` (web group, ahead of `auth`) sends every page to **Set up CRMS** (`SetupController`, `/setup`), where the Super Admin types their own name, email and password once; then the page only redirects to sign-in. By default it opens only on the CRMS computer itself (`FirstRunSetup::allowedFrom`: client `127.0.0.1`/`::1`, or the client address equals the server's own, i.e. `https://<server IP>` opened on the server PC), so another PC on the LAN cannot claim the account first. `CRMS_SETUP_LOCAL_ONLY=false` turns that off (Docker does, because its port is published on `127.0.0.1` only). The starter layouts seeded before the account are credited to it. Audit: `user.created`. `php artisan crms:reset-password` gives it a new temporary password, printed once, and asks for a new one at the next sign-in.
 - **Old data**: the migration `2026_11_11_000200_remove_staff_and_admin_accounts` moved the other accounts' records and change requests to the Super Admin and deleted those accounts. Audit Log entries keep the person's name (`actor_name`, `actor_role`).
 - **Recovery codes** (`PasswordRecoveryController`, `User::generateRecoveryCodes`): **Account Settings → Recovery codes** (with the current password) makes 10 one-time 6-digit codes, shown once; the old set stops working. Only an HMAC-SHA256 of each unused code, keyed with `APP_KEY`, is stored in `users.recovery_codes`, so a new `APP_KEY` voids them all. **Forgot password?** on the sign-in page takes the email and a code (at most 5 wrong codes per email an hour, and the same answer for a wrong email or a wrong code), then gives 10 minutes to choose the new password; the code is crossed off then. Audit: `user.recovery_codes_generated`, `user.recovery_failed` (a wrong code for the account's email), `user.password_recovered`.
 - **Name and email once**: the first save in **Your details** that changes them sets `users.details_locked_at`, and the form is locked after that. `php artisan crms:unlock-details` (audit `user.details_unlocked`) allows one more change.
@@ -367,16 +367,12 @@ npm run build
 ```
 Before building, this copies the PDF.js worker from `node_modules` into `public/vendor/pdfjs/`, so PDFs open without internet and the worker always matches the installed PDF.js version.
 
-### Default Credentials
+### First Visit: Set up CRMS
 
-| Account | Email | Default Password | Role |
-| :--- | :--- | :--- | :--- |
-| **Bootstrap Super Admin** | `superadmin@admin.com` | `superadmin@admin.com` | Super Admin |
+There are no default credentials. On the first visit, CRMS opens **Set up CRMS**: type your name, the email you will sign in with, and your own password. It works once, and only on the CRMS computer itself.
 
-> **Security Warning**: This password is public (it is written here). CRMS asks for a new one at the first sign-in (`must_change_password`, set by `SuperAdminSeeder`), and nothing else opens until it is changed. To customize default bootstrap credentials before running seeders, specify `CRMS_SUPER_ADMIN_EMAIL` and `CRMS_SUPER_ADMIN_PASSWORD` in your `.env`.
-
-#### First Sign-in and a Forgotten Password
-At the first sign-in CRMS asks you to choose your own password. Then make the account's **recovery codes** in **Account Settings** and keep them somewhere safe. **Forgot the password?** On the sign-in page, **Forgot password?** takes the email and one recovery code. Without a code, run `php artisan crms:reset-password` on the CRMS computer: it prints a temporary password once, and asks for a new one at the next sign-in.
+#### Recovery Codes and a Forgotten Password
+After setting up, make the account's **recovery codes** in **Account Settings** and keep them somewhere safe. **Forgot the password?** On the sign-in page, **Forgot password?** takes the email and one recovery code. Without a code, run `php artisan crms:reset-password` on the CRMS computer: it prints a temporary password once, and asks for a new one at the next sign-in.
 
 ---
 
@@ -977,9 +973,7 @@ vendor\bin\pint --test                   # Verify PHP code style
 | `OCR_BROWSER_ORIGIN_REGEX` | *(Loopback regex)* | Allowed browser origins regex for CORS upload requests. |
 | `CRMS_CONFIDENCE_THRESHOLD` | `80` | Default OCR confidence threshold below which fields flag for review. |
 | `CRMS_REPORTING_TIMEZONE` | `Asia/Manila` | Timezone every page and the CSV show times in, and whose days the date filters and dashboard use. Stored times stay UTC. |
-| `CRMS_SUPER_ADMIN_NAME` | `"Super Admin"` | Initial name for the bootstrap Super Admin seeder. |
-| `CRMS_SUPER_ADMIN_EMAIL` | `superadmin@admin.com` | Initial email for the bootstrap Super Admin seeder. |
-| `CRMS_SUPER_ADMIN_PASSWORD` | `superadmin@admin.com` | Initial password for the bootstrap Super Admin seeder. |
+| `CRMS_SETUP_LOCAL_ONLY` | `true` | The one-time Set up CRMS page opens only on the CRMS computer itself. `false` in Docker. |
 
 ---
 

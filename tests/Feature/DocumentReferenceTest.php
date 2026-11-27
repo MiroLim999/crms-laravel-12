@@ -22,6 +22,8 @@ class DocumentReferenceTest extends TestCase
 
     public function test_guests_cannot_access_identify_reference(): void
     {
+        User::factory()->create(); // with no account at all, Set up CRMS comes first
+
         $this->getJson(route('documents.identify-reference', [
             'doc_type' => 'birth',
             'book_no' => '7',

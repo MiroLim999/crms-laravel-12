@@ -14,6 +14,8 @@ class AuthenticationTest extends TestCase
 
     public function test_login_screen_renders(): void
     {
+        User::factory()->create();
+
         $this->get(route('login'))
             ->assertOk()
             ->assertSee('Sign In', false);

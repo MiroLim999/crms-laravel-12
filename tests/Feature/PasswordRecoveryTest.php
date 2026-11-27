@@ -99,6 +99,8 @@ class PasswordRecoveryTest extends TestCase
 
     public function test_the_sign_in_page_links_to_forgot_password(): void
     {
+        User::factory()->create();
+
         $this->get(route('login'))->assertOk()->assertSee(route('password.recover'), false);
         $this->get(route('password.recover'))->assertOk()->assertSee('Recovery code');
     }

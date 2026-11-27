@@ -4,19 +4,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Bootstrap Super Admin
+    | First-run setup
     |--------------------------------------------------------------------------
     |
-    | The one CRMS account, made by `php artisan db:seed`. This password is only
-    | the first one: the account must choose its own at the first sign-in, and
-    | running the seeder again never resets an existing account.
+    | There is no default account. While no account exists, every page leads to
+    | the Set up CRMS page, where the Super Admin's name, email and password are
+    | chosen once. By default that page only opens on the CRMS computer itself,
+    | so another PC on the network cannot claim the account first. Docker turns
+    | this off: there the site is published on 127.0.0.1 only, and requests
+    | arrive from Docker's own network address.
     |
     */
 
-    'super_admin' => [
-        'name' => env('CRMS_SUPER_ADMIN_NAME', 'Super Admin'),
-        'email' => env('CRMS_SUPER_ADMIN_EMAIL', 'superadmin@admin.com'),
-        'password' => env('CRMS_SUPER_ADMIN_PASSWORD', 'superadmin@admin.com'),
+    'setup' => [
+        'local_only' => (bool) env('CRMS_SETUP_LOCAL_ONLY', true),
     ],
 
     /*

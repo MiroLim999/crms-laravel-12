@@ -1782,7 +1782,7 @@ Set in the `.env` file. Defaults from `.env.example`.
 | `CRMS_SCAN_BATCH_KEEP_DAYS` | `7` | An open batch untouched this long is deleted with its files |
 | `CRMS_CONFIDENCE_THRESHOLD` | `80` | Readings below this confidence are flagged |
 | `CRMS_REPORTING_TIMEZONE` | `Asia/Manila` | Time zone for screens, filters and the CSV |
-| `CRMS_SUPER_ADMIN_EMAIL`, `CRMS_SUPER_ADMIN_PASSWORD` | `superadmin@admin.com` | The first Super Admin, used only at installation |
+| `CRMS_SETUP_LOCAL_ONLY` | `true` | The one-time Set up CRMS page (makes the account) opens only on the CRMS computer itself |
 
 ## Appendix D. Service endpoints
 

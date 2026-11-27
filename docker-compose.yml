@@ -62,6 +62,10 @@ x-app: &app
     # localhost:8080 and a Windows setup on localhost:8000 would share the login
     # cookie, and signing in to one would sign you out of the other.
     SESSION_COOKIE: crms_docker_session
+    # The Set up CRMS page normally opens only on the CRMS computer itself. Inside
+    # Docker every request comes from Docker's network, never 127.0.0.1, so the
+    # check is off here: the site is published on 127.0.0.1 only (see ports).
+    CRMS_SETUP_LOCAL_ONLY: "false"
   depends_on:
     mysql:
       condition: service_healthy

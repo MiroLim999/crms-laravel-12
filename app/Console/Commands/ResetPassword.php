@@ -26,7 +26,7 @@ class ResetPassword extends Command
         $user = User::where('role_id', Role::of(RoleSlug::SuperAdmin)->getKey())->orderBy('id')->first();
 
         if ($user === null) {
-            $this->error('There is no account yet. Run: php artisan db:seed');
+            $this->error('There is no account yet. Open CRMS in the browser to set it up.');
 
             return self::FAILURE;
         }
