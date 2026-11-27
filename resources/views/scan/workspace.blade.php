@@ -1569,6 +1569,7 @@
         import { LineOverlay, polygonBounds } from '{{ Vite::asset('resources/js/line-overlay.js') }}';
         import {
             addColumn,
+            addColumnWhereRoom,
             clampRowAngle,
             clampRuledY,
             columnBand,
@@ -9873,30 +9874,26 @@
             const columns = ledgerColumns(targetBoxes);
             const { angle: _angle, columnIndex: _index, personGroup: _group, personFieldOrder: _order, ...plain } = box;
             const nextIndex = Math.max(-1, ...columns.map((column) => Number(column.columnIndex)).filter(Number.isInteger)) + 1;
-            let moved;
             if (columns.length > 0 && rows.length >= 2) {
-                // After that page's last column, across its rows, turned with its table.
-                const last = columns.reduce((right, column) => (column.x + column.w > right.x + right.w ? column : right));
-                const top = rows[0];
-                const bottom = rows[rows.length - 1];
-                moved = {
-                    ...plain,
-                    x: Math.max(0, Math.min(1 - box.w, last.x + last.w)),
-                    y: top,
-                    h: Math.max(0.01, bottom - top),
-                    kind: 'column',
-                    columnIndex: nextIndex,
-                    ...(Number(last.angle) ? { angle: Number(last.angle) } : {}),
-                };
+                // Right of its table, or the widest column's right half when the page has
+                // no room there: never on top of another column.
+                const { x: _x, y: _y, w: _w, h: _h, ...props } = plain;
+                const added = addColumnWhereRoom(targetBoxes, { ...props, kind: 'column', columnIndex: nextIndex });
+                if (!added) {
+                    showOcrError(`Page ${other.number} has no room for another column. Make one of its columns wider first.`);
+                    return;
+                }
+                const tilt = gridTilt(columns);
+                if (tilt && !added.boxes[added.index].angle) added.boxes[added.index] = { ...added.boxes[added.index], angle: tilt };
+                targetBoxes.splice(0, targetBoxes.length, ...added.boxes);
             } else {
                 // No table there yet: the column where it is, with this page's row lines.
-                moved = { ...plain, kind: 'column', columnIndex: nextIndex, ...(Number(box.angle) ? { angle: Number(box.angle) } : {}) };
+                targetBoxes.push({ ...plain, kind: 'column', columnIndex: nextIndex, ...(Number(box.angle) ? { angle: Number(box.angle) } : {}) });
                 rows = [...gridRows];
                 tilts = [...rowTilts];
                 spans = fitSpans(rowSpans, gridRows.length);
                 bends = null;
             }
-            targetBoxes.push(moved);
             tilts = tilts ? fitTilts(tilts, rows.length) : rows.map(() => 0);
 
             // That page keeps it: a batch page on its queue item, a page of this file in its saved layout.
@@ -11647,6 +11644,8 @@
 
         /** One page in Verify: its labels, its width and the Submit wording. */
         function setVerifySpreadLayout() {
+            // A view-only page 2 still loading for the record before is not shown now.
+            viewOnlyPageToken += 1;
             const pill = el('validationPagePill');
             pill.textContent = `Page ${scanPageNumber} of ${scanPageCount}`;
             pill.classList.toggle('d-none', !multiPage());
@@ -11750,6 +11749,68 @@
                 if (initialGroup) focusFirstVerifyField(initialGroup);
             });
             companionLines.clear();
+            // A two-page register whose page 2 has nothing to read: that page is shown
+            // beside this one all the same (view only), as the record's other page.
+            showViewOnlyOtherPage();
+        }
+
+        /**
+         * The other page of this record when the layout's page 2 is empty (nothing on
+         * it is read), with the file it is drawn from: { file, page, main }, or null.
+         */
+        function viewOnlyOtherPage() {
+            if (!config.pageTwo || (config.pageTwo.boxes ?? []).length > 0) return null;
+            if (batchState.active) {
+                const item = batchState.items[batchState.currentIndex];
+                if (!item?.file || !(item.pageTotal > 1)) return null;
+                const other = item.pageNo % 2 === 1 ? item.pageNo + 1 : item.pageNo - 1;
+                return other >= 1 && other <= item.pageTotal ? { file: item.file, page: other, main: item.pageNo } : null;
+            }
+            const other = companionPageFor(scanPageNumber);
+            return scanFile && other !== null ? { file: scanFile, page: other, main: scanPageNumber } : null;
+        }
+
+        let viewOnlyPageToken = 0;
+
+        /**
+         * Verify (and Review & Export, which shows the same pane) on page 1 of a
+         * register whose page 2 has no fields: page 2 is drawn beside it, with no
+         * outlines, so the whole document is in view. Nothing on it is read.
+         */
+        async function showViewOnlyOtherPage() {
+            const token = ++viewOnlyPageToken;
+            const other = viewOnlyOtherPage();
+            if (!other) return;
+
+            const companion = el('validationCompanionPage');
+            companion.classList.remove('d-none', 'is-live');
+            companion.style.order = other.page < other.main ? '-1' : '1';
+            companion.title = `Page ${other.page} has no fields in this layout: shown for reference, nothing on it is read`;
+            el('validationCompanionLabel').textContent = `Page ${other.page} · view only`;
+            el('validationMainLabel').textContent = `Page ${other.main}`;
+            el('validationMainLabel').classList.remove('d-none');
+            const pill = el('validationPagePill');
+            pill.textContent = `Pages ${Math.min(other.page, other.main)}–${Math.max(other.page, other.main)} · page ${other.page} has nothing to read`;
+            pill.classList.remove('d-none');
+            document.querySelector('#step-verify .validation-comparison-grid')?.classList.add('is-two-page');
+            window.dispatchEvent(new Event('crms:verify-layout'));
+            validationMarker.fitShare = 0.5;
+            validationCompanionMarker.setBoxes([]);
+            companionLines.clear();
+
+            try {
+                await validationCompanionMarker.load(other.file, { page: other.page });
+            } catch (error) {
+                console.warn(`Page ${other.page} could not be drawn beside this one:`, error);
+                if (token === viewOnlyPageToken) setVerifySpreadLayout();
+                return;
+            }
+            // Another record or scan opened meanwhile: this page is not its.
+            if (token !== viewOnlyPageToken || verifyDoc) return;
+            window.requestAnimationFrame(() => {
+                validationMarker.resetZoom();
+                el('validationDocViewport').scrollTo({ top: 0, left: 0 });
+            });
         }
 
         // On while the first field gets the cursor after a scan, so the view stays whole.

@@ -37,6 +37,10 @@
             'baselineRuledBends' => $ruledBends ?? [],
             // The layout of page 2 of a two-page spread, drawn beside page 1 (null: one page).
             'pageTwo' => $pageTwo ?? null,
+            // Other layouts of this book: a page takes one's columns in one step (Preset).
+            'columnPresets' => $columnPresets ?? [],
+            // The book's register fields (null: none): "Needed columns" lists those no column fills yet.
+            'registry' => App\Support\RegistryFields::forWorkspace((string) $docType->key),
             // Already published: a save that changes nothing is not a new publish.
             'published' => $published,
             'detectGridUrl' => route('templates.detect-grid'),
@@ -396,6 +400,24 @@
                                         </button>
                                     </div>
 
+                                    {{-- Another layout of this book's columns, on the page being edited, in one step. --}}
+                                    <div class="document-grid-card__line @if (empty($columnPresets)) d-none @endif" id="columnPresetLine">
+                                        <span class="document-grid-card__label" id="columnPresetLabel">Preset</span>
+                                        <div class="input-group input-group-sm flex-grow-1 flex-nowrap" role="group" aria-labelledby="columnPresetLabel">
+                                            <select class="form-select" id="columnPresetSelect" aria-label="Layout whose columns to use"
+                                                    title="Take the column names and settings of another layout of this book">
+                                                <option value="">Columns from…</option>
+                                                @foreach ($columnPresets ?? [] as $preset)
+                                                    <option value="{{ $preset['id'] }}">{{ $preset['label'] }}</option>
+                                                @endforeach
+                                            </select>
+                                            <button type="button" class="btn btn-outline-primary" id="applyColumnPresetBtn" disabled
+                                                    title="Use that layout's columns on the page being edited">
+                                                Apply
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     {{-- Two pages whose rows differ: row N of both pages is one person. Only said when wrong. --}}
                                     <p class="template-row-match is-mismatch d-none" id="rowMatch" role="status" aria-live="polite"></p>
 
@@ -465,6 +487,15 @@
                                         <i class="icon-base bx bx-trash icon-sm me-1" aria-hidden="true"></i>
                                         <span>Delete</span>
                                     </button>
+                                </div>
+
+                                {{-- What the book's register needs read from the page: ticked once a column fills it. --}}
+                                <div class="template-needed-columns d-none" id="neededColumns" aria-labelledby="neededColumnsTitle">
+                                    <div class="template-needed-columns__head">
+                                        <span class="template-needed-columns__title" id="neededColumnsTitle">Needed columns</span>
+                                        <span class="template-needed-columns__count" id="neededColumnsCount"></span>
+                                    </div>
+                                    <ul class="template-needed-columns__list list-unstyled mb-0" id="neededColumnsList"></ul>
                                 </div>
 
                                 <div class="template-person-record" id="personRecord">

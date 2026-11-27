@@ -159,7 +159,10 @@ export function fieldKeyOf(name) {
 export const NOT_A_FIELD = '-';
 
 // Words a column name and a field may differ by without meaning something else.
-const FIELD_WORD = { husb: 'husband', number: 'no', num: 'no', nr: 'no', registration: 'reg', registry: 'reg', register: 'reg' };
+const FIELD_WORD = {
+    husb: 'husband', number: 'no', num: 'no', nr: 'no', registration: 'reg', registry: 'reg', register: 'reg',
+    minutes: 'mins', minute: 'mins', min: 'mins',
+};
 const FIELD_FILLER = new Set(['of', 'the', 'a', 's']);
 
 /** A name's words, the same whichever order or spelling: "Mother's Name" -> "mother name". */
@@ -236,6 +239,32 @@ function matchPair(name, pairs) {
         const base = shared(first);
         return base !== '' && (base === words || sameWords(words, base));
     })?.[0] ?? null;
+}
+
+/**
+ * The register fields a layout's column names fill, as Review & Export will
+ * match them (same words, a slip of the pen, the two lines of a pair): a Set of
+ * field keys. A manual field is never filled from the scan.
+ */
+export function fieldsFilledBy(names, fields, pairs = []) {
+    const fillable = fields.filter((field) => !field.manual);
+    const filled = new Set();
+    names.forEach((name) => {
+        const field = matchField(name, fillable.filter((candidate) => !filled.has(candidate.key)))
+            ?? matchPair(name, pairs);
+        if (field) filled.add(field);
+    });
+    // A column for the first line of a pair gives the second line too (the wife under the husband).
+    pairs.forEach(([first, second]) => {
+        if (filled.has(first)) filled.add(second);
+    });
+    return filled;
+}
+
+/** A field key as people read it: "husb_nationality" -> "husband nationality". */
+export function fieldLabelOf(key) {
+    const words = { husb: 'husband', reg: 'registration', no: 'number', mins: 'minutes' };
+    return String(key ?? '').split('_').map((word) => words[word] ?? word).join(' ');
 }
 
 /**

@@ -13,6 +13,8 @@ import {
     csvSafe,
     exportFileName,
     fieldKeyOf,
+    fieldLabelOf,
+    fieldsFilledBy,
     joinTables,
     matchField,
     nextCellPosition,
@@ -25,6 +27,56 @@ import {
     toCsv,
     toSheetData,
 } from '../../resources/js/review-table.js';
+
+// The register fields as App\Support\RegistryFields has them (manual ones flagged).
+const REGISTER_KEYS = {
+    birth: ['name', 'date_of_birth', 'sex', 'book_no', 'page_no', 'reg_no', 'date_of_reg', 'place_of_birth',
+        'name_of_mother', 'nationality_mother', 'name_of_father', 'nationality_father',
+        'parents_marriage_date', 'parents_marriage_place', 'attendant', 'type_of_birth',
+        'mother_age', 'father_age', 'late_registration'],
+    death: ['name', 'date_of_death', 'sex', 'book_no', 'page_no', 'reg_no', 'date_of_reg',
+        'age_years', 'age_months', 'age_days', 'age_hours', 'age_mins',
+        'civil_status', 'nationality', 'place_of_death', 'cause_of_death', 'corpse_disposal',
+        'attendant', 'residence', 'date_of_birth', 'late_registration'],
+    marriage: ['husband_name', 'wife_name', 'date_of_marriage', 'book_no', 'page_no', 'reg_no',
+        'husband_age', 'wife_age', 'husb_nationality', 'wife_nationality',
+        'husb_civil_status', 'wife_civil_status', 'husb_mother', 'wife_mother',
+        'husb_father', 'wife_father', 'date_of_reg', 'place_of_marriage', 'ceremony_type',
+        'late_registration'],
+};
+const MANUAL = new Set(['late_registration', 'attendant', 'corpse_disposal', 'ceremony_type']);
+const MARRIAGE_PAIRS = [['husband_name', 'wife_name'], ['husband_age', 'wife_age'], ['husb_nationality', 'wife_nationality'],
+    ['husb_civil_status', 'wife_civil_status'], ['husb_mother', 'wife_mother'], ['husb_father', 'wife_father']];
+const registerFields = (type) => REGISTER_KEYS[type].map((key) => ({ key, manual: MANUAL.has(key) }));
+
+test('a column the builder adds for a needed field is matched back to that field', () => {
+    Object.keys(REGISTER_KEYS).forEach((type) => {
+        const fields = registerFields(type);
+        const pairs = type === 'marriage' ? MARRIAGE_PAIRS : [];
+        fields.filter((field) => !field.manual).forEach((field) => {
+            const label = fieldLabelOf(field.key);
+            assert.ok(
+                fieldsFilledBy([label], fields, pairs).has(field.key),
+                `${type}: a column named "${label}" fills ${field.key}`,
+            );
+        });
+        // Every needed column, added by its label, fills every needed field.
+        const all = fields.filter((field) => !field.manual).map((field) => fieldLabelOf(field.key));
+        const filled = fieldsFilledBy(all, fields, pairs);
+        fields.filter((field) => !field.manual).forEach((field) => assert.ok(filled.has(field.key), `${type}: ${field.key}`));
+    });
+});
+
+test('needed columns: the second line of a pair comes with the first, manual fields never', () => {
+    const fields = registerFields('marriage');
+    const filled = fieldsFilledBy(['Husband Name', 'Place of Mirriage', 'Ceremony type'], fields, MARRIAGE_PAIRS);
+    assert.ok(filled.has('husband_name'));
+    assert.ok(filled.has('wife_name'), 'the wife is written under the husband');
+    assert.ok(filled.has('place_of_marriage'), 'a slip of the pen still matches');
+    assert.ok(!filled.has('ceremony_type'), 'a manual field is picked in Review & Export, not read');
+    assert.equal(fieldLabelOf('husb_nationality'), 'husband nationality');
+    assert.equal(fieldLabelOf('reg_no'), 'registration number');
+});
 
 test('Sex is a dropdown of M and F whatever the layout says', () => {
     assert.deepEqual(columnType('Sex').options, ['M', 'F']);

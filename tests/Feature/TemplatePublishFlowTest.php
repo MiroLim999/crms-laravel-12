@@ -102,6 +102,35 @@ class TemplatePublishFlowTest extends TestCase
             ->assertViewHas('pageTwo', fn ($pageTwo) => is_array($pageTwo) && $pageTwo['boxes'] === []);
     }
 
+    public function test_the_builder_offers_other_layouts_of_the_book_as_column_presets(): void
+    {
+        // A two-page birth layout: its columns are what another layout can take.
+        $source = $this->layout(['name' => 'Birth register 1957', 'page_two_json' => $this->pageTwo('Name of Father')]);
+        $other = $this->layout(['name' => 'Birth register new']);
+
+        $this->actingAs($this->admin)
+            ->get(route('templates.edit', $other))
+            ->assertOk()
+            ->assertViewHas('columnPresets', function (array $presets) use ($source, $other) {
+                $ids = array_column($presets, 'id');
+                $preset = collect($presets)->firstWhere('id', $source->id);
+
+                return ! in_array($other->id, $ids, true)
+                    && $preset !== null
+                    && array_column($preset['pages'][0]['columns'], 'name') === ['Entry No.', "Child's Name"]
+                    && $preset['pages'][0]['columns'][0]['role'] === 'entry'
+                    && array_column($preset['pages'][1]['columns'], 'name') === ['Name of Father']
+                    && count($preset['pages'][1]['ruledYs']) === 5
+                    && str_contains($preset['label'], 'page 2: 1 columns');
+            });
+
+        // A new layout of the same book is offered the same presets.
+        $this->actingAs($this->admin)
+            ->get(route('templates.create', ['type' => DocumentType::Birth->value]))
+            ->assertOk()
+            ->assertViewHas('columnPresets', fn (array $presets) => count($presets) === 2);
+    }
+
     public function test_an_empty_page_two_without_blank_still_removes_page_two(): void
     {
         $layout = $this->layout(['page_two_json' => $this->pageTwo()]);

@@ -11508,6 +11508,81 @@ $dashboard-reveal-step: 40ms;
   font-size: .6875rem;
 }
 
+// The book's register fields a layout must read: ticked once a column fills it,
+// a small "+ name" button while it is missing.
+.template-needed-columns {
+  margin-block-end: .75rem;
+  padding: .5rem .625rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: .5rem;
+  background: var(--bs-tertiary-bg, var(--bs-light));
+}
+
+.template-needed-columns__head {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-block-end: .375rem;
+
+  .btn {
+    padding-block: .125rem;
+    font-size: .75rem;
+  }
+}
+
+.template-needed-columns__title {
+  color: var(--bs-heading-color);
+  font-size: .75rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+
+.template-needed-columns__count {
+  color: var(--bs-secondary-color);
+  font-size: .75rem;
+}
+
+.template-needed-columns__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem;
+}
+
+.template-needed-columns__item {
+  display: inline-flex;
+  align-items: center;
+  gap: .125rem;
+  font-size: .75rem;
+  line-height: 1.2;
+
+  &.is-done {
+    padding: .1875rem .4375rem;
+    border-radius: 999px;
+    background: rgba(var(--bs-success-rgb), .12);
+    color: var(--bs-success-text-emphasis, var(--bs-success));
+  }
+}
+
+.template-needed-columns__add {
+  display: inline-flex;
+  align-items: center;
+  gap: .125rem;
+  padding: .125rem .4375rem;
+  border: 1px dashed var(--bs-border-color);
+  border-radius: 999px;
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  font-size: .75rem;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    border-color: var(--bs-primary);
+    color: var(--bs-primary);
+  }
+}
+
 // Two pages: the Fields card is one person's record, page 1's part then
 // page 2's (order is set from the script: the page being edited may be 2).
 .template-person-record {

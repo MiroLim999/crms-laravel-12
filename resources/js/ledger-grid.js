@@ -420,6 +420,24 @@ export function addColumn(boxes, column, selected = null, first = null) {
 }
 
 /**
+ * A column added with nothing selected, many perhaps one after another (the
+ * builder's "+", a preset, a column moved from the other page): a typical
+ * column's width right of the table when the page has room there, else the
+ * right half of the widest column, so the room is shared and no column ever
+ * lies on another. Same result shape as addColumn; null when even the widest
+ * column is too narrow to split, or there is no table.
+ */
+export function addColumnWhereRoom(boxes, column) {
+    const columns = boxes.flatMap((box, index) => (isColumn(box) ? [index] : []));
+    if (columns.length === 0) return null;
+    const width = median(columns.map((index) => boxes[index].w));
+    const right = Math.max(...columns.map((index) => boxes[index].x + boxes[index].w));
+    if (right + width <= 1 + 1e-9) return addColumn(boxes, column);
+    const widest = columns.reduce((best, index) => (boxes[index].w > boxes[best].w ? index : best));
+    return addColumn(boxes, column, widest);
+}
+
+/**
  * The columns a page's printed table has, put onto the columns already in the
  * layout. Detect from sample finds each page's own column lines; a page 2 that
  * started as a copy of page 1 must not keep page 1's column positions.

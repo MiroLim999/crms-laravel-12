@@ -91,7 +91,60 @@ class DocumentTemplateController extends Controller
             'ruledTilts' => [],
             'ruledSpans' => [],
             'ruledBends' => [],
+            'columnPresets' => $this->columnPresets($type),
         ]);
+    }
+
+    /**
+     * Column presets for the builder: every other layout of the same book that
+     * has columns, each page's columns (name, box, settings) and row lines, so a
+     * page can take another layout's columns in one step.
+     *
+     * @return list<array{id: int, label: string, pages: list<array{columns: list<array<string, mixed>>, ruledYs: list<float>}>}>
+     */
+    private function columnPresets(DocumentTypeDefinition $type, ?DocumentTemplate $except = null): array
+    {
+        $page = fn (?DocumentTemplate $layout) => [
+            'columns' => array_values(array_map(fn (array $column) => array_filter([
+                'name' => (string) ($column['name'] ?? ''),
+                'box' => $column['box'] ?? null,
+                'angle' => $column['angle'] ?? null,
+                'role' => $column['role'] ?? null,
+                'required' => $column['required'] ?? null,
+                'type' => $column['type'] ?? null,
+                'options' => $column['options'] ?? null,
+                'hint' => $column['hint'] ?? null,
+            ], fn ($value) => $value !== null), $layout?->columns ?? [])),
+            'ruledYs' => array_values(array_map('floatval', $layout?->ruled_ys ?? [])),
+        ];
+
+        return DocumentTemplate::listed()
+            ->where('document_type_id', $type->getKey())
+            ->when($except, fn ($query) => $query->whereKeyNot($except->getKey()))
+            ->with('pageTwoTemplate')
+            ->orderByDesc('is_active')
+            ->orderByDesc('updated_at')
+            ->limit(20)
+            ->get()
+            ->map(function (DocumentTemplate $layout) use ($page) {
+                $pages = [$page($layout), $page($layout->pageTwoTemplate)];
+                $counts = array_map(fn (array $p) => count($p['columns']), $pages);
+                if (array_sum($counts) === 0) {
+                    return null;
+                }
+                $parts = $counts[1] > 0
+                    ? "page 1: {$counts[0]} columns, page 2: {$counts[1]} columns"
+                    : "{$counts[0]} columns";
+
+                return [
+                    'id' => (int) $layout->getKey(),
+                    'label' => $layout->name.($layout->is_active ? ' (published)' : '').' · '.$parts,
+                    'pages' => $pages,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
     }
 
     /**
@@ -199,6 +252,8 @@ class DocumentTemplateController extends Controller
             'pageTwo' => $this->pageTwoForBuilder($template),
             // What still stops this layout from being published (none: it can be).
             'publishProblems' => $this->publishProblems($template),
+            // Other layouts of this book whose columns a page can take in one step.
+            'columnPresets' => $this->columnPresets($template->documentTypeDefinition, $template),
         ]);
     }
 

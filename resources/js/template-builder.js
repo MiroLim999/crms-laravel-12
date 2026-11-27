@@ -6,6 +6,7 @@ import {
     normaliseAngle,
 } from './field-marker';
 import {
+    addColumnWhereRoom,
     clampRowAngle,
     clampRuledY,
     shiftRuledYs,
@@ -45,6 +46,7 @@ import { LayoutHistory } from './template-history';
 import { guessedRowCount, namesOnBothPages, publishProblems, rowMismatch } from './layout-publish-checks';
 import { setDisclosureExpanded } from './disclosure-motion';
 import { confirmDialog } from './dialog';
+import { fieldLabelOf, fieldsFilledBy } from './review-table';
 
 const configNode = document.getElementById('templateBuilderConfig');
 
@@ -55,6 +57,12 @@ if (!(configNode instanceof HTMLScriptElement)) {
 const config = JSON.parse(configNode.textContent || '{}');
 const maxFields = Number(config.maxFields) || 450;
 const maxFieldNameLength = Number(config.maxFieldNameLength) || 500;
+// The book's register fields (see "needed columns"): Book No. and Page No. come from
+// step 1, and manual fields are picked in Review & Export, so neither is a column.
+const registry = config.registry && Array.isArray(config.registry.fields) ? config.registry : null;
+const neededFields = registry
+    ? registry.fields.filter((field) => !field.manual && !['book_no', 'page_no'].includes(field.key))
+    : [];
 
 function element(id, Type = HTMLElement) {
     const node = document.getElementById(id);
@@ -683,7 +691,141 @@ function renderFieldList(boxes) {
     selectAllInput.disabled = boxes.length === 0;
     renderPersonRecord(boxes, other, onBoth);
     renderPersonGroups(boxes);
+    renderNeededColumns(boxes);
     updateSelectionUI(marker.selectedIndexes());
+}
+
+// ------------------------------------------------------------ needed columns
+// The book's register fields (config.registry) that a layout must read: each is
+// ticked once a column on either page fills it, as Review & Export will match it.
+
+/** The needed fields no column on either page fills yet, in the register's order. */
+function missingNeededFields(boxes = marker.toJSON()) {
+    const names = [...boxes, ...(otherPageLayout()?.boxes ?? [])].map((box) => box.name);
+    const filled = fieldsFilledBy(names, registry?.fields ?? [], registry?.pairs ?? []);
+    return neededFields.filter((field) => !filled.has(field.key));
+}
+
+function renderNeededColumns(boxes = marker.toJSON()) {
+    const panel = element('neededColumns');
+    panel.classList.toggle('d-none', neededFields.length === 0);
+    if (neededFields.length === 0) return;
+
+    const missing = new Set(missingNeededFields(boxes).map((field) => field.key));
+    element('neededColumnsCount').textContent = missing.size === 0
+        ? 'all there'
+        : `${neededFields.length - missing.size} of ${neededFields.length}`;
+
+    element('neededColumnsList').replaceChildren(...neededFields.map((field) => {
+        const item = document.createElement('li');
+        const label = fieldLabelOf(field.key);
+        if (!missing.has(field.key)) {
+            item.className = 'template-needed-columns__item is-done';
+            item.title = `A column fills ${label}`;
+            const icon = document.createElement('i');
+            icon.className = 'icon-base bx bx-check icon-sm';
+            icon.setAttribute('aria-hidden', 'true');
+            item.append(icon, label);
+            return item;
+        }
+        item.className = 'template-needed-columns__item';
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'template-needed-columns__add';
+        add.title = `Add a "${label}" column to page ${activePage}`;
+        const icon = document.createElement('i');
+        icon.className = 'icon-base bx bx-plus icon-sm';
+        icon.setAttribute('aria-hidden', 'true');
+        add.append(icon, label);
+        // A page with a table: one more column after its last. Without one: a column
+        // all the same, laid out with the page's other columns (a table is made for it).
+        add.addEventListener('click', () => (ruledYs.length >= 2 && ledgerColumns().length > 0
+            ? addNeededColumns([field])
+            : addAndArrangeNeededColumns([field])));
+        item.append(add);
+        return item;
+    }));
+}
+
+/** Add `fields` as columns (or fields, on a page without a table) to the page being edited. */
+function addNeededColumns(fields) {
+    const pending = newFieldInput.value;
+    for (const field of fields) {
+        newFieldInput.value = fieldLabelOf(field.key);
+        // Stops at the first that cannot be added (too many fields, a name taken): it says why.
+        if (!addPendingField()) break;
+    }
+    newFieldInput.value = pending;
+}
+
+/**
+ * Needed columns (`wanted`, else every one still missing) added to the page being
+ * edited, then all of the page's columns arranged side by side in equal widths
+ * across the page: the ones it had keep their order (left to right), the new ones
+ * follow in the register's order. They run across the row lines, or a page with
+ * none gets a starting table of ten rows. Drag them onto the printed columns
+ * after, or Detect. Used by a "+" on a page with no table yet.
+ */
+function addAndArrangeNeededColumns(wanted = null) {
+    arrangeColumns((wanted ?? missingNeededFields()).map((field) => fieldLabelOf(field.key)));
+}
+
+/**
+ * Columns named `names` added to the page being edited (a name already on the page
+ * is left out), then all its columns laid side by side in equal widths across the
+ * page, none on another: those it had keep their order, the new ones follow.
+ */
+function arrangeColumns(names) {
+    const boxes = marker.toJSON();
+    const fields = boxes.filter((box) => !isColumn(box));
+    const existing = ledgerColumns(boxes).sort((a, b) => a.x - b.x);
+    const taken = new Set(boxes.map((box) => box.name.trim().toLocaleLowerCase()));
+    const added = names.filter((name) => !taken.has(name.trim().toLocaleLowerCase()));
+    const count = existing.length + added.length;
+    if (count === 0) return;
+    if (fields.length + count > maxFields) {
+        showBuilderError(`A layout can contain at most ${maxFields} fields.`);
+        return;
+    }
+
+    // The table's band: its row lines, or a starting one with ten even rows.
+    const haveRows = ruledYs.length >= 2;
+    const rows = haveRows ? ruledYs : distributeRuledYs([0.22, 0.9], 10);
+    const top = rows[0];
+    const bottom = rows[rows.length - 1];
+    // Across the page, inside a small margin; equal widths, one after another.
+    const left = 0.03;
+    const width = (0.97 - left) / count;
+    const columns = [
+        ...existing.map((column) => withoutPlace(column)),
+        ...added.map((name) => ({ name, personGroup: null, personFieldOrder: null })),
+    ].map((column, index) => ({
+        ...column,
+        x: left + index * width,
+        y: top,
+        w: width,
+        h: bottom - top,
+        kind: 'column',
+        columnIndex: index,
+    }));
+
+    clearBuilderError();
+    selectedRule = null;
+    allRulesSelected = false;
+    replaceBoxes([...fields, ...columns]);
+    if (!haveRows) {
+        applyGrid(rows, marker.toJSON(), rows.map(() => 0), rows.map(() => null));
+    } else {
+        // The columns moved: the row lines run across them again.
+        renderLedgerGrid();
+        updateLedgerChecks();
+    }
+}
+
+/** A column without its place and turn (it is laid out afresh), its name and settings kept. */
+function withoutPlace(column) {
+    const { x: _x, y: _y, w: _w, h: _h, angle: _angle, columnIndex: _index, ...rest } = column;
+    return rest;
 }
 
 /** The page not being edited of a two-page layout ({ boxes, ruledYs, ... }), or null. */
@@ -1092,6 +1234,30 @@ function pasteCopiedFields() {
     clearBuilderError();
 }
 
+/**
+ * `props` (a name, settings) as one more column among `boxes`: a typical column's
+ * width right of the table when the page has room there, else the right half of
+ * the widest column (addColumnWhereRoom). Never on top of another column. Turned
+ * with the table. Returns { boxes, index } (the new column last), or null when
+ * even half of the widest column would be too thin to read.
+ */
+function withNewColumn(boxes, props) {
+    const columns = ledgerColumns(boxes);
+    const indexes = columns.map((column) => Number(column.columnIndex)).filter(Number.isInteger);
+    const added = addColumnWhereRoom(boxes, {
+        personGroup: null,
+        personFieldOrder: null,
+        ...props,
+        kind: 'column',
+        columnIndex: Math.max(-1, ...indexes) + 1,
+    });
+    if (!added) return null;
+    // Right of the table it is upright; the table's columns may be turned.
+    const tilt = gridTilt(columns);
+    if (tilt && !added.boxes[added.index].angle) added.boxes[added.index] = { ...added.boxes[added.index], angle: tilt };
+    return added;
+}
+
 function addPendingField() {
     const name = newFieldInput.value.trim();
     if (!name) return true;
@@ -1109,26 +1275,19 @@ function addPendingField() {
     }
 
     // A page with a table: what is added is one more column (marked Col, read line by
-    // line in the rows), put after the last column across the grid's rows.
-    const columns = ledgerColumns(boxes);
-    if (columns.length > 0 && ruledYs.length >= 2) {
-        const last = columns.reduce((right, column) => (column.x + column.w > right.x + right.w ? column : right));
-        const width = Math.max(0.03, columns.reduce((sum, column) => sum + column.w, 0) / columns.length);
-        const top = ruledYs[0];
-        const bottom = ruledYs[ruledYs.length - 1];
-        const indexes = columns.map((column) => Number(column.columnIndex)).filter(Number.isInteger);
-        marker.addBox(name, {
-            x: Math.max(0, Math.min(1 - width, last.x + last.w)),
-            y: top,
-            w: width,
-            h: Math.max(0.01, bottom - top),
-            kind: 'column',
-            columnIndex: Math.max(-1, ...indexes) + 1,
-            // Turned with the table, like the columns beside it.
-            ...markerAngleMetadata(last),
-        });
+    // line in the rows), never on top of another (see withNewColumn).
+    if (ledgerColumns(boxes).length > 0 && ruledYs.length >= 2) {
+        const added = withNewColumn(boxes, { name });
         newFieldInput.value = '';
         clearBuilderError();
+        if (added) {
+            replaceBoxes(added.boxes);
+            marker.selectIndexes([added.index]);
+        } else {
+            // Every column already too thin to split: the page's columns are spaced out again.
+            arrangeColumns([name]);
+            showBuilderError(`There was no room for “${name}”, so the columns were spaced out evenly. Drag them back onto the printed columns, or Detect.`);
+        }
         return true;
     }
 
@@ -2289,6 +2448,93 @@ function nudgeAllRules(pixels) {
 element('selectAllRulesBtn', HTMLButtonElement).addEventListener('click', () => (
     allRulesSelected ? selectRule(null) : selectAllRules()
 ));
+
+// ------------------------------------------------------------ column presets
+// Another layout of this book (sent as config.columnPresets) gives the page being
+// edited its columns: names, settings and, on a page with no table yet, places.
+
+const columnPresets = Array.isArray(config.columnPresets) ? config.columnPresets : [];
+const presetSelect = element('columnPresetSelect', HTMLSelectElement);
+const presetApplyBtn = element('applyColumnPresetBtn', HTMLButtonElement);
+
+/** A preset's columns for one page (1 or 2), as markers flagged as columns: [] when it has none there. */
+function presetColumns(preset, page) {
+    const spec = preset?.pages?.[page - 1];
+    return normaliseColumns(Array.isArray(spec?.columns) ? spec.columns : []);
+}
+
+/** Without the settings a column had: the preset's own replace them. */
+function withoutSettings(box) {
+    const { role: _r, required: _q, type: _t, options: _o, hint: _h, ...rest } = box;
+    return rest;
+}
+
+function applyColumnPreset(preset) {
+    const wanted = presetColumns(preset, activePage);
+    if (wanted.length === 0) {
+        showBuilderError(`That layout has no columns on page ${activePage}.`);
+        return;
+    }
+
+    const boxes = marker.toJSON();
+    const fields = boxes.filter((box) => !isColumn(box));
+    // This page's columns left to right: they take the preset's names in that order.
+    const current = ledgerColumns(boxes).sort((a, b) => a.x - b.x);
+    const taken = new Set(fields.map((box) => box.name.trim().toLocaleLowerCase()));
+
+    let next;
+    // Preset columns that found no room (every column too thin to split): spaced out after.
+    const crowded = [];
+    if (current.length === 0) {
+        // No table here yet: the preset's columns where they were on that layout's page.
+        next = [...fields, ...wanted.map((column, index) => ({ ...column, columnIndex: index }))];
+    } else {
+        const renamed = current.map((column, index) => ({
+            ...(index < wanted.length
+                ? { ...withoutSettings(column), name: wanted[index].name, ...savedSettings(wanted[index]) }
+                : column),
+            columnIndex: index,
+        }));
+        next = [...fields, ...renamed];
+        // More columns in the preset: each where Align would add it, never on another.
+        wanted.slice(current.length).forEach((column) => {
+            const { x: _x, y: _y, w: _w, h: _h, angle: _angle, columnIndex: _index, ...props } = column;
+            const added = withNewColumn(next, props);
+            if (added) next = added.boxes;
+            else crowded.push(column.name);
+        });
+    }
+
+    const clash = next.filter(isColumn).find((column) => taken.has(column.name.trim().toLocaleLowerCase()));
+    if (next.length > maxFields) {
+        showBuilderError(`A layout can contain at most ${maxFields} fields.`);
+        return;
+    }
+
+    clearBuilderError();
+    selectedRule = null;
+    allRulesSelected = false;
+    replaceBoxes(next);
+    // A page with no row lines takes the preset page's, so it is a table at once.
+    const presetYs = normaliseRuledYs(preset.pages?.[activePage - 1]?.ruledYs);
+    if (ruledYs.length < 2 && presetYs.length >= 2) {
+        applyGrid(presetYs, marker.toJSON(), presetYs.map(() => 0), presetYs.map(() => null));
+    }
+    if (crowded.length > 0) {
+        arrangeColumns(crowded);
+        showBuilderError('There was no room for every preset column, so the columns were spaced out evenly. Drag them onto the printed columns, or Detect.');
+    } else if (clash) {
+        showBuilderError(`“${clash.name}” is also the name of a field on this page. Rename one of them before saving.`);
+    }
+}
+
+presetSelect.addEventListener('change', () => {
+    presetApplyBtn.disabled = presetSelect.value === '';
+});
+presetApplyBtn.addEventListener('click', () => {
+    const preset = columnPresets.find((candidate) => String(candidate.id) === presetSelect.value);
+    if (preset) applyColumnPreset(preset);
+});
 
 function removeRule(index) {
     if (!Number.isInteger(index) || index < 0 || index >= ruledYs.length) return;

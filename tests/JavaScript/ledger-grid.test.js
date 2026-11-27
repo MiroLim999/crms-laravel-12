@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
     addColumn,
+    addColumnWhereRoom,
     clampRuledY,
     columnBand,
     distributeRuledYs,
@@ -137,6 +138,30 @@ test('with no room at the right, an added column takes half of the last column',
     close([added.boxes[1].x, added.boxes[1].w, added.boxes[2].x, added.boxes[2].w], [0.75, 0.12, 0.87, 0.12]);
     assert.equal(addColumn([column('A', 0.5, 0.2, 0.6, 0.015)], { name: 'B', kind: 'column' }, 0), null, 'too narrow to split');
     assert.equal(addColumn([{ name: 'Field', x: 0.1, y: 0.1, w: 0.2, h: 0.1 }], { name: 'C' }), null, 'no table');
+});
+
+test('columns added one after another never lie on top of each other', () => {
+    // A table reaching near the right edge, then many columns added (as the builder's "+" does).
+    let boxes = [column('A', 0.05, 0.2, 0.6, 0.3), column('B', 0.35, 0.2, 0.6, 0.3), column('C', 0.65, 0.2, 0.6, 0.3)];
+    for (let n = 0; n < 8; n += 1) {
+        const added = addColumnWhereRoom(boxes, { name: `New ${n}`, kind: 'column' });
+        assert.ok(added, `column ${n} found room`);
+        boxes = added.boxes;
+    }
+
+    const columns = boxes.filter((box) => box.kind === 'column').sort((a, b) => a.x - b.x);
+    assert.equal(columns.length, 11);
+    columns.forEach((box) => assert.ok(box.x >= 0 && box.x + box.w <= 1 + 1e-9, `${box.name} is on the page`));
+    columns.slice(1).forEach((box, index) => {
+        const before = columns[index];
+        assert.ok(box.x >= before.x + before.w - 1e-9, `${box.name} starts where ${before.name} ends, not on it`);
+    });
+    // The room is shared: no column is squeezed far thinner than the rest.
+    const widths = columns.map((box) => box.w);
+    assert.ok(Math.min(...widths) >= Math.max(...widths) / 2 - 1e-9, `widths stay even: ${widths.map((w) => w.toFixed(3))}`);
+    // With room at the right, a column still goes there, the others untouched.
+    const roomy = addColumnWhereRoom([column('A', 0.05, 0.2, 0.6, 0.1)], { name: 'B', kind: 'column' });
+    close([roomy.boxes[1].x, roomy.boxes[1].w], [0.15, 0.1]);
 });
 
 test('with no columns left, the first one goes where it is told', () => {
