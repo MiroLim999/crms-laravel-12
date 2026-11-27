@@ -4,7 +4,7 @@
 
 | | |
 | :--- | :--- |
-| **Describes** | The code on branch `gono-latest-v1` at commit `49d5ab9`, 27 November 2026, plus the fixes made after this review the same day (not committed yet; listed in [11.3](#113-risks-and-gaps-found-in-this-review)). Branch `main` (commit `6776cdb`, 25 November) does not have the work of 26–27 November yet. |
+| **Describes** | The code on branch `gono-latest-v1` at commit `40d36db`, 27 November 2026: the team's work up to `49d5ab9` plus the fixes made after this review (listed in [11.3](#113-risks-and-gaps-found-in-this-review)). Branch `main` (commit `6776cdb`, 25 November) does not have the work of 26–27 November yet. |
 | **Based on** | The source code, the database structure, the installed AI models' own reports, the training datasets' own metadata, and a full test run on 27 November 2026 after the fixes |
 | **Replaces** | The edition of 3 November 2026 (commit `e2167bc`) and its two later notes. [Changes since 3 November](#changes-since-3-november) lists what is new. |
 | **Diagrams** | Plain text, so they show in VS Code's preview (Ctrl+Shift+V) and on GitHub without add-ons |
@@ -1442,8 +1442,8 @@ sign-in now asks for a new password.)
 
 ### 9.1 Automated tests
 
-All four suites were run on **27 November 2026** for this document, on branch `gono-latest-v1` at `49d5ab9` with the
-fixes of this review:
+All four suites were run on **27 November 2026** for this document, on branch `gono-latest-v1` with the fixes of this
+review (the code committed as `40d36db`):
 
 | Suite | What it tests | Tests | Passed | Failed | Skipped | Time |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
@@ -1558,7 +1558,7 @@ once, `php artisan crms:normalize-dates` for register dates saved before 25 Nove
 
 ### 11.3 Risks and gaps found in this review
 
-**Fixed after this review (27 November 2026, not committed yet):**
+**Fixed after this review (27 November 2026, commit `40d36db`):**
 
 | Problem found | What was done |
 | :--- | :--- |
@@ -1579,8 +1579,8 @@ once, `php artisan crms:normalize-dates` for register dates saved before 25 Nove
    it down in [TRAINING-DATA.md](TRAINING-DATA.md), with who checked the labels.
 3. **Security items in [8.6](#86-known-security-gaps)**: outdated PHP and MySQL, no encryption at rest, record edits
    with no second approver, manual backups. These change the computer, not the code.
-4. **Branches.** `main` lacks the 26–27 November work and these fixes; this document describes `gono-latest-v1`.
-   Commit the fixes and merge before the defense, so the code shown matches this document.
+4. **Branches.** `main` lacks the 26–27 November work and these fixes; they are on `gono-latest-v1` (pushed). Merge
+   into `main` before the defense, so the code shown matches this document.
 5. **The hidden smoke test**: show it again or remove its code.
 6. **Technical debt** (does not affect users today):
    - The document type is stored twice (`document_type_id` and an older `doc_type` column with a fixed list).
@@ -1598,7 +1598,7 @@ In order of value for the defense and for real use:
    score the base and active models on it, and report it per document type, as Part 3 of the evaluation kit asks.
    This is the strongest evidence missing.
 3. **Run the user evaluation** in `docs/System-Evaluation.pdf` (functional checklist, timing against manual encoding, questionnaire and SUS) with real registry staff.
-4. **Commit the fixes and merge `gono-latest-v1` into `main`**, so the code shown at the defense is the code tested here.
+4. **Merge `gono-latest-v1` into `main`**, so the code shown at the defense is the code tested here.
 5. **Close the quick security gaps**: update PHP, bind MySQL to 127.0.0.1, turn on disk encryption, schedule backups.
 6. Later: network access for several staff computers (with HTTPS), full-text search, splitting the largest files.
 
