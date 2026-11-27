@@ -3633,6 +3633,28 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   flex: 0 0 auto;
 }
 
+// Align: Save / Save Both / Scan stay in sight at the foot of the side panel
+// while the field list scrolls under them. A short panel puts them at its foot too.
+#step-mark .field-marker-actions {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 3;
+  margin-block-start: auto;
+  padding-block: .75rem;
+  background: var(--bs-body-bg);
+
+  // A soft fade above, so the list slides under the buttons instead of being cut.
+  &::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    inset-block-end: 100%;
+    block-size: 1rem;
+    pointer-events: none;
+    background: linear-gradient(to bottom, transparent, var(--bs-body-bg));
+  }
+}
+
 // Scan all: its page count in a tag, as on Save, so the label stays on one line.
 #scanNowBtnLabel {
   display: inline-flex;
@@ -6107,13 +6129,25 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     font-weight: 600;
   }
 
-  // Rows (− count +) and Gridlines (All lines) as two lines of one grid: the labels
-  // in the same column as Tilt's, the button exactly as wide as the count above it.
-  .document-grid-card__line.document-grid-card__rows {
+  // Align step: Rows (− count +), Tilt, then Gridlines (All lines) as the rows of
+  // one grid. The labels share a column, and All lines is exactly as wide as the
+  // controls above it. Each line's box steps aside (display: contents) so its label
+  // and control sit in the shared grid; the Tilt line's is-row-scope styles still
+  // reach its children.
+  &.document-rows-control {
     display: grid;
     grid-template-columns: 3.75rem max-content;
     align-items: center;
-    gap: .4rem .75rem;
+    gap: .5rem .75rem;
+
+    > .document-grid-card__line {
+      display: contents;
+    }
+
+    > .document-grid-card__source {
+      grid-column: 1 / -1;
+      margin-block-start: 0;
+    }
 
     #selectAllRowsBtn {
       justify-self: stretch;
@@ -7471,7 +7505,12 @@ img.validation-field__crop {
   }
 }
 
+// Verify and Review & Export: Back / Review & export / Save stay in sight at the
+// foot of the panel, also where the page stacks and scrolls as a whole.
 .validation-submit-bar {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 3;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -11684,11 +11723,13 @@ $dashboard-reveal-step: 40ms;
     margin-block-end: .5rem;
   }
 
-  // Name and Rows: the same label width, so both controls start at the same edge
-  // (outranks the ledger card's auto-sized label).
+  // Name, Rows, Gridlines, Preset: the same label width, so every control starts
+  // at the same edge (outranks the ledger card's auto-sized label). Wide enough for
+  // "Gridlines" on one line; a label never wraps.
   &.template-ledger-card .document-grid-card__line .document-grid-card__label {
-    flex: 0 0 2.75rem;
-    inline-size: 2.75rem;
+    flex: 0 0 3.75rem;
+    inline-size: 3.75rem;
+    white-space: nowrap;
   }
 
   .template-layout-name .form-control {

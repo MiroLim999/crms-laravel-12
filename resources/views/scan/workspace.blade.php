@@ -384,7 +384,8 @@
                     <div class="card-body">
                         @if (count($ruledYs) >= 2)
                             <div class="document-grid-card document-rows-control">
-                                {{-- Rows and Gridlines share two columns: "All lines" is as wide as the count above it. --}}
+                                {{-- Rows, Tilt, then Gridlines: the lines share one two-column grid, so
+                                     "All lines" is as wide as the controls above it. --}}
                                 <div class="document-grid-card__line document-grid-card__rows">
                                     <span class="document-grid-card__label" id="gridRowsLabel">Rows</span>
                                     <div class="btn-group btn-group-sm" role="group" aria-labelledby="gridRowsLabel">
@@ -401,12 +402,6 @@
                                             <i class="icon-base bx bx-plus icon-sm" aria-hidden="true"></i>
                                         </button>
                                     </div>
-                                    {{-- Every row line at once: dragged or nudged together. --}}
-                                    <span class="document-grid-card__label" id="gridLinesLabel">Gridlines</span>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="selectAllRowsBtn"
-                                        aria-labelledby="gridLinesLabel selectAllRowsBtn" aria-pressed="false" title="Select every row line, to move them all together (Ctrl+A on a line)">
-                                        <i class="icon-base bx bx-select-multiple icon-sm me-1" aria-hidden="true"></i>All lines
-                                    </button>
                                 </div>
                                 {{-- A page scanned a little turned: the columns and row lines turn with it. --}}
                                 <div class="document-grid-card__line" id="gridTiltLine">
@@ -430,6 +425,14 @@
                                             <i class="icon-base bx bx-rotate-right icon-sm" aria-hidden="true"></i>
                                         </button>
                                     </div>
+                                </div>
+                                {{-- Every row line at once: dragged or nudged together. --}}
+                                <div class="document-grid-card__line">
+                                    <span class="document-grid-card__label" id="gridLinesLabel">Gridlines</span>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="selectAllRowsBtn"
+                                        aria-labelledby="gridLinesLabel selectAllRowsBtn" aria-pressed="false" title="Select every row line, to move them all together (Ctrl+A on a line)">
+                                        <i class="icon-base bx bx-select-multiple icon-sm me-1" aria-hidden="true"></i>All lines
+                                    </button>
                                 </div>
                                 {{-- Only when a row line has no printed line under it. --}}
                                 <p class="document-grid-card__source d-none" id="gridSource" aria-live="polite"></p>
