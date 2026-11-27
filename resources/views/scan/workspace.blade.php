@@ -2027,8 +2027,10 @@
                     }
                 }
             } else {
-                // One page number per record: the companion page shares it.
-                const companion = companionPageFor(scanPageNumber);
+                // One page number per record: the companion page shares it, but only when
+                // the layout pairs pages into one record (it has a page 2). Otherwise each
+                // page of the file is its own record, with its own page number.
+                const companion = config.pageTwo ? companionPageFor(scanPageNumber) : null;
                 const ref = pageReferences.get(scanPageNumber)
                     ?? (companion ? pageReferences.get(companion) : undefined);
                 if (ref && ref.bookNo) {
@@ -2084,7 +2086,8 @@
                 }
             } else {
                 pageReferences.set(scanPageNumber, { bookNo: bVal, pageNo: pVal });
-                const companion = companionPageFor(scanPageNumber);
+                // Paired pages are one record: the other page gets the same book and page.
+                const companion = config.pageTwo ? companionPageFor(scanPageNumber) : null;
                 if (companion) pageReferences.set(companion, { bookNo: bVal, pageNo: pVal });
             }
 
