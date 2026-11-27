@@ -489,13 +489,16 @@
                                     </button>
                                 </div>
 
-                                {{-- What the book's register needs read from the page: ticked once a column fills it. --}}
+                                {{-- The book's register fields no column fills yet (hidden once every one is assigned). --}}
                                 <div class="template-needed-columns d-none" id="neededColumns" aria-labelledby="neededColumnsTitle">
                                     <div class="template-needed-columns__head">
-                                        <span class="template-needed-columns__title" id="neededColumnsTitle">Needed columns</span>
+                                        <span class="template-needed-columns__title" id="neededColumnsTitle">Not assigned yet</span>
                                         <span class="template-needed-columns__count" id="neededColumnsCount"></span>
                                     </div>
                                     <ul class="template-needed-columns__list list-unstyled mb-0" id="neededColumnsList"></ul>
+                                    <p class="template-needed-columns__hint mb-0">
+                                        Pick each column's field in its list below, or select a column on the page and click a name here.
+                                    </p>
                                 </div>
 
                                 <div class="template-person-record" id="personRecord">

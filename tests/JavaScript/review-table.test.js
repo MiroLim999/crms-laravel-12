@@ -17,6 +17,7 @@ import {
     fieldsFilledBy,
     joinTables,
     matchField,
+    matchPair,
     nextCellPosition,
     parseClipboard,
     registryColumnType,
@@ -65,6 +66,16 @@ test('a column the builder adds for a needed field is matched back to that field
         const filled = fieldsFilledBy(all, fields, pairs);
         fields.filter((field) => !field.manual).forEach((field) => assert.ok(filled.has(field.key), `${type}: ${field.key}`));
     });
+});
+
+test('a marriage column named for both ("husband and wife age") fills the husband and the wife', () => {
+    const fields = registerFields('marriage');
+    const names = ['husband and wife name', 'husband and wife age', 'husband and wife nationality',
+        'husband and wife civil status', 'husband and wife mother', 'husband and wife father'];
+    const filled = fieldsFilledBy(names, fields, MARRIAGE_PAIRS);
+    MARRIAGE_PAIRS.flat().forEach((key) => assert.ok(filled.has(key), `${key} is filled`));
+    // Each is read as its pair's first field: the wife comes from the line under the husband.
+    names.forEach((name, index) => assert.equal(matchPair(name, MARRIAGE_PAIRS), MARRIAGE_PAIRS[index][0], name));
 });
 
 test('needed columns: the second line of a pair comes with the first, manual fields never', () => {

@@ -163,7 +163,7 @@ const FIELD_WORD = {
     husb: 'husband', number: 'no', num: 'no', nr: 'no', registration: 'reg', registry: 'reg', register: 'reg',
     minutes: 'mins', minute: 'mins', min: 'mins',
 };
-const FIELD_FILLER = new Set(['of', 'the', 'a', 's']);
+const FIELD_FILLER = new Set(['of', 'the', 'a', 's', 'and']);
 
 /** A name's words, the same whichever order or spelling: "Mother's Name" -> "mother name". */
 function fieldWords(name) {
@@ -227,7 +227,7 @@ const PAIR_WORDS = new Set(['husband', 'wife', 'groom', 'bride', 'contracting', 
  * without saying whose ("Name", "Age", "Father", "Husband / Wife Nationality"),
  * or null.
  */
-function matchPair(name, pairs) {
+export function matchPair(name, pairs) {
     // "Names of the Contracting Parties" is "name": whose words go, and a plural is one.
     const shared = (text) => fieldWords(text).split(' ')
         .filter((word) => !PAIR_WORDS.has(word))

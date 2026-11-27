@@ -2033,10 +2033,13 @@
                 const companion = config.pageTwo ? companionPageFor(scanPageNumber) : null;
                 const ref = pageReferences.get(scanPageNumber)
                     ?? (companion ? pageReferences.get(companion) : undefined);
+                // One document: its book only (another page of this file may have it); a new
+                // upload starts empty, unlike a batch, which keeps the book it was given.
+                const sameFileBook = [...pageReferences.values()].find((other) => other?.bookNo)?.bookNo;
                 if (ref && ref.bookNo) {
                     bookInput.value = ref.bookNo;
-                } else if (lastEnteredBookNo) {
-                    bookInput.value = lastEnteredBookNo;
+                } else if (sameFileBook) {
+                    bookInput.value = sameFileBook;
                 } else {
                     bookInput.value = '';
                 }
@@ -4521,6 +4524,9 @@
                 scanFingerprint = null;
                 savedPages = new Map();
                 pageLayouts.clear();
+                // A new document: its own Book No. and Page No., typed afresh (a batch keeps the book).
+                pageReferences.clear();
+                referenceLookup = null;
                 clearDetection();
                 verifyDoc = null;
                 // It opens at its first page not saved yet.
@@ -4529,6 +4535,7 @@
                 scanPageNumber = firstUnsavedPage(pageCount, savedPages);
                 useLayoutForPage(scanPageNumber);
                 await marker.load(file, { page: scanPageNumber });
+                syncReferenceInputsForCurrentPage();
                 updateScanNotices();
                 showScanContext();
                 showStep('mark');

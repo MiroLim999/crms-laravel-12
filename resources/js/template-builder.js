@@ -46,7 +46,7 @@ import { LayoutHistory } from './template-history';
 import { guessedRowCount, namesOnBothPages, publishProblems, rowMismatch } from './layout-publish-checks';
 import { setDisclosureExpanded } from './disclosure-motion';
 import { confirmDialog } from './dialog';
-import { fieldLabelOf, fieldsFilledBy } from './review-table';
+import { fieldLabelOf, fieldsFilledBy, matchField, matchPair } from './review-table';
 
 const configNode = document.getElementById('templateBuilderConfig');
 
@@ -60,9 +60,24 @@ const maxFieldNameLength = Number(config.maxFieldNameLength) || 500;
 // The book's register fields (see "needed columns"): Book No. and Page No. come from
 // step 1, and manual fields are picked in Review & Export, so neither is a column.
 const registry = config.registry && Array.isArray(config.registry.fields) ? config.registry : null;
+// Two-line entries (the marriage book): the wife is written under the husband in the
+// same column, so a pair is one needed column, listed by its first field.
+const registryPairs = Array.isArray(registry?.pairs) ? registry.pairs : [];
+const secondOfPair = new Set(registryPairs.map(([, second]) => second));
+// In the order the columns run across the printed page (registry.pageOrder), the rest after.
+const pageOrder = Array.isArray(registry?.pageOrder) ? registry.pageOrder : [];
+const pagePlace = (key) => (pageOrder.includes(key) ? pageOrder.indexOf(key) : pageOrder.length);
 const neededFields = registry
-    ? registry.fields.filter((field) => !field.manual && !['book_no', 'page_no'].includes(field.key))
+    ? registry.fields
+        .filter((field) => !field.manual && !['book_no', 'page_no'].includes(field.key) && !secondOfPair.has(field.key))
+        .map((field, index) => ({ field, index }))
+        .sort((a, b) => pagePlace(a.field.key) - pagePlace(b.field.key) || a.index - b.index)
+        .map(({ field }) => field)
     : [];
+// The field list's "Other…": a column named as the admin types it, filling no register field.
+const OTHER_FIELD = '__other';
+/** A name the builder made up ("Column 7", "Field 2"), not one the admin gave. */
+const placeholderName = (name) => /^(column|field)\s*\d+$/i.test(String(name ?? '').trim());
 
 function element(id, Type = HTMLElement) {
     const node = document.getElementById(id);
@@ -539,12 +554,58 @@ function createFieldRow(index) {
     number.className = 'badge bg-label-primary template-builder-field-number';
     item.appendChild(number);
 
+    // A register's column picks its field from a list (no typing, no typos); "Other…"
+    // gives it a name of its own in the box beside. Fields and other books type a name.
+    const pick = document.createElement('select');
+    pick.className = 'form-select form-select-sm template-builder-field-pick d-none';
+    pick.setAttribute('aria-label', `Column ${index + 1}: register field`);
+    item.appendChild(pick);
+
+    // A column whose field is set: just its name. Double-click to pick another field.
+    const fieldLabel = document.createElement('span');
+    fieldLabel.className = 'template-builder-field-label d-none';
+    fieldLabel.title = 'Double-click to change this column’s field';
+    fieldLabel.addEventListener('dblclick', () => {
+        item.dataset.changing = '1';
+        renderFieldList(marker.toJSON());
+        item.querySelector('.template-builder-field-pick')?.focus();
+    });
+    item.appendChild(fieldLabel);
+    pick.addEventListener('blur', () => {
+        if (item.dataset.changing !== '1') return;
+        delete item.dataset.changing;
+        renderFieldList(marker.toJSON());
+    });
+
     const input = document.createElement('input');
     input.type = 'text';
     input.maxLength = maxFieldNameLength;
     input.className = 'form-control form-control-sm template-builder-field-name';
     input.setAttribute('aria-label', `Field ${index + 1} name`);
     item.appendChild(input);
+
+    pick.addEventListener('focus', () => marker.selectBox(Number(item.dataset.fieldIndex)));
+    // As in the name box: Enter goes on to the next column's field, Shift + Enter back.
+    pick.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' || event.isComposing) return;
+        event.preventDefault();
+        stepFieldName(Number(item.dataset.fieldIndex), event.shiftKey ? -1 : 1);
+    });
+    pick.addEventListener('change', () => {
+        const currentIndex = Number(item.dataset.fieldIndex);
+        invalidFieldIndexes.delete(currentIndex);
+        clearBuilderError();
+        if (pick.value === OTHER_FIELD) {
+            // A name of its own: typed in the box, which shows now.
+            input.classList.remove('d-none');
+            input.focus();
+            input.select();
+            return;
+        }
+        // A field picked: the column is named as the register names it (then shown as its name).
+        delete item.dataset.changing;
+        marker.renameBox(currentIndex, pick.value ? neededLabel(pick.value) : `Column ${currentIndex + 1}`);
+    });
 
     const tags = document.createElement('span');
     tags.className = 'template-builder-field-tags d-none';
@@ -573,7 +634,7 @@ function createFieldRow(index) {
     });
 
     item.addEventListener('click', (event) => {
-        if (event.target instanceof Element && event.target.closest('button')) return;
+        if (event.target instanceof Element && event.target.closest('button, select')) return;
         if (event.target === input && !event.shiftKey) return;
 
         const currentIndex = Number(item.dataset.fieldIndex);
@@ -645,6 +706,14 @@ function renderFieldList(boxes) {
     const onBoth = new Set(other
         ? namesOnBothPages(boxes, other.boxes).map((name) => name.toLocaleLowerCase())
         : []);
+    // Which register field each column on either page fills: a field is offered once.
+    const assigned = [
+        ...boxes.map((box, index) => ({ box, index, page: activePage })),
+        ...(other?.boxes ?? []).map((box, index) => ({ box, index, page: 3 - activePage })),
+    ]
+        .filter(({ box }) => isColumn(box))
+        .map((entry) => ({ ...entry, key: fieldOfName(entry.box.name) }))
+        .filter((entry) => entry.key !== null);
 
     items.forEach((item, index) => {
         const box = boxes[index];
@@ -656,6 +725,10 @@ function renderFieldList(boxes) {
         const removeButton = item.querySelector('button');
 
         if (number) number.textContent = String(offset + index + 1);
+        const pick = item.querySelector('.template-builder-field-pick');
+        if (pick instanceof HTMLSelectElement && input instanceof HTMLInputElement) {
+            showFieldPick(pick, input, box, assigned.filter((entry) => entry.index !== index || entry.page !== activePage), item);
+        }
         if (input instanceof HTMLInputElement) {
             if (document.activeElement !== input) input.value = box.name;
             input.classList.toggle('is-invalid', invalidFieldIndexes.has(index));
@@ -699,6 +772,76 @@ function renderFieldList(boxes) {
 // The book's register fields (config.registry) that a layout must read: each is
 // ticked once a column on either page fills it, as Review & Export will match it.
 
+/** The register field a column's name stands for (as Review & Export matches it), or null. */
+function fieldOfName(name) {
+    if (neededFields.length === 0 || placeholderName(name)) return null;
+    const key = matchField(name, neededFields) ?? matchPair(name, registryPairs);
+    // A column named for the wife's line alone counts for the pair it is in.
+    return key ?? registryPairs.find(([, second]) => matchField(name, [{ key: second }]))?.[0] ?? null;
+}
+
+/**
+ * A needed field as people read it and as its column is named. The first of a
+ * pair stands for both lines: "husband name" is "husband and wife name", which
+ * Review & Export reads as the husband's line and the wife's under it.
+ */
+function neededLabel(key) {
+    const label = fieldLabelOf(key);
+    if (!registryPairs.some(([first]) => first === key)) return label;
+    return label.replace(/^husband\b/, 'husband and wife');
+}
+
+/**
+ * A column's field dropdown (register books only): the register's fields, each
+ * offered once across both pages (one taken by another column is greyed), and
+ * "Other…" for a name of the admin's own, typed in the box that then shows. Not
+ * rebuilt while it is open. A plain field, or a book with no register, types its name.
+ */
+function showFieldPick(pick, input, box, others, item) {
+    const label = item.querySelector('.template-builder-field-label');
+    const usesPick = neededFields.length > 0 && isColumn(box);
+    const key = usesPick ? fieldOfName(box.name) : null;
+    // Its field set (and not being changed): only its name, no dropdown.
+    const settled = key !== null && item.dataset.changing !== '1' && document.activeElement !== pick;
+    label?.classList.toggle('d-none', !settled);
+    if (label && settled) label.textContent = neededLabel(key);
+    pick.classList.toggle('d-none', !usesPick || settled);
+    if (!usesPick) {
+        input.classList.remove('d-none');
+        return;
+    }
+    if (settled) {
+        input.classList.add('d-none');
+        return;
+    }
+
+    const custom = key === null && !placeholderName(box.name) && box.name.trim() !== '';
+    const takenBy = new Map(others.map((entry) => [entry.key, entry]));
+    if (document.activeElement !== pick) {
+        const option = (value, text, disabled = false) => {
+            const node = document.createElement('option');
+            node.value = value;
+            node.textContent = text;
+            node.disabled = disabled;
+            return node;
+        };
+        pick.replaceChildren(
+            option('', 'Choose a field…'),
+            ...neededFields.map((field) => {
+                const holder = takenBy.get(field.key);
+                const label = neededLabel(field.key);
+                return option(field.key, holder ? `${label} (page ${holder.page}, column ${holder.index + 1})` : label, Boolean(holder));
+            }),
+            option(OTHER_FIELD, 'Other…'),
+        );
+        pick.value = key ?? (custom ? OTHER_FIELD : '');
+    }
+    pick.classList.toggle('is-unassigned', key === null && !custom);
+    pick.title = key ? `Fills the register's ${neededLabel(key)}` : (custom ? 'A column of its own: fills no register field' : 'Pick the register field this column holds');
+    // The name box only for a name of its own.
+    input.classList.toggle('d-none', !(custom || pick.value === OTHER_FIELD));
+}
+
 /** The needed fields no column on either page fills yet, in the register's order. */
 function missingNeededFields(boxes = marker.toJSON()) {
     const names = [...boxes, ...(otherPageLayout()?.boxes ?? [])].map((box) => box.name);
@@ -706,52 +849,117 @@ function missingNeededFields(boxes = marker.toJSON()) {
     return neededFields.filter((field) => !filled.has(field.key));
 }
 
+/**
+ * "Not assigned yet": only the register fields no column fills (the columns
+ * themselves show what they fill, in their dropdowns). Gone once all are there.
+ */
 function renderNeededColumns(boxes = marker.toJSON()) {
     const panel = element('neededColumns');
-    panel.classList.toggle('d-none', neededFields.length === 0);
-    if (neededFields.length === 0) return;
+    const missing = neededFields.length > 0 ? missingNeededFields(boxes) : [];
+    panel.classList.toggle('d-none', missing.length === 0);
+    if (missing.length === 0) return;
 
-    const missing = new Set(missingNeededFields(boxes).map((field) => field.key));
-    element('neededColumnsCount').textContent = missing.size === 0
-        ? 'all there'
-        : `${neededFields.length - missing.size} of ${neededFields.length}`;
-
-    element('neededColumnsList').replaceChildren(...neededFields.map((field) => {
+    element('neededColumnsCount').textContent = `${missing.length} of ${neededFields.length}`;
+    element('neededColumnsList').replaceChildren(...missing.map((field) => {
         const item = document.createElement('li');
-        const label = fieldLabelOf(field.key);
-        if (!missing.has(field.key)) {
-            item.className = 'template-needed-columns__item is-done';
-            item.title = `A column fills ${label}`;
-            const icon = document.createElement('i');
-            icon.className = 'icon-base bx bx-check icon-sm';
-            icon.setAttribute('aria-hidden', 'true');
-            item.append(icon, label);
-            return item;
-        }
         item.className = 'template-needed-columns__item';
+        const label = neededLabel(field.key);
         const add = document.createElement('button');
         add.type = 'button';
         add.className = 'template-needed-columns__add';
-        add.title = `Add a "${label}" column to page ${activePage}`;
+        add.title = `Name the selected unnamed column "${label}", or add it beside the others on page ${activePage}`;
         const icon = document.createElement('i');
         icon.className = 'icon-base bx bx-plus icon-sm';
         icon.setAttribute('aria-hidden', 'true');
         add.append(icon, label);
-        // A page with a table: one more column after its last. Without one: a column
-        // all the same, laid out with the page's other columns (a table is made for it).
-        add.addEventListener('click', () => (ruledYs.length >= 2 && ledgerColumns().length > 0
-            ? addNeededColumns([field])
-            : addAndArrangeNeededColumns([field])));
+        add.addEventListener('click', () => nameOrAddNeededColumn(field));
         item.append(add);
         return item;
     }));
+}
+
+/**
+ * A needed field's "+": a page whose columns are already on its printed lines (after
+ * Detect) gets no new column on top of them. The column selected on the page takes
+ * the field's name; else the leftmost column still named "Column N". Only a page
+ * with no such column gets one more (where there is room, never on another).
+ */
+function nameOrAddNeededColumn(field) {
+    const label = neededLabel(field.key);
+    const boxes = marker.toJSON();
+    // A selected column is renamed only while it has no field yet: one already named
+    // ("name") keeps it, and the new field is added beside it instead.
+    const selected = marker.selectedIndexes()
+        .filter((index) => isColumn(boxes[index]) && fieldOfName(boxes[index].name) === null);
+    const unnamed = boxes
+        .map((box, index) => ({ box, index }))
+        .filter(({ box }) => isColumn(box) && placeholderName(box.name))
+        .sort((a, b) => a.box.x - b.box.x);
+    const target = selected.length === 1 ? selected[0] : (unnamed[0]?.index ?? null);
+
+    if (target !== null) {
+        if (boxes.some((box, index) => index !== target && box.name.trim().toLocaleLowerCase() === label.toLocaleLowerCase())) {
+            showBuilderError(`A field named “${label}” already exists on this page.`);
+            return;
+        }
+        clearBuilderError();
+        marker.renameBox(target, label);
+        // On to the next unnamed column, so the next "+" names it (or click another column first).
+        const next = marker.toJSON()
+            .map((box, index) => ({ box, index }))
+            .filter(({ box }) => isColumn(box) && placeholderName(box.name))
+            .sort((a, b) => a.box.x - b.box.x)[0];
+        if (next) marker.selectIndexes([next.index]);
+        else marker.clearSelection();
+        return;
+    }
+
+    if (ruledYs.length >= 2 && ledgerColumns(boxes).length > 0) addNeededColumns([field]);
+    else addFirstNeededColumn(field);
+    // Not left selected: the next "+" adds the next column beside it, not renames this one.
+    marker.clearSelection();
+}
+
+/**
+ * The page's first column (no table yet): at the left, as wide as one of the book's
+ * needed columns would be with all of them side by side, across the row lines (a page
+ * with none gets a starting table of ten rows). Each next "+" then goes to its right
+ * (addNeededColumns), and nothing already placed is moved.
+ */
+function addFirstNeededColumn(field) {
+    const boxes = marker.toJSON();
+    if (boxes.length >= maxFields) {
+        showBuilderError(`A layout can contain at most ${maxFields} fields.`);
+        return;
+    }
+    const haveRows = ruledYs.length >= 2;
+    const rows = haveRows ? ruledYs : distributeRuledYs([0.22, 0.9], 10);
+    const top = rows[0];
+    const bottom = rows[rows.length - 1];
+    const width = Math.max(0.04, 0.94 / Math.max(1, neededFields.length));
+
+    clearBuilderError();
+    selectedRule = null;
+    allRulesSelected = false;
+    replaceBoxes([...boxes, {
+        name: neededLabel(field.key),
+        x: 0.03,
+        y: top,
+        w: width,
+        h: bottom - top,
+        kind: 'column',
+        columnIndex: 0,
+        personGroup: null,
+        personFieldOrder: null,
+    }]);
+    if (!haveRows) applyGrid(rows, marker.toJSON(), rows.map(() => 0), rows.map(() => null));
 }
 
 /** Add `fields` as columns (or fields, on a page without a table) to the page being edited. */
 function addNeededColumns(fields) {
     const pending = newFieldInput.value;
     for (const field of fields) {
-        newFieldInput.value = fieldLabelOf(field.key);
+        newFieldInput.value = neededLabel(field.key);
         // Stops at the first that cannot be added (too many fields, a name taken): it says why.
         if (!addPendingField()) break;
     }
@@ -767,7 +975,7 @@ function addNeededColumns(fields) {
  * after, or Detect. Used by a "+" on a page with no table yet.
  */
 function addAndArrangeNeededColumns(wanted = null) {
-    arrangeColumns((wanted ?? missingNeededFields()).map((field) => fieldLabelOf(field.key)));
+    arrangeColumns((wanted ?? missingNeededFields()).map((field) => neededLabel(field.key)));
 }
 
 /**
@@ -847,7 +1055,9 @@ function pageRowCount(layout) {
 function renderPersonRecord(boxes, other, onBoth) {
     element('fieldsCardTitle').textContent = other ? 'Person record' : 'Fields';
     // Add field (in the panel's footer) adds to the page being edited.
-    element('newFieldName', HTMLInputElement).placeholder = other ? `Page ${activePage} field, e.g. Page No.` : 'e.g. Page No.';
+    // A register book picks its columns' fields in the list: this box is for anything else.
+    const example = neededFields.length > 0 ? 'Other name, e.g. Remarks' : 'e.g. Page No.';
+    element('newFieldName', HTMLInputElement).placeholder = other ? `Page ${activePage}: ${example}` : example;
     element('activePageHeading').classList.toggle('d-none', !other);
     element('otherPageSection').classList.toggle('d-none', !other);
     // Page 1 always first, as in the record.
@@ -905,10 +1115,20 @@ function renderPersonRecord(boxes, other, onBoth) {
 
 /** Put the cursor in a field's name box on the page being edited, the name selected, ready to type over. */
 function focusFieldName(index) {
-    const input = element('fieldList').querySelector(`[data-field-index="${index}"] .template-builder-field-name`);
-    if (!(input instanceof HTMLInputElement)) return false;
-    input.focus();
-    input.select();
+    const row = element('fieldList').querySelector(`[data-field-index="${index}"]`);
+    const input = row?.querySelector('.template-builder-field-name');
+    const pick = row?.querySelector('.template-builder-field-pick');
+    // A register column whose name box is hidden: its field list takes the focus, or,
+    // its field already set (shown as its name), the column is selected on the page.
+    if (input instanceof HTMLInputElement && input.classList.contains('d-none') && pick instanceof HTMLSelectElement) {
+        if (pick.classList.contains('d-none')) marker.selectBox(index);
+        else pick.focus();
+    } else if (input instanceof HTMLInputElement) {
+        input.focus();
+        input.select();
+    } else {
+        return false;
+    }
     centerFieldListRow(index, { centerPanel: false });
     return true;
 }

@@ -532,7 +532,31 @@ final class RegistryFields
     {
         $fields = self::for($type);
 
-        return $fields === [] ? null : ['type' => $type, 'fields' => $fields, 'pairs' => self::pairs($type)];
+        return $fields === [] ? null : [
+            'type' => $type,
+            'fields' => $fields,
+            'pairs' => self::pairs($type),
+            'pageOrder' => self::pageOrder($type),
+        ];
+    }
+
+    /**
+     * The fields in the order their columns run across the printed register page,
+     * left to right (the Template Builder lists the columns still to add in it).
+     * Not the download order (for()). A pair is listed by its first field. Fields
+     * not named here follow in the download order.
+     *
+     * @return list<string>
+     */
+    public static function pageOrder(string $type): array
+    {
+        return match ($type) {
+            'marriage' => [
+                'date_of_reg', 'reg_no', 'husband_name', 'husband_age', 'husb_nationality',
+                'husb_civil_status', 'husb_father', 'husb_mother', 'place_of_marriage', 'date_of_marriage',
+            ],
+            default => [],
+        };
     }
 
     /**
