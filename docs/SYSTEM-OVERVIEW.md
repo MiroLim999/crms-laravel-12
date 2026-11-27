@@ -533,7 +533,7 @@ The template's **markers** (boxes for fields, columns for a ledger) are drawn ov
 | Tool | What it does |
 | :--- | :--- |
 | Move, resize, tilt | Drag a marker; resize from any corner or side; tilt with the rotate knob or the `[` and `]` keys |
-| Magnetic edges | An edge within 8 screen pixels of a printed line snaps onto it (hold Alt to place freely) |
+| Magnetic edges | Markers move freely; with Alt held, an edge within 8 screen pixels of a printed line snaps onto it |
 | **Snap to table** | Fits the template's columns and rows onto the table printed on this page in under a second, without reading anything. It also measures how far the page is turned. |
 | Rows and Columns card | Add or remove rows and columns for this page only (the template is not changed) |
 | Row lines | For a ledger, one line per printed row; each can be dragged or tilted on its own |

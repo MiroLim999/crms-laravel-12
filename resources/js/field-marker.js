@@ -756,9 +756,9 @@ export class FieldMarker {
 
     /**
      * The page's printed lines, as page fractions: { vertical: [x...],
-     * horizontal: [y...] }. While a marker is moved or resized, an edge
-     * within a few screen pixels of one snaps onto it (hold Alt to place
-     * freely). null turns snapping off.
+     * horizontal: [y...] }. A marker moves and resizes freely; with Alt held,
+     * an edge within a few screen pixels of one snaps onto it. null turns
+     * snapping off.
      */
     setSnapLines(lines) {
         this.snapLines = lines && (lines.vertical?.length || lines.horizontal?.length) ? lines : null;
@@ -1316,7 +1316,9 @@ export class FieldMarker {
                 let boundedY = clamp(dy, minDy, maxDy);
 
                 const grabbed = origins.find((origin) => origin.box === box);
-                if (this.snapLines && grabbed && !event.altKey) {
+                // Free by default: the marker stays exactly where it is let go. Alt: snap
+                // an edge onto a printed line (as row lines do).
+                if (this.snapLines && grabbed && event.altKey) {
                     const snapX = magnetShift(
                         [grabbed.x + boundedX, grabbed.x + grabbed.w + boundedX], this.snapLines.vertical, 8 / width,
                     );
@@ -1342,9 +1344,9 @@ export class FieldMarker {
                 let sx = east || west ? dx : 0;
                 let sy = north || south ? dy : 0;
 
-                // The dragged side of the grabbed marker snaps to a printed line.
+                // Alt: the dragged side of the grabbed marker snaps to a printed line (free otherwise).
                 const grabbed = origins.find((origin) => origin.box === box);
-                if (this.snapLines && grabbed && !event.altKey) {
+                if (this.snapLines && grabbed && event.altKey) {
                     const snapX = east || west
                         ? magnetShift([west ? grabbed.x + sx : grabbed.x + grabbed.w + sx], this.snapLines.vertical, 8 / width)
                         : { shift: 0, line: null };

@@ -3506,8 +3506,14 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
     white-space: nowrap;
   }
 
-  .field-list-item__remove {
+  .field-list-item__remove,
+  .field-list-item__move {
     flex: 0 0 auto;
+  }
+
+  // Move to the other page: beside Remove, a little apart from it.
+  .field-list-item__move {
+    margin-inline-end: .25rem;
   }
 
   // Two pages side by side: "Page 1 · aligning" / "Page 2" over each page's fields.

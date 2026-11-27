@@ -203,7 +203,7 @@
                                         <div><span>Drag selection</span><small>Move selected fields</small></div>
                                         <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
                                         <div><span>Arrow keys</span><small>Move selected 1 px (<kbd>Shift</kbd>: 10 px)</small></div>
-                                        <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + drag</span><small>Place without snapping to printed lines</small></div>
+                                        <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + drag</span><small>Snap an edge onto a printed line (fields move freely without)</small></div>
                                         <div><span>Drag the rotate knob below a field</span><small>Tilt that field (<kbd>Shift</kbd>: 5° steps)</small></div>
                                         <div><span><kbd>[</kbd> or <kbd>]</kbd></span><small>Tilt selected 0.5° (<kbd>Shift</kbd>: 5°)</small></div>
                                         <div><span>Double-click the knob</span><small>Straighten</small></div>

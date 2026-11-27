@@ -172,8 +172,7 @@
                                     <div><span><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></span><small>Nudge selected fields
                                             (<kbd>Shift</kbd>: 10 px)</small></div>
                                     <div><span>Drag resize handle</span><small>Resize selected fields</small></div>
-                                    <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + drag</span><small>Place without snapping to
-                                            printed lines</small></div>
+                                    <div><span><kbd>Alt</kbd> / <kbd>⌥</kbd> + drag</span><small>Snap an edge onto a printed line (markers move freely without)</small></div>
                                     <div><span>Drag the rotate knob below a field</span><small>Tilt that field
                                             (<kbd>Shift</kbd>: 5° steps)</small></div>
                                     <div><span><kbd>[</kbd> or <kbd>]</kbd></span><small>Tilt selected 0.5°
@@ -9845,6 +9844,100 @@
             if (index < marker.toJSON().length) marker.selectBox(index, { source: 'marker' });
         }
 
+        /**
+         * Column `index` of the page being aligned moved to the page beside it (page 1 ⇄
+         * page 2): taken off this page, and put on that page after its last column,
+         * across that page's row lines. A page with no table yet takes it where it is,
+         * with this page's row lines. That page keeps it (opened, saved or read later).
+         */
+        function moveColumnToOtherPage(index) {
+            const other = otherPageFields();
+            const box = marker.toJSON()[index];
+            if (!other || !box || box.kind !== 'column') return;
+
+            const grid = companionGridFor(other.number, other.mate) ?? { boxes: [], rows: [] };
+            const targetBoxes = cloneBoxes(grid.boxes ?? []);
+            if (targetBoxes.some((existing) => nameKey(existing.name) === nameKey(box.name))) {
+                showOcrError(`Page ${other.number} already has a field named “${box.name}”. Rename one of them first.`);
+                return;
+            }
+            if (targetBoxes.length >= config.maxFields) {
+                showOcrError(`Page ${other.number} already has ${config.maxFields} fields, the most a page can have.`);
+                return;
+            }
+
+            let rows = [...(grid.rows ?? [])];
+            let tilts = grid.tilts ? [...grid.tilts] : null;
+            let spans = grid.spans ?? null;
+            let bends = grid.bends ?? null;
+            const columns = ledgerColumns(targetBoxes);
+            const { angle: _angle, columnIndex: _index, personGroup: _group, personFieldOrder: _order, ...plain } = box;
+            const nextIndex = Math.max(-1, ...columns.map((column) => Number(column.columnIndex)).filter(Number.isInteger)) + 1;
+            let moved;
+            if (columns.length > 0 && rows.length >= 2) {
+                // After that page's last column, across its rows, turned with its table.
+                const last = columns.reduce((right, column) => (column.x + column.w > right.x + right.w ? column : right));
+                const top = rows[0];
+                const bottom = rows[rows.length - 1];
+                moved = {
+                    ...plain,
+                    x: Math.max(0, Math.min(1 - box.w, last.x + last.w)),
+                    y: top,
+                    h: Math.max(0.01, bottom - top),
+                    kind: 'column',
+                    columnIndex: nextIndex,
+                    ...(Number(last.angle) ? { angle: Number(last.angle) } : {}),
+                };
+            } else {
+                // No table there yet: the column where it is, with this page's row lines.
+                moved = { ...plain, kind: 'column', columnIndex: nextIndex, ...(Number(box.angle) ? { angle: Number(box.angle) } : {}) };
+                rows = [...gridRows];
+                tilts = [...rowTilts];
+                spans = fitSpans(rowSpans, gridRows.length);
+                bends = null;
+            }
+            targetBoxes.push(moved);
+            tilts = tilts ? fitTilts(tilts, rows.length) : rows.map(() => 0);
+
+            // That page keeps it: a batch page on its queue item, a page of this file in its saved layout.
+            if (other.mate) {
+                Object.assign(other.mate.item, {
+                    boxes: targetBoxes,
+                    rows,
+                    tilts,
+                    spans: fitSpans(spans, rows.length),
+                    bends: bends ? fitBends(bends, rows.length, ledgerColumns(targetBoxes).length) : null,
+                });
+            } else {
+                const saved = pageLayouts.get(other.number);
+                pageLayouts.set(other.number, {
+                    grid: {
+                        boxes: targetBoxes,
+                        rows,
+                        tilts,
+                        spans: fitSpans(spans, rows.length),
+                        bends: bends ? fitBends(bends, rows.length, ledgerColumns(targetBoxes).length) : [],
+                        estimated: saved?.grid?.estimated ?? [],
+                        byHand: saved?.grid?.byHand ?? false,
+                    },
+                    autoFields: saved?.autoFields ?? new Map(),
+                    rowsSource: saved?.rowsSource ?? null,
+                    history: saved?.history ?? [],
+                });
+            }
+
+            clearOcrError();
+            // Off this page (one undoable change here), then both pages and the list redrawn.
+            marker.removeBox(index);
+            companionGridKey = '';
+            renderCompanionGrid(companionGridFor(other.number, other.mate));
+            renderFieldList(marker.toJSON());
+            if (batchState.active) {
+                scheduleBatchSync();
+                renderBatchQueueBanner();
+            }
+        }
+
         function renderFieldList(boxes) {
             const list = el('fieldList');
             list.innerHTML = '';
@@ -9875,15 +9968,30 @@
                 name.textContent = box.name;
                 // A long name is cut short with "…": the whole name shows on hover.
                 name.title = box.name;
-                li.querySelector('button').setAttribute('aria-label', `Remove ${box.name}`);
+                const remove = li.querySelector('.field-list-item__remove');
+                remove.setAttribute('aria-label', `Remove ${box.name}`);
                 li.addEventListener('click', (event) => marker.selectBox(index, {
                     additive: event.shiftKey,
                     toggle: event.shiftKey,
                 }));
-                li.querySelector('button').addEventListener('click', (event) => {
+                remove.addEventListener('click', (event) => {
                     event.stopPropagation();
                     marker.removeBox(index);
                 });
+                // Two pages side by side: a column can go to the other page (page 1 ⇄ page 2).
+                if (other && box.kind === 'column') {
+                    const move = document.createElement('button');
+                    move.type = 'button';
+                    move.className = 'btn btn-sm btn-icon btn-outline-secondary rounded-pill field-list-item__move';
+                    move.title = `Move this column to page ${other.number}`;
+                    move.setAttribute('aria-label', `Move ${box.name} to page ${other.number}`);
+                    move.innerHTML = '<i class="icon-base bx bx-transfer-alt icon-sm" aria-hidden="true"></i>';
+                    move.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        moveColumnToOtherPage(index);
+                    });
+                    remove.before(move);
+                }
                 list.appendChild(li);
             });
 
@@ -10528,7 +10636,7 @@
         // ------------------------------------------------------- snap to table
         // The page's printed table lines, found in well under a second: "Snap to
         // table" fits every column and row marker onto them, and while a marker
-        // is dragged its edges snap to them (Alt places it freely).
+        // is dragged with Alt held its edges snap to them (free otherwise).
 
         let snapToken = 0;
 
