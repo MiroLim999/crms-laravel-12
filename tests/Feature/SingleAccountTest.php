@@ -29,8 +29,8 @@ class SingleAccountTest extends TestCase
             ->get(route('settings.edit'))
             ->assertOk()
             ->assertSee('Your details')
-            ->assertSee('value="Rosa Reyes"', false)
-            ->assertSee('value="rosa@example.test"', false)
+            ->assertSee('<dd>Rosa Reyes</dd>', false)
+            ->assertSee('<dd>rosa@example.test</dd>', false)
             ->assertDontSee('managed by an administrator')
             ->assertDontSee('>Role<', false);
     }

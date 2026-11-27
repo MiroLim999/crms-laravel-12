@@ -8,6 +8,7 @@ use App\Models\DocumentTypeDefinition;
 use App\Models\ScanBatch;
 use App\Models\ScanBatchDraft;
 use App\Models\ScanBatchPage;
+use App\Services\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -233,7 +234,7 @@ class ScanBatchController extends Controller
      * Discard: the batch is given up. Its pages are let go by the next prune.
      * From any tab, since it ends the batch for all of them.
      */
-    public function abandon(Request $request, ScanBatch $batch): JsonResponse
+    public function abandon(Request $request, ScanBatch $batch, AuditLogger $audit): JsonResponse
     {
         $this->authorizeBatch($request, $batch);
 
@@ -242,6 +243,8 @@ class ScanBatchController extends Controller
                 'status' => ScanBatch::STATUS_ABANDONED,
                 'version' => $batch->version + 1,
             ])->save();
+
+            $audit->log('scan.discarded', $batch, description: 'Scan batch discarded before all its records were saved.');
         }
 
         return response()->json(['version' => $batch->version, 'status' => $batch->status]);

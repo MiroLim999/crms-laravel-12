@@ -18,6 +18,8 @@ use Illuminate\View\View;
  */
 class AuditLogController extends Controller
 {
+    public const PER_PAGE = 10;
+
     public function index(Request $request): View
     {
         $filters = $request->validate([
@@ -50,7 +52,9 @@ class AuditLogController extends Controller
             })
             ->orderByDesc('created_at')
             ->orderByDesc('id')
-            ->paginate(25)
+            // Ten rows fit one screen with the filters above, so the pager
+            // takes over instead of the page scrolling.
+            ->paginate(self::PER_PAGE)
             ->withQueryString();
 
         return view('audit.index', [

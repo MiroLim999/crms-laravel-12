@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Services\AuditLogger;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
@@ -38,6 +39,15 @@ class LoginRequest extends FormRequest
 
         if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
             RateLimiter::hit($this->throttleKey());
+
+            // The typed password is never logged, only the email it was tried with.
+            $email = Str::limit((string) $this->string('email'), 255, '');
+            $audit = app(AuditLogger::class);
+            $audit->log('auth.login_failed', description: "Wrong password or email ({$email}).");
+
+            if (RateLimiter::tooManyAttempts($this->throttleKey(), 5)) {
+                $audit->log('auth.locked_out', description: "Too many failed sign-ins for {$email}; sign-in paused.");
+            }
 
             throw ValidationException::withMessages([
                 'email' => 'Those credentials do not match our records.',

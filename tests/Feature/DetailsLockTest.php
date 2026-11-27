@@ -20,11 +20,6 @@ class DetailsLockTest extends TestCase
         $user = User::factory()->superAdmin()->create(['name' => 'Rosa', 'email' => 'rosa@example.test']);
 
         $this->actingAs($user)
-            ->get(route('settings.edit'))
-            ->assertSee('You can change your name and email only once.')
-            ->assertSee('Save details');
-
-        $this->actingAs($user)
             ->from(route('settings.edit'))
             ->put(route('settings.profile.update'), ['name' => 'Rosa Reyes', 'email' => 'rosa@example.test'])
             ->assertSessionHas('success');
@@ -32,11 +27,18 @@ class DetailsLockTest extends TestCase
         $user->refresh();
         $this->assertSame('Rosa Reyes', $user->name);
         $this->assertNotNull($user->details_locked_at);
+    }
+
+    public function test_settings_shows_name_and_email_without_a_way_to_edit_them(): void
+    {
+        $user = User::factory()->superAdmin()->create(['name' => 'Rosa', 'email' => 'rosa@example.test']);
 
         $this->actingAs($user)
             ->get(route('settings.edit'))
-            ->assertSee('Locked: changed once')
-            ->assertDontSee('Save details');
+            ->assertSee('Rosa')
+            ->assertSee('rosa@example.test')
+            ->assertDontSee('Save details')
+            ->assertDontSee(route('settings.profile.update'));
     }
 
     public function test_a_locked_account_cannot_change_them_again(): void

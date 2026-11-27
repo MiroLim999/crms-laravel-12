@@ -30,7 +30,7 @@
                     @foreach ($actions as $action)
                         <option value="{{ $action }}"
                                 @selected(($filters['action'] ?? null) === $action)>
-                            {{ $action }}
+                            {{ \App\Models\AuditLog::labelFor($action) }}
                         </option>
                     @endforeach
                 </select>
@@ -75,18 +75,17 @@
                     <thead>
                         <tr>
                             <th>When</th>
-                            <th>Actor</th>
-                            <th>Action</th>
+                            <th>Event</th>
                             <th>Target</th>
-                            <th>IP</th>
                             <th class="text-end">Changes</th>
                         </tr>
                     </thead>
                     <tbody>
                         @foreach ($entries as $entry)
                             @php
-                                $actorName = $entry->actor_name ?? $entry->user?->name ?? 'System';
-                                $target   = $entry->auditable_type ? class_basename($entry->auditable_type) : null;
+                                $actorName = $entry->actor_name ?? $entry->user?->name
+                                    ?? (str_starts_with($entry->action, 'auth.') ? 'someone not signed in' : 'System');
+                                $target   = $entry->targetLabel();
                                 $diffKeys = array_keys(array_merge($entry->old_values ?? [], $entry->new_values ?? []));
                                 $diffId   = 'audit-diff-' . $entry->getKey();
 
@@ -105,9 +104,12 @@
                                     <div><small class="text-muted">{{ $entry->created_at?->diffForHumans() }}</small></div>
                                 </td>
                                 <td>
-                                    <div class="fw-medium">{{ $actorName }}</div>
+                                    <div class="fw-medium">{{ $entry->eventLabel() }}</div>
+                                    <small class="text-muted">
+                                        by {{ $actorName }}
+                                        · <code class="text-muted" title="Action code">{{ $entry->action }}</code>
+                                    </small>
                                 </td>
-                                <td><code class="text-body">{{ $entry->action }}</code></td>
                                 <td>
                                     @if ($target)
                                         <span class="fw-medium">{{ $target }}</span>
@@ -119,7 +121,6 @@
                                         <div><small class="text-muted">{{ $entry->description }}</small></div>
                                     @endif
                                 </td>
-                                <td class="text-muted small">{{ $entry->ip_address ?? '—' }}</td>
                                 <td class="text-end">
                                     @if ($diffKeys !== [])
                                         {{--
@@ -142,7 +143,7 @@
 
                             @if ($diffKeys !== [])
                                 <tr class="audit-expand-row" id="{{ $diffId }}-row">
-                                    <td class="p-0" colspan="6" style="border-top:0">
+                                    <td class="p-0" colspan="4" style="border-top:0">
                                         {{-- Slide wrapper. max-height is animated by JS. --}}
                                         <div class="audit-diff-panel" id="{{ $diffId }}" style="max-height:0;overflow:hidden;">
                                             <div class="audit-diff-inner mx-1 mb-2 rounded-2 border">

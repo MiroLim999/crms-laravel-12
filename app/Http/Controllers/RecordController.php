@@ -344,6 +344,13 @@ class RecordController extends Controller
             }
         }
 
+        // Who looked at whose record is part of the trail for a civil registry.
+        app(AuditLogger::class)->log(
+            'record.viewed',
+            $record,
+            description: 'Opened '.$record->typeShortLabel().': '.$record->title().'.',
+        );
+
         return view('records.show', [
             'record' => $record,
             'fieldGroups' => $fieldGroups,

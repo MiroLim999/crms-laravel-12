@@ -27,15 +27,15 @@ class AuditLogViewerTest extends TestCase
     public function test_it_paginates(): void
     {
         $actor = User::factory()->superAdmin()->create();
-        $this->entries($actor, 30);
+        $this->entries($actor, 15);
 
         $first = $this->actingAs(User::factory()->superAdmin()->create())
             ->get(route('audit.index'))
             ->assertOk()
             ->viewData('entries');
 
-        $this->assertSame(30, $first->total());
-        $this->assertCount(25, $first->items());
+        $this->assertSame(15, $first->total());
+        $this->assertCount(10, $first->items());
         $this->assertTrue($first->hasMorePages());
 
         $second = $this->actingAs(User::factory()->superAdmin()->create())

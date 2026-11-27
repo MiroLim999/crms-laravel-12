@@ -72,9 +72,16 @@
         @endunless
 
         @if (! $activeModel)
-            <div class="alert alert-warning document-upload-alert" role="alert">
-                <i class="icon-base bx bx-error" aria-hidden="true"></i>
-                <div>No OCR model is active. Activate one in OCR Workspace before scanning.</div>
+            <div class="alert alert-warning document-upload-alert" role="alert" id="noOcrModelAlert">
+                <i class="icon-base bx bx-lock-alt" aria-hidden="true"></i>
+                <div>
+                    <strong>Upload is locked: no OCR model is active.</strong>
+                    @can('ocr.manage')
+                        Activate one in <a href="{{ route('ocr.index') }}" class="alert-link">OCR Workspace</a> before scanning.
+                    @else
+                        Ask an administrator to activate one before scanning.
+                    @endcan
+                </div>
             </div>
         @endif
 
@@ -193,7 +200,10 @@
                         </button>
                     </div>
                 </div>
-                <div class="document-upload-mode-bar" role="radiogroup" aria-label="Choose upload mode">
+                {{-- No active OCR model: the mode choice and the drop area are locked
+                     (the workspace script reads data-no-ocr-model and keeps them so). --}}
+                <div class="document-upload-mode-bar {{ $activeModel ? '' : 'is-disabled' }}" role="radiogroup" aria-label="Choose upload mode"
+                     @unless ($activeModel) aria-disabled="true" @endunless>
                     <div class="document-upload-mode-header">
                         <span class="document-upload-mode-label">Upload mode</span>
                         <span class="document-upload-mode-hint" id="uploadModeHint">Upload and process one document at a time</span>
@@ -219,11 +229,12 @@
                     </div>
                 </div>
 
-                <label for="scanFile" class="document-dropzone" id="documentDropzone" tabindex="0">
+                <label for="scanFile" class="document-dropzone {{ $activeModel ? '' : 'is-disabled is-locked' }}" id="documentDropzone" tabindex="0"
+                       @unless ($activeModel) data-no-ocr-model aria-disabled="true" @endunless>
                     <span class="document-dropzone__icon" aria-hidden="true">
                         <i class="icon-base bx bx-cloud-upload"></i>
                     </span>
-                    <span class="document-dropzone__title" id="dropzoneTitle">Drop the scan here</span>
+                    <span class="document-dropzone__title" id="dropzoneTitle">{{ $activeModel ? 'Drop the scan here' : 'Activate an OCR model to upload' }}</span>
                     <span class="document-dropzone__actions">
                         <span class="btn btn-primary document-dropzone__button" id="dropzoneButton">Choose file</span>
                         <button type="button" class="btn btn-outline-primary document-dropzone__folder-btn d-none" id="dropzoneFolderButton">
@@ -235,8 +246,8 @@
                     </span>
                 </label>
                 <input type="file" id="scanFile" class="visually-hidden"
-                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp">
-                <input type="file" id="scanFolder" class="visually-hidden" webkitdirectory directory multiple>
+                       accept="application/pdf,image/png,image/jpeg,image/webp,image/bmp" @disabled(! $activeModel)>
+                <input type="file" id="scanFolder" class="visually-hidden" webkitdirectory directory multiple @disabled(! $activeModel)>
             @else
                 {{-- Same layout as after a type is chosen, but grayed out and without inputs. --}}
                 <div class="document-upload-mode-bar is-disabled" aria-hidden="true">

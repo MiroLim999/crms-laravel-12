@@ -3,7 +3,6 @@
 @section('title', 'Account Settings')
 
 @php
-    $detailsLocked = $user->details_locked_at !== null;
     $codesLeft = $user->recoveryCodesLeft();
     $codesMade = $user->recovery_codes_generated_at !== null;
     $codeTotal = \App\Models\User::RECOVERY_CODE_COUNT;
@@ -22,20 +21,9 @@
             text-align: center; font-family: var(--bs-font-monospace); font-size: 1.125rem; letter-spacing: .08em;
             background: var(--bs-tertiary-bg, transparent);
         }
-        .lock-details-dialog { max-inline-size: 26rem; }
-        .lock-details-icon {
-            display: inline-flex; align-items: center; justify-content: center;
-            inline-size: 3.5rem; block-size: 3.5rem; border-radius: 50%;
-            background: var(--bs-warning-bg-subtle, rgba(255, 171, 0, .16)); color: var(--bs-warning);
-            font-size: 1.75rem;
-        }
-        .lock-details-preview {
-            display: grid; grid-template-columns: auto 1fr; gap: .35rem 1rem;
-            padding: .75rem 1rem; border-radius: .5rem; background: var(--bs-tertiary-bg, rgba(0, 0, 0, .04));
-            font-size: .875rem;
-        }
-        .lock-details-preview dt { font-weight: 500; color: var(--bs-secondary-color); }
-        .lock-details-preview dd { margin: 0; min-inline-size: 0; overflow-wrap: anywhere; }
+        .details-view { display: grid; grid-template-columns: auto 1fr; gap: .75rem 1.5rem; }
+        .details-view dt { font-weight: 500; color: var(--bs-secondary-color); }
+        .details-view dd { margin: 0; min-inline-size: 0; overflow-wrap: anywhere; }
     </style>
 @endpush
 
@@ -72,66 +60,14 @@
     <div class="row g-4 mb-4">
         <div class="col-lg-6">
             <x-card title="Your details" subtitle="The name shown in CRMS and the email you sign in with." class="h-100">
-                @if ($detailsLocked)
-                    <x-slot:actions>
-                        <span class="badge bg-label-secondary"><i class="icon-base bx bx-lock-alt icon-xs me-1" aria-hidden="true"></i>Locked</span>
-                    </x-slot:actions>
-                @endif
-
-                {{-- Name and email can be changed once: the first save that changes them locks both. --}}
-                <form method="POST" action="{{ route('settings.profile.update') }}" class="d-flex flex-column h-100"
-                      id="detailsForm">
-                    @csrf
-                    @method('PUT')
-
-                    <div class="mb-3">
-                        <label for="name" class="form-label">Name</label>
-                        <input type="text"
-                               id="name"
-                               name="name"
-                               value="{{ old('name', $user->name) }}"
-                               maxlength="255"
-                               class="form-control @error('name') is-invalid @enderror"
-                               required
-                               @disabled($detailsLocked)
-                               autocomplete="name">
-                        @error('name')
-                            <div class="invalid-feedback">{{ $message }}</div>
-                        @enderror
-                    </div>
-
-                    <div class="mb-4">
-                        <label for="email" class="form-label">Email</label>
-                        <input type="email"
-                               id="email"
-                               name="email"
-                               value="{{ old('email', $user->email) }}"
-                               maxlength="255"
-                               class="form-control @error('email') is-invalid @enderror"
-                               required
-                               @disabled($detailsLocked)
-                               autocomplete="email">
-                        @error('email')
-                            <div class="invalid-feedback">{{ $message }}</div>
-                        @enderror
-                        <div class="form-text">You sign in with this email.</div>
-                    </div>
-
-                    <div class="mt-auto">
-                        @if ($detailsLocked)
-                            <div class="alert alert-secondary d-flex align-items-start gap-2 mb-0 small" role="status">
-                                <i class="icon-base bx bx-lock-alt mt-1" aria-hidden="true"></i>
-                                <span>Locked: changed once, {{ $user->details_locked_at->diffForHumans() }}. They can no longer be edited here.</span>
-                            </div>
-                        @else
-                            <div class="alert alert-warning d-flex align-items-start gap-2 mb-4 small" role="note">
-                                <i class="icon-base bx bx-error mt-1" aria-hidden="true"></i>
-                                <span>You can change your name and email only once. Check them before saving.</span>
-                            </div>
-                            <button type="submit" class="btn btn-primary">Save details</button>
-                        @endif
-                    </div>
-                </form>
+                {{-- Shown only: name and email cannot be edited here. --}}
+                <dl class="details-view mb-0">
+                    <dt>Name</dt>
+                    <dd>{{ $user->name }}</dd>
+                    <dt>Email</dt>
+                    <dd>{{ $user->email }}</dd>
+                </dl>
+                <div class="form-text mt-3">You sign in with this email.</div>
             </x-card>
         </div>
 
@@ -271,57 +207,10 @@
         </div>
     </x-card>
 
-    @unless ($detailsLocked)
-        {{-- Asked before the one allowed change of name and email is saved. --}}
-        <div class="modal fade" id="lockDetailsModal" tabindex="-1"
-             aria-labelledby="lockDetailsModalTitle" aria-describedby="lockDetailsModalText" aria-hidden="true">
-            <div class="modal-dialog modal-dialog-centered lock-details-dialog">
-                <div class="modal-content text-center">
-                    <div class="modal-body px-4 pt-5 pb-4">
-                        <span class="lock-details-icon mb-3" aria-hidden="true">
-                            <i class="icon-base bx bx-lock-alt"></i>
-                        </span>
-                        <h2 class="h5 mb-2" id="lockDetailsModalTitle">Save and lock your details?</h2>
-                        <p class="text-muted mb-3" id="lockDetailsModalText">
-                            Your name and email can be changed only once. After saving, they cannot be edited again.
-                        </p>
-                        <dl class="lock-details-preview text-start mb-0">
-                            <dt>Name</dt><dd id="lockDetailsName"></dd>
-                            <dt>Email</dt><dd id="lockDetailsEmail"></dd>
-                        </dl>
-                    </div>
-                    <div class="modal-footer justify-content-center gap-2 pt-0 pb-4">
-                        <button type="button" class="btn btn-label-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary" id="confirmLockDetails">Save and lock</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    @endunless
 @endsection
 
 @push('scripts')
     <script>
-        // Saving name and email locks them: asked in a modal first (not the browser's own box).
-        (() => {
-            const form = document.getElementById('detailsForm');
-            const modalEl = document.getElementById('lockDetailsModal');
-            if (!form || !modalEl) return;
-            let confirmed = false;
-            form.addEventListener('submit', (event) => {
-                if (confirmed) return;
-                event.preventDefault();
-                document.getElementById('lockDetailsName').textContent = form.elements.name.value.trim();
-                document.getElementById('lockDetailsEmail').textContent = form.elements.email.value.trim().toLowerCase();
-                window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
-            });
-            document.getElementById('confirmLockDetails').addEventListener('click', (event) => {
-                event.currentTarget.disabled = true;
-                confirmed = true;
-                form.requestSubmit();
-            });
-        })();
-
         // The new codes as a text file: downloaded by itself as soon as they are shown
         // (they are shown once), and again with Download codes.
         (() => {

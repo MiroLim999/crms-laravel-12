@@ -5080,6 +5080,9 @@
         // An unfinished batch of this type waits (setUploadLock): nothing new is uploaded
         // until it is resumed (and so finished here) or discarded.
         let uploadLocked = false;
+        // No OCR model is active (data-no-ocr-model, set by the server): uploads stay
+        // locked for this whole page, whatever the batch lock says.
+        const noOcrModel = document.getElementById('documentDropzone')?.hasAttribute('data-no-ocr-model') ?? false;
         // Set once the batch is done (showBatchSummary): step 4 shows the summary card
         // in place of the scan and the table, and the batch's bar (its queue) is put away.
         let batchSummaryShown = false;
@@ -5116,7 +5119,9 @@
         function showUploadModeText() {
             const batch = uploadMode === 'batch';
             if (dropzoneTitleEl) {
-                dropzoneTitleEl.textContent = uploadLocked
+                dropzoneTitleEl.textContent = noOcrModel
+                    ? 'Activate an OCR model to upload'
+                    : uploadLocked
                     ? 'Resume or discard the unfinished batch first'
                     : batch ? 'Drop scans or a folder here' : 'Drop the scan here';
             }
@@ -8088,7 +8093,8 @@
             const zone = document.getElementById('documentDropzone');
             // No type chosen yet: the drop area is a placeholder, gray on its own.
             if (!zone || zone.hasAttribute('data-requires-type')) return;
-            uploadLocked = locked;
+            uploadLocked = locked || noOcrModel;
+            locked = uploadLocked;
             zone.classList.toggle('is-disabled', locked);
             zone.classList.toggle('is-locked', locked);
             // The title in the drop area says why (no hover tooltip repeating it).
@@ -8102,6 +8108,13 @@
 
         /** Tried to upload while locked: say why, and point at the banner. */
         function explainUploadLock() {
+            if (noOcrModel) {
+                const alert = document.getElementById('noOcrModelAlert');
+                alert?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                tellInApp('No OCR model is active',
+                    'Activate an OCR model in OCR Workspace first. Then you can upload scans here.');
+                return;
+            }
             const banner = el('batchResume');
             banner.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
             banner.classList.remove('is-nudged');
@@ -8374,6 +8387,11 @@
         });
 
         el('batchResumeBtn').addEventListener('click', () => {
+            // Resuming would read pages, which needs an active model.
+            if (noOcrModel) {
+                explainUploadLock();
+                return;
+            }
             if (el('batchResume').dataset.mode === 'files') askForBatchFiles({ thenContinue: true });
             else resumeBatch(Number(el('batchResumeBtn').dataset.batch));
         });
