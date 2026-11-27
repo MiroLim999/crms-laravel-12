@@ -3,7 +3,7 @@
  *
  * Each line runs across the table's columns with a grip on the table's left
  * and right edges. A grip selects its line and drags it (Shift: every line
- * together); double-clicking a grip removes the line. A dragged line moves
+ * together); Delete removes the selected line. A dragged line moves
  * freely and stays where it is let go; held with Alt, it snaps onto the page's
  * printed lines. Only the grips take
  * the pointer, so the columns under the lines can still be dragged.
@@ -51,15 +51,18 @@ export class RowLineLayer {
      * @param {(index: number) => void} [options.onRemove]
      * @param {boolean} [options.stretchable]  Grips can stretch their line.
      * @param {(index: number, change: {span: {l: number, r: number}, y: number, tilt: number}) => void} [options.onStretch]
+     * @param {(spans: {l: number, r: number}[]) => void} [options.onStretchAll]  Every line selected and a grip
+     *   dragged sideways: that end of every line moved by the same amount (each line's new span).
      * @param {boolean} [options.bendable]  Each column's part of a line can be moved up or down.
      * @param {(index: number, column: number, dy: number, side: 'l'|'r') => void} [options.onBend]
      */
     constructor({
         overlay, printedLines = () => null, onSelect = () => {}, onMove = () => {}, onRemove = () => {},
-        stretchable = false, onStretch = () => {}, bendable = false, onBend = () => {},
+        stretchable = false, onStretch = () => {}, onStretchAll = () => {}, bendable = false, onBend = () => {},
     }) {
         this.stretchable = stretchable;
         this.onStretch = onStretch;
+        this.onStretchAll = onStretchAll;
         this.bendable = bendable;
         this.onBend = onBend;
         this.overlay = overlay;
@@ -75,12 +78,13 @@ export class RowLineLayer {
         overlay.appendChild(this.layer);
 
         this.layer.addEventListener('pointerdown', (event) => this.drag(event));
+        // A double-click on a grip no longer removes its line: clicking a grip again
+        // to drag it read as a double-click, and lines went while being adjusted.
+        // A line is removed with Delete or the Rows − button.
         this.layer.addEventListener('dblclick', (event) => {
-            const grip = gripOf(event);
-            if (!grip || this.state.locked) return;
+            if (!gripOf(event)) return;
             event.preventDefault();
             event.stopPropagation();
-            this.onRemove(Number(grip.dataset.index));
         });
 
         // Each column's piece of each line, with its handle (bendable only). A layer of
@@ -137,8 +141,8 @@ export class RowLineLayer {
                 grip.title = isEstimated
                     ? `Row line ${index + 1} has no printed line under it. Check it against the page; drag to move it.`
                     : (this.stretchable
-                        ? `Row line ${index + 1}: drag up or down to move (Shift: every line), sideways to stretch, Alt+drag to pull this end anywhere, double-click to remove`
-                        : `Row line ${index + 1}: drag to move (Shift: every line), double-click to remove`);
+                        ? `Row line ${index + 1}: drag up or down to move (Shift: every line), sideways to stretch, Alt+drag to pull this end anywhere. Delete removes it.`
+                        : `Row line ${index + 1}: drag to move (Shift: every line). Delete removes it.`);
             });
         });
         this.renderPieces(dragging);
@@ -335,10 +339,15 @@ export class RowLineLayer {
         const startY = pageY(event.clientY).y;
         const moving = new Set(together ? origin.map((_, i) => i) : [index]);
         const stretchable = this.stretchable && !together;
-        // 'move' (the line, up or down), 'x' (this end sideways) or 'free' (this end anywhere).
-        let mode = stretchable ? (event.altKey ? 'free' : null) : 'move';
+        // Every line selected (not Shift): sideways stretches that end of all of them, up or down moves them.
+        const stretchAll = this.stretchable && allSelected && !event.shiftKey;
+        // 'move' (the line, up or down), 'x' (this end sideways), 'free' (this end anywhere)
+        // or 'all-x' (this end of every line sideways).
+        let mode = stretchable ? (event.altKey ? 'free' : null) : (stretchAll ? null : 'move');
         let current = origin;
         let stretched = null;
+        let stretchedAll = null;
+        const spans0 = origin.map((_, i) => this.spanOf(i));
         // With every line selected, they stay selected while dragged.
         if (!allSelected) this.onSelect(index);
 
@@ -350,7 +359,18 @@ export class RowLineLayer {
                 const dx = moveEvent.clientX - event.clientX;
                 const dy = moveEvent.clientY - event.clientY;
                 if (Math.hypot(dx, dy) < 4) return;
-                mode = Math.abs(dx) > Math.abs(dy) ? 'x' : 'move';
+                mode = Math.abs(dx) > Math.abs(dy) ? (stretchAll ? 'all-x' : 'x') : 'move';
+            }
+
+            if (mode === 'all-x') {
+                // The same end of every line, moved by how far this grip went (each kept its own length).
+                const box = bounds();
+                const dx = (moveEvent.clientX - event.clientX) / Math.max(1, box.width);
+                stretchedAll = spans0.map((span) => (isEnd
+                    ? { l: span.l, r: Math.min(1, Math.max(span.l + MIN_SPAN, span.r + dx)) }
+                    : { l: Math.max(0, Math.min(span.r - MIN_SPAN, span.l + dx)), r: span.r }));
+                this.render({ spans: stretchedAll }, moving);
+                return;
             }
 
             if (mode === 'move') {
@@ -398,7 +418,9 @@ export class RowLineLayer {
             window.removeEventListener('pointerup', end);
             window.removeEventListener('pointercancel', end);
 
-            if (stretched && (mode === 'x' || mode === 'free')) {
+            if (stretchedAll && mode === 'all-x') {
+                this.onStretchAll(stretchedAll);
+            } else if (stretched && (mode === 'x' || mode === 'free')) {
                 this.onStretch(index, stretched);
             } else if (current.some((y, i) => Math.abs(y - origin[i]) > 1e-9)) {
                 this.onMove(current, { index, together });

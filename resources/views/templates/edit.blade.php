@@ -386,6 +386,16 @@
                                         </div>
                                     </div>
 
+                                    {{-- Every row line at once, as in Align: dragged or nudged together. --}}
+                                    <div class="document-grid-card__line">
+                                        <span class="document-grid-card__label" id="ledgerGridLinesLabel">Gridlines</span>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary flex-grow-1" id="selectAllRulesBtn" disabled
+                                                aria-labelledby="ledgerGridLinesLabel selectAllRulesBtn" aria-pressed="false"
+                                                title="Select every row line, to move them all together (Ctrl+A on a line)">
+                                            <i class="icon-base bx bx-select-multiple icon-sm me-1" aria-hidden="true"></i>All lines
+                                        </button>
+                                    </div>
+
                                     {{-- Two pages whose rows differ: row N of both pages is one person. Only said when wrong. --}}
                                     <p class="template-row-match is-mismatch d-none" id="rowMatch" role="status" aria-live="polite"></p>
 

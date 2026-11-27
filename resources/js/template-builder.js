@@ -8,6 +8,7 @@ import {
 import {
     clampRowAngle,
     clampRuledY,
+    shiftRuledYs,
     columnBand,
     columnsAtPageTilt,
     distributeRuledYs,
@@ -224,6 +225,8 @@ let coveredFieldIndexes = [];
 let tableBand = null;
 let tableColumnCount = 0;
 let selectedRule = null;
+// Every row line selected (Gridlines → All lines): dragged or nudged together.
+let allRulesSelected = false;
 let printedLines = null;
 let estimatedYs = new Set();
 let sampleGrid = null;
@@ -360,6 +363,7 @@ function handleMarkerChange(boxes) {
         rowSpans = [];
         rowBends = [];
         selectedRule = null;
+        allRulesSelected = false;
         estimatedYs = new Set();
     }
     previousMarkerCount = boxes.length;
@@ -876,8 +880,9 @@ function centerFieldListRow(index, { centerPanel = true } = {}) {
 
 function updateSelectionUI(indexes, context = {}) {
     const selected = new Set(indexes);
-    if (indexes.length > 0 && selectedRule !== null) {
+    if (indexes.length > 0 && (selectedRule !== null || allRulesSelected)) {
         selectedRule = null;
+        allRulesSelected = false;
         renderLedgerGrid();
     }
 
@@ -993,6 +998,7 @@ function undoLayoutChange() {
     rowSpans = fitSpans(previous.rowSpans, ruledYs.length);
     rowBends = fitBends(previous.rowBends, ruledYs.length, bendColumns(previous.boxes).length);
     selectedRule = null;
+    allRulesSelected = false;
     marker.setBoxes(cloneBoxes(previous.boxes));
     restoringHistory = false;
     history.sync(layoutState());
@@ -1102,6 +1108,30 @@ function addPendingField() {
         return false;
     }
 
+    // A page with a table: what is added is one more column (marked Col, read line by
+    // line in the rows), put after the last column across the grid's rows.
+    const columns = ledgerColumns(boxes);
+    if (columns.length > 0 && ruledYs.length >= 2) {
+        const last = columns.reduce((right, column) => (column.x + column.w > right.x + right.w ? column : right));
+        const width = Math.max(0.03, columns.reduce((sum, column) => sum + column.w, 0) / columns.length);
+        const top = ruledYs[0];
+        const bottom = ruledYs[ruledYs.length - 1];
+        const indexes = columns.map((column) => Number(column.columnIndex)).filter(Number.isInteger);
+        marker.addBox(name, {
+            x: Math.max(0, Math.min(1 - width, last.x + last.w)),
+            y: top,
+            w: width,
+            h: Math.max(0.01, bottom - top),
+            kind: 'column',
+            columnIndex: Math.max(-1, ...indexes) + 1,
+            // Turned with the table, like the columns beside it.
+            ...markerAngleMetadata(last),
+        });
+        newFieldInput.value = '';
+        clearBuilderError();
+        return true;
+    }
+
     const offset = (boxes.length % 10) * 0.018;
     const width = 0.34;
     const height = 0.06;
@@ -1120,8 +1150,17 @@ function validateFields() {
     const boxes = marker.toJSON();
     invalidFieldIndexes = new Set();
 
+    // Page 2 of a two-page layout may be left empty: page 1's fields are enough.
+    if (boxes.length === 0 && twoPage && activePage === 2 && (otherPageLayout()?.boxes.length ?? 0) > 0) {
+        clearBuilderError();
+        renderFieldList(boxes);
+        return true;
+    }
+
     if (boxes.length === 0) {
-        showBuilderError('Add at least one field before saving this layout.');
+        showBuilderError(twoPage && activePage === 1
+            ? 'Add at least one field on page 1 before saving this layout.'
+            : 'Add at least one field before saving this layout.');
         renderFieldList(boxes);
         return false;
     }
@@ -1218,10 +1257,12 @@ function serialiseFields() {
         ['ruled_tilts_json', tiltList],
         ['ruled_spans_json', spanList],
         ['ruled_bends_json', bendList],
-        // Page 2 of a two-page layout; an empty one removes a page 2 saved before.
+        // Page 2 of a two-page layout. Two pages with nothing on page 2 keep an
+        // empty page 2 (`blank`: nothing is read there, page 1's columns are not
+        // used on it); one page removes a page 2 saved before.
         ...(twoPage || savedPageTwo
             ? [['page_two_json', twoPage
-                ? layoutPayload(pageLayouts[2].boxes, pageLayouts[2].ruledYs, pageLayouts[2].grouping, pageLayouts[2].rowTilts, pageLayouts[2].rowSpans, pageLayouts[2].rowBends)
+                ? { ...layoutPayload(pageLayouts[2].boxes, pageLayouts[2].ruledYs, pageLayouts[2].grouping, pageLayouts[2].rowTilts, pageLayouts[2].rowSpans, pageLayouts[2].rowBends), blank: pageLayouts[2].boxes.length === 0 }
                 : { fields: [], columns: [], ruled_ys: [], ruled_tilts: [], ruled_spans: [], ruled_bends: [], grouping_mode: 'auto' }]]
             : []),
     ].forEach(([name, value]) => {
@@ -1291,6 +1332,9 @@ async function openSample(file, { pendingUpload = true } = {}) {
         // sample follows the layout as it was saved.
         if (pendingUpload) {
             await setTwoPage(samplePageCount === 2);
+        } else if (samplePageCount === 2 && !twoPage) {
+            // A stored sample of two pages shows both, even if page 2 was never laid out.
+            await setTwoPage(true);
         } else {
             await updateSpread();
         }
@@ -1465,6 +1509,7 @@ function restoreBaseline() {
     rowSpans = fitSpans(baseline.rowSpans, ruledYs.length);
     rowBends = fitBends(baseline.rowBends, ruledYs.length, bendColumns(baseline.boxes).length);
     selectedRule = null;
+    allRulesSelected = false;
     estimatedYs = new Set();
     replaceBoxes(baseline.boxes);
     marker.resetZoom();
@@ -1514,6 +1559,14 @@ document.addEventListener('keydown', (event) => {
         return;
     }
 
+    // Ctrl+A on a row line (or with every line selected already): every row line, as in Align.
+    if (commandPressed && !event.shiftKey && !event.altKey && key === 'a'
+        && (selectedRule !== null || allRulesSelected) && !layoutUndoIsBlocked(event, shortcutOptions)) {
+        event.preventDefault();
+        selectAllRules();
+        return;
+    }
+
     // Also right after a click on a button or checkbox, which keeps the focus
     // (so the browser would highlight the page's text instead). A text box
     // with text in it keeps its own select-all.
@@ -1552,6 +1605,24 @@ document.addEventListener('keydown', (event) => {
         event.preventDefault();
         pasteCopiedFields();
         return;
+    }
+
+    // Every row line selected: the arrow keys move them all (Shift: 10 px), Esc lets go.
+    // Delete does nothing (the grid keeps its lines).
+    if (!commandPressed && !event.altKey && allRulesSelected) {
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            event.preventDefault();
+            nudgeAllRules((event.key === 'ArrowUp' ? -1 : 1) * (event.shiftKey ? 10 : 1));
+            return;
+        }
+        if (event.key === 'Escape') {
+            selectRule(null);
+            return;
+        }
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+            event.preventDefault();
+            return;
+        }
     }
 
     // A selected row line: arrow keys move it (Shift: 10 px), Delete removes it.
@@ -1823,7 +1894,7 @@ form.addEventListener('formdata', (event) => {
 
 // The row lines, drawn and dragged as in the Align step: a grip on each
 // end of the table selects and drags its line (Shift: every line), a
-// double-click on a grip removes it, and a line stays where it is let go
+// Delete removes the selected one, and a line stays where it is let go
 // (Alt: snap onto the sample's printed rules). Only the grips take the pointer, so the
 // columns under the lines can still be dragged.
 const rowLines = new RowLineLayer({
@@ -1863,6 +1934,18 @@ const rowLines = new RowLineLayer({
             fitSpans(rowSpans, ruledYs.length).map((value, i) => (i === index ? own : value)),
         );
     },
+    // Every line selected (Gridlines → All lines) and a grip dragged sideways: that end
+    // of every line moves by the same amount, one undo step.
+    onStretchAll: (spans) => {
+        const columns = ledgerColumns();
+        const left = columns.length ? Math.min(...columns.map((c) => c.x)) : 0.02;
+        const right = columns.length ? Math.max(...columns.map((c) => c.x + c.w)) : 0.98;
+        // A line back at the table's own width keeps no stretch.
+        const own = spans.slice(0, ruledYs.length).map((span) => (
+            Math.abs(span.l - left) < 0.002 && Math.abs(span.r - right) < 0.002 ? null : span
+        ));
+        applyGrid(ruledYs, marker.toJSON(), fitTilts(rowTilts, ruledYs.length), own);
+    },
     // As in the Align step: a square at each end of each column's part of a line,
     // dragged up or down, moves that end only (seen and lined up against only).
     bendable: true,
@@ -1890,7 +1973,7 @@ function drawRules(ys = ruledYs, columns = ledgerColumns()) {
         rows: ys,
         left: columns.length ? Math.min(...columns.map((c) => c.x)) : 0.02,
         right: columns.length ? Math.max(...columns.map((c) => c.x + c.w)) : 0.98,
-        selected: selectedRule,
+        selected: allRulesSelected ? 'all' : selectedRule,
         estimated: estimatedYs,
         // On a page scanned a little turned, the lines turn with the columns.
         tilt: gridTilt(columns),
@@ -1923,7 +2006,17 @@ function renderLedgerGrid() {
 
     const rowsInput = element('evenRowsInput', HTMLInputElement);
     if (document.activeElement !== rowsInput) rowsInput.value = rows > 0 ? String(rows) : '';
-    element('removeRuledLineBtn', HTMLButtonElement).disabled = selectedRule === null && ruledYs.length <= 2;
+    element('removeRuledLineBtn', HTMLButtonElement).disabled = allRulesSelected || (selectedRule === null && ruledYs.length <= 2);
+
+    // Gridlines → All lines: pressed while every row line is selected.
+    if (ruledYs.length < 2) allRulesSelected = false;
+    const allLines = element('selectAllRulesBtn', HTMLButtonElement);
+    allLines.disabled = ruledYs.length < 2;
+    allLines.classList.toggle('active', allRulesSelected);
+    allLines.setAttribute('aria-pressed', String(allRulesSelected));
+    allLines.title = allRulesSelected
+        ? 'Every row line is selected: drag one, or use the arrow keys, to move them all. Click again or press Esc to let go.'
+        : 'Select every row line, to move them all together (Ctrl+A on a line)';
 
     renderRowMatch();
 
@@ -2168,14 +2261,39 @@ function applyGrid(nextYs, boxes = marker.toJSON(), tilts = rowTilts, spans = ro
  * markers are never selected together.
  */
 function selectRule(index) {
+    allRulesSelected = false;
     selectedRule = Number.isInteger(index) && index >= 0 && index < ruledYs.length ? index : null;
     if (selectedRule !== null) marker.clearSelection();
     renderLedgerGrid();
 }
 
+/** Every row line selected: dragging any grip, or the arrow keys, move them all together. */
+function selectAllRules() {
+    if (ruledYs.length < 2) return;
+    selectedRule = null;
+    allRulesSelected = true;
+    marker.clearSelection();
+    renderLedgerGrid();
+}
+
+/** Every row line moved up or down by some screen pixels (kept on the page). */
+function nudgeAllRules(pixels) {
+    const height = Math.max(1, overlay.getBoundingClientRect().height);
+    const moved = shiftRuledYs(ruledYs, pixels / height);
+    if (moved.every((y, i) => Math.abs(y - ruledYs[i]) < 1e-9)) return;
+    const dy = moved[0] - ruledYs[0];
+    estimatedYs = new Set([...estimatedYs].map((key) => ruleKey(Number(key) + dy)));
+    applyGrid(moved);
+}
+
+element('selectAllRulesBtn', HTMLButtonElement).addEventListener('click', () => (
+    allRulesSelected ? selectRule(null) : selectAllRules()
+));
+
 function removeRule(index) {
     if (!Number.isInteger(index) || index < 0 || index >= ruledYs.length) return;
     selectedRule = null;
+    allRulesSelected = false;
     applyGrid(ruledYs.filter((_, candidate) => candidate !== index), marker.toJSON(),
         fitTilts(rowTilts, ruledYs.length).filter((_, candidate) => candidate !== index),
         fitSpans(rowSpans, ruledYs.length).filter((_, candidate) => candidate !== index),
@@ -2197,7 +2315,7 @@ function nudgeRule(pixels) {
 
 // A click on the page around the markers lets go of the row line.
 overlay.addEventListener('pointerdown', (event) => {
-    if (event.target === overlay && selectedRule !== null) selectRule(null);
+    if (event.target === overlay && (selectedRule !== null || allRulesSelected)) selectRule(null);
 });
 
 function uniqueName(base, taken) {
@@ -2367,6 +2485,7 @@ async function detectLedgerGrid() {
         const result = gridFromDetection(payload, marker.toJSON(), pageAspect());
         estimatedYs = result.estimated;
         selectedRule = null;
+        allRulesSelected = false;
         ruledYs = result.ruledYs;
         // A fresh Detect: the lines follow the table again.
         rowTilts = result.ruledYs.map(() => 0);
@@ -2414,6 +2533,7 @@ function spaceRowsEvenly() {
     // Placed by the admin now, not estimated.
     estimatedYs = new Set();
     selectedRule = null;
+    allRulesSelected = false;
     applyGrid(spaced, marker.toJSON(), respaceTilts(fitTilts(rowTilts, ruledYs.length), spaced.length), spaced.map(() => null));
 }
 
@@ -2482,6 +2602,7 @@ element('mergeFieldsBtn', HTMLButtonElement).addEventListener('click', () => {
     if (!merge) return;
     clearBuilderError();
     selectedRule = null;
+    allRulesSelected = false;
     ruledYs = merge.ys;
     // Records one undo step and redraws the grid and this notice.
     replaceBoxes(merge.boxes);
@@ -2679,6 +2800,7 @@ async function switchPage(page, { focus = false } = {}) {
     rowSpans = fitSpans(layout.rowSpans, ruledYs.length);
     rowBends = fitBends(layout.rowBends, ruledYs.length, bendColumns(layout.boxes).length);
     selectedRule = null;
+    allRulesSelected = false;
     estimatedYs = new Set(layout.estimated ?? []);
     previousMarkerCount = 0;
     replaceBoxes(layout.boxes);
@@ -2704,10 +2826,8 @@ async function setTwoPage(on) {
     }
     if (on) {
         twoPage = true;
-        // A page 2 with nothing on it starts from page 1's markers: the pages are often alike.
-        if (pageLayouts[2].boxes.length === 0 && pageLayouts[1] === null) {
-            pageLayouts[2] = { boxes: cloneBoxes(marker.toJSON()), ruledYs: [...ruledYs], rowTilts: fitTilts(rowTilts, ruledYs.length), rowSpans: fitSpans(rowSpans, ruledYs.length), rowBends: fitBends(rowBends, ruledYs.length, bendColumns().length), grouping: groupingModeInput.value === 'custom' ? 'custom' : 'auto' };
-        }
+        // Page 2 starts empty: page 1's columns are not copied onto it (it often
+        // has other columns, or none). Detect page 2 or Add field fills it.
         pageLayouts[1] = null;
         await updateSpread();
     } else {

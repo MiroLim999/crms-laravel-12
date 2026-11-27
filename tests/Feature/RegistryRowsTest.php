@@ -104,24 +104,20 @@ class RegistryRowsTest extends TestCase
         $this->assertSame('1949-06-02', $row->parents_marriage_date);
     }
 
-    public function test_two_rows_with_one_register_number_save_nothing(): void
+    public function test_two_rows_with_one_register_number_are_both_saved(): void
     {
         $user = User::factory()->superAdmin()->create();
         $second = $this->birthRow('2', 'Second Child');
         $third = $this->birthRow('2', 'Third Child');
         $third['row'] = '03';
 
-        $response = $this->actingAs($user)
+        $this->actingAs($user)
             ->postJson(route('documents.store'), $this->payload(DocumentType::Birth, [$second, $third]))
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors(['registry_rows']);
+            ->assertCreated();
 
-        $this->assertStringContainsString(
-            "Row 03: reg_no 2 is row 02's register number too.",
-            implode(' ', $response->json('errors.registry_rows')),
-        );
-        // Neither replaced the other: nothing is saved.
-        $this->assertDatabaseCount('birth_records', 0);
+        // The books have repeated register numbers: neither replaces the other.
+        $this->assertDatabaseCount('birth_records', 2);
+        $this->assertSame(['Second Child', 'Third Child'], BirthRecord::orderBy('id')->pluck('name')->all());
     }
 
     public function test_a_book_and_page_already_saved_is_not_saved_again(): void

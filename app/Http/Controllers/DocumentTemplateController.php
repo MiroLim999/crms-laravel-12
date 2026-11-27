@@ -285,8 +285,25 @@ class DocumentTemplateController extends Controller
             throw ValidationException::withMessages(['page_two_json' => 'Page 2 of this layout must be a valid layout.']);
         }
 
-        // A layout with nothing on it is no page 2: any page 2 saved before is dropped.
         if (($layout['fields'] ?? []) === [] && ($layout['columns'] ?? []) === []) {
+            // Two pages with nothing on page 2 (`blank`): an empty page 2 is kept, so
+            // scans read nothing there instead of page 1's columns.
+            if ($layout['blank'] ?? false) {
+                return [
+                    'name' => Str::limit(($validated['name'] ?? 'Layout').' - page 2', 120, ''),
+                    'page_ratio' => $validated['page_ratio'],
+                    'description' => null,
+                    'grouping_mode' => 'auto',
+                    'fields' => [],
+                    'columns' => [],
+                    'ruled_ys' => [],
+                    'ruled_tilts' => [],
+                    'ruled_spans' => [],
+                    'ruled_bends' => [],
+                ];
+            }
+
+            // One page: any page 2 saved before is dropped.
             return ['empty' => true];
         }
 

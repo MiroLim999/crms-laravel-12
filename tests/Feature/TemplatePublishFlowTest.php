@@ -79,6 +79,42 @@ class TemplatePublishFlowTest extends TestCase
 
     // ------------------------------------------------------------ 1. own page 2
 
+    public function test_an_empty_page_two_of_a_two_page_layout_is_kept_and_published(): void
+    {
+        $blank = json_encode([
+            'fields' => [], 'columns' => [], 'ruled_ys' => [], 'grouping_mode' => 'auto', 'blank' => true,
+        ], JSON_THROW_ON_ERROR);
+
+        $layout = $this->layout(['page_two_json' => $blank, 'publish' => 1]);
+
+        // Page 2 stays a page of its own, with nothing on it: page 1's columns are not used there.
+        $this->assertTrue($layout->is_active);
+        $pageTwo = $layout->pageTwoTemplate;
+        $this->assertNotNull($pageTwo);
+        $this->assertTrue($pageTwo->is_page_two);
+        $this->assertSame([], $pageTwo->columns ?? []);
+        $this->assertSame(0, $pageTwo->fields()->count());
+
+        // The scan workspace gets that empty page 2, not page 1's markers.
+        $this->actingAs($this->admin)
+            ->get(route('documents.workspace', ['type' => DocumentType::Birth->value]))
+            ->assertOk()
+            ->assertViewHas('pageTwo', fn ($pageTwo) => is_array($pageTwo) && $pageTwo['boxes'] === []);
+    }
+
+    public function test_an_empty_page_two_without_blank_still_removes_page_two(): void
+    {
+        $layout = $this->layout(['page_two_json' => $this->pageTwo()]);
+        $this->assertNotNull($layout->pageTwoTemplate);
+
+        $this->actingAs($this->admin)->put(route('templates.update', $layout), $this->payload([
+            'page_two_json' => json_encode(['fields' => [], 'columns' => [], 'ruled_ys' => [], 'grouping_mode' => 'auto'], JSON_THROW_ON_ERROR),
+            'revision' => $layout->revision,
+        ]))->assertSessionHasNoErrors();
+
+        $this->assertNull($layout->refresh()->page_two_template_id);
+    }
+
     public function test_a_duplicate_gets_its_own_page_two(): void
     {
         $original = $this->layout(['page_two_json' => $this->pageTwo(), 'publish' => 1]);

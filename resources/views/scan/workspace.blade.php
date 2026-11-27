@@ -1022,27 +1022,6 @@
                             <p class="small text-muted mb-0" id="batchSummaryDescription"></p>
                         </div>
                     </div>
-                    <div class="review-pane__tools">
-                        <div class="dropdown" id="batchSummaryDownload">
-                            <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" id="batchSummaryDownloadBtn"
-                                    data-bs-toggle="dropdown" aria-expanded="false">
-                                <span class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
-                                <i class="icon-base bx bx-download icon-sm me-1" aria-hidden="true"></i>Download all
-                            </button>
-                            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="batchSummaryDownloadBtn">
-                                <li>
-                                    <button type="button" class="dropdown-item" id="batchSummaryCsv">
-                                        <i class="icon-base bx bx-file icon-sm me-2" aria-hidden="true"></i>CSV (.csv)
-                                    </button>
-                                </li>
-                                <li>
-                                    <button type="button" class="dropdown-item" id="batchSummaryXlsx">
-                                        <i class="icon-base bx bx-spreadsheet icon-sm me-2" aria-hidden="true"></i>Excel (.xlsx)
-                                    </button>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
                 </header>
 
                 <div class="batch-done__body">
@@ -1617,12 +1596,9 @@
             attachAddColumn,
             attachSplit,
             buildReviewModel,
-            combineTables,
             downloadCsv,
-            downloadRecordTables,
             downloadXlsx,
             exportFileName,
-            fetchRecordTables,
             ReviewTable,
         } from '{{ Vite::asset('resources/js/review-table.js') }}';
         import {
@@ -1704,8 +1680,6 @@
             pageQueueUrl: @json(route('documents.pages.queue', ['page' => '__PAGE__'])),
             // A finished batch: the archive, or this workspace again for the next one.
             recordsUrl: @json(route('records.index')),
-            // Several saved records' tables at once (the batch's Download all).
-            recordsExportUrl: @json(route('records.export')),
             restartUrl: @json(route('documents.workspace', ['type' => $docType->value])),
             // The pages of one file already saved; 64 zeros stand in for its fingerprint.
             // Account settings > Uploads: check files for copies and saved pages (off unless turned on).
@@ -1818,6 +1792,12 @@
         // A page saved already (or used by another record of this batch) cannot be saved again.
         let referenceLookup = null;
 
+        /** The other queued pages of the same record (same file and record key) as this one. */
+        function recordMates(item) {
+            if (!item?.record) return [];
+            return batchState.items.filter((it) => it !== item && it.record === item.record);
+        }
+
         /** Digits only: a book or page number is a whole number. */
         const digitsOnly = (value) => String(value ?? '').replace(/\D+/g, '').slice(0, 9);
 
@@ -1847,7 +1827,26 @@
         const getBookNumber = () => el('bookNumberInput')?.value?.trim() || '';
         const getPageNumber = () => el('pageNumberInput')?.value?.trim() || '';
 
+        /**
+         * A batch record reopened (Continue unfinished, or another record opened)
+         * may show empty boxes although its book and page were kept with the
+         * batch: those fill the empty boxes, so the save does not send the user back.
+         */
+        function fillReferenceFromBatch() {
+            if (!batchState.active) return;
+            const current = batchState.items[batchState.currentIndex];
+            if (!current) return;
+            const members = [current, ...recordMates(current)];
+            const bookInput = el('bookNumberInput');
+            const pageInput = el('pageNumberInput');
+            const keptBook = members.map((it) => it.bookNo).find((value) => value);
+            const keptPage = members.map((it) => it.pageNoRef).find((value) => value);
+            if (bookInput && !bookInput.value.trim() && keptBook) bookInput.value = String(keptBook);
+            if (pageInput && !pageInput.value.trim() && keptPage) pageInput.value = String(keptPage);
+        }
+
         function validateDocumentReference() {
+            fillReferenceFromBatch();
             const bookInput = el('bookNumberInput');
             const pageInput = el('pageNumberInput');
             const bookError = el('bookNumberError');
@@ -2018,14 +2017,20 @@
                         bookInput.value = '';
                     }
 
-                    if (current.pageNoRef !== undefined && current.pageNoRef !== null) {
-                        pageInput.value = current.pageNoRef;
+                    // One page number per record: both pages of a register share it.
+                    const sharedPageNo = current.pageNoRef ?? recordMates(current).find((it) => it.pageNoRef)?.pageNoRef;
+                    if (sharedPageNo !== undefined && sharedPageNo !== null) {
+                        pageInput.value = sharedPageNo;
+                        current.pageNoRef = sharedPageNo;
                     } else {
                         pageInput.value = '';
                     }
                 }
             } else {
-                const ref = pageReferences.get(scanPageNumber);
+                // One page number per record: the companion page shares it.
+                const companion = companionPageFor(scanPageNumber);
+                const ref = pageReferences.get(scanPageNumber)
+                    ?? (companion ? pageReferences.get(companion) : undefined);
                 if (ref && ref.bookNo) {
                     bookInput.value = ref.bookNo;
                 } else if (lastEnteredBookNo) {
@@ -2068,11 +2073,19 @@
                     if (mate && bVal && !mate.bookNo) {
                         mate.bookNo = bVal;
                     }
+                    // One page number per record: every page of it gets the same one.
+                    // An empty box (e.g. while switching pages) never wipes what was entered.
+                    recordMates(current).forEach((it) => {
+                        if (pVal !== '') it.pageNoRef = pVal;
+                        if (bVal) it.bookNo = bVal;
+                    });
                     // Kept on the server with the batch, so a resume has them.
                     scheduleBatchSync();
                 }
             } else {
                 pageReferences.set(scanPageNumber, { bookNo: bVal, pageNo: pVal });
+                const companion = companionPageFor(scanPageNumber);
+                if (companion) pageReferences.set(companion, { bookNo: bVal, pageNo: pVal });
             }
 
             if (el('submitBookNo')) el('submitBookNo').value = bVal;
@@ -2520,6 +2533,8 @@
             // (shorter or longer), Alt+drag pulls the end anywhere (the line turns about its other end).
             stretchable: true,
             onStretch: (index, stretched) => stretchRow(index, stretched),
+            // Gridlines → All lines and a grip dragged sideways: that end of every line.
+            onStretchAll: (spans) => stretchAllRows(spans),
             // A handle in each column: that column's part of the line moves up or down (on screen only).
             bendable: true,
             onBend: (index, column, dy, side) => bendRow(index, column, dy, side),
@@ -2803,6 +2818,19 @@
             gridRows = gridRows.map((value, line) => (line === index ? y : value));
             rowTilts = fitTilts(rowTilts, gridRows.length).map((value, line) => (line === index ? tilt : value));
             rowSpans = fitSpans(rowSpans, gridRows.length).map((value, line) => (line === index ? own : value));
+            rowsByHand = true;
+            rowsChanged();
+        }
+
+        /** Every row line stretched together (All lines selected, a grip dragged sideways), one undo step. */
+        function stretchAllRows(spans) {
+            const columns = ledgerColumns(marker.toJSON());
+            const left = columns.length ? Math.min(...columns.map((column) => column.x)) : 0;
+            const right = columns.length ? Math.max(...columns.map((column) => column.x + column.w)) : 1;
+            // A line back at the table's own width keeps no stretch.
+            rowSpans = fitSpans(spans.slice(0, gridRows.length).map((span) => (
+                Math.abs(span.l - left) < 0.002 && Math.abs(span.r - right) < 0.002 ? null : span
+            )), gridRows.length);
             rowsByHand = true;
             rowsChanged();
         }
@@ -5547,11 +5575,13 @@
                     if (saveQueueLabel) {
                         // A pair: this page and the one beside it are queued together.
                         const pairing = batchPairToQueue();
+                        // An empty page 2 goes with this one too (left out: nothing on it to read).
+                        const blankMate = pairing ? null : blankBatchMate();
                         const hasMoreUnsaved = batchState.items.some((it, idx) => idx !== batchState.currentIndex
-                            && it !== pairing?.mate.item && it.status === 'pending' && pageAlignable(it));
+                            && it !== pairing?.mate.item && it !== blankMate && it.status === 'pending' && pageAlignable(it));
                         // The words only (how far the queue is shows in the bar above).
                         let text;
-                        if (pairing) {
+                        if (pairing || blankMate) {
                             if (currentItem?.realign) text = hasMoreUnsaved ? 'Queue Both Again & Next' : 'Queue Both Again & Scan';
                             else if (failedHere) text = hasMoreUnsaved ? 'Queue Both Again & Next' : 'Queue Both Again';
                             else if (currentItem?.status === 'saved') text = hasMoreUnsaved ? 'Update & Save Both & Next' : 'Update & Save Both Pages';
@@ -7012,6 +7042,19 @@
         }
 
         /**
+         * The other page of the pair when it has nothing to read (its layout's page 2
+         * is empty): saved with this page by leaving it out, so one Save does both and
+         * the user is never sent to it on its own. Null otherwise.
+         */
+        function blankBatchMate() {
+            if (!batchAligning()) return null;
+            const mate = batchPartner();
+            if (!mate || !['pending', 'failed'].includes(mate.item.status)) return null;
+            const boxes = Array.isArray(mate.item.boxes) ? mate.item.boxes : (layoutFor(mate.item.pageNo).boxes ?? []);
+            return boxes.length === 0 ? mate.item : null;
+        }
+
+        /**
          * The page as drawn now, for sendBatchPageToQueue (null when none is sent: a page
          * Smoke test went over, or one re-read on the server): a pixel-for-pixel copy, made
          * at once (the canvas shows the next page soon), turned into a PNG only when sent.
@@ -7141,7 +7184,9 @@
             // A page with nothing marked (page 2 of a book whose fields are all on
             // page 1) has nothing to read: it is left out, and the batch goes on.
             if (marker.toJSON().length === 0) {
-                if (await askInApp({
+                // The layout's page 2 is empty on purpose (fields only on page 1): no question.
+                const blankByLayout = (layoutFor(item.pageNo ?? 1).boxes ?? []).length === 0;
+                if (!blankByLayout && await askInApp({
                     title: `Page ${item.pageNo ?? ''} has no markers`.replace('  ', ' '),
                     text: 'Nothing on it is read, so it is left out of the batch. The other pages are read as usual.',
                     confirm: 'Leave it out',
@@ -7202,6 +7247,10 @@
             el('saveQueueNextIcon')?.classList.add('d-none');
             el('saveQueueNextSpinner')?.classList.remove('d-none');
             clearOcrError();
+            // The other page of the pair with nothing to read (an empty page 2): saved with this
+            // one by leaving it out of the batch, so it is not opened on its own next.
+            const blankMate = batchPairToQueue() ? null : blankBatchMate();
+            if (blankMate) await removeBatchPages([blankMate]);
             // The other page of the pair goes to the queue with this one (null: this page alone).
             const pairing = batchPairToQueue();
             const mate = pairing?.mate.item ?? null;
@@ -9094,19 +9143,7 @@
             el('validationExistingBanner').classList.add('d-none');
         }
         // ------------------------------------------------ the end of a batch
-        // Every record is saved or rejected: say what was saved, link each
-        // record, and offer every saved record's table as one download (taken
-        // as Review & Export showed it when that record was saved).
-        function batchExportTable() {
-            // A register's records join as its own columns only (no Record ID or Document).
-            return combineTables(batchRecords()
-                .filter((record) => record.members[0].exportTable)
-                .map((record) => ({
-                    recordId: record.members[0].recordId,
-                    label: recordLabel(record),
-                    table: record.members[0].exportTable,
-                })), { plain: Boolean(registry) });
-        }
+        // Every record is saved or rejected: say what was saved and link each record.
 
         /**
          * Save & next in a batch: the record passed the same checks Save does,
@@ -9218,6 +9255,14 @@
             finishServerBatch();
             // Nothing is left to lose: leaving the page no longer asks.
             scanFile = null;
+            // The batch is done: the next upload starts with an empty Book No.
+            lastEnteredBookNo = '';
+            try {
+                sessionStorage.removeItem(docRefStorageKey);
+            } catch {}
+            if (el('bookNumberInput')) el('bookNumberInput').value = '';
+            if (el('pageNumberInput')) el('pageNumberInput').value = '';
+            pageReferences.clear();
             batchSummaryShown = true;
             if (activeStep !== 'review') showStep('review');
             renderBatchQueueBanner();
@@ -9288,8 +9333,6 @@
                 return tr;
             }));
 
-            const canDownload = batchSavedRecordIds().length > 0 || batchExportTable().length > 1;
-            el('batchSummaryDownloadBtn').disabled = !canDownload;
             el('batchSummaryRecordsBtn').href = config.recordsUrl;
             el('batchSummaryRestartBtn').href = config.restartUrl;
 
@@ -9303,52 +9346,6 @@
             el('batchSummaryRestartBtn').focus({ preventScroll: true });
         }
 
-        const batchFileName = () => exportFileName(config.typeLabel, 'Batch', new Date().toISOString().slice(0, 10));
-
-        /** The records this batch saved, in queue order. */
-        function batchSavedRecordIds() {
-            return batchRecords()
-                .map((record) => record.members[0])
-                .filter((lead) => lead.status === 'imported' && lead.recordId)
-                .map((lead) => lead.recordId);
-        }
-
-        /**
-         * Download all: every saved record's table as the archive has it now (later
-         * edits included), as one CSV, or one Excel file with an "All records" sheet
-         * and a sheet per record. If the server cannot give them, the tables kept in
-         * this page (as Review & Export showed them) are used instead.
-         */
-        async function downloadBatch(format) {
-            const button = el('batchSummaryDownloadBtn');
-            const spinner = button.querySelector('.spinner-border');
-            button.disabled = true;
-            spinner?.classList.remove('d-none');
-            try {
-                const ids = batchSavedRecordIds();
-                let records = [];
-                if (ids.length > 0) {
-                    const params = new URLSearchParams();
-                    ids.forEach((id) => params.append('ids[]', String(id)));
-                    try {
-                        records = await fetchRecordTables(config.recordsExportUrl, params);
-                    } catch (error) {
-                        console.warn('The saved records could not be fetched; using the tables kept in this page:', error);
-                    }
-                }
-                if (records.length > 0) await downloadRecordTables(records, batchFileName(), format);
-                else if (format === 'csv') await downloadCsv(batchExportTable(), batchFileName());
-                else await downloadXlsx(batchExportTable(), batchFileName());
-            } catch (error) {
-                console.error('The batch download failed:', error);
-                tellInApp('The file could not be made', format === 'xlsx' ? 'Try CSV instead.' : (error.message || 'Try again.'));
-            } finally {
-                button.disabled = false;
-                spinner?.classList.add('d-none');
-            }
-        }
-        el('batchSummaryCsv').addEventListener('click', () => downloadBatch('csv'));
-        el('batchSummaryXlsx').addEventListener('click', () => downloadBatch('xlsx'));
         // OK is the safe default: Enter never adds duplicates by accident.
         el('batchIntakeModal').addEventListener('shown.bs.modal', () => el('batchIntakeOkBtn').focus());
 

@@ -48,7 +48,7 @@ Rows that follow the page, and rows and columns Staff can add and remove, in the
 - [x] The row lines are drawn in Align from the start (the template's rows) and follow the columns when the table is moved or stretched.
 - [x] Each row line has a grip at both ends (`resources/js/row-lines.js`):
   - click it to select the line, drag it to move the line (it stays where you let go; <kbd>Alt</kbd> snaps it to printed lines);
-  - <kbd>Shift</kbd>+drag moves every line, and double-clicking a grip removes the line;
+  - <kbd>Shift</kbd>+drag moves every line, and <kbd>Delete</kbd> removes the selected line;
   - a selected line moves with the arrow keys and is removed with <kbd>Delete</kbd>.
 - [x] A **Ledger grid** card: "11 columns · 25 rows (template: 20)", where the rows came from, **Add row**, **Remove row**, and **Add column** with its name.
 - [x] **Add column** splits the selected column in two, or adds one at the right end of the table. A column is removed by selecting it and pressing Delete.

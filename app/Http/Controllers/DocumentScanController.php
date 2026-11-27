@@ -869,8 +869,8 @@ class DocumentScanController extends Controller
 
     /**
      * Each row into the type's register table, linked to the saved record. A
-     * row whose book, page and register number are there already (the page
-     * saved again) is replaced, so a register entry is never there twice.
+     * register number may repeat on a page (the books have repeats), so every
+     * row is its own entry; a page saved already was refused before this.
      *
      * @param  list<array<string, mixed>>  $rows
      */
@@ -878,14 +878,7 @@ class DocumentScanController extends Controller
     {
         $model = RegistryFields::model($type);
         foreach ($rows as $attributes) {
-            $model::updateOrCreate(
-                [
-                    'book_no' => $attributes['book_no'],
-                    'page_no' => $attributes['page_no'],
-                    'reg_no' => $attributes['reg_no'],
-                ],
-                [...$attributes, 'civil_record_id' => $record->getKey()],
-            );
+            $model::create([...$attributes, 'civil_record_id' => $record->getKey()]);
         }
     }
 
