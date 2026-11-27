@@ -11,8 +11,10 @@ use App\Models\OcrModel;
 use App\Models\User;
 use App\Services\RecordCsv;
 use Database\Seeders\DocumentTemplateSeeder;
+use Illuminate\Database\Events\TransactionBeginning;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -119,6 +121,34 @@ class SavedRegisterEditTest extends TestCase
             ->assertStatus(422);
 
         $this->assertSame('Ana Crus', BirthRecord::where('reg_no', '5')->where('page_no', '83')->sole()->name);
+    }
+
+    public function test_a_page_taken_by_another_tab_while_an_edit_saves_is_still_refused(): void
+    {
+        $record = $this->savedRecord();
+        // The edit moves the page to 84; another tab saves Book 7, page 84 after this edit's
+        // first check has passed, just as it starts writing: the check made again refuses it.
+        $slipped = false;
+        Event::listen(TransactionBeginning::class, function () use (&$slipped) {
+            if (! $slipped) {
+                $slipped = true;
+                BirthRecord::factory()->create(['book_no' => '7', 'page_no' => '84', 'name' => 'Saved Elsewhere']);
+            }
+        });
+
+        $this->actingAs($this->user)
+            ->patchJson(route('records.review.update', $record), [
+                'registry_rows' => [
+                    $this->row('5', 'Ana Crus', ['attendant' => 'MIDWIFE', 'page_no' => '84']),
+                    $this->row('6', 'Ben Santos', ['page_no' => '84']),
+                ],
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['registry_rows']);
+
+        $this->assertTrue($slipped);
+        $this->assertSame(['83', '83'], BirthRecord::where('civil_record_id', $record->getKey())->orderBy('id')->pluck('page_no')->all());
+        $this->assertSame(0, AuditLog::where('action', 'record.edited')->count());
     }
 
     public function test_a_book_downloads_page_2_before_page_10_with_formulas_kept_as_text(): void

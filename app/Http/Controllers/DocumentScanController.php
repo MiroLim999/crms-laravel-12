@@ -428,6 +428,14 @@ class DocumentScanController extends Controller
         try {
             $record = DB::transaction(function () use ($request, $scan, $scanMime, $validated, $path, $documentType, $settingsByName, $page, $linesById, $missingRequired, $gridChanges, $source, $extraPages, $pageTwoTemplate, $registryRows, $fieldMaps, &$copiedFiles) {
 
+                // The register tables have no unique key (a register number may repeat), so
+                // "already saved" is asked again here, one save of the book type at a time:
+                // two tabs saving the same book and page at the same moment cannot both pass.
+                if ($registryRows !== null) {
+                    DocumentTypeDefinition::whereKey($documentType->getKey())->lockForUpdate()->first();
+                    $this->refuseSavedPages($documentType->key, $registryRows, locking: true);
+                }
+
                 $record = CivilRecord::create([
                     'doc_type' => $documentType->legacyType()->value,
                     'document_type_id' => $documentType->getKey(),
@@ -596,7 +604,7 @@ class DocumentScanController extends Controller
         $this->linkBatchPages($request, $validated, $record);
 
         $redirect = route('records.show', $record);
-        $message = 'Record submitted and locked. Change it later with Correct record.';
+        $message = 'Record submitted and locked. Change it later with Edit in Review & Export.';
 
         if ($request->expectsJson()) {
             return response()->json([
@@ -845,10 +853,11 @@ class DocumentScanController extends Controller
     /**
      * A register page is saved once: a book and page that already have rows in
      * the type's register table stops the save, saying which record has them.
+     * `locking`: inside the save's transaction, read what is committed now.
      *
      * @param  list<array<string, mixed>>  $rows
      */
-    private function refuseSavedPages(string $type, array $rows): void
+    private function refuseSavedPages(string $type, array $rows, bool $locking = false): void
     {
         $model = RegistryFields::model($type);
         $pages = collect($rows)
@@ -856,7 +865,9 @@ class DocumentScanController extends Controller
             ->unique(fn (array $page) => $page['book_no'] . '|' . $page['page_no']);
 
         foreach ($pages as $page) {
-            $saved = $model::where('book_no', $page['book_no'])->where('page_no', $page['page_no'])->first();
+            $saved = $model::where('book_no', $page['book_no'])->where('page_no', $page['page_no'])
+                ->when($locking, fn ($query) => $query->lockForUpdate())
+                ->first();
             if ($saved === null) {
                 continue;
             }

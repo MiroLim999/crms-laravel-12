@@ -573,8 +573,9 @@ class RowsFromThePageTest(unittest.TestCase):
                 self.assertEqual([faded], result["geometry"]["estimated_rows"])
 
     def test_rows_guessed_down_to_a_footer_line_stop_at_the_table(self):
-        # A signature line well below the table: the rows the page's run guesses down to it lie
-        # outside the table's column lines, so they are not rows.
+        # A signature line well below the table: rows down to it would lie outside the table's
+        # column lines, so they are not rows. (Until 2026-11-13 the page's run guessed rows down to
+        # it and the fit dropped them again; since the faint-rule fix it stops at the table itself.)
         ledger = Ledger(cols=4, rows=8, header=1.3)
         rules = self.page_rules(ledger)
         pitch = rules[1] - rules[0]
@@ -591,7 +592,10 @@ class RowsFromThePageTest(unittest.TestCase):
             "ruled_ys": [y * scale for y in ledger.geometry["ruled_ys"]],
         }
 
-        self.assertGreater(lm.detect_grid(canvas)["suggestion"]["estimated_ys"], 0, "the run guesses rows")
+        suggestion = lm.detect_grid(canvas)["suggestion"]
+        self.assertEqual(len(rules), len(suggestion["ruled_ys"]), "the table's own rows, none down to the footer")
+        self.assertEqual(0, suggestion["estimated_ys"], "no rows guessed below the table")
+        self.assertAlmostEqual(rules[-1], suggestion["ruled_ys"][-1] * canvas.height, delta=2)
         self.assertEqual(8, self.rows(self.snap(ledger)["geometry"]))
 
     def test_unruled_rows_with_writing_are_kept_by_detect(self):
