@@ -8,8 +8,8 @@ Set-Location (Split-Path -Parent $PSScriptRoot)
 $suites = @(
     @{ Name = 'PHP';                 Command = { php artisan test } },
     @{ Name = 'JavaScript';          Command = { npm run test:js } },
-    @{ Name = 'Python (line detection)'; Command = { & 'ml\.venv-kraken\Scripts\python.exe' -m unittest tests.Python.test_line_markers tests.Python.test_grid_layouts } },
-    @{ Name = 'Python (OCR service)'; Command = { & '.venv\Scripts\python.exe' -m unittest tests.Python.test_evaluation_report tests.Python.test_service_key tests.Python.test_ocr_batch } }
+    @{ Name = 'Python (line detection)'; Command = { & 'ml\.venv-kraken\Scripts\python.exe' -m unittest tests.Python.test_line_markers tests.Python.test_grid_layouts tests.Python.test_line_markers_service } },
+    @{ Name = 'Python (OCR service)'; Command = { & '.venv\Scripts\python.exe' -m unittest tests.Python.test_evaluation_report tests.Python.test_service_key tests.Python.test_ocr_batch tests.Python.test_no_model_installed } }
 )
 
 foreach ($suite in $suites) {

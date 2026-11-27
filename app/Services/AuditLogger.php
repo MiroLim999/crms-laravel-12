@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Request;
 /**
  * Single entry point for writing audit entries.
  *
- * Every state change on a record, change request, account, or OCR model goes
+ * Every state change on a record, layout, account, or OCR model goes
  * through here. Do not write AuditLog rows directly - routing through this class
  * is what keeps actor, role, and request metadata consistent.
  */

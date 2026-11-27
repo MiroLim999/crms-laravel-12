@@ -12,8 +12,10 @@ use App\Models\OcrModel;
 use App\Models\User;
 use App\Support\RegistryFields;
 use Database\Seeders\DocumentTemplateSeeder;
+use Illuminate\Database\Events\TransactionBeginning;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -137,6 +139,29 @@ class RegistryRowsTest extends TestCase
 
         $this->assertDatabaseCount('records', 1);
         $this->assertSame('Ariel Villanujan', BirthRecord::sole()->name);
+    }
+
+    public function test_a_page_saved_by_another_tab_during_this_save_is_still_refused(): void
+    {
+        $user = User::factory()->superAdmin()->create();
+        // Another tab saves Book 7, page 83 after this save's first check has passed,
+        // just as this save starts writing: the check made again inside it refuses it.
+        $slipped = false;
+        Event::listen(TransactionBeginning::class, function () use (&$slipped) {
+            if (! $slipped) {
+                $slipped = true;
+                BirthRecord::factory()->create(['book_no' => '7', 'page_no' => '83', 'name' => 'Saved Elsewhere']);
+            }
+        });
+
+        $this->actingAs($user)
+            ->postJson(route('documents.store'), $this->payload(DocumentType::Birth, [$this->birthRow('5', 'Ariel Villanujan')]))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['page_no']);
+
+        $this->assertTrue($slipped);
+        $this->assertDatabaseCount('records', 0);
+        $this->assertSame(0, BirthRecord::where('name', 'Ariel Villanujan')->count());
     }
 
     public function test_book_and_page_numbers_are_whole_numbers(): void

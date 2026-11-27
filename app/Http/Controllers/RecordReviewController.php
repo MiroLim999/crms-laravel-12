@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\CivilRecord;
 use App\Models\DocumentTemplate;
+use App\Models\DocumentTypeDefinition;
 use App\Models\RecordField;
 use App\Services\AuditLogger;
 use App\Services\RecordFieldGrouper;
@@ -91,6 +92,11 @@ class RecordReviewController extends Controller
             // when a value in them changed. Deleted first, then written, so two rows
             // that swap register numbers never meet the one-entry-per-number rule.
             if ($stored !== null && $registerOld !== []) {
+                // Asked again here, one save of the book type at a time: two saves of the
+                // same book and page at the same moment cannot both pass the check above.
+                DocumentTypeDefinition::whereKey($record->document_type_id)->lockForUpdate()->first();
+                $this->refuseOtherRecordsPages($record, $this->typeKey($record), $registerRows, locking: true);
+
                 $model = $stored->first()::class;
                 $model::whereKey($stored->modelKeys())->delete();
                 foreach ($registerRows as $index => $attributes) {
@@ -205,19 +211,7 @@ class RecordReviewController extends Controller
 
         // A book and page belongs to one record (as when it was first saved).
         $model = RegistryFields::model($type);
-        $pages = collect($clean)->map(fn (array $row) => [(string) $row['book_no'], (string) $row['page_no']])
-            ->unique(fn (array $page) => implode('|', $page));
-        foreach ($pages as [$book, $page]) {
-            $other = $model::where('book_no', $book)->where('page_no', $page)
-                ->where(fn ($query) => $query->whereNull('civil_record_id')->orWhere('civil_record_id', '!=', $record->getKey()))
-                ->first();
-            if ($other !== null) {
-                $owner = $other->civil_record_id ? " (Record #{$other->civil_record_id})" : '';
-                throw ValidationException::withMessages([
-                    'registry_rows' => "Book {$book}, page {$page} is already saved{$owner}. Enter another page number.",
-                ]);
-            }
-        }
+        $this->refuseOtherRecordsPages($record, $type, $clean);
 
         $old = [];
         $new = [];
@@ -236,6 +230,31 @@ class RecordReviewController extends Controller
         }
 
         return [$stored, $clean, $old, $new];
+    }
+
+    /**
+     * A book and page that another record has stops the save, saying which.
+     * `locking`: inside the save's transaction, read what is committed now.
+     *
+     * @param  list<array<string, mixed>>  $rows  checked register rows
+     */
+    private function refuseOtherRecordsPages(CivilRecord $record, string $type, array $rows, bool $locking = false): void
+    {
+        $model = RegistryFields::model($type);
+        $pages = collect($rows)->map(fn (array $row) => [(string) $row['book_no'], (string) $row['page_no']])
+            ->unique(fn (array $page) => implode('|', $page));
+        foreach ($pages as [$book, $page]) {
+            $other = $model::where('book_no', $book)->where('page_no', $page)
+                ->where(fn ($query) => $query->whereNull('civil_record_id')->orWhere('civil_record_id', '!=', $record->getKey()))
+                ->when($locking, fn ($query) => $query->lockForUpdate())
+                ->first();
+            if ($other !== null) {
+                $owner = $other->civil_record_id ? " (Record #{$other->civil_record_id})" : '';
+                throw ValidationException::withMessages([
+                    'registry_rows' => "Book {$book}, page {$page} is already saved{$owner}. Enter another page number.",
+                ]);
+            }
+        }
     }
 
     private function typeKey(CivilRecord $record): string
