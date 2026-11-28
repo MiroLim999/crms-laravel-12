@@ -138,12 +138,20 @@
         </div>
     </div>
 
-    <x-card title="Recovery codes" subtitle="For a forgotten password: each 6-digit code works once.">
+    <x-card title="Recovery codes" subtitle="For a forgotten password: each code works once.">
         <x-slot:actions>
             <span class="badge bg-label-{{ $codeTone }}">
                 {{ $codesMade ? "{$codesLeft} of {$codeTotal} left" : 'None yet' }}
             </span>
         </x-slot:actions>
+
+        @if (! session('recovery_codes') && $user->hasOldRecoveryCodes())
+            <div class="alert alert-warning d-flex align-items-start gap-2 small mb-4" role="alert">
+                <i class="icon-base bx bx-shield-quarter mt-1" aria-hidden="true"></i>
+                <span><strong>Make a new set of codes.</strong> Yours are the old 6-digit kind, short enough
+                    to guess over time. New codes are 10 letters and digits; making them retires the old ones.</span>
+            </div>
+        @endif
 
         @if (session('recovery_codes'))
             <div id="recoveryCodePrint" class="mb-4">
@@ -155,8 +163,8 @@
                 <h6 class="d-none d-print-block mb-3">CRMS recovery codes · {{ $user->email }} · {{ now()->format('M j, Y') }}</h6>
                 <ol class="recovery-codes list-unstyled mb-3" id="recoveryCodeList">
                     @foreach (session('recovery_codes') as $code)
-                        {{-- The gap is CSS, not a character, so a copied code is just its 6 digits. --}}
-                        <li><span class="me-2">{{ substr($code, 0, 3) }}</span>{{ substr($code, 3) }}</li>
+                        {{-- The gap is CSS, not a character, so a copied code is just its 10 characters. --}}
+                        <li><span class="me-2">{{ substr($code, 0, 5) }}</span>{{ substr($code, 5) }}</li>
                     @endforeach
                 </ol>
                 <div class="d-flex flex-wrap gap-2">

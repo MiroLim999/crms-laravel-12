@@ -169,7 +169,7 @@ Rules behind the table:
 
 **Forgot the password?** Two ways back in:
 
-1. On the sign-in page, **Forgot password?**: the email and one of the account's 6-digit **recovery codes** (made in
+1. On the sign-in page, **Forgot password?**: the email and one of the account's **recovery codes** (made in
    Account Settings), then a new password. Each code works once.
 2. On the CRMS computer, `php artisan crms:reset-password`: it prints a new temporary password once, and at the next
    sign-in CRMS asks for a new one.
@@ -529,7 +529,7 @@ Where each feature's code is, file by file, is listed in [section 12](#12-where-
 - Sign in with email and password. There is no sign-up page.
 - After **5 wrong attempts** for the same email from the same computer, sign-in is blocked for a short time, and the screen says how long.
 - At the **first sign-in** (and after `php artisan crms:reset-password`) the account must choose its own password before it can open anything else.
-- **Forgot password?** on the sign-in page: type the email and one of the account's **recovery codes** (6 digits), then
+- **Forgot password?** on the sign-in page: type the email and one of the account's **recovery codes** (10 letters and digits, like `ABCDE-12345`), then
   choose a new password. The code is used up. After **5 wrong codes** for an email the page waits an hour. A wrong
   email and a wrong code get the same answer, so the page does not reveal which email exists. When 2 codes or fewer are
   left, CRMS says to make a new set.
@@ -880,7 +880,7 @@ Opened from the initials badge at the top right.
   both (`php artisan crms:unlock-details` on the CRMS computer allows one more change). The email must be unused, and
   the change is in the audit log as `user.updated`.
 - **Change password**: needs the current password.
-- **Recovery codes**: with the current password, makes **10 new one-time 6-digit codes** for Forgot password?. They are
+- **Recovery codes**: with the current password, makes **10 new one-time codes** (10 letters and digits each) for Forgot password?. They are
   shown once, to write down; the old ones stop working. Only a keyed hash of each code is stored.
 
 ### 4.15 Background jobs and command-line tools
@@ -1384,7 +1384,7 @@ Measured during development (not a formal benchmark):
 - Passwords stored as bcrypt hashes; temporary passwords shown once, never stored in plain text, never logged.
 - Sign-in limited to 5 attempts per email and computer; the session is renewed at sign-in.
 - Forced password change at the first sign-in and after a temporary password, on every page (a new page cannot forget it).
-- **Recovery codes**: 10 one-time 6-digit codes; only a keyed hash of each (HMAC-SHA256 with the app's secret key) is
+- **Recovery codes**: 10 one-time codes of 10 characters (about 50 bits each; old 6-digit sets work until replaced); only a keyed hash of each (HMAC-SHA256 with the app's secret key) is
   stored; at most 5 wrong codes per email an hour; a wrong email and a wrong code get the same answer; a wrong code
   for the account's own email is logged (`user.recovery_failed`).
 - The account's name and email can be changed once from the screen; a second change needs the command line.
@@ -1665,7 +1665,7 @@ In order of value for the defense and for real use:
 | **Person group** | The values that belong to one person (one ledger row, or the mother's fields on a certificate) |
 | **Queue worker** | The background program that does slow work so the website stays fast |
 | **Re-align** | Sending a read document of a batch back to Align, to be read again |
-| **Recovery code** | One of 10 one-time 6-digit codes that let the account set a new password from the sign-in page |
+| **Recovery code** | One of 10 one-time 10-character codes that let the account set a new password from the sign-in page |
 | **Register table / register row** | `birth_records`, `death_records` or `marriage_records`: one typed row per person, linked to the saved page record |
 | **Review & Export** | Step 4 of scanning, and the edit page of a saved record: the values as a table, one row per person, to edit and download as CSV or Excel |
 | **Scheduler** | The background program that runs the hourly clean-up |
@@ -1782,7 +1782,7 @@ Set in the `.env` file. Defaults from `.env.example`.
 | `CRMS_SCAN_BATCH_KEEP_DAYS` | `7` | An open batch untouched this long is deleted with its files |
 | `CRMS_CONFIDENCE_THRESHOLD` | `80` | Readings below this confidence are flagged |
 | `CRMS_REPORTING_TIMEZONE` | `Asia/Manila` | Time zone for screens, filters and the CSV |
-| `CRMS_SETUP_LOCAL_ONLY` | `true` | The one-time Set up CRMS page (makes the account) opens only on the CRMS computer itself |
+| `CRMS_SETUP_LOCAL_ONLY` | `true` | The one-time Set up CRMS page (makes the account) opens only on the CRMS computer itself; when `false` (Docker) it asks for the token from `php artisan crms:setup-token` |
 
 ## Appendix D. Service endpoints
 

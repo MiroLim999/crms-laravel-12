@@ -33,7 +33,10 @@ class SetupController extends Controller
             return redirect()->route('login');
         }
 
-        return view('auth.setup', ['allowed' => FirstRunSetup::allowedFrom($request)]);
+        return view('auth.setup', [
+            'allowed' => FirstRunSetup::allowedFrom($request),
+            'needsToken' => FirstRunSetup::needsToken(),
+        ]);
     }
 
     public function store(Request $request): RedirectResponse
@@ -43,6 +46,20 @@ class SetupController extends Controller
         }
 
         abort_unless(FirstRunSetup::allowedFrom($request), 403, 'Set up CRMS on the CRMS computer itself.');
+
+        // Where the address cannot show the request came from the CRMS computer
+        // (Docker), the token from `php artisan crms:setup-token` shows it instead.
+        if (FirstRunSetup::needsToken()) {
+            $request->validate([
+                'setup_token' => ['required', 'string', 'max:64', function (string $attribute, string $value, \Closure $fail): void {
+                    if (! FirstRunSetup::tokenMatches($value)) {
+                        $fail('That is not the setup token. Run php artisan crms:setup-token on the CRMS computer to see it.');
+                    }
+                }],
+            ], [
+                'setup_token.required' => 'Enter the setup token. Run php artisan crms:setup-token on the CRMS computer to see it.',
+            ]);
+        }
 
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -81,6 +98,8 @@ class SetupController extends Controller
         if ($user === null) {
             return redirect()->route('login')->with('info', 'CRMS is already set up. Sign in.');
         }
+
+        FirstRunSetup::forgetToken();
 
         Auth::login($user);
         $request->session()->regenerate();

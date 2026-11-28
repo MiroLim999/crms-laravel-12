@@ -11,8 +11,9 @@ return [
     | the Set up CRMS page, where the Super Admin's name, email and password are
     | chosen once. By default that page only opens on the CRMS computer itself,
     | so another PC on the network cannot claim the account first. Docker turns
-    | this off: there the site is published on 127.0.0.1 only, and requests
-    | arrive from Docker's own network address.
+    | this off, since requests arrive from Docker's own network address: the
+    | page then asks for a one-time token that only the CRMS computer can read
+    | (php artisan crms:setup-token).
     |
     */
 

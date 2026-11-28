@@ -129,14 +129,37 @@ class FirstRunSetupTest extends TestCase
         $this->assertSame(1, User::count());
     }
 
-    public function test_the_local_only_check_can_be_turned_off_for_docker(): void
+    public function test_with_the_address_check_off_the_setup_token_is_required(): void
     {
         config(['crms.setup.local_only' => false]);
+        $docker = ['REMOTE_ADDR' => '172.18.0.1', 'SERVER_ADDR' => '172.18.0.5'];
 
-        $this->withServerVariables(['REMOTE_ADDR' => '172.18.0.1', 'SERVER_ADDR' => '172.18.0.5'])
-            ->post(route('setup.store'), self::FORM)
+        $this->withServerVariables($docker)->get(route('setup'))
+            ->assertOk()->assertSee('Setup token')->assertSee('crms:setup-token');
+
+        // No token, or a wrong one: no account.
+        $this->withServerVariables($docker)->post(route('setup.store'), self::FORM)
+            ->assertSessionHasErrors('setup_token');
+        $this->withServerVariables($docker)->post(route('setup.store'), self::FORM + ['setup_token' => 'AAAA-AAAA-AAAA'])
+            ->assertSessionHasErrors('setup_token');
+        $this->assertSame(0, User::count());
+
+        // The token the command shows, typed in lower case: the account is made.
+        $this->artisan('crms:setup-token')->expectsOutputToContain('Setup token:')->assertSuccessful();
+        $token = strtolower(\App\Support\FirstRunSetup::formatted(\App\Support\FirstRunSetup::token()));
+
+        $this->withServerVariables($docker)->post(route('setup.store'), self::FORM + ['setup_token' => $token])
             ->assertRedirect(route('settings.edit'));
-
         $this->assertSame(1, User::count());
+
+        // Used up: the file is gone, and the command says there is nothing to do.
+        $this->assertFalse(\Illuminate\Support\Facades\Storage::disk('local')->exists('setup-token'));
+        $this->artisan('crms:setup-token')->expectsOutputToContain('already set up')->assertSuccessful();
+    }
+
+    public function test_the_setup_token_is_not_asked_on_the_crms_computer(): void
+    {
+        $this->get(route('setup'))->assertOk()->assertDontSee('Setup token');
+        $this->artisan('crms:setup-token')->expectsOutputToContain('needs no token')->assertSuccessful();
     }
 }

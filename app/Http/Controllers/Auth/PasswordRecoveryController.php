@@ -23,8 +23,9 @@ use Illuminate\View\View;
  * Between the two, the session holds the account and the code's stored form
  * (never the code itself) for a few minutes.
  *
- * A 6-digit code is short, so attempts are limited per email (wherever they
- * come from): a few tries an hour, then a wait.
+ * Attempts are limited per email (wherever they come from): a few tries an
+ * hour, then a wait. That matters for old 6-digit codes; the 10-character ones
+ * cannot be guessed in any useful time.
  */
 class PasswordRecoveryController extends Controller
 {
@@ -57,18 +58,20 @@ class PasswordRecoveryController extends Controller
     /** Step 1: the email and the code. */
     public function store(Request $request): RedirectResponse
     {
-        // Keep only the digits: a code may be typed or pasted as "123 456",
-        // "123-456" or with a copied narrow space between the halves.
-        $request->merge(['code' => preg_replace('/\D+/u', '', (string) $request->input('code', ''))]);
+        // As stored: "abcde-12345", "ABCDE 12345" and an old "123 456" are all read.
+        $request->merge(['code' => User::normalizeRecoveryCode((string) $request->input('code', ''))]);
 
         $validated = $request->validate([
             'email' => ['required', 'string', 'email', 'max:255'],
-            'code' => ['required', 'string', 'regex:/^\d{6}$/'],
+            'code' => ['required', 'string', 'max:32', function (string $attribute, string $value, \Closure $fail): void {
+                if (! User::looksLikeRecoveryCode($value)) {
+                    $fail('A recovery code is 10 letters and digits, like ABCDE-12345.');
+                }
+            }],
         ], [
             'email.required' => 'Enter the email you sign in with.',
             'email.email' => 'Enter a valid email address.',
-            'code.required' => 'Enter one of your 6-digit recovery codes.',
-            'code.regex' => 'A recovery code is 6 digits.',
+            'code.required' => 'Enter one of your recovery codes.',
         ]);
 
         $key = 'password-recovery|'.Str::transliterate(Str::lower(trim($validated['email'])));

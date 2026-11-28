@@ -14,10 +14,27 @@
         <form method="POST" action="{{ route('setup.store') }}" class="mb-2">
             @csrf
 
+            @if ($needsToken)
+                <div class="mb-6">
+                    <label for="setup_token" class="form-label">Setup token</label>
+                    <input type="text" id="setup_token" name="setup_token" maxlength="64"
+                        class="form-control font-monospace @error('setup_token') is-invalid @enderror"
+                        placeholder="ABCD-EFGH-JKMN" required autofocus autocomplete="off" spellcheck="false"
+                        autocapitalize="characters">
+                    @error('setup_token')
+                        <div class="invalid-feedback">{{ $message }}</div>
+                    @enderror
+                    <div class="form-text">
+                        Proves you are at the CRMS computer. See it there with
+                        <code>docker compose exec web php artisan crms:setup-token</code>.
+                    </div>
+                </div>
+            @endif
+
             <div class="mb-6">
                 <label for="name" class="form-label">Your name</label>
                 <input type="text" id="name" name="name" value="{{ old('name') }}"
-                    class="form-control @error('name') is-invalid @enderror" required autofocus autocomplete="name">
+                    class="form-control @error('name') is-invalid @enderror" required @unless ($needsToken) autofocus @endunless autocomplete="name">
                 @error('name')
                     <div class="invalid-feedback">{{ $message }}</div>
                 @enderror

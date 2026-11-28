@@ -21,6 +21,7 @@ Wait until Docker says **Engine running**, then follow the [README installation]
 Good to know:
 
 - Before `migrate --seed` runs, the worker may show `Restarting`. That is normal.
+- The first visit opens **Set up CRMS**, which asks for a **setup token**. See it with `docker compose exec web php artisan crms:setup-token`. It stops working once the account is made.
 - `docker compose ps` should show `crms-ocr-1` and `crms-mysql-1` as `Up (healthy)`.
 - Docker Desktop is free for personal use, education and small businesses. Larger companies may need a paid subscription.
 

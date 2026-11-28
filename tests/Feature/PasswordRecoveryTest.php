@@ -105,7 +105,7 @@ class PasswordRecoveryTest extends TestCase
         $this->get(route('password.recover'))->assertOk()->assertSee('Recovery code');
     }
 
-    public function test_settings_make_ten_six_digit_codes_shown_once_and_stored_hashed(): void
+    public function test_settings_make_ten_long_codes_shown_once_and_stored_hashed(): void
     {
         $user = User::factory()->superAdmin()->create(['password' => 'password']);
 
@@ -118,7 +118,8 @@ class PasswordRecoveryTest extends TestCase
         $this->assertCount(10, $codes);
         $this->assertCount(10, array_unique($codes));
         foreach ($codes as $code) {
-            $this->assertMatchesRegularExpression('/^\d{6}$/', $code);
+            // 10 characters, Crockford base32: no I, L, O or U to misread.
+            $this->assertMatchesRegularExpression('/^[0-9A-HJKMNP-TV-Z]{10}$/', $code);
         }
 
         $user->refresh();
@@ -158,29 +159,30 @@ class PasswordRecoveryTest extends TestCase
         $this->assertTrue(Hash::check('newpass123', $user->refresh()->password));
 
         // Another code still works; written with a space it is the same code.
-        $this->recover($user->email, substr($codes[5], 0, 3).' '.substr($codes[5], 3), 'third1234')
+        $this->recover($user->email, substr($codes[5], 0, 5).' '.substr($codes[5], 5), 'third1234')
             ->assertRedirect(route('login'));
         $this->assertTrue(Hash::check('third1234', $user->refresh()->password));
         $this->assertSame(8, $user->recoveryCodesLeft());
 
-        // Pasted with a narrow no-break space (as older code lists showed) or a dash: still the code.
-        $this->recover($user->email, ' '.substr($codes[6], 0, 3)."\u{202F}".substr($codes[6], 3).' ', 'fourth123')
+        // Pasted with a narrow no-break space or a dash, or typed in lower case: still the code.
+        $this->recover($user->email, ' '.substr($codes[6], 0, 5)."\u{202F}".substr($codes[6], 5).' ', 'fourth123')
             ->assertRedirect(route('login'));
-        $this->recover($user->email, substr($codes[7], 0, 3).'-'.substr($codes[7], 3), 'fifth1234')
+        $this->recover($user->email, strtolower(substr($codes[7], 0, 5).'-'.substr($codes[7], 5)), 'fifth1234')
             ->assertRedirect(route('login'));
         $this->assertSame(6, $user->refresh()->recoveryCodesLeft());
 
-        // Not six digits: the format message.
-        $this->recover($user->email, '12345')->assertSessionHasErrors(['code' => 'A recovery code is 6 digits.']);
+        // Not a code's shape: the format message.
+        $this->recover($user->email, '12345')
+            ->assertSessionHasErrors(['code' => 'A recovery code is 10 letters and digits, like ABCDE-12345.']);
     }
 
     public function test_a_wrong_code_or_email_is_refused_the_same_way(): void
     {
         $user = User::factory()->superAdmin()->create(['password' => 'password']);
         $codes = $user->generateRecoveryCodes();
-        $wrong = $codes[0] === '000000' ? '000001' : '000000';
+        $wrong = '0000000000';
         while (in_array($wrong, $codes, true)) {
-            $wrong = str_pad((string) ((int) $wrong + 1), 6, '0', STR_PAD_LEFT);
+            $wrong = str_pad((string) ((int) $wrong + 1), 10, '0', STR_PAD_LEFT);
         }
 
         $this->recover($user->email, $wrong)->assertSessionHasErrors(['code' => 'That email and recovery code do not match.']);
@@ -219,5 +221,43 @@ class PasswordRecoveryTest extends TestCase
         $this->assertStringContainsString('Too many tries', session('errors')->first('code'));
         $this->assertTrue(Hash::check('password', $user->refresh()->password));
         $this->assertSame(10, $user->recoveryCodesLeft());
+    }
+
+    public function test_look_alike_letters_are_read_as_digits(): void
+    {
+        $user = User::factory()->superAdmin()->create(['password' => 'password']);
+        $codes = $user->generateRecoveryCodes();
+        $withZeroOrOne = collect($codes)->first(fn ($code) => strpbrk($code, '01') !== false);
+        if ($withZeroOrOne === null) {
+            $this->markTestSkipped('No code in this set has a 0 or 1.');
+        }
+
+        // Read off paper: O for 0, l for 1.
+        $typed = strtr(strtolower($withZeroOrOne), ['0' => 'O', '1' => 'l']);
+        $this->recover($user->email, $typed)->assertRedirect(route('login'));
+    }
+
+    public function test_old_six_digit_codes_still_work_until_a_new_set_is_made(): void
+    {
+        $user = User::factory()->superAdmin()->create(['password' => 'password']);
+        // A set made before the codes grew: plain keyed hashes of 6 digits.
+        $old = ['123456', '654321'];
+        $user->forceFill([
+            'recovery_codes' => array_map(fn ($code) => hash_hmac('sha256', $code, (string) config('app.key')), $old),
+        ])->save();
+        $this->assertTrue($user->hasOldRecoveryCodes());
+
+        // Account Settings asks for a new set.
+        $this->actingAs($user)->get(route('settings.edit'))->assertOk()->assertSee('Make a new set of codes.');
+        auth()->logout();
+
+        $this->recover($user->email, '123 456')->assertRedirect(route('login'));
+        $this->assertSame(1, $user->refresh()->recoveryCodesLeft());
+
+        // A new set retires the rest, and the warning goes.
+        $user->generateRecoveryCodes();
+        $this->assertFalse($user->refresh()->hasOldRecoveryCodes());
+        $this->recover($user->email, '654321')->assertSessionHasErrors('code');
+        $this->actingAs($user)->get(route('settings.edit'))->assertDontSee('Make a new set of codes.');
     }
 }

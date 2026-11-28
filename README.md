@@ -101,6 +101,7 @@ Updates, backups, the NVIDIA GPU and troubleshooting: **[docs/DOCKER-SETUP.md](d
 CRMS has **one account**, the Super Admin. There is **no default password**: the first time CRMS is opened, it shows
 **Set up CRMS**, where you type your name, the email you will sign in with, and your own password. This page works
 **once**, and only on the CRMS computer itself, so nobody else on the network can make the account first.
+In Docker the page also asks for a **setup token**; see it with `docker compose exec web php artisan crms:setup-token`.
 
 Then, in **Account Settings** (CRMS opens it right after setup; later: initials badge at the top right →
 **Account Settings**):

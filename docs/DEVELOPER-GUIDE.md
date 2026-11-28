@@ -168,7 +168,7 @@ The client runs CRMS on one offline PC with one account, the Super Admin. The St
 - **Tests**: `tests/Feature/CapabilityMatrixTest.php` checks that the account opens every page, a guest is sent to sign in, and `/users` and `/analytics` give Not Found.
 - **The account**: no seeder makes it, so there is no default password. While the `users` table is empty, `EnsureSetupIsDone` (web group, ahead of `auth`) sends every page to **Set up CRMS** (`SetupController`, `/setup`), where the Super Admin types their own name, email and password once; then the page only redirects to sign-in. By default it opens only on the CRMS computer itself (`FirstRunSetup::allowedFrom`: client `127.0.0.1`/`::1`, or the client address equals the server's own, i.e. `https://<server IP>` opened on the server PC), so another PC on the LAN cannot claim the account first. `CRMS_SETUP_LOCAL_ONLY=false` turns that off (Docker does, because its port is published on `127.0.0.1` only). The starter layouts seeded before the account are credited to it. Audit: `user.created`. `php artisan crms:reset-password` gives it a new temporary password, printed once, and asks for a new one at the next sign-in.
 - **Old data**: the migration `2026_11_11_000200_remove_staff_and_admin_accounts` moved the other accounts' records and change requests to the Super Admin and deleted those accounts. Audit Log entries keep the person's name (`actor_name`, `actor_role`).
-- **Recovery codes** (`PasswordRecoveryController`, `User::generateRecoveryCodes`): **Account Settings → Recovery codes** (with the current password) makes 10 one-time 6-digit codes, shown once; the old set stops working. Only an HMAC-SHA256 of each unused code, keyed with `APP_KEY`, is stored in `users.recovery_codes`, so a new `APP_KEY` voids them all. **Forgot password?** on the sign-in page takes the email and a code (at most 5 wrong codes per email an hour, and the same answer for a wrong email or a wrong code), then gives 10 minutes to choose the new password; the code is crossed off then. Audit: `user.recovery_codes_generated`, `user.recovery_failed` (a wrong code for the account's email), `user.password_recovered`.
+- **Recovery codes** (`PasswordRecoveryController`, `User::generateRecoveryCodes`): **Account Settings → Recovery codes** (with the current password) makes 10 one-time codes of 10 characters (Crockford base32, e.g. `ABCDE-12345`; older 6-digit sets keep working until replaced, and Account Settings asks for a new set), shown once; the old set stops working. Only an HMAC-SHA256 of each unused code, keyed with `APP_KEY`, is stored in `users.recovery_codes`, so a new `APP_KEY` voids them all. **Forgot password?** on the sign-in page takes the email and a code (at most 5 wrong codes per email an hour, and the same answer for a wrong email or a wrong code), then gives 10 minutes to choose the new password; the code is crossed off then. Audit: `user.recovery_codes_generated`, `user.recovery_failed` (a wrong code for the account's email), `user.password_recovered`.
 - **Name and email once**: the first save in **Your details** that changes them sets `users.details_locked_at`, and the form is locked after that. `php artisan crms:unlock-details` (audit `user.details_unlocked`) allows one more change.
 
 ---
@@ -369,7 +369,7 @@ Before building, this copies the PDF.js worker from `node_modules` into `public/
 
 ### First Visit: Set up CRMS
 
-There are no default credentials. On the first visit, CRMS opens **Set up CRMS**: type your name, the email you will sign in with, and your own password. It works once, and only on the CRMS computer itself.
+There are no default credentials. On the first visit, CRMS opens **Set up CRMS**: type your name, the email you will sign in with, and your own password. It works once, and only on the CRMS computer itself. In Docker, where the address cannot show that, it asks for a one-time setup token instead: `docker compose exec web php artisan crms:setup-token`.
 
 #### Recovery Codes and a Forgotten Password
 After setting up, make the account's **recovery codes** in **Account Settings** and keep them somewhere safe. **Forgot the password?** On the sign-in page, **Forgot password?** takes the email and one recovery code. Without a code, run `php artisan crms:reset-password` on the CRMS computer: it prints a temporary password once, and asks for a new one at the next sign-in.
@@ -973,7 +973,8 @@ vendor\bin\pint --test                   # Verify PHP code style
 | `OCR_BROWSER_ORIGIN_REGEX` | *(Loopback regex)* | Allowed browser origins regex for CORS upload requests. |
 | `CRMS_CONFIDENCE_THRESHOLD` | `80` | Default OCR confidence threshold below which fields flag for review. |
 | `CRMS_REPORTING_TIMEZONE` | `Asia/Manila` | Timezone every page and the CSV show times in, and whose days the date filters and dashboard use. Stored times stay UTC. |
-| `CRMS_SETUP_LOCAL_ONLY` | `true` | The one-time Set up CRMS page opens only on the CRMS computer itself. `false` in Docker. |
+| `CRMS_SETUP_LOCAL_ONLY` | `true` | The one-time Set up CRMS page opens only on the CRMS computer itself. `false` in Docker, where the page asks for the token from `php artisan crms:setup-token` instead. |
+| `CRMS_TRUSTED_HOSTS` | `localhost,127.0.0.1` | Host names the site answers to besides `APP_URL`'s (not checked when `APP_ENV=local`). |
 
 ---
 

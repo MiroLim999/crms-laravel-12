@@ -93,7 +93,9 @@ x-app: &app
     SESSION_COOKIE: crms_docker_session
     # The Set up CRMS page normally opens only on the CRMS computer itself. Inside
     # Docker every request comes from Docker's network, never 127.0.0.1, so the
-    # check is off here: the site is published on 127.0.0.1 only (see ports).
+    # address check is off here. The page asks for a one-time setup token
+    # instead, which only this computer can read:
+    #   docker compose exec web php artisan crms:setup-token
     CRMS_SETUP_LOCAL_ONLY: "false"
   depends_on:
     mysql:

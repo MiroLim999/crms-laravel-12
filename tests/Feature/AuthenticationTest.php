@@ -120,6 +120,29 @@ class AuthenticationTest extends TestCase
         );
     }
 
+    public function test_a_new_email_each_time_cannot_fill_the_audit_log(): void
+    {
+        $user = User::factory()->superAdmin()->create(['password' => 'password']);
+
+        // A script trying a different email every time, from one address.
+        for ($i = 0; $i < 40; $i++) {
+            $this->post(route('login.store'), [
+                'email' => "guess{$i}@example.com",
+                'password' => 'wrong-password',
+            ])->assertSessionHasErrors('email');
+        }
+
+        // 30 failures are logged, then one note that the address is paused; the rest never reach the log.
+        $this->assertSame(30, AuditLog::where('action', 'auth.login_failed')->count());
+        $this->assertSame(1, AuditLog::where('action', 'auth.locked_out')->count());
+        $this->assertStringContainsString('Too many sign-in attempts', session('errors')->first('email'));
+
+        // The right password from that address waits too, until the pause ends.
+        $this->post(route('login.store'), ['email' => $user->email, 'password' => 'password'])
+            ->assertSessionHasErrors('email');
+        $this->assertGuest();
+    }
+
     // ------------------------------------------------- forced password change
 
     public function test_a_temporary_password_locks_the_user_to_the_change_screen(): void

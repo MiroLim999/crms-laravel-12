@@ -7,7 +7,7 @@
     @section('subheading', 'Your recovery code is accepted. The code is used up when you save the new password.')
 @else
     @section('heading', 'Forgot your password?')
-    @section('subheading', 'Enter your email and one of your 6-digit recovery codes.')
+    @section('subheading', 'Enter your email and one of your recovery codes.')
 @endif
 
 @section('content')
@@ -75,8 +75,8 @@
 
             <div class="mb-8">
                 <label for="code" class="form-label">Recovery code</label>
-                <input type="text" id="code" name="code" inputmode="numeric" maxlength="12"
-                    class="form-control @error('code') is-invalid @enderror" placeholder="123456" required
+                <input type="text" id="code" name="code" maxlength="32" autocapitalize="characters"
+                    class="form-control @error('code') is-invalid @enderror" placeholder="ABCDE-12345" required
                     autocomplete="one-time-code" spellcheck="false">
                 @error('code')
                     <div class="invalid-feedback">{{ $message }}</div>
