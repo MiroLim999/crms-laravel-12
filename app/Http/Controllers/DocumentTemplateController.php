@@ -1680,6 +1680,19 @@ class DocumentTemplateController extends Controller
      *
      * @param  array<string, mixed>  $validated
      */
+    /**
+     * Row-line bends as compared by layoutChanged: no bend on any line (a layout
+     * saved before bends existed holds null, a new save [null, null, ...]) is [].
+     *
+     * @return list<mixed>
+     */
+    private function bendsSignature(mixed $bends): array
+    {
+        $bends = array_values(is_array($bends) ? $bends : []);
+
+        return array_filter($bends, fn ($bend) => $bend !== null) === [] ? [] : $bends;
+    }
+
     private function layoutChanged(DocumentTemplate $template, array $validated): bool
     {
         $template->loadMissing('fields');
@@ -1706,7 +1719,7 @@ class DocumentTemplateController extends Controller
 
         $tiltsChanged = $tiltsChanged
             || json_encode(array_values($template->ruled_spans ?? [])) !== json_encode(array_values($validated['ruled_spans'] ?? []))
-            || json_encode(array_values($template->ruled_bends ?? [])) !== json_encode(array_values($validated['ruled_bends'] ?? []));
+            || json_encode($this->bendsSignature($template->ruled_bends)) !== json_encode($this->bendsSignature($validated['ruled_bends'] ?? null));
 
         return $tiltsChanged || $saved !== $this->layoutSignature(
             $validated['grouping_mode'],

@@ -13,8 +13,8 @@ use Illuminate\View\View;
 /**
  * Sign-in and sign-out.
  *
- * There is no registration counterpart by design: the one account is made by
- * the seeder (SuperAdminSeeder).
+ * There is no registration counterpart by design: the one account is made
+ * once on the Set up CRMS page (SetupController).
  */
 class LoginController extends Controller
 {

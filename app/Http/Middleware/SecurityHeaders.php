@@ -20,14 +20,21 @@ class SecurityHeaders
         $response = $next($request);
 
         $headers = $response->headers;
-        $headers->set('X-Frame-Options', 'SAMEORIGIN', false);
-        $headers->set('X-Content-Type-Options', 'nosniff', false);
-        $headers->set('Referrer-Policy', 'same-origin', false);
-        $headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()', false);
-        $headers->set('Cross-Origin-Opener-Policy', 'same-origin', false);
-
+        // Only where the response has not set its own: set(..., false) would append a second value.
+        $defaults = [
+            'X-Frame-Options' => 'SAMEORIGIN',
+            'X-Content-Type-Options' => 'nosniff',
+            'Referrer-Policy' => 'same-origin',
+            'Permissions-Policy' => 'camera=(), microphone=(), geolocation=(), payment=()',
+            'Cross-Origin-Opener-Policy' => 'same-origin',
+        ];
         if ($request->isSecure()) {
-            $headers->set('Strict-Transport-Security', 'max-age=31536000', false);
+            $defaults['Strict-Transport-Security'] = 'max-age=31536000';
+        }
+        foreach ($defaults as $name => $value) {
+            if (! $headers->has($name)) {
+                $headers->set($name, $value);
+            }
         }
 
         return $response;

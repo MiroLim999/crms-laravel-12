@@ -58,7 +58,9 @@ class SetupController extends Controller
             // Two setup forms sent at once: the second waits here, then finds the account.
             Role::whereKey($role->getKey())->lockForUpdate()->first();
 
-            if (! FirstRunSetup::needed()) {
+            // A locking read: it sees what is committed now, not the snapshot the
+            // transaction's first read (firstOrCreate) took before the wait.
+            if (User::query()->lockForUpdate()->exists()) {
                 return null;
             }
 
