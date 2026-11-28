@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AuditLog;
 use App\Models\User;
+use App\Services\TwoFactor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
@@ -37,9 +38,16 @@ class AuthenticationTest extends TestCase
     {
         $user = User::factory()->superAdmin()->create(['password' => 'password']);
 
+        // Step 1: the right password is not enough on its own.
         $this->post(route('login.store'), [
             'email' => $user->email,
             'password' => 'password',
+        ])->assertRedirect(route('two-factor.challenge'));
+        $this->assertGuest();
+
+        // Step 2: the authenticator code.
+        $this->post(route('two-factor.challenge.store'), [
+            'code' => app(TwoFactor::class)->currentCode($user->two_factor_secret),
         ])->assertRedirect(route('dashboard'));
 
         $this->assertAuthenticatedAs($user);
@@ -64,10 +72,7 @@ class AuthenticationTest extends TestCase
     {
         $user = User::factory()->superAdmin()->create(['password' => 'password']);
 
-        $this->post(route('login.store'), [
-            'email' => $user->email,
-            'password' => 'password',
-        ]);
+        $this->signInWithCode($user);
 
         $this->assertDatabaseHas('audit_logs', [
             'user_id' => $user->getKey(),
@@ -232,14 +237,22 @@ class AuthenticationTest extends TestCase
     {
         $user = User::factory()->superAdmin()->create(['password' => 'password']);
 
-        $this->post(route('login.store'), [
-            'email' => $user->email,
-            'password' => 'password',
-        ]);
+        $this->signInWithCode($user);
 
+        $this->assertGreaterThan(0, AuditLog::count());
         foreach (AuditLog::all() as $entry) {
             $blob = json_encode([$entry->old_values, $entry->new_values]);
             $this->assertStringNotContainsString('password"', (string) $blob);
         }
+    }
+
+    /** Both steps of signing in: the password, then the authenticator code. */
+    private function signInWithCode(User $user, string $password = 'password'): void
+    {
+        $this->post(route('login.store'), ['email' => $user->email, 'password' => $password])
+            ->assertRedirect(route('two-factor.challenge'));
+        $this->post(route('two-factor.challenge.store'), [
+            'code' => app(TwoFactor::class)->currentCode($user->two_factor_secret),
+        ])->assertRedirect(route('dashboard'));
     }
 }

@@ -70,7 +70,7 @@ class DashboardAnalytics
      * @var list<string>
      */
     private const ROUTINE_AUDIT_ACTIONS = [
-        'auth.login', 'auth.logout', 'auth.login_failed', 'record.submitted', 'record.exported', 'record.viewed',
+        'auth.login', 'auth.logout', 'auth.login_failed', 'auth.two_factor_failed', 'record.submitted', 'record.exported', 'record.viewed',
     ];
 
     /** How many entries the Recent changes card lists. */

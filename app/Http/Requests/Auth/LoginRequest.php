@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Models\User;
 use App\Services\AuditLogger;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
@@ -42,15 +43,20 @@ class LoginRequest extends FormRequest
     }
 
     /**
-     * Attempt authentication, rate limited per email + IP, and per IP alone.
+     * Check the email and password, rate limited per email + IP, and per IP
+     * alone. Nobody is signed in yet: the authenticator code comes next
+     * (LoginController), so this only answers whose password it was.
      *
      * @throws ValidationException
      */
-    public function authenticate(): void
+    public function authenticate(): User
     {
         $this->ensureIsNotRateLimited();
 
-        if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
+        $user = Auth::getProvider()->retrieveByCredentials($this->only('email'));
+        $valid = $user instanceof User && Auth::getProvider()->validateCredentials($user, $this->only('password'));
+
+        if (! $valid) {
             RateLimiter::hit($this->throttleKey());
             RateLimiter::hit($this->ipThrottleKey(), self::IP_DECAY_SECONDS);
 
@@ -74,6 +80,8 @@ class LoginRequest extends FormRequest
         }
 
         RateLimiter::clear($this->throttleKey());
+
+        return $user;
     }
 
     /**

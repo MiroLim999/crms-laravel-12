@@ -93,7 +93,8 @@ class SingleAccountTest extends TestCase
 
     public function test_a_temporary_password_must_be_replaced_at_sign_in(): void
     {
-        User::factory()->create([
+        // As after crms:reset-password: a temporary password, and the authenticator reset.
+        User::factory()->withoutTwoFactor()->create([
             'email' => 'rosa@example.test',
             'password' => 'Temporary123',
             'must_change_password' => true,
@@ -119,7 +120,8 @@ class SingleAccountTest extends TestCase
         ])->assertRedirect(route('dashboard'));
 
         $this->assertFalse(User::firstOrFail()->must_change_password);
-        $this->get(route('dashboard'))->assertOk();
+        // Then the authenticator app, before anything else.
+        $this->get(route('dashboard'))->assertRedirect(route('two-factor.setup'));
     }
 
     public function test_the_sign_in_page_has_no_administrator_line(): void

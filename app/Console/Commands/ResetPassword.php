@@ -39,16 +39,22 @@ class ResetPassword extends Command
             'password_changed_at' => null,
         ])->save();
 
+        // Whoever runs this is at the CRMS computer; the phone may be the thing
+        // that was lost. The authenticator is set up again after the new password.
+        $hadTwoFactor = $user->hasTwoFactor();
+        $user->forgetTwoFactor();
+
         $audit->log(
             'user.password_reset',
             $user,
-            description: 'Password reset from the command line (crms:reset-password).',
+            description: 'Password reset from the command line (crms:reset-password)'.($hadTwoFactor ? '; the authenticator app must be set up again.' : '.'),
             actor: $user,
         );
 
         $this->info("Email:              {$user->email}");
         $this->info("Temporary password: {$temporary}");
-        $this->line('Sign in with these. You will then be asked to choose your own password.');
+        $this->line('Sign in with these. You will then be asked to choose your own password,');
+        $this->line('then to set up the authenticator app on your phone again.');
         $this->line('This password is shown only once.');
 
         return self::SUCCESS;

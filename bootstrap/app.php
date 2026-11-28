@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\EnsurePasswordIsChanged;
 use App\Http\Middleware\EnsureSetupIsDone;
+use App\Http\Middleware\EnsureTwoFactorIsEnabled;
 use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
@@ -22,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             EnsureSetupIsDone::class,
             EnsurePasswordIsChanged::class,
+            EnsureTwoFactorIsEnabled::class,
         ]);
         $middleware->append(SecurityHeaders::class);
 

@@ -101,10 +101,19 @@ CRMS has **one account**, the Super Admin. There is **no default password**: the
 **once**, and only on the CRMS computer itself, so nobody else on the network can make the account first.
 In Docker the page also asks for a **setup token**; see it with `docker compose exec web php artisan crms:setup-token`.
 
-Then, in **Account Settings** (CRMS opens it right after setup; later: initials badge at the top right →
+Next, CRMS asks you to set up **two-factor sign-in** (required): install **Google Authenticator** (or Microsoft
+Authenticator, Authy) on your phone, scan the QR code, and type the 6-digit code it shows. From then on, signing in
+needs your password **and** the code the app shows. It works offline: the phone and CRMS each work the code out from
+the time, so the CRMS computer's clock must be right (within about a minute).
+
+Then, in **Account Settings** (CRMS opens it right after that; later: initials badge at the top right →
 **Account Settings**):
 
-- **Recovery codes**: make your 10 one-time codes and keep them somewhere safe. They are shown only once.
+- **Recovery codes**: make your 10 one-time codes and keep them somewhere safe. They are shown only once. They are
+  also the way in when the phone is lost: on the code page, choose **Use a recovery code**.
+- **Two-factor sign-in → Set up on a new phone**: for a new or lost phone (needs your password).
+
+Signing out happens by itself after **30 minutes** without a click (`SESSION_LIFETIME`).
 - **Your details**: your name and email. They can be changed **once**; after that they are locked
   (`php artisan crms:unlock-details` on the CRMS computer allows one more change).
 
@@ -122,7 +131,8 @@ There is no email when offline. Two ways back in:
    php artisan crms:reset-password
    ```
 
-   It prints a new temporary password once. Sign in with it, and CRMS asks you to choose a new one.
+   It prints a new temporary password once. Sign in with it, and CRMS asks you to choose a new one, then to set up
+   the authenticator app again (the command resets it, in case the phone was lost too).
    (With Docker: `docker compose exec web php artisan crms:reset-password`.)
 
 ---

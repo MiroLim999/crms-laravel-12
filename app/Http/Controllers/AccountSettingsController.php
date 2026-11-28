@@ -80,6 +80,31 @@ class AccountSettingsController extends Controller
     }
 
     /**
+     * Forget the authenticator app, for a new phone or a lost one. The account
+     * is sent straight to set one up again: two-factor sign-in stays required.
+     */
+    public function resetTwoFactor(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'two_factor_password' => ['required', 'current_password'],
+        ], [
+            'two_factor_password.current_password' => 'That is not your current password.',
+        ]);
+
+        $request->user()->forgetTwoFactor();
+
+        $this->audit->log(
+            'user.two_factor_reset',
+            $request->user(),
+            description: 'Authenticator app reset from account settings; a new one must be set up.',
+        );
+
+        return redirect()
+            ->route('two-factor.setup')
+            ->with('info', 'Set up the authenticator app on your new phone.');
+    }
+
+    /**
      * Ten new one-time recovery codes for "Forgot password?", replacing the old
      * ones. They are shown once, on the page this redirects to.
      */

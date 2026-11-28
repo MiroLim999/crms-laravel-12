@@ -27,6 +27,7 @@ class User extends Authenticatable
         'password',
         'remember_token',
         'recovery_codes',
+        'two_factor_secret',
     ];
 
     /** How many recovery codes are made at a time. */
@@ -38,6 +39,10 @@ class User extends Authenticatable
             'password' => 'hashed',
             'recovery_codes' => 'array',
             'recovery_codes_generated_at' => 'datetime',
+            // Encrypted with APP_KEY: a copy of the database alone cannot make codes.
+            'two_factor_secret' => 'encrypted',
+            'two_factor_confirmed_at' => 'datetime',
+            'two_factor_last_step' => 'integer',
             // Name and email changed once from settings: locked since then (null: still editable).
             'details_locked_at' => 'datetime',
             'must_change_password' => 'boolean',
@@ -77,6 +82,27 @@ class User extends Authenticatable
     public function isSuperAdmin(): bool
     {
         return $this->hasRole(RoleSlug::SuperAdmin);
+    }
+
+    // -------------------------------------------------------- two-factor sign-in
+    //
+    // Required: an account without a confirmed authenticator is sent to set one
+    // up before anything else (EnsureTwoFactorIsEnabled).
+
+    /** Whether an authenticator app is set up and confirmed. */
+    public function hasTwoFactor(): bool
+    {
+        return $this->two_factor_confirmed_at !== null && filled($this->two_factor_secret);
+    }
+
+    /** Forget the authenticator: the account must set one up again at its next page. */
+    public function forgetTwoFactor(): void
+    {
+        $this->forceFill([
+            'two_factor_secret' => null,
+            'two_factor_confirmed_at' => null,
+            'two_factor_last_step' => null,
+        ])->save();
     }
 
     // ----------------------------------------------------------- recovery codes

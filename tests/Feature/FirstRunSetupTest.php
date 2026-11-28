@@ -58,7 +58,8 @@ class FirstRunSetupTest extends TestCase
         $this->assertAuthenticatedAs($user);
 
         $this->assertSame($user->getKey(), AuditLog::where('action', 'user.created')->sole()->user_id);
-        $this->get(route('dashboard'))->assertOk();
+        // Two-factor sign-in is required: the authenticator is set up before anything else.
+        $this->get(route('dashboard'))->assertRedirect(route('two-factor.setup'));
     }
 
     public function test_setup_works_without_the_role_seeded(): void

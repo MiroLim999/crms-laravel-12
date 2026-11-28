@@ -6,6 +6,8 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordChangeController;
 use App\Http\Controllers\Auth\PasswordRecoveryController;
 use App\Http\Controllers\Auth\SetupController;
+use App\Http\Controllers\Auth\TwoFactorChallengeController;
+use App\Http\Controllers\Auth\TwoFactorSetupController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentPageController;
 use App\Http\Controllers\DocumentScanController;
@@ -47,6 +49,12 @@ Route::middleware('guest')->group(function () {
     Route::post('forgot-password/new-password', [PasswordRecoveryController::class, 'reset'])
         ->middleware('throttle:20,1')
         ->name('password.recover.reset');
+
+    // Step 2 of signing in: the code from the authenticator app (or a recovery code).
+    Route::get('two-factor', [TwoFactorChallengeController::class, 'create'])->name('two-factor.challenge');
+    Route::post('two-factor', [TwoFactorChallengeController::class, 'store'])
+        ->middleware('throttle:20,1')
+        ->name('two-factor.challenge.store');
 });
 
 Route::post('logout', [LoginController::class, 'destroy'])
@@ -65,6 +73,13 @@ Route::post('logout', [LoginController::class, 'destroy'])
 Route::middleware('auth')->group(function () {
     Route::get('password/change', [PasswordChangeController::class, 'edit'])->name('password.change');
     Route::post('password/change', [PasswordChangeController::class, 'update'])->name('password.change.store');
+
+    // Setting up the authenticator app: required, and reachable while
+    // EnsureTwoFactorIsEnabled blocks everything else.
+    Route::get('two-factor/setup', [TwoFactorSetupController::class, 'create'])->name('two-factor.setup');
+    Route::post('two-factor/setup', [TwoFactorSetupController::class, 'store'])
+        ->middleware('throttle:20,1')
+        ->name('two-factor.setup.store');
 });
 
 /*
@@ -88,6 +103,9 @@ Route::middleware('auth')->group(function () {
     // A new set of one-time recovery codes for "Forgot password?".
     Route::post('settings/recovery-codes', [AccountSettingsController::class, 'generateRecoveryCodes'])
         ->name('settings.recovery-codes.generate');
+    // A new phone, or a lost one: forget the authenticator and set it up again.
+    Route::post('settings/two-factor/reset', [AccountSettingsController::class, 'resetTwoFactor'])
+        ->name('settings.two-factor.reset');
 
     // Digitisation: scanning, Align and Verify.
     Route::middleware('can:documents.process')->group(function () {

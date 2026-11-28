@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Enums\RoleSlug;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\TwoFactor;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -31,7 +32,19 @@ class UserFactory extends Factory
             'must_change_password' => false,
             'password_changed_at' => now(),
             'remember_token' => Str::random(10),
+            // Two-factor sign-in is required, so a made-up account has it set up.
+            'two_factor_secret' => fn () => app(TwoFactor::class)->newSecret(),
+            'two_factor_confirmed_at' => now(),
         ];
+    }
+
+    /** No authenticator set up yet: sent to set one up before anything else. */
+    public function withoutTwoFactor(): static
+    {
+        return $this->state(fn () => [
+            'two_factor_secret' => null,
+            'two_factor_confirmed_at' => null,
+        ]);
     }
 
     public function role(RoleSlug $slug): static

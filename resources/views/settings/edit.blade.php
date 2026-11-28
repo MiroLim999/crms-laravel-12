@@ -15,7 +15,7 @@
         .settings-meta { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; }
         .settings-meta__item { display: flex; align-items: center; gap: .4rem; font-size: .8125rem; }
         .settings-meta__item i { opacity: .7; }
-        .recovery-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: .5rem; }
+        .recovery-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: .5rem; }
         .recovery-codes li {
             border: 1px dashed var(--bs-border-color); border-radius: .5rem; padding: .5rem 0;
             text-align: center; font-family: var(--bs-font-monospace); font-size: 1.125rem; letter-spacing: .08em;
@@ -28,7 +28,7 @@
 @endpush
 
 @section('content')
-    <x-page-header title="Account Settings" subtitle="Your name, email, password and recovery codes." />
+    <x-page-header title="Account Settings" subtitle="Your name, email, password, authenticator app and recovery codes." />
 
     {{-- Who is signed in, at a glance. --}}
     <div class="card settings-summary mb-4">
@@ -138,7 +138,46 @@
         </div>
     </div>
 
-    <x-card title="Recovery codes" subtitle="For a forgotten password: each code works once.">
+    <x-card title="Two-factor sign-in" subtitle="Signing in needs your password and a code from the authenticator app." class="mb-4">
+        <x-slot:actions>
+            <span class="badge bg-label-success">On</span>
+        </x-slot:actions>
+
+        <div class="row g-4 align-items-end">
+            <div class="col-lg-6">
+                <p class="mb-0">
+                    Set up{{ $user->two_factor_confirmed_at ? ' '.$user->two_factor_confirmed_at->format('M j, Y') : '' }}.
+                    New phone, or lost this one? Set the app up again: the old phone's codes stop working.
+                    Without the phone, sign in with a recovery code.
+                </p>
+            </div>
+            <div class="col-lg-6">
+                <form method="POST" action="{{ route('settings.two-factor.reset') }}">
+                    @csrf
+                    <label for="two_factor_password" class="form-label">Current password</label>
+                    <div class="d-flex flex-wrap flex-sm-nowrap gap-2">
+                        <div class="input-group input-group-merge form-password-toggle flex-grow-1 @error('two_factor_password') is-invalid @enderror">
+                            <input type="password"
+                                   id="two_factor_password"
+                                   name="two_factor_password"
+                                   class="form-control @error('two_factor_password') is-invalid @enderror"
+                                   required
+                                   autocomplete="current-password">
+                            <span class="input-group-text cursor-pointer" title="Show or hide">
+                                <i class="icon-base bx bx-hide" aria-hidden="true"></i>
+                            </span>
+                        </div>
+                        <button type="submit" class="btn btn-outline-primary text-nowrap">Set up on a new phone</button>
+                    </div>
+                    @error('two_factor_password')
+                        <div class="invalid-feedback d-block">{{ $message }}</div>
+                    @enderror
+                </form>
+            </div>
+        </div>
+    </x-card>
+
+    <x-card title="Recovery codes" subtitle="For a forgotten password or a lost phone: each code works once.">
         <x-slot:actions>
             <span class="badge bg-label-{{ $codeTone }}">
                 {{ $codesMade ? "{$codesLeft} of {$codeTotal} left" : 'None yet' }}

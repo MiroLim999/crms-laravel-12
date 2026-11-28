@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Services\AuditLogger;
+use App\Services\SignIn;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -18,7 +19,7 @@ use Illuminate\View\View;
  */
 class LoginController extends Controller
 {
-    public function __construct(private readonly AuditLogger $audit) {}
+    public function __construct(private readonly AuditLogger $audit, private readonly SignIn $signIn) {}
 
     public function create(): View
     {
@@ -27,22 +28,20 @@ class LoginController extends Controller
 
     public function store(LoginRequest $request): RedirectResponse
     {
-        $request->authenticate();
-        $request->session()->regenerate();
+        $user = $request->authenticate();
+        $remember = $request->boolean('remember');
 
-        $user = $request->user();
+        // The password was right; with an authenticator set up, its code comes next.
+        if ($user->hasTwoFactor()) {
+            SignIn::await($request, $user, $remember);
 
-        $user->forceFill(['last_login_at' => now()])->save();
-
-        $this->audit->log('auth.login', $user, description: 'Signed in.');
-
-        if ($user->must_change_password) {
-            return redirect()
-                ->route('password.change')
-                ->with('warning', 'Choose your own password before you start.');
+            return redirect()->route('two-factor.challenge');
         }
 
-        return redirect()->intended(route('dashboard'));
+        // Not set up yet (an account from before two-factor sign-in, or one whose
+        // authenticator was reset): signed in, and EnsureTwoFactorIsEnabled sends
+        // it to set one up before anything else.
+        return $this->signIn->complete($request, $user, $remember);
     }
 
     public function destroy(Request $request): RedirectResponse

@@ -99,6 +99,9 @@ x-app: &app
     # localhost:8080 and a Windows setup on localhost:8000 would share the login
     # cookie, and signing in to one would sign you out of the other.
     SESSION_COOKIE: crms_docker_session
+    # Signed out after 30 minutes without a click, so a PC left unattended does
+    # not stay signed in for long (Laravel's default is 120).
+    SESSION_LIFETIME: "30"
     # The Set up CRMS page normally opens only on the CRMS computer itself. Inside
     # Docker every request comes from Docker's network, never 127.0.0.1, so the
     # address check is off here. The page asks for a one-time setup token
