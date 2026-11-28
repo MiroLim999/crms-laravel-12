@@ -1631,6 +1631,31 @@ def _row_frame(rules, x):
     return ys[:-1], np.diff(ys)
 
 
+def _band_row(y, x, rules):
+    """The row whose two grid lines enclose height y at x, or None outside the table.
+
+    The grid the user aligned is the last word: writing that sits away from
+    where this page's writing usually sits (on or across a printed rule) still
+    goes in the row its middle is drawn in, instead of being left for the
+    reviewer to place.
+    """
+    tops, heights = _row_frame(rules, x)
+    if len(tops) == 0:
+        return None
+    k = int(np.searchsorted(tops + heights, y))
+    if 0 <= k < len(tops) and tops[k] <= y <= tops[k] + heights[k]:
+        return k
+    return None
+
+
+def _writing_middle(line):
+    """Half way down a line's writing (its outline when it has one, else a little above its baseline)."""
+    ys = [float(point[1]) for part in (line.parts or []) for point in np.asarray(part).reshape(-1, 2)]
+    if ys:
+        return (min(ys) + max(ys)) / 2
+    return line.y
+
+
 def _writing_offset(lines, rules):
     """Where in a row this page's writing usually sits, as a fraction of it.
 
@@ -1696,18 +1721,34 @@ def _assign_rows(lines, rules, offset):
     for i in range(len(lines) - 1, -1, -1):
         lines[i].row = r
         lines[i].row_distance = math.sqrt(cost[i, r])
-        if lines[i].row_distance > NO_ROW_DISTANCE:
-            lines[i].flags.append(FLAG_NO_ROW)
         r = int(back[i, r]) if i > 0 else r
 
+    # Far from where this page's writing usually sits (on or across a rule): the
+    # grid decides, the row its writing's middle is drawn in. Only writing
+    # outside every row is left without one.
+    for line in lines:
+        if line.row_distance <= NO_ROW_DISTANCE:
+            continue
+        band = _band_row(_writing_middle(line), line.cx, rules)
+        if band is None:
+            line.flags.append(FLAG_NO_ROW)
+        else:
+            line.row = band
 
-def _nearest_row(y, x, rules, offset):
-    """Row for a single outline (manual corrections), or None if between rows."""
+
+def _nearest_row(y, x, rules, offset, middle=None):
+    """Row for a single outline (manual corrections), or None outside the table.
+
+    Away from where writing usually sits, the row whose grid lines enclose
+    `middle` (the writing's middle; `y` when not given) is used.
+    """
     tops, heights = _row_frame(rules, x)
     expected = tops + offset * heights
     distances = np.abs(y - expected) / np.maximum(heights, 1.0)
     r = int(np.argmin(distances))
-    return (None if distances[r] > NO_ROW_DISTANCE else r), float(distances[r])
+    if distances[r] > NO_ROW_DISTANCE:
+        return _band_row(y if middle is None else middle, x, rules), float(distances[r])
+    return r, float(distances[r])
 
 
 def _rows_do_not_fit(written, rules, row_height):
@@ -2764,7 +2805,7 @@ def place_outline(polygon, lines_json):
     base_y = min(ys) + 0.7 * (max(ys) - min(ys))
     cx = (min(xs) + max(xs)) / 2
     column = _column_at(cx, base_y, columns)
-    row, _ = _nearest_row(base_y, cx, rules, grid["offset"])
+    row, _ = _nearest_row(base_y, cx, rules, grid["offset"], middle=(min(ys) + max(ys)) / 2)
     flags = [] if row is not None else [FLAG_NO_ROW]
     return column, (None if row is None else row + 1), flags
 

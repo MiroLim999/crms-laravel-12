@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    columnsSideBySide,
     addColumn,
     addColumnWhereRoom,
     clampRuledY,
     columnBand,
+    columnsOnLines,
     distributeRuledYs,
     fieldsOverLedger,
     fieldsToColumns,
@@ -430,4 +432,70 @@ test('after a missed row is added, the other fields on it merge into their colum
     assert.equal(result.added, 0);
     assert.deepEqual(result.ys, ys);
     assert.deepEqual(result.boxes.map((box) => box.kind), ['column', 'column']);
+});
+
+test('columns sit on the first and last row lines where a tilted line crosses them', () => {
+    const column = (x) => ({ kind: 'column', name: `c${x}`, x, y: 0.2, w: 0.1, h: 0.6 });
+    const boxes = [column(0.1), column(0.8), { kind: 'field', name: 'date', x: 0.1, y: 0.05, w: 0.2, h: 0.05 }];
+    const ys = [0.21, 0.5, 0.79];
+    // The first line slopes down 1° to the right (on a square page), the others are level.
+    const fitted = columnsOnLines(boxes, ys, [1, 0, 0], 1);
+    const slope = Math.tan(Math.PI / 180);
+    assert.ok(Math.abs(fitted[0].y - (0.21 + slope * (0.15 - 0.5))) < 1e-4);
+    assert.ok(Math.abs(fitted[1].y - (0.21 + slope * (0.85 - 0.5))) < 1e-4);
+    assert.ok(fitted[1].y > fitted[0].y);
+    assert.ok(Math.abs(fitted[0].y + fitted[0].h - 0.79) < 1e-4);
+    // A field is not a column: left alone.
+    assert.equal(fitted[2], boxes[2]);
+    // On the lines already: nothing changes.
+    assert.equal(columnsOnLines(fitted, ys, [1, 0, 0], 1), fitted);
+    // A column set well apart from the lines (more than a row away) stays where it is.
+    const apart = [{ ...column(0.1), y: 0.02, h: 0.9 }];
+    const rows = [0.3, 0.35, 0.4, 0.45, 0.5];
+    assert.equal(columnsOnLines(apart, rows, rows.map(() => 0), 1), apart);
+});
+
+test('a bent line is followed too: the column top is the middle of its bent ends', () => {
+    const boxes = [{ kind: 'column', name: 'a', x: 0.2, y: 0.2, w: 0.2, h: 0.6 }];
+    const fitted = columnsOnLines(boxes, [0.2, 0.8], [0, 0], 1, [[[0.01, 0.03]], null]);
+    assert.ok(Math.abs(fitted[0].y - 0.22) < 1e-4);
+    assert.ok(Math.abs(fitted[0].y + fitted[0].h - 0.8) < 1e-4);
+});
+
+test('Align lines every column up on the first and last row lines, however far off it was', () => {
+    const boxes = [
+        { kind: 'column', name: 'A', x: 0.1, y: 0.05, w: 0.2, h: 0.9 },
+        { kind: 'column', name: 'B', x: 0.3, y: 0.2, w: 0.2, h: 0.5 },
+    ];
+    const ys = [0.3, 0.35, 0.4, 0.45, 0.5];
+    // Further off than a row: left alone unless asked.
+    assert.equal(columnsOnLines(boxes, ys), boxes);
+    const tidy = columnsOnLines(boxes, ys, [], 1, null, { always: true });
+    tidy.forEach((box) => {
+        assert.ok(Math.abs(box.y - 0.3) < 1e-6);
+        assert.ok(Math.abs(box.y + box.h - 0.5) < 1e-6);
+    });
+});
+
+test('overlapping neighbour columns meet half way; a sliver of a gap closes; a real gap stays', () => {
+    const boxes = [
+        { kind: 'column', name: 'A', x: 0.10, y: 0.1, w: 0.22, h: 0.8 },
+        { kind: 'column', name: 'B', x: 0.30, y: 0.1, w: 0.20, h: 0.8 },
+        { kind: 'column', name: 'C', x: 0.503, y: 0.1, w: 0.1, h: 0.8 },
+        { kind: 'column', name: 'D', x: 0.70, y: 0.1, w: 0.1, h: 0.8 },
+        { kind: 'field', name: 'Year', x: 0.2, y: 0.0, w: 0.5, h: 0.05 },
+    ];
+    const next = columnsSideBySide(boxes);
+    const [a, b, c, d, field] = next;
+    // A and B overlapped by 0.02: they share the middle, 0.31.
+    assert.ok(Math.abs(a.x + a.w - 0.31) < 1e-6);
+    assert.ok(Math.abs(b.x - 0.31) < 1e-6);
+    assert.ok(Math.abs(b.x + b.w - 0.5) < 1e-6 || Math.abs(b.x + b.w - c.x) < 1e-6);
+    // B and C: a 0.003 sliver closed.
+    assert.ok(Math.abs(b.x + b.w - c.x) < 1e-6);
+    // C and D: a real gap (a column left out) stays.
+    assert.ok(Math.abs(d.x - 0.70) < 1e-6);
+    assert.equal(field, boxes[4]);
+    // Already side by side: nothing moves.
+    assert.equal(columnsSideBySide(next), next);
 });

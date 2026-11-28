@@ -22,6 +22,10 @@
                             <div class="batch-queue-banner__top">
                                 {{-- What to do now, and how far the batch is: "Align each page · 3 of 36 queued". --}}
                                 <div class="batch-queue-banner__info">
+                                    {{-- Shown in Check & Save only (the bar is its own card there). --}}
+                                    <span class="batch-queue-banner__icon" aria-hidden="true">
+                                        <i class="icon-base bx bx-check-shield"></i>
+                                    </span>
                                     <strong class="batch-queue-banner__heading" id="batchQueuePhaseTitle">Preparing the batch</strong>
                                     <span class="batch-queue-banner__sub" id="batchQueueCounter"></span>
                                 </div>
@@ -603,9 +607,9 @@
                         <i class="icon-base bx bx-scan icon-sm me-1"></i> <span id="scanNowBtnLabel">Scan with OCR</span>
                     </button>
                     {{-- A page sent back from Verify: keep the reading it had and go back to Verify. --}}
-                    <button class="btn btn-label-secondary d-none" type="button" id="cancelRealignBtn"
+                    <button class="btn btn-outline-secondary btn-lg d-none" type="button" id="cancelRealignBtn"
                         title="Keep the reading this page had and go back to Check &amp; Save">
-                        <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>Cancel re-align
+                        <i class="icon-base bx bx-undo icon-sm" aria-hidden="true"></i><span>Cancel re-align</span>
                     </button>
                 </div>
             </div>
@@ -992,6 +996,9 @@
                             @include('records.partials.review-add-column')
                         </div>
                     </header>
+
+                    {{-- Writing that could not be placed in a row (no person yet): placed here, then it has a cell. --}}
+                    <div class="review-unplaced d-none" id="reviewUnplaced" role="status"></div>
 
                     {{-- The picked cell's handwriting: the crop TrOCR read, what it read, its tools and its Checked tick. --}}
                     <div class="review-inspector d-none" id="reviewInspector" aria-live="polite"></div>
@@ -1594,6 +1601,8 @@
             columnBand,
             fieldsToColumns,
             fitBends,
+            columnsOnLines,
+            columnsSideBySide,
             fitTilts,
             followFirstAndLastLine,
             gridTilt,
@@ -1794,6 +1803,8 @@
         // next scan and saved with the record as fields with no outline.
         let reviewing = false;
         let reviewTable = null;
+        // Align: the columns' places and sizes when last seen (handleMarkerChange tidies them only when these change).
+        let lastColumnsShape = '';
         // Check & Save: Save was pressed once with values not checked yet (the second press saves).
         let reviewSaveUnchecked = false;
         // The cell shown above the table (see renderReviewInspector) and its fields' rows.
@@ -2751,8 +2762,40 @@
             currentFieldSnapshot = next;
         }
 
+        /**
+         * The columns' tops and bottoms on the first and last row lines where those
+         * cross them (a tilted or bent line too). Part of the change that called it.
+         */
+        const columnsShape = (boxes) => JSON.stringify(ledgerColumns(boxes)
+            .map((box) => [box.x, box.y, box.w, box.h, Number(box.angle) || 0].map((value) => Math.round(value * 100000))));
+
+        function keepColumnsOnLines({ tidy = false } = {}) {
+            if (!isLedger) return false;
+            const boxes = marker.toJSON();
+            const table = gridTilt(ledgerColumns(boxes));
+            const angles = gridRows.map((_, index) => table + (Number(rowTilts[index]) || 0));
+            // `tidy` (a column moved or resized by hand): every column onto the first and
+            // last lines however far off, and neighbours that overlap meet on one edge.
+            const onLines = columnsOnLines(boxes, gridRows, angles, pageAspect(),
+                fitBends(rowBends, gridRows.length, bendColumns(boxes).length), { always: tidy });
+            const fitted = tidy ? columnsSideBySide(onLines) : onLines;
+            if (fitted === boxes) return false;
+            const selected = marker.selectedIndexes();
+            const row = selectedRow;
+            settingGrid = true;
+            try {
+                marker.setBoxes(cloneBoxes(fitted));
+            } finally {
+                settingGrid = false;
+            }
+            marker.selectIndexes(selected);
+            selectedRow = row;
+            return true;
+        }
+
         /** After the row lines alone changed. */
         function rowsChanged() {
+            keepColumnsOnLines();
             recordGridChange();
             renderRows();
             updateGridCard();
@@ -2796,6 +2839,7 @@
                 settingGrid = false;
             }
             selectedRow = selected;
+            keepColumnsOnLines();
             renderRows();
             updateGridCard();
         }
@@ -3270,6 +3314,14 @@
             // The rows go with the table, unless they were just set with the markers.
             if (settingGrid) rememberBand(boxes);
             else followColumns(boxes);
+            // A column moved or resized by hand: the columns line up on the first and
+            // last row lines and side by side (no overlap). Setting them runs this again,
+            // as part of the same change (one undo step).
+            // Only when a column's place or size changed (not a field renamed: its box keeps focus).
+            const columnsNow = columnsShape(boxes);
+            const columnsMoved = columnsNow !== lastColumnsShape;
+            lastColumnsShape = columnsNow;
+            if (!settingGrid && columnsMoved && isLedger && gridRows.length >= 2 && keepColumnsOnLines({ tidy: true })) return;
 
             recordGridChange();
             renderFieldList(boxes);
@@ -5680,7 +5732,7 @@
                 if (phaseTitle) {
                     phaseTitle.textContent = phase === 'done' && !batchFinishing ? 'Batch complete'
                         : batchFinishing ? (allSaved ? 'Batch saved' : 'Saving the batch')
-                            : (activeStep === 'review' ? 'Review & save' : 'Verify each record');
+                            : 'Check & save';
                 }
                 // Saving the Done records: which one is being saved, and how many are.
                 const savedRecords = records.filter(recordDone).length;
@@ -10756,6 +10808,9 @@
                 estimated: (payload.rows?.estimated ?? []).filter((index) => rows[index] !== undefined)
                     .map((index) => rowKey(rows[index])),
             });
+            // The columns' tops and bottoms on the page's first and last row lines, as they
+            // slope, and side by side (no overlap).
+            keepColumnsOnLines({ tidy: true });
             // The fields Snap placed are the new starting point; the ones kept stay as placed by hand.
             rememberAutoFields(snapped, kept);
             if (keptBoxes.size > 0) {
@@ -14986,6 +15041,8 @@
             const people = reviewModel.rows.length;
             const pages = docEntries().length;
             const unchecked = uncheckedReviewValues();
+            const unplaced = (validationGroups.find((group) => group.id === 'needs-review')?.indexes ?? [])
+                .filter((index) => !cropped[index]?.cropDeleted).length;
             const leftOut = reviewModel.rows.filter((row) => !reviewRowKept(row)).length;
             // A register's table: its own columns (scanned columns no field takes are not saved).
             const savedColumns = reviewModel.columns.filter((column) => !column.noExport).length;
@@ -14993,6 +15050,7 @@
                 + `${savedColumns} column${savedColumns === 1 ? '' : 's'}`
                 + (pages > 1 ? ` · ${pages} pages` : '')
                 + (unchecked > 0 ? ` · ${unchecked} to check (greyed)` : '')
+                + (unplaced > 0 ? ` · ${unplaced} need a row` : '')
                 + (leftOut > 0 ? ` · ${leftOut} row${leftOut === 1 ? '' : 's'} with nothing checked (not saved)` : '');
         }
 
@@ -15143,6 +15201,7 @@
             reviewSaveUnchecked = false;
             inspectorKey = null;
             reviewTable.render(reviewModel);
+            renderUnplacedFields();
             updateVerificationSummary();
             // Start on the first cell, without zooming the scan.
             if (reviewModel.rows.length > 0 && reviewModel.columns.length > 0) reviewTable.select(0, 0, { locate: false });
@@ -15194,6 +15253,75 @@
             setAllVerified(checked);
         });
 
+
+        // ------------------------------------------- fields that need a row
+        // Writing the reader could not place in a row (it crosses a row line, or
+        // sits between rows) belongs to no person yet, so it has no cell. Listed
+        // above the table with its crop, what was read, and Verify's own Person /
+        // Column choices (lent from its row); once placed, the table is drawn again.
+        const unplacedLent = new WeakMap();
+
+        function renderUnplacedFields() {
+            const box = el('reviewUnplaced');
+            if (!box || !reviewing) return;
+            const group = validationGroups.find((candidate) => candidate.id === 'needs-review');
+            const indexes = (group?.indexes ?? []).filter((index) => !cropped[index]?.cropDeleted);
+            box.replaceChildren();
+            box.classList.toggle('d-none', indexes.length === 0);
+            if (indexes.length === 0) return;
+
+            const head = document.createElement('div');
+            head.className = 'review-unplaced__head';
+            head.innerHTML = '<i class="icon-base bx bx-error-circle" aria-hidden="true"></i>';
+            const title = document.createElement('span');
+            title.innerHTML = `<strong>${indexes.length} ${indexes.length === 1 ? 'field needs' : 'fields need'} a row</strong>`
+                + ' · the writing crosses a row line, so its person is not known. Choose the Person (and Column) to put it in the table.';
+            head.append(title);
+            box.append(head);
+
+            const list = document.createElement('div');
+            list.className = 'review-unplaced__list';
+            indexes.forEach((index) => {
+                const row = validationRow(index);
+                if (!(row instanceof HTMLElement)) return;
+                const item = document.createElement('div');
+                item.className = 'review-unplaced__item';
+
+                const crop = row.querySelector('img.validation-field__crop');
+                if (crop instanceof HTMLImageElement && crop.getAttribute('src')) {
+                    const frame = document.createElement('button');
+                    frame.type = 'button';
+                    frame.className = 'review-unplaced__crop';
+                    frame.title = 'Show it on the page (double-click to enlarge)';
+                    const picture = document.createElement('img');
+                    picture.src = crop.src;
+                    picture.alt = crop.alt;
+                    frame.append(picture);
+                    frame.addEventListener('click', () => activateValidationField(index, 'row'));
+                    frame.addEventListener('dblclick', () => crop.click());
+                    item.append(frame);
+                }
+
+                const body = document.createElement('div');
+                body.className = 'review-unplaced__body';
+                const read = document.createElement('span');
+                read.className = 'review-unplaced__reading';
+                const words = document.createElement('b');
+                words.textContent = row.querySelector('.validation-field__reading-text span')?.textContent.trim() || '(nothing read)';
+                read.append('Read: ', words);
+                body.append(read);
+                // Verify's Person / Column (and Remove) for this field.
+                const place = row.querySelector('.validation-field__place') ?? unplacedLent.get(row);
+                if (place) {
+                    unplacedLent.set(row, place);
+                    body.append(place);
+                }
+                item.append(body);
+                list.append(item);
+            });
+            box.append(list);
+        }
+
         // ------------------------------------------- the picked cell's handwriting
         // Above the table: the exact crop TrOCR read for the picked cell, what it
         // read and how sure it was, Verify's own tools for that field (Adjust
@@ -15211,6 +15339,7 @@
             }));
             inspectorKey = null;
             reviewTable.render(reviewModel);
+            renderUnplacedFields();
             updateReviewSummary();
         }
 
@@ -15266,23 +15395,9 @@
             part.className = 'review-inspector__field';
             part.dataset.fieldIndex = String(index);
 
-            const crop = row.querySelector('img.validation-field__crop');
-            if (crop instanceof HTMLImageElement && crop.getAttribute('src')) {
-                const frame = document.createElement('button');
-                frame.type = 'button';
-                frame.className = 'review-inspector__crop';
-                frame.title = 'Click to enlarge the exact image TrOCR read';
-                frame.setAttribute('aria-label', crop.getAttribute('aria-label') ?? 'Enlarge the crop');
-                const picture = document.createElement('img');
-                picture.src = crop.src;
-                picture.alt = crop.alt;
-                const zoom = document.createElement('span');
-                zoom.className = 'review-inspector__zoom';
-                zoom.innerHTML = '<i class="icon-base bx bx-search" aria-hidden="true"></i>';
-                frame.append(picture, zoom);
-                frame.addEventListener('click', () => crop.click());
-                part.append(frame);
-            } else if (cropped[index]?.cropDeleted) {
+            // The writing itself is on the page beside the table (zoomed in on, with its
+            // outline): not repeated here. A deleted crop says so.
+            if (cropped[index]?.cropDeleted) {
                 const gone = document.createElement('span');
                 gone.className = 'review-inspector__crop is-deleted';
                 gone.innerHTML = '<i class="icon-base bx bx-trash" aria-hidden="true"></i>Crop deleted';
@@ -15318,7 +15433,9 @@
             // Verify's own buttons for this field, pressed from here.
             const tools = document.createElement('div');
             tools.className = 'review-inspector__actions';
-            ['.validation-field__adjust:not(.validation-field__delete-crop)', '.validation-field__delete-crop', '.validation-field__draw-again']
+            // Adjust outline and Delete crop are not offered here (the reviewer checks
+            // values in the table); a crop deleted earlier can still be drawn again.
+            ['.validation-field__draw-again']
                 .map((selector) => row.querySelector(selector))
                 .filter((button) => button instanceof HTMLButtonElement)
                 .forEach((button) => {

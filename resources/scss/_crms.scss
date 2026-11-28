@@ -9,6 +9,42 @@
   --crms-brand-font-family: 'Rubik', 'IBM Plex Sans', sans-serif;
 }
 
+// Muted text (hints, "Keep it", counts like "0 of 1 record saved"): the theme's
+// #a7acb2 is too light to read on white (about 2.2:1). This grey is about 5.6:1,
+// readable and still clearly secondary. Light theme only; dark mode keeps its own.
+:root:not([data-bs-theme="dark"]),
+[data-bs-theme="light"] {
+  --bs-secondary-color: #5f6873;
+  --bs-secondary-color-rgb: 95, 104, 115;
+}
+
+// The quiet button (Keep it, Discard, Cancel…): the theme never defined it, so it
+// showed pale. Dark grey text on a light grey fill, darker on hover.
+.btn.btn-label-secondary {
+  --bs-btn-color: #3f4954;
+  --bs-btn-bg: rgba(var(--crms-ink-rgb, 56, 69, 81), .07);
+  --bs-btn-border-color: transparent;
+  --bs-btn-hover-color: #262f38;
+  --bs-btn-hover-bg: rgba(var(--crms-ink-rgb, 56, 69, 81), .13);
+  --bs-btn-hover-border-color: transparent;
+  --bs-btn-active-color: #262f38;
+  --bs-btn-active-bg: rgba(var(--crms-ink-rgb, 56, 69, 81), .18);
+  --bs-btn-active-border-color: transparent;
+  --bs-btn-disabled-color: var(--bs-secondary-color);
+  --bs-btn-disabled-bg: rgba(var(--crms-ink-rgb, 56, 69, 81), .05);
+  --bs-btn-disabled-border-color: transparent;
+  font-weight: 500;
+}
+
+[data-bs-theme="dark"] .btn.btn-label-secondary {
+  --bs-btn-color: #d7d8e6;
+  --bs-btn-bg: rgba(255, 255, 255, .08);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: rgba(255, 255, 255, .14);
+  --bs-btn-active-color: #fff;
+  --bs-btn-active-bg: rgba(255, 255, 255, .18);
+}
+
 // Brand name and big letter headings use Rubik just like the reference picture
 .app-brand-text,
 .sidebar-brand__name,
@@ -2051,14 +2087,68 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   }
 }
 
-// Verify and Review & Export: the bar is its own short card above both panes.
+// The bar's icon: only in Check & Save, where the bar is a card of its own.
+.batch-queue-banner__icon {
+  display: none;
+}
+
+// Check & Save: the bar is its own short card above both panes: an icon, what
+// to do ("Check & save"), which record of how many as a badge, the file on the right.
 .batch-queue-banner.is-standalone {
   margin-block-end: 1rem;
-  border-radius: .65rem;
-  box-shadow: var(--bs-card-box-shadow, 0 .125rem .5rem rgba(var(--crms-shadow-rgb), .12));
+  border: 1px solid var(--bs-border-color);
+  border-radius: .75rem;
+  box-shadow: 0 1px 2px rgba(var(--crms-ink-rgb), .05);
 
   .batch-queue-banner__body {
-    padding: .5rem .9rem;
+    padding: .5rem .75rem .5rem .625rem;
+  }
+
+  .batch-queue-banner__info {
+    align-items: center;
+    gap: .625rem;
+  }
+
+  .batch-queue-banner__icon {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    inline-size: 2rem;
+    block-size: 2rem;
+    border-radius: .5rem;
+    color: var(--bs-primary);
+    background: rgba(var(--bs-primary-rgb), .1);
+    font-size: 1.125rem;
+  }
+
+  [data-phase="done"] & .batch-queue-banner__icon,
+  &[data-phase="done"] .batch-queue-banner__icon {
+    color: var(--bs-success);
+    background: rgba(var(--bs-success-rgb), .12);
+  }
+
+  .batch-queue-banner__heading {
+    font-size: .9375rem;
+  }
+
+  // "Record 1 of 1 · 0 done" as a quiet badge.
+  .batch-queue-banner__sub:not(:empty) {
+    padding: .1875rem .625rem;
+    border-radius: 999px;
+    color: var(--bs-body-color);
+    background: rgba(var(--crms-ink-rgb), .05);
+    font-size: .75rem;
+    font-weight: 500;
+
+    &::before {
+      content: none;
+    }
+  }
+
+  .batch-queue-toggle {
+    border: 1px solid var(--bs-border-color);
+    background: var(--bs-paper-bg);
   }
 
   // The line stays inside the rounded corners.
@@ -3633,6 +3723,23 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   flex: 0 0 auto;
 }
 
+// Re-align: Cancel re-align sits under the blue button as its equal, outlined,
+// the same height and type, icon and words centred (not loose text).
+#cancelRealignBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding-inline: .9rem;
+  font-size: 1rem;
+  line-height: 1.2;
+  background: var(--bs-paper-bg);
+
+  &.d-none {
+    display: none;
+  }
+}
+
 // Align: Save / Save Both / Scan stay in sight at the foot of the side panel
 // while the field list scrolls under them. A short panel puts them at its foot too.
 #step-mark .field-marker-actions {
@@ -4486,6 +4593,35 @@ html.layout-menu-collapsed .global-sidebar-toggle .bx-chevron-left {
   background-color: transparent;
   box-shadow: none;
   transform: none;
+  transition: none;
+}
+
+// The × stays where it is: the theme slides it up and right on hover and focus
+// (a dialog's × takes focus as it opens), which took it out of the corner.
+.modal .leave-scan-modal > .btn-close,
+.modal .batch-resume-modal > .btn-close {
+  &:hover,
+  &:focus,
+  &:focus-visible,
+  &:active {
+    transform: none;
+  }
+}
+
+// Every other dialog's × keeps its resting place on hover and focus too.
+.modal .btn-close:hover,
+.modal .btn-close:focus,
+.modal .btn-close:active {
+  transform: translate(23px, -25px);
+}
+
+.modal .modal-fullscreen .btn-close,
+.modal.modal-top .btn-close {
+  &:hover,
+  &:focus,
+  &:active {
+    transform: translate(0, 0);
+  }
 }
 
 // The end of a batch, in step 4's place: a card like the Records table one
@@ -12627,6 +12763,193 @@ $dashboard-reveal-step: 40ms;
   &:has(.form-check-input:disabled) {
     opacity: .55;
     cursor: default;
+  }
+}
+
+// Check & Save's strip, compact: one short band above the table, so the table
+// keeps the height. Crop, then the name with its reading and tools on two lines,
+// then the Checked pill.
+.review-pane .review-inspector {
+  gap: .75rem;
+  margin: .5rem .75rem;
+  padding: .375rem .625rem;
+  border-radius: .625rem;
+  box-shadow: 0 1px 2px rgba(var(--crms-ink-rgb), .05);
+}
+
+.review-pane .review-inspector__fields {
+  gap: .375rem;
+}
+
+.review-pane .review-inspector__field {
+  gap: .75rem;
+}
+
+.review-pane .review-inspector__crop {
+  inline-size: auto;
+  max-inline-size: 30%;
+  block-size: 2.25rem;
+  padding: .125rem;
+  border-radius: .375rem;
+}
+
+.review-pane .review-inspector__body {
+  flex-flow: row wrap;
+  align-items: center;
+  gap: .125rem .625rem;
+  font-size: .75rem;
+}
+
+.review-pane .review-inspector__title strong {
+  font-size: .8125rem;
+}
+
+// The name and the reading share the first line; the tools take the second.
+.review-pane .review-inspector__reading {
+  flex: 1 1 8rem;
+  min-inline-size: 0;
+}
+
+.review-pane .review-inspector__warn {
+  flex-basis: 100%;
+}
+
+.review-pane .review-inspector__actions {
+  flex: 1 0 100%;
+  flex-wrap: nowrap;
+  gap: .375rem;
+  margin: 0;
+}
+
+.review-pane .review-inspector__tool {
+  // Plain text links: no chip behind them.
+  padding: 0;
+  border: 0;
+  background: none;
+  white-space: nowrap;
+
+  &:hover,
+  &:focus-visible {
+    border: 0;
+    background: none;
+    text-decoration: underline;
+  }
+
+  &.is-danger:hover,
+  &.is-danger:focus-visible {
+    background: none;
+  }
+}
+
+.review-pane .review-inspector__actions {
+  gap: .875rem;
+}
+
+.review-pane .review-inspector__check {
+  gap: .375rem;
+  padding: .25rem .625rem;
+  font-size: .75rem;
+
+  .form-check-input {
+    inline-size: 1rem;
+    block-size: 1rem;
+  }
+}
+
+.review-pane .review-inspector__note {
+  font-size: .75rem;
+}
+
+// Check & Save: writing that could not be placed in a row, above the table.
+.review-unplaced {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  margin: .75rem 1rem 0;
+  padding: .625rem .875rem;
+  border: 1px solid rgba(var(--bs-danger-rgb), .35);
+  border-radius: .75rem;
+  background: rgba(var(--bs-danger-rgb), .04);
+  font-size: .8125rem;
+}
+
+.review-unplaced__head {
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  color: var(--bs-body-color);
+
+  .icon-base {
+    flex: none;
+    color: var(--bs-danger);
+    font-size: 1.125rem;
+  }
+
+  strong {
+    color: var(--bs-danger-text-emphasis);
+  }
+}
+
+.review-unplaced__list {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  max-block-size: 12rem;
+  overflow-y: auto;
+}
+
+.review-unplaced__item {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .375rem .5rem;
+  border-radius: .5rem;
+  background: var(--bs-paper-bg);
+}
+
+.review-unplaced__crop {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  inline-size: 9rem;
+  block-size: 2.75rem;
+  padding: .125rem;
+  overflow: hidden;
+  border: 1px solid rgba(var(--crms-ink-rgb), .12);
+  border-radius: .375rem;
+  background: #f6efe1;
+  cursor: pointer;
+
+  img {
+    max-inline-size: 100%;
+    max-block-size: 100%;
+    object-fit: contain;
+    mix-blend-mode: multiply;
+  }
+}
+
+.review-unplaced__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: .25rem;
+  min-inline-size: 0;
+
+  .validation-field__place {
+    margin: 0;
+  }
+}
+
+.review-unplaced__reading {
+  overflow: hidden;
+  color: var(--bs-secondary-color);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  b {
+    color: var(--bs-body-color);
+    font-weight: 500;
   }
 }
 

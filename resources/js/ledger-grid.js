@@ -298,6 +298,91 @@ export function followFirstAndLastLine(boxes, before, after, attached = ATTACHED
 }
 
 /**
+ * Each column's top and bottom on the first and last row lines where they
+ * cross it, so the table's frame follows a tilted (or bent) line instead of
+ * staying flat above or below it. Only a column already within a row's height
+ * of a line is moved onto it; one set apart on purpose is left alone.
+ *
+ * @param {object[]} boxes   Every marker.
+ * @param {number[]} ys      The row lines, top to bottom (held at x = 0.5).
+ * @param {number[]} angles  Each line's tilt in degrees (the table's and its own).
+ * @param {number}   aspect  The page's width over its height in pixels.
+ * @param {Array}    bends   Per line, per column (left to right): [left, right] end shifts.
+ * @returns {object[]} the same array when nothing moves
+ */
+export function columnsOnLines(boxes, ys, angles = [], aspect = 1, bends = null, { always = false } = {}) {
+    if (ys.length < 2) return boxes;
+    const columns = boxes.filter(isColumn);
+    if (columns.length === 0) return boxes;
+    // `always`: every column goes onto the lines, however far off it was (Align's tidy-up).
+    const reach = always ? Infinity : (typicalGap(ys) || 0.02);
+    const order = [...columns].sort((a, b) => a.x - b.x);
+    const last = ys.length - 1;
+    const bendAt = (line, column, side) => {
+        const raw = bends?.[line]?.[column];
+        if (Array.isArray(raw)) return Number(raw[side]) || 0;
+        return side === 0 ? Number(raw) || 0 : 0;
+    };
+    // The line's height across the column: the middle of its left and right ends.
+    const lineAt = (line, column, box) => {
+        const angle = Number(angles[line]) || 0;
+        const left = rowLineY(ys[line], box.x, angle, aspect) + bendAt(line, column, 0);
+        const right = rowLineY(ys[line], box.x + box.w, angle, aspect) + bendAt(line, column, 1);
+        return (left + right) / 2;
+    };
+
+    let moved = false;
+    const next = boxes.map((box) => {
+        if (!isColumn(box)) return box;
+        const column = order.indexOf(box);
+        const top = lineAt(0, column, box);
+        const bottom = lineAt(last, column, box);
+        const newTop = Math.abs(box.y - top) <= reach ? top : box.y;
+        const newBottom = Math.abs(box.y + box.h - bottom) <= reach ? bottom : box.y + box.h;
+        if (newBottom - newTop <= 0.01) return box;
+        if (Math.abs(newTop - box.y) < 1e-5 && Math.abs(newBottom - (box.y + box.h)) < 1e-5) return box;
+        moved = true;
+        const round = (value) => Math.round(value * 100000) / 100000;
+        return { ...box, y: round(newTop), h: round(newBottom - newTop) };
+    });
+    return moved ? next : boxes;
+}
+
+/**
+ * Neighbouring columns that overlap meet half way, and a sliver of a gap between
+ * two (less than `snap` of the page's width) is closed the same way: a printed
+ * ledger's columns share their rules, so no writing is read by two columns or
+ * falls between them. A wider gap (a column left out on purpose) is kept.
+ * Returns the same array when nothing moves.
+ */
+export function columnsSideBySide(boxes, snap = 0.006) {
+    const order = boxes
+        .map((box, index) => ({ box, index }))
+        .filter(({ box }) => isColumn(box))
+        .sort((a, b) => a.box.x - b.box.x);
+    if (order.length < 2) return boxes;
+    const next = boxes.map((box) => (isColumn(box) ? { ...box } : box));
+    const round = (value) => Math.round(value * 100000) / 100000;
+    let moved = false;
+    for (let at = 1; at < order.length; at += 1) {
+        const left = next[order[at - 1].index];
+        const right = next[order[at].index];
+        const leftEdge = left.x + left.w;
+        const gap = right.x - leftEdge;
+        if (Math.abs(gap) < 1e-5 || gap >= snap) continue;
+        const middle = round((leftEdge + right.x) / 2);
+        const rightEnd = right.x + right.w;
+        // Never so far that a column would vanish.
+        if (middle - left.x <= 0.002 || rightEnd - middle <= 0.002) continue;
+        left.w = round(middle - left.x);
+        right.x = middle;
+        right.w = round(rightEnd - middle);
+        moved = true;
+    }
+    return moved ? next : boxes;
+}
+
+/**
  * Fields drawn by hand over table rows merge into the columns. A field over
  * a row the grid missed (above the first line, or under the last) adds that
  * row: a row line goes on its edge and the columns on the first or last line

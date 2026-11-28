@@ -617,10 +617,11 @@ so it can be brought back, but users can no longer reach it. Outlines are fixed 
 ### 4.6 New Document, step 3: Check & Save (checking each value)
 
 Since 28 Nov 2026 the list below is not shown on its own: right after reading, the table of 4.8 opens. Pick a cell and
-the strip above the table shows the exact crop TrOCR read, what it read and its confidence, **Adjust outline**,
-**Delete crop** / **Draw again**, and its **Checked** tick (the person and column are the table's row and column). **Space** checks the picked
-cell (or the picked cells of a column) and goes down a row; **Check all** checks every value. A value not checked is
-greyed and not saved ; one read with low confidence is filled light orange until it is checked. **Add missed field** and
+the page zooms in on its writing, and the strip above the table shows the field's name, what TrOCR read and its
+confidence, and its **Checked** tick (the crop, Adjust outline and Delete crop are not shown there; **Draw again** shows
+only for a crop deleted earlier). **Space** checks the picked cell (or the picked cells of a column) and goes on to the
+next cell to check; **Check all** checks every value. A value not checked is
+greyed and not saved; one read with low confidence is filled light orange until it is checked. **Add missed field** and
 **Group fields** are above the page. **Save** warns once when values are still unchecked; pressing it again saves
 without them. The rest of this section describes the tools as they were in the separate step.
 
@@ -1182,7 +1183,7 @@ For each page:
 | 2. Find the printed table | Finds the printed horizontal and vertical lines and fits the layout's grid onto them (position and scale). A page turned a few degrees is straightened and looked at again when the first look finds no table. Rules that bend are followed, and up to three faint missing rules in a row are filled in. |
 | 3. Find the writing | Kraken finds the baseline and outline of every line of writing. It uses the GPU if there is one and falls back to the CPU. Its ridge filter runs at five sizes side by side (5.8 s → 3.0 s, identical output), and the outlines are traced in 4 processes at once (6.6 s → 2.3 s). |
 | 4. Split at the columns | Kraken often joins neighbouring cells into one line, so lines are split at the column rules, in the gap nearest the rule. |
-| 5. Assign rows | Each line is put in a row according to where writing usually sits in a row on this page. A line too far from any row (more than 0.35 of a row) is flagged `no_row` instead of guessed. |
+| 5. Assign rows | Each line is put in a row according to where writing usually sits in a row on this page. A line far from that spot (more than 0.35 of a row: written on or across a rule) goes in the row whose grid lines enclose the middle of its writing (`_band_row`, since 28 Nov 2026); only a line outside every row is flagged `no_row`. |
 | 6. Give every stroke to one line | A pen stroke that enters a line's core band belongs to that line, even if its capital or tail reaches into the next row. Other lines' strokes, and marks running across the whole page, are cut out of the outline. |
 | 7. Fill gaps | A cell with ink but no detected line (a single letter, an entry number) gets a line built from that ink. |
 | 8. Free text | If a column's writing does not follow the rows at all (a list of diseases under a ledger layout), that column is read as free text, line by line. |
@@ -1735,7 +1736,7 @@ In order of value for the defense and for real use:
 
 | Code | Meaning |
 | :--- | :--- |
-| `no_row` | The line sits between two rows and could not be placed with confidence |
+| `no_row` | The line lies outside every row of the grid (before 28 Nov 2026: also a line far from where the page's writing usually sits) |
 | `shared_cell` | Two or more lines ended up in the same cell |
 | `redraw` | Its crop was deleted in Verify and must be drawn again (or it is left out) |
 
