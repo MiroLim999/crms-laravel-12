@@ -559,7 +559,7 @@ class RecordController extends Controller
 
         return Response::file(
             Storage::disk('local')->path($record->scan_path),
-            ['Content-Type' => $record->scan_mime ?? 'application/octet-stream'],
+            ['Content-Type' => $record->scan_mime ?? 'application/octet-stream', 'X-Content-Type-Options' => 'nosniff'],
         );
     }
 

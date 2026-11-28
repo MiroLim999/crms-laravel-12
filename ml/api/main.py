@@ -559,8 +559,24 @@ def _env_value(name):
     return None
 
 
+def _secret_file_value(name):
+    """A secret from the file named by <name>_FILE (a Docker secret), else None."""
+    path = os.environ.get(f"{name}_FILE")
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read().strip() or None
+    except OSError:
+        raise HTTPException(status_code=503, detail=f"{name}_FILE names a file that cannot be read.")
+
+
 def _upload_secret():
-    secret = _env_value("OCR_UPLOAD_SECRET") or _env_value("APP_KEY")
+    secret = (
+        _secret_file_value("OCR_UPLOAD_SECRET")
+        or _env_value("OCR_UPLOAD_SECRET")
+        or _env_value("APP_KEY")
+    )
     if not secret:
         raise HTTPException(
             status_code=503,
@@ -1034,11 +1050,16 @@ _ALLOWED_MODEL_FILES = {
     "tokenizer.json", "tokenizer_config.json",
     "special_tokens_map.json", "added_tokens.json",
     "vocab.json", "merges.txt", "sentencepiece.bpe.model", "spm.model",
-    "model.safetensors", "pytorch_model.bin", EVALUATION_REPORT_FILE,
+    "model.safetensors", EVALUATION_REPORT_FILE,
 }
-_ALLOWED_MODEL_EXTS = {".json", ".safetensors", ".bin", ".txt", ".model"}
+# No ".bin": pytorch_model.bin is a pickle, and loading a pickle can run code.
+# Uploads must bring safetensors weights, which are plain tensors.
+_ALLOWED_MODEL_EXTS = {".json", ".safetensors", ".txt", ".model"}
 
+# Weights a model already on disk may have (evaluation reports name them).
 _WEIGHT_FILES = {"model.safetensors", "pytorch_model.bin"}
+# Weights an upload may bring.
+_UPLOAD_WEIGHT_FILES = {"model.safetensors"}
 
 
 def _sha256_file(path):
@@ -1340,10 +1361,10 @@ def _extract_model_archive(source, target):
 
     if "config.json" not in saved:
         raise HTTPException(status_code=400, detail="Missing config.json.")
-    if not (_WEIGHT_FILES & set(saved)):
+    if not (_UPLOAD_WEIGHT_FILES & set(saved)):
         raise HTTPException(
             status_code=400,
-            detail="Missing weights (model.safetensors or pytorch_model.bin).",
+            detail="Missing weights (model.safetensors). pytorch_model.bin is not accepted: convert it to safetensors.",
         )
 
     return sorted(saved)
@@ -1363,10 +1384,10 @@ def _save_model_files(uploads, target):
 
     if "config.json" not in incoming:
         raise HTTPException(status_code=400, detail="Missing config.json.")
-    if not (_WEIGHT_FILES & set(incoming)):
+    if not (_UPLOAD_WEIGHT_FILES & set(incoming)):
         raise HTTPException(
             status_code=400,
-            detail="Missing weights (model.safetensors or pytorch_model.bin).",
+            detail="Missing weights (model.safetensors). pytorch_model.bin is not accepted: convert it to safetensors.",
         )
 
     saved = []

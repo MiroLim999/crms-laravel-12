@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\EnsurePasswordIsChanged;
 use App\Http\Middleware\EnsureSetupIsDone;
+use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -22,6 +23,14 @@ return Application::configure(basePath: dirname(__DIR__))
             EnsureSetupIsDone::class,
             EnsurePasswordIsChanged::class,
         ]);
+        $middleware->append(SecurityHeaders::class);
+
+        // Refuse Host headers other than APP_URL's host (and its subdomains) and
+        // config('crms.trusted_hosts'). Laravel skips this in APP_ENV=local and tests.
+        $middleware->trustHosts(at: fn () => array_map(
+            fn (string $host) => '^'.preg_quote($host).'$',
+            config('crms.trusted_hosts'),
+        ));
         // Before the sign-in check: with no account yet, "set up" comes before "sign in".
         $middleware->prependToPriorityList(AuthenticatesRequests::class, EnsureSetupIsDone::class);
 

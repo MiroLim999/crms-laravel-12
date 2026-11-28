@@ -19,7 +19,7 @@ cd "$(dirname "$0")" || exit 1
 make_secrets() {
     mkdir -p docker-data/secrets
     chmod 700 docker-data/secrets
-    for name in db_root_password db_owner_password db_app_password backup_passphrase; do
+    for name in db_root_password db_owner_password db_app_password backup_passphrase ocr_upload_secret; do
         file="docker-data/secrets/$name"
         if [ ! -s "$file" ]; then
             head -c 32 /dev/urandom | od -An -tx1 | tr -d ' 

@@ -41,13 +41,17 @@ x-app: &app
   # A tiny init process that cleans up the Python processes Kraken starts.
   init: true
   restart: unless-stopped
+  # A process inside cannot gain privileges (setuid binaries do nothing).
+  security_opt:
+    - no-new-privileges:true
   volumes:
     # Laravel's own .env, read while the app runs (never copied into the image).
-    # create_host_path: false makes a missing .env an error, instead of Docker
-    # quietly creating an empty folder called .env.
+    # Read-only: the app never writes it. create_host_path: false makes a
+    # missing .env an error, instead of Docker quietly creating an empty folder.
     - type: bind
       source: ./.env
       target: /var/www/html/.env
+      read_only: true
       bind:
         create_host_path: false
     # Scans, crops and logs, kept in docker-data/ in this project folder so they
@@ -61,7 +65,18 @@ x-app: &app
   # Only the app's own password: rows in, rows out. Never the owner's or root's.
   secrets:
     - db_app_password
+    - ocr_upload_secret
   environment: &app-env
+    # Production settings whatever .env says (it is the Windows setup's, with
+    # APP_DEBUG=true): no stack traces, SQL or settings shown on an error page.
+    APP_ENV: production
+    APP_DEBUG: "false"
+    LOG_LEVEL: warning
+    # The key Laravel and the ocr service share, a secret of its own, so the
+    # ocr container never holds APP_KEY (config/services.php).
+    OCR_UPLOAD_SECRET_FILE: /run/secrets/ocr_upload_secret
+    # Host names the site answers to, besides APP_URL's (config/crms.php).
+    CRMS_TRUSTED_HOSTS: ${CRMS_TRUSTED_HOSTS:-localhost,127.0.0.1}
     DB_HOST: mysql
     DB_PORT: "3306"
     DB_DATABASE: crms
@@ -127,6 +142,7 @@ services:
     restart: "no"
     secrets:
       - db_owner_password
+      - ocr_upload_secret
     environment:
       <<: *app-env
       DB_USERNAME: crms
@@ -141,14 +157,20 @@ services:
     image: crms-ocr
     init: true
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # No .env here: this container parses images and model files, so it holds
+    # only its own signing key, never APP_KEY or anything else in .env.
+    secrets:
+      - ocr_upload_secret
+    environment:
+      OCR_UPLOAD_SECRET_FILE: /run/secrets/ocr_upload_secret
+      # Docker Compose fills these in from .env in this folder, if set there.
+      OCR_DEVICE: ${OCR_DEVICE:-auto}
+      OCR_PRECISION: ${OCR_PRECISION:-fp16}
+      # OCR_BROWSER_ORIGIN_REGEX is left to the service's default (localhost and
+      # 127.0.0.1 on any port); its "$" does not survive Compose's substitution.
     volumes:
-      # Read for APP_KEY (or OCR_UPLOAD_SECRET), which signs model uploads.
-      - type: bind
-        source: ./.env
-        target: /app/.env
-        read_only: true
-        bind:
-          create_host_path: false
       # The model folders (about 1.3 GB each), shared rather than copied.
       - ./ml/models:/app/ml/models
     ports:
@@ -217,3 +239,6 @@ secrets:
     file: ./docker-data/secrets/db_app_password
   backup_passphrase:
     file: ./docker-data/secrets/backup_passphrase
+  # Signs model uploads and authenticates Laravel to the ocr service.
+  ocr_upload_secret:
+    file: ./docker-data/secrets/ocr_upload_secret

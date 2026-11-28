@@ -78,8 +78,8 @@
                     <i class="icon-base bx bx-info-circle icon-sm flex-shrink-0"></i>
                     <span>
                         Requires <span class="font-monospace">config.json</span>, tokenizer files,
-                        and <span class="font-monospace">model.safetensors</span> or
-                        <span class="font-monospace">pytorch_model.bin</span>. The model uploads directly to the OCR service.
+                        and <span class="font-monospace">model.safetensors</span> (<span class="font-monospace">pytorch_model.bin</span>
+                        is not accepted). The model uploads directly to the OCR service.
                     </span>
                 </div>
             </div>

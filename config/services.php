@@ -62,8 +62,9 @@ return [
         // OcrClient sends it as X-CRMS-Service-Key on every call, which the
         // service requires on all but /health. APP_KEY is a safe zero-configuration
         // fallback for this two-process repository; a dedicated secret can rotate
-        // independently in deployment.
-        'upload_secret' => env('OCR_UPLOAD_SECRET') ?: env('APP_KEY'),
+        // independently in deployment. In Docker it is its own secret file
+        // (OCR_UPLOAD_SECRET_FILE), so the OCR container never needs APP_KEY.
+        'upload_secret' => \App\Support\SecretFile::value('OCR_UPLOAD_SECRET_FILE', env('OCR_UPLOAD_SECRET') ?: env('APP_KEY')),
         'upload_ticket_ttl' => env('OCR_UPLOAD_TICKET_TTL', 900),
     ],
 

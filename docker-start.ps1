@@ -27,7 +27,7 @@ Set-Location $PSScriptRoot
 function New-CrmsSecrets {
     $dir = Join-Path $PSScriptRoot 'docker-data\secrets'
     New-Item -ItemType Directory -Force $dir | Out-Null
-    foreach ($name in 'db_root_password', 'db_owner_password', 'db_app_password', 'backup_passphrase') {
+    foreach ($name in 'db_root_password', 'db_owner_password', 'db_app_password', 'backup_passphrase', 'ocr_upload_secret') {
         $file = Join-Path $dir $name
         if (-not (Test-Path $file) -or (Get-Item $file).Length -eq 0) {
             $bytes = New-Object byte[] 32

@@ -125,6 +125,9 @@ The start script sets all of this up by itself, and checks it again on every sta
 | **Append-only audit log** | MySQL itself refuses every change or deletion of an Audit Log entry, even through a direct database connection. |
 | **No port** | The database has no port on the computer: only the other containers can reach it. |
 | **Encrypted backups** | See below. |
+| **Production mode** | The app containers run with `APP_ENV=production` and `APP_DEBUG=false` whatever `.env` says, so an error never shows stack traces or settings. They read `.env` read-only. |
+| **OCR key of its own** | Laravel and the handwriting reader share `docker-data/secrets/ocr_upload_secret`, made by `docker-start`. The reader never sees `.env` or `APP_KEY`. Model uploads must bring `model.safetensors`: `pytorch_model.bin` can run code when loaded, so it is refused. |
+| **Host names** | The site answers only to `localhost`, `127.0.0.1` and `APP_URL`'s host. To open it by another name or address, add it to `CRMS_TRUSTED_HOSTS` in `.env` (comma-separated). |
 
 **Check it:**
 

@@ -279,13 +279,14 @@ function describeSelection(files) {
 
     const names = files.map((file) => relativePathFor(file).split('/').pop());
     const hasConfig = names.includes('config.json');
-    const hasWeights = names.includes('model.safetensors') || names.includes('pytorch_model.bin');
+    // Safetensors only: the service refuses pytorch_model.bin, a pickle that can run code when loaded.
+    const hasWeights = names.includes('model.safetensors');
 
     if (!hasConfig || !hasWeights) {
         return {
             ok: false,
             title: 'Incomplete model folder',
-            detail: `${!hasConfig ? 'config.json' : 'A supported weights file'} is missing.`,
+            detail: `${!hasConfig ? 'config.json' : 'model.safetensors'} is missing.`,
         };
     }
 

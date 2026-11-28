@@ -22,6 +22,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Trusted host names
+    |--------------------------------------------------------------------------
+    |
+    | Outside APP_ENV=local, a request whose Host header is not APP_URL's host
+    | (or a subdomain of it) or one of these names is refused, so links Laravel
+    | builds cannot be pointed at another site. Comma-separated host names or
+    | IP addresses, e.g. "localhost,127.0.0.1,192.168.1.20".
+    |
+    */
+
+    'trusted_hosts' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('CRMS_TRUSTED_HOSTS', 'localhost,127.0.0.1')),
+    ))),
+
+    /*
+    |--------------------------------------------------------------------------
     | OCR Review Threshold
     |--------------------------------------------------------------------------
     |
