@@ -134,9 +134,11 @@ export function usualMonthOf(isoDates) {
 }
 
 /**
- * A date the scan misread by one stray digit ("22-22-57" for 2-22-57, a "2"
- * read twice), repaired from the rest of its column: each way of taking one
- * digit out of it is tried, and the one whole date in the column's usual
+ * A date the scan misread, repaired from the rest of its column: by one stray
+ * digit ("22-22-57" for 2-22-57, a "2" read twice), each way of taking one digit
+ * out of it is tried; failing that, by dashes it missed ("3457" or "36-57" for
+ * 3-4-57 and 3-6-57), each way of cutting its digits into month, day and year
+ * (a year of 2 or 4 digits) is tried. The one whole date in the column's usual
  * month (`usual`, from usualMonthOf) is it. Null when none, or more than one, is.
  */
 export function repairedDate(value, usual, { dayFirst = false, today = new Date() } = {}) {
@@ -148,6 +150,21 @@ export function repairedDate(value, usual, { dayFirst = false, today = new Date(
         if (!/\d/.test(text[at])) continue;
         const iso = toIsoDate(text.slice(0, at) + text.slice(at + 1), today, { dayFirst });
         if (iso && Number(iso.slice(0, 4)) === usual.year && Number(iso.slice(5, 7)) === usual.month) found.add(iso);
+    }
+    if (found.size === 1) return [...found][0];
+    if (found.size > 1) return null;
+
+    // Dashes missed: the digits cut into two parts of 1-2 digits and a year of 2 or 4.
+    const digits = text.replace(/\D/g, '');
+    for (const yearLength of [2, 4]) {
+        const head = digits.slice(0, digits.length - yearLength);
+        const year = digits.slice(digits.length - yearLength);
+        for (let cut = 1; cut <= 2; cut += 1) {
+            const [first, second] = [head.slice(0, cut), head.slice(cut)];
+            if (second.length < 1 || second.length > 2) continue;
+            const iso = toIsoDate(`${first}-${second}-${year}`, today, { dayFirst });
+            if (iso && Number(iso.slice(0, 4)) === usual.year && Number(iso.slice(5, 7)) === usual.month) found.add(iso);
+        }
     }
     return found.size === 1 ? [...found][0] : null;
 }

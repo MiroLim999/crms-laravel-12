@@ -14,6 +14,12 @@
         <div class="marker-shortcuts-menu__title">Edit a cell</div>
         {{-- Mac keys beside the Windows ones: ⌘ Command for Ctrl. --}}
         <p class="marker-shortcuts-menu__note">On a Mac, <kbd>⌘</kbd> is Command and <kbd>Delete</kbd> is Backspace.</p>
+        @if (empty($savedRecord))
+            {{-- The scan workspace's Check & Save: each value checked against its handwriting. --}}
+            <div><span><kbd>Space</kbd></span><small>Checked against the handwriting (again: unchecked); goes to the next cell to check</small></div>
+            <div><span>Grey cell</span><small>Not checked yet: not saved until checked</small></div>
+            <div><span>Orange cell</span><small>Read with low confidence: look at it first</small></div>
+        @endif
         <div><span>Click, or type</span><small>Edit it (shows it on the scan)</small></div>
         <div><span><kbd>Enter</kbd> / <kbd>Tab</kbd></span><small>Keep, go down / right</small></div>
         <div><span><kbd>Esc</kbd></span><small>Cancel the edit</small></div>

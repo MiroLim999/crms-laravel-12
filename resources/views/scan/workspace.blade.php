@@ -604,7 +604,7 @@
                     </button>
                     {{-- A page sent back from Verify: keep the reading it had and go back to Verify. --}}
                     <button class="btn btn-label-secondary d-none" type="button" id="cancelRealignBtn"
-                        title="Keep the reading this page had and go back to Verify">
+                        title="Keep the reading this page had and go back to Check &amp; Save">
                         <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>Cancel re-align
                     </button>
                 </div>
@@ -951,11 +951,17 @@
                 <section class="card validation-pane review-pane" id="reviewPane" aria-labelledby="reviewPaneTitle">
                     <header class="validation-pane__header review-pane__header">
                         <div class="min-w-0">
-                            <span class="validation-pane__eyebrow">Review &amp; Export</span>
+                            <span class="validation-pane__eyebrow">Check &amp; Save</span>
                             <h3 class="h5 mb-0" id="reviewPaneTitle">Records table</h3>
                             <p class="small text-muted mb-0" id="reviewPaneSummary"></p>
                         </div>
                         <div class="review-pane__tools">
+                            {{-- Every value of every person checked at once (blank ones stay unchecked). --}}
+                            <label class="review-check-all" for="reviewCheckAll"
+                                   title="Check every value of every person at once">
+                                <input class="form-check-input" type="checkbox" id="reviewCheckAll">
+                                <span>Check all</span>
+                            </label>
                             @include('records.partials.review-shortcuts')
                             @if ($registry)
                                 {{-- Which scanned column fills each register field (kept for the layout). --}}
@@ -987,13 +993,23 @@
                         </div>
                     </header>
 
+                    {{-- The picked cell's handwriting: the crop TrOCR read, what it read, its tools and its Checked tick. --}}
+                    <div class="review-inspector d-none" id="reviewInspector" aria-live="polite"></div>
+
                     <div class="review-table-scroll" id="reviewTable"></div>
 
                     <footer class="validation-submit-bar">
                         <div class="validation-submit-actions">
                             <button class="btn btn-outline-secondary" type="button" id="backToVerify">
-                                <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i> Back to verify
+                                <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i> Back to Align
                             </button>
+                            {{-- A batch only: this whole document back to Align, read again once queued. --}}
+                            <div class="d-none" id="reviewRealignGroup">
+                                <button class="btn btn-outline-secondary" type="button" id="reviewRealignBtn"
+                                    title="Back to Align for this whole document: it is read again once queued">
+                                    <i class="icon-base bx bx-chevron-left icon-sm me-1" aria-hidden="true"></i>Re-align
+                                </button>
+                            </div>
                             {{-- Nothing ticked Verified on this record (opened from the queue on this step):
                                  in place of Back to verify and Save, one way on, back to Verify. --}}
                             <button class="btn btn-primary d-none" type="button" id="reviewVerifyFirstBtn"
@@ -1778,6 +1794,11 @@
         // next scan and saved with the record as fields with no outline.
         let reviewing = false;
         let reviewTable = null;
+        // Check & Save: Save was pressed once with values not checked yet (the second press saves).
+        let reviewSaveUnchecked = false;
+        // The cell shown above the table (see renderReviewInspector) and its fields' rows.
+        let inspectorKey = null;
+        let inspectorRows = [];
         let reviewModel = null;
         const reviewExtras = new Map();
         // ------------------------------------------------ Document Reference (Book No & Page No)
@@ -3219,7 +3240,7 @@
             }));
             const fields = changes.pages.reduce((sum, page) => sum + page.names.length, 0);
             el('realignConfirmWarning').textContent = changes.rowsMoved
-                ? 'Row lines moved: cells typed in Review & Export for this document will be cleared.'
+                ? 'Row lines moved: cells typed in Check & Save for this document will be cleared.'
                 : '';
             const current = batchState.items[batchState.currentIndex];
             return askRealign(
@@ -4332,8 +4353,9 @@
             el('workspaceContextDetail').classList.toggle('d-none', !focusedWorkspace);
             el('workspaceCancel').classList.toggle('d-none', !focusedWorkspace);
 
-            const order = ['upload', 'mark', 'verify', 'review'];
-            const activeIndex = order.indexOf(name);
+            // Verify is set up on the way to Check & Save (never shown on its own): one step.
+            const order = ['upload', 'mark', 'review'];
+            const activeIndex = order.indexOf(name === 'verify' ? 'review' : name);
             document.querySelectorAll('[data-flow-step]').forEach((node) => {
                 const stepIndex = order.indexOf(node.dataset.flowStep);
                 node.classList.toggle('is-active', stepIndex === activeIndex);
@@ -5329,7 +5351,7 @@
             if (pages.length === 0) return;
             const answer = await askInApp({
                 title: 'This document is not read yet',
-                text: `${recordLabel(record)} is queued but has not been read. Read it now? It opens in Verify when it is done.`,
+                text: `${recordLabel(record)} is queued but has not been read. Read it now? It opens in Check & Save when it is done.`,
                 confirm: 'Read it now',
                 cancel: 'Not now',
                 tone: 'info',
@@ -6100,7 +6122,7 @@
                 : (open.disabled && waitsFor ? `Waits for page ${waitsFor.pageNo} to be read again`
                 : batchVerifying() && recordStateOf(item) !== 'ready' && recordReadable(item) ? 'Not read yet: click to read it now'
                 : batchVerifying() && open.disabled ? (VERIFY_WAIT_REASON[item.status] ?? '')
-                : recordStateOf(item) === 'ready' ? 'Open in Verify'
+                : recordStateOf(item) === 'ready' ? 'Open in Check & Save'
                     : (pageAlignable(item) ? 'Open in Align' : (pageNeedsFile(item) ? 'Pick its file again to align it' : '')));
             open.addEventListener('click', () => {
                 if (open.disabled) return;
@@ -8899,6 +8921,8 @@
             const existing = members.map((it) => it.page.existingRecord).find(Boolean) ?? null;
             checkAndShowExistingRecord(lead.existingAccepted ? null : existing);
             existingRecordAccepted = Boolean(lead.existingAccepted);
+            // Set up in Verify and moved on at once: each value is checked in the table.
+            if (activeStep === 'verify') openReview({ switching: true });
         }
 
         // Continue anyway was chosen for this scan's match with a saved record.
@@ -9167,6 +9191,7 @@
             });
         }
         setUpRealign('verify');
+        setUpRealign('review');
 
         // Continue anyway: the scan is kept and verified as usual, and saving it
         // makes a new record without asking again.
@@ -10647,7 +10672,7 @@
             ocrProgressTimer = null;
         }
 
-        async function completeOcrProgress(title = 'Scan complete', note = 'Opening the results in Verify.') {
+        async function completeOcrProgress(title = 'Scan complete', note = 'Opening the results in Check & Save.') {
             endOcrPhases('Done');
             stopOcrProgress();
             setOcrProgress(100, title, note);
@@ -11131,7 +11156,7 @@
                 el('summaryModel').textContent = processedPage.model || '—';
 
                 endOcrPhases('Almost done');
-                setOcrProgress(96, 'Preparing Verify', partner
+                setOcrProgress(96, 'Preparing Check & Save', partner
                     ? 'Putting both pages side by side, one person to a row.'
                     : 'The handwriting results are ready for your review.');
                 renderVerifyRows();
@@ -11146,6 +11171,8 @@
                     showStep('mark');
                     throw error;
                 }
+                // Set up in Verify and moved on at once: each value is checked in the table.
+                openReview({ switching: true });
             } catch (error) {
                 readSpan = null;
                 scanKind = 'full';
@@ -12206,8 +12233,9 @@
         // The field the view is sliding to. One click on a card focuses it and then
         // clicks it: the slide already on its way is left to finish, not restarted.
         let glidingToField = null;
-        // Step 4: a picked cell's writing is shown this close (500%, the most the view zooms).
-        const REVIEW_CELL_ZOOM = 5;
+        // Check & Save: a picked cell's writing is shown at least this close (700%;
+        // the view zooms to 1000%, and a closer zoom set by hand is kept).
+        const REVIEW_CELL_ZOOM = 7;
         function revealValidationMarker(index, { alignTo = null } = {}) {
             if (quietVerifyReveal) return;
             if (placedVerifyBoxes([index]).length === 0) return;
@@ -12215,10 +12243,10 @@
             glidingToField = index;
             // Close enough to read the writing: about twice the whole-page size
             // (a two-page document's 100% is half as wide, so it goes further).
-            // Already zoomed in further by hand: that zoom is kept. Review & Export
-            // compares a cell with its writing: every pick glides in to 500% (the most).
+            // Already zoomed in further by hand: that zoom is kept. Check & Save
+            // compares a cell with its writing: every pick glides in to 700% or closer.
             const zoom = reviewing
-                ? REVIEW_CELL_ZOOM
+                ? Math.max(validationMarker.zoom, REVIEW_CELL_ZOOM)
                 : Math.max(validationMarker.zoom, verifyDoc ? 2.2 : 1.6);
             verifyFocus = null;
             verifyFocusZoom = null;
@@ -12416,16 +12444,21 @@
             el('submitVerifiedCount').textContent = String(verified);
             el('submitBtn').disabled = verified === 0 || recordSubmitting;
             el('reviewSaveBtn').disabled = verified === 0 || recordSubmitting;
-            // Nothing ticked yet: Review & Export offers only the way back to Verify.
-            const verifyFirst = verified === 0 && total > 0;
-            el('reviewVerifyFirstBtn').classList.toggle('d-none', !verifyFirst);
-            el('reviewSaveBtn').classList.toggle('d-none', verifyFirst);
-            el('backToVerify').classList.toggle('d-none', verifyFirst);
+            // Check & Save is the only step after Align: Save shows (disabled until something is checked).
+            el('reviewVerifyFirstBtn').classList.add('d-none');
+            el('reviewSaveBtn').classList.remove('d-none');
+            const checkAll = el('reviewCheckAll');
+            checkAll.checked = total > 0 && verified === total;
+            checkAll.indeterminate = verified > 0 && verified < total;
+            checkAll.disabled = total === 0;
+            // A tick changed: the "not checked" warning on Save is said again next time.
+            reviewSaveUnchecked = false;
             updateValidationGroupSummaries();
             updateValidationMarkerStates();
             if (reviewing) {
                 reviewTable?.refresh();
                 updateReviewSummary();
+                renderReviewInspector();
             }
         }
 
@@ -13143,6 +13176,8 @@
             });
             lineOverlay.setLines(processedPage, cropped);
         showPickedFields();
+            // In Check & Save the table is drawn again from the fields as they are now.
+            rebuildReviewTable();
             updateVerificationSummary();
 
             const index = cropped.findIndex((item) => item.lineId === focusLineId);
@@ -14581,9 +14616,11 @@
             // the table (nor the downloads); one with something typed in step 4 stays.
             const ticked = (index) => Boolean(verifyTickOf(index)?.checked);
             const typedIn = (group) => [...reviewExtras.keys()].some((key) => key.startsWith(`${group.id}|`) && String(reviewExtras.get(key) ?? '').trim() !== '');
+            // Every person is in the table: each value is checked there (Space). A row with
+            // nothing checked or typed is left out of what is saved (see submitRecord).
+            void ticked; void typedIn;
             const people = validationGroups
                 .filter((group) => group.kind === 'person')
-                .filter((group) => group.indexes.some(ticked) || typedIn(group))
                 .map((group, position) => ({
                     id: group.id,
                     // The register row, as the record's CSV numbers it (else the person's place).
@@ -14925,26 +14962,38 @@
             if (!cell.column.detail) activateValidationGroup(cell.row.id, 'group');
         }
 
-        function updateReviewSummary() {
-            if (!reviewModel) return;
-            const people = reviewModel.rows.length;
-            const pages = docEntries().length;
-            // Values shown greyed: none of their fields ticked Verified, so not saved.
-            const unverified = reviewModel.rows.reduce((count, row) => count + reviewModel.columns.filter((column) => {
+        /** Values shown but not checked yet (greyed): not saved until checked. */
+        function uncheckedReviewValues() {
+            if (!reviewModel) return 0;
+            return reviewModel.rows.filter((row) => reviewRowKept(row)).reduce((count, row) => count + reviewModel.columns.filter((column) => {
                 const refs = row.cells[column.key]?.refs ?? [];
                 return refs.length > 0
                     && refs.every((index) => !verifyTickOf(index)?.checked)
                     && refs.some((index) => verifyValueOf(index).trim() !== '');
             }).length, 0);
-            // Rows left out: nothing on them ticked Verified (see reviewInput).
-            const hiddenRows = validationGroups.filter((group) => group.kind === 'person').length - people;
+        }
+
+        /** A person is saved once something on the row is checked or typed. */
+        function reviewRowKept(row) {
+            const group = validationGroups.find((candidate) => candidate.id === row.id);
+            if (!group) return true;
+            const typed = [...reviewExtras.keys()].some((key) => key.startsWith(`${group.id}|`) && String(reviewExtras.get(key) ?? '').trim() !== '');
+            return typed || group.indexes.some((index) => Boolean(verifyTickOf(index)?.checked));
+        }
+
+        function updateReviewSummary() {
+            if (!reviewModel) return;
+            const people = reviewModel.rows.length;
+            const pages = docEntries().length;
+            const unchecked = uncheckedReviewValues();
+            const leftOut = reviewModel.rows.filter((row) => !reviewRowKept(row)).length;
             // A register's table: its own columns (scanned columns no field takes are not saved).
             const savedColumns = reviewModel.columns.filter((column) => !column.noExport).length;
             el('reviewPaneSummary').textContent = `${people} ${people === 1 ? 'person' : 'people'} · `
                 + `${savedColumns} column${savedColumns === 1 ? '' : 's'}`
                 + (pages > 1 ? ` · ${pages} pages` : '')
-                + (hiddenRows > 0 ? ` · ${hiddenRows} row${hiddenRows === 1 ? '' : 's'} not verified (left out)` : '')
-                + (unverified > 0 ? ` · ${unverified} not verified (greyed, not saved)` : '');
+                + (unchecked > 0 ? ` · ${unchecked} to check (greyed)` : '')
+                + (leftOut > 0 ? ` · ${leftOut} row${leftOut === 1 ? '' : 's'} with nothing checked (not saved)` : '');
         }
 
         // Required fields left out were accepted on the way in (Continue anyway):
@@ -15017,7 +15066,7 @@
                 if (verifyDoc) {
                     const unchecked = verifyDoc.pages.find((_, side) => !verifiedIndexes.some((index) => (cropped[index]?.pageIndex ?? 0) === side));
                     if (unchecked) {
-                        showValidationSubmitError(`Check Verified on at least one field of page ${unchecked.number}.`);
+                        showValidationSubmitError(`Check at least one value of page ${unchecked.number} before saving.`);
                         return;
                     }
                 }
@@ -15061,6 +15110,18 @@
                         && cell.refs.every((index) => !verifyTickOf(index)?.checked),
                     // A register field every row does not need can be removed from its header.
                     removableFields: true,
+                    // Read with low confidence and not checked yet: marked, to look at first.
+                    isLow: (cell) => cell.refs.some((index) => !cropped[index]?.cropDeleted
+                        && !verifyTickOf(index)?.checked
+                        && normaliseConfidence(readings[index]) < config.threshold),
+                    // Space: the picked cells checked against the handwriting.
+                    onToggle: (cells) => checkReviewCells(cells),
+                    // The picked cell's crop and tools, above the table.
+                    onActive: () => renderReviewInspector(),
+                    // A person with nothing checked or typed is not saved (nor downloaded).
+                    isRowLeftOut: (row) => !reviewRowKept(row),
+                    // A checked value shows light green.
+                    showChecked: true,
                     // The book and page are entered in step 1 (Document), for the whole record:
                     // shown here, not changed here.
                     isReadOnly: (cell) => (['book_no', 'page_no'].includes(cell.column.field)
@@ -15076,6 +15137,11 @@
 
             showStep('review');
             updateReviewSaveLabel();
+            // A queued page is aligned again by Re-align (the whole document), not Back to Align.
+            el('backToVerify').classList.toggle('d-none', Boolean(batchState?.active));
+            el('reviewRealignGroup').classList.toggle('d-none', !batchState?.active);
+            reviewSaveUnchecked = false;
+            inspectorKey = null;
             reviewTable.render(reviewModel);
             updateVerificationSummary();
             // Start on the first cell, without zooming the scan.
@@ -15097,6 +15163,14 @@
         el('reviewSaveBtn').addEventListener('click', () => {
             // A cell still being typed counts.
             reviewTable?.commit();
+            // Values not checked yet are not saved: said once, and a second click saves without them.
+            const unchecked = uncheckedReviewValues();
+            if (unchecked > 0 && !reviewSaveUnchecked) {
+                reviewSaveUnchecked = true;
+                showValidationSubmitError(`${unchecked} ${unchecked === 1 ? 'value is' : 'values are'} not checked yet and will not be saved. `
+                    + 'Check them (pick a cell, press Space), or click Save again to save without them.');
+                return;
+            }
             // "Continue anyway" is not asked again, but once the cells typed here
             // fill every required field the server checks the record as usual.
             const verifiedNow = [...el('verifyRows').querySelectorAll('.validation-field')]
@@ -15104,12 +15178,227 @@
                 .map((row) => Number(row.dataset.fieldIndex));
             submitRecord({ allowMissing: reviewAllowMissing && requiredNotSubmitted(verifiedNow).length > 0 });
         });
+        // Back to Align (one document): the markers can be moved and the page scanned again.
         el('backToVerify').addEventListener('click', () => {
             reviewTable?.commit();
-            clearValidationSubmitError();
-            showStep('verify');
-            if (activeValidationIndex !== null) revealValidationRow(activeValidationIndex);
+            el('backToMark').click();
         });
+
+        el('reviewCheckAll').addEventListener('change', (event) => {
+            const checked = event.currentTarget.checked;
+            // Checked: every date is written as it is saved (2-18-57 → 1957-02-18).
+            if (checked && reviewTable) {
+                const { rows, columns } = reviewTable.model;
+                reviewTable.writeDates(rows.flatMap((_, row) => columns.map((__, column) => reviewTable.cell(row, column))));
+            }
+            setAllVerified(checked);
+        });
+
+        // ------------------------------------------- the picked cell's handwriting
+        // Above the table: the exact crop TrOCR read for the picked cell, what it
+        // read and how sure it was, Verify's own tools for that field (Adjust
+        // outline, Delete crop) and the cell's Checked tick. The tools are Verify's
+        // own buttons, clicked for the reviewer.
+
+        /** The table drawn again from Verify's fields (one added, deleted, re-read or grouped). */
+        function rebuildReviewTable() {
+            if (!reviewing || !reviewTable) return;
+            reviewTable.commit();
+            reviewBaseModel = buildReviewModel(reviewInput());
+            reviewModel = reviewModelFrom(reviewBaseModel);
+            reviewModel.rows.forEach((row) => reviewModel.columns.forEach((column) => {
+                if ((row.cells[column.key]?.refs.length ?? 0) > 0) reviewExtras.delete(`${row.id}|${column.key}`);
+            }));
+            inspectorKey = null;
+            reviewTable.render(reviewModel);
+            updateReviewSummary();
+        }
+
+        /** Tick (or untick) the cells' fields; true when they are checked now. */
+        function checkReviewCells(cells, force = null) {
+            const indexes = [...new Set(cells.flatMap((cell) => cell.refs))].filter((index) => !cropped[index]?.cropDeleted);
+            // A value typed by hand is saved as it is: nothing to check.
+            if (indexes.length === 0) return false;
+            const checked = force ?? !indexes.every((index) => verifyTickOf(index)?.checked);
+            // Checked: a date is written as it is saved (2-18-57 → 1957-02-18).
+            if (checked) reviewTable?.writeDates(cells);
+            const blank = verifyFields(indexes, checked);
+            if (blank.length > 0) {
+                showValidationSubmitError(blank.length === 1
+                    ? 'This cell is empty: type its value first, then check it.'
+                    : `${blank.length} empty cells were left unchecked: type their values first.`);
+            } else {
+                clearValidationSubmitError();
+            }
+            return checked && blank.length === 0;
+        }
+
+        function inspectorWarnings(row) {
+            return ['.validation-field__error', '.validation-field__ocr-error', '.validation-field__flag', '.validation-field__type']
+                .map((selector) => row.querySelector(selector))
+                .filter((node) => node && !node.classList.contains('d-none'))
+                .map((node) => node.textContent.trim())
+                .filter(Boolean)
+                .join(' ');
+        }
+
+        function syncInspectorCheck(cell) {
+            const box = el('reviewInspector').querySelector('.review-inspector__check input');
+            if (!(box instanceof HTMLInputElement) || !cell) return;
+            const indexes = cell.refs.filter((index) => !cropped[index]?.cropDeleted);
+            const ticks = indexes.map((index) => Boolean(verifyTickOf(index)?.checked));
+            box.disabled = indexes.length === 0;
+            box.checked = ticks.length > 0 && ticks.every(Boolean);
+            box.indeterminate = ticks.some(Boolean) && !box.checked;
+            const panel = el('reviewInspector');
+            panel.classList.toggle('is-checked', box.checked);
+            panel.classList.toggle('is-low', !box.checked && indexes.some((index) => normaliseConfidence(readings[index]) < config.threshold));
+            // A warning can change with the value (an edit, a re-read): shown again.
+            el('reviewInspector').querySelectorAll('.review-inspector__field').forEach((part) => {
+                const row = validationRow(Number(part.dataset.fieldIndex));
+                const warn = part.querySelector('.review-inspector__warn');
+                if (row && warn) warn.textContent = inspectorWarnings(row);
+            });
+        }
+
+        function inspectorField(index, row) {
+            const part = document.createElement('div');
+            part.className = 'review-inspector__field';
+            part.dataset.fieldIndex = String(index);
+
+            const crop = row.querySelector('img.validation-field__crop');
+            if (crop instanceof HTMLImageElement && crop.getAttribute('src')) {
+                const frame = document.createElement('button');
+                frame.type = 'button';
+                frame.className = 'review-inspector__crop';
+                frame.title = 'Click to enlarge the exact image TrOCR read';
+                frame.setAttribute('aria-label', crop.getAttribute('aria-label') ?? 'Enlarge the crop');
+                const picture = document.createElement('img');
+                picture.src = crop.src;
+                picture.alt = crop.alt;
+                const zoom = document.createElement('span');
+                zoom.className = 'review-inspector__zoom';
+                zoom.innerHTML = '<i class="icon-base bx bx-search" aria-hidden="true"></i>';
+                frame.append(picture, zoom);
+                frame.addEventListener('click', () => crop.click());
+                part.append(frame);
+            } else if (cropped[index]?.cropDeleted) {
+                const gone = document.createElement('span');
+                gone.className = 'review-inspector__crop is-deleted';
+                gone.innerHTML = '<i class="icon-base bx bx-trash" aria-hidden="true"></i>Crop deleted';
+                part.append(gone);
+            }
+
+            const body = document.createElement('div');
+            body.className = 'review-inspector__body';
+            const title = document.createElement('div');
+            title.className = 'review-inspector__title';
+            const name = document.createElement('strong');
+            name.textContent = row.querySelector('.validation-field__name')?.textContent ?? '';
+            title.append(name);
+            const badge = row.querySelector('.validation-field__confidence');
+            if (badge) title.append(badge.cloneNode(true));
+            body.append(title);
+
+            const read = row.querySelector('.validation-field__reading-text span');
+            if (read) {
+                const reading = document.createElement('span');
+                reading.className = 'review-inspector__reading';
+                const words = document.createElement('b');
+                words.textContent = read.textContent.trim();
+                reading.append('TrOCR read: ', words);
+                reading.title = read.textContent.trim();
+                body.append(reading);
+            }
+            const warn = document.createElement('span');
+            warn.className = 'review-inspector__warn';
+            warn.textContent = inspectorWarnings(row);
+            body.append(warn);
+
+            // Verify's own buttons for this field, pressed from here.
+            const tools = document.createElement('div');
+            tools.className = 'review-inspector__actions';
+            ['.validation-field__adjust:not(.validation-field__delete-crop)', '.validation-field__delete-crop', '.validation-field__draw-again']
+                .map((selector) => row.querySelector(selector))
+                .filter((button) => button instanceof HTMLButtonElement)
+                .forEach((button) => {
+                    const proxy = document.createElement('button');
+                    proxy.type = 'button';
+                    proxy.className = `btn review-inspector__tool${button.classList.contains('validation-field__delete-crop') ? ' is-danger' : ''}`;
+                    proxy.innerHTML = button.innerHTML;
+                    if (button.title) proxy.title = button.title;
+                    proxy.setAttribute('aria-label', button.getAttribute('aria-label') ?? button.textContent.trim());
+                    proxy.addEventListener('click', () => button.click());
+                    tools.append(proxy);
+                });
+            // The person and column are the table's own row and column: not repeated here.
+            if (tools.childElementCount > 0) body.append(tools);
+            part.append(body);
+            return part;
+        }
+
+        function renderReviewInspector() {
+            const box = el('reviewInspector');
+            if (!box || !reviewing || !reviewTable) return;
+            const at = reviewTable.active;
+            const cell = at ? reviewTable.cell(at.row, at.column) : null;
+            const fields = (cell?.refs ?? [])
+                .map((index) => ({ index, row: validationRow(index) }))
+                .filter(({ row }) => row instanceof HTMLElement);
+            const key = cell ? `${cell.row.id}|${cell.column.key}` : '';
+            const rows = fields.map(({ row }) => row);
+            // The same cell and the same fields: only its tick and warnings change.
+            if (key === inspectorKey && rows.length === inspectorRows.length && rows.every((row, i) => row === inspectorRows[i])) {
+                syncInspectorCheck(cell);
+                return;
+            }
+            inspectorKey = key;
+            inspectorRows = rows;
+            box.replaceChildren();
+            if (!cell) {
+                box.classList.add('d-none');
+                return;
+            }
+            box.classList.remove('d-none');
+
+            if (fields.length === 0) {
+                const note = document.createElement('p');
+                note.className = 'review-inspector__note';
+                const header = reviewTable.headerOf(cell.column);
+                const icon = document.createElement('i');
+                icon.className = 'icon-base bx bx-edit-alt';
+                icon.setAttribute('aria-hidden', 'true');
+                const text = document.createElement('span');
+                note.append(icon, text);
+                box.classList.remove('is-checked', 'is-low');
+                text.textContent = cell.column.manual || cell.column.custom || cell.column.detail || reviewTable.isReadOnly(cell)
+                    ? `${header}: not read from the scan. It is saved as it is typed in the cell.`
+                    : `${header}: nothing was read here. Type it in the cell, or use Add missed field to draw it on the page.`;
+                box.append(note);
+                return;
+            }
+
+            const list = document.createElement('div');
+            list.className = 'review-inspector__fields';
+            fields.forEach(({ index, row }) => list.append(inspectorField(index, row)));
+            box.append(list);
+
+            const check = document.createElement('label');
+            check.className = 'review-inspector__check';
+            check.title = 'Checked against the handwriting: the value is saved';
+            check.innerHTML = '<input class="form-check-input" type="checkbox"><span>Checked</span><kbd>Space</kbd>';
+            const input = check.querySelector('input');
+            input.addEventListener('change', () => {
+                const current = reviewTable.active ? reviewTable.cell(reviewTable.active.row, reviewTable.active.column) : null;
+                const checked = current ? checkReviewCells([current], input.checked) : false;
+                syncInspectorCheck(current);
+                // Checked: on to the next value still to check, as Space does.
+                if (checked) reviewTable.selectNextToCheck();
+            });
+            box.append(check);
+            syncInspectorCheck(cell);
+        }
+
         // Grid off: the scan without its field outlines (the picked field and its row stay).
         el('reviewGridToggle').addEventListener('change', (event) => {
             document.querySelector('.validation-document-pane')?.classList.toggle('is-grid-hidden', !event.target.checked);
@@ -15425,7 +15714,7 @@
                 .map((row) => Number(row.dataset.fieldIndex));
 
             if (verifiedIndexes.length === 0) {
-                showValidationSubmitError('Check Verified on at least one field before submitting.');
+                showValidationSubmitError('Check at least one value before saving: pick a cell, compare it with the handwriting, and press Space.');
                 if (rows[0]) {
                     const firstIndex = Number(rows[0].dataset.fieldIndex);
                     activateValidationField(firstIndex, 'marker');
@@ -15477,7 +15766,7 @@
                     ]);
                     const unchecked = verifyDoc.pages.find((_, side) => !sides.has(side));
                     if (unchecked) {
-                        showValidationSubmitError(`Check Verified on at least one field of page ${unchecked.number}.`);
+                        showValidationSubmitError(`Check at least one value of page ${unchecked.number} before saving.`);
                         return false;
                     }
                 }
@@ -15568,7 +15857,7 @@
                 extraFields.forEach((extra) => pageFields[extra.side]?.push(extra.field));
                 const unchecked = verifyDoc.pages.find((_, side) => pageFields[side].length === 0);
                 if (unchecked) {
-                    showValidationSubmitError(`Check Verified on at least one field of page ${unchecked.number}.`);
+                    showValidationSubmitError(`Check at least one value of page ${unchecked.number} before saving.`);
                     return;
                 }
                 // Field names stay unique in the record: a name both pages have gets its page.

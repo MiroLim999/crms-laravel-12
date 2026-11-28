@@ -204,9 +204,9 @@ class ScanBatchTest extends TestCase
                 ],
             ])
             ->assertOk();
-        $this->assertSame('Verify', ScanBatchController::openBatchesFor($this->owner->getKey())[0]['leftOn']);
+        $this->assertSame('Check & Save', ScanBatchController::openBatchesFor($this->owner->getKey())[0]['leftOn']);
 
-        // Left on Review & Export: its record's draft says so.
+        // A draft from before the steps were one (left on Review & Export): Check & Save too.
         $this->actingAs($this->owner)
             ->putJson(route('documents.batches.draft', $batch), [
                 'version' => 1,
@@ -215,7 +215,7 @@ class ScanBatchTest extends TestCase
                 'draft' => ['verify' => [], 'review' => [], 'step' => 'review'],
             ])
             ->assertOk();
-        $this->assertSame('Review & Export', ScanBatchController::openBatchesFor($this->owner->getKey())[0]['leftOn']);
+        $this->assertSame('Check & Save', ScanBatchController::openBatchesFor($this->owner->getKey())[0]['leftOn']);
 
         // Left on a page still to align.
         $this->actingAs($this->owner)

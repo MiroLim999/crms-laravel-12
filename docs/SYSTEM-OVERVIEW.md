@@ -556,7 +556,10 @@ Times are stored in UTC and shown in Philippine time (`Asia/Manila`) on every pa
 
 ### 4.3 New Document, step 1: Document
 
-The scan screen has four steps, shown at the top: **1 Document**, **2 Align**, **3 Verify**, **4 Review & Export**.
+The scan screen has three steps, shown at the top: **1 Document**, **2 Align**, **3 Check & Save**. (Until 28 Nov 2026
+there were four: Verify and Review & Export were separate steps. They are one now: each value is checked in the table.
+Sections 4.6 and 4.8 describe the tools; the field list of the old Verify step is still built, unseen, and the table
+reads and writes it.)
 
 - Choose the **document type**: **Book of Birth**, **Book of Death**, **Book of Marriage** (renamed from "… Certificate"
   on 25 November 2026), or a custom type. Only types with a published layout can be scanned; the others are listed but
@@ -611,7 +614,15 @@ The button is now hidden. Its code is still in place (the job's `detect` mode, t
 so it can be brought back, but users can no longer reach it. Outlines are fixed **after** reading instead, in Verify
 ([4.6](#46-new-document-step-3-verify)).
 
-### 4.6 New Document, step 3: Verify
+### 4.6 New Document, step 3: Check & Save (checking each value)
+
+Since 28 Nov 2026 the list below is not shown on its own: right after reading, the table of 4.8 opens. Pick a cell and
+the strip above the table shows the exact crop TrOCR read, what it read and its confidence, **Adjust outline**,
+**Delete crop** / **Draw again**, and its **Checked** tick (the person and column are the table's row and column). **Space** checks the picked
+cell (or the picked cells of a column) and goes down a row; **Check all** checks every value. A value not checked is
+greyed and not saved ; one read with low confidence is filled light orange until it is checked. **Add missed field** and
+**Group fields** are above the page. **Save** warns once when values are still unchecked; pressing it again saves
+without them. The rest of this section describes the tools as they were in the separate step.
 
 The page (**Original document**) and the list of values (**Digital text output**) sit side by side. A two-page spread
 shows both pages side by side, and clicking a value glides the page to its writing.
@@ -637,7 +648,7 @@ shows both pages side by side, and clicking a value glides the page to its writi
 - The user **ticks** each value they have checked, and corrects any that are wrong.
 - **Re-align** (batch only) sends the whole document back to Align; it is read again once queued.
 
-Verify ends with **Review & export**, which opens step 4. The record is saved from there
+The record is saved from the table
 ([4.8](#48-review--export-step-4-and-editing-a-saved-record)).
 
 **When a record is saved.** If a required field or a required register column is left out, CRMS lists what is missing
@@ -726,12 +737,12 @@ Other document types (custom types) have no register table: their columns are th
 - Empty cells are yellow and invalid ones red; the issues button goes to the next one. Columns resize by dragging
   (double-click fits) and move by dragging their header (or Alt+Shift+arrow keys). Each header has ✎ (rename it in the
   download) and × (remove a column that is not required), each asking first.
-- A row (person) with nothing ticked in Verify is left out; a value not ticked shows greyed and is left out of the
-  downloads, because it is not saved. Editing the cell ticks it.
+- Every person is in the table. A value not checked shows greyed and is left out of the downloads, because it is not
+  saved; Space or editing the cell checks it. A row with nothing checked or typed is not saved or downloaded.
 - A value typed into a cell where nothing was read becomes a new field of that person (`Column · row N`).
 - **Download**: the table as **CSV** or **Excel (.xlsx)**, made in the browser.
 - **Save record** saves the record (see "When a record is saved" in [4.6](#46-new-document-step-3-verify)). In a batch
-  it reads **Save & next**. **Back to verify** returns to step 3.
+  it reads **Save & next**. **Back to Align** returns to step 2 (in a batch: **Re-align**).
 
 **A saved record.** On the record page, **Edit in Review & Export** opens the same table for that record, holding the
 register rows as they were saved.
@@ -758,8 +769,8 @@ at a time, exactly as a single record does.
    and Page No.; one already used in the batch is refused.
 3. **Scan all** reads every queued page. It first checks that the OCR service is up, has no time limit, and stops after
    a second page fails because the OCR service went down (those pages wait to be scanned again).
-4. **Check each record.** Verify → Review & Export → **Save & next**, which marks the record **Done** but does not save
-   it yet. Done records can still be changed from the queue list. **Re-align** in Verify sends the whole document back
+4. **Check each record.** Check & Save → **Save & next**, which marks the record **Done** but does not save
+   it yet. Done records can still be changed from the queue list. **Re-align** sends the whole document back
    to Align; **Cancel re-align** keeps the old reading. A record that should not be saved (a blank page, a cover) is
    taken out with its × in the queue list.
 5. **Save & finish batch** (the last record's button) saves every Done record, one after another. A record that cannot

@@ -286,6 +286,94 @@ test('a value not ticked Verified is shown but left out of the download, as it i
     assert.deepEqual(table.exportTable(), [['Row', 'Name', 'Sex'], ['01', 'ANA CRUZ', 'F']]);
 });
 
+test('a person with nothing checked is shown but not downloaded, saved or checked for missing values', () => {
+    const ticked = new Set([0]);
+    const values = ['Ana Cruz', 'F', 'Ben Reyes', 'M'];
+    const kept = (row) => row.id === 'person-1' ? [0, 1].some((index) => ticked.has(index)) : [2, 3].some((index) => ticked.has(index));
+    const table = new ReviewTable({
+        container: { addEventListener() {} },
+        valueOf: (cell) => cell.refs.map((index) => values[index]).join(' '),
+        onChange: () => {},
+        isUnverified: (cell) => cell.refs.length > 0 && cell.refs.every((index) => !ticked.has(index)),
+        isRowLeftOut: (row) => !kept(row),
+    });
+    table.model = {
+        columns: [{ key: 'name', header: 'Name' }, { key: 'sex', header: 'Sex' }],
+        rows: [
+            { id: 'person-1', label: '01', cells: { name: { refs: [0] }, sex: { refs: [1] } } },
+            { id: 'person-2', label: '02', cells: { name: { refs: [2] }, sex: { refs: [3] } } },
+        ],
+    };
+    assert.deepEqual(table.exportTable(), [['Row', 'Name', 'Sex'], ['01', 'ANA CRUZ', '']]);
+    // Once one of its values is checked, the row is in.
+    ticked.add(2);
+    assert.deepEqual(table.exportTable(), [['Row', 'Name', 'Sex'], ['01', 'ANA CRUZ', ''], ['02', 'BEN REYES', '']]);
+});
+
+test('Space checks the picked cell through onToggle and goes on to the next value to check; it never starts an edit', () => {
+    // No DOM here: the key handler only asks whether the target is an element.
+    const hadElement = 'Element' in globalThis;
+    if (!hadElement) globalThis.Element = class {};
+    const toggled = [];
+    const listeners = {};
+    const node = () => ({ focus() {}, classList: { add() {}, remove() {}, toggle() {}, contains: () => false }, parentElement: null, offsetTop: 0, offsetHeight: 0, offsetLeft: 0, offsetWidth: 0 });
+    const table = new ReviewTable({
+        container: {
+            addEventListener(type, handler) { listeners[type] = handler; },
+            querySelectorAll: () => [],
+            querySelector: () => null,
+            scrollTop: 0, scrollLeft: 0, clientHeight: 100, clientWidth: 100,
+        },
+        valueOf: () => 'x',
+        onChange: () => {},
+        // Row 1's second column is checked already: skipped.
+        isUnverified: (cell) => !(cell.row.id === 'person-1' && cell.column.key === 'sex'),
+        onToggle: (cells) => {
+            toggled.push(cells.map((cell) => cell.row.id));
+            return true;
+        },
+    });
+    table.model = {
+        columns: [{ key: 'name', header: 'Name', type: {} }, { key: 'sex', header: 'Sex', type: {} }],
+        rows: [
+            { id: 'person-1', cells: { name: { refs: [0] }, sex: { refs: [1] } } },
+            { id: 'person-2', cells: { name: { refs: [2] }, sex: { refs: [3] } } },
+        ],
+    };
+    table.cellNodes = [[node(), node()], [node(), node()]];
+    table.active = { row: 0, column: 0 };
+    let edited = false;
+    table.edit = () => { edited = true; };
+    listeners.keydown({ key: ' ', target: null, preventDefault() {}, stopPropagation() {} });
+    assert.deepEqual(toggled, [['person-1']]);
+    assert.equal(edited, false);
+    assert.deepEqual(table.active, { row: 1, column: 0 });
+    if (!hadElement) delete globalThis.Element;
+});
+
+test('a checked date is written as it is saved: 2-18-57 becomes 1957-02-18, one change for undo', () => {
+    const values = ['2-18-57', 'Male'];
+    const table = new ReviewTable({
+        container: { addEventListener() {}, querySelectorAll: () => [] },
+        valueOf: (cell) => cell.refs.map((index) => values[index]).join(' '),
+        onChange: (cell, value) => { values[cell.refs[0]] = value; },
+    });
+    table.refresh = () => {};
+    // Undo picks the changed cell again: no DOM here.
+    table.select = () => {};
+    table.model = {
+        columns: [{ key: 'dob', header: 'date_of_birth', type: { date: true } }, { key: 'sex', header: 'sex', type: {} }],
+        rows: [{ id: 'person-1', cells: { dob: { refs: [0] }, sex: { refs: [1] } } }],
+    };
+    const cells = [table.cell(0, 0), table.cell(0, 1)];
+    assert.equal(table.writeDates(cells), 1);
+    assert.deepEqual(values, ['1957-02-18', 'Male']);
+    // Already written so: nothing to change.
+    assert.equal(table.writeDates(cells), 0);
+    table.undo();
+    assert.equal(values[0], '2-18-57');
+});
+
 // ------------------------------------------------- a register's own columns
 
 const BIRTH = [

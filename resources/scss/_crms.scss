@@ -12274,9 +12274,8 @@ $dashboard-reveal-step: 40ms;
     display: flex;
   }
 
-  // Verify's tools that change the outlines stay in Verify, and the narrow
-  // scan has no room for Verify's colour key.
-  .validation-add-field,
+  // Add missed field and Group fields work here too (Check & Save is the one
+  // step after Align); the narrow scan has no room for the colour key.
   .validation-document-pane .validation-pane__hint {
     display: none;
   }
@@ -12376,6 +12375,272 @@ $dashboard-reveal-step: 40ms;
   flex-wrap: wrap;
   align-items: center;
   gap: .5rem;
+}
+
+// Check & Save: the picked cell's handwriting above the table. The crop TrOCR
+// read on its paper, what it read, the field's tools, and the Checked pill.
+// Its border says where the cell stands, the same all round: green (checked),
+// orange (read unsure, not checked), grey (not checked yet).
+.review-inspector {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: .75rem 1rem;
+  padding: .75rem 1rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: .75rem;
+  background: var(--bs-paper-bg);
+  box-shadow: 0 1px 2px rgba(var(--crms-ink-rgb), .06), 0 4px 14px rgba(var(--crms-ink-rgb), .05);
+  transition: border-color .15s ease;
+
+  &.is-low {
+    border-color: rgba(var(--bs-warning-rgb), .75);
+  }
+
+  &.is-checked {
+    border-color: rgba(var(--bs-success-rgb), .6);
+  }
+}
+
+.review-inspector__fields {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: .75rem;
+  min-inline-size: 0;
+}
+
+.review-inspector__field {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-inline-size: 0;
+}
+
+// The crop on its paper: a click opens it larger.
+.review-inspector__crop {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  inline-size: 15rem;
+  max-inline-size: 42%;
+  block-size: 4.25rem;
+  padding: .25rem;
+  overflow: hidden;
+  border: 1px solid rgba(var(--crms-ink-rgb), .12);
+  border-radius: .5rem;
+  background: #f6efe1;
+  cursor: zoom-in;
+
+  img {
+    max-inline-size: 100%;
+    max-block-size: 100%;
+    object-fit: contain;
+    mix-blend-mode: multiply;
+  }
+
+  .review-inspector__zoom {
+    position: absolute;
+    inset-block-end: .25rem;
+    inset-inline-end: .25rem;
+    display: inline-flex;
+    padding: .125rem;
+    border-radius: .375rem;
+    color: var(--bs-body-color);
+    background: rgba(255, 255, 255, .85);
+    font-size: .875rem;
+    opacity: 0;
+    transition: opacity .15s ease;
+  }
+
+  &:hover .review-inspector__zoom,
+  &:focus-visible .review-inspector__zoom {
+    opacity: 1;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--review-pick, var(--bs-primary));
+    outline-offset: 2px;
+  }
+
+  &.is-deleted {
+    gap: .375rem;
+    color: var(--bs-danger-text-emphasis);
+    background: rgba(var(--bs-danger-rgb), .06);
+    font-size: .8125rem;
+    cursor: default;
+  }
+}
+
+.review-inspector__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: .25rem;
+  min-inline-size: 0;
+  font-size: .8125rem;
+}
+
+.review-inspector__title {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-inline-size: 0;
+
+  strong {
+    overflow: hidden;
+    color: var(--bs-heading-color);
+    font-size: .875rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.review-inspector__reading {
+  overflow: hidden;
+  color: var(--bs-secondary-color);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  b {
+    color: var(--bs-body-color);
+    font-weight: 500;
+  }
+}
+
+.review-inspector__warn {
+  color: var(--bs-danger-text-emphasis);
+
+  &:empty {
+    display: none;
+  }
+}
+
+// The field's tools and its person, on one quiet line.
+.review-inspector__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .375rem .5rem;
+  margin-block-start: .25rem;
+}
+
+.review-inspector__tool {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  padding: .1875rem .5rem;
+  border: 1px solid transparent;
+  border-radius: .375rem;
+  color: var(--bs-secondary-color);
+  background: rgba(var(--crms-ink-rgb), .04);
+  font-size: .75rem;
+  line-height: 1.4;
+  transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+
+  .icon-base {
+    font-size: .875rem;
+  }
+
+  &:hover,
+  &:focus-visible {
+    color: var(--bs-primary);
+    background: rgba(var(--bs-primary-rgb), .08);
+    border-color: rgba(var(--bs-primary-rgb), .2);
+  }
+
+  &.is-danger:hover,
+  &.is-danger:focus-visible {
+    color: var(--bs-danger);
+    background: rgba(var(--bs-danger-rgb), .08);
+    border-color: rgba(var(--bs-danger-rgb), .2);
+  }
+}
+
+.review-inspector__note {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: .5rem;
+  margin: 0;
+  color: var(--bs-secondary-color);
+  font-size: .8125rem;
+
+  .icon-base {
+    flex: none;
+    font-size: 1.125rem;
+  }
+}
+
+// Checked: a pill that turns green once the value is checked.
+.review-inspector__check {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .5rem;
+  margin: 0;
+  padding: .4375rem .75rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 999px;
+  color: var(--bs-body-color);
+  background: var(--bs-paper-bg);
+  font-size: .8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+  user-select: none;
+
+  .form-check-input {
+    inline-size: 1.125rem;
+    block-size: 1.125rem;
+    margin: 0;
+  }
+
+  kbd {
+    padding: .0625rem .375rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .25rem;
+    color: var(--bs-secondary-color);
+    background: rgba(var(--crms-ink-rgb), .04);
+    box-shadow: none;
+    font-size: .6875rem;
+    font-weight: 500;
+  }
+
+  &:hover {
+    border-color: rgba(var(--bs-success-rgb), .5);
+  }
+
+  &:has(.form-check-input:checked) {
+    border-color: rgba(var(--bs-success-rgb), .55);
+    color: var(--bs-success-text-emphasis);
+    background: rgba(var(--bs-success-rgb), .1);
+
+    .form-check-input {
+      border-color: var(--bs-success);
+      background-color: var(--bs-success);
+    }
+  }
+
+  &:has(.form-check-input:disabled) {
+    opacity: .55;
+    cursor: default;
+  }
+}
+
+.review-check-all {
+  display: inline-flex;
+  align-items: center;
+  gap: .375rem;
+  margin: 0;
+  font-size: .8125rem;
+  cursor: pointer;
+
+  .form-check-input {
+    margin: 0;
+  }
 }
 
 .review-table-scroll {
@@ -12591,12 +12856,13 @@ body.review-table-dragging {
     z-index: 3;
   }
 
-  // The picked cell's row: orange, as its person on the scan.
+  // The picked cell's row: a light blue, as the picked cell (orange is kept for
+  // values read with low confidence, so the two are never confused).
   tr.is-active > .review-table__row-head {
-    color: var(--bs-warning-text-emphasis);
+    color: var(--review-pick, var(--bs-primary));
     font-weight: 600;
     // Solid: the Row column stays over the cells as the table scrolls sideways.
-    background: linear-gradient(rgba(var(--bs-warning-rgb), .22), rgba(var(--bs-warning-rgb), .22)), var(--bs-paper-bg);
+    background: linear-gradient(rgba(var(--review-pick-rgb, 37, 99, 235), .22), rgba(var(--review-pick-rgb, 37, 99, 235), .22)), var(--bs-paper-bg);
   }
 
   tbody .review-table__row-head,
@@ -12625,6 +12891,16 @@ body.review-table-dragging {
   background: var(--bs-paper-bg);
   outline: 0;
 
+  // Checked against the handwriting: light green, the text as it is.
+  &.is-checked {
+    background-color: rgba(var(--bs-success-rgb), .1);
+  }
+
+  // Read with low confidence and not checked yet: filled light orange, to look at first.
+  &.is-low {
+    background-color: rgba(var(--bs-orange-rgb, 253, 126, 20), .12);
+  }
+
   &.is-empty {
     background: rgba(var(--bs-warning-rgb), .14);
   }
@@ -12635,18 +12911,17 @@ body.review-table-dragging {
   }
 
   // A misread date repaired from its column (one stray digit): red, as any date
-  // that is not as written on the scan, with a bar on its edge, to check.
+  // that is not as written on the scan, to check.
   &.is-guessed {
     color: var(--bs-danger-text-emphasis);
     background: rgba(var(--bs-danger-rgb), .13);
-    box-shadow: inset 3px 0 0 rgba(var(--bs-danger-rgb), .9);
   }
 
   tr.is-active > &.is-guessed {
     background-color: rgba(var(--bs-danger-rgb), .16);
   }
 
-  // Not ticked Verified: shown, but not saved or downloaded (greyed, in italics).
+  // Not checked yet: shown, but not saved or downloaded (greyed, in italics).
   &.is-unverified {
     color: rgba(var(--bs-secondary-rgb), .75);
     font-style: italic;
@@ -12659,9 +12934,18 @@ body.review-table-dragging {
     cursor: default;
   }
 
-  // The rest of the picked cell's row: orange.
+  // The rest of the picked cell's row: a light blue (each cell's own colour shows over it).
   tr.is-active > & {
-    background-color: rgba(var(--bs-warning-rgb), .16);
+    background-color: rgba(var(--review-pick-rgb, 37, 99, 235), .12);
+  }
+
+  tr.is-active > &.is-low {
+    background-color: rgba(var(--bs-orange-rgb, 253, 126, 20), .2);
+  }
+
+  // A checked cell stays green in the picked row.
+  tr.is-active > &.is-checked {
+    background-color: rgba(var(--bs-success-rgb), .16);
   }
 
   tr.is-active > &.is-empty {
@@ -12687,7 +12971,7 @@ body.review-table-dragging {
 
   &.is-active,
   tr.is-active > &.is-active {
-    background-color: rgba(var(--review-pick-rgb), .16);
+    background-color: rgba(var(--review-pick-rgb), .22);
     box-shadow: inset 0 0 0 2px var(--review-pick);
   }
 

@@ -271,9 +271,9 @@ export class FieldMarker {
         this.pageMeasurement = null;
         this.zoom = 1;
         this.minZoom = 0.5;
-        // Up to 500%: small handwriting on low-resolution scans needs a close
-        // look when outlines are adjusted stroke by stroke.
-        this.maxZoom = 5;
+        // Up to 1000%: small handwriting on low-resolution scans needs a close
+        // look when values are checked and outlines adjusted stroke by stroke.
+        this.maxZoom = 10;
 
         this._panning = false;
         this._panX = 0;
@@ -1072,8 +1072,12 @@ export class FieldMarker {
         this._applyZoom();
     }
 
+    /**
+     * One zoom step (the wheel, + and −). Past 100% a step grows with the zoom,
+     * so 1000% is a few steps away, not fifty: 10% at 100%, 50% at 500%.
+     */
     zoomBy(amount, focalEvent = null) {
-        this.setZoom(this.zoom + amount, focalEvent);
+        this.setZoom(this.zoom + amount * Math.max(1, this.zoom), focalEvent);
     }
 
     setZoom(value, focalEvent = null) {

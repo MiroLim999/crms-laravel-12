@@ -145,8 +145,7 @@ There is no email when offline. Two ways back in:
 | **Batch mode** | Queue several files, or a whole register book, read them all with **Scan all**, then check and save them one record at a time. A batch survives a reload and can be resumed. It ends with **Download all** as one CSV or Excel file. |
 | **Find the handwriting** | Kraken outlines every handwritten line, following the page's tilt. |
 | **Read it** | A fine-tuned TrOCR model reads each line and gives a confidence score. Low scores are flagged. |
-| **Verify** | Check every value beside the page. Only checked values are saved. |
-| **Review & Export** | Step 4: the document as the register's own table (for birth, death and marriage books: name, dates, sex, book, page, register number, and so on), one row per person, beside the scan. Edit cells (fill several at once, paste from Excel, undo), then **Download** as CSV or Excel, and **Save record**. |
+| **Check & Save** | Step 3: the document as the register's own table (for birth, death and marriage books: name, dates, sex, book, page, register number, and so on), one row per person, beside the scan. Pick a cell to see the exact handwriting TrOCR read above the table, compare, and press **Space** to check it (or edit it). Only checked values are saved. Edit cells (fill several at once, paste from Excel, undo), then **Download** as CSV or Excel, and **Save record**. |
 | **Saved Records** | Saved records are locked. **Edit in Review & Export** changes a saved record's values on the same table, and every old and new value goes to the Audit Log. **Download CSV** gives one document's values; **Download one book as CSV** gives a whole register book, one row per entry, for import into another system. |
 | **Template Builder** | Design the layout of each document type (one or two pages, columns, row lines). |
 | **OCR Workspace** | Install models, choose the active one, and compare benchmarks (CER, WER, exact match). |

@@ -293,7 +293,7 @@ class ScanBatchController extends Controller
 
     /**
      * The step the batch was left on (the page open then, which Resume opens
-     * again): Align, Verify or Review & Export. Null when not known.
+     * again): Align or Check & Save. Null when not known.
      */
     private static function leftOn(ScanBatch $batch): ?string
     {
@@ -308,9 +308,9 @@ class ScanBatchController extends Controller
         if ($page->status !== 'ready') {
             return null;
         }
-        $draft = $batch->drafts->firstWhere('record_key', $page->record_key)?->draft;
-
-        return ($draft['step'] ?? null) === 'review' ? 'Review & Export' : 'Verify';
+        // A read record opens in Check & Save (Verify and Review & Export were one
+        // step made of two; an older draft's 'step' no longer changes where it opens).
+        return 'Check & Save';
     }
 
     /**

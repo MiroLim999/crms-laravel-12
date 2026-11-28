@@ -880,6 +880,12 @@ const MAX_AUTO_WIDTH = 420;
  *   isUnverified(cell)  its value is shown but will not be saved (Verify: no
  *                   field of the cell ticked Verified). Shown greyed, and left
  *                   out of the downloads (optional)
+ *   isLow(cell)     what was read needs a closer look (low confidence): marked (optional)
+ *   onToggle(cells) Space on the picked cells: check them, or uncheck them (optional)
+ *   showChecked     a read value that is checked shows light green (optional)
+ *   onActive(cell)  the picked cell changed (null: none), e.g. to show its crop (optional)
+ *   isRowLeftOut(row)  nothing on the row is checked or typed: shown, but not
+ *                   saved, downloaded or checked for missing values (optional)
  *
  * The picked cell (blue) and its row (orange) are marked is-active. Several
  * cells of one column can be picked together, by dragging down or up it, by
@@ -894,8 +900,14 @@ export class ReviewTable {
         container, valueOf, onChange, onLocate = () => {}, onIssues = () => {},
         snapshotOf = () => null, restore = () => {}, onRange = () => {}, onCleared = () => {},
         isUnverified = () => false, onColumnsChange = () => {}, removableFields = false,
-        isReadOnly = () => null,
+        isReadOnly = () => null, isLow = () => false, onToggle = null, onActive = () => {},
+        isRowLeftOut = () => false, showChecked = false,
     }) {
+        this.showChecked = showChecked;
+        this.isRowLeftOut = isRowLeftOut;
+        this.isLow = isLow;
+        this.onToggle = onToggle;
+        this.onActive = onActive;
         // A cell that cannot be changed here (step 4's book_no and page_no come from step 1):
         // answers why, as its tooltip, or null when it can be typed into.
         this.isReadOnly = isReadOnly;
@@ -1523,6 +1535,7 @@ export class ReviewTable {
             this._mark(keep.row, keep.column);
         } else {
             this.active = null;
+            this.onActive(null);
         }
     }
 
@@ -1567,8 +1580,12 @@ export class ReviewTable {
         const problem = cell.column.custom ? null : cellProblem(value, cell.column.type);
         // A cell being typed in keeps its box; it is drawn again once closed.
         if (td.classList.contains('is-editing')) return problem;
-        // A register date shows as it is saved: YYYY-MM-DD.
-        td.textContent = cell.column.type?.date ? (this._isoDate(cell.column, value, rowIndex) ?? value) : value;
+        // Not checked yet: shown, but not saved (greyed, with why; an edit saves it).
+        const unverified = value.trim() !== '' && Boolean(this.isUnverified(cell));
+        // A register date shows as it is saved (YYYY-MM-DD) once checked; until then
+        // as it is written on the page (2-18-57), to compare with the handwriting.
+        const iso = cell.column.type?.date ? this._isoDate(cell.column, value, rowIndex) : null;
+        td.textContent = iso && !unverified ? iso : value;
         // A misread date repaired from its column: red, saying what was read.
         const repaired = Boolean(cell.column.type?.date) && !problem && value.trim() !== ''
             && !toIsoDate(value, this._rowToday(rowIndex), { dayFirst: Boolean(cell.column.type.dayFirst) });
@@ -1576,12 +1593,13 @@ export class ReviewTable {
         td.classList.toggle('is-empty', problem?.kind === 'empty');
         td.classList.toggle('is-cleared', problem?.kind === 'empty' && this.cleared.has(`${cell.row.id}|${cell.column.key}`));
         td.classList.toggle('is-invalid', problem?.kind === 'invalid');
-        // Shown, but not saved: greyed, with why (an edit saves it).
-        const unverified = value.trim() !== '' && Boolean(this.isUnverified(cell));
         td.classList.toggle('is-unverified', unverified);
+        td.classList.toggle('is-low', value.trim() !== '' && Boolean(this.isLow(cell)));
+        // Checked against the handwriting: light green (the text as it is).
+        td.classList.toggle('is-checked', this.showChecked && cell.refs.length > 0 && value.trim() !== '' && !unverified);
         td.title = problem?.message
-            ?? (repaired ? `Read as "${value.trim()}": taken as ${td.textContent} from the other dates in this column. Check it on the scan.` : null)
-            ?? (unverified ? 'Not verified: this value is not saved or downloaded. Edit it, or tick it in Verify, to keep it.' : '');
+            ?? (repaired ? `Read as "${value.trim()}": taken as ${iso ?? value.trim()} from the other dates in this column. Check it on the scan.` : null)
+            ?? (unverified ? 'Not checked yet: compare it with the handwriting, then press Space (or edit it) to keep it. Unchecked values are not saved.' : '');
         td.setAttribute('aria-invalid', String(Boolean(problem)));
         const readOnly = this.isReadOnly(cell);
         td.classList.toggle('is-readonly', Boolean(readOnly));
@@ -1959,6 +1977,47 @@ export class ReviewTable {
         return false;
     }
 
+    /**
+     * Pick the next cell still to check after the picked one: across its row, then
+     * the rows below (wraps round). Stays put when every value is checked.
+     */
+    selectNextToCheck() {
+        const rows = this.model.rows.length;
+        const columns = this.model.columns.length;
+        if (!this.active || rows * columns === 0) return false;
+        const start = this.active.row * columns + this.active.column + 1;
+        for (let step = 0; step < rows * columns - 1; step += 1) {
+            const index = (start + step) % (rows * columns);
+            const row = Math.floor(index / columns);
+            const column = index % columns;
+            const cell = this.cell(row, column);
+            if (cell.refs.length > 0 && String(this.valueOf(cell) ?? '').trim() !== '' && this.isUnverified(cell)) {
+                this.select(row, column);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Write the date cells among `cells` as they are saved (YYYY-MM-DD: "2-18-57"
+     * becomes 1957-02-18), so a checked date is the converted one. One change for
+     * Ctrl+Z; a date that cannot be read whole is left as it is.
+     */
+    writeDates(cells) {
+        const changes = [];
+        cells.forEach((cell) => {
+            if (!cell?.column?.type?.date || cell.refs.length === 0) return;
+            const row = this.model.rows.indexOf(cell.row);
+            const column = this.model.columns.indexOf(cell.column);
+            const value = String(this.valueOf(cell) ?? '').trim();
+            const iso = value === '' ? null : this._isoDate(cell.column, value, row);
+            if (row < 0 || column < 0 || !iso || iso === value) return;
+            changes.push({ row, column, value: iso });
+        });
+        return changes.length > 0 ? this._apply(changes) : 0;
+    }
+
     /** Pick the next empty or invalid cell after the picked one (wraps round). */
     nextIssue() {
         const rows = this.model.rows.length;
@@ -2024,6 +2083,7 @@ export class ReviewTable {
         td.parentElement?.classList.add('is-active');
         this.active = { row, column };
         this._showRange();
+        this.onActive(this.cell(row, column));
         return true;
     }
 
@@ -2058,8 +2118,14 @@ export class ReviewTable {
         const cell = this.cell(row, column);
         // Shown, not typed into: it says where it is changed.
         if (this.isReadOnly(cell)) return;
-        const original = String(this.valueOf(cell) ?? '');
         const type = cell.column.type;
+        // The box starts from what the cell shows: a checked date as it is saved
+        // (1957-02-18), one not checked yet as written (2-18-57). Left as it is,
+        // the cell is not changed (nor checked).
+        const read = String(this.valueOf(cell) ?? '');
+        const original = type?.date && read.trim() !== '' && !this.isUnverified(cell)
+            ? (this._isoDate(cell.column, read.trim(), row) ?? read)
+            : read;
         // Every column is typed into, choices too (Sex): a typed value that
         // stands for one of them is saved as it ("m" -> M), and any other is
         // shown as invalid, as a value read wrong is.
@@ -2615,6 +2681,16 @@ export class ReviewTable {
             }
             return;
         }
+        // Space: the picked cells checked against the handwriting (or unchecked).
+        if (event.key === ' ' && this.onToggle) {
+            event.preventDefault();
+            event.stopPropagation();
+            const cells = this.selectedRows().map((picked) => this.cell(picked, column)).filter(Boolean);
+            const checked = this.onToggle(cells);
+            // One cell checked: on to the next one still to check (the next column, then the next row).
+            if (checked && cells.length === 1) this.selectNextToCheck();
+            return;
+        }
         // Typing on a picked cell replaces its value, as in a spreadsheet.
         if (event.key.length === 1) {
             event.preventDefault();
@@ -2640,11 +2716,14 @@ export class ReviewTable {
             .filter(({ column }) => !column.noExport && (!register || column.field))
             .sort((a, b) => (register ? (placeOf.get(a.column.key) ?? a.index) - (placeOf.get(b.column.key) ?? b.index) : 0));
         const header = [...(register ? [] : ['Row']), ...shown.map(({ column }) => (register ? (this.headerNames.get(column.key) ?? column.field) : this.headerOf(column)))];
-        // Every value in capitals.
-        const rows = this.model.rows.map((row, rowIndex) => [
-            ...(register ? [] : [this.rowLabelOf(row)]),
-            ...shown.map(({ index }) => exportCase(downloadedFlag(this.model.columns[index], this._exported(this.cell(rowIndex, index))))),
-        ]);
+        // Every value in capitals. A row with nothing checked or typed is not saved, so not downloaded.
+        const rows = this.model.rows
+            .map((row, rowIndex) => ({ row, rowIndex }))
+            .filter(({ row }) => !this.isRowLeftOut(row))
+            .map(({ row, rowIndex }) => [
+                ...(register ? [] : [this.rowLabelOf(row)]),
+                ...shown.map(({ index }) => exportCase(downloadedFlag(this.model.columns[index], this._exported(this.cell(rowIndex, index))))),
+            ]);
         return [header, ...rows];
     }
 
@@ -2717,10 +2796,13 @@ export class ReviewTable {
         const fields = this.model.columns
             .map((column, index) => ({ column, index }))
             .filter(({ column }) => column.field && !column.noExport);
-        return this.model.rows.map((row, rowIndex) => ({
-            row: this.rowLabelOf(row),
-            values: Object.fromEntries(fields.map(({ column, index }) => [column.field, this._exported(this.cell(rowIndex, index))])),
-        }));
+        return this.model.rows
+            .map((row, rowIndex) => ({ row, rowIndex }))
+            .filter(({ row }) => !this.isRowLeftOut(row))
+            .map(({ row, rowIndex }) => ({
+                row: this.rowLabelOf(row),
+                values: Object.fromEntries(fields.map(({ column, index }) => [column.field, this._exported(this.cell(rowIndex, index))])),
+            }));
     }
 
     /**
@@ -2730,6 +2812,7 @@ export class ReviewTable {
     firstFieldIssue() {
         this._applyDateOrder();
         for (let row = 0; row < this.model.rows.length; row += 1) {
+            if (this.isRowLeftOut(this.model.rows[row])) continue;
             for (let column = 0; column < this.model.columns.length; column += 1) {
                 const cell = this.cell(row, column);
                 if (!cell.column.field || cell.column.noExport) continue;
@@ -2742,7 +2825,7 @@ export class ReviewTable {
                     row,
                     column,
                     message: unverified
-                        ? `${where}: the value is not verified. Edit it here or tick it in Verify.`
+                        ? `${where}: the value is not checked yet. Compare it with the handwriting, then press Space (or edit it).`
                         : `${where}: ${problem.message}.`,
                 };
             }

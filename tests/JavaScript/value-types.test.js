@@ -90,3 +90,15 @@ test('a date misread by one stray digit is repaired from its column, and only wh
     assert.equal(repairedDate('22-22-57', null, { today }), null);
     assert.equal(usualMonthOf(['1957-02-11']), null);
 });
+
+test('a date whose dashes were missed is repaired from its column: 3457 and 36-57 in March 1957', async () => {
+    const { repairedDate } = await import('../../resources/js/value-types.js');
+    const today = new Date('2026-11-28');
+    const usual = { year: 1957, month: 3 };
+    assert.equal(repairedDate('3457', usual, { today }), '1957-03-04');
+    assert.equal(repairedDate('36-57', usual, { today }), '1957-03-06');
+    assert.equal(repairedDate('31157', usual, { today }), '1957-03-11');
+    // Outside the column's month, or more than one way: left for the reviewer.
+    assert.equal(repairedDate('4557', usual, { today }), null);
+    assert.equal(repairedDate('10-19-', usual, { today }), null);
+});
