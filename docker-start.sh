@@ -21,6 +21,11 @@ make_secrets() {
     chmod 700 docker-data/secrets
     for name in db_root_password db_owner_password db_app_password backup_passphrase ocr_upload_secret; do
         file="docker-data/secrets/$name"
+        # "docker compose up" before this script makes an empty folder where a
+        # missing secret file should be; the containers then cannot start.
+        if [ -d "$file" ]; then
+            rmdir "$file" || { echo "$file is a folder, not a file: remove it and run this again." >&2; exit 1; }
+        fi
         if [ ! -s "$file" ]; then
             head -c 32 /dev/urandom | od -An -tx1 | tr -d ' 
 ' > "$file"

@@ -84,11 +84,33 @@ class AuthenticationTest extends TestCase
     {
         $user = User::factory()->superAdmin()->create(['password' => 'password']);
 
-        $this->post(route('login.store'), [
+        $this->from(route('login'))->post(route('login.store'), [
             'email' => $user->email,
             'password' => 'wrong-password',
-        ])->assertSessionHasErrors('email');
+        ])->assertRedirect(route('login'))
+            ->assertSessionHasErrors(['password' => 'Wrong password. Check it and try again.'])
+            ->assertSessionDoesntHaveErrors('email');
 
+        $this->assertGuest();
+
+        // Back on the form: the email is still there, the password is not.
+        $this->get(route('login'))
+            ->assertSee('value="'.$user->email.'"', false)
+            ->assertSee('Wrong password.')
+            ->assertDontSee('wrong-password');
+    }
+
+    public function test_an_unknown_email_is_named_as_the_wrong_one(): void
+    {
+        User::factory()->superAdmin()->create(['email' => 'clerk@example.test', 'password' => 'password']);
+
+        $this->from(route('login'))->post(route('login.store'), [
+            'email' => 'clark@example.test',
+            'password' => 'password',
+        ])->assertSessionHasErrors(['email' => 'No account uses this email. Check it and try again.'])
+            ->assertSessionDoesntHaveErrors('password');
+
+        $this->get(route('login'))->assertSee('value="clark@example.test"', false);
         $this->assertGuest();
     }
 

@@ -71,6 +71,17 @@ class TwoFactorTest extends TestCase
         $this->assertArrayNotHasKey('two_factor_secret', $user->toArray());
     }
 
+    public function test_the_app_shows_the_email_with_a_plain_at_sign(): void
+    {
+        $user = User::factory()->create(['email' => 'clerk@gmail.com']);
+
+        $url = $this->twoFactor()->otpauthUrl($user, $user->two_factor_secret);
+
+        $this->assertStringStartsWith('otpauth://totp/CRMS:clerk@gmail.com?secret=', $url);
+        $this->assertStringNotContainsString('%40', $url);
+        $this->assertStringContainsString('&issuer=CRMS', $url);
+    }
+
     // ------------------------------------------------------------- sign in
 
     public function test_the_password_alone_does_not_sign_in(): void

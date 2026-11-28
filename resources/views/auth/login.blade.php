@@ -11,7 +11,7 @@
         <div class="mb-6">
             <label for="email" class="form-label">Email</label>
             <input type="email" id="email" name="email" value="{{ old('email') }}"
-                class="form-control @error('email') is-invalid @enderror" placeholder="you@example.com" required autofocus
+                class="form-control @error('email') is-invalid @enderror" placeholder="you@example.com" required @unless($errors->has('password')) autofocus @endunless
                 autocomplete="username">
             @error('email')
                 <div class="invalid-feedback">{{ $message }}</div>
@@ -25,7 +25,7 @@
                 <a href="{{ route('password.recover') }}" class="small">Forgot password?</a>
             </div>
             <div class="input-group input-group-merge @error('password') is-invalid @enderror">
-                <input type="password" id="password" name="password" class="form-control"
+                <input type="password" id="password" name="password" class="form-control" @error('password') autofocus @enderror
                     placeholder="&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;&#xb7;"
                     aria-describedby="password" required autocomplete="current-password">
                 <span class="input-group-text cursor-pointer">

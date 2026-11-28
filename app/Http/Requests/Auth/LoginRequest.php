@@ -54,7 +54,8 @@ class LoginRequest extends FormRequest
         $this->ensureIsNotRateLimited();
 
         $user = Auth::getProvider()->retrieveByCredentials($this->only('email'));
-        $valid = $user instanceof User && Auth::getProvider()->validateCredentials($user, $this->only('password'));
+        $known = $user instanceof User;
+        $valid = $known && Auth::getProvider()->validateCredentials($user, $this->only('password'));
 
         if (! $valid) {
             RateLimiter::hit($this->throttleKey());
@@ -63,7 +64,9 @@ class LoginRequest extends FormRequest
             // The typed password is never logged, only the email it was tried with.
             $email = Str::limit((string) $this->string('email'), 255, '');
             $audit = app(AuditLogger::class);
-            $audit->log('auth.login_failed', description: "Wrong password or email ({$email}).");
+            $audit->log('auth.login_failed', description: $known
+                ? "Wrong password ({$email})."
+                : "Wrong email ({$email}).");
 
             if (RateLimiter::tooManyAttempts($this->throttleKey(), self::MAX_ATTEMPTS)) {
                 $audit->log('auth.locked_out', description: "Too many failed sign-ins for {$email}; sign-in paused.");
@@ -74,9 +77,12 @@ class LoginRequest extends FormRequest
                 $audit->log('auth.locked_out', description: 'Too many failed sign-ins from '.$this->ip().' with different emails; sign-in from there paused for an hour.');
             }
 
-            throw ValidationException::withMessages([
-                'email' => 'Those credentials do not match our records.',
-            ]);
+            // Say which one was wrong (CRMS has one account, and the code from
+            // the authenticator app is still needed after a right password).
+            // The email stays in the form; the password is cleared.
+            throw ValidationException::withMessages($known
+                ? ['password' => 'Wrong password. Check it and try again.']
+                : ['email' => 'No account uses this email. Check it and try again.']);
         }
 
         RateLimiter::clear($this->throttleKey());

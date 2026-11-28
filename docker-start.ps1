@@ -29,6 +29,12 @@ function New-CrmsSecrets {
     New-Item -ItemType Directory -Force $dir | Out-Null
     foreach ($name in 'db_root_password', 'db_owner_password', 'db_app_password', 'backup_passphrase', 'ocr_upload_secret') {
         $file = Join-Path $dir $name
+        # "docker compose up" before this script makes an empty folder where a
+        # missing secret file should be; the containers then cannot start.
+        if (Test-Path $file -PathType Container) {
+            if (Get-ChildItem -Force $file) { throw "$file is a folder, not a file: remove it and run this again." }
+            Remove-Item $file
+        }
         if (-not (Test-Path $file) -or (Get-Item $file).Length -eq 0) {
             $bytes = New-Object byte[] 32
             [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)

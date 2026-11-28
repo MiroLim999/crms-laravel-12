@@ -48,11 +48,24 @@ class TwoFactor
      */
     public function qrCodeSvg(User $user, string $secret): string
     {
-        $url = $this->engine->getQRCodeUrl('CRMS', $user->email, $secret);
+        $url = $this->otpauthUrl($user, $secret);
         $svg = (new Writer(new ImageRenderer(new RendererStyle(200, 1), new SvgImageBackEnd)))->writeString($url);
 
         // Inline in the page: drop the XML declaration.
         return trim((string) preg_replace('/^<\?xml[^>]*\?>/', '', $svg));
+    }
+
+    /**
+     * The link in the QR code. The library writes the email's "@" as "%40",
+     * and some authenticator apps show that as it is ("name%40gmail.com");
+     * "@" is allowed there, so it is kept as it is.
+     */
+    public function otpauthUrl(User $user, string $secret): string
+    {
+        $url = $this->engine->getQRCodeUrl('CRMS', $user->email, $secret);
+        [$label, $query] = explode('?', $url, 2);
+
+        return str_replace('%40', '@', $label).'?'.$query;
     }
 
     /**
