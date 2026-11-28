@@ -9,8 +9,14 @@
 # ml/line_markers.py as a child process (app/Services/Lines/LineMarkers.php),
 # so both have to live in the same container.
 #
-# Built in two stages: Node builds the CSS and JavaScript, then only the built
-# files are copied into the final image, which has no Node in it.
+# Built in stages: Node builds the CSS and JavaScript, then only the built
+# files are copied into the PHP image, which has no Node in it. Its last two
+# stages are the two images it can become:
+#
+#   app   what docker-compose.yml runs: no development packages, no Composer,
+#         and every process runs as the unprivileged user crms, never root.
+#   test  app plus the development packages, to run the tests inside Docker
+#         (docker compose run --rm test).
 
 # ---------------------------------------------------------------------------
 # Stage 1: front-end files (npm run build)
@@ -35,7 +41,7 @@ RUN npm run build
 # ---------------------------------------------------------------------------
 # Debian 12 ("bookworm") with Python 3.13, the version both Windows Python
 # environments use. Debian 12's own PHP is 8.2, the same as XAMPP's 8.2.12.
-FROM python:3.13-slim-bookworm
+FROM python:3.13-slim-bookworm AS build
 
 # PHP and the extensions Laravel uses. pdo_mysql comes from php8.2-mysql;
 # pcntl, which lets queue:work enforce --timeout, is built into php8.2-cli.
@@ -56,8 +62,15 @@ RUN apt-get update \
         unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Same limits and OPcache settings as C:\xampp\php\php.ini.
+# Upload limits as on Windows, plus production settings (php.ini explains each).
 COPY docker/app/php.ini /etc/php/8.2/cli/conf.d/99-crms.ini
+
+# The user every process runs as. Its number matches the usual first account on
+# a Linux computer (1000), so the scans it writes into docker-data/ belong to
+# that account there too. Another number: docker compose build --build-arg APP_UID=...
+ARG APP_UID=1000
+RUN groupadd --gid ${APP_UID} crms \
+    && useradd --uid ${APP_UID} --gid crms --create-home --shell /usr/sbin/nologin crms
 
 # Kraken in its own virtual environment, like ml/.venv-kraken on Windows: it
 # needs torch 2.14, while the OCR service (its own image) keeps torch 2.6.
@@ -84,9 +97,10 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 WORKDIR /var/www/html
 
 # Composer packages, before the code for the same reason as npm ci above.
-# Development packages stay in, so the tests can run inside the container.
+# Production packages only: test tools (PHPUnit, Faker, ...) are not in the
+# image the website runs, only in the test image below.
 COPY composer.json composer.lock ./
-RUN composer install --no-interaction --no-progress --prefer-dist \
+RUN composer install --no-dev --no-interaction --no-progress --prefer-dist \
         --no-scripts --no-autoloader
 
 COPY . .
@@ -96,11 +110,41 @@ COPY --from=assets /src/public/vendor/pdfjs public/vendor/pdfjs
 # .dockerignore keeps storage/ out of the image, so its folders are made here.
 # docker-compose.yml then shares storage/app and storage/logs with this
 # computer, so scans and logs outlive the container.
+#
+# The code belongs to root and crms can only read it, so nothing that runs in
+# the container can change it. crms may write only where Laravel must:
+# storage/ and bootstrap/cache/.
 RUN mkdir -p storage/app/private storage/app/public \
         storage/framework/cache/data storage/framework/sessions \
         storage/framework/testing storage/framework/views \
         storage/logs bootstrap/cache \
-    && composer dump-autoload --optimize --no-interaction
+    && composer dump-autoload --optimize --no-dev --no-interaction \
+    && chown -R crms:crms storage bootstrap/cache \
+    && chmod -R u=rwX,g=rX,o= storage bootstrap/cache
+
+# ---------------------------------------------------------------------------
+# test: the development packages added, for docker compose run --rm test
+# ---------------------------------------------------------------------------
+FROM build AS test
+RUN composer install --no-interaction --no-progress --prefer-dist --no-scripts \
+    && composer dump-autoload --optimize --no-interaction \
+    && chown -R crms:crms storage bootstrap/cache
+ENV HOME=/home/crms
+USER crms
+CMD ["php", "artisan", "test"]
+
+# ---------------------------------------------------------------------------
+# app: what docker-compose.yml runs. Last, so a plain build makes this one.
+# ---------------------------------------------------------------------------
+FROM build AS app
+
+# Composer only installs packages; the running image has no use for it.
+RUN rm -f /usr/bin/composer
+
+# Kraken's and torch's caches go to crms's own home, not to root's.
+ENV HOME=/home/crms
+
+USER crms
 
 EXPOSE 8000
 

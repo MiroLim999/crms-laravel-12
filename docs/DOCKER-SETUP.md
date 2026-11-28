@@ -21,6 +21,7 @@ Wait until Docker says **Engine running**, then follow the [README installation]
 Good to know:
 
 - Before `migrate --seed` runs, the worker may show `Restarting`. That is normal.
+- **Linux, upgrading from an older CRMS:** its containers ran as root, so files they wrote may belong to root. `docker-start.sh` says so; hand them over with `sudo chown -R 1000:1000 docker-data/storage ml/models`.
 - The first visit opens **Set up CRMS**, which asks for a **setup token**. See it with `docker compose exec web php artisan crms:setup-token`. It stops working once the account is made.
 - `docker compose ps` should show `crms-ocr-1` and `crms-mysql-1` as `Up (healthy)`.
 - Docker Desktop is free for personal use, education and small businesses. Larger companies may need a paid subscription.
@@ -128,6 +129,9 @@ The start script sets all of this up by itself, and checks it again on every sta
 | **Encrypted backups** | See below. |
 | **Production mode** | The app containers run with `APP_ENV=production` and `APP_DEBUG=false` whatever `.env` says, so an error never shows stack traces or settings. They read `.env` read-only. |
 | **OCR key of its own** | Laravel and the handwriting reader share `docker-data/secrets/ocr_upload_secret`, made by `docker-start`. The reader never sees `.env` or `APP_KEY`. Model uploads must bring `model.safetensors`: `pytorch_model.bin` can run code when loaded, so it is refused. |
+| **No root in the containers** | The website, worker, scheduler and handwriting reader run as an ordinary user (`crms`), with every Linux capability dropped and `no-new-privileges`. The code in the image belongs to root, so they can read it but never change it; they write only scans, logs and models. |
+| **No test tools in the running image** | The image the website runs has no PHPUnit, Faker or Composer. The tests have their own image: `docker compose run --rm --build test`. |
+| **Memory and process limits** | A runaway page or upload stops its own container, not the computer: website 2 GB, worker 6 GB, reader 6 GB, scheduler 512 MB. Change them with `CRMS_WEB_MEMORY`, `CRMS_WORKER_MEMORY` and `CRMS_OCR_MEMORY` in `.env` (e.g. `8g`). |
 | **Host names** | The site answers only to `localhost`, `127.0.0.1` and `APP_URL`'s host. To open it by another name or address, add it to `CRMS_TRUSTED_HOSTS` in `.env` (comma-separated). |
 
 **Check it:**

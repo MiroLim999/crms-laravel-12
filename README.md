@@ -60,7 +60,6 @@ Check that this file exists: `ml/models/trocr-finetuned-final/config.json` (if t
 
 ```bash
 sh docker-start.sh
-docker compose exec web php artisan key:generate
 docker compose run --rm migrate --seed
 docker compose restart
 ```
@@ -69,12 +68,11 @@ docker compose restart
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\docker-start.ps1
-docker compose exec web php artisan key:generate
 docker compose run --rm migrate --seed
 docker compose restart
 ```
 
-The first start takes **10 to 45 minutes** (Docker downloads several GB). Run `key:generate` only once. The start script also makes the database passwords (in `docker-data/secrets`) and encrypts the database; see [Database security](docs/DOCKER-SETUP.md#database-security). An NVIDIA GPU is used automatically if the computer has one that works; otherwise the processor is used.
+The first start takes **10 to 45 minutes** (Docker downloads several GB). The start script writes Laravel's `APP_KEY` into `.env` the first time (the containers can only read `.env`), and makes the database passwords (in `docker-data/secrets`) and encrypts the database; see [Database security](docs/DOCKER-SETUP.md#database-security). An NVIDIA GPU is used automatically if the computer has one that works; otherwise the processor is used.
 
 ### Step 4: Open CRMS
 

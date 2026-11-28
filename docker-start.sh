@@ -33,6 +33,42 @@ make_secrets() {
 }
 make_secrets
 
+# Laravel's APP_KEY, written into .env here the first time. The containers can
+# only read .env (docker-compose.yml), so php artisan key:generate cannot do it.
+make_app_key() {
+    if [ ! -f .env ]; then
+        echo "There is no .env. Copy it first: cp .env.example .env"
+        exit 1
+    fi
+    if grep -Eq '^APP_KEY=[[:space:]]*$' .env || ! grep -q '^APP_KEY=' .env; then
+        key="base64:$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+        awk -v key="$key" '
+            /^APP_KEY=/ { print "APP_KEY=" key; done = 1; next }
+            { print }
+            END { if (!done) print "APP_KEY=" key }
+        ' .env > .env.tmp && cat .env.tmp > .env && rm -f .env.tmp
+        echo "Made a new APP_KEY in .env"
+    fi
+}
+make_app_key
+
+# The folders the containers write into, made here by this computer's user.
+# The containers run as an ordinary user (crms, number 1000), not root; a folder
+# Docker had to make itself would belong to root, and they could not write it.
+make_data_folders() {
+    mkdir -p docker-data/storage/app docker-data/storage/logs docker-data/backups ml/models
+    # On Linux, folders an older CRMS (whose containers ran as root) wrote into
+    # may still belong to root. Say how to hand them over, once.
+    if [ "$(uname -s)" = Linux ]; then
+        owned_by_root=$(find docker-data/storage ml/models -maxdepth 3 -uid 0 2>/dev/null | head -n 1)
+        if [ -n "$owned_by_root" ]; then
+            echo "Some CRMS files belong to root (from an older CRMS). Hand them to the containers' user with:"
+            echo "  sudo chown -R 1000:1000 docker-data/storage ml/models"
+        fi
+    fi
+}
+make_data_folders
+
 start_crms() {
     if [ "$1" = gpu ]; then
         docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build --force-recreate

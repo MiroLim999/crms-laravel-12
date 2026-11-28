@@ -26,11 +26,23 @@ RUN pip install torch==2.6.0 torchvision==0.21.0 \
 COPY docker/ocr/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
 
+# The user the service runs as, never root. The same number as the app image's
+# crms, so both can read the model folders shared with this computer.
+ARG APP_UID=1000
+RUN groupadd --gid ${APP_UID} crms \
+    && useradd --uid ${APP_UID} --gid crms --create-home --shell /usr/sbin/nologin crms
+
 # Same layout as the repository, so ml/api/main.py finds its neighbours
 # (trocr_common.py, dataset_registry.py) and ml/models where it expects them.
+# The code belongs to root and the service can only read it; it writes only
+# into ml/models (shared with this computer) and the temporary folder.
 WORKDIR /app
 COPY ml/api ml/api
 COPY ml/*.py ml/
+RUN mkdir -p ml/models && chown crms:crms ml/models
+
+ENV HOME=/home/crms
+USER crms
 
 EXPOSE 8001
 

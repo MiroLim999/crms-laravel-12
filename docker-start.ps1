@@ -43,6 +43,34 @@ function New-CrmsSecrets {
 }
 New-CrmsSecrets
 
+# Laravel's APP_KEY, written into .env here the first time. The containers can
+# only read .env (docker-compose.yml), so php artisan key:generate cannot do it.
+$envFile = Join-Path $PSScriptRoot '.env'
+if (-not (Test-Path $envFile)) {
+    Write-Host 'There is no .env. Copy it first: Copy-Item .env.example .env'
+    exit 1
+}
+$envText = [System.IO.File]::ReadAllText($envFile)
+if ($envText -notmatch '(?m)^APP_KEY=[ \t]*\S') {
+    $bytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    $line = 'APP_KEY=base64:' + [Convert]::ToBase64String($bytes)
+    if ($envText -match '(?m)^APP_KEY=') {
+        $envText = [regex]::Replace($envText, '(?m)^APP_KEY=[^\r\n]*', $line.Replace('$', '$$'))
+    } else {
+        $envText = $envText.TrimEnd("`r", "`n") + "`r`n" + $line + "`r`n"
+    }
+    # No byte-order mark: Laravel and Docker read .env as plain UTF-8.
+    [System.IO.File]::WriteAllText($envFile, $envText, (New-Object System.Text.UTF8Encoding $false))
+    Write-Host 'Made a new APP_KEY in .env'
+}
+
+# The folders the containers write into, made here before Docker starts, so
+# Docker never has to make them itself.
+foreach ($folder in 'docker-data\storage\app', 'docker-data\storage\logs', 'docker-data\backups', 'ml\models') {
+    New-Item -ItemType Directory -Force (Join-Path $PSScriptRoot $folder) | Out-Null
+}
+
 function Start-Crms([bool]$Gpu) {
     $files = @('-f', 'docker-compose.yml')
     if ($Gpu) { $files += @('-f', 'docker-compose.gpu.yml') }

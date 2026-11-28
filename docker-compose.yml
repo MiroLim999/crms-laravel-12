@@ -37,13 +37,21 @@ x-app: &app
   build:
     context: .
     dockerfile: docker/app/Dockerfile
+    # The production image: no test tools, no Composer, runs as user crms.
+    target: app
   image: crms-app
   # A tiny init process that cleans up the Python processes Kraken starts.
   init: true
   restart: unless-stopped
-  # A process inside cannot gain privileges (setuid binaries do nothing).
+  # A process inside cannot gain privileges (setuid binaries do nothing), and
+  # has none of root's special powers to begin with: the image runs as crms,
+  # and every Linux capability is dropped.
   security_opt:
     - no-new-privileges:true
+  cap_drop:
+    - ALL
+  # One runaway process (a fork loop, a stuck job) cannot exhaust the computer.
+  pids_limit: 512
   volumes:
     # Laravel's own .env, read while the app runs (never copied into the image).
     # Read-only: the app never writes it. create_host_path: false makes a
@@ -109,6 +117,10 @@ services:
       <<: *app-env
       # Four PHP processes answer requests at once (Linux can; Windows could not).
       PHP_CLI_SERVER_WORKERS: "4"
+    # Four PHP processes of up to 512 MB each (php.ini memory_limit). A flood of
+    # huge uploads stops here instead of taking the computer's memory. Set
+    # CRMS_WEB_MEMORY in .env to change it.
+    mem_limit: ${CRMS_WEB_MEMORY:-2g}
     ports:
       # 127.0.0.1: only this computer can open the site; phones and other
       # computers on the same network cannot.
@@ -124,6 +136,12 @@ services:
     # halfway is stuck until the queue gives up on it (retry_after, 16 minutes)
     # and marks it failed.
     stop_grace_period: 3m
+    # Kraken and torch outline a page in a few GB. A bad scan that would use more
+    # stops this container (and its page fails) instead of the whole computer.
+    # Set CRMS_WORKER_MEMORY in .env to change it.
+    mem_limit: ${CRMS_WORKER_MEMORY:-6g}
+    # Up to LINE_MARKERS_WORKERS Kraken processes, each with torch's threads.
+    pids_limit: 1024
     depends_on:
       mysql:
         condition: service_healthy
@@ -133,6 +151,7 @@ services:
   scheduler:
     <<: *app
     command: php artisan schedule:work
+    mem_limit: 512m
 
   # Changes the tables (php artisan migrate) as the owner account, then stops.
   # Not started by "up": run it after an update with
@@ -152,6 +171,30 @@ services:
     entrypoint: ["php", "artisan", "migrate", "--force"]
     command: []
 
+  # The tests, inside Docker, against their own database (crms_test, never the
+  # real records). Built from the test image, which has PHPUnit; the running
+  # app's image does not. Not started by "up":
+  #   docker compose run --rm --build test
+  test:
+    <<: *app
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+      target: test
+    image: crms-app-test
+    profiles: ["tools"]
+    restart: "no"
+    # Only .env: never docker-data, so a test that writes files can never touch
+    # real scans. Its files stay inside the container and go with it.
+    volumes:
+      - type: bind
+        source: ./.env
+        target: /var/www/html/.env
+        read_only: true
+        bind:
+          create_host_path: false
+    command: ["php", "artisan", "test"]
+
   ocr:
     build:
       context: .
@@ -159,8 +202,15 @@ services:
     image: crms-ocr
     init: true
     restart: unless-stopped
+    # Runs as user crms (docker/ocr/Dockerfile) with no Linux capabilities.
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 1024
+    # TrOCR in memory plus the pages being read. Set CRMS_OCR_MEMORY in .env to
+    # change it (more for the GPU build or a larger model).
+    mem_limit: ${CRMS_OCR_MEMORY:-6g}
     # No .env here: this container parses images and model files, so it holds
     # only its own signing key, never APP_KEY or anything else in .env.
     secrets:
@@ -190,6 +240,11 @@ services:
     build:
       context: docker/mysql
     image: crms-mysql
+    # MySQL's own start-up script runs as root only to hand the data folders to
+    # the mysql user, then MySQL itself runs as mysql. It needs those few root
+    # powers, so its capabilities stay; nothing in it can gain more.
+    security_opt:
+      - no-new-privileges:true
     # Philippine time (+08:00), like the MySQL service on Windows (time_zone
     # SYSTEM). Every date column is a TIMESTAMP, which MySQL converts by this
     # setting: on UTC, all existing dates would show 8 hours off.
